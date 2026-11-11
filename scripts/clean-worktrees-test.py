@@ -109,7 +109,7 @@ os.environ[REMOVALS_LOG_OVERRIDE_VARIABLE] = str(Path(_removals_log_for_every_ru
 
 TASK_LISTS_DIRECTORY_OVERRIDE_VARIABLE = "CLEAN_WORKTREES_TASK_LISTS_DIRECTORY_OVERRIDE"
 # Without this, every run would judge the machine's open restored-branch tasks against this suite's
-# scratch clones, and fail on any one whose restore commit a scratch clone lacks.
+# scratch clones, and close or fail on any one whose commit a scratch clone lacks.
 _task_lists_for_every_run = tempfile.mkdtemp(prefix="clean-worktrees-test-task-lists-")
 atexit.register(shutil.rmtree, _task_lists_for_every_run, ignore_errors=True)
 os.environ[TASK_LISTS_DIRECTORY_OVERRIDE_VARIABLE] = _task_lists_for_every_run

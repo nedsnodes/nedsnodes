@@ -1026,6 +1026,13 @@ def test_restore_a_subset():
               and f"\nRestore commit: {restore_commit}\n" in task.get("description", "")
               and ref in task.get("description", "") and str(target) in task.get("description", ""),
               f"restore opens the restored branch's task, naming its restore commit, {where}", task)
+        trailer = f"Restored-from-work-snapshot: {ref}"
+        check(f"\n{trailer}\nKeep this trailer in the commit message. " in task.get("description", "")
+              and target.is_dir()
+              and git(target, "log", "-1", "--format=%(trailers:key=Restored-from-work-snapshot,"
+                                           "valueonly)").strip() == ref,
+              f"restore gives its commit the trailer {trailer} and writes the same line in the "
+              f"task's description, followed by the instruction to keep it, {where}", task)
         check((restore_task_list() / ".highwatermark").read_text() == next(iter(new_tasks), ""),
               "restore raises the task list's .highwatermark to the new task's id")
         check(f"branch: {branch}" in lines and f"worktree: {target}" in lines
@@ -1502,7 +1509,8 @@ def test_the_cleaner_closes_a_restored_branch_task_by_its_commit():
           "after a fetch, the task of a branch whose restore commit reached origin/main is "
           "marked completed, with a line saying why", lines)
     check(states["deleted"]["status"] == "completed"
-          and "no ref holds the restore commit" in states["deleted"]["description"],
+          and "no commit with the line \"Restored-from-work-snapshot: " in states["deleted"]["description"]
+          and "is on any ref." in states["deleted"]["description"],
           "the task of a branch deleted with git branch -D is marked completed", lines)
     check(states["pushed"]["status"] == "pending" and states["open"]["status"] == "pending",
           "a branch deleted locally but still on origin, and a renamed branch, keep their "
@@ -1515,6 +1523,90 @@ def test_the_cleaner_closes_a_restored_branch_task_by_its_commit():
     failures_seen, lines = close_tasks(main, remove=True, only_done=True)
     check(failures_seen == 0 and lines == [],
           "a completed task is not judged again, and --only-done names no open one", lines)
+
+
+def test_the_cleaner_keeps_open_the_task_of_a_restored_branch_rebased_onto_a_main_that_moved_on():
+    empty_restore_task_list()
+    main = new_clone()
+    ref, _worktree = leftover_snapshot(main, "rebased", {"rebased.txt": "work\n"}, "11-5")
+    code, lines = run_restore(main, ref, ["rebased.txt"])
+    target = restored_worktree_of(main, ref)
+    restore_commit = git(target, "rev-parse", "HEAD")
+    (main / "moved-on.txt").write_text("main moved on\n")
+    git(main, "add", "moved-on.txt")
+    git(main, "commit", "-q", "-m", "main moves on")
+    git(main, "push", "-q", "origin", "main")
+    git(target, "rebase", "-q", "main")
+    check(code == 0 and git(target, "rev-parse", "HEAD") != restore_commit
+          and git(main, "for-each-ref", "--contains", restore_commit) == "",
+          "the restored branch rebased onto a main that moved on leaves its restore commit on "
+          "no ref", lines)
+    failures_seen, lines = close_tasks(main, remove=True)
+    check(failures_seen == 0 and restored_task_of(main, ref)[1]["status"] == "pending"
+          and any("kept open" in line for line in lines),
+          "the task of a restored branch rebased onto a main that moved on stays open, since "
+          "the rebased commit keeps the trailer", lines)
+    git(main, "merge", "-q", "--no-ff", "-m", "merge the rebased branch",
+        snapshots.restored_branch_name(ref))
+    git(main, "push", "-q", "origin", "main")
+    failures_seen, lines = close_tasks(main, remove=True)
+    task = restored_task_of(main, ref)[1]
+    check(failures_seen == 0 and task["status"] == "completed"
+          and "is reachable from origin/main." in task["description"].splitlines()[-1],
+          "the rebased branch's task closes once its pull request merges", lines)
+
+
+def test_the_cleaner_judges_a_task_without_the_trailer_line_by_its_restore_commit():
+    empty_restore_task_list()
+    main = new_clone()
+    refs = {}
+    for label in ("merged", "deleted", "open"):
+        refs[label], _worktree = leftover_snapshot(main, f"no-trailer-{label}",
+                                                   {f"{label}.txt": "work\n"}, f"11-{6 + len(refs)}")
+        code, lines = run_restore(main, refs[label], [f"{label}.txt"])
+        check(code == 0, f"the {label} branch is restored", lines)
+        key, task = restored_task_of(main, refs[label])
+        description = "\n".join(line for line in task["description"].splitlines()
+                                if not line.startswith("Restored-from-work-snapshot: "))
+        (restore_task_list() / f"{key}.json").write_text(json.dumps(dict(task, description=description)))
+    branch = {label: snapshots.restored_branch_name(ref) for label, ref in refs.items()}
+    git(main, "merge", "-q", "--no-ff", "-m", "merge the restored branch", branch["merged"])
+    git(main, "push", "-q", "origin", "main")
+    git(main, "worktree", "remove", "--force", str(restored_worktree_of(main, refs["deleted"])))
+    git(main, "branch", "-D", branch["deleted"])
+    failures_seen, lines = close_tasks(main, remove=True)
+    states = {label: restored_task_of(main, ref)[1] for label, ref in refs.items()}
+    check(failures_seen == 0 and states["merged"]["status"] == "completed"
+          and "the restore commit " in states["merged"]["description"].splitlines()[-1]
+          and "is reachable from origin/main." in states["merged"]["description"].splitlines()[-1]
+          and states["deleted"]["status"] == "completed"
+          and "no ref holds the restore commit" in states["deleted"]["description"]
+          and states["open"]["status"] == "pending",
+          "a task without the Restored-from-work-snapshot line is judged by its Restore commit "
+          "line, as before", lines)
+
+
+def test_the_cleaner_reports_a_trailer_task_git_log_cannot_judge():
+    empty_restore_task_list()
+    main = new_clone()
+    ref, _worktree = leftover_snapshot(main, "log-fails", {"new.txt": "work\n"}, "12-3")
+    code, lines = run_restore(main, ref, ["new.txt"])
+    key, _task = restored_task_of(main, ref)
+    task_file = restore_task_list() / f"{key}.json"
+    original = task_file.read_text()
+    not_a_repository = SCRATCH / "log-fails-not-a-repository"
+    not_a_repository.mkdir()
+    failures_seen, lines = close_tasks(not_a_repository, remove=False)
+    check(failures_seen == 1 and any(line.startswith("FAILED: ") and "could not be judged (git log "
+                                     "origin/main exited" in line for line in lines)
+          and task_file.read_text() == original,
+          "a git log that fails is reported, never read as no commit with the trailer, and the "
+          "task is left as it was", lines)
+    fails_on_every_ref = {"origin/main": ({}, None), "--all": (None, "git log --all exited 128")}
+    reason, git_failure = cleaner.restored_from_work_snapshot_trailer_done_reason(ref, fails_on_every_ref.get)
+    check(reason is None and git_failure == "git log --all exited 128",
+          "a git log --all that fails after git log origin/main succeeds is reported, never read "
+          "as no commit with the trailer", (reason, git_failure))
 
 
 def test_the_cleaner_reports_each_task_it_cannot_judge():
@@ -2267,6 +2359,9 @@ def main():
                      test_restore_task_and_ref_deletion_failures, test_discard,
                      test_command_line_of_restore_and_discard, test_entries_end_with_their_command,
                      test_the_cleaner_closes_a_restored_branch_task_by_its_commit,
+                     test_the_cleaner_keeps_open_the_task_of_a_restored_branch_rebased_onto_a_main_that_moved_on,
+                     test_the_cleaner_judges_a_task_without_the_trailer_line_by_its_restore_commit,
+                     test_the_cleaner_reports_a_trailer_task_git_log_cannot_judge,
                      test_the_cleaner_reports_each_task_it_cannot_judge,
                      test_two_cleaners_rewriting_one_task_each_publish_their_own_text, test_cleaner,
                      test_in_place_and_duplicate_leftovers,

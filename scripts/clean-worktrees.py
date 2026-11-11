@@ -200,18 +200,23 @@ in every task list on the machine, ~/.claude/tasks/nedschorus-*-tasks, or under
 the directory CLEAN_WORKTREES_TASK_LISTS_DIRECTORY_OVERRIDE names, which is how
 the tests keep out of the machine's task lists. Each
 task not marked completed whose subject starts with
-RESTORED_BRANCH_TASK_SUBJECT_PREFIX is judged by the commit its description's
-`Restore commit: ` line names: --remove first runs `git fetch --prune
-origin`, then marks the task completed, adding a line at the end of its
-description saying why and when, when that commit is reachable from
-origin/main, or when `git for-each-ref --contains` names no ref holding it.
-Any other such task stays open. The report modes name each task --remove
-would mark and change none; they do not fetch, and judge the refs as last
-fetched, so a stale origin only keeps more open. When the fetch fails or runs
-past RESTORED_BRANCH_TASKS_CLOSE_GIT_FETCH_TIMEOUT_SECONDS, a task list or a
-task file cannot be read, a task file cannot be rewritten, a task has no
-`Restore commit: ` line, or git cannot judge its commit, the task is left as
-it was and a line opening `FAILED: ` says so.
+RESTORED_BRANCH_TASK_SUBJECT_PREFIX is judged by its description's
+`Restored-from-work-snapshot: <ref>` line, the trailer restore gives its
+commit: --remove first runs `git fetch --prune origin`, then marks the task
+completed, adding a line at the end of its description saying why and when,
+when `git log`, reading each commit's trailers, finds a commit with that line
+reachable from origin/main, or finds none on any ref. The trailer survives a
+rebase, which the commit's id does not. A task without that line is judged
+instead by the commit its `Restore commit: ` line names: completed when that
+commit is reachable from origin/main, or when `git for-each-ref --contains`
+names no ref holding it. Any other such task stays open. The report modes
+name each task --remove would mark and change none; they do not fetch, and
+judge the refs as last fetched, so a stale origin only keeps more open. When
+the fetch fails or runs past
+RESTORED_BRANCH_TASKS_CLOSE_GIT_FETCH_TIMEOUT_SECONDS, a task list or a task
+file cannot be read, a task file cannot be rewritten, a task has neither
+line, or git cannot judge it, the task is left as it was and a line opening
+`FAILED: ` says so.
 
 Modes:
   (default)    report every worktree, one line each, then the count lines
@@ -1524,12 +1529,46 @@ def open_restored_branch_tasks(task_lists_directory, out):
     return tasks, failures
 
 
-def restore_commit_of_task(task):
-    prefix = work_snapshots.RESTORED_BRANCH_TASK_DESCRIPTION_RESTORE_COMMIT_LINE_PREFIX
+def task_description_line_value(task, prefix):
+    """The rest of the task description's first line opening with prefix, or None."""
     for line in str(task.get("description", "")).splitlines():
         if line.startswith(prefix):
             return line[len(prefix):].strip()
     return None
+
+
+def restored_from_work_snapshot_trailer_commits(repo, revision):
+    """({work-snapshot ref: [commit id, ...]} for each commit revision reaches whose message has
+    the trailer RESTORED_FROM_WORK_SNAPSHOT_TRAILER_KEY, None), or (None, the git failure)."""
+    key = work_snapshots.RESTORED_FROM_WORK_SNAPSHOT_TRAILER_KEY
+    logged = run_git(repo, "log", "-z", f"--format=%H%n%(trailers:key={key},valueonly)", revision)
+    if logged.returncode:
+        return None, f"git log {revision} {work_snapshots.git_failure_text(logged)}"
+    commits = {}
+    for record in logged.stdout.split("\0"):
+        commit, _newline, values = record.strip("\n").partition("\n")
+        for value in values.splitlines():
+            commits.setdefault(value.strip(), []).append(commit)
+    return commits, None
+
+
+def restored_from_work_snapshot_trailer_done_reason(ref, trailer_commits):
+    """(why the restored branch's task is done, or None while a ref holds a commit with its
+    trailer and origin/main holds none; the git failure that kept it from being judged, or
+    None). trailer_commits(revision) is restored_from_work_snapshot_trailer_commits' result."""
+    line = f"{work_snapshots.RESTORED_FROM_WORK_SNAPSHOT_TRAILER_KEY}: {ref}"
+    on_main, git_failure = trailer_commits("origin/main")
+    if git_failure:
+        return None, git_failure
+    if ref in on_main:
+        return (f"the commit {on_main[ref][0]}, with the line \"{line}\", is reachable from "
+                f"origin/main"), None
+    on_any_ref, git_failure = trailer_commits("--all")
+    if git_failure:
+        return None, git_failure
+    if ref in on_any_ref:
+        return None, None
+    return f"no commit with the line \"{line}\" is on any ref", None
 
 
 def restore_commit_done_reason(repo, commit):
@@ -1551,8 +1590,10 @@ def restore_commit_done_reason(repo, commit):
 
 
 def close_restored_branch_tasks(repo, remove, only_done, task_lists_directory=None, out=print):
-    """Mark completed each task restore opened whose restore commit is on origin/main or held
-    by no ref; return the number of failures. Without remove, name them and change nothing."""
+    """Mark completed each task restore opened whose restored-from-work-snapshot trailer is on
+    origin/main or on no ref, or, for a task without the trailer, whose restore commit is on
+    origin/main or held by no ref; return the number of failures. Without remove, name them and
+    change nothing."""
     if task_lists_directory is None:
         task_lists_directory = task_lists_directory_from_override_or_home_claude_tasks()
     tasks, failures = open_restored_branch_tasks(task_lists_directory, out)
@@ -1573,24 +1614,38 @@ def close_restored_branch_tasks(repo, remove, only_done, task_lists_directory=No
                 f"tasks were not judged and are left as they were: "
                 + ", ".join(str(task_file) for task_file, _task in tasks))
             return failures + 1
+    logged = {}
+
+    def trailer_commits(revision):
+        if revision not in logged:
+            logged[revision] = restored_from_work_snapshot_trailer_commits(repo, revision)
+        return logged[revision]
+
+    trailer_prefix = f"{work_snapshots.RESTORED_FROM_WORK_SNAPSHOT_TRAILER_KEY}: "
+    commit_prefix = work_snapshots.RESTORED_BRANCH_TASK_DESCRIPTION_RESTORE_COMMIT_LINE_PREFIX
     for task_file, task in tasks:
         name = f"task {task_file.parent.name}/{task_file.stem} ({task.get('subject')})"
-        commit = restore_commit_of_task(task)
-        if commit is None:
-            out(f"FAILED: {name} has no line opening "
-                f"\"{work_snapshots.RESTORED_BRANCH_TASK_DESCRIPTION_RESTORE_COMMIT_LINE_PREFIX}\", "
-                f"so its restore commit is unknown; it is left as it was")
+        ref = task_description_line_value(task, trailer_prefix)
+        commit = task_description_line_value(task, commit_prefix)
+        if ref:
+            reason, git_failure = restored_from_work_snapshot_trailer_done_reason(ref, trailer_commits)
+            kept_open = (f"a ref still holds a commit with the line \"{trailer_prefix}{ref}\", "
+                         f"and origin/main holds none")
+        elif commit:
+            reason, git_failure = restore_commit_done_reason(repo, commit)
+            kept_open = f"a ref still holds its restore commit {commit}, which origin/main lacks"
+        else:
+            out(f"FAILED: {name} has no line opening \"{trailer_prefix}\" or "
+                f"\"{commit_prefix}\", so its restore commit is unknown; it is left as it was")
             failures += 1
             continue
-        reason, git_failure = restore_commit_done_reason(repo, commit)
         if git_failure:
             out(f"FAILED: {name} could not be judged ({git_failure}); it is left as it was")
             failures += 1
             continue
         if reason is None:
             if not only_done:
-                out(f"{name}: kept open — a ref still holds its restore commit {commit}, "
-                    f"which origin/main lacks")
+                out(f"{name}: kept open — {kept_open}")
             continue
         if not remove:
             out(f"{name}: would be marked completed, as {reason} — mark it with: "

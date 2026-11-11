@@ -18,8 +18,9 @@ restore or discard command that handles it, and scripts/clean-worktrees.py
 deletes a listed leftover first listed more than
 LEFTOVER_DELETED_DAYS_AFTER_FIRST_LISTING days ago and still lost, and a
 leftover a newer leftover of the same worktree duplicates exactly, and marks
-completed the task a restore opened once its restore commit is on origin/main
-or held by no ref.
+completed the task a restore opened once a commit carrying its
+RESTORED_FROM_WORK_SNAPSHOT_TRAILER_KEY trailer is on origin/main or no ref
+holds one.
 
 Usage:
   uncommitted-work-snapshots.py list [--agent-seat NAME] [--repo PATH]
@@ -85,9 +86,10 @@ MODULE_PATH = Path(__file__).resolve()
 
 RESTORED_BRANCH_NAME_PREFIX = "restored-"
 RESTORE_COMMIT_MESSAGE_TEMPLATE = "Restore work from {ref}"
-# scripts/clean-worktrees.py finds the tasks restore opens by these two.
+# scripts/clean-worktrees.py finds the tasks restore opens, and judges them, by these three.
 RESTORED_BRANCH_TASK_SUBJECT_PREFIX = "Restored branch "
 RESTORED_BRANCH_TASK_DESCRIPTION_RESTORE_COMMIT_LINE_PREFIX = "Restore commit: "
+RESTORED_FROM_WORK_SNAPSHOT_TRAILER_KEY = "Restored-from-work-snapshot"
 TASK_LIST_ENVIRONMENT_VARIABLE = "CLAUDE_CODE_TASK_LIST_ID"
 TASK_FILE_NAME_PATTERN = re.compile(r"[1-9][0-9]*\.json")
 TASK_HIGH_WATER_MARK_FILE_NAME = ".highwatermark"
@@ -737,6 +739,10 @@ def restored_branch_task_subject(branch):
     return f"{RESTORED_BRANCH_TASK_SUBJECT_PREFIX}{branch}: open its pull request or delete it"
 
 
+def restored_from_work_snapshot_trailer(ref):
+    return f"{RESTORED_FROM_WORK_SNAPSHOT_TRAILER_KEY}: {ref}"
+
+
 def restored_branch_task_description(snapshot, kept, worktree, restore_commit):
     return "\n".join([
         f"`restore` restored the work-snapshot {snapshot['ref']}, left by the worktree "
@@ -745,9 +751,10 @@ def restored_branch_task_description(snapshot, kept, worktree, restore_commit):
         f"Kept files: {', '.join(kept)}.",
         f"Restored worktree: {worktree}",
         f"{RESTORED_BRANCH_TASK_DESCRIPTION_RESTORE_COMMIT_LINE_PREFIX}{restore_commit}",
-        "Carry the branch on to a pull request, or delete it. Leave this task open: "
-        "scripts/clean-worktrees.py marks it completed once that commit is on main or no branch "
-        "holds it any more.",
+        restored_from_work_snapshot_trailer(snapshot["ref"]),
+        "Keep this trailer in the commit message. Carry the branch on to a pull request, or "
+        "delete it. Leave this task open: scripts/clean-worktrees.py marks it completed once a "
+        "commit with this trailer is on main or no branch holds one any more.",
     ])
 
 
@@ -928,7 +935,8 @@ def restore_work_snapshot(repo, ref, keep, environment=None, out=print):
     if applied.returncode:
         return undo_after("git apply --index",
                           f"exited {applied.returncode}: {applied.stderr.decode(errors='replace').strip()}")
-    committed = run_git(worktree, "commit", "-q", "-m", RESTORE_COMMIT_MESSAGE_TEMPLATE.format(ref=ref))
+    committed = run_git(worktree, "commit", "-q", "-m", RESTORE_COMMIT_MESSAGE_TEMPLATE.format(ref=ref),
+                        "-m", restored_from_work_snapshot_trailer(ref))
     if committed.returncode:
         return undo_after("git commit", git_failure_text(committed))
     restore_commit = git_output(worktree, "rev-parse", "HEAD")
