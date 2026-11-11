@@ -1603,7 +1603,7 @@ def test_the_cleaner_reports_a_trailer_task_git_log_cannot_judge():
           "a git log that fails is reported, never read as no commit with the trailer, and the "
           "task is left as it was", lines)
     fails_on_every_ref = {"origin/main": ({}, None), "--all": (None, "git log --all exited 128")}
-    reason, git_failure = cleaner.restored_from_work_snapshot_trailer_done_reason(ref, fails_on_every_ref.get)
+    reason, git_failure = cleaner.restored_from_work_snapshot_task_done_reason_judged_by_trailer_commits(ref, fails_on_every_ref.get)
     check(reason is None and git_failure == "git log --all exited 128",
           "a git log --all that fails after git log origin/main succeeds is reported, never read "
           "as no commit with the trailer", (reason, git_failure))

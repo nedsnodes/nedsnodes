@@ -1552,7 +1552,7 @@ def restored_from_work_snapshot_trailer_commits(repo, revision):
     return commits, None
 
 
-def restored_from_work_snapshot_trailer_done_reason(ref, trailer_commits):
+def restored_from_work_snapshot_task_done_reason_judged_by_trailer_commits(ref, trailer_commits):
     """(why the restored branch's task is done, or None while a ref holds a commit with its
     trailer and origin/main holds none; the git failure that kept it from being judged, or
     None). trailer_commits(revision) is restored_from_work_snapshot_trailer_commits' result."""
@@ -1628,7 +1628,7 @@ def close_restored_branch_tasks(repo, remove, only_done, task_lists_directory=No
         ref = task_description_line_value(task, trailer_prefix)
         commit = task_description_line_value(task, commit_prefix)
         if ref:
-            reason, git_failure = restored_from_work_snapshot_trailer_done_reason(ref, trailer_commits)
+            reason, git_failure = restored_from_work_snapshot_task_done_reason_judged_by_trailer_commits(ref, trailer_commits)
             kept_open = (f"a ref still holds a commit with the line \"{trailer_prefix}{ref}\", "
                          f"and origin/main holds none")
         elif commit:
