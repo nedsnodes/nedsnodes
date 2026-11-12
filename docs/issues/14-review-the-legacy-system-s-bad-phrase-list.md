@@ -122,7 +122,7 @@ The nedlern repository is private; the agent-seats' `mac-claude` GitHub account 
 
 ## Next action
 
-This design gets its cold-read-full-run, then the approval-walk the user asked for on 2026-10-05, before any of it is built. After that, the build, each step in its own pull request, in this order:
+This design had its cold-read-full-run on 2026-11-12 (cold-read-records `nedlern@ned-box:/home/nedlern/nedschorus-logs/cold-read-records/14-review-the-legacy-system-s-bad-phrase-list-2026-11-12-2/` and `-3/`). Next it goes to the user in the approval-walk he asked for on 2026-10-05, one item per numbered item of What to build, before any of it is built. After that, the build, each step in its own pull request, in this order:
 1. the rename of item 5;
 2. the Why it is flagged and Check columns, with a reason written for each row and put to the user as item 1 says, the parser's new rules, and the checker reporting both columns with each hit;
 3. the parser in its own module without the -nbd suffix, the promise rows on the page, and the idle sweep reading them, with the two changes item 3 names;
