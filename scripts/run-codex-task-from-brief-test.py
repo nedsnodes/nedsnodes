@@ -5,8 +5,9 @@ A fake `gh` on PATH stands in for the commands --prefetch-github runs: it
 logs its arguments and the folder it ran in and, by FAKE_GH_MODE, prints data,
 fails, or sleeps.
 
-The fake records its arguments and, by the FAKE_CODEX_MODE environment
-variable, writes a report, writes a report file of its own with or without a final
+The fake records its arguments and, by FAKE_CODEX_WORKTREE_WRITES, changes a
+file in the -C checkout, writes commit-message.txt there, or both; and, by the
+FAKE_CODEX_MODE environment variable, writes a report, writes a report file of its own with or without a final
 message, fails with or without a report, writes nothing,
 sleeps past the deadline with a child that may ignore SIGTERM, writes a
 final message and then sleeps past the deadline, or blocks
@@ -46,6 +47,15 @@ with open(os.environ["FAKE_CODEX_ARGUMENTS_FILE"] + ".environment", "w") as reco
         "GH_CONFIG_DIR")}, record)
 report = arguments[arguments.index("-o") + 1]
 mode = os.environ.get("FAKE_CODEX_MODE", "report")
+checkout = arguments[arguments.index("-C") + 1]
+writes = os.environ.get("FAKE_CODEX_WORKTREE_WRITES", "")
+if "change" in writes.split(","):
+    open(os.path.join(checkout, "changed.txt"), "w").write("Codex's change\n")
+if "message" in writes.split(","):
+    open(os.path.join(checkout, "commit-message.txt"), "w").write(
+        "Codex's subject\n\nCodex's body.\n")
+if "empty-message" in writes.split(","):
+    open(os.path.join(checkout, "commit-message.txt"), "w").write("  \n")
 print("fake codex trace line")
 sys.stdout.flush()
 if mode == "report":
@@ -153,7 +163,8 @@ try:
     slow_find.chmod(0o755)
 
     def run(mode, *extra, stdin=None, timeout=60, path_first=None,
-            start_line_timeout=600, gh_mode="data", extra_environment=None):
+            start_line_timeout=600, gh_mode="data", extra_environment=None,
+            checkout_folder=checkout):
         """Run the program; return (completed, report, seconds since it said it is running Codex).
 
         timeout counts from that stderr line, which the program prints after building
@@ -171,10 +182,13 @@ try:
                            FAKE_CODEX_PID_FILE=str(codex_pid_file),
                            FAKE_GH_MODE=gh_mode, FAKE_GH_LOG=str(gh_log),
                            **(extra_environment or {}))
+        # A git run inside the launcher must reach only the -C checkout's repository.
+        for name in ("GIT_DIR", "GIT_INDEX_FILE", "GIT_WORK_TREE"):
+            environment.pop(name, None)
         report = scratch / f"report-{mode}.md"
         codex_pid_file.unlink(missing_ok=True)
-        command = [sys.executable, str(PROGRAM), "-C", str(checkout), "--brief", str(brief),
-                   "-o", str(report), *extra]
+        command = [sys.executable, str(PROGRAM), "-C", str(checkout_folder), "--brief",
+                   str(brief), "-o", str(report), *extra]
         process = subprocess.Popen(command, env=environment, stdin=stdin, cwd=elsewhere,
                                    stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True,
                                    start_new_session=True)
@@ -936,6 +950,115 @@ try:
           f"exit {completed.returncode}, stderr {completed.stderr!r}")
     shared_folder.unlink()
     log_store.rmdir()
+
+    # A git worktree, so the launcher's commit step runs; the environment names no other
+    # repository, so neither the test's git nor the launcher's can commit outside it.
+    git_identity = dict(GIT_AUTHOR_NAME="test-seat",
+                        GIT_AUTHOR_EMAIL="test-seat@nedschorus.invalid",
+                        GIT_COMMITTER_NAME="test-seat",
+                        GIT_COMMITTER_EMAIL="test-seat@nedschorus.invalid")
+    git_environment = {name: value for name, value in os.environ.items()
+                       if name not in ("GIT_DIR", "GIT_INDEX_FILE", "GIT_WORK_TREE")}
+    git_environment.update(HOME=str(scratch_home), **git_identity)
+    worktree = scratch / "worktree"
+
+    def git(*words):
+        return subprocess.run(["git", "-C", str(worktree), *words], env=git_environment,
+                              capture_output=True, text=True, check=True).stdout
+
+    def fresh_worktree():
+        shutil.rmtree(worktree, ignore_errors=True)
+        worktree.mkdir()
+        git("init", "--quiet")
+        (worktree / "existing.txt").write_text("before the run\n")
+        git("add", "existing.txt")
+        git("commit", "--quiet", "-m", "start")
+        return git("rev-parse", "HEAD").strip()
+
+    def run_in_worktree(writes, *extra, mode="report"):
+        completed, report, _ = run(mode, *extra, checkout_folder=worktree,
+                                   extra_environment={**git_identity,
+                                                      "FAKE_CODEX_WORKTREE_WRITES": writes})
+        return completed, report
+
+    message_file = worktree / "commit-message.txt"
+
+    start = fresh_worktree()
+    completed, report = run_in_worktree("change,message", "--sandbox", "workspace-write")
+    arguments = json.loads(arguments_file.read_text())
+    check("a workspace-write run in a worktree is told where to write its commit message",
+          f"commit message for your changes in the file {message_file}:" in arguments[-1],
+          repr(arguments[-1]))
+    check("a workspace-write run that changes the worktree and writes a message is committed "
+          "with that message under the caller's git identity, and the message file deleted",
+          completed.returncode == 0 and completed.stdout.strip() == f"report: {report}"
+          and git("rev-parse", "HEAD~1").strip() == start
+          and git("log", "-1", "--format=%an|%B").strip()
+          == "test-seat|Codex's subject\n\nCodex's body."
+          and git("show", "--name-only", "--format=", "HEAD").split() == ["changed.txt"]
+          and not message_file.exists() and git("status", "--porcelain") == ""
+          and f"as {git('rev-parse', 'HEAD').strip()}" in completed.stderr,
+          f"exit {completed.returncode}, stderr {completed.stderr!r}, log "
+          f"{git('log', '--format=%h %an %s')!r}")
+
+    for writes in ("change", "change,empty-message"):
+        start = fresh_worktree()
+        completed, report = run_in_worktree(writes, "--sandbox", "workspace-write")
+        check(f"a workspace-write run with {writes!r} commits nothing, lists the change and "
+              f"exits 1",
+              completed.returncode == 1 and git("rev-parse", "HEAD").strip() == start
+              and "missing or empty" in completed.stderr
+              and "?? changed.txt" in completed.stderr
+              and "report:" not in completed.stdout,
+              f"exit {completed.returncode}, stderr {completed.stderr!r}")
+
+    for writes in ("", "message"):
+        start = fresh_worktree()
+        completed, report = run_in_worktree(writes, "--sandbox", "workspace-write")
+        check(f"a workspace-write run that changes nothing ({writes!r}) commits nothing, "
+              f"leaves no message file and exits 0",
+              completed.returncode == 0 and git("rev-parse", "HEAD").strip() == start
+              and not message_file.exists() and git("status", "--porcelain") == "",
+              f"exit {completed.returncode}, stderr {completed.stderr!r}")
+
+    start = fresh_worktree()
+    completed, report = run_in_worktree("change,message")
+    arguments = json.loads(arguments_file.read_text())
+    check("a read-only run in a worktree is not told to write a commit message, and nothing "
+          "is committed",
+          completed.returncode == 0 and "commit-message.txt" not in arguments[-1]
+          and git("rev-parse", "HEAD").strip() == start and message_file.exists(),
+          f"exit {completed.returncode}, {arguments[-1]!r}")
+
+    start = fresh_worktree()
+    completed, report = run_in_worktree("change,message", "--sandbox", "workspace-write",
+                                        mode="fail")
+    check("a run that fails commits nothing",
+          completed.returncode == 1 and git("rev-parse", "HEAD").strip() == start
+          and message_file.exists(), f"exit {completed.returncode}")
+
+    start = fresh_worktree()
+    hook = worktree / ".git" / "hooks" / "pre-commit"
+    hook.write_text("#!/bin/sh\necho 'pre-commit: refused for the test' >&2\nexit 1\n")
+    hook.chmod(0o755)
+    completed, report = run_in_worktree("change,message", "--sandbox", "workspace-write")
+    check("when git refuses the commit, the run exits 1 with git's words, and the changes and "
+          "the message file are kept",
+          completed.returncode == 1 and git("rev-parse", "HEAD").strip() == start
+          and "could not commit the run's changes" in completed.stderr
+          and "pre-commit: refused for the test" in completed.stderr
+          and message_file.exists() and (worktree / "changed.txt").exists(),
+          f"exit {completed.returncode}, stderr {completed.stderr!r}")
+
+    subfolder = worktree / "subfolder"
+    start = fresh_worktree()
+    subfolder.mkdir()
+    completed, report, _ = run("report", "--sandbox", "workspace-write",
+                               checkout_folder=subfolder, extra_environment=git_identity)
+    arguments = json.loads(arguments_file.read_text())
+    check("a -C below a worktree's top folder is not committed in",
+          completed.returncode == 0 and "commit-message.txt" not in arguments[-1],
+          repr(arguments[-1]))
 
     empty_brief = scratch / "empty.md"
     empty_brief.write_text("  \n")

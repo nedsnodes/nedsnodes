@@ -32,7 +32,11 @@ The program an agent uses to hand Codex a task. It always:
   - when the log-store is on this machine, lets Codex write in its run's
     subfolder <agent-seat>/<brief file name without its extension> of
     ~/nedschorus-logs/codex-and-gemini-sandboxed-task-runs-shared-writable-folder/,
-    and ends the brief with that folder's path.
+    and names that folder in the brief;
+  - with --sandbox workspace-write and -C naming the top folder of a git
+    worktree, tells Codex to write its commit message in the file
+    commit-message.txt there, and, when Codex ends without error or timeout,
+    commits the run's changes; see "Commit" below.
 
 Options that widen what Codex may do, each off by default:
   --writable-root <folder>  let Codex write in this folder as well as the
@@ -72,10 +76,20 @@ log. Every other option applies as in a first run, -C included: Codex works
 in the -C folder, not the one the session started in. --writable-root is
 refused with --resume because `codex exec resume` does not accept --add-dir.
 
+Commit: the program, which runs outside Codex's sandbox, stages every change
+in the worktree and commits it with commit-message.txt as the message, using
+the git identity the worktree gives the agent-seat, then deletes that file.
+When the file is missing or empty, it commits nothing and lists the
+uncommitted changes. A run that changes nothing commits nothing, and an
+unneeded commit-message.txt is deleted. Give -o outside the worktree, or the
+report and run log are committed with the change. The agent-seat reviews the
+commit and pushes it.
+
 On success it prints `report: <path>` and exits 0. It exits 1, saying what
 failed, when a --prefetch-github command fails, or when Codex cannot be
 started, exits nonzero, writes no report, or when the run passes its
-deadline. It exits 2 on bad arguments. It needs no terminal, so
+deadline, or when the run's changes cannot be committed: no commit message,
+or git refused the commit. It exits 2 on bad arguments. It needs no terminal, so
 it can run as a background task.
 """
 
@@ -130,6 +144,7 @@ CODEX_AND_GEMINI_SHARED_WRITABLE_FOLDER = (
     pathlib.Path.home() / "nedschorus-logs"
     / "codex-and-gemini-sandboxed-task-runs-shared-writable-folder")
 NO_AGENT_SEAT_NAME = "no-agent-seat-name"
+CODEX_OR_GEMINI_COMMIT_MESSAGE_FILE_NAME = "commit-message.txt"
 _seat_shared_file_ship_spec = importlib.util.spec_from_file_location(
     "seat_shared_file_ship",
     pathlib.Path(__file__).resolve().parent / "seat-shared-file-ship.py")
@@ -285,6 +300,77 @@ def brief_with_shared_writable_subfolder(prompt: str, subfolder: pathlib.Path) -
             f"code you are asked to change, in this folder: {subfolder}\n")
 
 
+def codex_or_gemini_workspace_write_run_worktree_path_to_commit_later_or_none(
+        checkout: pathlib.Path, sandbox: str):
+    """Return the checkout when the launcher commits the run's changes in it, which is when
+    the run may write and the checkout is the top folder of a git worktree; else None."""
+    if sandbox != "workspace-write":
+        return None
+    # Equality, not "inside a work tree": a stray .git above a plain folder, such as the
+    # /tmp/.git a Codex sandbox with /tmp writable creates, would otherwise count.
+    result = subprocess.run(["git", "-C", str(checkout), "rev-parse", "--show-toplevel"],
+                            stdin=subprocess.DEVNULL, capture_output=True, text=True)
+    if result.returncode != 0 or pathlib.Path(result.stdout.strip()).resolve() != checkout:
+        return None
+    return checkout
+
+
+def brief_with_commit_message_file_instruction(prompt: str, worktree: pathlib.Path) -> str:
+    message_file = worktree / CODEX_OR_GEMINI_COMMIT_MESSAGE_FILE_NAME
+    return (f"{prompt.rstrip()}\n\n"
+            f"When you have changed files in {worktree}, write the commit message for your "
+            f"changes in the file {message_file}: a subject line, a blank line, and a body "
+            f"saying what changed and why. Do not run git add or git commit: when you finish, "
+            f"the program that started you stages every change in {worktree}, commits it with "
+            f"that message, and deletes the file. Without the file, your changes are not "
+            f"committed.\n")
+
+
+def codex_or_gemini_finished_workspace_write_run_changes_commit(worktree: pathlib.Path):
+    """Commit every change in the worktree with the message in its commit-message.txt, and
+    delete that file; return (what was done, or None when nothing was to commit; the
+    failure, or None)."""
+    message_file = worktree / CODEX_OR_GEMINI_COMMIT_MESSAGE_FILE_NAME
+    every_change_but_the_message_file = [
+        "--", ".", f":(exclude){CODEX_OR_GEMINI_COMMIT_MESSAGE_FILE_NAME}"]
+    step = "list the run's changes"
+    try:
+        changes = subprocess.run(
+            ["git", "status", "--short", "--untracked-files=all",
+             *every_change_but_the_message_file], cwd=worktree, stdin=subprocess.DEVNULL,
+            capture_output=True, text=True, check=True).stdout
+        if not changes.strip():
+            message_file.unlink(missing_ok=True)
+            return None, None
+        if not message_file.is_file() or not message_file.read_text(encoding="utf-8").strip():
+            return None, (
+                f"the run ended without error but left {message_file} missing or empty, so "
+                f"its changes in {worktree} were not committed:\n{changes.rstrip()}\n"
+                f"Review the changes; to keep them, commit them yourself with a message that "
+                f"says what they do.")
+        step = "stage the run's changes"
+        subprocess.run(["git", "add", "--all", *every_change_but_the_message_file],
+                       cwd=worktree, stdin=subprocess.DEVNULL, capture_output=True,
+                       text=True, check=True)
+        step = "commit the run's changes"
+        subprocess.run(["git", "commit", "--quiet", "--file", str(message_file)],
+                       cwd=worktree, stdin=subprocess.DEVNULL, capture_output=True,
+                       text=True, check=True)
+        commit = subprocess.run(["git", "rev-parse", "HEAD"], cwd=worktree,
+                                stdin=subprocess.DEVNULL, capture_output=True, text=True,
+                                check=True).stdout.strip()
+    except subprocess.CalledProcessError as error:
+        said = (error.stderr or "").strip() or (error.stdout or "").strip() or "(nothing)"
+        return None, (
+            f"could not {step} in {worktree}: `{' '.join(error.cmd)}` exited "
+            f"{error.returncode} and said: {said}\n"
+            f"The run's changes are left in the worktree, and {message_file} is kept.\n"
+            f"Fix what git reported, then commit the changes yourself, with that file as "
+            f"the message, and delete the file.")
+    message_file.unlink()
+    return f"committed the run's changes in {worktree} as {commit}.", None
+
+
 def codex_command(checkout: pathlib.Path, last_message: pathlib.Path, sandbox: str,
                   model, effort, prompt: str, network: bool = True,
                   writable_roots=(), outside_git_checkout: bool = False,
@@ -431,6 +517,10 @@ def main(argv=None) -> int:
                     f"{CODEX_AND_GEMINI_SHARED_WRITABLE_FOLDER}: {error}")
     if shared_subfolder:
         prompt = brief_with_shared_writable_subfolder(prompt, shared_subfolder)
+    worktree_to_commit = codex_or_gemini_workspace_write_run_worktree_path_to_commit_later_or_none(
+        checkout, args.sandbox)
+    if worktree_to_commit:
+        prompt = brief_with_commit_message_file_instruction(prompt, worktree_to_commit)
     command = codex_command(
         checkout, last_message, args.sandbox, args.model, args.effort, prompt,
         network=not args.no_network,
@@ -473,6 +563,13 @@ def main(argv=None) -> int:
     if last_message.exists():
         print(f"{PROGRAM}: Codex wrote the report at {report} itself, so it is kept; "
               f"Codex's final message is in {last_message}.", file=sys.stderr)
+    if worktree_to_commit:
+        done, error = codex_or_gemini_finished_workspace_write_run_changes_commit(
+            worktree_to_commit)
+        if error:
+            return fail(f"{error}\nThe report is at {report}.")
+        if done:
+            print(f"{PROGRAM}: {done}", file=sys.stderr)
     print(f"report: {report}")
     return 0
 

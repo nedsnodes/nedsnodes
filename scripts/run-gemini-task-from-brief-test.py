@@ -60,6 +60,11 @@ if mode == "remove-report":
     report.unlink()
 elif mode != "no-report":
     report.write_text("one\ntwo\nthree\n")
+writes = os.environ.get("FAKE_AGY_WORKTREE_WRITES", "").split(",")
+if "change" in writes:
+    pathlib.Path(os.getcwd(), "changed.txt").write_text("Gemini's change\n")
+if "message" in writes:
+    pathlib.Path(os.getcwd(), "commit-message.txt").write_text("Gemini's subject\n\nGemini's body.\n")
 '''
 
 FAKE_SANDBOX = r'''#!PYTHON
@@ -228,6 +233,89 @@ class GeminiTaskTests(unittest.TestCase):
         self.assertEqual(result.returncode, 1)
         self.assertIn("creating the run's folder in the shared writable folder", result.stderr)
         self.assertFalse(self.calls.exists())
+
+    def git(self, *words):
+        return subprocess.run(["git", "-C", str(self.checkout), *words], env=self.git_env,
+                              capture_output=True, text=True, check=True).stdout
+
+    def make_checkout_a_worktree(self):
+        """Make -C a git worktree, with the report outside it; return its first commit."""
+        # Neither the test's git nor the launcher's may reach a repository named by the caller.
+        self.git_env = {name: value for name, value in self.env.items()
+                        if name not in ("GIT_DIR", "GIT_INDEX_FILE", "GIT_WORK_TREE")}
+        self.git_env.update(GIT_AUTHOR_NAME="test-seat", GIT_AUTHOR_EMAIL="test-seat@nedschorus.invalid",
+                            GIT_COMMITTER_NAME="test-seat",
+                            GIT_COMMITTER_EMAIL="test-seat@nedschorus.invalid")
+        self.env = self.git_env
+        outside_report = self.base / "report.md"
+        self.args[self.args.index("-o") + 1] = str(outside_report)
+        self.env["FAKE_REPORT"] = str(outside_report)
+        self.git("init", "--quiet")
+        (self.checkout / "existing.txt").write_text("before the run\n")
+        self.git("add", "existing.txt")
+        self.git("commit", "--quiet", "-m", "start")
+        return self.git("rev-parse", "HEAD").strip()
+
+    def run_in_worktree(self, writes, mode="report", sandbox="workspace-write"):
+        self.env["FAKE_AGY_WORKTREE_WRITES"] = writes
+        return self.run_cli(mode, extra=("--sandbox", sandbox))
+
+    def test_workspace_write_run_in_a_worktree_is_committed_with_its_message(self):
+        start = self.make_checkout_a_worktree()
+        result = self.run_in_worktree("change,message")
+        self.assertEqual(result.returncode, 0, result.stderr)
+        prompt = json.loads(self.calls.read_text().splitlines()[1])[1][-1]
+        self.assertIn(f"in the file {self.checkout / 'commit-message.txt'}:", prompt)
+        self.assertEqual(self.git("rev-parse", "HEAD~1").strip(), start)
+        self.assertEqual(self.git("log", "-1", "--format=%an|%B").strip(),
+                         "test-seat|Gemini's subject\n\nGemini's body.")
+        self.assertEqual(self.git("show", "--name-only", "--format=", "HEAD").split(), ["changed.txt"])
+        self.assertFalse((self.checkout / "commit-message.txt").exists())
+        self.assertEqual(self.git("status", "--porcelain"), "")
+        self.assertIn(f"as {self.git('rev-parse', 'HEAD').strip()}", result.stderr)
+
+    def test_changes_without_a_commit_message_are_listed_not_committed(self):
+        start = self.make_checkout_a_worktree()
+        result = self.run_in_worktree("change")
+        self.assertEqual(result.returncode, 1, result.stderr)
+        self.assertEqual(self.git("rev-parse", "HEAD").strip(), start)
+        self.assertIn("committing the run's changes", result.stderr)
+        self.assertIn("missing or empty", result.stderr)
+        self.assertIn("?? changed.txt", result.stderr)
+        self.assertNotIn("report:", result.stdout)
+
+    def test_run_that_changes_nothing_commits_nothing(self):
+        start = self.make_checkout_a_worktree()
+        for writes in ("", "message"):
+            with self.subTest(writes=writes):
+                result = self.run_in_worktree(writes)
+                self.assertEqual(result.returncode, 0, result.stderr)
+                self.assertEqual(self.git("rev-parse", "HEAD").strip(), start)
+                self.assertFalse((self.checkout / "commit-message.txt").exists())
+
+    def test_read_only_and_failed_runs_commit_nothing(self):
+        start = self.make_checkout_a_worktree()
+        for mode, sandbox, code in (("report", "read-only", 0), ("fail", "workspace-write", 1)):
+            with self.subTest(mode=mode, sandbox=sandbox):
+                self.calls.unlink(missing_ok=True)
+                result = self.run_in_worktree("change,message", mode=mode, sandbox=sandbox)
+                self.assertEqual(result.returncode, code, result.stderr)
+                self.assertEqual(self.git("rev-parse", "HEAD").strip(), start)
+                prompt = json.loads(self.calls.read_text().splitlines()[1])[1][-1]
+                self.assertEqual("commit-message.txt" in prompt, sandbox == "workspace-write")
+
+    def test_commit_git_refuses_keeps_changes_and_message(self):
+        start = self.make_checkout_a_worktree()
+        hook = self.checkout / ".git" / "hooks" / "pre-commit"
+        hook.write_text("#!/bin/sh\necho 'pre-commit: refused for the test' >&2\nexit 1\n")
+        hook.chmod(0o755)
+        result = self.run_in_worktree("change,message")
+        self.assertEqual(result.returncode, 1, result.stderr)
+        self.assertEqual(self.git("rev-parse", "HEAD").strip(), start)
+        self.assertIn("could not commit the run's changes", result.stderr)
+        self.assertIn("pre-commit: refused for the test", result.stderr)
+        self.assertTrue((self.checkout / "commit-message.txt").exists())
+        self.assertTrue((self.checkout / "changed.txt").exists())
 
     def test_unknown_model_stops_before_task(self):
         result = self.run_cli(extra=("-m", "gemini-4-argon"))

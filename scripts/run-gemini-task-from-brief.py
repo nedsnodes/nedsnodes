@@ -15,12 +15,22 @@ not files created later or found elsewhere.
 read-only lets agy write REPORT and, when the log-store is on this machine,
 its run's subfolder <agent-seat>/<brief file name without its extension> of
 ~/nedschorus-logs/codex-and-gemini-sandboxed-task-runs-shared-writable-folder/,
-whose path ends the brief; nothing else, not even its own state under
+whose path the brief names; nothing else, not even its own state under
 ~/.gemini, so agy logs failed cache writes. workspace-write also lets it
 write CHECKOUT and each --writable-root folder. The report file is bound
 individually on Linux, so replacing it by rename is not supported. Existing
 report content is removed before the task starts. Files in writable folders
 may be overwritten by the task and are not rolled back on failure.
+
+With workspace-write and CHECKOUT the top folder of a git worktree, the brief
+tells agy to write its commit message in CHECKOUT/commit-message.txt, and,
+when agy ends without error or timeout, the launcher, outside the sandbox,
+stages every change in the worktree, commits it with that message under the
+git identity the worktree gives the agent-seat, and deletes the file. When
+the file is missing or empty, it commits nothing, lists the uncommitted
+changes and exits 1. A run that changes nothing commits nothing. Give REPORT
+outside the worktree, or the report and run log are committed with the
+change. The agent-seat reviews the commit and pushes it.
 
 agy always reaches the network, its own web tool included: its model
 connection needs it, and no proxy separates model traffic from tool
@@ -47,7 +57,8 @@ the Codex launcher's process-group cleanup stops agy and its children.
 
 Exits 0 with `report: PATH` for a nonblank report, 2 for invalid arguments,
 and 1 with a diagnostic for file errors, unavailable sandbox, agy startup
-or model-list failures, unknown models, timeout, nonzero exit or no report.
+or model-list failures, unknown models, timeout, nonzero exit, no report,
+or changes that could not be committed.
 Requires bwrap on Linux or sandbox-exec on macOS; never runs unsandboxed.
 """
 
@@ -138,6 +149,12 @@ def main(argv=None):
             codex_task.codex_or_gemini_task_run_subfolder_in_shared_writable_folder_create(brief))
         if shared_subfolder:
             prompt = codex_task.brief_with_shared_writable_subfolder(prompt, shared_subfolder)
+        stage = "checking whether -C is a git worktree to commit in"
+        worktree_to_commit = codex_task.codex_or_gemini_workspace_write_run_worktree_path_to_commit_later_or_none(
+            checkout, args.sandbox)
+        if worktree_to_commit:
+            prompt = codex_task.brief_with_commit_message_file_instruction(
+                prompt, worktree_to_commit)
         stage = "preparing the sandbox"
         writable_folders = [checkout, *roots] if args.sandbox == "workspace-write" else []
         writable_folders += [shared_subfolder] if shared_subfolder else []
@@ -177,6 +194,14 @@ def main(argv=None):
         stage = f"reading report {report}"
         if not report.is_file() or not report.read_text(encoding="utf-8").strip():
             raise RuntimeError(f"agy exited 0 but wrote no report at {report}")
+        if worktree_to_commit:
+            stage = f"committing the run's changes; the report is at {report}"
+            done, error = codex_task.codex_or_gemini_finished_workspace_write_run_changes_commit(
+                worktree_to_commit)
+            if error:
+                raise RuntimeError(error)
+            if done:
+                print(f"{PROGRAM}: {done}", file=sys.stderr)
     except (OSError, UnicodeError, RuntimeError) as error:
         print(f"{PROGRAM}: failed while {stage}: {error}; output: {log_path}", file=sys.stderr)
         return 1
