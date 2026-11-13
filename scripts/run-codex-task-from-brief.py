@@ -29,10 +29,12 @@ The program an agent uses to hand Codex a task. It always:
     ~/.config/nedschorus-sandboxed-models/, so that Codex's `gh` reads public
     GitHub. When that token cannot be read, Codex runs without one, and the
     run log's first line says why;
-  - when the log-store is on this machine, lets Codex write in its run's
-    subfolder <agent-seat>/<brief file name without its extension> of
+  - when the log-store is on this machine, creates the run's own numbered
+    folder <agent-seat>/<brief file name without its extension>/<number> of
     ~/nedschorus-logs/codex-and-gemini-sandboxed-task-runs-shared-writable-folder/,
-    and names that folder in the brief;
+    1 for the brief's first run and one more than the highest number there
+    after that, lets Codex write in it, prints its path on stderr, and names
+    it in the brief;
   - with --sandbox workspace-write and -C naming the top folder of a git
     worktree, tells Codex to write its commit message in the file
     commit-message.txt there, and, when Codex ends without error or timeout,
@@ -146,6 +148,10 @@ CODEX_AND_GEMINI_SHARED_WRITABLE_FOLDER = (
     / "codex-and-gemini-sandboxed-task-runs-shared-writable-folder")
 NO_AGENT_SEAT_NAME = "no-agent-seat-name"
 CODEX_OR_GEMINI_COMMIT_MESSAGE_FILE_NAME = "commit-message.txt"
+# A run's folder in the brief's folder: 1, 2, 3 and so on.
+CODEX_OR_GEMINI_TASK_RUN_NUMBERED_FOLDER_NAME_PATTERN = re.compile(r"[1-9][0-9]*")
+# Each attempt fails only when another run took that number in the same instant.
+CODEX_OR_GEMINI_TASK_RUN_NUMBERED_FOLDER_CREATE_ATTEMPTS = 100
 _seat_shared_file_ship_spec = importlib.util.spec_from_file_location(
     "seat_shared_file_ship",
     pathlib.Path(__file__).resolve().parent / "seat-shared-file-ship.py")
@@ -285,14 +291,29 @@ def brief_with_prefetched_files(prompt: str, files) -> str:
 
 
 def codex_or_gemini_task_run_subfolder_in_shared_writable_folder_create(brief: pathlib.Path):
-    """Create and return this run's subfolder of the shared writable folder, or None
-    when the log-store is not on this machine."""
+    """Create and return this run's numbered folder inside the brief's folder of the shared
+    writable folder, or None when the log-store is not on this machine."""
     if not CODEX_AND_GEMINI_SHARED_WRITABLE_FOLDER.parent.is_dir():
         return None
     seat = seat_shared_file_ship.seat_name_from_environment() or NO_AGENT_SEAT_NAME
-    subfolder = CODEX_AND_GEMINI_SHARED_WRITABLE_FOLDER / seat / brief.stem
-    subfolder.mkdir(parents=True, exist_ok=True)
-    return subfolder
+    brief_folder = CODEX_AND_GEMINI_SHARED_WRITABLE_FOLDER / seat / brief.stem
+    brief_folder.mkdir(parents=True, exist_ok=True)
+    attempts = CODEX_OR_GEMINI_TASK_RUN_NUMBERED_FOLDER_CREATE_ATTEMPTS
+    number = 1 + max((int(entry.name) for entry in brief_folder.iterdir()
+                      if CODEX_OR_GEMINI_TASK_RUN_NUMBERED_FOLDER_NAME_PATTERN.fullmatch(
+                          entry.name)), default=0)
+    # os.mkdir fails on an existing folder, so two runs started together never share one.
+    for candidate in range(number, number + attempts):
+        try:
+            os.mkdir(brief_folder / str(candidate))
+        except FileExistsError:
+            continue
+        return brief_folder / str(candidate)
+    raise OSError(
+        f"every numbered folder from {number} to {number + attempts - 1} "
+        f"in {brief_folder} was taken by another run as this one tried to create it.\n"
+        f"Start the run again; if this happens again, look in {brief_folder} for what "
+        f"is creating folders there.")
 
 
 def brief_with_shared_writable_subfolder(prompt: str, subfolder: pathlib.Path) -> str:
@@ -517,6 +538,7 @@ def main(argv=None) -> int:
         return fail(f"could not create the run's folder in "
                     f"{CODEX_AND_GEMINI_SHARED_WRITABLE_FOLDER}: {error}")
     if shared_subfolder:
+        print(f"{PROGRAM}: this run's folder is {shared_subfolder}", file=sys.stderr)
         prompt = brief_with_shared_writable_subfolder(prompt, shared_subfolder)
     worktree_to_commit = codex_or_gemini_workspace_write_run_worktree_path_to_commit_later_or_none(
         checkout, args.sandbox)

@@ -925,19 +925,79 @@ try:
     for seat_environment, seat_folder in (
             ({"CLAUDE_CODE_TASK_LIST_ID": "nedschorus-test-seat-tasks"}, "test-seat"),
             ({"CLAUDE_CODE_TASK_LIST_ID": ""}, "no-agent-seat-name")):
-        completed, report, _ = run("report", extra_environment=seat_environment)
-        arguments = json.loads(arguments_file.read_text())
-        run_folder = shared_folder / seat_folder / "brief"
-        profile = next((argument for argument in arguments
-                        if argument.startswith("permissions.codex-task-no-credentials.filesystem=")),
-                       "")
-        check(f"with the log-store present, the run's folder {seat_folder}/brief is created, "
-              f"writable in the read-only profile, and named at the end of the brief",
-              completed.returncode == 0 and run_folder.is_dir()
-              and f'{json.dumps(str(run_folder))}="write"' in profile
-              and arguments[-1].startswith(brief.read_text().rstrip())
-              and arguments[-1].rstrip().endswith(str(run_folder)),
-              f"exit {completed.returncode}, {arguments!r}")
+        for number in ("1", "2"):
+            completed, report, _ = run("report", extra_environment=seat_environment)
+            arguments = json.loads(arguments_file.read_text())
+            run_folder = shared_folder / seat_folder / "brief" / number
+            profile = next((argument for argument in arguments if argument.startswith(
+                "permissions.codex-task-no-credentials.filesystem=")), "")
+            check(f"with the log-store present, the brief's run number {number} gets the folder "
+                  f"{seat_folder}/brief/{number}, created, printed, writable in the read-only "
+                  f"profile, and named at the end of the brief",
+                  completed.returncode == 0 and run_folder.is_dir()
+                  and f"this run's folder is {run_folder}\n" in completed.stderr
+                  and f'{json.dumps(str(run_folder))}="write"' in profile
+                  and not any(json.dumps(str(run_folder.parent)) + "=" in argument
+                              for argument in arguments)
+                  and arguments[-1].startswith(brief.read_text().rstrip())
+                  and arguments[-1].rstrip().endswith(str(run_folder)),
+                  f"exit {completed.returncode}, {arguments!r}")
+
+    brief_folder = shared_folder / "test-seat" / "brief"
+    shutil.rmtree(brief_folder)
+    (brief_folder / "1").mkdir(parents=True)
+    (brief_folder / "notes").mkdir()
+    completed, report, _ = run(
+        "report", extra_environment={"CLAUDE_CODE_TASK_LIST_ID": "nedschorus-test-seat-tasks"})
+    check("a 1/ already in the brief's folder makes the run take 2/",
+          completed.returncode == 0 and (brief_folder / "2").is_dir()
+          and f"this run's folder is {brief_folder / '2'}\n" in completed.stderr,
+          f"exit {completed.returncode}, stderr {completed.stderr!r}")
+
+    # Another run creating a folder between this run's listing and its mkdir cannot be
+    # timed from a test, so a wrapped os.mkdir creates the folder first, as that run would.
+    real_mkdir = runner.os.mkdir
+    runner_seat_environment = os.environ.get("CLAUDE_CODE_TASK_LIST_ID")
+    os.environ["CLAUDE_CODE_TASK_LIST_ID"] = "nedschorus-test-seat-tasks"
+    shutil.rmtree(brief_folder)
+    taken_first = []
+
+    def mkdir_beaten_once_by_another_run(path, *rest, **options):
+        if Path(path).parent == brief_folder and not taken_first:
+            real_mkdir(path, *rest, **options)
+            taken_first.append(Path(path).name)
+        return real_mkdir(path, *rest, **options)
+
+    def mkdir_always_beaten_by_another_run(path, *rest, **options):
+        if Path(path).parent == brief_folder:
+            raise FileExistsError(path)
+        return real_mkdir(path, *rest, **options)
+
+    try:
+        runner.os.mkdir = mkdir_beaten_once_by_another_run
+        run_folder = runner.codex_or_gemini_task_run_subfolder_in_shared_writable_folder_create(
+            brief)
+        check("a run whose number another run takes first creates the next number instead",
+              taken_first == ["1"] and run_folder == brief_folder / "2" and run_folder.is_dir(),
+              f"{taken_first!r}, {run_folder}")
+        runner.os.mkdir = mkdir_always_beaten_by_another_run
+        try:
+            runner.codex_or_gemini_task_run_subfolder_in_shared_writable_folder_create(brief)
+            bounded = "no error"
+        except OSError as error:
+            bounded = str(error)
+        check("when every attempted number is taken, the attempts stop and the error says so",
+              bounded.startswith(
+                  f"every numbered folder from 3 to "
+                  f"{2 + runner.CODEX_OR_GEMINI_TASK_RUN_NUMBERED_FOLDER_CREATE_ATTEMPTS} "
+                  f"in {brief_folder}"),
+              bounded)
+    finally:
+        runner.os.mkdir = real_mkdir
+        if runner_seat_environment is None:
+            os.environ.pop("CLAUDE_CODE_TASK_LIST_ID", None)
+        else:
+            os.environ["CLAUDE_CODE_TASK_LIST_ID"] = runner_seat_environment
 
     shutil.rmtree(shared_folder)
     shared_folder.write_text("a file where the shared folder belongs\n")

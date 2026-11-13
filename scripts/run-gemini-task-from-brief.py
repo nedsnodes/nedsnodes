@@ -13,9 +13,11 @@ credential files present at launch under home and the launcher's checkout,
 not files created later or found elsewhere.
 
 read-only lets agy write REPORT and, when the log-store is on this machine,
-its run's subfolder <agent-seat>/<brief file name without its extension> of
+the run's own numbered folder <agent-seat>/<brief file name without its
+extension>/<number> of
 ~/nedschorus-logs/codex-and-gemini-sandboxed-task-runs-shared-writable-folder/,
-whose path the brief names; nothing else, not even its own state under
+1 for the brief's first run and one more than the highest number there after
+that, whose path the launcher prints on stderr and the brief names; nothing else, not even its own state under
 ~/.gemini, so agy logs failed cache writes. workspace-write also lets it
 write CHECKOUT and each --writable-root folder. The report file is bound
 individually on Linux, so replacing it by rename is not supported. Existing
@@ -149,6 +151,7 @@ def main(argv=None):
         shared_subfolder = (
             codex_task.codex_or_gemini_task_run_subfolder_in_shared_writable_folder_create(brief))
         if shared_subfolder:
+            print(f"{PROGRAM}: this run's folder is {shared_subfolder}", file=sys.stderr)
             prompt = codex_task.brief_with_shared_writable_subfolder(prompt, shared_subfolder)
         stage = "checking whether -C is a git worktree to commit in"
         worktree_to_commit = codex_task.codex_or_gemini_workspace_write_run_worktree_path_to_commit_later_or_none(

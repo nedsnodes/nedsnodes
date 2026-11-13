@@ -215,16 +215,59 @@ class GeminiTaskTests(unittest.TestCase):
         self.env["CLAUDE_CODE_TASK_LIST_ID"] = "nedschorus-test-seat-tasks"
         result = self.run_cli()
         self.assertEqual(result.returncode, 0, result.stderr)
-        run_folder = self.shared_folder / "test-seat" / "brief"
-        self.assertTrue(run_folder.is_dir())
-        args = json.loads(self.calls.read_text().splitlines()[1])[1]
-        self.assertIn(f"in this folder: {run_folder}\n", args[-1])
-        prefix = json.loads(self.sandbox_calls.read_text().splitlines()[-1])
-        if sys.platform == "darwin":
-            self.assertIn(f'(require-not (subpath {json.dumps(str(run_folder))}))', prefix[2])
-        else:
-            self.assertEqual([prefix[i + 1] for i, arg in enumerate(prefix) if arg == "--bind"],
-                             [str(self.report), str(run_folder)])
+        for number in ("1", "2"):
+            if number == "2":
+                self.calls.unlink()
+                result = self.run_cli()
+                self.assertEqual(result.returncode, 0, result.stderr)
+            run_folder = self.shared_folder / "test-seat" / "brief" / number
+            self.assertTrue(run_folder.is_dir())
+            self.assertIn(f"this run's folder is {run_folder}\n", result.stderr)
+            args = json.loads(self.calls.read_text().splitlines()[1])[1]
+            self.assertIn(f"in this folder: {run_folder}\n", args[-1])
+            prefix = json.loads(self.sandbox_calls.read_text().splitlines()[-1])
+            if sys.platform == "darwin":
+                self.assertIn(f'(require-not (subpath {json.dumps(str(run_folder))}))', prefix[2])
+            else:
+                self.assertEqual([prefix[i + 1] for i, arg in enumerate(prefix) if arg == "--bind"],
+                                 [str(self.report), str(run_folder)])
+
+    def test_run_takes_the_number_after_a_folder_already_there(self):
+        brief_folder = self.shared_folder / "test-seat" / "brief"
+        (brief_folder / "1").mkdir(parents=True)
+        self.env["CLAUDE_CODE_TASK_LIST_ID"] = "nedschorus-test-seat-tasks"
+        result = self.run_cli()
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertTrue((brief_folder / "2").is_dir())
+        self.assertIn(f"this run's folder is {brief_folder / '2'}\n", result.stderr)
+
+    def test_run_folder_taken_by_another_run_first_gets_the_next_number(self):
+        # Another run creating a folder between the listing and the mkdir cannot be timed
+        # from a test, so a wrapped os.mkdir creates the folder first, as that run would.
+        brief_folder = self.shared_folder / "test-seat" / "brief"
+        brief_folder.mkdir(parents=True)
+        real_mkdir = os.mkdir
+        taken_first = []
+
+        def beaten_once(path, *rest, **options):
+            if Path(path).parent == brief_folder and not taken_first:
+                real_mkdir(path, *rest, **options)
+                taken_first.append(Path(path).name)
+            return real_mkdir(path, *rest, **options)
+
+        def always_beaten(path, *rest, **options):
+            if Path(path).parent == brief_folder:
+                raise FileExistsError(path)
+            return real_mkdir(path, *rest, **options)
+
+        create = runner.codex_task.codex_or_gemini_task_run_subfolder_in_shared_writable_folder_create
+        with patch.dict(os.environ, {"CLAUDE_CODE_TASK_LIST_ID": "nedschorus-test-seat-tasks"}):
+            with patch.object(runner.codex_task.os, "mkdir", beaten_once):
+                self.assertEqual(create(self.brief), brief_folder / "2")
+            self.assertEqual(taken_first, ["1"])
+            with patch.object(runner.codex_task.os, "mkdir", always_beaten), \
+                    self.assertRaisesRegex(OSError, "every numbered folder from 3 to 102"):
+                create(self.brief)
 
     def test_shared_writable_subfolder_that_cannot_be_created_stops_the_run(self):
         self.shared_folder.parent.mkdir()
