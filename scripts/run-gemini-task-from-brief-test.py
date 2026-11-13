@@ -284,6 +284,15 @@ class GeminiTaskTests(unittest.TestCase):
         self.assertIn("?? changed.txt", result.stderr)
         self.assertNotIn("report:", result.stdout)
 
+    def test_commit_message_left_by_an_earlier_run_is_not_used(self):
+        start = self.make_checkout_a_worktree()
+        (self.checkout / "commit-message.txt").write_text("A stale subject from an earlier run\n")
+        result = self.run_in_worktree("change")
+        self.assertEqual(result.returncode, 1, result.stderr)
+        self.assertEqual(self.git("rev-parse", "HEAD").strip(), start)
+        self.assertIn("missing or empty", result.stderr)
+        self.assertFalse((self.checkout / "commit-message.txt").exists())
+
     def test_run_that_changes_nothing_commits_nothing(self):
         start = self.make_checkout_a_worktree()
         for writes in ("", "message"):

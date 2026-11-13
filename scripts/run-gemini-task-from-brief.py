@@ -26,7 +26,8 @@ With workspace-write and CHECKOUT the top folder of a git worktree, the brief
 tells agy to write its commit message in CHECKOUT/commit-message.txt, and,
 when agy ends without error or timeout, the launcher, outside the sandbox,
 stages every change in the worktree, commits it with that message under the
-git identity the worktree gives the agent-seat, and deletes the file. When
+git identity the worktree gives the agent-seat, and deletes the file. A
+commit-message.txt already there when the run starts is deleted first. When
 the file is missing or empty, it commits nothing, lists the uncommitted
 changes and exits 1. A run that changes nothing commits nothing. Give REPORT
 outside the worktree, or the report and run log are committed with the
@@ -153,6 +154,9 @@ def main(argv=None):
         worktree_to_commit = codex_task.codex_or_gemini_workspace_write_run_worktree_path_to_commit_later_or_none(
             checkout, args.sandbox)
         if worktree_to_commit:
+            # A message left by an earlier run must not pass for this run's.
+            (worktree_to_commit / codex_task.CODEX_OR_GEMINI_COMMIT_MESSAGE_FILE_NAME).unlink(
+                missing_ok=True)
             prompt = codex_task.brief_with_commit_message_file_instruction(
                 prompt, worktree_to_commit)
         stage = "preparing the sandbox"

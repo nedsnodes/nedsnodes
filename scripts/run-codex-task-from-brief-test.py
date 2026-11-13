@@ -1012,6 +1012,15 @@ try:
               and "report:" not in completed.stdout,
               f"exit {completed.returncode}, stderr {completed.stderr!r}")
 
+    start = fresh_worktree()
+    message_file.write_text("A stale subject from an earlier run\n")
+    completed, report = run_in_worktree("change", "--sandbox", "workspace-write")
+    check("a commit-message.txt left by an earlier run is deleted before the run, so a run "
+          "that writes changes but no message commits nothing and exits 1",
+          completed.returncode == 1 and git("rev-parse", "HEAD").strip() == start
+          and "missing or empty" in completed.stderr and not message_file.exists(),
+          f"exit {completed.returncode}, stderr {completed.stderr!r}")
+
     for writes in ("", "message"):
         start = fresh_worktree()
         completed, report = run_in_worktree(writes, "--sandbox", "workspace-write")

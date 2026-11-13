@@ -79,6 +79,7 @@ refused with --resume because `codex exec resume` does not accept --add-dir.
 Commit: the program, which runs outside Codex's sandbox, stages every change
 in the worktree and commits it with commit-message.txt as the message, using
 the git identity the worktree gives the agent-seat, then deletes that file.
+A commit-message.txt already there when the run starts is deleted first.
 When the file is missing or empty, it commits nothing and lists the
 uncommitted changes. A run that changes nothing commits nothing, and an
 unneeded commit-message.txt is deleted. Give -o outside the worktree, or the
@@ -520,6 +521,8 @@ def main(argv=None) -> int:
     worktree_to_commit = codex_or_gemini_workspace_write_run_worktree_path_to_commit_later_or_none(
         checkout, args.sandbox)
     if worktree_to_commit:
+        # A message left by an earlier run must not pass for this run's.
+        (worktree_to_commit / CODEX_OR_GEMINI_COMMIT_MESSAGE_FILE_NAME).unlink(missing_ok=True)
         prompt = brief_with_commit_message_file_instruction(prompt, worktree_to_commit)
     command = codex_command(
         checkout, last_message, args.sandbox, args.model, args.effort, prompt,
