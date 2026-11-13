@@ -47,6 +47,6 @@ This page lists words to avoid in this project and what to write instead. Most o
 
 "Applies to" names where the word is avoided: files, messages to other agents, and messages to the user. The pronoun rows and the `or` row apply to messages only; no program checks them.
 
-## Absolutes in instructions
+## Absolutes in agent-instructions and tool-messages-to-agent
 
-When writing agent-instructions or an agent-facing-message, absolute words like "always", "never", "every", "all" or "cannot" can backfire in unforeseen conditions. Before you write one, look for an exception; if you find one, name it or soften the wording; if you find none, the absolute stands.
+When writing agent-instructions or a tool-message-to-agent, absolute words like "always", "never", "every", "all" or "cannot" can backfire in unforeseen conditions. Before you write one, look for an exception; if you find one, name it or soften the wording; if you find none, the absolute stands.
