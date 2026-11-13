@@ -49,4 +49,4 @@ This page lists words to avoid in this project and what to write instead. Most o
 
 ## Absolutes in agent-instructions and tool-messages-to-agent
 
-When writing agent-instructions or a tool-message-to-agent, absolute words like "always", "never", "every", "all" or "cannot" can backfire in unforeseen conditions. Before you write one, look for an exception; if you find one, name it or soften the wording; if you find none, the absolute stands.
+When writing agent-instructions or a tool-message-to-agent, absolute words like "always", "never", "every", "all" or "cannot" can backfire in unforeseen conditions. Before you write such a word, look for an exception; if you find any, name each or soften the wording; if you find none, the absolute stands.
