@@ -686,6 +686,9 @@ def main(argv=None) -> int:
               file=sys.stderr)
         return 1
 
+    common.sandboxed_model_run_output_gh_read_only_github_token_refused_by_github_check_and_report(
+        "code-review-codex-cell", completed.stderr)
+
     def stderr_tail():
         lines = (completed.stderr or "").strip().splitlines()
         for line in lines[-10:]:

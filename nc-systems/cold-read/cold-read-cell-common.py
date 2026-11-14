@@ -112,6 +112,27 @@ def process_environment_copy_with_agent_seat_github_tokens_replaced_by_read_only
     return copy, None
 
 
+# Both are on the line gh prints when GitHub refuses its token: "HTTP 401: Bad credentials
+# (<url>)" from most commands, "gh: Bad credentials (HTTP 401)" from `gh api` (gh 2.102.0).
+GH_REFUSED_TOKEN_LINE_WORDS = ("HTTP 401", "Bad credentials")
+
+
+def sandboxed_model_run_output_gh_read_only_github_token_refused_by_github_check_and_report(program: str, *outputs) -> bool:
+    """Print "read-only GitHub token refused" on stderr when a line of the run's outputs is
+    gh's HTTP 401; return whether one was. The caller's exit status does not change."""
+    for output in outputs:
+        for line in (output or "").splitlines():
+            if all(word in line for word in GH_REFUSED_TOKEN_LINE_WORDS):
+                print(f"{program}: read-only GitHub token refused: gh inside the run got "
+                      f"HTTP 401, so the model could not read GitHub through gh. gh said: "
+                      f"{line.strip()}\n"
+                      f"{program}: tell the user that GitHub refuses the token in "
+                      f"{SANDBOXED_MODELS_READ_ONLY_GITHUB_TOKEN_FILE}, so it needs replacing.",
+                      file=sys.stderr)
+                return True
+    return False
+
+
 def reviewer_program_login_files(except_program: str = None,
                                  only_present: bool = False) -> list:
     """Return login paths, optionally excluding one program and absent files."""
@@ -827,6 +848,10 @@ def run_model_chain(
             continue
         recognised_texts = (recognised_failure_texts_for_model(model)
                             if recognised_failure_texts_for_model else ())
+        # Only the Codex and agy cells give the model the read-only token and its environment.
+        if child_environment is not None:
+            sandboxed_model_run_output_gh_read_only_github_token_refused_by_github_check_and_report(
+                program, completed.stdout, completed.stderr)
         if completed.stderr:
             print(completed.stderr, file=sys.stderr, end="")
         if completed.returncode is None:

@@ -571,6 +571,10 @@ def main(argv=None) -> int:
         exit_code = process.wait(timeout=seconds_left)
     except subprocess.TimeoutExpired:
         stop_process_group(process)
+        exit_code = None
+    common.sandboxed_model_run_output_gh_read_only_github_token_refused_by_github_check_and_report(
+        PROGRAM, run_log.read_text(encoding="utf-8", errors="replace"))
+    if exit_code is None:
         place_final_message(report, last_message)
         shared = ("The deadline covers every --prefetch-github command and Codex "
                   "together. " if args.prefetch_github else "")

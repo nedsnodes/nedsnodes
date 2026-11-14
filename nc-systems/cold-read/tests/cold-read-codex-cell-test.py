@@ -501,6 +501,20 @@ with tempfile.TemporaryDirectory() as scratch:
     leftover = sorted(path.name for path in copied_temporary_directory.iterdir())
     check("a refusal leaves no staging directory behind", leftover == [], repr(leftover))
 
+    # A Codex run whose gh was refused the read-only token still writes its review.
+    gh_refused_report = scratch / "gh-refused-report.md"
+    result = run_cell(stubs, STUB_CODEX_WRITES_REPORT.replace(
+                          "sys.exit(0)\n",
+                          "sys.stderr.write('HTTP 401: Bad credentials "
+                          "(https://api.github.com/graphql)\\n')\nsys.exit(0)\n"),
+                      gh_refused_report, "--cell", "defect-hunt", "--tier", "deep",
+                      "--target", str(target))
+    check("a gh HTTP 401 in Codex's output is reported as the read-only token refused, and "
+          "the cell still exits 0",
+          result.returncode == 0
+          and "cold-read-codex-cell: read-only GitHub token refused" in result.stderr,
+          f"exit {result.returncode}; stderr={result.stderr[-800:]!r}")
+
 print()
 if failures:
     print(f"{len(failures)} case(s) failed: {', '.join(failures)}")

@@ -52,6 +52,8 @@ if mode in ("sleep", "models-sleep"):
         os._exit(0)
     time.sleep(120)
 print("agy stdout", flush=True)
+if mode == "gh-refused":
+    print('HTTP 401: Bad credentials (https://api.github.com/graphql)', flush=True)
 report = pathlib.Path(os.environ["FAKE_REPORT"])
 if mode == "fail":
     report.write_text("partial output")
@@ -368,6 +370,21 @@ class GeminiTaskTests(unittest.TestCase):
         self.assertIn("pre-commit: refused for the test", result.stderr)
         self.assertTrue((self.checkout / "commit-message.txt").exists())
         self.assertTrue((self.checkout / "changed.txt").exists())
+
+    def test_gh_http_401_in_agy_output_is_reported_and_exit_status_kept(self):
+        for mode, code in (("gh-refused", 0), ("report", 0)):
+            with self.subTest(mode=mode):
+                result = self.run_cli(mode)
+                self.assertEqual(result.returncode, code, result.stderr)
+                self.assertEqual("run-gemini-task-from-brief: read-only GitHub token refused"
+                                 in result.stderr, mode == "gh-refused")
+
+    def test_log_left_by_an_earlier_run_is_not_read_for_a_401(self):
+        self.log.write_text("HTTP 401: Bad credentials (https://api.github.com/graphql)\n")
+        self.brief.write_text("   ")
+        result = self.run_cli()
+        self.assertEqual(result.returncode, 1)
+        self.assertNotIn("read-only GitHub token refused", result.stderr)
 
     def test_unknown_model_stops_before_task(self):
         result = self.run_cli(extra=("-m", "gemini-4-argon"))

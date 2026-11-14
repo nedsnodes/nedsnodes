@@ -63,6 +63,9 @@ if mode == "report":
 elif mode == "fail":
     print("fake codex: model refused", file=sys.stderr)
     sys.exit(3)
+elif mode == "report-after-gh-refused":
+    print('HTTP 401: Bad credentials (https://api.github.com/graphql)')
+    open(report, "w").write("the report\n")
 elif mode == "report-file-then-final-message":
     # As Codex does when a brief names the -o path as the file to write its report to.
     open(os.environ["FAKE_CODEX_REPORT_FILE"], "w").write("the full report Codex wrote\n")
@@ -272,6 +275,16 @@ try:
                                                        arguments.index('web_search="live"') + 1]
           and "--add-dir" not in arguments and "--skip-git-repo-check" not in arguments
           if 'web_search="live"' in arguments else False, repr(arguments))
+
+    completed, report, _ = run("report-after-gh-refused")
+    check("a gh HTTP 401 in Codex's output is reported as the read-only token refused, and the "
+          "run still exits 0",
+          completed.returncode == 0 and completed.stdout.strip() == f"report: {report}"
+          and "run-codex-task-from-brief: read-only GitHub token refused" in completed.stderr,
+          f"exit {completed.returncode}, stderr {completed.stderr!r}")
+    completed, report, _ = run("report")
+    check("a run without a gh HTTP 401 reports no refused token",
+          "read-only GitHub token refused" not in completed.stderr, completed.stderr)
 
     completed, report, _ = run("report", "--no-network")
     arguments = json.loads(arguments_file.read_text())

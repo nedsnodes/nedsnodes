@@ -669,6 +669,16 @@ with tempfile.TemporaryDirectory() as scratch:
           and "cold-read-agy-cell: no read-only GitHub token (" in result.stderr,
           f"exit {result.returncode}; tokens={received_tokens!r}; stderr={result.stderr!r}")
 
+    repository = build_scratch_repository(scratch)
+    report = report_path_for(repository, "gh-read-only-token-refused")
+    result = run_agy_cell(repository, stubs,
+                          {"*": {"report": "STUB AGY REVIEW\n", "stdout": 'HTTP 401: Bad credentials (https://api.github.com/graphql)\n'}}, report)
+    check("a gh HTTP 401 in agy's output is reported as the read-only token refused, and the "
+          "cell still exits 0",
+          result.returncode == 0
+          and "cold-read-agy-cell: read-only GitHub token refused" in result.stderr,
+          f"exit {result.returncode}; stderr={result.stderr!r}")
+
     # What the real agy 1.4.7 printed on ned-box with ~/.gemini hidden; the URL is shortened.
     agy_logged_out_stderr = (
         "Authentication required. Please visit the URL to log in:\n"

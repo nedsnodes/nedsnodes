@@ -144,6 +144,8 @@ WHAT IS PINNED HERE.
 Run: python3 nc-systems/cold-read/tests/cold-read-cell-common-test.py
 """
 
+import contextlib
+import io
 import hashlib
 import importlib.util
 import json
@@ -2337,6 +2339,27 @@ with tempfile.TemporaryDirectory() as token_scratch:
     check("a missing token file leaves no GitHub token and a note saying why",
           environment == {"PATH": "/usr/bin"} and note is not None
           and note.startswith("no read-only GitHub token (") and "No such file" in note, repr(note))
+
+# What gh 2.102.0 printed on ned-box for a refused token: `gh pr view` and `gh api user`.
+refusal_report = _instrument_common.sandboxed_model_run_output_gh_read_only_github_token_refused_by_github_check_and_report
+for case_name, outputs, refused in (
+        ("gh pr view's 401", ("trace\nHTTP 401: Bad credentials (https://api.github.com/graphql)\n",),
+         True),
+        ("gh api's 401, in the second output", ("", '  "status": "401"\n}gh: Bad credentials (HTTP 401)\n'),
+         True),
+        ("no 401", ("HTTP 404: Not Found\n", None), False),
+        ("Codex's own logged-out 401", ("ERROR codex_api::endpoint::responses_websocket: failed to "
+                                        "connect to websocket: HTTP error: 401 Unauthorized\n",),
+         False),
+        ("the two words on different lines", ("HTTP 401\nBad credentials\n",), False)):
+    captured_stderr = io.StringIO()
+    with contextlib.redirect_stderr(captured_stderr):
+        found = refusal_report("probe-launcher", *outputs)
+    printed = captured_stderr.getvalue()
+    check(f"the 401 report for {case_name} {'prints' if refused else 'prints nothing'}",
+          found is refused and (("probe-launcher: read-only GitHub token refused" in printed
+                                 and "gh said: " in printed) if refused else printed == ""),
+          repr(printed))
 
 profile = _instrument_common.codex_credential_denying_permission_profile_arguments(
     "probe", ":read-only", "darwin", writable_paths=[Path("/shared/run")])[-1]

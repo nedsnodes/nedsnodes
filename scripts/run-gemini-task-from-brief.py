@@ -136,6 +136,7 @@ def main(argv=None):
         parser.error("--brief, -o and --run-log must name different files")
     sandbox = agy_cell.credential_sandbox_program()
     stage = "preparing the sandbox"
+    log_written_this_run = False
     try:
         if sandbox is None or shutil.which(sandbox) is None:
             raise RuntimeError(f"required sandbox {sandbox or 'bwrap (Linux) or sandbox-exec (macOS)'} is unavailable")
@@ -173,6 +174,7 @@ def main(argv=None):
         # bwrap needs an existing file to bind without granting its parent directory.
         report.touch()
         with log_path.open("w+", encoding="utf-8") as log:
+            log_written_this_run = True
             deadline = time.monotonic() + args.deadline_minutes * 60
             stage = "listing models with agy models"
             _run([*prefix, "agy", "models"], checkout, log, deadline, environment)
@@ -211,9 +213,15 @@ def main(argv=None):
                 print(f"{PROGRAM}: {done}", file=sys.stderr)
     except (OSError, UnicodeError, RuntimeError) as error:
         print(f"{PROGRAM}: failed while {stage}: {error}; output: {log_path}", file=sys.stderr)
-        return 1
-    print(f"report: {report}")
-    return 0
+        status = 1
+    else:
+        print(f"report: {report}")
+        status = 0
+    # A log at this path left by an earlier run is not this run's output.
+    if log_written_this_run:
+        agy_cell.common.sandboxed_model_run_output_gh_read_only_github_token_refused_by_github_check_and_report(
+            PROGRAM, log_path.read_text(encoding="utf-8", errors="replace"))
+    return status
 
 
 if __name__ == "__main__":

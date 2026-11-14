@@ -253,6 +253,19 @@ with tempfile.TemporaryDirectory() as scratch:
     check("--commit that does not resolve says so on stderr",
           "does not resolve to a commit" in result.stderr, repr(result.stderr))
 
+    # A review whose gh was refused the read-only token still produces its report.
+    result = run_cell(stubs, STUB_CODEX_WRITES_REPORT.replace(
+                          "sys.exit(0)\n",
+                          "sys.stderr.write('HTTP 401: Bad credentials "
+                          "(https://api.github.com/graphql)\\n')\nsys.exit(0)\n"),
+                      "--commit", head_sha, "--repo", str(checkout),
+                      "--output", str(scratch / "report-gh-refused.md"))
+    check("a gh HTTP 401 in Codex's stderr is reported as the read-only token refused, and the "
+          "cell still exits 0",
+          result.returncode == 0
+          and "code-review-codex-cell: read-only GitHub token refused" in result.stderr,
+          f"exit {result.returncode}; stderr={result.stderr!r}")
+
     # --- The third bad invocation: --output is not a regular file ----------
     # Before the 2026-08-23 fix this reached output_path.unlink() and died on
     # an unhandled OSError, exiting 1 with a traceback.

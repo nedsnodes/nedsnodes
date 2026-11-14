@@ -1005,7 +1005,8 @@ def main():
     def capture_command(command, *arguments, **keywords):
         captured["command"] = list(command)
         captured["env"] = keywords.get("env")
-        return subprocess.CompletedProcess(list(command), 0, "", "")
+        # As a Codex run whose gh was refused the read-only token prints it.
+        return subprocess.CompletedProcess(list(command), 0, "", 'HTTP 401: Bad credentials (https://api.github.com/graphql)\n')
 
     # The credential lists are pointed at a scratch home for the call, so the
     # profile's denials name paths in it and the real home is neither scanned
@@ -1035,7 +1036,9 @@ def main():
         real_tokens = {name: os.environ.get(name) for name in ("GH_TOKEN", "GITHUB_TOKEN")}
         os.environ.update(GH_TOKEN="agent-seat-token", GITHUB_TOKEN="agent-seat-token")
         try:
-            runner_memories.run_codex("a prompt no model ever sees")
+            with contextlib.redirect_stderr(io.StringIO()) as codex_cell_stderr:
+                captured["exit"] = runner_memories.run_codex("a prompt no model ever sees")[0]
+            captured["stderr"] = codex_cell_stderr.getvalue()
         finally:
             shared.SANDBOXED_MODELS_READ_ONLY_GITHUB_TOKEN_FILE = real_token_file
             for name, value in real_tokens.items():
@@ -1064,6 +1067,11 @@ def main():
     check("run_codex gives codex the read-only GitHub token and none of the agent-seat's",
           codex_environment.get("GH_TOKEN") == "read-only"
           and "GITHUB_TOKEN" not in codex_environment, repr(sorted(codex_environment)))
+    check("run_codex reports a gh HTTP 401 in Codex's output as the read-only token refused, "
+          "and its exit status stays 0",
+          captured.get("exit") == 0
+          and "sanity-check Codex cell: read-only GitHub token refused" in captured.get("stderr", ""),
+          repr((captured.get("exit"), captured.get("stderr"))))
     check("run_codex asks codex for live web search",
           'web_search="live"' in codex_overrides, repr(codex_overrides))
     check("run_codex runs under no --sandbox, which Codex will not combine with a profile",

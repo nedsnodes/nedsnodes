@@ -816,6 +816,8 @@ def run_codex(prompt: str, checkout: pathlib.Path = None) -> tuple:
             # would otherwise have what it had written so far saved as its
             # report.
             return 1, "", CODEX_MODEL, "", None
+        common.sandboxed_model_run_output_gh_read_only_github_token_refused_by_github_check_and_report(
+            "sanity-check Codex cell", completed.stdout, completed.stderr)
         if completed.returncode != 0:
             for stream in (completed.stderr, completed.stdout):
                 print(last_lines_of_stream(
