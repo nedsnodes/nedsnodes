@@ -16,9 +16,9 @@ git_machine_readable_output = importlib.util.module_from_spec(_git_machine_reada
 _git_machine_readable_output_spec.loader.exec_module(git_machine_readable_output)
 
 _next_step_lines_spec = importlib.util.spec_from_file_location(
-    "failed_command_agent_facing_message_rerun_once_then_stop_and_report_lines_common",
+    "failed_command_tool_message_to_agent_rerun_once_then_stop_and_report_lines_common",
     Path(__file__).resolve().parents[1] / "nc-systems" / "general-tools"
-    / "failed-command-agent-facing-message-rerun-once-then-stop-and-report-lines-common.py")
+    / "failed-command-tool-message-to-agent-rerun-once-then-stop-and-report-lines-common.py")
 next_step_lines = importlib.util.module_from_spec(_next_step_lines_spec)
 _next_step_lines_spec.loader.exec_module(next_step_lines)
 
@@ -36,7 +36,7 @@ GIT_FAILURE_TEMPLATE = (
     "{path} by running the command printed on its own line below this paragraph. If git's error "
     "above names no lock file, run that "
     "command now. "
-    + next_step_lines.LOCK_FILE_NAMED_BY_GIT_ERROR_CONDITION + ", "
+    + next_step_lines.GIT_ERROR_NAMES_A_LOCK_FILE_LINE_OPENING_IF_CONDITION_CLAUSE_WITHOUT_ITS_INSTRUCTION_IN_TOOL_MESSAGE_TO_AGENT + ", "
     + next_step_lines.lock_file_named_by_git_error_wait_then_rerun_instruction("the command below this paragraph")
     .replace("{", "{{").replace("}", "}}")
     + ". The command "
