@@ -9,8 +9,8 @@ Usage: run-gemini-task-from-brief.py -C CHECKOUT --brief FILE -o REPORT
 Reads use the cold-read agy sandbox: the filesystem, including log-store
 paths, is readable except for credential paths. No --readable-root is
 needed. As in that sandbox, agy's own login remains readable; Linux masks
-credential files present at launch under home and the launcher's checkout,
-not files created later or found elsewhere.
+the credential directories and login files, and no file by its name, so a
+`.env` or `*.token` file outside those directories is readable.
 
 read-only lets agy write REPORT and, when the log-store is on this machine,
 the run's own numbered folder <agent-seat>/<brief file name without its
