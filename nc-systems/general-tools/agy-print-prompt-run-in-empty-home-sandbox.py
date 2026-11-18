@@ -12,7 +12,11 @@ sandbox program, and passes agy's stdout and stderr through. Its exit code is
 listed under "Exit codes" below. Whenever the sandbox program exits nonzero,
 this program adds one line of its own to stderr, after the messages of agy or
 the sandbox program. GEMINI_API_KEY is removed from agy's environment, because
-a key is billed per call and agy's own Google login, in ~/.gemini, is not.
+a key is billed per call and agy's own Google login, in ~/.gemini, is not. The
+agent-seat's GitHub tokens, which can push and merge, are removed too: every
+name in AGENT_SEAT_GITHUB_TOKEN_ENVIRONMENT_VARIABLES of
+nc-systems/cold-read/cold-read-cell-common.py, GH_TOKEN and GITHUB_TOKEN among
+them. No read-only token takes their place.
 
 The program's name describes the Linux sandbox; on macOS the home is not
 emptied, as the macOS paragraph below says.
@@ -98,12 +102,25 @@ def empty_home_sandbox_prefix(home: pathlib.Path, agy_path: str) -> list:
     ]
 
 
-def launcher_credential_sandbox_prefix() -> list:
-    """Return the Gemini launcher's macOS sandbox-exec prefix."""
+def gemini_launcher():
+    """Load and return the Gemini cold-read launcher module."""
     spec = importlib.util.spec_from_file_location("cold_read_agy_cell", GEMINI_LAUNCHER_PATH)
     launcher = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(launcher)
-    return launcher.credential_sandbox_prefix()
+    return launcher
+
+
+def launcher_credential_sandbox_prefix() -> list:
+    """Return the Gemini launcher's macOS sandbox-exec prefix."""
+    return gemini_launcher().credential_sandbox_prefix()
+
+
+def agy_environment(environment) -> dict:
+    """Return a copy of environment without GEMINI_API_KEY or any agent-seat GitHub token."""
+    launcher = gemini_launcher()
+    return {name: value
+            for name, value in launcher.agy_environment_copy_without_gemini_api_key(environment).items()
+            if name not in launcher.common.AGENT_SEAT_GITHUB_TOKEN_ENVIRONMENT_VARIABLES}
 
 
 def main() -> int:
@@ -129,10 +146,8 @@ def main() -> int:
         else:
             command = [*empty_home_sandbox_prefix(pathlib.Path.home(), agy_path),
                        AGY_PATH_INSIDE_SANDBOX, *agy_arguments]
-        environment = {name: value for name, value in os.environ.items()
-                       if name != "GEMINI_API_KEY"}
         exit_code = subprocess.run(command, stdin=subprocess.DEVNULL, cwd=working_directory,
-                                   env=environment).returncode
+                                   env=agy_environment(os.environ)).returncode
     if exit_code != 0:
         print(f"{PROGRAM}: the sandboxed agy run failed with exit code {exit_code}; "
               f"{sandbox_program}'s or agy's own message is above.", file=sys.stderr)
