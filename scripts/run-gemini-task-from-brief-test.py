@@ -77,6 +77,20 @@ if "change" in writes:
     pathlib.Path(os.getcwd(), "changed.txt").write_text("Gemini's change\n")
 if "message" in writes:
     pathlib.Path(os.getcwd(), "commit-message.txt").write_text("Gemini's subject\n\nGemini's body.\n")
+if mode == "no-result-line":
+    sys.exit(0)
+if mode == "no-result-line-then-hang":
+    signal.signal(signal.SIGTERM, signal.SIG_IGN)
+    pathlib.Path(os.environ["FAKE_CHILD"]).write_text(str(os.getpid()))
+    time.sleep(120)
+status = "ERROR" if mode.startswith("result-error") else "SUCCESS"
+# Before the result line, which lets the launcher kill this process at once.
+if mode.endswith("then-hang"):
+    signal.signal(signal.SIGTERM, signal.SIG_IGN)
+    pathlib.Path(os.environ["FAKE_CHILD"]).write_text(str(os.getpid()))
+print(json.dumps({"event": "result", "result": {"status": status, "response": "done"}}), flush=True)
+if mode.endswith("then-hang"):
+    time.sleep(120)
 '''
 
 FAKE_TEST_SUITE_RUNNER = r'''#!PYTHON
@@ -170,7 +184,7 @@ class GeminiTaskTests(unittest.TestCase):
         self.assertTrue(args[-1].startswith(self.brief.read_text()))
         self.assertIn(str(self.report), args[-1])
         for flag, value in (("--model", "gemini-3.8-flash-medium"), ("--effort", "medium"),
-                            ("--print-timeout", "600s"), ("--output-format", "text")):
+                            ("--print-timeout", "600s"), ("--output-format", "stream-json")):
             self.assertEqual(args[args.index(flag) + 1], value)
         self.assertIn("--dangerously-skip-permissions", args)
         self.assertEqual([args[i+1] for i, arg in enumerate(args) if arg == "--add-dir"],
@@ -337,9 +351,9 @@ class GeminiTaskTests(unittest.TestCase):
         self.git("commit", "--quiet", "-m", "start")
         return self.git("rev-parse", "HEAD").strip()
 
-    def run_in_worktree(self, writes, mode="report", sandbox="workspace-write"):
+    def run_in_worktree(self, writes, mode="report", sandbox="workspace-write", extra=()):
         self.env["FAKE_AGY_WORKTREE_WRITES"] = writes
-        return self.run_cli(mode, extra=("--sandbox", sandbox))
+        return self.run_cli(mode, extra=("--sandbox", sandbox, *extra))
 
     def test_workspace_write_run_in_a_worktree_is_committed_with_its_message(self):
         start = self.make_checkout_a_worktree()
@@ -495,6 +509,43 @@ class GeminiTaskTests(unittest.TestCase):
                 self.assertEqual(result.returncode, 1, result.stderr)
                 self.assertIn("deadline passed", result.stderr)
                 self.assert_process_dies(int(self.child.read_text()))
+
+    def test_result_line_ends_a_run_whose_agy_hangs_and_the_run_is_committed(self):
+        start = self.make_checkout_a_worktree()
+        result = self.run_in_worktree("change,message", mode="result-then-hang",
+                                      extra=("--deadline-minutes", "0.25"))
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertIn(runner.agy_cell.common.AGENT_BINARY_KILLED_AFTER_FINAL_RESULT_LINE_PHRASE,
+                      result.stderr)
+        self.assertEqual(self.git("rev-parse", "HEAD~1").strip(), start)
+        self.assertEqual(self.git("show", "--name-only", "--format=", "HEAD").split(), ["changed.txt"])
+        self.assertIn('"event": "result"', self.log.read_text())
+        self.assert_process_dies(int(self.child.read_text()))
+
+    def test_result_line_status_other_than_success_fails_the_run_and_commits_nothing(self):
+        start = self.make_checkout_a_worktree()
+        for mode in ("result-error", "result-error-then-hang"):
+            with self.subTest(mode=mode):
+                result = self.run_in_worktree("change,message", mode=mode)
+                self.assertEqual(result.returncode, 1, result.stderr)
+                self.assertIn("result line did not report SUCCESS", result.stderr)
+                self.assertEqual(self.git("rev-parse", "HEAD").strip(), start)
+                self.assertNotIn("report:", result.stdout)
+
+    def test_agy_that_exits_0_without_a_result_line_still_succeeds_on_its_report(self):
+        result = self.run_cli("no-result-line")
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertIn("agy stdout", self.log.read_text())
+
+    def test_run_with_no_result_line_is_stopped_at_the_deadline_and_commits_nothing(self):
+        start = self.make_checkout_a_worktree()
+        result = self.run_in_worktree("change,message", mode="no-result-line-then-hang",
+                                      extra=("--deadline-minutes", "0.05"))
+        self.assertEqual(result.returncode, 1, result.stderr)
+        self.assertIn("deadline passed with no result line", result.stderr)
+        self.assertEqual(self.git("rev-parse", "HEAD").strip(), start)
+        self.assertTrue((self.checkout / "changed.txt").exists())
+        self.assert_process_dies(int(self.child.read_text()))
 
     def assert_process_dies(self, pid, timeout=10):
         # SIGKILL takes effect asynchronously; under load the child can still be running

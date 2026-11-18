@@ -26,7 +26,8 @@ may be overwritten by the task and are not rolled back on failure.
 
 With workspace-write and CHECKOUT the top folder of a git worktree, the brief
 tells agy to write its commit message in CHECKOUT/commit-message.txt, and,
-when agy ends without error or timeout, the launcher, outside the sandbox,
+when agy's run succeeds, as the stream-json paragraph below says, the
+launcher, outside the sandbox,
 stages every change in the worktree, commits it with that message under the
 git identity the worktree gives the agent-seat, and deletes the file. A
 commit-message.txt already there when the run starts is deleted first. When
@@ -60,12 +61,22 @@ Runs `agy models` inside the same sandbox before starting the task, refusing
 unknown names with the known names. The default is gemini-4-argon-high.
 Closes stdin and logs both output streams to REPORT.run.log, or to
 --run-log; an existing log at that path is overwritten. The
-deadline covers model discovery and task execution after sandbox setup;
-the Codex launcher's process-group cleanup stops agy and its children.
+deadline covers model discovery and task execution after sandbox setup.
+
+agy often prints its result and then hangs for minutes, ignoring SIGTERM,
+so the task runs with `--output-format stream-json`, and the stdout line
+whose `event` is `result` ends it: the launcher waits up to the agy
+cold-read-cell's wait for the report file or for agy to exit, then kills
+agy's process group with SIGKILL. The result's `status` SUCCESS is a
+successful run and any other status a failed one, whatever agy's exit
+code. A run with no result line ends when agy exits, its exit code
+deciding, or at the deadline, when agy's process group is stopped and the
+run fails.
 
 Exits 0 with `report: PATH` for a nonblank report, 2 for invalid arguments,
 and 1 with a diagnostic for file errors, unavailable sandbox, agy startup
-or model-list failures, unknown models, timeout, nonzero exit, no report,
+or model-list failures, unknown models, timeout, a result whose status is
+not SUCCESS, nonzero exit without a result line, no report,
 changes that could not be committed, or, after a commit, a test-suite runner
 that cannot be started, names failing nc-test-suites, which the message
 lists, or ends without judging every suite.
@@ -122,6 +133,42 @@ def _run(command, checkout, log, deadline, environment):
         raise RuntimeError("deadline passed; agy and its children were stopped") from None
     if code != 0:
         raise RuntimeError(f"agy exited {code}")
+
+
+def _run_task_until_its_result_line(command, checkout, log, deadline, environment, report):
+    """Run the task with agy's stream-json output; its result line, not agy's exit, ends the run."""
+    result_line_answers = []
+
+    def log_line_and_parse_it(line):
+        log.write(line)
+        log.flush()
+        answer = agy_cell.agy_stream_json_stdout_line_final_result_event_parse_to_exit_code_and_response_or_none(line)
+        if answer is not None:
+            result_line_answers.append(answer)
+        return answer
+
+    # A decoding error in the reader thread would stop line reading and leave the run to its deadline.
+    process = subprocess.Popen(command, cwd=checkout, env=environment, stdin=subprocess.PIPE,
+                               stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True,
+                               encoding="utf-8", errors="replace", start_new_session=True)
+    completed = agy_cell.common.run_reviewer_program_until_its_result_line(
+        process, command, None, max(0, deadline - time.monotonic()), log_line_and_parse_it, report,
+        agy_cell.COLD_READ_AGY_CELL_WAIT_FOR_REPORT_FILE_AFTER_AGY_STDOUT_RESULT_LINE_BEFORE_PROCESS_GROUP_KILL_SECONDS)
+    log.write(completed.stderr)
+    log.flush()
+    # Before the result line: one read while agy was being stopped at the deadline does not count.
+    if completed.returncode is None:
+        raise RuntimeError("deadline passed with no result line from agy; agy and its children were stopped")
+    if result_line_answers:
+        if isinstance(completed, agy_cell.common.ReviewerRunEndedByResultLine):
+            print(f"{PROGRAM}: agy {agy_cell.common.AGENT_BINARY_KILLED_AFTER_FINAL_RESULT_LINE_PHRASE}, "
+                  "so its process group was killed", file=sys.stderr)
+        if result_line_answers[0][0] != 0:
+            raise RuntimeError(f"agy's result line did not report {agy_cell.AGY_RESULT_SUCCESS_STATUS}; "
+                               f"its response: {result_line_answers[0][1] or '(empty)'}")
+        return
+    if completed.returncode != 0:
+        raise RuntimeError(f"agy exited {completed.returncode}")
 
 
 def main(argv=None):
@@ -202,7 +249,7 @@ def main(argv=None):
             command = [*prefix, "agy", "--add-dir", str(checkout),
                        "--dangerously-skip-permissions", "--model", args.model,
                        "--print-timeout", f"{math.ceil(args.deadline_minutes * 60)}s",
-                       "--output-format", "text"]
+                       "--output-format", "stream-json"]
             for root in roots:
                 command += ["--add-dir", str(root)]
             if args.effort:
@@ -210,7 +257,7 @@ def main(argv=None):
             command += ["--print", prompt + f"\n\nWrite the task's report to this exact file: {report}\n"]
             stage = "running the task"
             print(f"{PROGRAM}: running Gemini in {checkout}; log {log_path}", file=sys.stderr)
-            _run(command, checkout, log, deadline, environment)
+            _run_task_until_its_result_line(command, checkout, log, deadline, environment, report)
         stage = f"reading report {report}"
         if not report.is_file() or not report.read_text(encoding="utf-8").strip():
             raise RuntimeError(f"agy exited 0 but wrote no report at {report}")
