@@ -23,6 +23,13 @@ import time
 import unittest
 from unittest.mock import patch
 
+_git_environment_fixture_spec = importlib.util.spec_from_file_location(
+    "git_redirecting_environment_removal_test_fixture",
+    Path(__file__).resolve().with_name("git-redirecting-environment-removal-test-fixture.py"))
+_git_environment_fixture = importlib.util.module_from_spec(_git_environment_fixture_spec)
+_git_environment_fixture_spec.loader.exec_module(_git_environment_fixture)
+_git_environment_fixture.remove_git_redirecting_environment_variables_from_this_process()
+
 PROGRAM = Path(__file__).with_name("run-gemini-task-from-brief.py")
 spec = importlib.util.spec_from_file_location("gemini_task", PROGRAM)
 runner = importlib.util.module_from_spec(spec)
@@ -306,9 +313,7 @@ class GeminiTaskTests(unittest.TestCase):
 
     def make_checkout_a_worktree(self, with_test_suite_runner=True, with_commit=True):
         """Make -C a git worktree, with the report outside it; return its first commit."""
-        # Neither the test's git nor the launcher's may reach a repository named by the caller.
-        self.git_env = {name: value for name, value in self.env.items()
-                        if name not in ("GIT_DIR", "GIT_INDEX_FILE", "GIT_WORK_TREE")}
+        self.git_env = dict(self.env)
         self.git_env.update(GIT_AUTHOR_NAME="test-seat", GIT_AUTHOR_EMAIL="test-seat@nedschorus.invalid",
                             GIT_COMMITTER_NAME="test-seat",
                             GIT_COMMITTER_EMAIL="test-seat@nedschorus.invalid")

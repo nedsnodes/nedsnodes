@@ -24,6 +24,7 @@ Run: python3 scripts/run-codex-task-from-brief-test.py
 Prints one line per case and exits non-zero if any case fails.
 """
 
+import importlib.util
 import json
 import os
 import shutil
@@ -34,6 +35,13 @@ import tempfile
 import threading
 import time
 from pathlib import Path
+
+_git_environment_fixture_spec = importlib.util.spec_from_file_location(
+    "git_redirecting_environment_removal_test_fixture",
+    Path(__file__).resolve().with_name("git-redirecting-environment-removal-test-fixture.py"))
+_git_environment_fixture = importlib.util.module_from_spec(_git_environment_fixture_spec)
+_git_environment_fixture_spec.loader.exec_module(_git_environment_fixture)
+_git_environment_fixture.remove_git_redirecting_environment_variables_from_this_process()
 
 PROGRAM = Path(__file__).with_name("run-codex-task-from-brief.py")
 
@@ -193,9 +201,6 @@ try:
                            FAKE_CODEX_PID_FILE=str(codex_pid_file),
                            FAKE_GH_MODE=gh_mode, FAKE_GH_LOG=str(gh_log),
                            **(extra_environment or {}))
-        # A git run inside the launcher must reach only the -C checkout's repository.
-        for name in ("GIT_DIR", "GIT_INDEX_FILE", "GIT_WORK_TREE"):
-            environment.pop(name, None)
         report = scratch / f"report-{mode}.md"
         codex_pid_file.unlink(missing_ok=True)
         command = [sys.executable, str(PROGRAM), "-C", str(checkout_folder), "--brief",
@@ -1043,15 +1048,12 @@ try:
     shared_folder.unlink()
     log_store.rmdir()
 
-    # A git worktree, so the launcher's commit step runs; the environment names no other
-    # repository, so neither the test's git nor the launcher's can commit outside it.
+    # A git worktree, so the launcher's commit step runs.
     git_identity = dict(GIT_AUTHOR_NAME="test-seat",
                         GIT_AUTHOR_EMAIL="test-seat@nedschorus.invalid",
                         GIT_COMMITTER_NAME="test-seat",
                         GIT_COMMITTER_EMAIL="test-seat@nedschorus.invalid")
-    git_environment = {name: value for name, value in os.environ.items()
-                       if name not in ("GIT_DIR", "GIT_INDEX_FILE", "GIT_WORK_TREE")}
-    git_environment.update(HOME=str(scratch_home), **git_identity)
+    git_environment = dict(os.environ, HOME=str(scratch_home), **git_identity)
     worktree = scratch / "worktree"
 
     def git(*words):
