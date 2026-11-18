@@ -3,6 +3,8 @@
 
 Checks CLI forwarding, sandbox mount order and profiles, model discovery,
 closed stdin, logging, every failure handler and process-group deadlines.
+A fake scripts/run-all-test-suites.py in each test worktree stands in for
+the worktree's own test-suite runner.
 Sandbox argument tests do not claim that a host supports sandbox execution.
 Run directly with Python; unittest exits nonzero on a failed assertion.
 """
@@ -13,6 +15,7 @@ import io
 import json
 import os
 from pathlib import Path
+import shutil
 import subprocess
 import sys
 import tempfile
@@ -67,6 +70,24 @@ if "change" in writes:
     pathlib.Path(os.getcwd(), "changed.txt").write_text("Gemini's change\n")
 if "message" in writes:
     pathlib.Path(os.getcwd(), "commit-message.txt").write_text("Gemini's subject\n\nGemini's body.\n")
+'''
+
+FAKE_TEST_SUITE_RUNNER = r'''#!PYTHON
+import json, os, sys
+with open(os.environ["FAKE_TEST_SUITE_RUNNER_CALLS"], "w") as record:
+    json.dump([os.getcwd(), sys.argv[1:]], record)
+mode = os.environ.get("FAKE_TEST_SUITE_RUNNER_MODE", "pass")
+if mode == "pass":
+    print("PASS scripts/a-test.py (1.0s)")
+elif mode == "fail":
+    print("FAIL scripts/a-test.py exit 1 (1.0s)")
+    print("2 failed:")
+    print("FAIL scripts/a-test.py exit 1 — log /logs/a-test.py.log")
+    print("FAIL scripts/c-test.py exit 2 — log /logs/c-test.py.log")
+    sys.exit(1)
+elif mode == "no-verdict":
+    print("NOT RUN scripts/a-test.py did not start: bwrap failed")
+    sys.exit(2)
 '''
 
 FAKE_SANDBOX = r'''#!PYTHON
@@ -283,7 +304,7 @@ class GeminiTaskTests(unittest.TestCase):
         return subprocess.run(["git", "-C", str(self.checkout), *words], env=self.git_env,
                               capture_output=True, text=True, check=True).stdout
 
-    def make_checkout_a_worktree(self):
+    def make_checkout_a_worktree(self, with_test_suite_runner=True, with_commit=True):
         """Make -C a git worktree, with the report outside it; return its first commit."""
         # Neither the test's git nor the launcher's may reach a repository named by the caller.
         self.git_env = {name: value for name, value in self.env.items()
@@ -298,6 +319,16 @@ class GeminiTaskTests(unittest.TestCase):
         self.git("init", "--quiet")
         (self.checkout / "existing.txt").write_text("before the run\n")
         self.git("add", "existing.txt")
+        self.test_suite_runner_calls = self.base / "test-suite-runner-calls.json"
+        self.env["FAKE_TEST_SUITE_RUNNER_CALLS"] = str(self.test_suite_runner_calls)
+        if with_test_suite_runner:
+            fake_runner = self.checkout / "scripts" / "run-all-test-suites.py"
+            fake_runner.parent.mkdir()
+            fake_runner.write_text(FAKE_TEST_SUITE_RUNNER.replace("#!PYTHON", "#!" + sys.executable))
+            fake_runner.chmod(0o755)
+            self.git("add", "scripts")
+        if not with_commit:
+            return None
         self.git("commit", "--quiet", "-m", "start")
         return self.git("rev-parse", "HEAD").strip()
 
@@ -318,6 +349,44 @@ class GeminiTaskTests(unittest.TestCase):
         self.assertFalse((self.checkout / "commit-message.txt").exists())
         self.assertEqual(self.git("status", "--porcelain"), "")
         self.assertIn(f"as {self.git('rev-parse', 'HEAD').strip()}", result.stderr)
+        self.assertEqual(json.loads(self.test_suite_runner_calls.read_text()), [
+            str(self.checkout), ["--only-suites-whose-recorded-inputs-changed-since", start,
+                                 "--leave-recorded-inputs-and-failure-history-unchanged"]])
+        self.assertIn("PASS scripts/a-test.py (1.0s)", result.stderr)
+        self.assertEqual(result.stdout.strip(), f"report: {self.base / 'report.md'}")
+
+    def test_test_suites_that_fail_or_give_no_verdict_after_the_commit_exit_1_keeping_it(self):
+        for runner_mode, said in (
+                ("fail", "failed after its commit: scripts/a-test.py, scripts/c-test.py."),
+                ("no-verdict", "ended with exit 2 without naming a failing suite")):
+            with self.subTest(runner_mode=runner_mode):
+                shutil.rmtree(self.checkout)
+                self.checkout.mkdir()
+                start = self.make_checkout_a_worktree()
+                self.env["FAKE_TEST_SUITE_RUNNER_MODE"] = runner_mode
+                result = self.run_in_worktree("change,message")
+                self.assertEqual(result.returncode, 1, result.stderr)
+                self.assertEqual(self.git("rev-parse", "HEAD~1").strip(), start)
+                self.assertIn("running the nc-test-suites the run's change touches", result.stderr)
+                self.assertIn(said, result.stderr)
+                self.assertIn("The run's commit is kept", result.stderr)
+                self.assertNotIn("report:", result.stdout)
+
+    def test_test_suite_runner_that_cannot_start_exits_1_keeping_the_commit(self):
+        start = self.make_checkout_a_worktree(with_test_suite_runner=False)
+        result = self.run_in_worktree("change,message")
+        self.assertEqual(result.returncode, 1, result.stderr)
+        self.assertEqual(self.git("rev-parse", "HEAD~1").strip(), start)
+        self.assertIn("could not start `scripts/run-all-test-suites.py", result.stderr)
+        self.assertIn("no nc-test-suite was run on the commit", result.stderr)
+        self.assertNotIn("report:", result.stdout)
+
+    def test_worktree_whose_head_names_no_commit_stops_before_agy(self):
+        self.make_checkout_a_worktree(with_commit=False)
+        result = self.run_in_worktree("change,message")
+        self.assertEqual(result.returncode, 1, result.stderr)
+        self.assertIn("could not read the commit HEAD is at", result.stderr)
+        self.assertFalse(self.calls.exists())
 
     def test_changes_without_a_commit_message_are_listed_not_committed(self):
         start = self.make_checkout_a_worktree()
@@ -346,6 +415,7 @@ class GeminiTaskTests(unittest.TestCase):
                 self.assertEqual(result.returncode, 0, result.stderr)
                 self.assertEqual(self.git("rev-parse", "HEAD").strip(), start)
                 self.assertFalse((self.checkout / "commit-message.txt").exists())
+                self.assertFalse(self.test_suite_runner_calls.exists())
 
     def test_read_only_and_failed_runs_commit_nothing(self):
         start = self.make_checkout_a_worktree()

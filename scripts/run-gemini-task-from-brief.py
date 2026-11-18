@@ -31,7 +31,12 @@ stages every change in the worktree, commits it with that message under the
 git identity the worktree gives the agent-seat, and deletes the file. A
 commit-message.txt already there when the run starts is deleted first. When
 the file is missing or empty, it commits nothing, lists the uncommitted
-changes and exits 1. A run that changes nothing commits nothing. Give REPORT
+changes and exits 1. A run that changes nothing commits nothing. After a
+commit, the launcher runs the worktree's own `scripts/run-all-test-suites.py
+--only-suites-whose-recorded-inputs-changed-since <the commit HEAD was at when
+the run started> --leave-recorded-inputs-and-failure-history-unchanged` in the
+worktree, outside the deadline, copying its output to stderr. A worktree whose
+HEAD names no commit is refused before agy starts. Give REPORT
 outside the worktree, or the report and run log are committed with the
 change. The agent-seat reviews the commit and pushes it.
 
@@ -61,7 +66,9 @@ the Codex launcher's process-group cleanup stops agy and its children.
 Exits 0 with `report: PATH` for a nonblank report, 2 for invalid arguments,
 and 1 with a diagnostic for file errors, unavailable sandbox, agy startup
 or model-list failures, unknown models, timeout, nonzero exit, no report,
-or changes that could not be committed.
+changes that could not be committed, or, after a commit, a test-suite runner
+that cannot be started, names failing nc-test-suites, which the message
+lists, or ends without judging every suite.
 Requires bwrap on Linux or sandbox-exec on macOS; never runs unsandboxed.
 """
 
@@ -158,6 +165,10 @@ def main(argv=None):
         worktree_to_commit = codex_task.codex_or_gemini_workspace_write_run_worktree_path_to_commit_later_or_none(
             checkout, args.sandbox)
         if worktree_to_commit:
+            start_commit, error = codex_task.codex_or_gemini_workspace_write_run_start_commit(
+                worktree_to_commit)
+            if error:
+                raise RuntimeError(error)
             # A message left by an earlier run must not pass for this run's.
             (worktree_to_commit / codex_task.CODEX_OR_GEMINI_COMMIT_MESSAGE_FILE_NAME).unlink(
                 missing_ok=True)
@@ -211,6 +222,13 @@ def main(argv=None):
                 raise RuntimeError(error)
             if done:
                 print(f"{PROGRAM}: {done}", file=sys.stderr)
+                stage = (f"running the nc-test-suites the run's change touches; the report is "
+                         f"at {report}")
+                error = (codex_task.
+                         codex_or_gemini_committed_run_test_suites_whose_recorded_inputs_changed_run(
+                             worktree_to_commit, start_commit))
+                if error:
+                    raise RuntimeError(error)
     except (OSError, UnicodeError, RuntimeError) as error:
         print(f"{PROGRAM}: failed while {stage}: {error}; output: {log_path}", file=sys.stderr)
         status = 1

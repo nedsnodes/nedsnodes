@@ -6,7 +6,11 @@ logs its arguments and the folder it ran in and, by FAKE_GH_MODE, prints data,
 fails, or sleeps.
 
 The fake records its arguments and, by FAKE_CODEX_WORKTREE_WRITES, changes a
-file in the -C checkout, writes commit-message.txt there, or both; and, by the
+file in the -C checkout, writes commit-message.txt there, or both. A fake
+scripts/run-all-test-suites.py in each test worktree stands in for the
+worktree's own test-suite runner: it records its arguments and folder and, by
+FAKE_TEST_SUITE_RUNNER_MODE, passes, names failing suites, or exits 2 with a
+suite not run. By the
 FAKE_CODEX_MODE environment variable, writes a report, writes a report file of its own with or without a final
 message, fails with or without a report, writes nothing,
 sleeps past the deadline with a child that may ignore SIGTERM, writes a
@@ -92,6 +96,30 @@ elif mode == "final-message-then-sleep":
 elif mode == "read-stdin":
     data = sys.stdin.read()
     open(report, "w").write(f"stdin held {len(data)} characters\n")
+'''
+
+FAKE_TEST_SUITE_RUNNER = r'''#!/usr/bin/env python3
+import json, os, sys
+with open(os.environ["FAKE_TEST_SUITE_RUNNER_CALLS"], "w") as record:
+    json.dump([os.getcwd(), sys.argv[1:]], record)
+mode = os.environ.get("FAKE_TEST_SUITE_RUNNER_MODE", "pass")
+if mode == "pass":
+    print("PASS scripts/a-test.py (1.0s)")
+    print("SUMMARY: 1 passed, 0 failed")
+elif mode == "fail":
+    print("FAIL scripts/a-test.py exit 1 (1.0s)")
+    print("PASS scripts/b-test.py (1.0s)")
+    print("FAIL scripts/c-test.py exit 2 (1.0s)")
+    print("")
+    print("2 failed:")
+    print("FAIL scripts/a-test.py exit 1 — log /logs/a-test.py.log")
+    print("FAIL scripts/c-test.py exit 2 — log /logs/c-test.py.log")
+    print("SUMMARY: 1 passed, 2 failed")
+    sys.exit(1)
+elif mode == "no-verdict":
+    print("NOT RUN scripts/a-test.py did not start: bwrap failed")
+    print("SUMMARY: 0 passed, 0 failed, 1 not run")
+    sys.exit(2)
 '''
 
 FAKE_GH = r'''#!/usr/bin/env python3
@@ -1030,19 +1058,32 @@ try:
         return subprocess.run(["git", "-C", str(worktree), *words], env=git_environment,
                               capture_output=True, text=True, check=True).stdout
 
-    def fresh_worktree():
+    test_suite_runner_calls = scratch / "test-suite-runner-calls.json"
+
+    def fresh_worktree(with_test_suite_runner=True, with_commit=True):
         shutil.rmtree(worktree, ignore_errors=True)
+        test_suite_runner_calls.unlink(missing_ok=True)
         worktree.mkdir()
         git("init", "--quiet")
         (worktree / "existing.txt").write_text("before the run\n")
         git("add", "existing.txt")
+        if with_test_suite_runner:
+            fake_runner = worktree / "scripts" / "run-all-test-suites.py"
+            fake_runner.parent.mkdir()
+            fake_runner.write_text(FAKE_TEST_SUITE_RUNNER)
+            fake_runner.chmod(0o755)
+            git("add", "scripts")
+        if not with_commit:
+            return None
         git("commit", "--quiet", "-m", "start")
         return git("rev-parse", "HEAD").strip()
 
-    def run_in_worktree(writes, *extra, mode="report"):
+    def run_in_worktree(writes, *extra, mode="report", test_suite_runner_mode="pass"):
         completed, report, _ = run(mode, *extra, checkout_folder=worktree,
-                                   extra_environment={**git_identity,
-                                                      "FAKE_CODEX_WORKTREE_WRITES": writes})
+                                   extra_environment={
+                                       **git_identity, "FAKE_CODEX_WORKTREE_WRITES": writes,
+                                       "FAKE_TEST_SUITE_RUNNER_MODE": test_suite_runner_mode,
+                                       "FAKE_TEST_SUITE_RUNNER_CALLS": str(test_suite_runner_calls)})
         return completed, report
 
     message_file = worktree / "commit-message.txt"
@@ -1064,6 +1105,58 @@ try:
           and f"as {git('rev-parse', 'HEAD').strip()}" in completed.stderr,
           f"exit {completed.returncode}, stderr {completed.stderr!r}, log "
           f"{git('log', '--format=%h %an %s')!r}")
+    check("after the commit, the worktree's own test-suite runner runs in the worktree on the "
+          "suites whose recorded inputs changed since the run's start, leaving its records "
+          "unchanged, and its output is copied to stderr",
+          test_suite_runner_calls.exists()
+          and json.loads(test_suite_runner_calls.read_text()) == [
+              str(worktree), ["--only-suites-whose-recorded-inputs-changed-since", start,
+                              "--leave-recorded-inputs-and-failure-history-unchanged"]]
+          and "PASS scripts/a-test.py (1.0s)" in completed.stderr,
+          f"calls {test_suite_runner_calls.read_text() if test_suite_runner_calls.exists() else None!r}")
+
+    start = fresh_worktree()
+    completed, report = run_in_worktree("change,message", "--sandbox", "workspace-write",
+                                        test_suite_runner_mode="fail")
+    check("when nc-test-suites fail after the commit, the run exits 1 naming each failing "
+          "suite once, keeps the commit and prints no report line",
+          completed.returncode == 1 and git("rev-parse", "HEAD~1").strip() == start
+          and "failed after its commit: scripts/a-test.py, scripts/c-test.py." in completed.stderr
+          and "The run's commit is kept" in completed.stderr
+          and "scripts/b-test.py," not in completed.stderr
+          and f"The report is at {report}." in completed.stderr
+          and "report:" not in completed.stdout,
+          f"exit {completed.returncode}, stderr {completed.stderr!r}")
+
+    start = fresh_worktree()
+    completed, report = run_in_worktree("change,message", "--sandbox", "workspace-write",
+                                        test_suite_runner_mode="no-verdict")
+    check("when the test-suite runner ends without judging every suite, the run exits 1 "
+          "saying so, quoting its NOT RUN line, and keeps the commit",
+          completed.returncode == 1 and git("rev-parse", "HEAD~1").strip() == start
+          and "ended with exit 2 without naming a failing suite" in completed.stderr
+          and "  NOT RUN scripts/a-test.py did not start: bwrap failed" in completed.stderr
+          and "report:" not in completed.stdout,
+          f"exit {completed.returncode}, stderr {completed.stderr!r}")
+
+    start = fresh_worktree(with_test_suite_runner=False)
+    completed, report = run_in_worktree("change,message", "--sandbox", "workspace-write")
+    check("when the worktree's test-suite runner cannot be started, the run exits 1 saying no "
+          "suite was run, and keeps the commit",
+          completed.returncode == 1 and git("rev-parse", "HEAD~1").strip() == start
+          and "could not start `scripts/run-all-test-suites.py" in completed.stderr
+          and "no nc-test-suite was run on the commit" in completed.stderr
+          and "report:" not in completed.stdout,
+          f"exit {completed.returncode}, stderr {completed.stderr!r}")
+
+    fresh_worktree(with_commit=False)
+    arguments_file.unlink(missing_ok=True)
+    completed, report = run_in_worktree("change,message", "--sandbox", "workspace-write")
+    check("a workspace-write run in a worktree whose HEAD names no commit exits 1 before Codex "
+          "starts",
+          completed.returncode == 1 and "could not read the commit HEAD is at" in completed.stderr
+          and not arguments_file.exists(),
+          f"exit {completed.returncode}, stderr {completed.stderr!r}")
 
     for writes in ("change", "change,empty-message"):
         start = fresh_worktree()
@@ -1089,9 +1182,10 @@ try:
         start = fresh_worktree()
         completed, report = run_in_worktree(writes, "--sandbox", "workspace-write")
         check(f"a workspace-write run that changes nothing ({writes!r}) commits nothing, "
-              f"leaves no message file and exits 0",
+              f"leaves no message file, runs no nc-test-suite and exits 0",
               completed.returncode == 0 and git("rev-parse", "HEAD").strip() == start
-              and not message_file.exists() and git("status", "--porcelain") == "",
+              and not message_file.exists() and git("status", "--porcelain") == ""
+              and not test_suite_runner_calls.exists(),
               f"exit {completed.returncode}, stderr {completed.stderr!r}")
 
     start = fresh_worktree()
