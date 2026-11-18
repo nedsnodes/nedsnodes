@@ -59,6 +59,9 @@ the log.
 
 Runs `agy models` inside the same sandbox before starting the task, refusing
 unknown names with the known names. The default is gemini-4-argon-high.
+--effort is refused with a model id that ends in an effort, such as
+gemini-4-hydrogen-xhigh, and so with the default; give it only with an id
+that carries none, such as gemini-pro-orchestrator.
 Closes stdin and logs both output streams to REPORT.run.log, or to
 --run-log; an existing log at that path is overwritten. The
 deadline covers model discovery and task execution after sandbox setup.
@@ -106,6 +109,8 @@ ROOT = pathlib.Path(__file__).resolve().parent.parent
 agy_cell = _load("cold_read_agy_cell", ROOT / "nc-systems/cold-read/cold-read-agy-cell.py")
 codex_task = _load("run_codex_task_from_brief", ROOT / "scripts/run-codex-task-from-brief.py")
 PROGRAM = "run-gemini-task-from-brief"
+# The values `agy --help` gives for --effort; a model id ending in one of them carries its effort.
+AGY_EFFORT_WORDS = ("low", "medium", "high", "xhigh", "max")
 
 
 def _parser():
@@ -178,6 +183,10 @@ def main(argv=None):
         parser.error("--deadline-minutes must be finite and greater than zero")
     if args.writable_root and args.sandbox != "workspace-write":
         parser.error("--writable-root requires --sandbox workspace-write")
+    if args.effort and args.model.rpartition("-")[2] in AGY_EFFORT_WORDS:
+        parser.error(f"--effort is refused with the model {args.model}, whose id already "
+                     "carries an effort; give -m an id that carries none, such as "
+                     "gemini-pro-orchestrator, or leave out --effort")
     checkout = pathlib.Path(args.checkout).resolve()
     brief = pathlib.Path(args.brief).resolve()
     report = pathlib.Path(args.report).resolve()

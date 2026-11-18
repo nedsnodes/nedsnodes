@@ -51,7 +51,7 @@ if args == ["models"]:
     if mode == "models-fail":
         sys.exit(4)
     if mode != "models-sleep":
-        print("Available models:\n  gemini-4-argon-high\n  gemini-3.8-flash-medium", flush=True)
+        print("Available models:\n  gemini-4-argon-high\n  gemini-3.8-flash-medium\n  gemini-pro-orchestrator", flush=True)
         sys.exit(0)
 if mode in ("sleep", "models-sleep"):
     child = os.fork()
@@ -173,7 +173,7 @@ class GeminiTaskTests(unittest.TestCase):
         second.mkdir()
         result = self.run_cli(extra=("--sandbox", "workspace-write", "--writable-root", str(first),
                                     "--writable-root", str(second), "--effort", "medium",
-                                    "-m", "gemini-3.8-flash-medium", "--deadline-minutes", "10"),
+                                    "-m", "gemini-pro-orchestrator", "--deadline-minutes", "10"),
                               input="caller stdin must not reach agy")
         self.assertEqual(result.returncode, 0, result.stderr)
         self.assertEqual(result.stdout, f"report: {self.report}\n")
@@ -183,7 +183,7 @@ class GeminiTaskTests(unittest.TestCase):
         self.assertEqual((cwd, stdin), (str(self.checkout), ""))
         self.assertTrue(args[-1].startswith(self.brief.read_text()))
         self.assertIn(str(self.report), args[-1])
-        for flag, value in (("--model", "gemini-3.8-flash-medium"), ("--effort", "medium"),
+        for flag, value in (("--model", "gemini-pro-orchestrator"), ("--effort", "medium"),
                             ("--print-timeout", "600s"), ("--output-format", "stream-json")):
             self.assertEqual(args[args.index(flag) + 1], value)
         self.assertIn("--dangerously-skip-permissions", args)
@@ -580,6 +580,23 @@ class GeminiTaskTests(unittest.TestCase):
         result = subprocess.run([sys.executable, str(PROGRAM), "--help"], capture_output=True, text=True)
         self.assertEqual(result.returncode, 0)
         self.assertNotIn("--network", result.stdout)
+
+    def test_effort_with_a_model_id_that_carries_one_is_refused_before_agy(self):
+        for extra in (("--effort", "low"), ("--effort", "low", "-m", "gemini-4-hydrogen-xhigh"),
+                      ("--effort", "high", "-m", "gemini-3.8-flash-medium")):
+            with self.subTest(extra=extra):
+                result = self.run_cli(extra=extra)
+                self.assertEqual(result.returncode, 2)
+                self.assertIn("already carries an effort", result.stderr)
+                self.assertIn("gemini-pro-orchestrator", result.stderr)
+                self.assertFalse(self.calls.exists())
+
+    def test_effort_with_a_model_id_that_carries_none_is_passed_to_agy(self):
+        result = self.run_cli(extra=("--effort", "xhigh", "-m", "gemini-pro-orchestrator"))
+        self.assertEqual(result.returncode, 0, result.stderr)
+        args = json.loads(self.calls.read_text().splitlines()[1])[1]
+        self.assertEqual(args[args.index("--effort") + 1], "xhigh")
+        self.assertEqual(args[args.index("--model") + 1], "gemini-pro-orchestrator")
 
     def test_file_failures(self):
         self.brief.unlink()
