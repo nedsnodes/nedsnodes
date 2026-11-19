@@ -909,31 +909,66 @@ with tempfile.TemporaryDirectory() as scratch:
         return common_module.classify_failed_attempt(
             stdout=stdout, stderr=stderr, exit_code=exit_code,
             recognised_texts=claude_module.recognised_failure_texts_for_model(model),
-            start_error=start_error)
+            start_error=start_error,
+            agent_binary_failure_line_prefix_checked_when_no_recognised_failure_text_matched=(
+                claude_module.AGENT_BINARY_FAILURE_LINE_PREFIX_CHECKED_WHEN_NO_RECOGNISED_FAILURE_TEXT_MATCHED))
+
+    UNRECOGNISED = common_module.UNRECOGNISED_FAILURE_TEXT_CAUSE_CLASS
 
     check("the weekly limit line is account-limit, the limit and its reset as detail",
           classify(stdout=PERMISSION_NOISE + WEEKLY_LIMIT_LINE + "\n")
           == ("account-limit", "weekly limit · resets Nov 7, 3am (America/Los_Angeles)"),
           repr(classify(stdout=PERMISSION_NOISE + WEEKLY_LIMIT_LINE + "\n")))
-    check("a line starting \"You've hit your \" whose next words do not end in limit is exit-N",
-          classify(stdout="You've hit your limitless quota · resets Nov 7\n")[0] == "exit-1",
+    check("a line starting \"You've hit your \" whose next words do not end in limit is unrecognised-failure-text",
+          classify(stdout="You've hit your limitless quota · resets Nov 7\n")[0] == UNRECOGNISED,
           repr(classify(stdout="You've hit your limitless quota · resets Nov 7\n")))
     check("three words before limit is still account-limit",
           classify(stdout="You've hit your Opus weekly usage limit · resets Nov 7\n")
           == ("account-limit", "Opus weekly usage limit · resets Nov 7"),
           repr(classify(stdout="You've hit your Opus weekly usage limit · resets Nov 7\n")))
-    check("exactly four words before limit is exit-N",
-          classify(stdout="You've hit your a b c d limit\n")[0] == "exit-1",
+    check("exactly four words before limit is unrecognised-failure-text",
+          classify(stdout="You've hit your a b c d limit\n")[0] == UNRECOGNISED,
           repr(classify(stdout="You've hit your a b c d limit\n")))
-    check("a line whose \"limit\" comes five or more words after \"You've hit your \" is exit-N",
-          classify(stdout="You've hit your stride and now the speed limit\n")[0] == "exit-1",
+    check("a line whose \"limit\" comes five or more words after \"You've hit your \" is unrecognised-failure-text",
+          classify(stdout="You've hit your stride and now the speed limit\n")[0] == UNRECOGNISED,
           repr(classify(stdout="You've hit your stride and now the speed limit\n")))
     check("the Fable limit line is model-limit for a Fable attempt, the family as detail",
           classify(stdout=PERMISSION_NOISE + FABLE_LIMIT_LINE + "\n") == ("model-limit", "Fable"),
           repr(classify(stdout=PERMISSION_NOISE + FABLE_LIMIT_LINE + "\n")))
-    check("the same line on an Opus attempt is not that model's limit: exit-N",
-          classify(stdout=FABLE_LIMIT_LINE + "\n", model="claude-opus-5")[0] == "exit-1",
+    check("the same line on an Opus attempt is not that model's limit: unrecognised-failure-text",
+          classify(stdout=FABLE_LIMIT_LINE + "\n", model="claude-opus-5")[0] == UNRECOGNISED,
           repr(classify(stdout=FABLE_LIMIT_LINE + "\n", model="claude-opus-5")))
+    UNRECOGNISED_LIMIT_LINE = "You've used 100% of your weekly allowance · resets Nov 25, 9am"
+    check("a failed exit's line starting \"You've \" that no recognised text matches is "
+          "unrecognised-failure-text, the line as detail",
+          classify(stdout=PERMISSION_NOISE + UNRECOGNISED_LIMIT_LINE + "\n\nlast line\n")
+          == (UNRECOGNISED, UNRECOGNISED_LIMIT_LINE),
+          repr(classify(stdout=PERMISSION_NOISE + UNRECOGNISED_LIMIT_LINE + "\n\nlast line\n")))
+    check("an unrecognised \"You've \" line on stdout is reported though stderr has other lines",
+          classify(stdout=UNRECOGNISED_LIMIT_LINE + "\n", stderr="Error: exiting\n")
+          == (UNRECOGNISED, UNRECOGNISED_LIMIT_LINE))
+    check("an unrecognised \"You've \" line followed by a recognised one is the recognised class",
+          classify(stdout=UNRECOGNISED_LIMIT_LINE + "\n" + WEEKLY_LIMIT_LINE + "\n")[0]
+          == "account-limit",
+          repr(classify(stdout=UNRECOGNISED_LIMIT_LINE + "\n" + WEEKLY_LIMIT_LINE + "\n")))
+    check("of two unrecognised \"You've \" lines the first is the detail",
+          classify(stdout=UNRECOGNISED_LIMIT_LINE + "\nYou've also got mail\n")
+          == (UNRECOGNISED, UNRECOGNISED_LIMIT_LINE))
+    check("the unrecognised line is cut to 120 characters",
+          classify(stdout="You've " + "z" * 200 + "\n")
+          == (UNRECOGNISED, ("You've " + "z" * 200)[:120]))
+    check("exit 0 with a line starting \"You've \" is no-report: that is the reviewer's prose",
+          classify(stdout="You've written a clear page.\n", exit_code=0)
+          == ("no-report", "no report written; the reviewer's last line: You've written a clear page."),
+          repr(classify(stdout="You've written a clear page.\n", exit_code=0)))
+    check("\"You've \" inside a line, not at its start, is exit-N",
+          classify(stdout="The page says You've hit a snag\n") == ("exit-1", "The page says You've hit a snag"),
+          repr(classify(stdout="The page says You've hit a snag\n")))
+    check("with no watched prefix, a \"You've \" line is exit-N as before",
+          common_module.classify_failed_attempt(
+              stdout=UNRECOGNISED_LIMIT_LINE + "\n", stderr="", exit_code=1,
+              recognised_texts=claude_module.recognised_failure_texts_for_model("claude-opus-5"))
+          == ("exit-1", UNRECOGNISED_LIMIT_LINE))
     check("the logged-out capture is logged-out with the whole line as detail",
           classify(stdout=LOGGED_OUT_LINE + "\n") == ("logged-out", LOGGED_OUT_LINE),
           repr(classify(stdout=LOGGED_OUT_LINE + "\n")))
@@ -1014,6 +1049,25 @@ with tempfile.TemporaryDirectory() as scratch:
     check("the cause line is the last line of its own about the attempt",
           len(cause_lines) == 1
           and result.stderr.index("failed (exit 1)") < result.stderr.index("cause: model-limit"),
+          repr(result.stderr))
+    shutil.rmtree(repository)
+    repository = build_scratch_repository(scratch)
+    report = repository / "cold-read-records" / "run-cause-unrecognised" / "claude-defect-hunt-second-strongest-model.md"
+    result = run_claude_cell(
+        repository, stubs,
+        {"claude-fable-5-1": {"exit": 1, "stdout": UNRECOGNISED_LIMIT_LINE + "\n"}},
+        report, "--tier", "second-strongest-model",
+    )
+    check("a Claude cell whose claude exits 1 on an unrecognised \"You've \" line prints "
+          "cause: unrecognised-failure-text with the line quoted",
+          result.returncode == 1
+          and f"cold-read-claude-cell: cause: unrecognised-failure-text — {UNRECOGNISED_LIMIT_LINE}"
+          in result.stderr.splitlines(),
+          repr(result.stderr))
+    check("the Claude cell says the line may be a new usage-limit wording and what to do",
+          f"that matches none of this cell's recognised failure texts, so it may be a usage limit "
+          f"in a wording the cell does not recognise: \"{UNRECOGNISED_LIMIT_LINE}\"" in result.stderr
+          and "\nIf that line reports a usage limit, tell the user, quoting it," in result.stderr,
           repr(result.stderr))
     shutil.rmtree(repository)
     repository = build_scratch_repository(scratch)
