@@ -131,12 +131,12 @@ MAC_REMOTE_CONTROL_RECONNECT_WATCHER_LINE = (
     "* * * * * /opt/homebrew/bin/python3 /Users/el/Projects/nedschorus/nc-systems/handoff/"
     "handoff-agent-seat-remote-control-lost-at-claude-login-reconnect-by-tmux-typing-watcher.py >> "
     "/Users/el/.claude/handoff-agent-seat-remote-control-lost-at-claude-login-reconnect-by-tmux-typing-watcher.log 2>&1")
-# The prune of the guarded-file hook's copies of removed checkouts, last in the table.
+# The prune of the guarded-file hook's copies of committed versions or of removed checkouts, last in the table.
 NED_BOX_GUARDED_FILE_PRUNE_LINE = (
     "0 7 * * * /usr/bin/python3 /home/nedlern/Projects/nedschorus/nc-systems/general-tools/"
-    "guarded-file-versions-and-approvals-store-removed-checkout-copies-prune.py >> "
-    "/home/nedlern/.claude/guarded-file-versions-and-approvals-store-removed-checkout-"
-    "copies-prune.log 2>&1")
+    "guarded-file-versions-and-approvals-store-copies-of-committed-versions-or-removed-checkouts-prune.py >> "
+    "/home/nedlern/.claude/guarded-file-versions-and-approvals-store-copies-of-committed-"
+    "versions-or-removed-checkouts-prune.log 2>&1")
 # The deletion of exited agent-sessions' Claude Code temp folders, on ned-box alone.
 NED_BOX_TEMP_FOLDERS_DELETE_LINE = (
     "30 7 * * * /usr/bin/python3 /home/nedlern/Projects/nedschorus/nc-systems/general-tools/"
@@ -172,19 +172,19 @@ NED_BOX_SCHEDULED_FULL_MUTATION_PASS_LINE = (
     "/home/nedlern/.claude/scheduled-full-mutation-pass-of-merged-pull-requests-and-survivor-"
     "tasks-open.log 2>&1")
 MAC_GUARDED_FILE_PRUNE_PLIST = {
-    "Label": "com.nedschorus.guarded-file-versions-and-approvals-store-removed-checkout-"
-             "copies-prune",
+    "Label": "com.nedschorus.guarded-file-versions-and-approvals-store-copies-of-committed-"
+             "versions-or-removed-checkouts-prune",
     "ProgramArguments": ["/opt/homebrew/bin/python3",
                          "/Users/el/Projects/nedschorus/nc-systems/general-tools/"
-                         "guarded-file-versions-and-approvals-store-removed-checkout-copies-prune.py"],
+                         "guarded-file-versions-and-approvals-store-copies-of-committed-versions-or-removed-checkouts-prune.py"],
     "EnvironmentVariables": {
         "PATH": "/Users/el/.local/bin:/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin:"
                 "/usr/sbin:/sbin"},
     "StartCalendarInterval": {"Hour": 7, "Minute": 0},
     "StandardOutPath": "/Users/el/.claude/guarded-file-versions-and-approvals-store-"
-                       "removed-checkout-copies-prune.log",
+                       "copies-of-committed-versions-or-removed-checkouts-prune.log",
     "StandardErrorPath": "/Users/el/.claude/guarded-file-versions-and-approvals-store-"
-                         "removed-checkout-copies-prune.log",
+                         "copies-of-committed-versions-or-removed-checkouts-prune.log",
 }
 # The nc-shared-database's nightly backup on ned-box and its copy to the Mac.
 NED_BOX_NC_SHARED_DATABASE_BACKUP_LINE = (
@@ -327,8 +327,8 @@ check("the table's jobs are the two typed by hand before this program, the workt
                             "clean-worktrees",
                             "cold-read-cell-credential-files-outside-denied-directories-daily-"
                             "check-user-alert-write",
-                            "guarded-file-versions-and-approvals-store-removed-checkout-"
-                            "copies-prune",
+                            "guarded-file-versions-and-approvals-store-copies-of-committed-"
+                            "versions-or-removed-checkouts-prune",
                             "handoff-agent-crash-watcher",
                             "handoff-agent-seat-remote-control-lost-at-claude-login-reconnect-by-"
                             "tmux-typing-watcher",
@@ -367,8 +367,8 @@ remote_control_watcher = real_jobs[
 remote_control_watcher_documentation = (
     REPOSITORY_ROOT / remote_control_watcher["program"]).read_text(encoding="utf-8")
 guarded_file_prune_documentation = (
-    REPOSITORY_ROOT / real_jobs["guarded-file-versions-and-approvals-store-removed-"
-                                "checkout-copies-prune"]["program"]).read_text(encoding="utf-8")
+    REPOSITORY_ROOT / real_jobs["guarded-file-versions-and-approvals-store-copies-of-"
+                                "committed-versions-or-removed-checkouts-prune"]["program"]).read_text(encoding="utf-8")
 temp_folders_delete = real_jobs["claude-code-temp-folders-of-exited-agent-sessions-delete"]
 check("the temp-folder deletion runs on ned-box alone, at 07:30, and its program documents the "
       "table's line",
@@ -488,7 +488,7 @@ check("--print as ned-box prints ned-box's cron lines from the real table and ru
           "cron line:", NED_BOX_REMOTE_CONTROL_RECONNECT_WATCHER_LINE,
           "uncommitted-work-snapshot-hook-scheduled-check-that-real-claude-session-is-recorded-as-owner — cron line:",
           NED_BOX_OWNER_CHECK_LINE,
-          "guarded-file-versions-and-approvals-store-removed-checkout-copies-prune — cron "
+          "guarded-file-versions-and-approvals-store-copies-of-committed-versions-or-removed-checkouts-prune — cron "
           "line:", NED_BOX_GUARDED_FILE_PRUNE_LINE,
           "nc-shared-database-nightly-backup-with-integrity-check — cron line:",
           NED_BOX_NC_SHARED_DATABASE_BACKUP_LINE,
@@ -517,9 +517,10 @@ full_test_run_part, _, clean_and_owner_check_part = mac_printed.partition(clean_
 clean_and_watcher_part, _, owner_check_and_prune_part = clean_and_owner_check_part.partition(owner_check_heading)
 clean_part, _, remote_control_watcher_part = clean_and_watcher_part.partition(
     remote_control_watcher_heading)
-prune_heading = ("guarded-file-versions-and-approvals-store-removed-checkout-copies-prune — "
+prune_heading = ("guarded-file-versions-and-approvals-store-copies-of-committed-versions-or-removed-checkouts-prune — "
                  "launchd job, /Users/el/Library/LaunchAgents/com.nedschorus.guarded-file-"
-                 "versions-and-approvals-store-removed-checkout-copies-prune.plist:\n")
+                 "versions-and-approvals-store-copies-of-committed-versions-or-removed-"
+                 "checkouts-prune.plist:\n")
 owner_check_part, _, prune_and_backup_copy_part = owner_check_and_prune_part.partition(prune_heading)
 backup_copy_heading = ("nc-shared-database-newest-backup-copy-to-mac — launchd job, "
                        "/Users/el/Library/LaunchAgents/com.nedschorus.nc-shared-database-"

@@ -123,14 +123,14 @@
       }
     },
     {
-      "name": "guarded-file-versions-and-approvals-store-removed-checkout-copies-prune",
-      "program": "nc-systems/general-tools/guarded-file-versions-and-approvals-store-removed-checkout-copies-prune.py",
+      "name": "guarded-file-versions-and-approvals-store-copies-of-committed-versions-or-removed-checkouts-prune",
+      "program": "nc-systems/general-tools/guarded-file-versions-and-approvals-store-copies-of-committed-versions-or-removed-checkouts-prune.py",
       "arguments": [],
-      "output": ".claude/guarded-file-versions-and-approvals-store-removed-checkout-copies-prune.log",
+      "output": ".claude/guarded-file-versions-and-approvals-store-copies-of-committed-versions-or-removed-checkouts-prune.log",
       "on": {
         "mac": {
           "scheduler": "launchd",
-          "label": "com.nedschorus.guarded-file-versions-and-approvals-store-removed-checkout-copies-prune",
+          "label": "com.nedschorus.guarded-file-versions-and-approvals-store-copies-of-committed-versions-or-removed-checkouts-prune",
           "launchd_keys": {"StartCalendarInterval": {"Hour": 7, "Minute": 0}}
         },
         "ned-box": {"scheduler": "cron", "schedule": "0 7 * * *"}
