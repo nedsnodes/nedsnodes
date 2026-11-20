@@ -28,7 +28,7 @@ The program:
   origin/main`, which puts the local main at origin/main and checks it out, whether or not every
   push succeeded, because every agent-seat's git hooks and the cron jobs run from this checkout;
   and then runs the clone's post-merge hook, with ORIG_HEAD at the commit HEAD left, as a merge
-  would have, since the switch runs none. Until the hook succeeds, the file
+  would have, since the switch runs none. Until the hook succeeds, the pending file
   ~/Projects/nedschorus/.git/handoff-reference-checkout-failed-post-merge-hook-orig-head-to-rerun,
   in the clone's git directory, keeps that commit, and each later run runs the hook again with it;
 - fast-forwards to origin/main and checks that HEAD is origin/main with no changed tracked file,
@@ -77,7 +77,7 @@ _reference_checkout_steps_spec = importlib.util.spec_from_file_location(
 reference_checkout_steps = importlib.util.module_from_spec(_reference_checkout_steps_spec)
 _reference_checkout_steps_spec.loader.exec_module(reference_checkout_steps)
 
-# Its messages reach an agent: docs/nedschorus-wiki/nedschorus-how-to-write-an-agent-facing-message-such-as-a-hook-refusal-or-script-error.md
+# Its messages reach an agent: docs/nedschorus-wiki/nedschorus-how-to-write-a-tool-message-to-agent-such-as-a-hook-refusal-or-script-error.md
 PROGRAM = "handoff-reference-checkout-back-on-main-after-pushing-leftovers-to-a-branch"
 LEFTOVERS_BRANCH_PREFIX = "reference-checkout-leftovers-"
 LEFTOVERS_COMMIT_MESSAGE = "Leftovers found in the reference-checkout"
