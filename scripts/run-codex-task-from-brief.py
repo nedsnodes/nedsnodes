@@ -31,7 +31,7 @@ The program an agent uses to hand Codex a task. It always:
     run log's first line says why;
   - when the log-store is on this machine, creates the run's own numbered
     folder <agent-seat>/<brief file name without its extension>/<number> of
-    ~/nedschorus-logs/codex-and-gemini-sandboxed-task-runs-shared-writable-folder/,
+    ~/nedsnodes-logs/codex-and-gemini-sandboxed-task-runs-shared-writable-folder/,
     1 for the brief's first run and one more than the highest number there
     after that, lets Codex write in it, prints its path on stderr, and names
     it in the brief;
@@ -152,7 +152,7 @@ PREFETCH_API_ACCEPTED_OPTIONS_TEXT = (
 PREFETCH_FILE_NAME_WORDS_MAX_CHARACTERS = 80
 # Its parent is the log-store, present only on ned-box.
 CODEX_AND_GEMINI_SHARED_WRITABLE_FOLDER = (
-    pathlib.Path.home() / "nedschorus-logs"
+    pathlib.Path.home() / "nedsnodes-logs"
     / "codex-and-gemini-sandboxed-task-runs-shared-writable-folder")
 NO_AGENT_SEAT_NAME = "no-agent-seat-name"
 CODEX_OR_GEMINI_COMMIT_MESSAGE_FILE_NAME = "commit-message.txt"

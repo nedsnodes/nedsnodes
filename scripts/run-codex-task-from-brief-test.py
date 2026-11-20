@@ -657,7 +657,7 @@ try:
     spec.loader.exec_module(runner)
     # In this process HOME is the real one; the cases below must not write in its log-store.
     runner.CODEX_AND_GEMINI_SHARED_WRITABLE_FOLDER = (
-        scratch_home / "nedschorus-logs" / "codex-and-gemini-sandboxed-task-runs-shared-writable-folder")
+        scratch_home / "nedsnodes-logs" / "codex-and-gemini-sandboxed-task-runs-shared-writable-folder")
     runner.common.SANDBOXED_MODELS_READ_ONLY_GITHUB_TOKEN_FILE = (
         scratch_home / "no-read-only-github-token-here")
 
@@ -956,11 +956,11 @@ try:
           and not any("shared-writable-folder" in argument for argument in arguments),
           repr(arguments))
 
-    log_store = scratch_home / "nedschorus-logs"
+    log_store = scratch_home / "nedsnodes-logs"
     log_store.mkdir()
     shared_folder = log_store / "codex-and-gemini-sandboxed-task-runs-shared-writable-folder"
     for seat_environment, seat_folder in (
-            ({"CLAUDE_CODE_TASK_LIST_ID": "nedschorus-test-seat-tasks"}, "test-seat"),
+            ({"CLAUDE_CODE_TASK_LIST_ID": "nedsnodes-test-seat-tasks"}, "test-seat"),
             ({"CLAUDE_CODE_TASK_LIST_ID": ""}, "no-agent-seat-name")):
         for number in ("1", "2"):
             completed, report, _ = run("report", extra_environment=seat_environment)
@@ -985,7 +985,7 @@ try:
     (brief_folder / "1").mkdir(parents=True)
     (brief_folder / "notes").mkdir()
     completed, report, _ = run(
-        "report", extra_environment={"CLAUDE_CODE_TASK_LIST_ID": "nedschorus-test-seat-tasks"})
+        "report", extra_environment={"CLAUDE_CODE_TASK_LIST_ID": "nedsnodes-test-seat-tasks"})
     check("a 1/ already in the brief's folder makes the run take 2/",
           completed.returncode == 0 and (brief_folder / "2").is_dir()
           and f"this run's folder is {brief_folder / '2'}\n" in completed.stderr,
@@ -995,7 +995,7 @@ try:
     # timed from a test, so a wrapped os.mkdir creates the folder first, as that run would.
     real_mkdir = runner.os.mkdir
     runner_seat_environment = os.environ.get("CLAUDE_CODE_TASK_LIST_ID")
-    os.environ["CLAUDE_CODE_TASK_LIST_ID"] = "nedschorus-test-seat-tasks"
+    os.environ["CLAUDE_CODE_TASK_LIST_ID"] = "nedsnodes-test-seat-tasks"
     shutil.rmtree(brief_folder)
     taken_first = []
 

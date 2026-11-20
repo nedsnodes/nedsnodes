@@ -151,7 +151,7 @@ class GeminiTaskTests(unittest.TestCase):
         self.args = ["-C", str(self.checkout), "--brief", str(self.brief), "-o", str(self.report),
                      "--run-log", str(self.log)]
         # Runs in this process read these paths, which the module set from the real home.
-        self.shared_folder = (self.home / "nedschorus-logs"
+        self.shared_folder = (self.home / "nedsnodes-logs"
                               / "codex-and-gemini-sandboxed-task-runs-shared-writable-folder")
         self.token_file = (self.home / ".config" / "nedschorus-sandboxed-models"
                            / "github-public-repositories-read-only-token")
@@ -256,7 +256,7 @@ class GeminiTaskTests(unittest.TestCase):
 
     def test_shared_writable_subfolder_is_bound_writable_and_named_in_the_brief(self):
         self.shared_folder.parent.mkdir()
-        self.env["CLAUDE_CODE_TASK_LIST_ID"] = "nedschorus-test-seat-tasks"
+        self.env["CLAUDE_CODE_TASK_LIST_ID"] = "nedsnodes-test-seat-tasks"
         result = self.run_cli()
         self.assertEqual(result.returncode, 0, result.stderr)
         for number in ("1", "2"):
@@ -279,7 +279,7 @@ class GeminiTaskTests(unittest.TestCase):
     def test_run_takes_the_number_after_a_folder_already_there(self):
         brief_folder = self.shared_folder / "test-seat" / "brief"
         (brief_folder / "1").mkdir(parents=True)
-        self.env["CLAUDE_CODE_TASK_LIST_ID"] = "nedschorus-test-seat-tasks"
+        self.env["CLAUDE_CODE_TASK_LIST_ID"] = "nedsnodes-test-seat-tasks"
         result = self.run_cli()
         self.assertEqual(result.returncode, 0, result.stderr)
         self.assertTrue((brief_folder / "2").is_dir())
@@ -305,7 +305,7 @@ class GeminiTaskTests(unittest.TestCase):
             return real_mkdir(path, *rest, **options)
 
         create = runner.codex_task.codex_or_gemini_task_run_subfolder_in_shared_writable_folder_create
-        with patch.dict(os.environ, {"CLAUDE_CODE_TASK_LIST_ID": "nedschorus-test-seat-tasks"}):
+        with patch.dict(os.environ, {"CLAUDE_CODE_TASK_LIST_ID": "nedsnodes-test-seat-tasks"}):
             with patch.object(runner.codex_task.os, "mkdir", beaten_once):
                 self.assertEqual(create(self.brief), brief_folder / "2")
             self.assertEqual(taken_first, ["1"])

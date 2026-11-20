@@ -80,7 +80,7 @@ REVIEWER_PROGRAM_LOGIN_FILES = {
 }
 
 
-# Outside the denied ~/.config/nedschorus: a denied directory hides only its own subtree,
+# Outside the denied ~/.config/nedsnodes: a denied directory hides only its own subtree,
 # not siblings sharing its name as a prefix (measured with Codex's profile and bwrap).
 SANDBOXED_MODELS_READ_ONLY_GITHUB_TOKEN_FILE = (
     pathlib.Path.home() / ".config" / "nedschorus-sandboxed-models"

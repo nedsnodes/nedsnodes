@@ -15,7 +15,7 @@ the sandbox program. GEMINI_API_KEY is removed from agy's environment, because
 a key is billed per call and agy's own Google login, in ~/.gemini, is not. The
 agent-seat's GitHub tokens, which can push and merge, are removed too: every
 name in AGENT_SEAT_GITHUB_TOKEN_ENVIRONMENT_VARIABLES of
-nc-systems/cold-read/cold-read-cell-common.py, GH_TOKEN and GITHUB_TOKEN among
+nn-systems/cold-read/cold-read-cell-common.py, GH_TOKEN and GITHUB_TOKEN among
 them. No read-only token takes their place.
 
 The program's name describes the Linux sandbox; on macOS the home is not

@@ -15,7 +15,7 @@ the credential directories and login files, and no file by its name, so a
 read-only lets agy write REPORT and, when the log-store is on this machine,
 the run's own numbered folder <agent-seat>/<brief file name without its
 extension>/<number> of
-~/nedschorus-logs/codex-and-gemini-sandboxed-task-runs-shared-writable-folder/,
+~/nedsnodes-logs/codex-and-gemini-sandboxed-task-runs-shared-writable-folder/,
 1 for the brief's first run and one more than the highest number there after
 that, whose path the launcher prints on stderr and the brief names; nothing else, not even its own state under
 ~/.gemini, so agy logs failed cache writes. workspace-write also lets it
