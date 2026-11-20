@@ -1,6 +1,13 @@
 #!/bin/bash
 # Gate a merge. Exits 0 only if every check passes; any problem exits non-zero
 # with a reason on stderr. It GATES -- it does not print a count and continue.
+# One exception, which never changes the exit code: before the checks it prints
+# on stderr the notice of scripts/no-sandbox-test-suites-run-on-main-in-a-quiet-gap.py
+# --print-merge-gate-notice-of-last-failed-or-stopped-run, when the no-sandbox test suites last failed or
+# stopped on main. Refusing instead would stop every merge
+# for one suite's failure on main, which a change being merged did not cause.
+# On a pass it also prints, after the merge command, each #follow_up link to an
+# open issue in this repository, which merge-lane-2 sends the author.
 #
 #   scripts/merge-gate.sh <pr-number> <expected-head-sha> <reviewed-since-iso8601>
 #
@@ -81,11 +88,11 @@
 # WHY AN INLINE COMMENT POSTED WITH A REVIEW THE CALLER WROTE OR READ IS READ AT
 # THAT REVIEW'S TIME. GHI "The merge gate refuses a merge when the merge
 # account's own review carries inline comments stamped a second later",
-# https://github.com/nedschorus/nedschorus/issues/729. GitHub stamps an inline
+# https://github.com/nedsnodes/nedsnodes/issues/729. GitHub stamps an inline
 # comment posted as part of a review with its own clock, which can read one
 # second after the review's submitted_at. On PR "A handoff's worktree cleaner
 # stopped at its time bound is counted and leaves no process running"
-# (https://github.com/nedschorus/nedschorus/pull/722) the merge account's
+# (https://github.com/nedsnodes/nedsnodes/pull/722) the merge account's
 # COMMENTED review read 20:43:02Z and its three inline comments 20:43:03Z. F2
 # bounds SINCE at that review, so no accepted SINCE was later than the
 # comments, they always counted as new, and the merge could never pass.
@@ -125,7 +132,9 @@
 # rebuild's. Recorded so the next reader knows it was seen and left.
 set -u
 
-REPO=nedschorus/nedschorus
+REPO=nedsnodes/nedsnodes
+# GitHub redirects the repository's old name, and descriptions written before the rename still link with it.
+OLD_REPOSITORY=nedschorus/nedschorus
 MERGE_ACCOUNT=ned-review-merge
 TOKEN_FILE=$HOME/.config/nedschorus/$MERGE_ACCOUNT.token
 
@@ -152,6 +161,11 @@ fi
 [ $# -eq 3 ] || cannot "merge-gate.sh takes exactly three arguments and was given $#." \
   "Call it as: scripts/merge-gate.sh <pull request number> <the nc-head-commit, all 40 characters> <reviewed-since: the submitted_at of your latest review as the merge account, or of the pin if that is later>"
 PR=$1; EXPECTED=$2; SINCE=$3
+
+NO_SANDBOX_SUITES_PROGRAM="$(dirname "${BASH_SOURCE[0]}")/no-sandbox-test-suites-run-on-main-in-a-quiet-gap.py"
+if ! python3 "$NO_SANDBOX_SUITES_PROGRAM" --print-merge-gate-notice-of-last-failed-or-stopped-run --clone "$(dirname "${BASH_SOURCE[0]}")/.." >&2; then
+  printf 'NO-SANDBOX TEST SUITES ON MAIN: %s --print-merge-gate-notice-of-last-failed-or-stopped-run failed; its error is just above this line. The gate goes on; tell reboot-test, which owns that program.\n' "$NO_SANDBOX_SUITES_PROGRAM" >&2
+fi
 
 command -v jq >/dev/null 2>&1 || cannot "jq is not on PATH. Put jq on PATH, then rerun the gate." \
   "If jq is not installed on this machine, tell the user this message."
@@ -348,6 +362,12 @@ FOLLOW_UP_IF_NO_ISSUE="If no such issue exists, open one with the /ghi-write ski
 FOLLOW_UP_EDIT_ONLY="Editing the description is enough; no new commit is needed."
 FOLLOW_UP_RERUN="Once the description has the link, run the gate again."
 FOLLOW_UP_REPLACE="Replace that link with an open issue or pull request that fixes the cause, or, if the cause is not known, an open issue that looks for it."
+open_follow_up_issues=""
+link_is_this_repository() {
+  local lower
+  lower=$(tr '[:upper:]' '[:lower:]' <<<"$link_repo")
+  [ "$lower" = "$REPO" ] || [ "$lower" = "$OLD_REPOSITORY" ]
+}
 not_fixed_count=$(jq length <<<"$not_fixed")                    || cannot "$DESCRIPTION_UNPARSABLE" "$JQ_ERROR_ABOVE" "$RERUN_ONCE_JQ"
 for ((line_index = 0; line_index < not_fixed_count; line_index++)); do
   line=$(jq -r ".[$line_index].line" <<<"$not_fixed")           || cannot "$DESCRIPTION_UNPARSABLE" "$JQ_ERROR_ABOVE" "$RERUN_ONCE_JQ"
@@ -360,7 +380,7 @@ for ((line_index = 0; line_index < not_fixed_count; line_index++)); do
   [[ $link =~ ^https://github\.com/([^/]+)/([^/]+)/(issues|pull)/([0-9]+)$ ]]
   link_repo="${BASH_REMATCH[1]}/${BASH_REMATCH[2]}"; link_path_kind=${BASH_REMATCH[3]}; link_number=${BASH_REMATCH[4]}
   # GitHub sends /issues/<n> and /pull/<n> to the same item, so either form names this pull request.
-  [ "$(tr '[:upper:]' '[:lower:]' <<<"$link_repo")" != "$REPO" ] || [ "$link_number" != "$PR" ] || fail "the description's line \`$line\` names after \`#follow_up\` $link, which is this pull request; a pull request cannot be the follow-up for a cause it leaves in place." \
+  ! link_is_this_repository || [ "$link_number" != "$PR" ] || fail "the description's line \`$line\` names after \`#follow_up\` $link, which is this pull request; a pull request cannot be the follow-up for a cause it leaves in place." \
     "$FOLLOW_UP_REPLACE" "$FOLLOW_UP_IF_NO_ISSUE" \
     "If this pull request does remove the cause, replace the whole line with a \"#root_cause\" line that names the cause it removes, and link nothing." \
     "$FOLLOW_UP_EDIT_ONLY" "$FOLLOW_UP_RERUN"
@@ -373,9 +393,12 @@ for ((line_index = 0; line_index < not_fixed_count; line_index++)); do
     "Otherwise run the gate again once; if it fails the same way, tell the user this message and gh's error."
   linked_kind=$(jq -r --arg path_kind "$link_path_kind" 'if $path_kind == "pull" and (.pull_request | not) then "issue-at-a-pull-request-link"
                        elif .pull_request then (if .state == "closed" and .pull_request.merged_at == null then "pull-request-closed-unmerged" else "live" end)
-                       elif .state == "closed" and .state_reason == "not_planned" then "issue-closed-not-planned" else "live" end' <<<"$linked")
+                       elif .state == "closed" and .state_reason == "not_planned" then "issue-closed-not-planned"
+                       elif .state == "open" then "open-issue" else "live" end' <<<"$linked")
   [ $? -eq 0 ] || cannot "could not parse what GitHub returned for $link" "$JQ_ERROR_ABOVE" "$RERUN_ONCE_JQ"
   case "$linked_kind" in
+    # An open pull request is work already under way; another project's issue is not ours.
+    open-issue) ! link_is_this_repository || open_follow_up_issues+="  $link from the line \`$line\`"$'\n' ;;
     issue-closed-not-planned) fail "the description's line \`$line\` names after \`#follow_up\` $link, an issue closed as not planned, so no work is planned on the cause the line leaves in place." \
       "$FOLLOW_UP_REPLACE" "$FOLLOW_UP_IF_NO_ISSUE" "$FOLLOW_UP_EDIT_ONLY" "$FOLLOW_UP_RERUN" ;;
     pull-request-closed-unmerged) fail "the description's line \`$line\` names after \`#follow_up\` $link, a pull request closed without merging, so it will not fix the cause the line leaves in place." \
@@ -393,3 +416,6 @@ echo "gate passed (#$PR): approved commit $approved_sha by $approver at $approva
 echo "MERGE WITH THIS EXACT COMMAND:"
 echo "  gh pr merge $PR --repo $REPO --merge --delete-branch --match-head-commit $approved_sha"
 echo "Run that command with GH_TOKEN set to the merge account's token, $TOKEN_FILE, so the merge runs as $MERGE_ACCOUNT."
+[ -z "$open_follow_up_issues" ] || printf '%s\n%s' \
+  "OPEN FOLLOW-UP ISSUES: after the merge, add each issue below to the message you send the pull request's author, asking the author to answer with the pull request that fixes the cause, the agent-seat that will fix it, \"blocked on <link>\", or \"needs the user: <why>\"." \
+  "$open_follow_up_issues"

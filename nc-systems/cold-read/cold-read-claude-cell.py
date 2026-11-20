@@ -39,8 +39,8 @@ it up with no change here.
 """
 
 import importlib.util
-import json
 import pathlib
+import re
 import sys
 
 _common_spec = importlib.util.spec_from_file_location(
@@ -49,9 +49,9 @@ _common_spec = importlib.util.spec_from_file_location(
 common = importlib.util.module_from_spec(_common_spec)
 _common_spec.loader.exec_module(common)
 _command_line_prefix_spec = importlib.util.spec_from_file_location(
-    "claude_code_headless_print_mode_command_line_prefix_with_no_connectors_and_explicit_permission_mode_common",
+    "claude_code_headless_run_command_line_prefix_with_no_connectors_and_explicit_permission_mode_common",
     pathlib.Path(__file__).resolve().parent.parent / "general-tools"
-    / "claude-code-headless-print-mode-command-line-prefix-with-no-connectors-and-explicit-permission-mode-common.py")
+    / "claude-code-headless-run-command-line-prefix-with-no-connectors-and-explicit-permission-mode-common.py")
 command_line_prefix = importlib.util.module_from_spec(_command_line_prefix_spec)
 _command_line_prefix_spec.loader.exec_module(command_line_prefix)
 
@@ -87,23 +87,35 @@ CREDENTIAL_READ_DENY_RULES = (
     + [f"Read(//**/{pattern})" for pattern in common.CREDENTIAL_FILE_NAME_PATTERNS]
     + [f"Read(/{path})" for path in common.reviewer_program_login_files()]
 )
-SETTINGS = json.dumps({"disableAllHooks": True,
-                       "permissions": {"deny": CREDENTIAL_READ_DENY_RULES}})
+SETTINGS = {"disableAllHooks": True, "permissions": {"deny": CREDENTIAL_READ_DENY_RULES}}
+PROMPT_CACHE_FIVE_MINUTE_TTL_SETTINGS = {"promptCacheTtl": "5m"}
 
 
-def invocation_builder(effort: str):
+def cold_read_cell_launcher_own_command_line_options_adder(parser):
+    parser.add_argument(
+        "--prompt-cache-five-minute-ttl", action="store_true",
+        help='add "promptCacheTtl": "5m" to the run\'s Claude Code settings, so '
+             "the run writes 5-minute prompt cache instead of the default 1-hour cache",
+    )
+
+
+def invocation_builder(effort: str, parsed_arguments=None):
     """Return a callback yielding model argv and prompt input for the shared runner."""
+    settings = (
+        {**SETTINGS, **PROMPT_CACHE_FIVE_MINUTE_TTL_SETTINGS}
+        if parsed_arguments is not None and parsed_arguments.prompt_cache_five_minute_ttl
+        else SETTINGS)
     # Pass the prompt on stdin: variadic --allowedTools can swallow a trailing positional argument.
     def build_invocation(model: str, prompt: str):
         # dontAsk: a tool call ALLOWED_TOOLS does not allow is refused, with no one to ask.
         command = [
-            *command_line_prefix.claude_code_headless_print_mode_command_line_prefix_build("dontAsk"),
+            *command_line_prefix.claude_code_headless_run_command_line_prefix_build(
+                "dontAsk", caller_claude_code_session_settings=settings),
             "--model", model,
             "--effort", effort,
             "--output-format", "text",
             "--allowedTools", ALLOWED_TOOLS,
             "--disallowedTools", DISALLOWED_TOOLS,
-            "--settings", SETTINGS,
         ]
         return command, prompt
     return build_invocation
@@ -120,8 +132,8 @@ def recognised_failure_texts_for_model(model: str) -> list:
     family = model_family_name(model)
     return [
         common.RecognisedFailureText(
-            "account-limit", "You've hit your session limit",
-            common.DETAIL_IS_REST_OF_LINE),
+            "account-limit", "You've hit your ", common.DETAIL_IS_REST_OF_LINE,
+            re.compile(r"(?:\S+ ){0,3}limit\b")),
         common.RecognisedFailureText(
             "model-limit", f"You've reached your {family} limit", family),
         common.RecognisedFailureText(
@@ -137,6 +149,7 @@ def main() -> int:
         tier_to_effort=TIER_TO_REASONING_EFFORT,
         invocation_builder=invocation_builder,
         recognised_failure_texts_for_model=recognised_failure_texts_for_model,
+        cold_read_cell_launcher_own_command_line_options_adder=cold_read_cell_launcher_own_command_line_options_adder,
     )
 
 

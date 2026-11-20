@@ -42,6 +42,7 @@ import io
 import json
 import os
 import re
+import shlex
 import shutil
 import signal
 import subprocess
@@ -65,6 +66,8 @@ OPEN_PULL_REQUEST_BRANCH_CHECK = (SCRIPTS_DIRECTORY / "git-client-side-hooks-pre
 REAL_TEST_SUITES_RUNNER = SCRIPTS_DIRECTORY / "run-all-test-suites.py"
 GIT_OUTPUT_MODULE_RELATIVE_PATH = Path(
     "nc-systems/general-tools/git-machine-readable-output-runner-and-parser-common.py")
+REBASE_OR_REPLACE_MODULE_RELATIVE_PATH = Path(
+    "nc-systems/general-tools/pull-request-conflict-with-main-rebase-or-replace-answer-common.py")
 
 TIME_BUDGET_VARIABLE = "NEDSCHORUS_PRE_PUSH_CONFLICT_CHECK_SECONDS"
 FAKE_CHECK_LOG_VARIABLE = "PRE_PUSH_TEST_FAKE_CHECK_LOG"
@@ -72,7 +75,7 @@ FAKE_TEST_SUITES_RUNNER_LOG_VARIABLE = "PRE_PUSH_TEST_FAKE_TEST_SUITES_RUNNER_LO
 FAKE_GH_OPEN_PULL_REQUESTS_VARIABLE = "PRE_PUSH_TEST_FAKE_GH_OPEN_PULL_REQUESTS"
 FAKE_GH_FAILURE_VARIABLE = "PRE_PUSH_TEST_FAKE_GH_FAILURE"
 FAKE_GH_LOG_VARIABLE = "PRE_PUSH_TEST_FAKE_GH_LOG"
-ESCAPE_HATCH_VARIABLE = "CLAUDE_MERGE_LANE_ASKED_FOR_THIS_REWRITE"
+RETIRED_EXEMPTION_VARIABLE = "CLAUDE_MERGE_LANE_ASKED_FOR_THIS_REWRITE"
 SESSION_VARIABLE = "CLAUDE_CODE_BRIDGE_SESSION_ID"
 LOCAL_SESSION_VARIABLE = "CLAUDE_CODE_SESSION_ID"
 FAKE_SESSION = "session_0FakePrePushTestSessionAAAA"
@@ -81,16 +84,21 @@ FAKE_SESSION = "session_0FakePrePushTestSessionAAAA"
 SHELLS_FOR_THE_HOOK = [shell for shell in ("/bin/sh", "/bin/dash")
                        if os.path.exists(shell)]
 
-OUTER_PUSH_TIMEOUT_SECONDS = 30
+HANGING_CHECK_BUDGET_SECONDS = "1"
+# A backstop only: the stop message and the stopped processes are what show a
+# hung check or test run was stopped at its budget. The hook may wait the
+# budget plus its grace for SIGTERM, up to 1 + 5 seconds, so this is ten times
+# that, which a busy machine cannot reach.
+HANGING_CASE_WALL_CLOCK_LIMIT_SECONDS = 60
+# Above the backstop, so a slow stop fails the backstop's own case first.
+OUTER_PUSH_TIMEOUT_SECONDS = 90
 # A hanging fake check sleeps this long. Longer than the outer timeout, so a
 # hook that fails to stop it still fails its case; short enough that one
 # missed by every cleanup exits on its own soon after the suite does.
-FAKE_HANG_SECONDS = 90
-HANGING_CHECK_BUDGET_SECONDS = "1"
-HANGING_CASE_WALL_CLOCK_LIMIT_SECONDS = 15
+FAKE_HANG_SECONDS = 120
 
 REFUSAL_HEADER = "pre-push: branch %s conflicts with origin/main; this push is refused."
-CLOSING_INSTRUCTION = "Once the merge is committed, push again."
+CLOSING_INSTRUCTION = "Do what scripts/branch-conflict-check.py reports above."
 # The hooks' own texts, copied here rather than imported, so a change to a
 # text fails a case.
 TELL_USER_LINE = ("Tell the user this whole message, including any error printed "
@@ -109,8 +117,8 @@ SHORT_COMMIT_LENGTH = 12
 
 def hand_check_line(branch, commit):
     return ("Check %s by hand from your worktree: python3 "
-            "scripts/branch-conflict-check.py --head %s"
-            % (branch, commit[:SHORT_COMMIT_LENGTH]))
+            "scripts/branch-conflict-check.py --head %s --branch %s"
+            % (branch, commit[:SHORT_COMMIT_LENGTH], branch))
 
 
 def branch_entry(branch, commit):
@@ -143,7 +151,7 @@ if _log:
 
 FAKE_CHECK_ALWAYS_CONFLICT = FAKE_CHECK_PREAMBLE + """\
 print("VERDICT: CONFLICT -- fake conflict for the test.")
-print("Merge origin/main into the branch by hand, with the frozen head as first parent.")
+print("ANSWER: rebase -- the fake's answer for the test.")
 sys.exit(1)
 """
 
@@ -308,10 +316,14 @@ def make_layout(parent, name, conflict_check=REAL_CONFLICT_CHECK,
         shutil.copy2(OPEN_PULL_REQUEST_BRANCH_CHECK, open_pull_request_branch_check)
     if include_test_suites_runner:
         (scripts / REAL_TEST_SUITES_RUNNER.name).write_text(FAKE_TEST_SUITES_RUNNER_FAILS)
+    rebase_or_replace_module = parent / name / REBASE_OR_REPLACE_MODULE_RELATIVE_PATH
+    rebase_or_replace_module.parent.mkdir(parents=True, exist_ok=True)
+    shutil.copy2(SCRIPTS_DIRECTORY.parent / REBASE_OR_REPLACE_MODULE_RELATIVE_PATH,
+                 rebase_or_replace_module)
     if isinstance(conflict_check, Path):
         shutil.copy2(conflict_check, scripts / REAL_CONFLICT_CHECK.name)
         module = parent / name / GIT_OUTPUT_MODULE_RELATIVE_PATH
-        module.parent.mkdir(parents=True)
+        module.parent.mkdir(parents=True, exist_ok=True)
         shutil.copy2(SCRIPTS_DIRECTORY.parent / GIT_OUTPUT_MODULE_RELATIVE_PATH, module)
     elif isinstance(conflict_check, str):
         (scripts / REAL_CONFLICT_CHECK.name).write_text(conflict_check)
@@ -347,9 +359,14 @@ class Scenario:
     `conflicting` conflicts with origin/main and the other two do not.
     Every setup push uses --no-verify, so the setup never depends on the hook
     under test.
+
+    Unless worktree_has_checks is False, the clone holds untracked empty files at
+    scripts/branch-conflict-check.py and at the revert check's path, as a seat's
+    worktree holds both checks, so the hooks give the hand-check commands that run
+    the worktree's copies.
     """
 
-    def __init__(self, parent, name, hooks, path_override=None):
+    def __init__(self, parent, name, hooks, path_override=None, worktree_has_checks=True):
         self.parent = parent
         self.name = name
         self.origin = parent / (name + "-origin.git")
@@ -384,6 +401,10 @@ class Scenario:
         self.commit("shared.txt", "main's line\n", "Main side")
         self.git(self.clone, "push", "--quiet", "--no-verify", "origin", "main")
         self.git(self.clone, "fetch", "--quiet", "origin")
+        if worktree_has_checks:
+            (self.clone / "scripts").mkdir()
+            for check_file in (REAL_CONFLICT_CHECK, REAL_REVERT_CHECK):
+                (self.clone / "scripts" / check_file.name).write_text("")
 
     def environment(self):
         env = {key: value for key, value in os.environ.items()
@@ -395,7 +416,6 @@ class Scenario:
         env[FAKE_CHECK_LOG_VARIABLE] = str(self.fake_check_log)
         env[FAKE_TEST_SUITES_RUNNER_LOG_VARIABLE] = str(self.fake_test_suites_runner_log)
         env[FAKE_GH_LOG_VARIABLE] = str(self.fake_gh_log)
-        env.pop(ESCAPE_HATCH_VARIABLE, None)
         path = self.path_override if self.path_override is not None else env.get("PATH", "")
         env["PATH"] = str(self.fake_gh_directory) + os.pathsep + path
         env.update(self.extra_environment)
@@ -440,6 +460,20 @@ class Scenario:
             return None
         if completed.returncode != 0:
             raise RuntimeError(f"git rev-parse --verify refs/heads/{branch} in origin exited "
+                               f"{completed.returncode}: {completed.stderr.strip()}")
+        return completed.stdout.strip()
+
+    def saved_old_head(self, ref):
+        """The commit the clone's ref holds, or None, so that a missing saved ref fails its case."""
+        completed = subprocess.run(
+            ["git", "rev-parse", "--verify", "--quiet", ref], cwd=str(self.clone),
+            env=dict(self.environment(), PATH=os.environ.get("PATH", "")),
+            capture_output=True, text=True, timeout=30)
+        # --verify --quiet exits 1 for a ref that does not exist.
+        if completed.returncode == 1:
+            return None
+        if completed.returncode != 0:
+            raise RuntimeError(f"git rev-parse --verify {ref} in the clone exited "
                                f"{completed.returncode}: {completed.stderr.strip()}")
         return completed.stdout.strip()
 
@@ -614,7 +648,7 @@ def run_unit_cases():
               "for conflicts with origin/main.",
               "For each branch this push sends to origin, other than main, run from "
               "your worktree: python3 scripts/branch-conflict-check.py --head "
-              "<branch name>",
+              "<branch name> --branch <branch name>",
               "Nor was any branch checked for files set back to a version that origin/main "
               "has replaced. For each branch this push sends to origin, other than main, "
               "once that conflict check prints VERDICT: CLEAN, also run: python3 "
@@ -710,17 +744,16 @@ def run_push_cases(scratch):
           REFUSAL_HEADER % "conflicting" in result.stderr, result.describe())
     check("and passes on the check's own verdict and instructions",
           "VERDICT: CONFLICT" in result.stderr
-          and "Merge origin/main into the branch by hand" in result.stderr,
+          and "ANSWER: rebase -- branch conflicting has no open pull request and "
+              "origin does not have it yet" in result.stderr,
           result.describe())
-    check("and carries the line on an edit beyond the conflicting lines",
-          "If the resolution forces an edit beyond the conflicting lines, put "
-          "that edit in one ordinary commit after the merge." in result.stderr,
+    check("and names the commit on origin/main that changed the conflicting file",
+          "MAIN'S SIDE: shared.txt -- changed on origin/main by commit " in result.stderr,
           result.describe())
-    check("and carries the line on pushing the merge and that commit once",
-          "Push the merge and that commit once, and name the files you "
-          "resolved in the merge's commit message and in the pull request's "
-          "description." in result.stderr, result.describe())
-    check("and ends with the instruction to push again",
+    check("and the check was asked about the pushed branch's open pull request",
+          any("--head conflicting" in call for call in scenario.fake_gh_calls()),
+          result.describe())
+    check("and ends with the instruction to do what the report says",
           CLOSING_INSTRUCTION in result.stderr, result.describe())
     check("and does not offer --no-verify", "--no-verify" not in result.stderr,
           result.describe())
@@ -745,19 +778,54 @@ def run_push_cases(scratch):
     check("and origin keeps the branch's earlier commit",
           scenario.origin_ref("pushed-then-conflicting") == early,
           repr(scenario.origin_ref("pushed-then-conflicting")))
+    check("and the refusal tells it to merge origin/main in, since origin has it",
+          "ANSWER: merge -- branch pushed-then-conflicting has no open pull request "
+          "and origin already has it" in result.stderr, result.describe())
 
-    # The remedy the refusal gives: merge origin/main by hand, then push again.
+    # The refusal's remedy for a branch origin has: merge origin/main into it,
+    # then push without --force.
+    scenario.git(scenario.clone, "switch", "--quiet", "-c", "pushed-then-merged",
+                 "pushed-then-conflicting")
+    scenario.git(scenario.clone, "push", "--quiet", "--no-verify", "origin",
+                 "pushed-then-merged")
     merge = subprocess.run(
-        ["git", "merge", "--quiet", "origin/main"], cwd=str(scenario.clone),
-        env=scenario.environment(), capture_output=True, text=True, timeout=60)
-    check("(setup) the hand merge stops on the conflict", merge.returncode != 0,
+        ["git", "merge", "--quiet", "--no-edit", "origin/main"],
+        cwd=str(scenario.clone), env=scenario.environment(), capture_output=True,
+        text=True, timeout=60)
+    check("(setup) the merge stops on the conflict", merge.returncode != 0,
           merge.stderr)
     (scenario.clone / "shared.txt").write_text("main's line\nanother branch line\n")
     scenario.git(scenario.clone, "add", "shared.txt")
     scenario.git(scenario.clone, "commit", "--quiet", "--no-edit")
-    result = scenario.push("origin", "pushed-then-conflicting")
-    check("after the hand merge the same branch is pushed",
-          went_through(result), result.describe())
+    result = scenario.push("origin", "pushed-then-merged")
+    check("after merging origin/main in, the branch is pushed without --force",
+          went_through(result)
+          and scenario.origin_ref("pushed-then-merged") == scenario.head(),
+          result.describe())
+    scenario.git(scenario.clone, "switch", "--quiet", "pushed-then-conflicting")
+
+    # A forced update to a branch with no open pull request goes through, and the
+    # commit it replaces is saved first.
+    rebase = subprocess.run(
+        ["git", "rebase", "--quiet", "origin/main"], cwd=str(scenario.clone),
+        env=scenario.environment(), capture_output=True, text=True, timeout=60)
+    check("(setup) the rebase stops on the conflict", rebase.returncode != 0,
+          rebase.stderr)
+    (scenario.clone / "shared.txt").write_text("main's line\nanother branch line\n")
+    scenario.git(scenario.clone, "add", "shared.txt")
+    rebase_environment = scenario.environment()
+    rebase_environment["GIT_EDITOR"] = "true"
+    subprocess.run(["git", "rebase", "--continue"], cwd=str(scenario.clone),
+                   env=rebase_environment, capture_output=True, text=True, timeout=60,
+                   check=True)
+    result = scenario.push("--force-with-lease", "origin", "pushed-then-conflicting")
+    check("after the rebase the same branch is force-pushed, and the commit it "
+          "replaces is saved",
+          went_through(result)
+          and scenario.origin_ref("pushed-then-conflicting") == scenario.head()
+          and scenario.saved_old_head(
+              "refs/force-pushed-old-heads/pushed-then-conflicting/" + early)
+          == early, result.describe())
 
     result = scenario.push("origin", "clean-second", "conflicting")
     check("one push of a clean branch and a conflicting one is refused",
@@ -803,9 +871,9 @@ def run_push_cases(scratch):
     check("(control) a check that says CONFLICT with exit 1 refuses the push",
           was_refused(result), result.describe())
     calls = scenario.fake_check_calls()
-    check("and the check was asked about the pushed commit, by full hash, "
-          "without --pull-request",
-          calls == ["--head %s" % scenario.head("clean")], repr(calls))
+    check("and the check was asked about the pushed commit, by full hash, and its "
+          "branch, without --pull-request",
+          calls == ["--head %s --branch clean" % scenario.head("clean")], repr(calls))
 
     scenario.git(scenario.clone, "push", "--quiet", "--no-verify", "origin", "clean")
     scenario.fake_check_log.unlink()
@@ -937,7 +1005,7 @@ def run_push_cases(scratch):
         check("%s: says which branch went unchecked and why" % label,
               index is not None, outcome.describe())
         if index is not None:
-            commit = lines[index + 1].rsplit(" ", 1)[-1] if len(lines) > index + 1 else ""
+            commit = hand_checked_commit("\n".join(lines[index + 1:index + 2]))
             check("%s: then the hand check, when to run the revert check, that the push goes "
                   "on, and the line telling the user" % label,
                   lines[index + 1:index + 6]
@@ -967,9 +1035,10 @@ def run_push_cases(scratch):
     check("check-no-answer: and ends with the rerun, when to run the revert check, and when "
           "to tell the user",
           follow is not None
+          and no_answer_lines[follow].endswith(" --branch conflicting")
           and no_answer_lines[follow + 1:follow + 4]
           == [*revert_check_not_run_lines(
-              "conflicting", no_answer_lines[follow].rsplit(" ", 1)[-1]).splitlines(),
+              "conflicting", hand_checked_commit(no_answer_lines[follow])).splitlines(),
               RERUN_VERDICT_LINE],
           outcome.describe())
     outcome = failing_check_case("check-unexpected-status", FAKE_CHECK_UNEXPECTED_STATUS,
@@ -1263,12 +1332,13 @@ def run_open_pull_request_branch_cases(scratch):
               f"request's head is refused, naming the branch and the pull request",
               was_refused(result) and refused_header in result.stderr
               and scenario.origin_ref("clean") == pushed, result.describe())
-    check("open pull request check: the refusal says to push a new commit on top, to clear a "
-          "conflict by the hand-merge, and how merge-lane-2 lets the push through",
+    check("open pull request check: the refusal says to push a new commit on top and to do what "
+          "scripts/branch-conflict-check.py reports for a conflict, and offers no way past the "
+          "refusal",
           "new commit on top of origin/clean" in result.stderr
-          and "the hand-merge that scripts/branch-conflict-check.py describes" in result.stderr
-          and f"{ESCAPE_HATCH_VARIABLE}=1 directly in front of the git push command"
-          in result.stderr, result.describe())
+          and "If the branch conflicts with main: run python3 scripts/branch-conflict-check.py "
+          "--pull-request 4242, and do what it reports." in result.stderr
+          and RETIRED_EXEMPTION_VARIABLE not in result.stderr, result.describe())
 
     # An unforced rewrite never reaches the hook: git rejects it first.
     scenario = fresh("unforced-rewrite")
@@ -1296,15 +1366,42 @@ def run_open_pull_request_branch_cases(scratch):
           and "git fetch origin clean" in result.stderr
           and scenario.origin_ref("clean") == pushed, result.describe())
 
-    # (b) A rewrite of a branch with no open pull request goes through, after asking gh.
+    # (b) A rewrite of a branch with no open pull request goes through, after asking gh, and
+    # the commit it replaces is saved under a ref first.
     scenario = fresh("no-pull-request")
     scenario.extra_environment[FAKE_GH_OPEN_PULL_REQUESTS_VARIABLE] = "{}"
+    pushed = scenario.origin_ref("clean")
     rewrite(scenario, "clean")
     result = scenario.push("--force", "origin", "clean")
+    saved_ref = f"refs/force-pushed-old-heads/clean/{pushed}"
     check("open pull request check: a forced rewrite of a branch with no open pull request goes "
           "through",
           went_through(result) and scenario.origin_ref("clean") == scenario.head("clean")
           and any("--head clean" in call for call in scenario.fake_gh_calls()),
+          result.describe())
+    check("old head save: a forced rewrite that goes through first saves the commit it replaces "
+          "under refs/force-pushed-old-heads/<branch>/<commit>, and says so",
+          scenario.saved_old_head(saved_ref) == pushed
+          and f"is saved under {saved_ref}." in result.stderr, result.describe())
+
+    # The replaced commit is fetched from origin first when this clone never had it.
+    scenario = fresh("no-pull-request-old-head-absent")
+    scenario.extra_environment[FAKE_GH_OPEN_PULL_REQUESTS_VARIABLE] = "{}"
+    other_clone = scratch / "open-pull-request-no-pull-request-old-head-absent-other-clone"
+    scenario.git(scratch, "clone", "--quiet", "--branch", "clean", str(scenario.origin),
+                 str(other_clone))
+    scenario.git(other_clone, "config", "user.name", "Other")
+    scenario.git(other_clone, "config", "user.email", "other@example.invalid")
+    scenario.commit("other.txt", "other\n", "Pushed from another clone", cwd=other_clone)
+    scenario.git(other_clone, "push", "--quiet", "--no-verify", "origin", "clean")
+    pushed = scenario.origin_ref("clean")
+    rewrite(scenario, "clean")
+    result = scenario.push("--force", "origin", "clean")
+    saved_ref = f"refs/force-pushed-old-heads/clean/{pushed}"
+    check("old head save: a replaced commit this clone never fetched is fetched from origin and "
+          "saved before the forced update goes through",
+          went_through(result) and scenario.origin_ref("clean") == scenario.head("clean")
+          and scenario.saved_old_head(saved_ref) == pushed,
           result.describe())
 
     # (e) Deleting an open pull request's head branch closes the pull request: refused.
@@ -1319,14 +1416,16 @@ def run_open_pull_request_branch_cases(scratch):
     check("open pull request check: deleting a branch with no open pull request goes through",
           went_through(result) and scenario.origin_ref("conflicting") is None, result.describe())
 
-    # The escape merge-lane-2 gives, the same assignment the Bash force-push guard reads.
-    scenario = fresh("escape")
+    # The retired exemption: the variable once let a forced rewrite through.
+    scenario = fresh("retired-exemption")
+    pushed = scenario.origin_ref("clean")
     rewrite(scenario, "clean")
-    scenario.extra_environment[ESCAPE_HATCH_VARIABLE] = "1"
+    scenario.extra_environment[RETIRED_EXEMPTION_VARIABLE] = "1"
     result = scenario.push("--force", "origin", "clean")
-    check(f"open pull request check: {ESCAPE_HATCH_VARIABLE}=1 lets a forced rewrite through",
-          scenario.origin_ref("clean") == scenario.head("clean")
-          and "this push is refused, because its update" not in result.stderr, result.describe())
+    check(f"open pull request check: a forced rewrite of an open pull request's head is refused "
+          f"with {RETIRED_EXEMPTION_VARIABLE}=1 set",
+          was_refused(result) and refused_header in result.stderr
+          and scenario.origin_ref("clean") == pushed, result.describe())
 
     # Only origin is checked.
     scenario = fresh("other-remote")
@@ -1350,7 +1449,7 @@ def run_open_pull_request_branch_cases(scratch):
           and "Tell the user this whole message, and do not push clean again until he answers."
           in result.stderr
           and "Run gh auth status" not in result.stderr
-          and "CLAUDE_MERGE_LANE_ASKED_FOR_THIS_REWRITE=1" in result.stderr
+          and RETIRED_EXEMPTION_VARIABLE not in result.stderr
           and scenario.origin_ref("clean") == pushed, result.describe())
     result = scenario.push("origin", "--delete", "conflicting")
     check("open pull request check: when gh is logged out, a deletion is refused",
@@ -1433,7 +1532,7 @@ def run_open_pull_request_branch_cases(scratch):
              "gh pr list printed output that is not JSON")]:
         printed = io.StringIO()
         try:
-            status = loaded.main(["origin", "url"], pushed_refs, printed, {},
+            status = loaded.main(["origin", "url"], pushed_refs, printed,
                                  runner_whose_gh(behaviour))
         except Exception as error:  # A crash is this case's failure, not the suite's.
             status = repr(error)
@@ -1442,9 +1541,9 @@ def run_open_pull_request_branch_cases(scratch):
               (status, printed.getvalue()))
 
 
-    # git failing to say whether an update is a fast-forward is a check that could not run,
-    # not a rewrite: the check exits 2 without asking gh. A commit cat-file reports missing
-    # still counts as not a fast-forward.
+    # git failing to say whether an update is a fast-forward refuses the push without asking gh,
+    # since a forced update would go through with its replaced commit saved nowhere. A commit
+    # cat-file reports missing still counts as not a fast-forward.
     def gh_must_not_be_asked(command):
         raise AssertionError("gh was asked")
 
@@ -1454,12 +1553,12 @@ def run_open_pull_request_branch_cases(scratch):
     for label, cat_file, is_ancestor, gh_behaviour, expected_status, expected_text in [
             ("merge-base --is-ancestor exits 128", present,
              exits(128, "fatal: injected merge-base failure"), gh_must_not_be_asked,
-             loaded.EXIT_CHECK_COULD_NOT_RUN,
+             loaded.EXIT_REFUSE_PUSH,
              "pre-push: whether this push's update to branch clean is a fast-forward could not "
              "be checked: git merge-base --is-ancestor exited with status 128: fatal: injected "
              "merge-base failure."),
             ("cat-file --batch-check exits 128", exits(128, "fatal: injected cat-file failure"),
-             exits(1), gh_must_not_be_asked, loaded.EXIT_CHECK_COULD_NOT_RUN,
+             exits(1), gh_must_not_be_asked, loaded.EXIT_REFUSE_PUSH,
              "git cat-file --batch-check exited with status 128: fatal: injected cat-file "
              "failure."),
             ("cat-file reports the remote commit missing",
@@ -1469,7 +1568,7 @@ def run_open_pull_request_branch_cases(scratch):
              loaded.EXIT_REFUSE_PUSH, refused_header)]:
         printed = io.StringIO()
         try:
-            status = loaded.main(["origin", "url"], pushed_refs, printed, {},
+            status = loaded.main(["origin", "url"], pushed_refs, printed,
                                  runner_whose_git(cat_file, is_ancestor, gh_behaviour))
         except Exception as error:  # A crash is this case's failure, not the suite's.
             status = repr(error)
@@ -1490,7 +1589,7 @@ def run_open_pull_request_branch_cases(scratch):
                     f"(delete) {'0' * 40} refs/heads/conflicting {'3' * 40}\n")
     printed = io.StringIO()
     try:
-        status = loaded.main(["origin", "url"], several_refs, printed, {},
+        status = loaded.main(["origin", "url"], several_refs, printed,
                              runner_whose_git(present, exits(128, "fatal: injected"),
                                               gh_with_open_pull_request_on("conflicting")))
     except Exception as error:  # A crash is this case's failure, not the suite's.
@@ -1503,6 +1602,69 @@ def run_open_pull_request_branch_cases(scratch):
           in printed.getvalue()
           and "whether this push's update to branch clean is a fast-forward could not be "
           "checked" in printed.getvalue(), (status, printed.getvalue()))
+
+    # The replaced commit cannot be saved: the push is refused, saying what failed.
+    def gh_with_no_open_pull_request(command):
+        return subprocess.CompletedProcess(command, 0, "[]", "")
+
+    def missing(command, options):
+        return subprocess.CompletedProcess(command, 0, options["input"].strip() + " missing\n",
+                                           "")
+
+    def save_failing_at(step, stderr_text, cat_file=present):
+        def run(command, **options):
+            if command[:2] == ["git", step]:
+                return subprocess.CompletedProcess(command, 128, "", stderr_text)
+            if command[:2] == ["git", "update-ref"] or command[:2] == ["git", "fetch"]:
+                return subprocess.CompletedProcess(command, 0, "", "")
+            return runner_whose_git(cat_file, exits(1), gh_with_no_open_pull_request)(
+                command, **options)
+        return run
+
+    def fetch_times_out(command, **options):
+        if command[:2] == ["git", "fetch"]:
+            raise subprocess.TimeoutExpired(command, options["timeout"])
+        return save_failing_at("update-ref", "", cat_file=missing)(command, **options)
+
+    old_head_ref = f"refs/force-pushed-old-heads/clean/{'2' * 40}"
+    for label, runner, detail in [
+            ("the fetch of a replaced commit this clone lacks does not answer in time",
+             fetch_times_out,
+             "git fetch --quiet did not answer within %d seconds."
+             % loaded.GIT_FETCH_TIMEOUT_SECONDS),
+            ("update-ref fails", save_failing_at("update-ref", "fatal: injected lock failure"),
+             "git update-ref " + old_head_ref + " exited with status 128: fatal: injected "
+             "lock failure"),
+            ("the fetch of a replaced commit this clone lacks fails",
+             save_failing_at("fetch", "fatal: injected fetch failure", cat_file=missing),
+             "git fetch --quiet exited with status 128: fatal: injected fetch failure")]:
+        printed = io.StringIO()
+        try:
+            status = loaded.main(["origin", "url"], pushed_refs, printed, runner)
+        except Exception as error:  # A crash is this case's failure, not the suite's.
+            status = repr(error)
+        check(f"old head save: when {label}, the forced update is refused, saying what failed "
+              f"and to tell the user",
+              status == loaded.EXIT_REFUSE_PUSH
+              and "pre-push: this push is refused, because it forces an update to branch clean "
+              f"on origin, and the commit that update replaces there, {'2' * 40}, could not "
+              f"first be saved under {old_head_ref}: " + detail in printed.getvalue()
+              and "do not push clean again until he answers." in printed.getvalue(),
+              (status, printed.getvalue()))
+
+    # An update git cannot check is refused, since it would go through with its replaced commit
+    # saved nowhere.
+    printed = io.StringIO()
+    status = loaded.main(["origin", "url"], pushed_refs, printed,
+                         runner_whose_git(present, exits(128, "fatal: injected"),
+                                          gh_with_no_open_pull_request))
+    check("old head save: an update git cannot check is refused, exit 10, naming it and saying why",
+          status == loaded.EXIT_REFUSE_PUSH
+          and "pre-push: this push is refused, because whether its update to branch clean on "
+          "origin builds on origin/clean could not be checked" in printed.getvalue()
+          and "whether this push's update to branch clean is a fast-forward could not be checked"
+          in printed.getvalue() and "is saved under" not in printed.getvalue(),
+          (status, printed.getvalue()))
 
     # The test helper origin_ref tells a missing ref from a git failure.
     broken = Scenario(scratch, "origin-ref-broken-origin", real)
@@ -1525,8 +1687,8 @@ REVERT_NOT_CHECKED = ("pre-push: branch %s was not checked for files set back to
 
 
 def hand_checked_commit(stderr):
-    """The commit named by the first hand conflict check line in a push's stderr."""
-    return next((line.rsplit(" ", 1)[-1] for line in stderr.splitlines()
+    """The commit named by the first hand conflict check line in a push's stderr, or ""."""
+    return next((line.split(" --head ", 1)[1].split()[0] for line in stderr.splitlines()
                  if " by hand from your worktree: python3 scripts/branch-conflict-check.py "
                  in line), "")
 
@@ -1596,8 +1758,8 @@ def run_revert_check_cases(scratch):
           and "shared.txt: back to its version before %s (Main side)"
           % scenario.head("origin/main")[:SHORT_COMMIT_LENGTH] in result.stderr,
           result.describe())
-    check("and does not give the conflict refusal's merge instruction",
-          "Once the merge is committed" not in result.stderr, result.describe())
+    check("and does not give the conflict refusal's closing instruction",
+          CLOSING_INSTRUCTION not in result.stderr, result.describe())
 
     result = scenario.push("origin", "clean")
     check("(control) a clean branch still goes through, with the revert check silent",
@@ -1660,12 +1822,143 @@ def run_revert_check_cases(scratch):
     scenario = Scenario(scratch, "revert-after-conflict", hooks)
     result = scenario.push("origin", "clean")
     check("a branch that conflicts is not sent to the revert check",
-          scenario.fake_check_calls() == ["--head %s" % scenario.head("clean")],
+          scenario.fake_check_calls() == ["--head %s --branch clean" % scenario.head("clean")],
           repr(scenario.fake_check_calls()))
 
 
+PRE_PUSH_CHECK_FROM_REFERENCE_CHECKOUT_RUN_BY_HAND_COMMAND = "python3 %s %s"
+CONFLICT_CHECK_ARGUMENTS = "--head %s --branch %s"
+REVERT_CHECK_ARGUMENTS = "--head %s"
+PRE_PUSH_CHECK_SCRIPT_MISSING_FROM_WORKTREE_AND_REFERENCE_CHECKOUT_TEXT = ("no copy of the check exists to run, as your worktree has no scripts/%s "
+                       "and %s is missing too; tell the user")
+# Gives no verdict when the hook runs it, which passes the full object ID, and a clean one when
+# run by hand, with the short commit.
+FAKE_CHECK_NO_VERDICT_FROM_HOOK_CLEAN_BY_HAND = FAKE_CHECK_PREAMBLE + """\
+if len(sys.argv[sys.argv.index("--head") + 1]) == 40:
+    sys.exit(7)
+print("VERDICT: CLEAN -- " + os.path.abspath(__file__) + " ran with " + " ".join(sys.argv[1:]))
+"""
+FAKE_CHECK_ALWAYS_CLEAN = FAKE_CHECK_PREAMBLE + """\
+print("VERDICT: CLEAN -- fake clean verdict for the test.")
+sys.exit(0)
+"""
+HAND_CONFLICT_CHECK_LINE = "Check clean by hand from your worktree: %s"
+HAND_REVERT_CHECK_AFTER_CONFLICT_CHECK_LINE = (
+    "Once the hand conflict check of clean prints VERDICT: CLEAN, check it for files set back "
+    "too: %s")
+HAND_REVERT_CHECK_LINE = "Check it by hand from your worktree: %s"
+
+
+def run_worktree_without_checks_cases(scratch):
+    """A worktree with no copy of a check is given a hand-check command that runs the reference
+    checkout's copy, and that command runs it; when the reference checkout's copy is the missing
+    file too, the line says no copy exists, instead of naming a command that cannot run."""
+    runner = load_runner_module()
+    empty_directory = scratch / "no-scripts-directory"
+    empty_directory.mkdir()
+    started_in = os.getcwd()
+    os.chdir(empty_directory)
+    try:
+        stream = io.StringIO()
+        runner.report_unexpected_error(stream, RuntimeError("boom"), ["origin", "url"], None)
+    finally:
+        os.chdir(started_in)
+    check("an error before the pushed refs were read, in a worktree with no checks: both "
+          "commands run the reference checkout's copies",
+          PRE_PUSH_CHECK_FROM_REFERENCE_CHECKOUT_RUN_BY_HAND_COMMAND % (
+              shlex.quote(str(REAL_CONFLICT_CHECK)),
+              CONFLICT_CHECK_ARGUMENTS % ("<branch name>", "<branch name>")) in stream.getvalue()
+          and PRE_PUSH_CHECK_FROM_REFERENCE_CHECKOUT_RUN_BY_HAND_COMMAND % (
+              shlex.quote(str(REAL_REVERT_CHECK)),
+              REVERT_CHECK_ARGUMENTS % "<branch name>") in stream.getvalue()
+          and "python3 scripts/" not in stream.getvalue(), stream.getvalue())
+
+    def check_arguments(check_file, short):
+        if check_file == REAL_CONFLICT_CHECK:
+            return CONFLICT_CHECK_ARGUMENTS % (short, "clean")
+        return REVERT_CHECK_ARGUMENTS % short
+
+    def hook_copy_command(hooks, check_file, short):
+        return PRE_PUSH_CHECK_FROM_REFERENCE_CHECKOUT_RUN_BY_HAND_COMMAND % (
+            shlex.quote(str(hooks.parent / check_file.name)), check_arguments(check_file, short))
+
+    def no_copy_text(hooks, check_file, short):
+        return PRE_PUSH_CHECK_SCRIPT_MISSING_FROM_WORKTREE_AND_REFERENCE_CHECKOUT_TEXT % (check_file.name, hooks.parent / check_file.name)
+
+    fake = FAKE_CHECK_NO_VERDICT_FROM_HOOK_CLEAN_BY_HAND
+    cases = (
+            ("the Python file is missing",
+             {"include_runner": False, "conflict_check": fake, "revert_check": fake},
+             ((HAND_CONFLICT_CHECK_LINE, REAL_CONFLICT_CHECK, hook_copy_command),
+              (HAND_REVERT_CHECK_AFTER_CONFLICT_CHECK_LINE, REAL_REVERT_CHECK,
+               hook_copy_command))),
+            ("the conflict check gives no verdict",
+             {"conflict_check": fake, "revert_check": fake},
+             ((HAND_CONFLICT_CHECK_LINE, REAL_CONFLICT_CHECK, hook_copy_command),
+              (HAND_REVERT_CHECK_AFTER_CONFLICT_CHECK_LINE, REAL_REVERT_CHECK,
+               hook_copy_command))),
+            ("the reference checkout's conflict check is missing",
+             {"conflict_check": None, "revert_check": fake},
+             ((HAND_CONFLICT_CHECK_LINE, REAL_CONFLICT_CHECK, no_copy_text),
+              (HAND_REVERT_CHECK_AFTER_CONFLICT_CHECK_LINE, REAL_REVERT_CHECK,
+               hook_copy_command))),
+            ("the Python file and the reference checkout's checks are missing",
+             {"include_runner": False, "conflict_check": None, "revert_check": None},
+             ((HAND_CONFLICT_CHECK_LINE, REAL_CONFLICT_CHECK, no_copy_text),
+              (HAND_REVERT_CHECK_AFTER_CONFLICT_CHECK_LINE, REAL_REVERT_CHECK, no_copy_text))),
+            ("the reference checkout's revert check is missing",
+             {"conflict_check": FAKE_CHECK_ALWAYS_CLEAN, "revert_check": None},
+             ((HAND_REVERT_CHECK_LINE, REAL_REVERT_CHECK, no_copy_text),)))
+    # The first case's command comes from the sh hook, the second's from the Python file; a
+    # reference checkout whose path holds a space or a single quote must still give a command
+    # that runs. A single quote is what the sh hook's sed escape handles.
+    quoting_cases = tuple(
+        (label + ", with %s in the reference checkout's path" % what, arguments, lines, parent)
+        for what, parent in (("a space", "reference checkout parent"),
+                             ("a single quote", "reference checkout's parent"))
+        for label, arguments, lines in cases[:2])
+    for case_number, (label, layout_arguments, expected_lines, parent) in enumerate(
+            tuple(case + (None,) for case in cases) + quoting_cases):
+        name = "worktree-without-checks-%d" % case_number
+        layout_parent = scratch / parent if parent else scratch
+        hooks = make_layout(layout_parent, "layout-" + name, **layout_arguments)
+        scenario = Scenario(scratch, name, hooks, worktree_has_checks=False)
+        scenario.git(scenario.clone, "switch", "--quiet", "clean")
+        short = scenario.head("clean")[:SHORT_COMMIT_LENGTH]
+        outcome = scenario.push("origin", "clean")
+        label = "worktree without the checks, " + label
+        check("%s: the push goes through" % label, went_through(outcome), outcome.describe())
+        check("%s: no command runs the worktree's missing copy" % label,
+              "python3 scripts/" not in outcome.stderr, outcome.describe())
+        lines = outcome.stderr.splitlines()
+        for line_text, check_file, fill in expected_lines:
+            fill_text = fill(hooks, check_file, short)
+            check("%s: the hand check of %s %s" % (
+                      label, check_file.name, "runs the reference checkout's copy"
+                      if fill is hook_copy_command else "says no copy exists"),
+                  line_text % fill_text in lines, outcome.describe())
+            if fill is not hook_copy_command:
+                continue
+            ran = subprocess.run(fill_text, shell=True, cwd=str(scenario.clone),
+                                 env=scenario.environment(), capture_output=True, text=True,
+                                 timeout=60)
+            check("%s: that command runs the reference checkout's %s on the commit"
+                  % (label, check_file.name),
+                  ran.returncode == 0
+                  and ran.stdout.strip() == "VERDICT: CLEAN -- %s ran with %s"
+                  % (hooks.parent / check_file.name, check_arguments(check_file, short)),
+                  "exit %s; stdout %r; stderr %r" % (ran.returncode, ran.stdout, ran.stderr))
+
+
 def main():
-    run_unit_cases()
+    # The unit cases run the hook code in this process and the shell part in its working
+    # directory, as git runs a hook in the worktree being pushed; this checkout is that worktree.
+    started_in = os.getcwd()
+    os.chdir(SCRIPTS_DIRECTORY.parent)
+    try:
+        run_unit_cases()
+    finally:
+        os.chdir(started_in)
     # Resolved, because git and the hooks print resolved paths: on macOS the temporary
     # directory is under /var, a symlink to /private/var.
     scratch = Path(tempfile.mkdtemp(prefix="pre-push-test-")).resolve()
@@ -1675,6 +1968,7 @@ def main():
         run_mutation_testing_worktree_cases(scratch)
         run_open_pull_request_branch_cases(scratch)
         run_revert_check_cases(scratch)
+        run_worktree_without_checks_cases(scratch)
     finally:
         shutil.rmtree(scratch, ignore_errors=True)
     if failures:

@@ -55,7 +55,7 @@ WHAT IS PINNED HERE.
     model; the lift machinery stays.
 
   - The read is seven cells: the defect-hunt pass on both tiers of both
-    runtimes, the terminology pass (user-ruled 2026-09-05) on the
+    agent-binaries, the terminology pass (user-ruled 2026-09-05) on the
     `deep` tier of both, and the defect-hunt pass on agy, on Gemini Argon at
     high. The terminology cells and the agy cell run
     at the effort the grid pins, which the stub reads off its own command
@@ -64,7 +64,7 @@ WHAT IS PINNED HERE.
     the nc-test-sandbox, where the real bwrap cannot start.
 
   - The model's echoed words are not the cell's status. The cell re-emits its
-    runtime's stderr into the log the grid lifts from, and the Codex CLI
+    agent-binary's stderr into the log the grid lifts from, and the Codex CLI
     copies the model's own text onto stderr — so on 2026-09-02 a reviewed
     document that quoted a code comment containing "fell back to" made two
     cells read as fallen back when both had run on the models asked for
@@ -150,9 +150,9 @@ import json
 import os
 import shlex
 import shutil
+import signal
 import subprocess
 import sys
-import tempfile
 import time
 from pathlib import Path
 from unittest import mock
@@ -220,7 +220,7 @@ def reviews_saved_lines(result):
     return [line for line in result.stdout.splitlines()
             if line.startswith("saved:") and not line.endswith("/" + QUESTION_4_REPORT_NAME)]
 
-# A stand-in for both runtimes. It takes the report path from the prompt it
+# A stand-in for both agent-binaries. It takes the report path from the prompt it
 # was given rather than from the environment, because the grid gives each of
 # its four cells a different one and only the prompt carries which: the
 # Claude leg feeds the prompt on stdin, the Codex leg passes it as an
@@ -267,9 +267,17 @@ def reviews_saved_lines(result):
 # whose report name contains COLD_READ_GRID_TEST_STUB_FAST_REPORT_NAME_FRAGMENT,
 # which does not wait. One fast cell that edits the target while six slow
 # ones read is how a case moves the target mid-run.
+# COLD_READ_GRID_TEST_STUB_SHIP_RECORD_FIRST_LINE_FILE, when set, is a file outside
+# the scratch repository: the fast cell runs the real shipper on its record
+# before writing its report, as the pre-remove hook does when an agent-seat
+# removes a worktree mid-run, and saves the shipper's stdout there.
 # COLD_READ_GRID_TEST_STUB_HANG_AFTER_WRITING_REPORT_SECONDS, when set, is how long the
 # stub hangs after writing its report: a reviewer that wrote and never exited.
 # The fast cell does not hang either, so it can still edit the target.
+# COLD_READ_GRID_TEST_STUB_ANOTHER_READ_STORE_RECORDS_DIRECTORY, when set, is a
+# log-store's records directory: the stub first writes another read's report
+# under its own report's name into the store's directory of its record's name,
+# as a read that took the name without claiming it would ship there.
 # COLD_READ_GRID_TEST_STUB_EDIT_GIVEN_TARGET_AFTER_THESE_REPORT_FILES_EXIST, when set, is a
 # comma-separated list of report names in the stub's own record directory;
 # the stub that edits its given target first waits, for at most 30 seconds,
@@ -348,6 +356,18 @@ sleep_seconds = float(os.environ.get("COLD_READ_GRID_TEST_STUB_SLEEP_SECONDS") o
 fast_fragment = os.environ.get("COLD_READ_GRID_TEST_STUB_FAST_REPORT_NAME_FRAGMENT")
 if sleep_seconds and not (fast_fragment and fast_fragment in given.name):
     time.sleep(sleep_seconds)
+ship_line_file = os.environ.get("COLD_READ_GRID_TEST_STUB_SHIP_RECORD_FIRST_LINE_FILE")
+if ship_line_file and fast_fragment and fast_fragment in given.name:
+    import subprocess
+    shipped = subprocess.run(
+        [sys.executable, str(given.parent.parent.parent / "nc-systems" / "cold-read" / "cold-read-record-ship.py"),
+         str(given.parent)], capture_output=True, text=True, check=False)
+    pathlib.Path(ship_line_file).write_text(shipped.stdout, encoding="utf-8")
+another_read_store = os.environ.get("COLD_READ_GRID_TEST_STUB_ANOTHER_READ_STORE_RECORDS_DIRECTORY")
+if another_read_store:
+    another_read_report = pathlib.Path(another_read_store) / given.parent.name / given.name
+    another_read_report.parent.mkdir(parents=True, exist_ok=True)
+    another_read_report.write_text("ANOTHER READ'S REPORT\n", encoding="utf-8")
 near_miss_character = os.environ.get("COLD_READ_GRID_TEST_STUB_NEAR_MISS_CHARACTER")
 if near_miss_character:
     given = (given.parent.parent / (given.parent.name[:-1] + near_miss_character)
@@ -435,8 +455,8 @@ def run_grid(repository, stub_directory, environment_overrides=None,
         stub.write_text(STUB_MODEL_RUNTIME, encoding="utf-8")
         stub.chmod(0o755)
     scratch_repository_fixture.install_fake_sandbox_programs(stub_directory)
-    # Every Codex cell scans HOME for credential files at launch, and the
-    # real home takes seconds to walk.
+    # A scratch HOME, so every cell's credential rules name paths in it, not
+    # the real home's.
     scratch_home = repository.parent / "scratch-home"
     scratch_home.mkdir(exist_ok=True)
     environment = dict(os.environ)
@@ -497,8 +517,23 @@ def frozen_target_path_in_scratch_repository(repository, record_directory):
         repository / TARGET_RELATIVE_PATH, record_directory)
 
 
-with tempfile.TemporaryDirectory() as scratch:
-    scratch = Path(scratch)
+_scratch_directory_common_spec = importlib.util.spec_from_file_location(
+    "test_scratch_directory_whose_earlier_killed_runs_leftovers_are_removed_first_common",
+    REPO_ROOT / "nc-systems" / "general-tools"
+    / "test-scratch-directory-whose-earlier-killed-runs-leftovers-are-removed-first-common.py")
+_scratch_directory_common = importlib.util.module_from_spec(_scratch_directory_common_spec)
+_scratch_directory_common_spec.loader.exec_module(_scratch_directory_common)
+SCRATCH_ROOT = _scratch_directory_common.make_test_scratch_directory_after_removing_killed_runs_leftovers(
+    "cold-read-grid-test-")
+
+
+def stopped_by_sigterm(*_):
+    raise SystemExit(1)  # So the finally below removes SCRATCH_ROOT.
+
+
+signal.signal(signal.SIGTERM, stopped_by_sigterm)
+try:
+    scratch = SCRATCH_ROOT
     stubs = scratch / "stub-bin"
 
     # --- The check that could not run ---------------------------------------
@@ -515,7 +550,7 @@ with tempfile.TemporaryDirectory() as scratch:
           not_checked_lines != [],
           f"stdout was {result.stdout!r}")
     check("the lifted line keeps the words that distinguish it from a clean run",
-          any(cell_common.STRAY_WRITE_CHECK_SKIPPED_IS_NOT_A_CLEAN_RESULT_PHRASE in line
+          any(cell_common.COLD_READ_CELL_STRAY_WRITE_CHECK_SKIPPED_IS_NOT_A_CLEAN_RESULT_PHRASE in line
               for line in not_checked_lines),
           f"lifted lines were {not_checked_lines!r}")
     check("every cell that could not be checked is named, the Question 4 cell's included",
@@ -728,7 +763,7 @@ with tempfile.TemporaryDirectory() as scratch:
           repr(unchecked_lines))
     check("the not-checked line says the missing check is not a clean result, in cell-common's words",
           unchecked_lines != []
-          and all(cell_common.STRAY_WRITE_CHECK_SKIPPED_IS_NOT_A_CLEAN_RESULT_PHRASE in line for line in unchecked_lines),
+          and all(cell_common.COLD_READ_CELL_STRAY_WRITE_CHECK_SKIPPED_IS_NOT_A_CLEAN_RESULT_PHRASE in line for line in unchecked_lines),
           repr(unchecked_lines))
 
     # --- A frozen copy that moves while reviewers have written but not exited
@@ -805,9 +840,9 @@ with tempfile.TemporaryDirectory() as scratch:
 
     # --- Every failure case below, in the design's terms ---------------------
     # nc-systems/cold-read/cold-read-grid-cell-failure-handling-design.md, section
-    # 8. The real limit texts (section 4) are the fixtures: line 2 of the two
+    # 8. The real limit texts (section 4) are the fixtures: the lines of the
     # kept logs it cites, and the 2026-09-18 logged-out capture on ned-box.
-    SESSION_LIMIT_LINE = "You've hit your session limit · resets 8:50pm (America/Los_Angeles)"
+    WEEKLY_LIMIT_LINE = "You've hit your weekly limit · resets Nov 7, 3am (America/Los_Angeles)"
     MODEL_LIMIT_LINE = ("You've reached your {family} limit. Switch to another model, or "
                         "manage usage credits at claude.ai/settings/usage?from=cc_cli_limit_message, "
                         "to continue.")
@@ -915,30 +950,30 @@ with tempfile.TemporaryDirectory() as scratch:
     # The 2026-09-10 outage, eight records of three unrelated FAILED lines.
     repository = build_scratch_repository(scratch, "checkout-claude-down")
     result = run_grid(repository, stubs, {"COLD_READ_GRID_TEST_STUB_FAILURE_PLAN": json.dumps(
-        [{"fragment": "claude-", "attempts": 2, "stdout": SESSION_LIMIT_LINE}])})
+        [{"fragment": "claude-", "attempts": 2, "stdout": WEEKLY_LIMIT_LINE}])})
     down_lines = lines_opening(result, "AGENT-BINARY DOWN:")
     check("one AGENT-BINARY DOWN line, naming claude, the class and the reset text",
-          down_lines == ["AGENT-BINARY DOWN: claude — account-limit — resets 8:50pm "
-                         "(America/Los_Angeles); 3 reports absent"],
+          down_lines == ["AGENT-BINARY DOWN: claude — account-limit — weekly limit · resets "
+                         "Nov 7, 3am (America/Los_Angeles); 3 reports absent"],
           f"down lines were {down_lines!r}; stdout={result.stdout!r}")
     failed_lines = lines_opening(result, "FAILED")
     check("an account limit is not retried: no RETRYING line, three FAILED lines naming it",
           lines_opening(result, "RETRYING:") == [] and len(failed_lines) == 3
-          and all("account-limit — resets 8:50pm (America/Los_Angeles)" in line
+          and all("account-limit — weekly limit · resets Nov 7, 3am (America/Los_Angeles)" in line
                   for line in failed_lines),
           repr(result.stdout))
     check("the first FAILED line alone tells the user, naming the attempt's log",
           [line for line in failed_lines if "Tell the user:" in line] == failed_lines[:1]
           and failed_lines[0].endswith(".md.stderr.log).")
-          and ". Tell the user: claude account-limit — resets 8:50pm (America/Los_Angeles) (log: "
+          and ". Tell the user: claude account-limit — weekly limit · resets Nov 7, 3am (America/Los_Angeles) (log: "
           in failed_lines[0], repr(failed_lines))
     check("the closing text restates the down line without the prefix, once",
-          result.stdout.count("- claude is down: account-limit — resets 8:50pm "
-                              "(America/Los_Angeles); 3 reports absent") == 1
+          result.stdout.count("- claude is down: account-limit — weekly limit · resets "
+                              "Nov 7, 3am (America/Los_Angeles); 3 reports absent") == 1
           and result.stdout.count("AGENT-BINARY DOWN:") == 1, repr(result.stdout))
     check("the closing text ends by telling the user the cause, with the log to check",
           result.stdout.rstrip().splitlines()[-1].startswith(
-              "Tell the user: claude account-limit — resets 8:50pm (America/Los_Angeles) (log: ")
+              "Tell the user: claude account-limit — weekly limit · resets Nov 7, 3am (America/Los_Angeles) (log: ")
           and result.stdout.rstrip().endswith(".md.stderr.log)."),
           repr(result.stdout.rstrip().splitlines()[-1]))
     check("four land, the some-landed text, exit 1",
@@ -946,26 +981,17 @@ with tempfile.TemporaryDirectory() as scratch:
           and "4 of 7 reports landed in" in result.stdout,
           f"exit {result.returncode}; stdout={result.stdout!r}")
 
-    # --- The account limit printed bare: an empty detail still names the class
-    # The agent-binary printed "You've hit your session limit" with nothing after
-    # it, so the cell's cause line ends `account-limit — ` and the grid's
-    # strip() took the separator's trailing space with it; partitioning on
-    # the full separator then found none, and the class "account-limit —"
-    # matched no class the grid knows, losing the AGENT-BINARY DOWN line and
-    # the Tell-the-user sentence. Found by the same review as the marker
-    # case above:
-    # https://github.com/nedschorus/nedschorus/pull/508#pullrequestreview-5252230189
+    # --- The account limit printed bare: the limit's own words are the detail
     repository = build_scratch_repository(scratch, "checkout-claude-down-bare-limit")
     result = run_grid(repository, stubs, {"COLD_READ_GRID_TEST_STUB_FAILURE_PLAN": json.dumps(
-        [{"fragment": "claude-", "attempts": 2, "stdout": "You've hit your session limit"}])})
+        [{"fragment": "claude-", "attempts": 2, "stdout": "You've hit your weekly limit"}])})
     down_lines = lines_opening(result, "AGENT-BINARY DOWN:")
-    check("a bare limit text is still one AGENT-BINARY DOWN line naming account-limit",
-          len(down_lines) == 1 and result.stdout.count("AGENT-BINARY DOWN:") == 1
-          and down_lines[0].startswith("AGENT-BINARY DOWN: claude — account-limit — ")
-          and down_lines[0].endswith("; 3 reports absent"),
+    check("a bare limit text is one AGENT-BINARY DOWN line naming account-limit and the limit",
+          down_lines == ["AGENT-BINARY DOWN: claude — account-limit — weekly limit; 3 reports absent"],
           f"down lines were {down_lines!r}; stdout={result.stdout!r}")
-    check("the user is still told the bare cause",
-          "Tell the user: claude account-limit — " in result.stdout, repr(result.stdout))
+    check("the user is told the bare cause",
+          "Tell the user: claude account-limit — weekly limit (log: " in result.stdout,
+          repr(result.stdout))
 
     # --- Two Claude cells hit the account limit after the third landed -------
     # The rule as the user revised it at item 3 of the design's walk
@@ -976,12 +1002,12 @@ with tempfile.TemporaryDirectory() as scratch:
     repository = build_scratch_repository(scratch, "checkout-claude-down-after-one-landed")
     result = run_grid(repository, stubs, {"COLD_READ_GRID_TEST_STUB_FAILURE_PLAN": json.dumps(
         [{"fragment": "claude-hunt-second-strongest-model.md", "attempts": 0},
-         {"fragment": "claude-", "attempts": 2, "stdout": SESSION_LIMIT_LINE}])})
+         {"fragment": "claude-", "attempts": 2, "stdout": WEEKLY_LIMIT_LINE}])})
     check("one landed Claude cell and two absent with the account limit is still claude down",
           lines_opening(result, "AGENT-BINARY DOWN:")
-          == ["AGENT-BINARY DOWN: claude — account-limit — resets 8:50pm "
-              "(America/Los_Angeles); 2 reports absent"]
-          and "- claude is down: account-limit — resets 8:50pm (America/Los_Angeles); 2 reports absent"
+          == ["AGENT-BINARY DOWN: claude — account-limit — weekly limit · resets "
+              "Nov 7, 3am (America/Los_Angeles); 2 reports absent"]
+          and "- claude is down: account-limit — weekly limit · resets Nov 7, 3am (America/Los_Angeles); 2 reports absent"
           in result.stdout
           and result.returncode == 1 and len(reviews_saved_lines(result)) == 5,
           f"exit {result.returncode}; stdout={result.stdout!r}")
@@ -1009,7 +1035,7 @@ with tempfile.TemporaryDirectory() as scratch:
     repository = build_scratch_repository(scratch, "checkout-mixed-causes")
     result = run_grid(repository, stubs, {"COLD_READ_GRID_TEST_STUB_FAILURE_PLAN": json.dumps(
         [{"fragment": "claude-hunt-second-strongest-model.md", "attempts": 2},
-         {"fragment": "claude-", "attempts": 2, "stdout": SESSION_LIMIT_LINE}])})
+         {"fragment": "claude-", "attempts": 2, "stdout": WEEKLY_LIMIT_LINE}])})
     retrying_lines = lines_opening(result, "RETRYING:")
     check("only the exit-1 cell is retried",
           len(retrying_lines) == 1
@@ -1213,7 +1239,7 @@ with tempfile.TemporaryDirectory() as scratch:
     # line: the cause changes what is reported, never what is decided.
     repository = build_scratch_repository(scratch, "checkout-codex-quotes-limit")
     result = run_grid(repository, stubs, {"COLD_READ_GRID_TEST_STUB_FAILURE_PLAN": json.dumps(
-        [{"fragment": "codex-terminology-deep.md", "attempts": 2, "stdout": SESSION_LIMIT_LINE}])})
+        [{"fragment": "codex-terminology-deep.md", "attempts": 2, "stdout": WEEKLY_LIMIT_LINE}])})
     repository_plain = build_scratch_repository(scratch, "checkout-codex-plain-failure")
     result_plain = run_grid(repository_plain, stubs, {"COLD_READ_GRID_TEST_STUB_FAILURE_PLAN": json.dumps(
         [{"fragment": "codex-terminology-deep.md", "attempts": 2}])})
@@ -1231,7 +1257,7 @@ with tempfile.TemporaryDirectory() as scratch:
           f"{decisions(result.stdout)} vs {decisions(result_plain.stdout)}")
 
     # --- The terminology cells run at the effort the grid pins ---------------
-    # max on both runtimes (user-ruled 2026-09-05, measured on the final
+    # max on both agent-binaries (user-ruled 2026-09-05, measured on the final
     # prompt: opus-max 20/15/28 flags on three targets, sol-max 44/41/49).
     # The grid passes it explicitly; the defect-hunt cells carry no override
     # and run at their launchers' own pins, which this case does not restate.
@@ -1291,7 +1317,7 @@ with tempfile.TemporaryDirectory() as scratch:
     # The 2026-09-02 false positive (nedschorus#244): the Codex CLI copies the
     # model's text onto stderr, the cell re-emits that stderr into the log the
     # grid reads, and a reviewed document that quoted a comment containing
-    # "fell back to" made two cells read as fallen back. Here every runtime
+    # "fell back to" made two cells read as fallen back. Here every agent-binary
     # echoes a passage carrying all four lifted phrases mid-line, and nothing
     # is lifted. This case used to carry its own positive control, one cell
     # that really fell back; since the 2026-09-04 ruling no pinned chain has
@@ -1434,7 +1460,7 @@ with tempfile.TemporaryDirectory() as scratch:
     # its FAILED line nor the closing text tells the user: nothing waits on it.
     repository = build_scratch_repository(scratch, "checkout-question-4-account-limit")
     result = run_grid(repository, stubs, {"COLD_READ_GRID_TEST_STUB_FAILURE_PLAN": json.dumps(
-        [{"fragment": QUESTION_4_REPORT_NAME, "attempts": 2, "stdout": SESSION_LIMIT_LINE}])})
+        [{"fragment": QUESTION_4_REPORT_NAME, "attempts": 2, "stdout": WEEKLY_LIMIT_LINE}])})
     record_directory = record_directory_of(repository)
     failed_lines = lines_opening(result, "FAILED")
     check("a Question 4 cell at its account limit is FAILED at once, not retried",
@@ -1448,8 +1474,8 @@ with tempfile.TemporaryDirectory() as scratch:
           and markers_in(record_directory, "<!-- INCOMPLETE SET:") == [],
           f"exit {result.returncode}; stdout={result.stdout!r}")
     check("the closing text gives the account limit as why Question 4 was not answered",
-          "Question 4, What should be code, was not answered: account-limit — resets 8:50pm "
-          f"(America/Los_Angeles) (log: " in result.stdout
+          "Question 4, What should be code, was not answered: account-limit — weekly limit · resets "
+          f"Nov 7, 3am (America/Los_Angeles) (log: " in result.stdout
           and f"{QUESTION_4_REPORT_NAME}.stderr.log). The other reports do not depend on it: "
           "go on without its answer." in result.stdout, repr(result.stdout))
 
@@ -1580,6 +1606,25 @@ with tempfile.TemporaryDirectory() as scratch:
             grid_module.cell_common.stop_process_tree(attempt.process, grace_seconds=0.1)
     check("stopping a cell reaps its launcher", attempt.process.returncode is not None)
 
+    # An interrupted grid exits while its cells keep writing the record: each cell holds the record's
+    # being-written lock too, so the record is not shipped until the last cell has exited.
+    lock_record = scratch / "cell-holds-lock-record"
+    lock_record.mkdir()
+    grid_module.record_shipper.record_directory_being_written_lock_take(lock_record)
+    attempt = grid_module.start_attempt(
+        [sys.executable, "-c", "import time; time.sleep(120)"],
+        lock_record / "report.md", 1, lock_record / "cell.stderr.log")
+    try:
+        grid_module.record_shipper.record_directory_being_written_lock_release(lock_record)
+        check("a cell still running holds its record's being-written lock after the grid releases it",
+              attempt.process is not None
+              and grid_module.record_shipper.record_directory_being_written_lock_is_held_by_any_process(lock_record))
+    finally:
+        if attempt.process is not None:
+            grid_module.cell_common.stop_process_tree(attempt.process, grace_seconds=0.1)
+    check("once the cell has exited, the record is no longer being written",
+          not grid_module.record_shipper.record_directory_being_written_lock_is_held_by_any_process(lock_record))
+
     for result in (0, subprocess.TimeoutExpired("cell", 5.0)):
         with mock.patch.object(grid_module.cell_common.os, "killpg") as killed:
             process = mock.Mock(pid=12345)
@@ -1606,7 +1651,7 @@ with tempfile.TemporaryDirectory() as scratch:
     reference_directory.mkdir()
     reference_target = reference_directory / "target.md"
     reference_target.write_text(
-        "See [PR 661](https://github.com/nedschorus/nedschorus/pull/661) and"
+        "See [PR 661](https://github.com/nedsnodes/nedsnodes/pull/661) and"
         " defect-hunt-prompt.md, then no-such-prompt-anywhere.md and"
         " nc-systems/cold-read/no-such-file.py.\n", encoding="utf-8")
     grid_module.reference_integrity_pre_pass(reference_target, reference_directory)
@@ -1625,7 +1670,7 @@ with tempfile.TemporaryDirectory() as scratch:
           repr(reference_lines))
     link_followed_by_path_target = reference_directory / "link-then-path.md"
     link_followed_by_path_target.write_text(
-        "[PR 661](https://github.com/nedschorus/nedschorus/pull/661)nc-systems/cold-read/"
+        "[PR 661](https://github.com/nedsnodes/nedsnodes/pull/661)nc-systems/cold-read/"
         "no-such-file-after-link.py\n", encoding="utf-8")
     grid_module.reference_integrity_pre_pass(link_followed_by_path_target, reference_directory)
     reference_lines = (reference_directory / "cold-read-reference-check.md").read_text(
@@ -1935,7 +1980,7 @@ with tempfile.TemporaryDirectory() as scratch:
     # the reviewer's review on PR "cold-read-grid: a failed cell is retried
     # once and reported with its cause, and every run closes with one
     # closing text":
-    # https://github.com/nedschorus/nedschorus/pull/508#pullrequestreview-5252230189
+    # https://github.com/nedsnodes/nedsnodes/pull/508#pullrequestreview-5252230189
     repository = build_scratch_repository(scratch, "checkout-incomplete-set-ships-marked")
     result = run_grid(repository, stubs, {"COLD_READ_GRID_TEST_STUB_FAILURE_PLAN": json.dumps(
         [{"fragment": "claude-terminology-deep.md", "attempts": 2}])})
@@ -1994,26 +2039,50 @@ with tempfile.TemporaryDirectory() as scratch:
           and frozen_target_path_in_scratch_repository(repository, record_directory).is_file())
 
     # --- A store that refuses the record: the run finishes, exits 1 ----------
-    # The store already holds this record's name with other bytes, so the
-    # add-only shipper refuses it, and the record did not reach the store.
-    # The grid names its record against the store's names too, so the store
-    # root is made unlistable (write and search only): the grid then falls
-    # back to a name free in the checkout, which the store already holds.
-    unreachable_record_name = record_directory.name
+    # The store holds this record's name with other bytes, so the add-only
+    # shipper refuses it, and the record did not reach the store. The grid
+    # claims its record's name in the store before its cells run, so each
+    # cell writes another read's report into that claimed directory first.
     repository = build_scratch_repository(scratch, "checkout-store-refuses")
-    seed_log_store_record(repository, unreachable_record_name, [])
-    store_root = repository / SCRATCH_LOG_STORE_RELATIVE
-    store_root.chmod(0o333)
-    try:
-        result = run_grid(repository, stubs)
-    finally:
-        store_root.chmod(0o755)
+    result = run_grid(repository, stubs, {
+        "COLD_READ_GRID_TEST_STUB_ANOTHER_READ_STORE_RECORDS_DIRECTORY":
+            str(repository / SCRATCH_LOG_STORE_RELATIVE)})
     record_lines = [line for line in result.stdout.splitlines() if line.startswith("record: ")]
     check("a store holding the record's name with other bytes prints record: REFUSED, "
           "the run finishes all seven, and exits 1",
           len(record_lines) == 1 and record_lines[0].startswith("record: REFUSED:")
           and result.returncode == 1 and "All seven reports landed" in result.stdout,
           f"exit {result.returncode}; {record_lines!r}; stderr={result.stderr[-400:]!r}")
+
+    # --- A shipment made while the run is still writing its record ----------
+    # The pre-remove hook ships a worktree's records whenever an
+    # agent-seat runs `git worktree remove` on it. A shipment made mid-run holds
+    # files the run then rewrites or deletes, such as a cell's .stderr.log,
+    # so the run's own shipment, and every later one, was refused. The run
+    # holds its record's being-written lock, so that shipment copies nothing.
+    repository = build_scratch_repository(scratch, "checkout-shipped-mid-run")
+    mid_run_ship_line_file = repository.parent / "checkout-shipped-mid-run-ship-line"
+    result = run_grid(repository, stubs, {
+        "COLD_READ_GRID_TEST_STUB_FAST_REPORT_NAME_FRAGMENT": "claude-hunt-deep.md",
+        "COLD_READ_GRID_TEST_STUB_SHIP_RECORD_FIRST_LINE_FILE": str(mid_run_ship_line_file)})
+    mid_run_ship_line = (mid_run_ship_line_file.read_text(encoding="utf-8")
+                         if mid_run_ship_line_file.is_file() else "")
+    record_directory = record_directory_of(repository)
+    record_lines = [line for line in result.stdout.splitlines() if line.startswith("record: ")]
+    check("a shipment made while the run writes its record is FAILED as still being written",
+          mid_run_ship_line.startswith("FAILED:") and "still being written" in mid_run_ship_line,
+          repr(mid_run_ship_line))
+    check("the run's own shipment, after a shipment tried mid-run, says shipped and exits 0",
+          len(record_lines) == 1 and record_lines[0].startswith("record: shipped:")
+          and result.returncode == 0,
+          f"exit {result.returncode}; {record_lines!r}; stderr={result.stderr[-400:]!r}")
+    store_copy = repository / SCRATCH_LOG_STORE_RELATIVE / record_directory.name
+    check("the store's copy of a record shipment was tried on mid-run is the finished record",
+          store_copy.is_dir()
+          and {path.relative_to(store_copy): path.read_bytes() for path in store_copy.rglob("*") if path.is_file()}
+          == {path.relative_to(record_directory): path.read_bytes()
+              for path in record_directory.rglob("*") if path.is_file()},
+          f"store={sorted(str(p) for p in store_copy.rglob('*'))}")
 
     # --- A changed target is still shipped: it is evidence -------------------
     repository = build_scratch_repository(scratch, "checkout-changed-still-shipped")
@@ -2200,7 +2269,7 @@ with tempfile.TemporaryDirectory() as scratch:
     link_directory = scratch / "mac-link-freeze"
     link_directory.mkdir()
     link_original = link_directory / "document.md"
-    link_original.write_text("See file:///Volumes/nedhome/agents/x/log.md now.\n", encoding="utf-8")
+    link_original.write_text("See [the log](file:///Volumes/nedhome/agents/x/log.md) now.\n", encoding="utf-8")
     link_record = link_directory / "record"
     link_record.mkdir()
     saved_mount_override = os.environ.get(mount_override)
@@ -2215,7 +2284,7 @@ with tempfile.TemporaryDirectory() as scratch:
     link_frozen = grid_module.record_names.frozen_target_path(link_original, link_record)
     check("the frozen copy holds the link as a /home/nedlern/ path",
           link_frozen.is_file()
-          and link_frozen.read_text(encoding="utf-8") == "See /home/nedlern/agents/x/log.md now.\n",
+          and link_frozen.read_text(encoding="utf-8") == "See [the log](/home/nedlern/agents/x/log.md) now.\n",
           repr(link_frozen.read_bytes() if link_frozen.is_file() else None))
     check("the document keeps its link and the digest returned is the document's",
           "file:///Volumes/nedhome/" in link_original.read_text(encoding="utf-8")
@@ -2714,6 +2783,63 @@ with tempfile.TemporaryDirectory() as scratch:
           and " of 3 for " not in result.stdout,
           f"exit {result.returncode}; stdout={result.stdout!r}; stderr={result.stderr!r}")
 
+    # Only the records whose name contains the document's file stem are
+    # opened: a record of another document is never read, so even one that
+    # cannot be read leaves the count intact.
+    repository = build_scratch_repository(scratch, "full-run-count-other-document-record-unread")
+    for day in ("2026-09-01", "2026-09-02", "2026-09-03"):
+        seed_log_store_record(repository, f"cold-read-grid-test-target-{day}", ["claude-hunt-deep.md"])
+    seed_log_store_record(repository, "some-other-document-2026-09-01", ["claude-hunt-deep.md"],
+                          frozen_relative="docs/some-other-document.md")
+    other_record = repository / SCRATCH_LOG_STORE_RELATIVE / "some-other-document-2026-09-01"
+    other_record.chmod(0o000)
+    try:
+        result = run_grid(repository, stubs / "full-run-count-other-document-record-unread")
+    finally:
+        other_record.chmod(0o755)
+    check("another document's record is not opened when counting, so a fourth run is still refused",
+          result.returncode == 2 and "refusing cold-read-full-run 4" in result.stderr,
+          f"exit {result.returncode}; stdout={result.stdout!r}; stderr={result.stderr!r}")
+
+    # The log-store on ned-box is listed over ssh with one find that prunes
+    # the other documents' records. A stand-in ssh runs that find here; where
+    # this machine's find has no -printf, the stand-in prints each path instead.
+    remote_store = scratch / "full-run-count-remote-store"
+    for name, frozen in (("cold-read-grid-test-target-2026-09-01", TARGET_RELATIVE_PATH),
+                         ("some-other-document-2026-09-01", "docs/some-other-document.md")):
+        (remote_store / name / "target" / Path(frozen).parent).mkdir(parents=True, exist_ok=True)
+        (remote_store / name / "target" / frozen).write_text("earlier run\n", encoding="utf-8")
+        (remote_store / name / "claude-hunt-deep.md").write_text("earlier run\n", encoding="utf-8")
+    (remote_store / "some-other-document-2026-09-01").chmod(0o000)
+    find_has_printf = subprocess.run(["find", str(remote_store / "cold-read-grid-test-target-2026-09-01"),
+                                      "-printf", ""], capture_output=True).returncode == 0
+    ssh_stub = stubs / "full-run-count-remote-listing-ssh"
+    ssh_stub.write_text(
+        "#!/usr/bin/env python3\nimport shlex, subprocess, sys\n"
+        "command = shlex.split(sys.argv[-1])\n"
+        f"if not {find_has_printf}:\n"
+        "    at = command.index('-printf')\n"
+        "    command[at:at + 2] = ['-print']\n"
+        "sys.exit(subprocess.run(command).returncode)\n", encoding="utf-8")
+    ssh_stub.chmod(0o755)
+    remote_listing_grid_spec = importlib.util.spec_from_file_location(
+        "cold_read_grid_remote_listing", SYSTEM_DIRECTORY / "cold-read-grid.py")
+    remote_listing_grid = importlib.util.module_from_spec(remote_listing_grid_spec)
+    remote_listing_grid_spec.loader.exec_module(remote_listing_grid)
+    remote_listing_grid.record_shipper.SSH_COMMAND = [str(ssh_stub)]
+    try:
+        remote_lines = remote_listing_grid.record_file_listing(
+            "ned-box-stand-in", str(remote_store),
+            remote_listing_grid.record_directory_name_parts({TARGET_RELATIVE_PATH}))
+    finally:
+        (remote_store / "some-other-document-2026-09-01").chmod(0o755)
+    listed = sorted(line.split("\t")[0].removeprefix(f"{remote_store}/") for line in remote_lines)
+    check("the remote listing holds the document's records and prunes another document's unread",
+          listed == ["cold-read-grid-test-target-2026-09-01/claude-hunt-deep.md",
+                     f"cold-read-grid-test-target-2026-09-01/target/{TARGET_RELATIVE_PATH}"]
+          and (not find_has_printf or all("\t" in line for line in remote_lines)),
+          repr(remote_lines))
+
     # A log-store that cannot be listed does not stop the read, as with
     # shipping, and the run says it went uncounted rather than counting zero.
     repository = build_scratch_repository(scratch, "full-run-count-store-unreadable")
@@ -2737,6 +2863,8 @@ with tempfile.TemporaryDirectory() as scratch:
     check("an unreadable git history is reported as EARLIER COLD-READ-FULL-RUNS NOT COUNTED",
           "EARLIER COLD-READ-FULL-RUNS NOT COUNTED:" in result.stdout and "git log --follow" in result.stdout,
           f"exit {result.returncode}; stdout={result.stdout!r}; stderr={result.stderr!r}")
+finally:
+    shutil.rmtree(SCRATCH_ROOT, ignore_errors=True)
 
 
 # The docstring is a reader's map of the run: its cell count must match the
