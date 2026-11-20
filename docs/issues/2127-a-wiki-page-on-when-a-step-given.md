@@ -8,7 +8,7 @@ issue: "[A wiki page on when a step given to an agent should become code and whe
 
 A new wiki page that tells an agent, when it writes or reviews a text that gives steps to a model or a person, which of those steps belong in code and which stay with the model, the split that code-prompt-code (CPC) programs are built on. The page shows before-and-after examples taken from this project, says plainly when code is the wrong answer, and is the one place the project explains the subject: other texts link to the page instead of repeating it.
 
-The page goes where `docs/nedsnodes-wiki/nedsnodes-file-naming-and-location-standards.md` puts a wiki page: `docs/nedsnodes-wiki/queue/` while it awaits the user's approval, and `docs/nedsnodes-wiki/` once he approves it. A suggested name, which a fresh subagent read correctly from the name alone, is `nedschorus-code-prompt-code-when-an-agent-step-becomes-code-or-stays-with-the-model.md`; the page's author may choose another by `docs/nedsnodes-wiki/nedsnodes-how-to-choose-a-name-for-files-code-and-glossary-terms.md`.
+The page goes where `docs/nedsnodes-wiki/nedsnodes-file-naming-and-location-standards.md` puts a wiki page: `docs/nedsnodes-wiki/queue/` while it awaits the user's approval, and `docs/nedsnodes-wiki/` once he approves it. A suggested name, which a fresh subagent read correctly from the name alone, is `nedsnodes-code-prompt-code-when-an-agent-step-becomes-code-or-stays-with-the-model.md`; the page's author may choose another by `docs/nedsnodes-wiki/nedsnodes-how-to-choose-a-name-for-files-code-and-glossary-terms.md`.
 
 ## Why
 
