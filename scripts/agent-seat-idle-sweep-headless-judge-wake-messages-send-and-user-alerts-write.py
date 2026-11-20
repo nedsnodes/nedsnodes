@@ -996,7 +996,7 @@ class Sweep:
                 if call["time"] and parse_time(call["time"]) > since],
             open_tasks_with_prerequisites_or_blocked_by=(
                 verdicts_print.open_tasks_with_prerequisites_or_blocked_by(
-                    self.paths.tasks_root / f"nedschorus-{seat}-tasks")))
+                    self.paths.tasks_root / f"nedsnodes-{seat}-tasks")))
         prompt = RECHECK_JUDGE_PROMPT.format(
             seat=seat, nudge_time=parse_time(wait[NUDGE]).strftime("%Y-%m-%d %H:%MZ"),
             since=since.strftime("%Y-%m-%d %H:%MZ"),
