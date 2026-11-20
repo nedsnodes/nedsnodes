@@ -4,7 +4,7 @@ This page holds the project's goals and philosophy: the user's founding statemen
 
 ## The founding statement
 
-The user gave merge-lane-2 a statement of the project's philosophy on 2026-11-03 at about 21:20Z; S1 quotes it whole. Principles 1 to 5 state what it asks of an agent. The founding statement is the parent of the project's objective page, [nedschorus-ai-native-software-development-objective.md](../nedschorus-ai-native-software-development-objective.md).
+The user gave merge-lane-2 a statement of the project's philosophy on 2026-11-03 at about 21:20Z; S1 quotes it whole. Principles 1 to 5 state what it asks of an agent. The founding statement is the parent of the project's objective page, [nedsnodes-ai-native-software-development-objective.md](../nedsnodes-ai-native-software-development-objective.md).
 
 ## What the statement asks of an agent
 
