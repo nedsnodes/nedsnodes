@@ -22,20 +22,28 @@ import sys
 import time
 from pathlib import Path
 
-_shell_reader_spec = importlib.util.spec_from_file_location(
-    "shell_command_tree_sitter_bash_reader_common",
-    Path(__file__).resolve().parents[2] / "nc-systems" / "general-tools"
-    / "shell-command-tree-sitter-bash-reader-common.py")
-shell_reader = importlib.util.module_from_spec(_shell_reader_spec)
-_shell_reader_spec.loader.exec_module(shell_reader)
-is_program = shell_reader.is_program
+_crash_notice_spec = importlib.util.spec_from_file_location(
+    "guard_hook_crash_fail_open_with_notice_common",
+    Path(__file__).resolve().parent / "guard-hook-crash-fail-open-with-notice-common.py")
+_crash_notice = importlib.util.module_from_spec(_crash_notice_spec)
+_crash_notice_spec.loader.exec_module(_crash_notice)
 
-_rebase_or_replace_spec = importlib.util.spec_from_file_location(
-    "pull_request_conflict_with_main_rebase_or_replace_answer_common",
-    Path(__file__).resolve().parents[2] / "nc-systems" / "general-tools"
-    / "pull-request-conflict-with-main-rebase-or-replace-answer-common.py")
-rebase_or_replace = importlib.util.module_from_spec(_rebase_or_replace_spec)
-_rebase_or_replace_spec.loader.exec_module(rebase_or_replace)
+with _crash_notice.guard_hook_crash_fail_open_with_notice_context_manager(
+        __file__, __name__ == "__main__"):
+    _shell_reader_spec = importlib.util.spec_from_file_location(
+        "shell_command_tree_sitter_bash_reader_common",
+        Path(__file__).resolve().parents[2] / "nc-systems" / "general-tools"
+        / "shell-command-tree-sitter-bash-reader-common.py")
+    shell_reader = importlib.util.module_from_spec(_shell_reader_spec)
+    _shell_reader_spec.loader.exec_module(shell_reader)
+
+    _rebase_or_replace_spec = importlib.util.spec_from_file_location(
+        "pull_request_conflict_with_main_rebase_or_replace_answer_common",
+        Path(__file__).resolve().parents[2] / "nc-systems" / "general-tools"
+        / "pull-request-conflict-with-main-rebase-or-replace-answer-common.py")
+    rebase_or_replace = importlib.util.module_from_spec(_rebase_or_replace_spec)
+    _rebase_or_replace_spec.loader.exec_module(rebase_or_replace)
+is_program = shell_reader.is_program
 
 # Stay below the hook timeout: overrunning it fails open silently.
 # Cap individual probes so one slow answer cannot consume the whole budget.
@@ -64,7 +72,7 @@ WRAPPER_DIRECTORY_OPTIONS = {("env", "-C"), ("env", "--chdir"), ("sudo", "-D"), 
 UNEXPANDED_PATTERN = re.compile(r"[$`*?]|\{\}")
 
 DENY_REASON_TEMPLATE = (
-    "Refused: branch {branch} has an open pull request, \"{title}\" ({url}). "
+    "[rule bash-guard-git-push-force] Refused: branch {branch} has an open pull request, \"{title}\" ({url}). "
     "A force push would replace the commits under review.\n"
     "If you are force-pushing to restore what an earlier force push replaced, "
     "stop: leave the branch as it is and message merge-lane-2 with SendMessage "
@@ -80,7 +88,7 @@ DENY_REASON_TEMPLATE = (
 )
 
 UNRESOLVED_REASON_TEMPLATE = (
-    "Refused: this guard cannot read {word}, so it cannot check whether the "
+    "[rule bash-guard-git-push-force] Refused: this guard cannot read {word}, so it cannot check whether the "
     "branch has an open pull request.\n"
     "Run the push again with the checkout path and the branch name written "
     "out, so this guard can check it: git -C <checkout path> push --force "
@@ -466,10 +474,7 @@ PARSER_UNAVAILABLE_NEXT_STEP_LINES = (
 
 
 def main(stdin=sys.stdin, runner=subprocess.run, clock=time.monotonic):
-    try:
-        payload = json.load(stdin)
-    except (json.JSONDecodeError, ValueError):
-        return 0
+    payload = json.load(stdin)
     if payload.get("tool_name") != "Bash":
         return 0
     command = (payload.get("tool_input") or {}).get("command") or ""
@@ -491,4 +496,5 @@ def main(stdin=sys.stdin, runner=subprocess.run, clock=time.monotonic):
 
 
 if __name__ == "__main__":
-    sys.exit(main())
+    with _crash_notice.guard_hook_crash_fail_open_with_notice_context_manager(__file__, True):
+        sys.exit(main())

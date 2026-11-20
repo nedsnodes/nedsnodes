@@ -591,7 +591,7 @@ finally:
 APPROVED_NOT_ABOUT_ISSUES_MESSAGE = (
     "Not a question about GitHub issues: ghi-guide-agent reports which issues relate to a subject.\n"
     'Ask again as: scripts/ghi-guide-agent-ask.py "Which issues cover <your subject>?"\n'
-    'If that is refused too, search yourself: gh issue list --repo nedschorus/nedschorus '
+    'If that is refused too, search yourself: gh issue list --repo nedsnodes/nedsnodes '
     '--state all --search "<terms>"\n')
 ESCALATE_SENTENCE = ("the 2026-09-19 body ruling in #46 may not hold after "
                      "the 2026-09-29 ruling in #783")
@@ -698,7 +698,9 @@ try:
     check("any other reply has no caller message",
           ghi_ask.caller_message_for_passthrough_reply("read #1, #2") is None
           and ghi_ask.caller_message_for_passthrough_reply(
-              "Out-of-scope reasons are listed in #5") is None)
+              "Out-of-scope reasons are listed in #5") is None
+          and ghi_ask.caller_message_for_passthrough_reply(
+              "Not-about-issues reasons are listed in #5") is None)
     check("the two bare replies are still recognized case-insensitively",
           ghi_ask.caller_message_for_passthrough_reply("NOT-ABOUT-ISSUES")[1] == 2
           and ghi_ask.caller_message_for_passthrough_reply("Ask-User-About-Ruling: x")[1] == 3

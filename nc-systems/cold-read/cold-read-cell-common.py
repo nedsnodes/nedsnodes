@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Shared cold-read-cell execution; launchers supply runtime-specific invocations."""
+"""Shared cold-read-cell execution; launchers supply agent-binary-specific invocations."""
 
 from __future__ import annotations
 
@@ -47,7 +47,7 @@ TIER_CHOICES = ["deep", "second-strongest-model", "fast"]
 PROMPT_FILE_CELL_LABEL_PATTERN = re.compile(r"^[a-z0-9]+(-[a-z0-9]+)*$")
 
 
-# EX_USAGE distinguishes launcher refusals from runtime command-line errors (Codex exits 2).
+# EX_USAGE distinguishes launcher refusals from agent-binary command-line errors (Codex exits 2).
 EXIT_BAD_INVOCATION = 64
 
 
@@ -118,7 +118,7 @@ def codex_credential_denying_permission_profile_arguments(
 
 
 class BadInvocationArgumentParser(argparse.ArgumentParser):
-    """Use the launcher refusal code to distinguish argparse errors from runtime errors."""
+    """Use the launcher refusal code to distinguish argparse errors from agent-binary errors."""
 
     def error(self, message):
         self.print_usage(sys.stderr)
@@ -127,6 +127,7 @@ class BadInvocationArgumentParser(argparse.ArgumentParser):
 
 def build_argument_parser(
     description: str, model_help: str, tier_choices=tuple(TIER_CHOICES),
+    cold_read_cell_launcher_own_command_line_options_adder=None,
 ) -> argparse.ArgumentParser:
     parser = BadInvocationArgumentParser(
         description=description, formatter_class=argparse.RawDescriptionHelpFormatter
@@ -180,6 +181,8 @@ def build_argument_parser(
              "exited 64 because the only template a cell would read was the "
              "one under prompts/. The stamp records the file's path.",
     )
+    if cold_read_cell_launcher_own_command_line_options_adder:
+        cold_read_cell_launcher_own_command_line_options_adder(parser)
     return parser
 
 
@@ -311,7 +314,7 @@ LEADING_TRACING_LOGGER_TIMESTAMP = re.compile(
 
 
 class RecognisedFailureText(typing.NamedTuple):
-    """A runtime failure prefix, cause class, rule for extracting the detail, and an
+    """An agent-binary failure prefix, cause class, rule for extracting the detail, and an
     optional pattern the rest of the line after the prefix must start with."""
 
     cause_class: str
@@ -360,7 +363,7 @@ def cause_line(program: str, cause_class: str, detail: str) -> str:
 
 
 STRAY_WRITE_CHECK_SKIPPED_PHRASE = "stray writes were not checked for this run"
-STRAY_WRITE_CHECK_SKIPPED_IS_NOT_A_CLEAN_RESULT_PHRASE = "a failure to look, not a clean result"
+COLD_READ_CELL_STRAY_WRITE_CHECK_SKIPPED_IS_NOT_A_CLEAN_RESULT_PHRASE = "a failure to look, not a clean result"
 STRAY_WRITE_PHRASE = "files outside its report changed while it ran"
 FELL_BACK_PHRASE = "fell back to"
 
@@ -424,11 +427,11 @@ NEAR_MISS_RECOVERY_PHRASE = "recovered a near-miss report"
 STDOUT_RECOVERY_PHRASE = "recovered the report from the model's chat output"
 
 
-def recover_report_from_runtime_stdout(
-    program: str, report: pathlib.Path, runtime_stdout: str, decide_body,
+def recover_report_from_agent_binary_stdout(
+    program: str, report: pathlib.Path, agent_binary_stdout: str, decide_body,
 ) -> bool:
     """Write and announce a report recovered from stdout under the launcher's rule."""
-    body = decide_body(runtime_stdout or "")
+    body = decide_body(agent_binary_stdout or "")
     if not body:
         return False
     report.parent.mkdir(parents=True, exist_ok=True)
@@ -527,10 +530,10 @@ def verify_report(program: str, report: pathlib.Path) -> None:
 TOKENS_USED_PATTERN = re.compile(r"tokens used[:\s]+([\d,]+)", re.IGNORECASE)
 
 
-def parse_tokens_used(runtime_output: str) -> str:
+def parse_tokens_used(agent_binary_output: str) -> str:
     """Return the last reported token total, or an empty string if none was reported."""
     # The last count is the total; absence must not be recorded as a zero cost.
-    matches = TOKENS_USED_PATTERN.findall(runtime_output or "")
+    matches = TOKENS_USED_PATTERN.findall(agent_binary_output or "")
     return matches[-1].replace(",", "") if matches else ""
 
 
@@ -827,7 +830,7 @@ def run_model_chain(
         # The reviewer program holds the record's being-written lock too, so a cell killed while its
         # reviewer still writes the report leaves the record unshipped until the reviewer exits.
         pass_fds = record_names.record_directory_being_written_lock_pass_fds_for_child_writers(report.parent)
-        # Both streams carry failure diagnostics; stderr also carries the runtime's token total.
+        # Both streams carry failure diagnostics; stderr also carries the agent-binary's token total.
         try:
             if per_model_run_timeout_seconds is None:
                 completed = subprocess.run(
@@ -887,7 +890,7 @@ def run_model_chain(
             recover_near_miss_report(program, report, attempt_started_at)
         # Prefer the report file over stdout, including a file recovered from the wrong directory.
         if not report.is_file() and recover_report_from_stdout is not None:
-            recover_report_from_runtime_stdout(
+            recover_report_from_agent_binary_stdout(
                 program, report, completed.stdout, recover_report_from_stdout)
         try:
             verify_report(program, report)
@@ -965,11 +968,16 @@ def run_cell(
     stage_report_outside_checkout: bool = False, child_environment=None,
     per_model_run_timeout_seconds=None, parse_agent_binary_final_result_from_stdout_line=None,
     report_wait_after_result_line_seconds: float = 0.0,
+    cold_read_cell_launcher_own_command_line_options_adder=None,
 ) -> int:
+    """cold_read_cell_launcher_own_command_line_options_adder, when given, adds
+    one launcher's own options to the parser, and invocation_builder then also
+    gets the parsed arguments as parsed_arguments=."""
     # Include failed attempts in the cell's total cost.
     cell_started_at = time.time()
     parser = build_argument_parser(
-        description, model_help, tier_choices=tuple(tier_to_model_chain))
+        description, model_help, tier_choices=tuple(tier_to_model_chain),
+        cold_read_cell_launcher_own_command_line_options_adder=cold_read_cell_launcher_own_command_line_options_adder)
     args = parser.parse_args()
 
     # Snapshot before execution so pre-existing edits are not reported as changes from this run.
@@ -1015,8 +1023,12 @@ def run_cell(
     # An explicit model must not silently fall back to a different model.
     chain = (args.model,) if args.model else tier_to_model_chain[args.tier]
     effort = args.effort or tier_to_effort[args.tier]
-    build_invocation = (invocation_builder(effort, staging_directory)
-                        if stage_report_outside_checkout else invocation_builder(effort))
+    launcher_own_option_arguments = (
+        {"parsed_arguments": args}
+        if cold_read_cell_launcher_own_command_line_options_adder else {})
+    build_invocation = (invocation_builder(effort, staging_directory, **launcher_own_option_arguments)
+                        if stage_report_outside_checkout
+                        else invocation_builder(effort, **launcher_own_option_arguments))
 
     try:
         exit_code = run_model_chain(
@@ -1056,17 +1068,17 @@ def move_staged_report(program: str, staged: pathlib.Path, report: pathlib.Path)
 
 def report_stray_writes(program: str, baseline, own_report_path=None) -> None:
     """Report changes outside the requested report without raising."""
-    # Check every runtime and every exit path: a failed reviewer may still have edited the target.
+    # Check every agent-binary and every exit path: a failed reviewer may still have edited the target.
     if baseline is None:
         print(f"{program}: {STRAY_WRITE_CHECK_SKIPPED_PHRASE} — no pre-run "
               f"snapshot of the working tree was taken. This is "
-              f"{STRAY_WRITE_CHECK_SKIPPED_IS_NOT_A_CLEAN_RESULT_PHRASE}.", file=sys.stderr)
+              f"{COLD_READ_CELL_STRAY_WRITE_CHECK_SKIPPED_IS_NOT_A_CLEAN_RESULT_PHRASE}.", file=sys.stderr)
         return
     try:
         stray = stray_writes_since(baseline, own_report_path)
     except WriteDetectorUnavailable as error:
         print(f"{program}: {STRAY_WRITE_CHECK_SKIPPED_PHRASE} — git status "
-              f"failed ({error}). This is {STRAY_WRITE_CHECK_SKIPPED_IS_NOT_A_CLEAN_RESULT_PHRASE}.",
+              f"failed ({error}). This is {COLD_READ_CELL_STRAY_WRITE_CHECK_SKIPPED_IS_NOT_A_CLEAN_RESULT_PHRASE}.",
               file=sys.stderr)
         return
     if stray:
