@@ -307,6 +307,8 @@ USER_CLEARABLE_CAUSE_CLASSES = frozenset(
     {"logged-out", "agent-binary-missing", "account-limit", "model-limit"})
 CAUSE_DETAIL_MAX_CHARACTERS = 120
 UNRECOGNISED_FAILURE_TEXT_CAUSE_CLASS = "unrecognised-failure-text"
+# Retried, unlike the user-clearable classes, but its line may be a usage limit only the user can judge.
+TOLD_TO_THE_USER_CAUSE_CLASSES = USER_CLEARABLE_CAUSE_CLASSES | {UNRECOGNISED_FAILURE_TEXT_CAUSE_CLASS}
 # Drop per-attempt timestamps from details that the grid reports for an entire agent-binary.
 DETAIL_IS_REST_OF_LINE = "rest-of-line"
 DETAIL_IS_WHOLE_LINE = "whole-line"
@@ -826,6 +828,8 @@ def run_model_chain(
     # parse_agent_binary_final_result_from_stdout_line takes effect only with per_model_run_timeout_seconds.
     # build_invocation must apply the same per-model effort mapping used by the stamp.
     failed_attempts: list[str] = []
+    # The cell's log is deleted when a later model's report lands, so the fell-back line must quote these.
+    unrecognised_failure_lines_of_failed_models: list[str] = []
     produced_by = ""
     produced_tokens = ""
     for model in chain:
@@ -905,6 +909,7 @@ def run_model_chain(
                       f"\"{detail}\"\n"
                       "If that line reports a usage limit, tell the user, quoting it, so a "
                       "recognised failure text can be added for it.", file=sys.stderr)
+                unrecognised_failure_lines_of_failed_models.append(f"{model} printed \"{detail}\"")
             print(cause_line(program, cause_class, detail), file=sys.stderr)
             continue
         # Recover only after exit 0; a failed model's leftover file is not an accepted review.
@@ -948,7 +953,10 @@ def run_model_chain(
         print(
             f"{program}: {FELL_BACK_PHRASE} {produced_by} after "
             + ", ".join(failed_attempts)
-            + ". The report's provenance stamp records this.",
+            + ". The report's provenance stamp records this."
+            + (" Tell the user: " + "; ".join(unrecognised_failure_lines_of_failed_models)
+               + ", which may be a usage limit in a wording the cell does not recognise."
+               if unrecognised_failure_lines_of_failed_models else ""),
             file=sys.stderr,
         )
 

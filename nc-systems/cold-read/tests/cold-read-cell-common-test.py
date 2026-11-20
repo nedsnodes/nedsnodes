@@ -1069,6 +1069,61 @@ with tempfile.TemporaryDirectory() as scratch:
           f"in a wording the cell does not recognise: \"{UNRECOGNISED_LIMIT_LINE}\"" in result.stderr
           and "\nIf that line reports a usage limit, tell the user, quoting it," in result.stderr,
           repr(result.stderr))
+    check("a cell that fails on the unrecognised line prints no fell-back line",
+          "fell back to" not in result.stderr, repr(result.stderr))
+    shutil.rmtree(repository)
+    # No pinned tier has a second model, so the scratch copy's chain is given one:
+    # when the later model's report lands the grid deletes the log, and the
+    # fell-back line, which the grid prints as FELL BACK:, is all that is left.
+    repository = build_scratch_repository(scratch)
+    scratch_claude_cell = repository / "nc-systems" / "cold-read" / "cold-read-claude-cell.py"
+    one_model_chain = '"second-strongest-model": ("claude-fable-5-1",),'
+    claude_cell_text = scratch_claude_cell.read_text(encoding="utf-8")
+    check("the scratch copy's second-strongest-model chain is the one this case widens",
+          claude_cell_text.count(one_model_chain) == 1, one_model_chain)
+    scratch_claude_cell.write_text(claude_cell_text.replace(
+        one_model_chain, '"second-strongest-model": ("claude-fable-5-1", "claude-opus-5-5"),'),
+        encoding="utf-8")
+    report = repository / "cold-read-records" / "run-cause-unrecognised-fell-back" / "claude-defect-hunt-second-strongest-model.md"
+    result = run_claude_cell(
+        repository, stubs,
+        {"claude-fable-5-1": {"exit": 1, "stdout": UNRECOGNISED_LIMIT_LINE + "\n"},
+         "claude-opus-5-5": {"report": "STUB REVIEW: the later model's findings\n"}},
+        report, "--tier", "second-strongest-model",
+    )
+    fell_back_lines = [line for line in result.stderr.splitlines()
+                       if line.startswith("cold-read-claude-cell: fell back to ")]
+    check("a later model's report after an unrecognised line: the one fell-back line quotes "
+          "the line and tells the user",
+          result.returncode == 0 and report.is_file() and len(fell_back_lines) == 1
+          and fell_back_lines[0].endswith(
+              "The report's provenance stamp records this. Tell the user: claude-fable-5-1 printed "
+              f"\"{UNRECOGNISED_LIMIT_LINE}\", which may be a usage limit in a wording the cell "
+              "does not recognise."),
+          f"exit {result.returncode}; stderr={result.stderr!r}")
+    check("the provenance stamp's fallback_from names the failed attempt alone, not the line",
+          "fallback_from=claude-fable-5-1(exit1)" in report.read_text(encoding="utf-8")
+          and "allowance" not in report.read_text(encoding="utf-8").splitlines()[0],
+          report.read_text(encoding="utf-8")[:300] if report.is_file() else "no report")
+    shutil.rmtree(repository)
+    repository = build_scratch_repository(scratch)
+    report = repository / "cold-read-records" / "run-cause-b-fell-back-exit" / "claude-defect-hunt-second-strongest-model.md"
+    scratch_claude_cell = repository / "nc-systems" / "cold-read" / "cold-read-claude-cell.py"
+    scratch_claude_cell.write_text(scratch_claude_cell.read_text(encoding="utf-8").replace(
+        one_model_chain, '"second-strongest-model": ("claude-fable-5-1", "claude-opus-5-5"),'),
+        encoding="utf-8")
+    result = run_claude_cell(
+        repository, stubs,
+        {"claude-fable-5-1": {"exit": 1, "stdout": "Error: something else\n"},
+         "claude-opus-5-5": {"report": "STUB REVIEW: the later model's findings\n"}},
+        report, "--tier", "second-strongest-model",
+    )
+    check("a fell-back line after a failure with no unrecognised line tells the user nothing",
+          result.returncode == 0
+          and any(line.startswith("cold-read-claude-cell: fell back to ")
+                  and line.endswith("The report's provenance stamp records this.")
+                  for line in result.stderr.splitlines()),
+          f"exit {result.returncode}; stderr={result.stderr!r}")
     shutil.rmtree(repository)
     repository = build_scratch_repository(scratch)
     report = repository / "cold-read-records" / "run-cause-b" / "codex-defect-hunt-second-strongest-model.md"
