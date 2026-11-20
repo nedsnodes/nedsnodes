@@ -153,7 +153,7 @@ class GeminiTaskTests(unittest.TestCase):
         # Runs in this process read these paths, which the module set from the real home.
         self.shared_folder = (self.home / "nedsnodes-logs"
                               / "codex-and-gemini-sandboxed-task-runs-shared-writable-folder")
-        self.token_file = (self.home / ".config" / "nedschorus-sandboxed-models"
+        self.token_file = (self.home / ".config" / "nedsnodes-sandboxed-models"
                            / "github-public-repositories-read-only-token")
         for module, name, value in (
                 (runner.codex_task, "CODEX_AND_GEMINI_SHARED_WRITABLE_FOLDER", self.shared_folder),

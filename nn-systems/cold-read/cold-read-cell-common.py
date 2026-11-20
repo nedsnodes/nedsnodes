@@ -83,7 +83,7 @@ REVIEWER_PROGRAM_LOGIN_FILES = {
 # Outside the denied ~/.config/nedsnodes: a denied directory hides only its own subtree,
 # not siblings sharing its name as a prefix (measured with Codex's profile and bwrap).
 SANDBOXED_MODELS_READ_ONLY_GITHUB_TOKEN_FILE = (
-    pathlib.Path.home() / ".config" / "nedschorus-sandboxed-models"
+    pathlib.Path.home() / ".config" / "nedsnodes-sandboxed-models"
     / "github-public-repositories-read-only-token")
 # The agent-seats' tokens can push and merge; gh and git read any of these.
 AGENT_SEAT_GITHUB_TOKEN_ENVIRONMENT_VARIABLES = (

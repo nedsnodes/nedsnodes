@@ -26,7 +26,7 @@ The program an agent uses to hand Codex a task. It always:
     search tool, unless given --no-network, which takes both away;
   - removes the agent-seat's GitHub tokens from Codex's environment, which
     can push and merge, and sets GH_TOKEN to the read-only token in
-    ~/.config/nedschorus-sandboxed-models/, so that Codex's `gh` reads public
+    ~/.config/nedsnodes-sandboxed-models/, so that Codex's `gh` reads public
     GitHub. When that token cannot be read, Codex runs without one, and the
     run log's first line says why;
   - when the log-store is on this machine, creates the run's own numbered

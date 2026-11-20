@@ -47,7 +47,7 @@ traffic.
 
 The launcher removes the agent-seat's GitHub tokens, which can push and
 merge, from agy's environment, and sets GH_TOKEN to the read-only token in
-~/.config/nedschorus-sandboxed-models/, so that `gh` inside the sandbox
+~/.config/nedsnodes-sandboxed-models/, so that `gh` inside the sandbox
 reads public GitHub. When that token cannot be read, agy runs without one,
 and the run log says why after the model listing. This launcher does not provision
 logins, recover reports from chat, retry models, or verify report content.

@@ -901,7 +901,7 @@ try:
     agent_seat_tokens = {"GH_TOKEN": "agent-seat-token", "GITHUB_TOKEN": "agent-seat-token",
                          "GH_ENTERPRISE_TOKEN": "agent-seat-token",
                          "GITHUB_ENTERPRISE_TOKEN": "agent-seat-token"}
-    token_folder = scratch_home / ".config" / "nedschorus-sandboxed-models"
+    token_folder = scratch_home / ".config" / "nedsnodes-sandboxed-models"
     token_folder.mkdir(parents=True)
     token_file = token_folder / "github-public-repositories-read-only-token"
     token_file.write_text("read-only-token\n")
