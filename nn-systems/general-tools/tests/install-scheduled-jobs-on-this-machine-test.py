@@ -133,7 +133,7 @@ MAC_REMOTE_CONTROL_RECONNECT_WATCHER_LINE = (
     "/Users/el/.claude/handoff-agent-seat-remote-control-lost-at-claude-login-reconnect-by-tmux-typing-watcher.log 2>&1")
 # The prune of the guarded-file hook's copies of committed versions or of removed checkouts, last in the table.
 NED_BOX_GUARDED_FILE_PRUNE_LINE = (
-    "0 7 * * * /usr/bin/python3 /home/nedlern/Projects/nedschorus/nc-systems/general-tools/"
+    "0 7 * * * /usr/bin/python3 /home/nedlern/Projects/nedsnodes/nn-systems/general-tools/"
     "guarded-file-versions-and-approvals-store-copies-of-committed-versions-or-removed-checkouts-prune.py >> "
     "/home/nedlern/.claude/guarded-file-versions-and-approvals-store-copies-of-committed-"
     "versions-or-removed-checkouts-prune.log 2>&1")
@@ -172,10 +172,10 @@ NED_BOX_SCHEDULED_FULL_MUTATION_PASS_LINE = (
     "/home/nedlern/.claude/scheduled-full-mutation-pass-of-merged-pull-requests-and-survivor-"
     "tasks-open.log 2>&1")
 MAC_GUARDED_FILE_PRUNE_PLIST = {
-    "Label": "com.nedschorus.guarded-file-versions-and-approvals-store-copies-of-committed-"
+    "Label": "com.nedsnodes.guarded-file-versions-and-approvals-store-copies-of-committed-"
              "versions-or-removed-checkouts-prune",
     "ProgramArguments": ["/opt/homebrew/bin/python3",
-                         "/Users/el/Projects/nedschorus/nc-systems/general-tools/"
+                         "/Users/el/Projects/nedsnodes/nn-systems/general-tools/"
                          "guarded-file-versions-and-approvals-store-copies-of-committed-versions-or-removed-checkouts-prune.py"],
     "EnvironmentVariables": {
         "PATH": "/Users/el/.local/bin:/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin:"
@@ -518,7 +518,7 @@ clean_and_watcher_part, _, owner_check_and_prune_part = clean_and_owner_check_pa
 clean_part, _, remote_control_watcher_part = clean_and_watcher_part.partition(
     remote_control_watcher_heading)
 prune_heading = ("guarded-file-versions-and-approvals-store-copies-of-committed-versions-or-removed-checkouts-prune — "
-                 "launchd job, /Users/el/Library/LaunchAgents/com.nedschorus.guarded-file-"
+                 "launchd job, /Users/el/Library/LaunchAgents/com.nedsnodes.guarded-file-"
                  "versions-and-approvals-store-copies-of-committed-versions-or-removed-"
                  "checkouts-prune.plist:\n")
 owner_check_part, _, prune_and_backup_copy_part = owner_check_and_prune_part.partition(prune_heading)

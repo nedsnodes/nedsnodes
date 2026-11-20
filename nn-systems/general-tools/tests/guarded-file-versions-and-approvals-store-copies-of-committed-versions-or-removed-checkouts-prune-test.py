@@ -1,10 +1,10 @@
 #!/usr/bin/env python3
-"""Tests for nc-systems/general-tools/guarded-file-versions-and-approvals-store-copies-of-committed-versions-or-removed-checkouts-prune.py.
+"""Tests for nn-systems/general-tools/guarded-file-versions-and-approvals-store-copies-of-committed-versions-or-removed-checkouts-prune.py.
 
 Each case builds a scratch store and scratch checkouts in a temporary directory, never the real
 store, and runs the program on them as ned-box.
 
-Run: python3 nc-systems/general-tools/tests/guarded-file-versions-and-approvals-store-copies-of-committed-versions-or-removed-checkouts-prune-test.py
+Run: python3 nn-systems/general-tools/tests/guarded-file-versions-and-approvals-store-copies-of-committed-versions-or-removed-checkouts-prune-test.py
 Prints one line per case and exits non-zero if any case fails.
 """
 
