@@ -41,7 +41,7 @@ THE SEVEN SURFACES, in the order they are searched:
                     rebase left behind. Surface 2 walks refs and cannot see
                     them. git prunes these reflog entries after 30 days by
                     default, so this surface's memory is about a month.
-  4. log-store    — every file name under /home/nedlern/nedschorus-logs on the
+  4. log-store    — every file name under /home/nedlern/nedsnodes-logs on the
                     box, where seats ship what git does not carry. FOUND only
                     for a file whose path ends with the path asked for, the
                     rule git's surface uses; any other file whose name
@@ -70,7 +70,7 @@ THE SEVEN SURFACES, in the order they are searched:
 
 WHY SURFACES 3 AND 4, AND WHY EACH SURFACE PRINTS AS IT FINISHES. Both were
 added on 2026-09-23 after the lost-file research
-(nedlern@ned-box:/home/nedlern/nedschorus-logs/seats/merge-lane/lost-file-research-report-2026-09-23.md,
+(nedlern@ned-box:/home/nedlern/nedsnodes-logs/seats/merge-lane/lost-file-research-report-2026-09-23.md,
 episodes E11 and E14). Two seats, three days apart, could not find
 docs/drafts/pr-main-process-design.md. It was in commits 12c18b5 and 28e4f5f,
 which only the merge-lane worktree's HEAD reflog still named after its seat
@@ -259,8 +259,8 @@ Usage:
   python3 scripts/find-deleted-path-across-backups.py <40-hex git blob id>
   python3 scripts/find-deleted-path-across-backups.py <path> --skip box
   python3 scripts/find-deleted-path-across-backups.py <path> --skip localsnapshots
-  python3 scripts/find-deleted-path-across-backups.py <path> --log-store-root /home/nedlern/nedschorus-logs
-  python3 scripts/find-deleted-path-across-backups.py <path> --repo ~/Projects/nedschorus
+  python3 scripts/find-deleted-path-across-backups.py <path> --log-store-root /home/nedlern/nedsnodes-logs
+  python3 scripts/find-deleted-path-across-backups.py <path> --repo ~/Projects/nedsnodes
   python3 scripts/find-deleted-path-across-backups.py <path> --prompt-for-root
 
 Each FOUND surface says where this run copied what it found, under
@@ -272,7 +272,7 @@ fragment of a path ("dispositions.md"). A fragment matches whole trailing
 path components: "dispositions.md" matches "docs/dispositions.md", not
 "docs/old-dispositions.md". It
 may also be written as it is cited: in the scp form
-("nedlern@ned-box:/home/nedlern/nedschorus-logs/x.md", or "ned-box:<path>"),
+("nedlern@ned-box:/home/nedlern/nedsnodes-logs/x.md", or "ned-box:<path>"),
 from the current directory ("../x.md", "./x.md"), or from a home ("~/x.md").
 Each of those is turned into the path it names before any surface is
 searched, and the header shows both.
@@ -354,14 +354,14 @@ _locator_spec.loader.exec_module(locator)
 
 _git_output_spec = importlib.util.spec_from_file_location(
     "git_machine_readable_output_runner_and_parser_common",
-    Path(__file__).resolve().parents[1] / "nc-systems" / "general-tools"
+    Path(__file__).resolve().parents[1] / "nn-systems" / "general-tools"
     / "git-machine-readable-output-runner-and-parser-common.py")
 git_output = importlib.util.module_from_spec(_git_output_spec)
 _git_output_spec.loader.exec_module(git_output)
 
 _next_step_lines_spec = importlib.util.spec_from_file_location(
     "failed_command_tool_message_to_agent_rerun_once_then_stop_and_report_lines_common",
-    Path(__file__).resolve().parents[1] / "nc-systems" / "general-tools"
+    Path(__file__).resolve().parents[1] / "nn-systems" / "general-tools"
     / "failed-command-tool-message-to-agent-rerun-once-then-stop-and-report-lines-common.py")
 next_step_lines = importlib.util.module_from_spec(_next_step_lines_spec)
 _next_step_lines_spec.loader.exec_module(next_step_lines)
@@ -387,13 +387,16 @@ DEFAULT_FOUND_COPIES_ROOT = "~/Downloads/nedschorus-found-copies"
 
 DEFAULT_BOX_SSH_HOST = "nedlern@ned-box"
 DEFAULT_TIMESHIFT_SNAPSHOT_ROOT = "/mnt/backup/timeshift/snapshots"
+# Snapshots taken before the project rename hold the reference-checkout under this name.
+REFERENCE_CHECKOUT_DIRECTORY_NAME_BEFORE_PROJECT_RENAME = "nedschorus"
 # Each seat has its own directory, so a repo-relative path may exist under several roots.
 DEFAULT_BOX_SEARCH_ROOTS = (
-    "/home/nedlern/Projects/nedschorus",
+    "/home/nedlern/Projects/nedsnodes",
+    "/home/nedlern/Projects/" + REFERENCE_CHECKOUT_DIRECTORY_NAME_BEFORE_PROJECT_RENAME,
     "/home/nedlern/agents/*",
 )
 DEFAULT_TRANSCRIPTS_DIR = "~/.claude/projects"
-DEFAULT_LOG_STORE_ROOT = "/home/nedlern/nedschorus-logs"
+DEFAULT_LOG_STORE_ROOT = "/home/nedlern/nedsnodes-logs"
 MAC_TRANSCRIPTS_COPY_UNDER_LOG_STORE = (
     *transcript_mirror.split_destination(transcript_mirror.LOG_STORE_AGENT_SESSION_FILES_DESTINATION)[1]
     .relative_to(DEFAULT_LOG_STORE_ROOT).parts,
@@ -925,13 +928,17 @@ def _missing_on_this_machine(path):
 def search_time_machine_after(blob_id, path, seen, runner=run_command, prompt_for_root=False):
     """Open the first Time Machine snapshot taken after the hook saw the version, and print the command that
     copies path from it."""
-    destination, _ = _time_machine_destination(runner)
+    destination, why_none, lookup_failure = _time_machine_destination(runner)
+    if lookup_failure is not None:
+        return SurfaceReport("time machine", UNAVAILABLE, [lookup_failure])
     if destination is None:
-        return SurfaceReport("time machine", UNAVAILABLE, ["no Time Machine destination is configured on this "
-                                                           "machine; the version was seen on the Mac, so run this "
-                                                           "program there"])
-    device, mount_point, attached = _time_machine_volume_state(destination["name"], runner)
-    if not attached or not mount_point:
+        return SurfaceReport("time machine", UNAVAILABLE, ["%s; the version was seen on the Mac, so run this "
+                                                           "program there" % why_none])
+    device, mount_point, lookup_failure = _time_machine_volume_state(destination["name"], runner)
+    if lookup_failure is not None:
+        return SurfaceReport("time machine", UNAVAILABLE, ["the backup disk %r could not be looked up — %s"
+                                                           % (destination["name"], lookup_failure)])
+    if not mount_point:
         return SurfaceReport("time machine", UNAVAILABLE, ["the backup disk %r is not mounted"
                                                            % destination["name"]],
                              ["diskutil mount %s" % shlex.quote(destination["name"])])
@@ -1045,7 +1052,7 @@ def search_local_snapshots(wanted, repo, runner=run_command, mount_point=LOCAL_S
         outcome, where, release_failure, read_in_place = _local_snapshot_probe(
             snapshot, probe_path, mount_point, runner, already_mounted.get(snapshot))
         made_mount_point = made_mount_point or not read_in_place
-        if outcome == "unmounted":
+        if outcome not in ("hit", "miss"):
             unsearched.append((snapshot, where))
         else:
             searched.append(snapshot)
@@ -1345,23 +1352,33 @@ def _local_snapshot_probe(snapshot, probe_path, mount_point, runner, already_mou
     if already_mounted:
         resolves, _, _ = runner(["test", "-d", already_mounted])
         if resolves == 0:
-            exists, _, _ = runner(["test", "-e", already_mounted + probe_path])
-            return ("hit" if exists == 0 else "miss"), already_mounted, None, True
+            outcome, why = _path_exists_outcome(already_mounted + probe_path, runner)
+            return outcome, why or already_mounted, None, True
     runner(["mkdir", "-p", mount_point])
     code, _, stderr = runner(["mount_apfs", "-o", "ro", "-s", snapshot, MAC_DATA_VOLUME, mount_point])
     if code != 0:
         first = stderr.strip().splitlines()[0] if stderr.strip() else "no error text"
         return "unmounted", "mount_apfs exited %s: %s" % (code, first), None, False
     try:
-        exists, _, _ = runner(["test", "-e", mount_point + probe_path])
-        outcome = "hit" if exists == 0 else "miss"
+        outcome, why = _path_exists_outcome(mount_point + probe_path, runner)
     finally:
         released, _, release_error = runner(["diskutil", "unmount", mount_point])
     release_failure = None
     if released != 0:
         first = release_error.strip().splitlines()[0] if release_error.strip() else "no error text"
         release_failure = "diskutil unmount exited %s: %s" % (released, first)
-    return outcome, mount_point, release_failure, False
+    return outcome, why or mount_point, release_failure, False
+
+
+def _path_exists_outcome(path, runner):
+    """Return ("hit", None), ("miss", None), or ("unreadable", why test -e could not answer)."""
+    # test exits 1 for a path that is not there; any other nonzero exit, such as a timeout's 124, is no answer.
+    code, _, stderr = runner(["test", "-e", path])
+    if code == 0:
+        return "hit", None
+    if code == 1:
+        return "miss", None
+    return "unreadable", "test -e %s exited %s — %s" % (shlex.quote(path), code, stderr.strip() or "no error text")
 
 
 
@@ -1983,24 +2000,32 @@ def _timeshift_probe_script(wanted, snapshot_root, search_roots):
 
 def search_time_machine(wanted, newest_date_held=None, snapshot_limit=DEFAULT_TIME_MACHINE_SNAPSHOT_LIMIT,
                         runner=run_command, prompt_for_root=False):
-    destination, why_none = _time_machine_destination(runner)
+    destination, why_none, lookup_failure = _time_machine_destination(runner)
+    if lookup_failure is not None:
+        return SurfaceReport("time machine", UNAVAILABLE, [lookup_failure])
     if destination is None:
         return SurfaceReport("time machine", UNAVAILABLE, [why_none])
 
     name = destination["name"]
-    device, mount_point, attached = _time_machine_volume_state(name, runner)
+    device, mount_point, lookup_failure = _time_machine_volume_state(name, runner)
 
-    if not attached:
+    if lookup_failure is not None:
         return SurfaceReport(
             "time machine",
             UNAVAILABLE,
-            ["the backup disk %r is not connected to this Mac" % name,
-             "reconnect it and re-run; nothing else here can be answered without it"],
+            ["the backup disk %r could not be looked up — %s" % (name, lookup_failure),
+             "if the disk is not connected to this Mac, reconnect it and re-run"],
         )
 
     if not mount_point:
         code, _, stderr = runner(["diskutil", "mount", name])
-        device, mount_point, attached = _time_machine_volume_state(name, runner)
+        device, mount_point, lookup_failure = _time_machine_volume_state(name, runner)
+        if lookup_failure is not None:
+            return SurfaceReport(
+                "time machine",
+                UNAVAILABLE,
+                ["the backup disk %r could not be looked up after diskutil mount — %s" % (name, lookup_failure)],
+            )
         if not mount_point:
             return SurfaceReport(
                 "time machine",
@@ -2127,15 +2152,15 @@ def _time_machine_manual_recovery(snapshot, device, path_inside=None, clear_firs
 
 
 def _time_machine_destination(runner):
-    """Return (destination, None), or (None, the line saying why there is none)."""
+    """Return (destination, None, None), (None, why there is none, None) or (None, None, why the lookup failed)."""
     code, out, stderr = runner(["tmutil", "destinationinfo"])
     if code == 127:
         # run_command's answer for a missing program; ned-box has no tmutil.
         return None, ("%s, and Time Machine exists only on macOS, so this machine has no Time Machine "
-                      "backup to search" % stderr.strip())
-    none_configured = "no Time Machine destination is configured on this machine"
+                      "backup to search" % stderr.strip()), None
     if code != 0:
-        return None, none_configured
+        return None, None, "tmutil destinationinfo exited %s — %s" % (code, stderr.strip() or "no error text")
+    none_configured = "no Time Machine destination is configured on this machine"
     destination = {}
     for line in out.splitlines():
         if ":" not in line:
@@ -2147,15 +2172,18 @@ def _time_machine_destination(runner):
             destination["name"] = value
         elif key == "mount point" and value:
             destination["mount_point"] = value
-    return (destination, None) if destination.get("name") else (None, none_configured)
+    return (destination, None, None) if destination.get("name") else (None, none_configured, None)
 
 
 def _time_machine_volume_state(name, runner):
-    """Return (device node, mount point, attached) resolved from the volume name."""
+    """Return (device node, mount point, None) resolved from the volume name, or (None, None, why the lookup
+    failed)."""
     # Device numbers change when disks are replugged.
-    code, out, _ = runner(["diskutil", "info", name])
+    code, out, stderr = runner(["diskutil", "info", name])
     if code != 0:
-        return None, None, False
+        # Either stream may carry diskutil's words.
+        why = stderr.strip() or out.strip() or "no error text"
+        return None, None, "diskutil info %s exited %s — %s" % (shlex.quote(name), code, why)
     device = None
     mount_point = None
     for line in out.splitlines():
@@ -2166,7 +2194,7 @@ def _time_machine_volume_state(name, runner):
             device = value
         elif key == "mount point" and value:
             mount_point = value
-    return device, mount_point, True
+    return device, mount_point, None
 
 
 def _time_machine_snapshots(device, runner):
@@ -2264,8 +2292,8 @@ def _time_machine_probe(snapshot, device, wanted, runner, prompt_for_root=False)
             outcome = ("unreadable", "mounted, but %s is not there — a snapshot of this backup "
                                      "volume keeps its files under <stamp>.backup/Data" % data_root)
         elif wanted.startswith("/"):
-            exists, _, _ = runner(["test", "-e", data_root + wanted])
-            outcome = ("hit", wanted) if exists == 0 else ("miss", None)
+            found, why = _path_exists_outcome(data_root + wanted, runner)
+            outcome = (found, why or wanted)
         else:
             code, out, stderr = runner(
                 ["find", data_root + "/Users", "-path", "*/" + wanted, "-maxdepth", "12"],
@@ -2290,11 +2318,10 @@ def _time_machine_probe(snapshot, device, wanted, runner, prompt_for_root=False)
 
 
 
-def git_failure_next_steps(rerun):
+def git_failure_next_steps(rerun, failure):
     """The lines that tell an agent what to do after a git failure in a run started as rerun."""
     return next_step_lines.git_failure_next_step_lines(
-        rerun, PROGRAM_PATH, text_the_failure_line_contains="git's failure:",
-        include_the_misspelt_branch_commit_or_path_line=True)
+        rerun, PROGRAM_PATH, git_error_line_shown_in_tool_message_to_agent_checked_for_lock_file_path=str(failure), text_the_failure_line_contains="git's failure:")
 
 
 REPO_PLACEHOLDER = "<checkout>"
@@ -2351,7 +2378,11 @@ def build_tool_message_to_agent_printed_when_git_cannot_find_the_repository_top_
 
 
 def rerun_command(arguments):
-    """The command line that runs this program again with arguments, from any directory."""
+    """The command line that runs this program again with arguments.
+
+    Only the program's path is made absolute: a relative path among the arguments, and --repo's default of the
+    current directory, still need the directory the first run started in.
+    """
     return shlex.join(["python3", os.path.abspath(__file__)] + list(arguments))
 
 
@@ -2526,7 +2557,7 @@ def main(argv=None, runner=run_command):
         repo_rerun = rerun_command(["--repo", REPO_PLACEHOLDER]
                                    + arguments_without_repo(sys.argv[1:] if argv is None else argv))
         print(build_tool_message_to_agent_printed_when_git_cannot_find_the_repository_top_level_from_surfaces_skip_left_in_exit_codes_and_repo_rerun_command(args.repo, named, failure, set(args.skip), repo_rerun)
-              + "\n" + git_failure_next_steps(rerun), file=sys.stderr, flush=True)
+              + "\n" + git_failure_next_steps(rerun, failure), file=sys.stderr, flush=True)
         wanted = named
     shown = wanted if wanted == args.path else "%s (given as %s)" % (wanted, args.path)
 

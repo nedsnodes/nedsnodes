@@ -10,8 +10,10 @@ Checks, per file type:
 
   .md   - repo paths named in backticks or markdown links exist on disk
           (a path this repository deliberately does not track is skipped;
-          a backtick citation with a line number, `file.md:120`, is checked
-          as the file it names)
+          a backtick citation with a line number, `file.md:120`, or a line
+          range, `file.md:120-125`, is checked as the file it names; the line
+          numbers themselves, past the file's end or a range written backwards,
+          are not checked)
         - markdown link targets resolve (external schemes skipped; a target
           that is only a `<placeholder>` skipped; a target written in angle
           brackets, `[x](<docs/file.md>)`, checked as the path inside them
@@ -24,8 +26,9 @@ Checks, per file type:
         - a backtick span that is only a number, in a sentence naming
           exactly one existing project code file (.py/.sh), appears in that
           file's source, digit-group separators ignored. A sentence ends at
-          ".", "!", "?" or ";" followed by whitespace; a number in another
-          sentence of the same line is not paired with the file. Prose
+          ".", "!", "?" or ";" followed by whitespace, and at a table cell's
+          " | "; a number in another sentence or cell of the same line is not
+          paired with the file. Prose
           numbers — counts, issue numbers, cardinalities — are never
           checked: backticks are what opt a number into the check.
   .json - no duplicate keys at any nesting depth (a duplicate key is legal
@@ -34,8 +37,8 @@ Checks, per file type:
 
 An nc-architecture-overview, a file at the path
 scripts/architecture-overview-path-template-and-checked-against-commit-reader-common.py
-gives for a system with a directory under nc-systems/, gets the overview
-checks of docs/nedschorus-wiki/nedschorus-how-to-write-an-architecture-overview.md
+gives for a system with a directory under nn-systems/, gets the overview
+checks of docs/nedsnodes-wiki/nedsnodes-how-to-write-an-architecture-overview.md
 too, when this script is run (a program that calls lint_markdown() gets them
 only by asking):
         - a component written "`<path>`, a `<event>` hook", or with a name
@@ -48,10 +51,10 @@ only by asking):
           order; a line naming no such file is not checked
         - each list item, and each line linking an issue, under
           "## Planned work" is written
-          "- GHI [<title>](https://github.com/nedschorus/nedschorus/issues/<number>)",
+          "- GHI [<title>](https://github.com/nedsnodes/nedsnodes/issues/<number>)",
           and the GHI is open on GitHub with that title
         and, as a note that is not a finding, each program (.py, .sh, or a
-        file starting "#!") under nc-systems/<system>/, outside tests/, whose
+        file starting "#!") under nn-systems/<system>/, outside tests/, whose
         file name the overview does not contain.
 
 Usage:
@@ -194,11 +197,13 @@ def _warn_once(repo_root: Path, detail: str):
           f"so citations of the record stores will be reported", file=sys.stderr)
 
 
-LINE_SUFFIXED_PATH = re.compile(r"^(?P<path>[^\s:]+):(?P<line>\d+)$")
+# The project's prose uses en dashes as well as hyphens for line ranges.
+LINE_SUFFIXED_PATH = re.compile(
+    r"^(?P<path>[^\s:]+):(?P<line>\d+)(?:[-–](?P<last_line>\d+))?$")
 
 
 def without_line_suffix(token: str) -> str:
-    """Remove a trailing :line number from a backtick citation."""
+    """Remove a trailing :line or :first-last suffix from a backtick citation."""
     match = LINE_SUFFIXED_PATH.match(token)
     return match.group("path") if match else token
 
@@ -311,7 +316,8 @@ def referenced_files(line: str, md_path: Path, repo_root: Path):
     return list(distinct.values())
 
 
-SENTENCE_END = re.compile(r"(?<=[.!?;])\s+")
+# A table row's cells are separate claims, as sentences are.
+SENTENCE_END = re.compile(r"(?<=[.!?;])\s+|\s+\|\s+")
 
 
 def sentences(line: str):
@@ -382,8 +388,8 @@ def architecture_overview_system(path: Path, repo_root: Path):
     except ValueError:
         return None
     match = ARCHITECTURE_OVERVIEW_PATH.fullmatch(relative)
-    # The template alone also matches nedschorus-how-to-write-an-architecture-overview.md.
-    if match is None or not (repo_root / "nc-systems" / match.group("system")).is_dir():
+    # The template alone also matches nedsnodes-how-to-write-an-architecture-overview.md.
+    if match is None or not (repo_root / "nn-systems" / match.group("system")).is_dir():
         return None
     return match.group("system")
 
@@ -453,11 +459,13 @@ def check_overview_lock_and_environment_variable_sources(line: str, md_path: Pat
             yield f"{claim} does not appear in the source of {names}"
 
 
-GITHUB_REPOSITORY = "nedschorus/nedschorus"
+GITHUB_REPOSITORY = "nedsnodes/nedsnodes"
+# GitHub redirects the repository's old name, and text written before the rename still holds it.
+OLD_REPOSITORY = "nedschorus/nedschorus"
 PLANNED_WORK_HEADING = "## Planned work"
 PLANNED_WORK_GHI_LINE = re.compile(
     r"\s*(?:[-*+]|\d+[.)]) GHI \[(?P<title>.+)\]\(https://github\.com/"
-    + re.escape(GITHUB_REPOSITORY) + r"/issues/(?P<number>\d+)\)")
+    + r"(?:" + re.escape(GITHUB_REPOSITORY) + "|" + re.escape(OLD_REPOSITORY) + r")/issues/(?P<number>\d+)\)")
 PLANNED_WORK_ENTRY = re.compile(r"\s*(?:[-*+]|\d+[.)])\s|.*github\.com/[^)\s]+/issues/\d+")
 GITHUB_QUERY_TIMEOUT_SECONDS = 60
 
@@ -553,12 +561,12 @@ def is_program(path: Path) -> bool:
 
 
 def architecture_overview_unnamed_programs(path: Path, repo_root: Path):
-    """Return the programs under the overview's nc-systems/<system>/, outside
+    """Return the programs under the overview's nn-systems/<system>/, outside
     tests/, whose file name the overview does not contain."""
     system = architecture_overview_system(path, repo_root)
     if system is None:
         return []
-    system_directory = repo_root / "nc-systems" / system
+    system_directory = repo_root / "nn-systems" / system
     text = path.read_text(encoding="utf-8")
     unnamed = []
     for candidate in sorted(system_directory.rglob("*")):

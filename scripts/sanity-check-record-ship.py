@@ -6,17 +6,17 @@ Usage:
   scripts/sanity-check-record-ship.py --all
 
 WHY THIS EXISTS (user-ruled 2026-09-15, nedschorus#392). The reports and
-`finding-dispositions.md` that scripts/sanity-check-adversarial-prompts.py writes under
+`sanity-check-finding-dispositions.md` that scripts/sanity-check-adversarial-prompts.py writes under
 `sanity-check-records/` are logs: the user ruled on 2026-08-25 that review
 records are kept as logs, and CLAUDE.md puts logs in the log-store, never in
 the repository. Cold-read records reach it through
-nc-systems/cold-read/cold-read-record-ship.py; these had no way there at all, so the runner
+nn-systems/cold-read/cold-read-record-ship.py; these had no way there at all, so the runner
 told its caller to DELETE the record when the
 work it served landed, and a sanity-check that shaped a design could not be
 cited afterwards.
 
 WHAT IT IS: the cold-read record shipper with the store's kind swapped.
-nc-systems/cold-read/cold-read-record-ship.py holds the ship logic and the store's rules --
+nn-systems/cold-read/cold-read-record-ship.py holds the ship logic and the store's rules --
 ADD-ONLY, REFUSE ON DIFFERENCE, FAIL LOUDLY, what the store is, how ssh and
 rsync are invoked, the store's README -- and this program imports it rather
 than copying any of it, the way scripts/seat-shared-file-ship.py does. Read
@@ -26,7 +26,7 @@ kind: `sanity-check-records/` beside `cold-read-records/` in the store, and
 
 ONE CONSEQUENCE OF ADD-ONLY WORTH KNOWING BEFORE YOU SHIP. A file already in
 the store whose content differs from the local one is refused, not replaced.
-So `finding-dispositions.md` shipped early and then edited is refused on the
+So `sanity-check-finding-dispositions.md` shipped early and then edited is refused on the
 next run: finish the triage, then ship, or ship the edited record under a `-2`
 name as the record shipper's rule says. Nothing is lost either way -- a refusal
 copies nothing and names every differing file.
@@ -35,7 +35,7 @@ WHO CALLS IT. scripts/sanity-check-adversarial-prompts.py at the end of every ru
 launched a cell, whatever the cells' outcome, a run in which every cell failed
 included, whose record holds its log and no report, printing this program's
 one line as `record:`; and the requesting agent again after writing
-`finding-dispositions.md`, when the add-only copy sends only that new file.
+`sanity-check-finding-dispositions.md`, when the add-only copy sends only that new file.
 Whenever this program's line is not `shipped:`, a calling program prints the
 line, finishes its run and keeps its reports, and then exits 1, or the nonzero
 code its run has for another reason; the record stays on disk for a later run.
@@ -60,7 +60,7 @@ REPO_ROOT = pathlib.Path(__file__).resolve().parent.parent
 
 # Share the shipper so store rules and location cannot drift.
 _shipper_spec = importlib.util.spec_from_file_location(
-    "cold_read_record_ship", REPO_ROOT / "nc-systems" / "cold-read" / "cold-read-record-ship.py")
+    "cold_read_record_ship", REPO_ROOT / "nn-systems" / "cold-read" / "cold-read-record-ship.py")
 shipper = importlib.util.module_from_spec(_shipper_spec)
 _shipper_spec.loader.exec_module(shipper)
 

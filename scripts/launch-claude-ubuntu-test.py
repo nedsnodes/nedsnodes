@@ -23,7 +23,7 @@ Run it from a checkout, on ned-box, where P1 is parsed by the real /bin/sh
 (dash) rather than by macOS sh standing in for it:
   python3 scripts/launch-claude-ubuntu-test.py
 The GitHub token cases run the real handoff-supervisor from the checkout's
-nc-systems/, and it loads modules from the checkout's scripts/, so the suite
+nn-systems/, and it loads modules from the checkout's scripts/, so the suite
 does not run from a copy of a few files.
 """
 
@@ -102,9 +102,9 @@ class LaunchHarness:
         self.stubs = root / "stubs"
         self.stubs.mkdir()
         # The box-side update runs the update-lock helper from the box's
-        # checkout, $HOME/Projects/nedschorus/scripts, so the helper under
+        # checkout, $HOME/Projects/nedsnodes/scripts, so the helper under
         # test is copied to that path in the sandbox HOME.
-        checkout_scripts = self.home / "Projects" / "nedschorus" / "scripts"
+        checkout_scripts = self.home / "Projects" / "nedsnodes" / "scripts"
         checkout_scripts.mkdir(parents=True)
         shutil.copy(UPDATE_LOCK_HELPER, checkout_scripts / UPDATE_LOCK_HELPER_NAME)
         write_stub(self.stubs, "ssh",
@@ -306,9 +306,9 @@ class LaunchHarness:
         the real supervisor, linked into the sandbox HOME's checkout path, so
         the case measures the refusal the supervisor itself prints.
         token_file_accounts names the accounts given a token file."""
-        (self.home / "Projects" / "nedschorus" / "nc-systems").symlink_to(
-            LAUNCHER.resolve().parent.parent / "nc-systems")
-        token_directory = self.home / ".config" / "nedschorus"
+        (self.home / "Projects" / "nedsnodes" / "nn-systems").symlink_to(
+            LAUNCHER.resolve().parent.parent / "nn-systems")
+        token_directory = self.home / ".config" / "nedsnodes"
         for account in token_file_accounts:
             token_directory.mkdir(parents=True, exist_ok=True)
             (token_directory / f"{account}.token").write_text(
@@ -327,7 +327,7 @@ class LaunchHarness:
         """Launcher -> captured remote string -> P1 replay (-> P2 inside the
         tmux stub). Returns a dict of everything observable.
 
-        mac_environment_agents_root sets NEDSCHORUS_AGENTS_ROOT in the
+        mac_environment_agents_root sets NEDSNODES_AGENTS_ROOT in the
         launcher's own (Mac-side) environment, the way a Mac seat inherits
         it, so a case can show the launcher ignores it.
 
@@ -339,18 +339,18 @@ class LaunchHarness:
             leftover.unlink()
         environment = {key: value for key, value in os.environ.items()
                        if key != "TERM_PROGRAM"
-                       and not key.startswith(("NEDSCHORUS_", "LAUNCH_CLAUDE_"))}
+                       and not key.startswith(("NEDSNODES_", "LAUNCH_CLAUDE_"))}
         if term_program is not None:
             environment["TERM_PROGRAM"] = term_program
         environment["PATH"] = f"{self.stubs}:{environment.get('PATH', '')}"
         environment["LCU_TEST_DIR"] = str(self.captures)
-        environment["NEDSCHORUS_AGENT_BOX"] = "stub-box"
+        environment["NEDSNODES_AGENT_BOX"] = "stub-box"
         if mac_environment_agents_root is not None:
-            environment["NEDSCHORUS_AGENTS_ROOT"] = mac_environment_agents_root
+            environment["NEDSNODES_AGENTS_ROOT"] = mac_environment_agents_root
         if extra_arguments is not None:
             environment["LAUNCH_CLAUDE_SUPERVISOR_EXTRA_ARGUMENTS"] = extra_arguments
         if seat_github_account is not None:
-            environment["NEDSCHORUS_SEAT_GITHUB_ACCOUNT"] = seat_github_account
+            environment["NEDSNODES_SEAT_GITHUB_ACCOUNT"] = seat_github_account
         if stdout_on_terminal:
             launched = run_with_stdout_on_terminal(
                 [str(LAUNCHER), *launcher_arguments], str(self.workdir),
@@ -540,8 +540,8 @@ def main() -> int:
         check("default root: the supervisor script rides the box's own $HOME",
               result["supervisor_argv"]
               and result["supervisor_argv"][0]
-              == (f"{harness.home}/Projects/nedschorus"
-                  "/nc-systems/handoff/handoff-supervisor.py"),
+              == (f"{harness.home}/Projects/nedsnodes"
+                  "/nn-systems/handoff/handoff-supervisor.py"),
               result["supervisor_argv"])
         check("default root: the seat directory was created at P1",
               (harness.home / "agents" / "seat-a").is_dir(),
@@ -567,7 +567,7 @@ def main() -> int:
 
         # --- 1c. the launcher reads NO agents root (user-ruled 2026-09-22,
         # merge-lane-2's walk; the launcher's NO AGENTS ROOT note has the
-        # why). NEDSCHORUS_AGENTS_ROOT names a path on the machine that reads
+        # why). NEDSNODES_AGENTS_ROOT names a path on the machine that reads
         # it, and every Mac seat inherits the Mac's own value, exported by
         # recover-crashed-seats.py. Whatever it holds, the box seat lands in
         # the box's ~/agents/<name>, and the value never reaches the box.
@@ -686,9 +686,9 @@ def main() -> int:
         # — so a leak would have to come through the composed string itself.)
         harness = LaunchHarness(root / "task-list-detached")
         result = harness.run(["seat-h", "--no-attach"])
-        check("task list: the pin reaches the supervisor as nedschorus-<seat>-tasks",
+        check("task list: the pin reaches the supervisor as nedsnodes-<seat>-tasks",
               result["supervisor_environment"].get("CLAUDE_CODE_TASK_LIST_ID")
-              == "nedschorus-seat-h-tasks",
+              == "nedsnodes-seat-h-tasks",
               result["supervisor_environment"])
         check("task list: the task tools are enabled for the supervisor",
               result["supervisor_environment"].get(
@@ -704,7 +704,7 @@ def main() -> int:
                                                  encoding="utf-8")
         result = harness.run(["seat-h", "--no-attach"])
         prefixed_store = (harness.home / ".claude" / "tasks"
-                          / "nedschorus-seat-h-tasks")
+                          / "nedsnodes-seat-h-tasks")
         check("migration: the unprefixed store is renamed to the prefixed id",
               not unprefixed_store.exists()
               and (prefixed_store / "1.json").is_file(),
@@ -716,7 +716,7 @@ def main() -> int:
         (unprefixed_store / "1.json").write_text("unprefixed",
                                                  encoding="utf-8")
         prefixed_store = (harness.home / ".claude" / "tasks"
-                          / "nedschorus-seat-h-tasks")
+                          / "nedsnodes-seat-h-tasks")
         prefixed_store.mkdir(parents=True)
         (prefixed_store / "2.json").write_text("prefixed", encoding="utf-8")
         result = harness.run(["seat-h", "--no-attach"])
@@ -731,7 +731,7 @@ def main() -> int:
         result = harness.run(["seat-i", "--no-attach"])
         check("task list: a second seat name yields a DIFFERENT list id",
               result["supervisor_environment"].get("CLAUDE_CODE_TASK_LIST_ID")
-              == "nedschorus-seat-i-tasks",
+              == "nedsnodes-seat-i-tasks",
               result["supervisor_environment"])
 
         # --- the seat's git identity, box-side (user-approved 2026-09-22):
@@ -792,15 +792,15 @@ def main() -> int:
         # TaskList returns empty with no error.
         harness = LaunchHarness(root / "task-list-attached")
         result = harness.run(["seat-j"])
-        check("task list (attached): the supervisor gets nedschorus-<seat>-tasks",
+        check("task list (attached): the supervisor gets nedsnodes-<seat>-tasks",
               result["supervisor_environment"].get("CLAUDE_CODE_TASK_LIST_ID")
-              == "nedschorus-seat-j-tasks"
+              == "nedsnodes-seat-j-tasks"
               and result["supervisor_environment"].get(
                   "CLAUDE_CODE_ENABLE_TODO_TOOLS") == "1",
               result["supervisor_environment"])
         check("task list (attached): the after-exit shell keeps the binding",
               result["after_exit_environment"].get("CLAUDE_CODE_TASK_LIST_ID")
-              == "nedschorus-seat-j-tasks"
+              == "nedsnodes-seat-j-tasks"
               and result["after_exit_environment"].get(
                   "CLAUDE_CODE_ENABLE_TODO_TOOLS") == "1",
               result["after_exit_environment"])
@@ -924,7 +924,7 @@ def main() -> int:
               result["replay"].returncode == 0
               and "handoff-supervisor.py" in " ".join(result["supervisor_argv"])
               and "GH_TOKEN" not in result["remote"]
-              and ".config/nedschorus" not in result["remote"],
+              and ".config/nedsnodes" not in result["remote"],
               (result["replay"].returncode, result["remote"][:400]))
 
         # --- 13. the account override is refused, not ignored: the
@@ -935,7 +935,7 @@ def main() -> int:
                              seat_github_account="ned-review-merge")
         check("account override: refused with exit 2, naming the variable and the table",
               result["launched"].returncode == 2
-              and "NEDSCHORUS_SEAT_GITHUB_ACCOUNT" in result["launched"].stderr
+              and "NEDSNODES_SEAT_GITHUB_ACCOUNT" in result["launched"].stderr
               and "AGENT_SEAT_GITHUB_ACCOUNTS_OTHER_THAN_THE_MACHINE_DEFAULT"
               in result["launched"].stderr,
               (result["launched"].returncode,
@@ -979,6 +979,59 @@ def main() -> int:
         check("--help alone: nothing was sent to the box",
               result["remote"] == "", result["remote"][:200])
 
+        # With no name, the usage lists the agent tmux sessions on the box.
+        # A listing whose ssh fails says so, passing ssh's message through,
+        # and is never read as an empty box.
+        # ssh exits 255 when it cannot connect, so only then is the reader
+        # sent to check the connection.
+        for label, ssh_exit_code, connected in (
+                ("ssh cannot reach the box", 255, False),
+                ("the listing command fails on the box", 1, True)):
+            harness = LaunchHarness(root / f"no-name-listing-fails-{ssh_exit_code}")
+            write_stub(harness.stubs, "ssh",
+                       'echo "ssh: Could not resolve hostname stub-box" >&2\n'
+                       f'exit {ssh_exit_code}\n')
+            result = harness.run([])
+            stderr = result["launched"].stderr
+            check(f"no name, {label}: exit nonzero, naming the failed listing "
+                  "and ssh's message, never 'No agent tmux sessions'",
+                  result["launched"].returncode != 0
+                  and "could not list the agent tmux sessions on stub-box: "
+                      f"ssh exited {ssh_exit_code}" in stderr
+                  and "ssh: Could not resolve hostname stub-box" in stderr
+                  and "No agent tmux sessions" not in stderr,
+                  (result["launched"].returncode, stderr[:800]))
+            connection_lines_shown = ("run it from the Mac instead" in stderr
+                                      and "check that the box is up and that ssh stub-box works" in stderr)
+            box_answered_line_shown = ("stub-box answered, so the connection works; "
+                                       "the listing command failed there" in stderr)
+            check(f"no name, {label}: "
+                  + ("says the box answered and the listing failed there, not to check the connection"
+                     if connected else
+                     "says to run it from the Mac or check the connection, not that the box answered"),
+                  (box_answered_line_shown and not connection_lines_shown) if connected
+                  else (connection_lines_shown and not box_answered_line_shown),
+                  stderr[:800])
+
+        harness = LaunchHarness(root / "no-name-listing-empty")
+        result = harness.run([])
+        check("no name, the listing succeeds and finds none: 'No agent tmux "
+              "sessions on the box now.'",
+              result["launched"].returncode == 2
+              and "No agent tmux sessions on the box now." in result["launched"].stderr
+              and "could not list" not in result["launched"].stderr,
+              (result["launched"].returncode, result["launched"].stderr[:800]))
+
+        harness = LaunchHarness(root / "no-name-listing-finds-sessions")
+        write_stub(harness.stubs, "ssh",
+                   "printf 'seat-a@seat-a\\nseat-b@default\\n'\n")
+        result = harness.run([])
+        check("no name, the listing finds sessions: they are named on one line",
+              result["launched"].returncode == 2
+              and "Agent tmux sessions on the box now (running agent-seats or "
+                  "leftover-shells): seat-a@seat-a seat-b@default" in result["launched"].stderr,
+              (result["launched"].returncode, result["launched"].stderr[:800]))
+
         # A first argument starting with - is refused as a seat name: the
         # first argument is always the name, so the launcher would otherwise
         # launch a seat named after the option.
@@ -1004,20 +1057,25 @@ def main() -> int:
         harness = LaunchHarness(root / "update-lock-bound")
         harness.update_timeout_seconds = 30
         with AnotherUpdateHoldsTheLock(harness.update_lock_path()):
-            started = time.monotonic()
             result = harness.run(["seat-v", "--no-attach"])
-            elapsed = time.monotonic() - started
         check("update lock (box): a held lock skips this update immediately",
               harness.claude_updates() == [], harness.claude_updates())
         check("update lock (box): the skip is reported in exactly one line",
               "Another claude update is running; this launch uses the claude already installed.\n"
               == result["replay"].stderr,
               result["replay"].stderr[:400])
-        check("update lock (box): the seat is still prepared, without hanging",
-              result["replay"].returncode == 0 and harness.prepare_ran()
-              and elapsed < 15,
-              (result["replay"].returncode, f"{elapsed:.1f}s",
-               result["replay"].stderr[:300]))
+        # The skip line above is the marker that the lock was tried without
+        # waiting; handoff-supervisor-session-launch-and-seat-lock-test.py counts
+        # the helper's lock attempts.
+        check("update lock (box): the seat is still prepared",
+              result["replay"].returncode == 0 and harness.prepare_ran(),
+              (result["replay"].returncode, result["replay"].stderr[:300]))
+
+        # The timed-out outcome and the killed command are what show the
+        # helper's timeout fired; elapsed time is only a backstop, at
+        # least ten times the timeout so a busy machine cannot fail it.
+        helper_timeout_seconds = 2
+        helper_timeout_backstop_seconds = 15 * helper_timeout_seconds
 
         # --- the pseudo-terminal helper: a command that closes its terminal
         # and its stderr and then keeps running is stopped at the timeout
@@ -1030,7 +1088,8 @@ def main() -> int:
                  "import os, sys, time; "
                  f"open({str(pid_file)!r}, 'w').write(str(os.getpid())); "
                  "os.close(1); os.close(2); time.sleep(600)"],
-                str(root), dict(os.environ), timeout_seconds=2)
+                str(root), dict(os.environ),
+                timeout_seconds=helper_timeout_seconds)
             closed_streams_timed_out = False
         except subprocess.TimeoutExpired:
             closed_streams_timed_out = True
@@ -1047,7 +1106,7 @@ def main() -> int:
         check("pseudo-terminal helper: a command that closes both streams "
               "and keeps running is stopped at the timeout and does not "
               "survive",
-              closed_streams_timed_out and elapsed < 15
+              closed_streams_timed_out and elapsed < helper_timeout_backstop_seconds
               and pid_file.is_file() and not closed_streams_command_survived,
               (closed_streams_timed_out, f"{elapsed:.1f}s",
                pid_file.is_file(), closed_streams_command_survived))

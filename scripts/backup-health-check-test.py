@@ -71,9 +71,9 @@ def run_check(root: Path, mounted: bool, status_line=True):
     log_directory, snapshot_directory = root / "log", root / "snapshots"
     environment = dict(
         os.environ,
-        NEDSCHORUS_BACKUP_MOUNT=str(root / "mount"),
-        NEDSCHORUS_TIMESHIFT_LOG_DIRECTORY=str(log_directory),
-        NEDSCHORUS_TIMESHIFT_SNAPSHOT_DIRECTORY=str(snapshot_directory),
+        NEDSNODES_BACKUP_MOUNT=str(root / "mount"),
+        NEDSNODES_TIMESHIFT_LOG_DIRECTORY=str(log_directory),
+        NEDSNODES_TIMESHIFT_SNAPSHOT_DIRECTORY=str(snapshot_directory),
     )
     (root / "mount").mkdir(exist_ok=True)
 
@@ -110,12 +110,11 @@ with tempfile.TemporaryDirectory() as temporary_directory:
     check("an absent drive is reported", "BACKUP DRIVE GONE" in result.stdout, result.stdout)
     check("an absent drive exits 1", result.returncode == 1)
 
-    # One three-hour run late is still healthy: the last log and snapshot are
-    # just inside the limits.
+    # A last log and snapshot just inside the age limits are still healthy.
     build_layout(root, log_age_seconds=4 * 3600 + 25 * 60,
                  snapshot_age_seconds=8 * 3600 + 55 * 60)
     result = run_check(root, mounted=True)
-    check("a run late by under a three-hour cycle prints nothing",
+    check("a log and snapshot just inside the age limits print nothing",
           result.stdout.strip() == "", repr(result.stdout))
 
     # Scheduler dead: no run for five hours, though snapshots on disk look fine.

@@ -4,7 +4,7 @@
 Runs after every Edit, Write, NotebookEdit and Bash call. For each worktree
 the call may have changed, it writes or replaces the calling `claude`
 process's work-snapshot when something is uncommitted, and deletes it when
-nothing is, through nc-systems/handoff/uncommitted-work-snapshots.py. It
+nothing is, through nn-systems/handoff/uncommitted-work-snapshots.py. It
 never changes a worktree's files, index or branch.
 
 Which worktrees: after Edit, Write and NotebookEdit, the one holding the
@@ -27,7 +27,7 @@ the agent is told through additionalContext that the worktree's uncommitted
 work is not protected; the hook always exits 0, since the tool call has
 already happened.
 
-Design: nc-systems/handoff/handoff-uncommitted-work-snapshots-across-crashes-design.md.
+Design: nn-systems/handoff/handoff-uncommitted-work-snapshots-across-crashes-design.md.
 """
 
 import importlib.util
@@ -37,7 +37,7 @@ import sys
 from pathlib import Path
 
 CLONE_ROOT = Path(__file__).resolve().parents[1]
-MODULE_PATH = CLONE_ROOT / "nc-systems" / "handoff" / "uncommitted-work-snapshots.py"
+MODULE_PATH = CLONE_ROOT / "nn-systems" / "handoff" / "uncommitted-work-snapshots.py"
 OWNER_FILE_MODULE_PATH = CLONE_ROOT / "scripts" / "worktree-owner-file-read-and-write.py"
 
 FILE_EDITING_TOOLS = ("Edit", "Write", "NotebookEdit")
@@ -53,12 +53,14 @@ NOT_PROTECTED_MESSAGE = (
 OWNER_FILE_NOT_WRITTEN_MESSAGE = (
     "The owner file of your worktree {worktree}, the file that tells the worktree cleaner "
     "who owns the worktree, could not be written, so "
-    "scripts/clean-worktrees.py will never remove that worktree, and it stays on disk once your "
+    "scripts/clean-worktrees.py removes that worktree only once nothing in it has changed for "
+    "2 days and it holds no uncommitted or untracked file, so it stays on disk after your "
     "work is done: {reason}\n"
     "Carry on with your task; nothing you do here fixes this.\n"
     "In your final report, give the agent that dispatched you this sentence: \"Worktree "
     "{worktree} has no owner file, the file that tells the worktree cleaner who owns it, so "
-    "the worktree cleaner leaves it alone; when its work is pushed or merged, remove it with "
+    "the worktree cleaner removes it only once nothing in it has changed for 2 days; when its "
+    "work is pushed or merged, remove it with "
     "git worktree remove {worktree}.\"")
 
 

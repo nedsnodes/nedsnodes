@@ -17,7 +17,7 @@ running while its handoff-supervisor runs: the process whose id is in
 --agent <name>. A session-handoff keeps the supervisor, so a handoff changes
 nothing. An agent-session owns the worktree of a subagent it dispatched, and
 counts as running while its `claude` process runs; owner_key names that
-process as nc-systems/handoff/uncommitted-work-snapshots.py names a
+process as nn-systems/handoff/uncommitted-work-snapshots.py names a
 work-snapshot's owner (boot id, process id and start time on Linux; process id
 and start time on macOS). agent_seat is the agent-seat whose agent-sessions
 are told about the worktree; the launchers set GIT_AUTHOR_NAME to it.
@@ -35,10 +35,11 @@ agent-session's `claude` process, and unlocks it when the subagent finishes;
 when the hook wrote no owner file there,
 scripts/uncommitted-work-snapshot-hook.py writes the agent-session's owner
 file after the subagent's Edit, Write, NotebookEdit or Bash calls there,
-while that lock still names the process. The cleaner never removes a
-worktree with no owner file, except a merge-lane review checkout, a worktree in
-~/.cache/merge-lane-review-worktrees, which it removes once its pull request has
-been merged or closed for 24 hours.
+while that lock still names the process. The cleaner removes a worktree with
+no owner file only once nothing in it has changed for 2 days and it holds no
+uncommitted or untracked file, or, for a merge-lane review checkout, a worktree
+in ~/.cache/merge-lane-review-worktrees, once its pull request has been merged
+or closed for 24 hours.
 
 It refuses to write into the reference-checkout, whose git directory is the
 clone's common one, and over an existing owner file.
@@ -110,10 +111,11 @@ WORKTREE_OWNER_FILE_COMMAND_FAILED_NEXT_STEP_LINES = (
     "scripts/worktree-owner-file-read-and-write.py command again once, with the same "
     "arguments.\n"
     "If it fails the same way again, give the FAILED line to the agent that dispatched you, or to "
-    "the user if no agent did, and say that scripts/clean-worktrees.py never removes a worktree "
-    "that has no owner file, apart from a merge-lane review checkout in "
-    "~/.cache/merge-lane-review-worktrees, so the worktree stays on disk until someone runs "
-    "git worktree remove <the worktree's path>.")
+    "the user if no agent did, and say that scripts/clean-worktrees.py removes a worktree "
+    "that has no owner file only once nothing in it has changed for 2 days and it holds no "
+    "uncommitted or untracked file, apart from a merge-lane review checkout in "
+    "~/.cache/merge-lane-review-worktrees, so the worktree stays on disk until then, or until "
+    "someone runs git worktree remove <the worktree's path>.")
 
 _work_snapshots = None
 _handoff_supervisor = None
@@ -140,7 +142,7 @@ def load_uncommitted_work_snapshots_module_once():
     if _work_snapshots is None:
         _work_snapshots = load_module(
             "uncommitted_work_snapshots",
-            REPO_ROOT / "nc-systems" / "handoff" / "uncommitted-work-snapshots.py")
+            REPO_ROOT / "nn-systems" / "handoff" / "uncommitted-work-snapshots.py")
     return _work_snapshots
 
 
@@ -149,7 +151,7 @@ def handoff_supervisor_module():
     global _handoff_supervisor
     if _handoff_supervisor is None:
         _handoff_supervisor = load_module(
-            "handoff_supervisor", REPO_ROOT / "nc-systems" / "handoff" / "handoff-supervisor.py")
+            "handoff_supervisor", REPO_ROOT / "nn-systems" / "handoff" / "handoff-supervisor.py")
     return _handoff_supervisor
 
 
@@ -304,7 +306,7 @@ def claude_code_subagent_worktree_lock_reason_parse(lock_reason):
 
 def claude_code_subagent_worktree_lock_macos_start_seconds(lock):
     """The macOS lock's start as whole seconds since 1970, the form
-    nc-systems/handoff/uncommitted-work-snapshots.py's macos_start_seconds gives; raises ValueError
+    nn-systems/handoff/uncommitted-work-snapshots.py's macos_start_seconds gives; raises ValueError
     when the start is not the date `ps -o lstart=` prints."""
     started = time.strptime(" ".join(lock.start_ticks.split()), MACOS_LOCK_START_FORMAT)
     return str(int(time.mktime(started)))
@@ -355,7 +357,7 @@ def claude_code_subagent_worktree_lock_dispatching_process_running_state(lock, p
 def claude_code_subagent_worktree_lock_ended_agent_session_owner_key(lock, proc_root="/proc",
                                                                    platform=sys.platform):
     """The owner key of the ended agent-session a lock names, in the form
-    nc-systems/handoff/uncommitted-work-snapshots.py writes for the platform; after a reboot the
+    nn-systems/handoff/uncommitted-work-snapshots.py writes for the platform; after a reboot the
     Linux boot id differs from the process's, and the key still reads as stopped. On macOS the
     key holds the lock's start in seconds, which no later process with that id matches, so it
     reads as stopped too; raises ValueError when that start cannot be read."""
@@ -384,6 +386,18 @@ def agent_seats_whose_claude_code_transcripts_name_subagent(agent_id, agents_roo
         if any(project.glob(f"*/subagents/agent-{agent_id}.jsonl")):
             found.append(seat)
     return found
+
+
+def nearest_claude_parent_process_owner_key():
+    """The owner_key of the nearest process named claude among this process's parent processes;
+    raise WorktreeOwnerFileError when there is none."""
+    snapshots = load_uncommitted_work_snapshots_module_once()
+    process_id = snapshots.claude_owner_process_id(os.getppid())
+    if process_id is None:
+        raise WorktreeOwnerFileError(
+            "no process named claude is among this program's parent processes, "
+            "so there is no agent-session to name")
+    return snapshots.owner_key_of_process(process_id)
 
 
 def worktree_lock_reason_read(worktree):
@@ -434,15 +448,10 @@ def main(argv=None):
             path = worktree_owner_file_write(worktree, OWNER_AGENT_SEAT, arguments[2])
         elif arguments == ["write", "--agent-session"]:
             worktree = worktree or worktree_of_current_directory()
-            snapshots = load_uncommitted_work_snapshots_module_once()
-            process_id = snapshots.claude_owner_process_id(os.getppid())
-            if process_id is None:
-                raise WorktreeOwnerFileError(
-                    "no process named claude is among this program's parent processes, "
-                    "so there is no agent-session to name")
-            agent_seat = os.environ.get(snapshots.AGENT_SEAT_ENVIRONMENT_VARIABLE, "")
+            agent_seat = os.environ.get(
+                load_uncommitted_work_snapshots_module_once().AGENT_SEAT_ENVIRONMENT_VARIABLE, "")
             path = worktree_owner_file_write(worktree, OWNER_AGENT_SESSION, agent_seat,
-                                             snapshots.owner_key_of_process(process_id))
+                                             nearest_claude_parent_process_owner_key())
         else:
             print(__doc__, file=sys.stderr)
             return 2

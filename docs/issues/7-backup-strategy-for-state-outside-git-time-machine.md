@@ -8,31 +8,33 @@ issue: "[Backup strategy for state outside git (Time Machine covers today; inven
 
 The user, in the MD-skills seat's walk on where cold-read records live: "I think we should backup our transcripts to the nedbox." This decides scope item 2 below for one class — Claude session transcripts — and is the first authorization to build anything under this issue. The rest of the scope (the other classes, the restore drill) stands as before.
 
-**Where they go.** The log-store is the directory on ned-box for the byproducts of the work that are not the system, ruled the same evening: `/home/nedlern/nedschorus-logs/`, one subdirectory per kind (`cold-read-records/`, `walk/`), a file there cited with its host in scp form so an agent on either machine knows the command. Transcripts are the third kind, one subdirectory per machine, keeping Claude Code's own layout underneath so a transcript is found the same way it is found locally:
+**Where they go.** The log-store is the directory on ned-box for the byproducts of the work that are not the system, ruled the same evening: `/home/nedlern/nedsnodes-logs/`, one subdirectory per kind (`cold-read-records/`, `walk/`), a file there cited with its host in scp form so an agent on either machine knows the command. Transcripts are the third kind, one subdirectory per machine, keeping Claude Code's own layout underneath so a transcript is found the same way it is found locally:
 
 ```
-/home/nedlern/nedschorus-logs/transcripts/mac/projects/<project-key>/<session-id>.jsonl
-/home/nedlern/nedschorus-logs/transcripts/mac/handoffs/<file>
-/home/nedlern/nedschorus-logs/transcripts/ned-box/projects/...
-/home/nedlern/nedschorus-logs/transcripts/ned-box/handoffs/...
+/home/nedlern/nedsnodes-logs/transcripts/mac/projects/<project-key>/<session-id>.jsonl
+/home/nedlern/nedsnodes-logs/transcripts/mac/handoffs/<file>
+/home/nedlern/nedsnodes-logs/transcripts/ned-box/projects/...
+/home/nedlern/nedsnodes-logs/transcripts/ned-box/handoffs/...
 ```
 
 `mac` and `ned-box` are the names CLAUDE.md uses for the two machines. The project-key directory (`-Users-el-agents-MD-skills`) already encodes the seat, so there is no per-seat layer. `~/.claude/projects/` also holds the memory store (`<project-key>/memory/`), so mirroring it covers memories too. ned-box's own transcripts are already on its disk inside Timeshift's coverage (its include list ends with `+ /home/nedlern/**`, checked 2026-09-07); copying them in as well makes the store the one place to look for any session from either machine.
 
 **How, as built and landed.** `scripts/transcript-mirror-to-log-store.py` with `scripts/transcript-mirror-to-log-store-test.py`, 20 cases, merged in PR [transcript-mirror-to-log-store.py: mirror ~/.claude/projects and handoffs into the log-store on ned-box, hourly by cron](https://github.com/nedschorus/nedschorus/pull/289) on 2026-09-08. `rsync -a` of the two directories, over ssh in batch mode from the Mac and locally on ned-box, never `--delete`, so a transcript that vanishes locally stays in the store. This is a mirror, not a record: a live session's transcript grows between runs and rsync sends the delta, so the record shipper's no-overwrite rule does not apply. The script's own docstring carries the rest, including why files vanishing mid-run are not a failure and why that exit code differs between the Mac's openrsync and ned-box's GNU rsync.
 
-**Scheduled 2026-09-10, hourly by cron on both machines.** Not launchd on the Mac: the project's escaped-bug dataset records that launchd never fires StartInterval jobs on this Mac. Cron does, verified the same day with a one-minute canary line that fired on time and was then removed. Both reference checkouts were brought to main first; ned-box's was 132 commits behind and did not have the script. The two lines, one per machine:
+**Scheduled 2026-09-10 by cron on both machines, hourly then; `nn-systems/general-tools/scheduled-jobs-on-each-machine.json` now runs it every minute.** Not launchd on the Mac: the project's escaped-bug dataset records that launchd never fires StartInterval jobs on this Mac. Cron does, verified the same day with a one-minute canary line that fired on time and was then removed. Both reference checkouts were brought to main first; ned-box's was 132 commits behind and did not have the script. The two lines, one per machine, as first installed:
 
 ```
-Mac:     17 * * * * /opt/homebrew/opt/python@3.13/libexec/bin/python3 /Users/el/Projects/nedschorus/scripts/transcript-mirror-to-log-store.py >> /Users/el/.claude/transcript-mirror.log 2>&1
-ned-box: 17 * * * * /usr/bin/python3 /home/nedlern/Projects/nedschorus/scripts/transcript-mirror-to-log-store.py >> /home/nedlern/.claude/transcript-mirror.log 2>&1
+Mac:     17 * * * * /opt/homebrew/opt/python@3.13/libexec/bin/python3 /Users/el/Projects/nedsnodes/scripts/transcript-mirror-to-log-store.py >> /Users/el/.claude/transcript-mirror.log 2>&1
+ned-box: 17 * * * * /usr/bin/python3 /home/nedlern/Projects/nedsnodes/scripts/transcript-mirror-to-log-store.py >> /home/nedlern/.claude/transcript-mirror.log 2>&1
 ```
 
 To remove either, `crontab -l | grep -v transcript-mirror-to-log-store | crontab -` on that machine.
 
 **First pass by hand, 2026-09-10, both exit 0.** Mac: 3,236 project files, and 158 handoffs against the store's 167, the nine extra being files the store kept after the Mac dropped them, which is the never-delete rule working. ned-box: 278 project files and 21 handoffs, matching exactly.
 
-**Next action.** Read `~/.claude/transcript-mirror.log` on each machine after the next few ticks at 17 minutes past the hour and confirm the hourly run stays quiet and exits 0. Then this class of scope item 2 is done and only the recovered archive below is unruled.
+**Checked 2026-11-13 on ned-box.** The job runs with `--failures-only`, so it writes `~/.claude/transcript-mirror.log` only when a run fails; ned-box's log was last written 2026-09-30 10:17 -0700, so no run there has failed since.
+
+**Next action.** On the Mac, which ned-box cannot reach, read the modification time of `~/.claude/transcript-mirror.log`; if it predates the switch to every minute, no Mac run has failed since, this class of scope item 2 is done, and only the recovered archive below is unruled.
 
 ## Added 2026-09-08 (cold-read-research): the recovered Time Machine merge is a fourth class, and a mirror will never pick it up
 
@@ -44,7 +46,7 @@ The 2026-09-07 ruling covers the two live trees. It does not cover a recovered a
 
 **Why this class matters beyond backup.** Two pieces of work now read old transcripts as source material rather than as logs. The reviewer test set's raw first drafts are recovered from them, and the resumed-author arm resumes them. So a deleted transcript is not a lost log, it is a lost test case and a lost experiment.
 
-**Proposed disposition, not yet ruled:** one-time upload to `/home/nedlern/nedschorus-logs/transcripts/recovered/from-time-machine-2026-09-05/`, kept separate from the `mac/` and `ned-box/` mirrors because it is an archive rather than a mirror — nothing on the Mac will keep changing it, and it must never be pruned to match a live tree. About 3.1 GB against 3.3 TB free on the store's disk.
+**Proposed disposition, not yet ruled:** one-time upload to `/home/nedlern/nedsnodes-logs/transcripts/recovered/from-time-machine-2026-09-05/`, kept separate from the `mac/` and `ned-box/` mirrors because it is an archive rather than a mirror — nothing on the Mac will keep changing it, and it must never be pruned to match a live tree. About 3.1 GB against 3.3 TB free on the store's disk.
 
 **Measured 2026-09-08, for whoever builds the mirror:** the store already holds 714 `.jsonl` files, 335 MB, under `transcripts/mac/projects/`; the Mac's live tree holds 1,861. That was a partial copy made by hand, before the mirror script existed. The script landed on 2026-09-08 and both machines' subtrees are now in the store; the counts are in the section above.
 
@@ -53,7 +55,7 @@ The 2026-09-07 ruling covers the two live trees. It does not cover a recovered a
 
 ## Measured 2026-10-01: the Mac's Time Machine backup, six questions answered
 
-The Mac-side survey, ruled 2026-08-14, asked six questions about the Mac's backup that no agent on ned-box could answer. Its questions are at `git show 773d118c:docs/issues/queue/mac-side-time-machine-survey.md`; the file is removed from the queue now that this section answers them. Measured on the Mac on 2026-10-01 (last at 19:59 PDT), read-only, with the backup drive connected; item 27 of the walk queue-and-drafts-drain-2026-09-22 ruled that the answers are recorded here (minutes: `nedlern@ned-box:/home/nedlern/nedschorus-logs/walk/queue-and-drafts-drain-2026-09-22-minutes.md`).
+The Mac-side survey, ruled 2026-08-14, asked six questions about the Mac's backup that no agent on ned-box could answer. Its questions are at `git show 773d118c:docs/issues/queue/mac-side-time-machine-survey.md`; the file is removed from the queue now that this section answers them. Measured on the Mac on 2026-10-01 (last at 19:59 PDT), read-only, with the backup drive connected; item 27 of the walk queue-and-drafts-drain-2026-09-22 ruled that the answers are recorded here (minutes: `nedlern@ned-box:/home/nedlern/nedsnodes-logs/walk/queue-and-drafts-drain-2026-09-22-minutes.md`).
 
 1. **Destination.** `tmutil destinationinfo`: one destination, "My Passport for Mac", Kind Local, an external disk mounted at `/Volumes/My Passport for Mac`, 3.6 TB.
 2. **Last backup and spacing.** `tmutil latestbackup`: 2026-10-01 18:58 PDT. `tmutil listbackups`: about one backup an hour while the drive is attached; none from 2026-09-26 to 2026-09-29, and the drive was found unplugged during that gap.
@@ -63,6 +65,14 @@ The Mac-side survey, ruled 2026-08-14, asked six questions about the Mac's backu
 6. **Restoring one file.** The backups can be listed without privilege, but not read in place: the path `tmutil latestbackup` prints does not open for an ordinary user, and reading inside a backup takes a read-only `mount_apfs`, which needs root. `scripts/find-deleted-path-across-backups.py <path>` searches Time Machine as one of its surfaces and prints the exact recovery command, or UNAVAILABLE with the command that needs the password. The tight sudoers rule it is built around ships in the repository as `config/sudoers-mount-apfs-readonly-for-backup-recovery`; a file named `nedschorus-mount-apfs-readonly` is present in `/etc/sudoers.d/` on the Mac (its content was not read: that needs root).
 
 **Next action.** None from these answers. Scope item 3 below, testing one restore path, now has a command-line route to test: `scripts/find-deleted-path-across-backups.py` against a file known to be in a Mac backup.
+
+## Ruled 2026-10-11: a wiki page on backup procedures
+
+While ruling on how long the worktree cleaner keeps old work, the user said: "I don't know if there is a wiki page or design for our backup procedures, but there should be." In item 5b of the approval-walk git-checkouts-worktrees-and-branch-rules-design-draft-2026-10-09-2, he approved, with "y y", adding that page to this issue as work (walk-minutes: `nedlern@ned-box:/home/nedlern/nedsnodes-logs/walk/git-checkouts-worktrees-and-branch-rules-design-draft-2026-10-09-2-minutes.md`, lines 20 and 21). The same ruling is decision 5 of the design draft for GHI [One design of record for the project's git checkouts, worktrees and branch rules](https://github.com/nedschorus/nedschorus/issues/1121).
+
+**The work.** A wiki page on the project's backup procedures: what is backed up, where, how often, how long each backup is kept, and how to restore a file. It is built from this issue's measurements and from `scripts/find-deleted-path-across-backups.py`. No such page exists: `git ls-tree -r --name-only origin/main docs/nedsnodes-wiki | grep -i backup` printed nothing on 2026-11-11.
+
+**Next action for this part.** Write the page.
 
 ---
 
@@ -78,7 +88,7 @@ Legacy references (existence verified 2026-07-21, contents NOT vetted — the bo
 - `~/Projects/nedlern/docs/working/proposed/agent-state-outside-git-design.md`
 - `~/Projects/nedlern/docs/working/proposed/nedlern-machine-state-repo-and-sweep-2026-07-17.md`
 
-Ladder position: the transcript mirror is authorized (2026-09-07) and now built and scheduled (2026-09-10); the Mac's Time Machine survey is answered (2026-10-01, above); nothing else under this issue is authorized.
+Ladder position: the transcript mirror is authorized (2026-09-07) and now built and scheduled (2026-09-10); the Mac's Time Machine survey is answered (2026-10-01, above); the wiki page on backup procedures is authorized (2026-10-11, above); nothing else under this issue is authorized.
 
 —
 Session: f5081355-c3fd-4271-956c-68ffeb99e4ae (new-vp); revised 2026-09-10 by md-skills-9e; Time Machine answers added 2026-10-01 by cold-read-research

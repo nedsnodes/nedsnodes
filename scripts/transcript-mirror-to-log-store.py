@@ -1,20 +1,25 @@
 #!/usr/bin/env python3
-"""Mirror this machine's Claude Code transcripts, handoffs, task lists, seat-briefs
-and global CLAUDE.md into the log-store on ned-box.
+"""Mirror this machine's Claude Code transcripts, handoffs, task lists, seat-briefs,
+global CLAUDE.md and, on the Mac, the Remote Control reconnect watcher's log
+into the log-store on ned-box.
 
 Usage:
   scripts/transcript-mirror-to-log-store.py                   # one pass, one line per source
   scripts/transcript-mirror-to-log-store.py --failures-only   # one pass, only FAILED lines (cron)
 
 WHAT IT MIRRORS AND WHERE (user-ruled 2026-09-07, "I think we should backup
-our transcripts to the nedbox"; recorded on nedschorus#7). Five sources under
+our transcripts to the nedbox"; recorded on nedschorus#7). Six sources under
 the home, the SOURCES table: `~/.claude/projects/`, which holds every
 session's transcript (`<project-key>/<session-id>.jsonl`) and beside them the
 memory store (`<project-key>/memory/`); `~/.claude/handoffs/`;
 `~/.claude/tasks/`, each agent-seat's task list (`<list-name>/<task-id>.json`);
 the seat-brief of each agent-seat, the `CLAUDE.local.md` at the root of each
 directory directly under `~/agents/`, skipping a directory that has none, such
-as a worktree; and `~/.claude/CLAUDE.md`, the machine's global instructions.
+as a worktree; `~/.claude/CLAUDE.md`, the machine's global instructions; and
+the Remote Control reconnect watcher's log directory on the Mac,
+`~/.local/state/claude/<REMOTE_CONTROL_RECONNECT_WATCHER_PROGRAM>/`, its
+<REMOTE_CONTROL_RECONNECT_WATCHER_PROGRAM>-decisions.jsonl and notices, which ned-box has nowhere else. ned-box has no
+such directory, because there the watcher writes into the log-store itself.
 Git tracks none of these; for the Mac, the store's copy is the only one off
 the machine.
 They go to the log-store as the third kind of byproduct, one subdirectory per
@@ -23,19 +28,20 @@ same way it is found locally, apart from the seat-briefs, which go to
 `seat-briefs/` because `~/.claude/agents/` is Claude Code's own directory of
 subagent definitions:
 
-  /home/nedlern/nedschorus-logs/agent-session-files-by-machine/mac/projects/<project-key>/<session-id>.jsonl
-  /home/nedlern/nedschorus-logs/agent-session-files-by-machine/mac/handoffs/<file>
-  /home/nedlern/nedschorus-logs/agent-session-files-by-machine/mac/tasks/<list-name>/<task-id>.json
-  /home/nedlern/nedschorus-logs/agent-session-files-by-machine/mac/seat-briefs/<seat>/CLAUDE.local.md
-  /home/nedlern/nedschorus-logs/agent-session-files-by-machine/mac/CLAUDE.md
-  /home/nedlern/nedschorus-logs/agent-session-files-by-machine/ned-box/projects/...
+  /home/nedlern/nedsnodes-logs/agent-session-files-by-machine/mac/projects/<project-key>/<session-id>.jsonl
+  /home/nedlern/nedsnodes-logs/agent-session-files-by-machine/mac/handoffs/<file>
+  /home/nedlern/nedsnodes-logs/agent-session-files-by-machine/mac/tasks/<list-name>/<task-id>.json
+  /home/nedlern/nedsnodes-logs/agent-session-files-by-machine/mac/seat-briefs/<seat>/CLAUDE.local.md
+  /home/nedlern/nedsnodes-logs/agent-session-files-by-machine/mac/CLAUDE.md
+  /home/nedlern/nedsnodes-logs/agent-session-files-by-machine/mac/<REMOTE_CONTROL_RECONNECT_WATCHER_PROGRAM>/<REMOTE_CONTROL_RECONNECT_WATCHER_PROGRAM>-decisions.jsonl
+  /home/nedlern/nedsnodes-logs/agent-session-files-by-machine/ned-box/projects/...
 
 `mac` and `ned-box` are the names CLAUDE.md uses for the two machines; this
 program tells them apart by hostname. On ned-box the copy is local -- its
 transcripts are already on that disk inside Timeshift's coverage, and the
 copy makes the store the one place to look for any session from either
 machine. A file there is cited with its host in scp form, like everything in
-the store: `nedlern@ned-box:/home/nedlern/nedschorus-logs/agent-session-files-by-machine/mac/handoffs/<file>`.
+the store: `nedlern@ned-box:/home/nedlern/nedsnodes-logs/agent-session-files-by-machine/mac/handoffs/<file>`.
 
 HOW. `rsync -a` of each source into its place, over ssh in batch mode with a
 connect timeout from the Mac, never `--delete`: a transcript that vanishes
@@ -47,7 +53,7 @@ GNU rsync exits 23, not 24, for a listed file that is gone by the time it
 looks, so on ned-box a seat-brief removed in that instant is a FAILED line
 for that one run. This is a mirror, not a record -- a live
 session's transcript grows between runs and rsync sends the delta -- so the
-no-overwrite rule nc-systems/cold-read/cold-read-record-ship.py applies to cold-read
+no-overwrite rule nn-systems/cold-read/cold-read-record-ship.py applies to cold-read
 records does not apply here. Two things rsync meets on a live tree are
 expected and not failures: files that vanish between its listing and its
 transfer (a scratch project directory removed by a session ending; exit 24
@@ -120,11 +126,11 @@ repository; com.nedlern.agent-ping was the casualty). Each machine runs its
 own `python3`: the Mac's Homebrew link and ned-box's system one. The lines,
 run from each machine's reference checkout, which the stop hook keeps on
 main, are installed by
-nc-systems/general-tools/install-scheduled-jobs-on-this-machine.py from the
+nn-systems/general-tools/install-scheduled-jobs-on-this-machine.py from the
 table beside that program, which is where a change to them is made:
 
-  Mac:     * * * * * /opt/homebrew/bin/python3 /Users/el/Projects/nedschorus/scripts/transcript-mirror-to-log-store.py --failures-only >> /Users/el/.claude/transcript-mirror.log 2>&1
-  ned-box: * * * * * /usr/bin/python3 /home/nedlern/Projects/nedschorus/scripts/transcript-mirror-to-log-store.py --failures-only >> /home/nedlern/.claude/transcript-mirror.log 2>&1
+  Mac:     * * * * * /opt/homebrew/bin/python3 /Users/el/Projects/nedsnodes/scripts/transcript-mirror-to-log-store.py --failures-only >> /Users/el/.claude/transcript-mirror.log 2>&1
+  ned-box: * * * * * /usr/bin/python3 /home/nedlern/Projects/nedsnodes/scripts/transcript-mirror-to-log-store.py --failures-only >> /home/nedlern/.claude/transcript-mirror.log 2>&1
 
 Cron's environment has no ssh agent; the Mac's key to ned-box carries no
 passphrase, checked 2026-09-07 with `env -i HOME=/Users/el PATH=/usr/bin:/bin
@@ -151,7 +157,7 @@ import time
 
 PROGRAM = "transcript-mirror-to-log-store"
 
-LOG_STORE_AGENT_SESSION_FILES_DESTINATION = "nedlern@ned-box:/home/nedlern/nedschorus-logs/agent-session-files-by-machine"
+LOG_STORE_AGENT_SESSION_FILES_DESTINATION = "nedlern@ned-box:/home/nedlern/nedsnodes-logs/agent-session-files-by-machine"
 LOG_STORE_HOSTNAME = "ned-box"
 MACHINE_NAME_ON_STORE_HOST = "ned-box"
 MACHINE_NAME_ELSEWHERE = "mac"
@@ -160,6 +166,10 @@ SOURCE_HOME_ENVIRONMENT_VARIABLE = "TRANSCRIPT_MIRROR_SOURCE_HOME"
 
 SEAT_BRIEF_FILE_NAME = "CLAUDE.local.md"
 GLOBAL_INSTRUCTIONS_FILE_NAME = "CLAUDE.md"
+# The Remote Control reconnect watcher's PROGRAM; on the Mac it logs to
+# ~/.local/state/claude/<this>/, which only this mirror carries to ned-box.
+REMOTE_CONTROL_RECONNECT_WATCHER_PROGRAM = (
+    "handoff-agent-seat-remote-control-lost-at-claude-login-reconnect-by-tmux-typing-watcher")
 
 
 def seat_briefs_in(agents: pathlib.Path) -> list:
@@ -181,6 +191,9 @@ SOURCES = (
     ("tasks", pathlib.Path(".claude") / "tasks", "tasks", None),
     ("seat-briefs", pathlib.Path("agents"), "seat-briefs", seat_briefs_in),
     (GLOBAL_INSTRUCTIONS_FILE_NAME, pathlib.Path(".claude"), ".", global_instructions_in),
+    (REMOTE_CONTROL_RECONNECT_WATCHER_PROGRAM,
+     pathlib.Path(".local") / "state" / "claude" / REMOTE_CONTROL_RECONNECT_WATCHER_PROGRAM,
+     REMOTE_CONTROL_RECONNECT_WATCHER_PROGRAM, None),
 )
 # mirror_one's outcome for a source that is absent or has no files to take.
 NOTHING_TO_MIRROR = "nothing to mirror"
@@ -361,7 +374,8 @@ def write_mirror_pass_stamp(host, machine_path: pathlib.PurePosixPath,
 def main(argv=None) -> int:
     parser = argparse.ArgumentParser(
         description="Mirror this machine's Claude Code transcripts, handoffs, task lists, "
-                    "seat-briefs and global CLAUDE.md into the log-store.")
+                    "seat-briefs, global CLAUDE.md and the Mac's Remote Control reconnect "
+                    "watcher log into the log-store.")
     parser.add_argument("--failures-only", action="store_true",
                         help="print FAILED lines only, for cron")
     failures_only = parser.parse_args(argv).failures_only

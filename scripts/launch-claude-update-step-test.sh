@@ -61,9 +61,12 @@ chmod +x "$STUBS/claude" "$STUBS/tmux" "$STUBS/git"
 # job report for the timed-out update names the script and a line number
 # ("launch-claude-mac: line 166: 12345 Alarm clock: ..."), and `set -x`-style
 # traces would do the same, so the "line <n>:" form is excluded.
-launcher_wrote_to_stderr() {
+launcher_lines() {
     grep '^launch-claude-mac: ' "$1" 2>/dev/null \
-        | grep -qv '^launch-claude-mac: line [0-9]'
+        | grep -v '^launch-claude-mac: line [0-9]'
+}
+launcher_wrote_to_stderr() {
+    launcher_lines "$1" | grep -q .
 }
 
 run_mac_launcher() {
@@ -71,7 +74,7 @@ run_mac_launcher() {
     CLAUDE_UPDATE_MARKER="$WORKSPACE/update-ran-$label"
     TMUX_CALL_LOG="$WORKSPACE/tmux-calls-$label"
     : > "$TMUX_CALL_LOG"
-    HOME="$WORKSPACE/home" NEDSCHORUS_AGENTS_ROOT="$WORKSPACE/agents" \
+    HOME="$WORKSPACE/home" NEDSNODES_AGENTS_ROOT="$WORKSPACE/agents" \
         PATH="$STUBS:$PATH" \
         CLAUDE_UPDATE_MARKER="$CLAUDE_UPDATE_MARKER" CLAUDE_UPDATE_MODE="$update_mode" \
         TMUX_CALL_LOG="$TMUX_CALL_LOG" LAUNCH_CLAUDE_UPDATE_TIMEOUT_SECONDS=2 \
@@ -94,17 +97,22 @@ grep -q "still running after 2s and was stopped" "$WORKSPACE/err-hangcase"
 check "the hang report names the limit it exceeded" $?
 grep -q "new-session" "$WORKSPACE/tmux-calls-hangcase"; check "the seat is still created after the hang" $?
 
-# A FAILING update: proceed anyway, and say nothing the launcher made up.
-status=$(run_mac_launcher fail failcase)
-check "a failing update does not block the launch" "$([ "$status" -eq 0 ]; echo $?)"
-if launcher_wrote_to_stderr "$WORKSPACE/err-failcase"; then fail_warned=1; else fail_warned=0; fi
-check "a failing update produces no launcher-written warning" "$fail_warned"
-grep -q "new-session" "$WORKSPACE/tmux-calls-failcase"; check "the seat is still created after a failing update" $?
-
 # A WORKING update: it runs on every launch, before the seat is created.
 status=$(run_mac_launcher ok okcase)
 check "a working update still launches" "$([ "$status" -eq 0 ]; echo $?)"
 check "every launch invokes claude update" "$([ -f "$WORKSPACE/update-ran-okcase" ]; echo $?)"
+
+# A FAILING update: proceed anyway, and say nothing the launcher made up.
+# Other launch steps warn here too, such as the reference-checkout
+# fast-forward, which cannot reach origin/main with git stubbed out, so a
+# warning counts only when the working update's launch above did not print it.
+status=$(run_mac_launcher fail failcase)
+check "a failing update does not block the launch" "$([ "$status" -eq 0 ]; echo $?)"
+launcher_lines "$WORKSPACE/err-okcase" | sed 's/okcase/LABEL/g' > "$WORKSPACE/launcher-lines-okcase"
+launcher_lines "$WORKSPACE/err-failcase" | sed 's/failcase/LABEL/g' \
+    | grep -qvxF -f "$WORKSPACE/launcher-lines-okcase"
+check "a failing update produces no launcher-written warning" "$([ $? -ne 0 ]; echo $?)"
+grep -q "new-session" "$WORKSPACE/tmux-calls-failcase"; check "the seat is still created after a failing update" $?
 
 # Per-seat tmux servers: the seat is created on its OWN server
 # (-L <name>) so one server crash cannot take the whole Mac fleet down, and
@@ -126,7 +134,7 @@ check "the mac launcher's window title reads [mac] <seat>" $?
 # seat on -L default. HOME is sandboxed like every invocation here (see the
 # note below: an unsandboxed run edits the operator's real ~/.claude.json).
 : > "$WORKSPACE/tmux-calls-transition"
-HOME="$WORKSPACE/home" NEDSCHORUS_AGENTS_ROOT="$WORKSPACE/agents" \
+HOME="$WORKSPACE/home" NEDSNODES_AGENTS_ROOT="$WORKSPACE/agents" \
     PATH="$STUBS:$PATH" \
     CLAUDE_UPDATE_MARKER="$WORKSPACE/update-ran-transition" CLAUDE_UPDATE_MODE=ok \
     TMUX_CALL_LOG="$WORKSPACE/tmux-calls-transition" LAUNCH_CLAUDE_UPDATE_TIMEOUT_SECONDS=2 \
@@ -289,7 +297,7 @@ esac
 HOME="$WORKSPACE/home" \
 TMUX_CALL_LOG="$WORKSPACE/tmux-calls-afterexit" \
 CLAUDE_UPDATE_MARKER="$WORKSPACE/update-ran-afterexit" \
-NEDSCHORUS_AGENTS_ROOT="$WORKSPACE/agents" \
+NEDSNODES_AGENTS_ROOT="$WORKSPACE/agents" \
 PATH="$STUBS:$PATH" sh "$SCRIPT_DIRECTORY/launch-claude-mac" seatprompt \
     > "$WORKSPACE/out-mac-prompt" 2>&1
 assert_supervised_option_is_first "mac tmux command" "$(cat "$WORKSPACE/tmux-calls-afterexit")"

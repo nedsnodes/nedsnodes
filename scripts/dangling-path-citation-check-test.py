@@ -38,7 +38,7 @@ _git_environment_fixture.remove_git_redirecting_environment_variables_from_this_
 
 _next_step_lines_spec = importlib.util.spec_from_file_location(
     "failed_command_tool_message_to_agent_rerun_once_then_stop_and_report_lines_common",
-    Path(__file__).resolve().parents[1] / "nc-systems" / "general-tools"
+    Path(__file__).resolve().parents[1] / "nn-systems" / "general-tools"
     / "failed-command-tool-message-to-agent-rerun-once-then-stop-and-report-lines-common.py")
 next_step_lines = importlib.util.module_from_spec(_next_step_lines_spec)
 _next_step_lines_spec.loader.exec_module(next_step_lines)
@@ -47,7 +47,7 @@ CHECK_SCRIPT = Path(__file__).with_name("dangling-path-citation-check.py")
 LINT_SCRIPT = Path(__file__).with_name("md-drift-lint.py")
 LINT_OVERVIEW_PATH_MODULE = Path(__file__).with_name(
     "architecture-overview-path-template-and-checked-against-commit-reader-common.py")
-GIT_OUTPUT_MODULE = (Path(__file__).resolve().parents[1] / "nc-systems" / "general-tools"
+GIT_OUTPUT_MODULE = (Path(__file__).resolve().parents[1] / "nn-systems" / "general-tools"
                      / "git-machine-readable-output-runner-and-parser-common.py")
 NEXT_STEP_LINES_MODULE = GIT_OUTPUT_MODULE.with_name(
     "failed-command-tool-message-to-agent-rerun-once-then-stop-and-report-lines-common.py")
@@ -82,9 +82,9 @@ def build_repository(root: Path):
     for source in (CHECK_SCRIPT, LINT_SCRIPT, LINT_OVERVIEW_PATH_MODULE):
         (root / "scripts" / source.name).write_text(source.read_text(encoding="utf-8"),
                                                    encoding="utf-8")
-    (root / "nc-systems" / "general-tools").mkdir(parents=True)
+    (root / "nn-systems" / "general-tools").mkdir(parents=True)
     for module in (GIT_OUTPUT_MODULE, NEXT_STEP_LINES_MODULE):
-        (root / "nc-systems" / "general-tools" / module.name).write_text(
+        (root / "nn-systems" / "general-tools" / module.name).write_text(
             module.read_text(encoding="utf-8"), encoding="utf-8")
     (root / "scripts" / "already-here.py").write_text("# a file that exists\n", encoding="utf-8")
     (root / ".gitignore").write_text("cold-read-records/\n", encoding="utf-8")
@@ -103,16 +103,17 @@ def run_check(root: Path, base: str, *arguments):
 INJECTED_GIT_ERROR = "fatal: injected git failure"
 
 
-def run_check_with_git_failing(root: Path, failing_arguments: str, base: str):
-    """Run the check with a stand-in git first on PATH: it exits 128 when its
-    arguments contain failing_arguments, and runs the real git otherwise."""
+def run_check_with_git_failing(root: Path, failing_arguments: str, base: str,
+                               git_error: str = INJECTED_GIT_ERROR):
+    """Run the check with a stand-in git first on PATH: it prints git_error and exits 128 when
+    its arguments contain failing_arguments, and runs the real git otherwise."""
     stand_in_directory = root.parent / "stand-in-git-bin"
     stand_in_directory.mkdir(exist_ok=True)
     stand_in_git = stand_in_directory / "git"
     stand_in_git.write_text(
         f"#!{sys.executable}\nimport os, sys\n"
         f"if {failing_arguments!r} in ' '.join(sys.argv[1:]):\n"
-        f"    sys.stderr.write({INJECTED_GIT_ERROR!r} + '\\n')\n"
+        f"    sys.stderr.write({git_error!r} + '\\n')\n"
         f"    sys.exit(128)\n"
         f"os.execv({shutil.which('git')!r}, ['git', *sys.argv[1:]])\n",
         encoding="utf-8")
@@ -193,6 +194,10 @@ A backticked path that is absent: `scripts/absent-program.py`.
 
 A backticked path that is present: `scripts/already-here.py`.
 
+An absent path cited with a line range: `scripts/absent-ranged.py:40-44`.
+
+A present path cited with a line range: `scripts/already-here.py:40-44`.
+
 A bare name with no directory: `dispositions.md`, which the user ruled on
 2026-09-17 is not checked at all.
 
@@ -205,6 +210,10 @@ scripts/inside-a-fence.py
           "scripts/absent-program.py" in out, out)
     check("a present backticked path is not reported",
           "already-here" not in out, out)
+    check("an absent path cited with a line range is reported",
+          "scripts/absent-ranged.py" in out, out)
+    check("a present path cited with a line range is not reported",
+          "already-here.py:40" not in out, out)
     check("a bare name with no directory is not reported (user-ruled 2026-09-17)",
           "dispositions.md" not in out, out)
     check("a path inside a code fence is not reported",
@@ -286,8 +295,8 @@ echo hello
     git(root, "add", "-A")
     git(root, "commit", "-qm", "add a program and a comment citing it")
     moved_base = git(root, "rev-parse", "HEAD").stdout.strip()
-    (root / "nc-systems" / "thing").mkdir(parents=True)
-    git(root, "mv", "scripts/cited-by-a-comment.py", "nc-systems/thing/cited-by-a-comment.py")
+    (root / "nn-systems" / "thing").mkdir(parents=True)
+    git(root, "mv", "scripts/cited-by-a-comment.py", "nn-systems/thing/cited-by-a-comment.py")
     git(root, "commit", "-qm", "move the program, sweeping nothing")
     code, out, err = run_check(root, moved_base)
     check("a path moved away, still cited by an untouched file, is reported",
@@ -298,10 +307,10 @@ echo hello
 
     # A move that sweeps its citations leaves nothing to report.
     git(root, "checkout", "-q", "-b", "moves-and-sweeps", moved_base)
-    (root / "nc-systems" / "thing").mkdir(parents=True, exist_ok=True)
-    git(root, "mv", "scripts/cited-by-a-comment.py", "nc-systems/thing/cited-by-a-comment.py")
+    (root / "nn-systems" / "thing").mkdir(parents=True, exist_ok=True)
+    git(root, "mv", "scripts/cited-by-a-comment.py", "nn-systems/thing/cited-by-a-comment.py")
     (root / "scripts" / "innocent-launcher").write_text(
-        "#!/bin/sh\n# follows the write in nc-systems/thing/cited-by-a-comment.py, ruled 2026-08-12\necho hi\n",
+        "#!/bin/sh\n# follows the write in nn-systems/thing/cited-by-a-comment.py, ruled 2026-08-12\necho hi\n",
         encoding="utf-8")
     git(root, "add", "-A")
     git(root, "commit", "-qm", "move the program and sweep its citation")
@@ -393,10 +402,10 @@ echo hello
     git(root, "add", "-A")
     git(root, "commit", "-qm", "add a tool and a usage line")
     deepening_base = git(root, "rev-parse", "HEAD").stdout.strip()
-    (root / "nc-systems" / "thing" / "scripts").mkdir(parents=True, exist_ok=True)
-    git(root, "mv", "scripts/swept-tool.py", "nc-systems/thing/scripts/swept-tool.py")
+    (root / "nn-systems" / "thing" / "scripts").mkdir(parents=True, exist_ok=True)
+    git(root, "mv", "scripts/swept-tool.py", "nn-systems/thing/scripts/swept-tool.py")
     (root / "docs" / "uses.md").write_text(
-        "Run `nc-systems/thing/scripts/swept-tool.py` to do the thing.\n", encoding="utf-8")
+        "Run `nn-systems/thing/scripts/swept-tool.py` to do the thing.\n", encoding="utf-8")
     git(root, "add", "-A")
     git(root, "commit", "-qm", "move the tool deeper and sweep its citation")
     code, out, err = run_check(root, deepening_base)
@@ -456,7 +465,7 @@ echo hello
     # a new dangling citation, and this program reported seventeen of its own
     # test's on its own pull request. Forward only, and the cost is stated in
     # its docstring. Both halves of the Test row of
-    # docs/nedschorus-wiki/nedschorus-file-naming-and-location-standards.md
+    # docs/nedsnodes-wiki/nedsnodes-file-naming-and-location-standards.md
     # are exercised, and neither fixture is a name the two-file list this
     # replaced would have covered.
     git(root, "checkout", "-q", "-b", "test-file-by-the-naming-standard", base)
@@ -499,6 +508,20 @@ echo hello
           code == 1 and "absent-under-a-name-ending-tested" in out,
           f"{code} {out!r} {err!r}")
 
+    # A GHI-MD's name comes from its issue's title, so it can end -test
+    # without being a test: docs/issues/2263-the-test-runner-s-history-of-failing-test.md.
+    commit_change(root, "docs/issues/9999-a-title-ending-in-failing-test.md",
+                  "# a GHI-MD\n\nSee `scripts/absent-under-a-markdown-name-ending-test.py`.\n")
+    code, out, err = run_check(root, base)
+    check("a Markdown file whose stem ends -test is not a test file, and is still reported",
+          code == 1 and "absent-under-a-markdown-name-ending-test" in out,
+          f"{code} {out!r} {err!r}")
+    commit_change(root, "scripts/subsystem/tests/fixture-page.md",
+                  "# a fixture\n\nSee `scripts/absent-under-a-markdown-fixture.py`.\n")
+    code, out, err = run_check(root, base)
+    check("a Markdown file in a tests directory is still exempt forward",
+          "absent-under-a-markdown-fixture" not in out, f"{code} {out!r} {err!r}")
+
     # --- BACKWARD: a citation carrying a leading or dotted slash --------
     # The six hook commands in .claude/settings.json are written
     # `"$CLAUDE_PROJECT_DIR"/scripts/<name>.py`, and a launcher runs a
@@ -514,8 +537,8 @@ echo hello
     git(root, "add", "-A")
     git(root, "commit", "-qm", "add a program and two slash-prefixed callers")
     slash_base = git(root, "rev-parse", "HEAD").stdout.strip()
-    (root / "nc-systems").mkdir(parents=True, exist_ok=True)
-    git(root, "mv", "scripts/hooked-tool.py", "nc-systems/hooked-tool.py")
+    (root / "nn-systems").mkdir(parents=True, exist_ok=True)
+    git(root, "mv", "scripts/hooked-tool.py", "nn-systems/hooked-tool.py")
     git(root, "commit", "-qm", "move the program, sweeping neither caller")
     code, out, err = run_check(root, slash_base)
     check("a citation prefixed with / or ./ is still reported when the path moves",
@@ -535,13 +558,34 @@ echo hello
     git(root, "add", "-A")
     git(root, "commit", "-qm", "add a module and a fixture file naming it")
     fixture_base = git(root, "rev-parse", "HEAD").stdout.strip()
-    (root / "nc-systems" / "moved").mkdir(parents=True, exist_ok=True)
-    git(root, "mv", "scripts/module-under-test.py", "nc-systems/moved/module-under-test.py")
+    (root / "nn-systems" / "moved").mkdir(parents=True, exist_ok=True)
+    git(root, "mv", "scripts/module-under-test.py", "nn-systems/moved/module-under-test.py")
     git(root, "commit", "-qm", "move the module, forget the fixture file")
     code, out, err = run_check(root, fixture_base)
     check("a test file's stale citation of a moved module is still reported",
           code == 1 and "scripts/dangling-path-citation-check-test.py:1: "
           "cites scripts/module-under-test.py, which this change removed" in out,
+          f"{code} {out!r} {err!r}")
+
+    # --- A file that keeps removed paths on purpose is not reported --------
+    git(root, "checkout", "-q", "-b", "archived-record-cites-a-moved-module", base)
+    (root / "scripts" / "renamed-module.py").write_text("# the module\n", encoding="utf-8")
+    (root / "nn-queue" / "archived").mkdir(parents=True, exist_ok=True)
+    (root / "nn-queue" / "archived" / "record.md").write_text(
+        "It ran `scripts/renamed-module.py`.\n", encoding="utf-8")
+    (root / "docs").mkdir(exist_ok=True)
+    (root / "docs" / "current.md").write_text(
+        "Run `scripts/renamed-module.py`.\n", encoding="utf-8")
+    git(root, "add", "-A")
+    git(root, "commit", "-qm", "add a module, an archived record and a current page naming it")
+    kept_base = git(root, "rev-parse", "HEAD").stdout.strip()
+    git(root, "mv", "scripts/renamed-module.py", "scripts/module-under-its-new-name.py")
+    git(root, "commit", "-qm", "rename the module")
+    code, out, err = run_check(root, kept_base, "--only-citations-of-removed-paths")
+    check("an archived record's citation of a renamed path is not reported, "
+          "while a current page's still is",
+          code == 1 and "nn-queue/archived/record.md" not in out
+          and "docs/current.md:1: cites scripts/renamed-module.py" in out,
           f"{code} {out!r} {err!r}")
 
     # --- FORWARD: a RENAMED file's base text, read at the name it had -----
@@ -636,8 +680,8 @@ echo hello
     git(root, "add", "-A")
     git(root, "commit", "-qm", "add a target and two documents citing it")
     relative_link_base = git(root, "rev-parse", "HEAD").stdout.strip()
-    (root / "nc-systems").mkdir(parents=True, exist_ok=True)
-    git(root, "mv", "docs/moving-target.md", "nc-systems/moving-target.md")
+    (root / "nn-systems").mkdir(parents=True, exist_ok=True)
+    git(root, "mv", "docs/moving-target.md", "nn-systems/moving-target.md")
     git(root, "commit", "-qm", "move the target, sweeping neither citation")
     code, out, err = run_check(root, relative_link_base)
     check("a relative markdown link to a moved file is reported",
@@ -665,9 +709,9 @@ echo hello
     git(root, "add", "-A")
     git(root, "commit", "-qm", "add a target and a document citing it in angle brackets")
     angle_link_base = git(root, "rev-parse", "HEAD").stdout.strip()
-    (root / "nc-systems").mkdir(parents=True, exist_ok=True)
-    git(root, "mv", "docs/moving-angle-target.md", "nc-systems/moving-angle-target.md")
-    git(root, "mv", "docs/moving-angle-image.png", "nc-systems/moving-angle-image.png")
+    (root / "nn-systems").mkdir(parents=True, exist_ok=True)
+    git(root, "mv", "docs/moving-angle-target.md", "nn-systems/moving-angle-target.md")
+    git(root, "mv", "docs/moving-angle-image.png", "nn-systems/moving-angle-image.png")
     git(root, "commit", "-qm", "move the target, sweeping no citation")
     code, out, err = run_check(root, angle_link_base)
     check("an angle-bracket markdown link to a moved file is reported",
@@ -691,8 +735,8 @@ echo hello
     git(root, "add", "-A")
     git(root, "commit", "-qm", "add a module and a docstring citing it in backticks")
     backticked_base = git(root, "rev-parse", "HEAD").stdout.strip()
-    (root / "nc-systems").mkdir(parents=True, exist_ok=True)
-    git(root, "mv", "scripts/quoted-module.py", "nc-systems/quoted-module.py")
+    (root / "nn-systems").mkdir(parents=True, exist_ok=True)
+    git(root, "mv", "scripts/quoted-module.py", "nn-systems/quoted-module.py")
     git(root, "commit", "-qm", "move the module, sweeping nothing")
     code, out, err = run_check(root, backticked_base)
     check("a backticked citation in a non-Markdown file is reported when the path moves",
@@ -714,8 +758,8 @@ echo hello
     git(root, "add", "-A")
     git(root, "commit", "-qm", "add a launcher with no extension and a document citing it")
     extensionless_base = git(root, "rev-parse", "HEAD").stdout.strip()
-    (root / "nc-systems").mkdir(parents=True, exist_ok=True)
-    git(root, "mv", "scripts/launcher-that-moves", "nc-systems/launcher-that-moves")
+    (root / "nn-systems").mkdir(parents=True, exist_ok=True)
+    git(root, "mv", "scripts/launcher-that-moves", "nn-systems/launcher-that-moves")
     git(root, "commit", "-qm", "move the launcher, sweeping nothing")
     code, out, err = run_check(root, extensionless_base)
     check("a citation of a moved path with no file extension is reported",
@@ -820,8 +864,8 @@ echo hello
     git(root, "add", "-A")
     git(root, "commit", "-qm", "add a gate, two placeholder illustrations and a real citation")
     placeholder_base = git(root, "rev-parse", "HEAD").stdout.strip()
-    (root / "nc-systems").mkdir(parents=True, exist_ok=True)
-    git(root, "mv", "scripts/gate.py", "nc-systems/gate.py")
+    (root / "nn-systems").mkdir(parents=True, exist_ok=True)
+    git(root, "mv", "scripts/gate.py", "nn-systems/gate.py")
     git(root, "commit", "-qm", "move the gate, sweeping nothing")
     code, out, err = run_check(root, placeholder_base)
     check("a placeholder in a sibling of the moved file is not read as citing it",
@@ -861,8 +905,8 @@ echo hello
     git(root, "add", "-A")
     git(root, "commit", "-qm", "add a gate, two placeholder links and a real citation")
     collapsed_placeholder_base = git(root, "rev-parse", "HEAD").stdout.strip()
-    (root / "nc-systems").mkdir(parents=True, exist_ok=True)
-    git(root, "mv", "scripts/gate.py", "nc-systems/gate.py")
+    (root / "nn-systems").mkdir(parents=True, exist_ok=True)
+    git(root, "mv", "scripts/gate.py", "nn-systems/gate.py")
     git(root, "commit", "-qm", "move the gate, sweeping nothing")
     code, out, err = run_check(root, collapsed_placeholder_base)
     check('a placeholder a ".." collapses away is not read as citing the moved file',
@@ -882,7 +926,7 @@ echo hello
     # FORWARD: the placeholder is in the MIDDLE, so the token's first
     # component is a real directory of this repository and its ending is a
     # real extension, and nothing else would refuse it. Two live lines of
-    # nc-systems/cold-read/cold-read-cell-common.py are written exactly so.
+    # nn-systems/cold-read/cold-read-cell-common.py are written exactly so.
     git(root, "checkout", "-q", "-b", "placeholder-forward", base)
     commit_change(root, "scripts/illustrates-shapes.py",
                   "# a program of the shape <system>/scripts/absent-illustration.py\n"
@@ -933,11 +977,11 @@ echo hello
     git(root, "add", "-A")
     git(root, "commit", "-qm", "add a gate directory and three documents citing it")
     emptied_base = git(root, "rev-parse", "HEAD").stdout.strip()
-    (root / "nc-systems" / "gate-that-moves-whole").mkdir(parents=True, exist_ok=True)
+    (root / "nn-systems" / "gate-that-moves-whole").mkdir(parents=True, exist_ok=True)
     git(root, "mv", "scripts/gate-that-moves-whole/entry.py",
-        "nc-systems/gate-that-moves-whole/entry.py")
+        "nn-systems/gate-that-moves-whole/entry.py")
     git(root, "mv", "scripts/gate-that-moves-whole/helper.py",
-        "nc-systems/gate-that-moves-whole/helper.py")
+        "nn-systems/gate-that-moves-whole/helper.py")
     git(root, "commit", "-qm", "move the gate whole, sweeping nothing")
     code, out, err = run_check(root, emptied_base)
     check("a citation of a directory every file moved out of is reported",
@@ -986,10 +1030,10 @@ echo hello
     git(root, "add", "-A")
     git(root, "commit", "-qm", "add a nested directory and a document citing each level")
     nested_base = git(root, "rev-parse", "HEAD").stdout.strip()
-    (root / "nc-systems" / "outer-that-empties" / "inner-that-empties").mkdir(
+    (root / "nn-systems" / "outer-that-empties" / "inner-that-empties").mkdir(
         parents=True, exist_ok=True)
     git(root, "mv", "scripts/outer-that-empties/inner-that-empties/only-file.py",
-        "nc-systems/outer-that-empties/inner-that-empties/only-file.py")
+        "nn-systems/outer-that-empties/inner-that-empties/only-file.py")
     git(root, "commit", "-qm", "move the only file out, emptying both directories")
     code, out, err = run_check(root, nested_base)
     check("the emptied directory holding the moved file is reported",
@@ -1051,8 +1095,8 @@ with tempfile.TemporaryDirectory() as workspace:
 with tempfile.TemporaryDirectory() as workspace:
     root = Path(workspace) / "repo"
     root.mkdir()
-    (root / "nc-systems" / "demo").mkdir(parents=True)
-    (root / "nc-systems" / "demo" / "demo.py").write_text("print()\n", encoding="utf-8")
+    (root / "nn-systems" / "demo").mkdir(parents=True)
+    (root / "nn-systems" / "demo" / "demo.py").write_text("print()\n", encoding="utf-8")
     base = build_repository(root)
     fake_bin = Path(workspace) / "fake-bin"
     fake_bin.mkdir()
@@ -1064,9 +1108,9 @@ with tempfile.TemporaryDirectory() as workspace:
         "                 '\"errors\": [{\"type\": \"NOT_FOUND\"}]}')\nsys.exit(1)\n",
         encoding="utf-8")
     (fake_bin / "gh").chmod(0o755)
-    commit_change(root, "docs/nedschorus-wiki/nedschorus-demo-architecture-overview.md",
+    commit_change(root, "docs/nedsnodes-wiki/nedsnodes-demo-architecture-overview.md",
                   "## Planned work\n\n"
-                  "- GHI [Gone](https://github.com/nedschorus/nedschorus/issues/7)\n")
+                  "- GHI [Gone](https://github.com/nedsnodes/nedsnodes/issues/7)\n")
     environment = dict(os.environ, PATH=f"{fake_bin}{os.pathsep}{os.environ.get('PATH', '')}")
     completed = subprocess.run(
         [sys.executable, str(root / "scripts" / CHECK_SCRIPT.name), "--base", base],
@@ -1095,8 +1139,8 @@ with tempfile.TemporaryDirectory() as workspace:
         return (code == 2 and INJECTED_GIT_ERROR in err and "a git command failed" in err
                 and "finding(s)" not in err
                 and next_step_lines.git_failure_next_step_lines(
-                    rerun, "dangling-path-citation-check", text_the_failure_line_contains="could not check, because a git command failed",
-                    include_the_misspelt_branch_commit_or_path_line=True) in err)
+                    rerun, "dangling-path-citation-check", git_error_line_shown_in_tool_message_to_agent_checked_for_lock_file_path=INJECTED_GIT_ERROR,
+                    text_the_failure_line_contains="could not check, because a git command failed") in err)
 
     for failing_arguments, what in (
             ("ls-tree -z HEAD --name-only -d", "listing the root directories"),
@@ -1105,6 +1149,13 @@ with tempfile.TemporaryDirectory() as workspace:
         code, out, err = run_check_with_git_failing(root, failing_arguments, base)
         check(f"the check exits 2 with git's error when {what} fails",
               reports_the_git_failure_and_no_result(base, code, err), f"{code} {out!r} {err!r}")
+    lock_file = root / ".git" / "index.lock"
+    code, out, err = run_check_with_git_failing(
+        root, "ls-tree -z HEAD --name-only -d", base, f"fatal: Unable to create '{lock_file}': File exists.")
+    check("a git error naming a lock file gives the step that waits for that lock file, "
+          "and no misspelt-name step",
+          code == 2 and f"Git's error names the lock file {lock_file}: " in err
+          and "is misspelt" not in err, f"{code} {out!r} {err!r}")
 
     # A file the base holds, so its base text is read.
     base_with_launcher = git(root, "rev-parse", "HEAD").stdout.strip()

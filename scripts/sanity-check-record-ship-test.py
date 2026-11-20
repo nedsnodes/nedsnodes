@@ -2,11 +2,11 @@
 """Tests for scripts/sanity-check-record-ship.py (nedschorus#392).
 
 The ship logic is the record shipper's and is tested by
-nc-systems/cold-read/tests/cold-read-record-ship-test.py; what is tested here is what this
+nn-systems/cold-read/tests/cold-read-record-ship-test.py; what is tested here is what this
 program adds: the store's kind is `sanity-check-records/`, the checkout's
 directory of the same name is what --all reads, and the consequences the
 runner's closing line promises — a second ship sends only the new
-finding-dispositions.md, and one edited after it was shipped is refused rather
+sanity-check-finding-dispositions.md, and one edited after it was shipped is refused rather
 than replaced.
 
 LOCAL MODE only: the destination override names a scratch directory and the
@@ -28,7 +28,7 @@ import tempfile
 SCRIPTS_DIR = pathlib.Path(__file__).resolve().parent
 SHIP = SCRIPTS_DIR / "sanity-check-record-ship.py"
 DESTINATION_VARIABLE = "COLD_READ_RECORD_SHIP_DESTINATION"
-RULED_DESTINATION = "nedlern@ned-box:/home/nedlern/nedschorus-logs/cold-read-records"
+RULED_DESTINATION = "nedlern@ned-box:/home/nedlern/nedsnodes-logs/cold-read-records"
 
 _spec = importlib.util.spec_from_file_location("sanity_check_record_ship", SHIP)
 shipper_under_test = importlib.util.module_from_spec(_spec)
@@ -125,26 +125,26 @@ with tempfile.TemporaryDirectory(prefix="sanity-check-record-ship-test-") as scr
           in (store / "README.md").read_text(encoding="utf-8"),
           (store / "README.md").read_text(encoding="utf-8")[:1200])
 
-    # --- The second ship sends only finding-dispositions.md -------------------
+    # --- The second ship sends only sanity-check-finding-dispositions.md ------
     # What the runner's closing line promises the requesting agent.
-    (record / "finding-dispositions.md").write_text(DISPOSITIONS, encoding="utf-8")
+    (record / "sanity-check-finding-dispositions.md").write_text(DISPOSITIONS, encoding="utf-8")
     result = ship(local_destination, str(record))
     check("shipping again adds only the new dispositions file",
           result.returncode == 0 and "1 file(s) added" in result.stdout,
           f"exit {result.returncode}: {result.stdout}")
     check("and that file is in the store",
-          (shipped_dir / "finding-dispositions.md").read_text(encoding="utf-8") == DISPOSITIONS)
+          (shipped_dir / "sanity-check-finding-dispositions.md").read_text(encoding="utf-8") == DISPOSITIONS)
 
     # --- An edited dispositions file is refused, not replaced -----------------
-    (record / "finding-dispositions.md").write_text(
+    (record / "sanity-check-finding-dispositions.md").write_text(
         DISPOSITIONS + "finding two: set aside.\n", encoding="utf-8")
     result = ship(local_destination, str(record))
     check("a dispositions file edited after it shipped is REFUSED, exit 2",
           result.returncode == 2 and result.stdout.startswith("REFUSED: "),
           f"exit {result.returncode}: {result.stdout}")
     check("the refusal names the differing file and leaves the store's copy alone",
-          "finding-dispositions.md" in result.stdout
-          and (shipped_dir / "finding-dispositions.md").read_text(encoding="utf-8") == DISPOSITIONS,
+          "sanity-check-finding-dispositions.md" in result.stdout
+          and (shipped_dir / "sanity-check-finding-dispositions.md").read_text(encoding="utf-8") == DISPOSITIONS,
           result.stdout)
 
     # --- A replaced triage names this kind's directory ------------------------
@@ -159,9 +159,9 @@ with tempfile.TemporaryDirectory(prefix="sanity-check-record-ship-test-") as scr
     check("a replaced sanity-check triage prints the sha256sum path under sanity-check-records, not cold-read-records",
           result.returncode == 0 and "REPLACED" in result.stderr
           and ("sha256sum /mnt/backup/timeshift/snapshots/*/localhost"
-               f"/home/nedlern/nedschorus-logs/sanity-check-records/{triaged.name}/triage.md")
+               f"/home/nedlern/nedsnodes-logs/sanity-check-records/{triaged.name}/triage.md")
           in result.stderr
-          and "localhost/home/nedlern/nedschorus-logs/cold-read-records/" not in result.stderr,
+          and "localhost/home/nedlern/nedsnodes-logs/cold-read-records/" not in result.stderr,
           result.stderr)
 
     # --- A failed copy names this program in its rerun command ---------------
@@ -197,14 +197,14 @@ with tempfile.TemporaryDirectory(prefix="sanity-check-record-ship-test-") as scr
     shutil.copytree(SCRIPTS_DIR, scratch_repo / "scripts",
                     ignore=shutil.ignore_patterns("__pycache__"))
     # The record shipper it loads lives with the cold read, not in scripts/.
-    shutil.copytree(SCRIPTS_DIR.parent / "nc-systems" / "cold-read",
-                    scratch_repo / "nc-systems" / "cold-read",
+    shutil.copytree(SCRIPTS_DIR.parent / "nn-systems" / "cold-read",
+                    scratch_repo / "nn-systems" / "cold-read",
                     ignore=shutil.ignore_patterns("__pycache__"))
     # cold-read-record-names-common.py reads ned-box's home and its Mac mount from this module.
     ned_box_home_module = "ned-box-home-directory-and-its-mac-mount-point-path-constants-common.py"
-    (scratch_repo / "nc-systems" / "general-tools").mkdir()
-    shutil.copy2(SCRIPTS_DIR.parent / "nc-systems" / "general-tools" / ned_box_home_module,
-                 scratch_repo / "nc-systems" / "general-tools" / ned_box_home_module)
+    (scratch_repo / "nn-systems" / "general-tools").mkdir()
+    shutil.copy2(SCRIPTS_DIR.parent / "nn-systems" / "general-tools" / ned_box_home_module,
+                 scratch_repo / "nn-systems" / "general-tools" / ned_box_home_module)
     scratch_ship = scratch_repo / "scripts" / SHIP.name
     all_store = str(scratch / "all-store" / "cold-read-records")
     good = make_record(scratch_repo / "sanity-check-records", "2026-09-10-good",
@@ -231,7 +231,7 @@ with tempfile.TemporaryDirectory(prefix="sanity-check-record-ship-test-") as scr
                                 {"cut-adversarial-prompt-claude.md": CUT_REPORT})
     holder = subprocess.Popen(
         [sys.executable, "-c", COLD_READ_RECORD_BEING_WRITTEN_LOCK_HOLDER_UNTIL_STDIN_CLOSES_PYTHON_SOURCE,
-         str(scratch_repo / "nc-systems" / "cold-read" / "cold-read-record-ship.py"), str(being_written)],
+         str(scratch_repo / "nn-systems" / "cold-read" / "cold-read-record-ship.py"), str(being_written)],
         stdin=subprocess.PIPE, stdout=subprocess.PIPE, text=True)
     try:
         held_line = holder.stdout.readline()
