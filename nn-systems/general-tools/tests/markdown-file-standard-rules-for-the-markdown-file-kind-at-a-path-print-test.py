@@ -1,12 +1,12 @@
 #!/usr/bin/env python3
-"""Tests for nc-systems/general-tools/markdown-file-standard-rules-for-the-markdown-file-kind-at-a-path-print.py.
+"""Tests for nn-systems/general-tools/markdown-file-standard-rules-for-the-markdown-file-kind-at-a-path-print.py.
 
 The program must pick the right section of the Markdown file standard for each kind of path,
 print the common part alone and exit 1 for a path no section covers, and exit 2 when the
 standard is missing, lacks a heading, or the program is called wrongly. The real standard
 must hold every heading the program's constants name.
 
-Run: python3 nc-systems/general-tools/tests/markdown-file-standard-rules-for-the-markdown-file-kind-at-a-path-print-test.py
+Run: python3 nn-systems/general-tools/tests/markdown-file-standard-rules-for-the-markdown-file-kind-at-a-path-print-test.py
 Prints one line per case and a verdict line, and exits 1 if any case fails.
 """
 
@@ -22,7 +22,7 @@ from pathlib import Path
 REPOSITORY_ROOT = Path(__file__).resolve().parents[3]
 PROGRAM_PATH = Path(os.environ.get(
     "MARKDOWN_FILE_STANDARD_RULES_FOR_THE_MARKDOWN_FILE_KIND_AT_A_PATH_PRINT_PROGRAM_PATH",
-    REPOSITORY_ROOT / "nc-systems" / "general-tools"
+    REPOSITORY_ROOT / "nn-systems" / "general-tools"
     / "markdown-file-standard-rules-for-the-markdown-file-kind-at-a-path-print.py"))
 _spec = importlib.util.spec_from_file_location(
     "markdown_file_standard_rules_for_the_markdown_file_kind_at_a_path_print", PROGRAM_PATH)
@@ -54,15 +54,15 @@ expected_kinds = {
     "/Volumes/nedhome/.claude/handoffs/reboot-test-next-step-20261117-105148.md": "Handoff next step files",
     "/home/nedlern/agents/merge-lane-2/CLAUDE.local.md": "Seat-briefs",
     "CLAUDE.local.md": "Seat-briefs",
-    "docs/nedschorus-wiki/nedschorus-glossary.md": "The project glossary",
-    "/home/nedlern/agents/x-wt/docs/nedschorus-wiki/nedschorus-glossary.md": "The project glossary",
+    "docs/nedsnodes-wiki/nedsnodes-glossary.md": "The project glossary",
+    "/home/nedlern/agents/x-wt/docs/nedsnodes-wiki/nedsnodes-glossary.md": "The project glossary",
     "docs/issues/46-ghi-guide-agent-design.md": "Designs",
     "docs/issues/queue/topic-branch-creation-script-design.md": "Designs",
-    "nc-systems/handoff/handoff-design.md": "Designs",
-    "docs/nedschorus-wiki/nedschorus-style-guide.md": "Wiki pages",
-    "docs/nedschorus-wiki/queue/nedschorus-markdown-file-standard-common-part-and-one-section-per-kind.md": "Wiki pages",
-    "docs/nedschorus-wiki/nedschorus-handoff-architecture-overview.md": "Wiki pages",
-    "/Volumes/nedhome/Projects/nedschorus/docs/nedschorus-wiki/nedschorus-agent-seat-model.md": "Wiki pages",
+    "nn-systems/handoff/handoff-design.md": "Designs",
+    "docs/nedsnodes-wiki/nedsnodes-style-guide.md": "Wiki pages",
+    "docs/nedsnodes-wiki/queue/nedsnodes-markdown-file-standard-common-part-and-one-section-per-kind.md": "Wiki pages",
+    "docs/nedsnodes-wiki/nedsnodes-handoff-architecture-overview.md": "Wiki pages",
+    "/Volumes/nedhome/Projects/nedsnodes/docs/nedsnodes-wiki/nedsnodes-agent-seat-model.md": "Wiki pages",
     "docs/issues/1080-type-definitions-for-the-project-s-kinds-of.md": "GHI-MDs",
     "docs/issues/queue/the-signal-sandbox-test-fails.md": "GHI-MDs",
 }
@@ -76,9 +76,9 @@ for path in [
     "docs/issues/README.md",
     "docs/issues/queue/x-test-design.md",
     "docs/issues/46-ghi-guide-agent-test-design.md",
-    "nc-systems/handoff/handoff-contract.md",
-    "nc-systems/handoff/handoff-system-glossary.md",
-    "docs/nedschorus-wiki/nedschorus-handoff-architecture-overview-proposed-improvements-or-changes-overview-write-claim-check-by-fresh-agent-2026-11-04.md",
+    "nn-systems/handoff/handoff-contract.md",
+    "nn-systems/handoff/handoff-system-glossary.md",
+    "docs/nedsnodes-wiki/nedsnodes-handoff-architecture-overview-proposed-improvements-or-changes-overview-write-claim-check-by-fresh-agent-2026-11-04.md",
     "docs/walk/walk-me-through-skill-refactor-approval-walk-2026-11-02.md",
     "notes-CLAUDE.local.md.bak",
 ]:
@@ -89,7 +89,7 @@ for path in [
 tracked = subprocess.run(["git", "-C", str(REPOSITORY_ROOT), "ls-files", "*.md"],
                          capture_output=True, text=True, check=True).stdout.split()
 check("the project glossary exists where its pattern looks",
-      (REPOSITORY_ROOT / "docs/nedschorus-wiki/nedschorus-glossary.md").is_file())
+      (REPOSITORY_ROOT / "docs/nedsnodes-wiki/nedsnodes-glossary.md").is_file())
 covered_kinds = {program.kind_section_heading_for_path(str(REPOSITORY_ROOT / name)) for name in tracked}
 for kind in ["The project glossary", "Designs", "Wiki pages", "GHI-MDs"]:
     check(f"a tracked file is covered by {kind}", kind in covered_kinds, sorted(map(str, covered_kinds)))
@@ -142,7 +142,7 @@ with tempfile.TemporaryDirectory() as scratch:
         + "".join(f"## {h}\n\nbody\n\n" for h, _ in program.KIND_SECTION_HEADING_AND_PATH_PATTERNS
                   if h != "Designs"),
         encoding="utf-8")
-    code, out, err = run(["nc-systems/handoff/handoff-design.md"], partial)
+    code, out, err = run(["nn-systems/handoff/handoff-design.md"], partial)
     check("a standard missing a heading exits 2", code == 2, code)
     check("a heading inside a code fence does not count", '"## Designs"' in err, err)
 

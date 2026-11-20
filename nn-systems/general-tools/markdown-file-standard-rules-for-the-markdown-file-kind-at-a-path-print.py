@@ -20,8 +20,8 @@ from pathlib import Path
 
 PROGRAM_NAME = "markdown-file-standard-rules-for-the-markdown-file-kind-at-a-path-print"
 MARKDOWN_FILE_STANDARD_PATH = (
-    Path(__file__).resolve().parents[2] / "docs" / "nedschorus-wiki" / "queue"
-    / "nedschorus-markdown-file-standard-common-part-and-one-section-per-kind.md")
+    Path(__file__).resolve().parents[2] / "docs" / "nedsnodes-wiki" / "queue"
+    / "nedsnodes-markdown-file-standard-common-part-and-one-section-per-kind.md")
 COMMON_PART_HEADING = "Common part"
 
 # A test-design and a design-contract sit beside their design, under names the Designs and
@@ -35,12 +35,12 @@ UNCOVERED_PATH_PATTERNS = [r"-test-design\.md$", r"-contract\.md$"]
 KIND_SECTION_HEADING_AND_PATH_PATTERNS = [
     ("Handoff next step files", r"(^|/)\.claude/handoffs/[^/]+-next-step-[^/]*\.md$"),
     ("Seat-briefs", r"(^|/)CLAUDE\.local\.md$"),
-    ("The project glossary", r"(^|/)docs/nedschorus-wiki/nedschorus-glossary\.md$"),
+    ("The project glossary", r"(^|/)docs/nedsnodes-wiki/nedsnodes-glossary\.md$"),
     ("Designs", r"(^|/)[^/]+-design\.md$"),
     # A claim-check's proposed-improvements-or-changes-file sits beside its overview but is a
     # record of what the claim-check found, not a page.
     ("Wiki pages",
-     r"(^|/)docs/nedschorus-wiki/(queue/)?(?![^/]*-proposed-improvements-or-changes-)[^/]+\.md$"),
+     r"(^|/)docs/nedsnodes-wiki/(queue/)?(?![^/]*-proposed-improvements-or-changes-)[^/]+\.md$"),
     ("GHI-MDs", r"(^|/)docs/issues/(queue/[^/]+|\d+-[^/]+)\.md$"),
 ]
 

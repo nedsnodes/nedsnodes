@@ -1,6 +1,6 @@
 # Markdown file standard: a common part and one section per kind
 
-This page is the standard for the project's Markdown files: a common part that every Markdown file follows, then one section for each of six kinds of file, saying what a file of that kind contains, what it leaves out and its length in words. Do not read the whole page before you write or edit a file. Run `nc-systems/general-tools/markdown-file-standard-rules-for-the-markdown-file-kind-at-a-path-print.py <path of the file>`, giving the path the file will have once it is in place, such as `CLAUDE.local.md` for a seat-brief drafted in a scratchpad. It prints the common part and the one section for that file's kind, or the common part alone when no section covers the path; read another section only where the printed one points to it. The program picks the kind by the path, and, for a GHI-MD that already exists, also by its front matter, as the GHI-MDs section says. It reads this page's level-2 headings as data, and holds this page's path: a heading is renamed, or the page moved, only together with the program's constant that holds it.
+This page is the standard for the project's Markdown files: a common part that every Markdown file follows, then one section for each of six kinds of file, saying what a file of that kind contains, what it leaves out and its length in words. Do not read the whole page before you write or edit a file. Run `nn-systems/general-tools/markdown-file-standard-rules-for-the-markdown-file-kind-at-a-path-print.py <path of the file>`, giving the path the file will have once it is in place, such as `CLAUDE.local.md` for a seat-brief drafted in a scratchpad. It prints the common part and the one section for that file's kind, or the common part alone when no section covers the path; read another section only where the printed one points to it. The program picks the kind by the path, and, for a GHI-MD that already exists, also by its front matter, as the GHI-MDs section says. It reads this page's level-2 headings as data, and holds this page's path: a heading is renamed, or the page moved, only together with the program's constant that holds it.
 
 ## Common part
 
@@ -40,7 +40,7 @@ Length: at most 600 words; Outcome and Provisional additions aside. A GHI-MD ove
 
 ## Designs
 
-A design decides how something will be built. It is a GHI-MD whose front matter carries `kind: design`, as `/ghi-write` step 4 says, or a file whose name ends `-design.md`, such as a design moved to its code's `docs/` directory. No section of this page covers a test-design or a design-contract, and the program prints the common part alone for either. `docs/nedschorus-wiki/nedschorus-file-naming-and-location-standards.md` says where it lives and how it is named at each stage.
+A design decides how something will be built. It is a GHI-MD whose front matter carries `kind: design`, as `/ghi-write` step 4 says, or a file whose name ends `-design.md`, such as a design moved to its code's `docs/` directory. No section of this page covers a test-design or a design-contract, and the program prints the common part alone for either. `docs/nedsnodes-wiki/nedsnodes-file-naming-and-location-standards.md` says where it lives and how it is named at each stage.
 
 A design has these seven level-2 headings, in this order. A design that does not need one of the seven keeps its heading, and the section's whole body is one line, `Not needed:` followed by the reason.
 
@@ -56,7 +56,7 @@ These headings follow the seven when the design has them, and are left out when 
 
 A design leaves out:
 
-- Its own revision history, such as "this revision folds in", and the dates its decisions were made. The `**Pinned to what landed:**` lines that `docs/nedschorus-wiki/nedschorus-file-naming-and-location-standards.md` asks for after each merge stay, because `scripts/stale-code-citation-check.py` reads them. A user-ruling the design rests on is stated as what is decided, followed by its walk-minutes citation in parentheses.
+- Its own revision history, such as "this revision folds in", and the dates its decisions were made. The `**Pinned to what landed:**` lines that `docs/nedsnodes-wiki/nedsnodes-file-naming-and-location-standards.md` asks for after each merge stay, because `scripts/stale-code-citation-check.py` reads them. A user-ruling the design rests on is stated as what is decided, followed by its walk-minutes citation in parentheses.
 - Detail the design-contract or the test-design holds.
 - Once its code has merged, any detail the code now states. From then on, a change to what the design promises goes through a GHI-MD that is a change request.
 
@@ -64,7 +64,7 @@ Length: at most 3,000 words for a system, at most 1,200 for a single program. A 
 
 ## The project glossary
 
-The project glossary is `docs/nedschorus-wiki/nedschorus-glossary.md`. Its opening paragraphs say what qualifies as a project-term, which glossary holds a term, the order of entries and when an entry carries the labels #prose, #code and #data; this section says what an entry holds.
+The project glossary is `docs/nedsnodes-wiki/nedsnodes-glossary.md`. Its opening paragraphs say what qualifies as a project-term, which glossary holds a term, the order of entries and when an entry carries the labels #prose, #code and #data; this section says what an entry holds.
 
 Every entry follows one template, on one line, in which `[…]` marks an optional part:
 
@@ -102,7 +102,7 @@ Length: at most 800 words. A seat-brief over 1,000 words holds procedures that b
 
 ## Handoff next step files
 
-A next step file is the file `/handoff` step 2 writes in `~/.claude/handoffs/`; `nc-systems/handoff/handoff-write-and-check-supervisor.py` copies its text into the session-handoff, which the successor agent-session, which did not see the work, starts from. `.claude/skills/handoff/SKILL.md` step 2 says what goes in it and what stays out; this section adds the order, the form and the length.
+A next step file is the file `/handoff` step 2 writes in `~/.claude/handoffs/`; `nn-systems/handoff/handoff-write-and-check-supervisor.py` copies its text into the session-handoff, which the successor agent-session, which did not see the work, starts from. `.claude/skills/handoff/SKILL.md` step 2 says what goes in it and what stays out; this section adds the order, the form and the length.
 
 It contains, in this order:
 
@@ -116,14 +116,14 @@ Length: at most 400 words. A next step file over 500 words holds work that belon
 
 ## Wiki pages
 
-A wiki page is a page in `docs/nedschorus-wiki/`, or one in `docs/nedschorus-wiki/queue/` pending approval, other than the project glossary and each proposed-improvements-or-changes-file beside an nc-architecture-overview. An nc-architecture-overview also follows `docs/nedschorus-wiki/nedschorus-how-to-write-an-architecture-overview.md`, which wins where the two differ.
+A wiki page is a page in `docs/nedsnodes-wiki/`, or one in `docs/nedsnodes-wiki/queue/` pending approval, other than the project glossary and each proposed-improvements-or-changes-file beside an nc-architecture-overview. An nc-architecture-overview also follows `docs/nedsnodes-wiki/nedsnodes-how-to-write-an-architecture-overview.md`, which wins where the two differ.
 
-Each page is one of three kinds, and keeps to its kind: a reference page lists rules or facts a reader looks up, such as `docs/nedschorus-wiki/nedschorus-style-guide.md`; a how-to page gives the steps of one job, such as `docs/nedschorus-wiki/nedschorus-how-to-choose-a-name-for-files-code-and-glossary-terms.md`; an explanation page says how part of the project works and why, such as `docs/nedschorus-wiki/nedschorus-agent-seat-model.md`. When a page grows material of another kind, move that material to a page of its own and link to it.
+Each page is one of three kinds, and keeps to its kind: a reference page lists rules or facts a reader looks up, such as `docs/nedsnodes-wiki/nedsnodes-style-guide.md`; a how-to page gives the steps of one job, such as `docs/nedsnodes-wiki/nedsnodes-how-to-choose-a-name-for-files-code-and-glossary-terms.md`; an explanation page says how part of the project works and why, such as `docs/nedsnodes-wiki/nedsnodes-agent-seat-model.md`. When a page grows material of another kind, move that material to a page of its own and link to it.
 
 A page contains, in this order:
 
 1. A level-1 heading naming its subject.
-2. A first paragraph saying what the page covers and when a reader needs it, so a reader can tell from that paragraph alone whether to read on. A page whose content a program reads as data names that program here, as the rule for prose a program reads in `docs/nedschorus-wiki/nedschorus-file-naming-and-location-standards.md` says.
+2. A first paragraph saying what the page covers and when a reader needs it, so a reader can tell from that paragraph alone whether to read on. A page whose content a program reads as data names that program here, as the rule for prose a program reads in `docs/nedsnodes-wiki/nedsnodes-file-naming-and-location-standards.md` says.
 3. The body: for a reference page, one rule or fact to an item, ordered for lookup; for a how-to page, numbered steps, each an action; for an explanation page, the parts and how they fit together, with a reason where it helps.
 
 A wiki page leaves out front matter or opening lines that say which approval-walk or user-ruling produced the page, status lines such as "status: ruled" or "streamlined on", the approval-walk or user-ruling behind each rule, and examples taken from past events when a current file or command would serve.
