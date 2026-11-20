@@ -100,7 +100,7 @@ WHAT IT CANNOT SEE, so nobody mistakes a choice for an oversight:
   `env`, `timeout` or `command`, is.
 - A gh alias the user defined is not expanded.
 
-Commands are read with nc-systems/general-tools/shell-command-tree-sitter-bash-reader-common.py,
+Commands are read with nn-systems/general-tools/shell-command-tree-sitter-bash-reader-common.py,
 the project's shared shell module on tree-sitter-bash, as the other Bash guards
 read them: one reader, reviewed once.
 """

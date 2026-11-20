@@ -458,7 +458,7 @@ def main():
               and registered[0] > hook.GIT_BUDGET_SECONDS, repr(registered))
 
         # A copy without the shell reader's file beside it cannot load the shell reader.
-        copy = root / "copy" / "nc-systems" / "general-tools" / HOOK_SCRIPT.name
+        copy = root / "copy" / "nn-systems" / "general-tools" / HOOK_SCRIPT.name
         copy.parent.mkdir(parents=True)
         shutil.copy(HOOK_SCRIPT, copy)
         code, text, stderr = run_hook_file(copy, "ls -la")

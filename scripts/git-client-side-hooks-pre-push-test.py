@@ -61,7 +61,7 @@ REAL_CONFLICT_CHECK = SCRIPTS_DIRECTORY / "branch-conflict-check.py"
 REAL_REVERT_CHECK = SCRIPTS_DIRECTORY / "branch-reverts-a-file-to-an-older-main-version-check.py"
 REAL_TEST_SUITES_RUNNER = SCRIPTS_DIRECTORY / "run-all-test-suites.py"
 GIT_OUTPUT_MODULE_RELATIVE_PATH = Path(
-    "nc-systems/general-tools/git-machine-readable-output-runner-and-parser-common.py")
+    "nn-systems/general-tools/git-machine-readable-output-runner-and-parser-common.py")
 
 TIME_BUDGET_VARIABLE = "NEDSNODES_PRE_PUSH_CONFLICT_CHECK_SECONDS"
 FAKE_CHECK_LOG_VARIABLE = "PRE_PUSH_TEST_FAKE_CHECK_LOG"
