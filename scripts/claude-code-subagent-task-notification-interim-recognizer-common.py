@@ -10,8 +10,8 @@ Code versions: its <note> says the result below may be interim, or its
 <result> begins "This agent has not reported yet".
 
 Not a program to run: scripts/handoff-context-threshold-hook.py, whose reader
-nc-systems/handoff/handoff-write-and-check-supervisor.py calls, and
-scripts/handoff-extract-conversation-subagent-tracker-nbd.py load it.
+nn-systems/handoff/handoff-write-and-check-supervisor.py calls, and
+scripts/handoff-extract-conversation-subagent-tracker-hack.py load it.
 """
 
 import re

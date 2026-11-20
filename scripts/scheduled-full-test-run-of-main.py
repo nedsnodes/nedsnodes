@@ -11,7 +11,7 @@ Usage:
                 is made from; default, the clone this file is in
   --log-store-root
                 the log-store's root, a path on ned-box; default
-                /home/nedlern/nedschorus-logs
+                /home/nedlern/nedsnodes-logs
   --test-suite-runner-program
                 the program run in place of the worktree's
                 scripts/run-all-test-suites.py, by the same interpreter with
@@ -72,7 +72,7 @@ WHAT ONE RUN DOES, in order.
 
 THE RECORD is one text file per machine and day in the log-store:
 
-  nedlern@ned-box:/home/nedlern/nedschorus-logs/scheduled-full-test-runs-of-main/<machine>/<YYYY-MM-DD>.txt
+  nedlern@ned-box:/home/nedlern/nedsnodes-logs/scheduled-full-test-runs-of-main/<machine>/<YYYY-MM-DD>.txt
 
 <machine> is `ned-box` or `mac`, the spellings the log-store's agent-session-files-by-machine/
 directory uses. The date is the date in America/Los_Angeles when the run
@@ -113,8 +113,8 @@ therefore remove the worktree the first is testing. So a run holds an
 exclusive lock on scheduled-full-test-run-of-main.lock in its directory, and a
 second run exits 6 having done nothing.
 
-WHAT IS REUSED. nc-systems/handoff/handoff-user-review-of-agent-memory-stores-mark.py is loaded by
-path, the way nc-systems/handoff/handoff-supervisor.py loads it, for the
+WHAT IS REUSED. nn-systems/handoff/handoff-user-review-of-agent-memory-stores-mark.py is loaded by
+path, the way nn-systems/handoff/handoff-supervisor.py loads it, for the
 Pacific date (pacific_time_of), the test that this machine is ned-box
 (this_machine_is_ned_box), ned-box's ssh target, and
 run_on_ned_box_or_here, which runs one shell command over ssh or here with
@@ -128,7 +128,7 @@ picks out, and the environment its own git calls run in, which drops the
 variables that send git into another repository.
 
 SCHEDULE. Installed on each machine by
-nc-systems/general-tools/install-scheduled-jobs-on-this-machine.py, from the
+nn-systems/general-tools/install-scheduled-jobs-on-this-machine.py, from the
 table beside that program, scheduled-jobs-on-each-machine.json, which is where
 a change to either machine's schedule is made; its --check mode compares what
 a machine has installed with the table.
@@ -136,7 +136,7 @@ a machine has installed with the table.
   ned-box: one cron line, run from the reference clone with the system's
   Python. ned-box's clock is America/Los_Angeles.
 
-    0 0 * * * /usr/bin/python3 /home/nedlern/Projects/nedschorus/scripts/scheduled-full-test-run-of-main.py >> /home/nedlern/.claude/scheduled-full-test-run-of-main.log 2>&1
+    0 0 * * * /usr/bin/python3 /home/nedlern/Projects/nedsnodes/scripts/scheduled-full-test-run-of-main.py >> /home/nedlern/.claude/scheduled-full-test-run-of-main.log 2>&1
 
   Both streams are appended to that file because ned-box has no mail
   transfer agent, so cron discards what a job prints: a refusal that writes
@@ -193,15 +193,15 @@ def module_loaded_by_path(module_name: str, path: Path):
 
 handoff_user_review_of_agent_memory_stores_mark = module_loaded_by_path(
     "handoff_user_review_of_agent_memory_stores_mark",
-    REPOSITORY_ROOT / "nc-systems" / "handoff" / "handoff-user-review-of-agent-memory-stores-mark.py")
+    REPOSITORY_ROOT / "nn-systems" / "handoff" / "handoff-user-review-of-agent-memory-stores-mark.py")
 run_all_test_suites = module_loaded_by_path(
     "run_all_test_suites", Path(__file__).resolve().with_name("run-all-test-suites.py"))
 git_output = module_loaded_by_path(
     "git_machine_readable_output_runner_and_parser_common",
-    REPOSITORY_ROOT / "nc-systems" / "general-tools"
+    REPOSITORY_ROOT / "nn-systems" / "general-tools"
     / "git-machine-readable-output-runner-and-parser-common.py")
 
-SCHEDULED_FULL_TEST_RUN_DEFAULT_LOG_STORE_ROOT = "/home/nedlern/nedschorus-logs"
+SCHEDULED_FULL_TEST_RUN_DEFAULT_LOG_STORE_ROOT = "/home/nedlern/nedsnodes-logs"
 # Use the log-store’s established machine and kind names.
 SCHEDULED_FULL_TEST_RUNS_KIND_DIRECTORY_NAME = "scheduled-full-test-runs-of-main"
 SCHEDULED_FULL_TEST_RUN_MACHINE_NAME_ON_NED_BOX = "ned-box"
@@ -280,7 +280,7 @@ def remove_worktree_of_main(clone: Path, worktree: Path):
         give_owner_read_write_and_search_on_every_directory_under(worktree)
         shutil.rmtree(worktree, ignore_errors=True)
     if worktree.exists():
-        return git_output.git_stderr_error_text_without_progress_lines(removed.stderr)
+        return git_output.git_stderr_first_error_message_else_last_line(removed.stderr)
     return None
 
 
@@ -488,7 +488,7 @@ def scheduled_full_test_run_under_lock(arguments, now, monotonic, on_ned_box, ma
     if fetched.returncode != 0:
         steps_failed.append((
             f"not run — git fetch origin failed in {clone}: "
-            f"{git_output.git_stderr_error_text_without_progress_lines(fetched.stderr)}",
+            f"{git_output.git_stderr_first_error_message_else_last_line(fetched.stderr)}",
             "Fix what git reports, then run this again."))
     else:
         resolved = git(clone, "rev-parse", "--verify", "--quiet",
@@ -505,7 +505,7 @@ def scheduled_full_test_run_under_lock(arguments, now, monotonic, on_ned_box, ma
         if added.returncode != 0:
             steps_failed.append((
                 f"not run — git worktree add --detach {worktree} {commit} failed in "
-                f"{clone}: {git_output.git_stderr_error_text_without_progress_lines(added.stderr)}",
+                f"{clone}: {git_output.git_stderr_first_error_message_else_last_line(added.stderr)}",
                 "Fix what git reports, then run this again."))
         else:
             try:

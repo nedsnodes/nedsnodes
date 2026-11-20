@@ -15,9 +15,10 @@ running. A worktree that is not idle is KEPT, with the reason, when:
   - its owner file cannot be read;
   - it has no owner file, as agent-homes and worktrees made by hand have,
     and is not a merge-lane review checkout;
-  - it is locked with `git worktree lock`, as Claude Code locks a subagent's
-    worktree while the subagent runs, apart from the lock CLAUDE CODE'S LOCK
-    below unlocks;
+  - it is locked with `git worktree lock`, apart from the lock CLAUDE CODE'S
+    LOCK below unlocks; a subagent's worktree that Claude Code made through
+    its `WorktreeCreate` hook, with an owner file and no lock, is judged by
+    its owner;
   - git would prune it, its directory being gone, unless STOPPED PARTWAY
     below applies;
   - a rebase, merge, cherry-pick or revert is in progress in it, or git
@@ -51,7 +52,7 @@ needs a pull request is kept, as is one whose ancestry git cannot read.
   origin/main lacks, get a branch of their own, named
   worktree-cleaner-detached-commits-<worktree directory name>-<12 hex digits
   of the commit>; and its uncommitted and untracked files go to a
-  work-snapshot (nc-systems/handoff/uncommitted-work-snapshots.py) owned by
+  work-snapshot (nn-systems/handoff/uncommitted-work-snapshots.py) owned by
   this invocation's own process and carrying the owner file's agent-seat, so
   the agent-seat's next agent-session is told of it once this invocation has
   ended. The branch is kept, unless BRANCHES deletes it.
@@ -116,7 +117,7 @@ work anyone carries on.
 
 Ignored files do not keep a worktree. Before --remove removes one, it ships
 each walk in the worktree's docs/walk/, one for each <name>-minutes.md there,
-with nc-systems/skills/walk-me-through/walk-files-ship.py, given by its walk text <name>.md, or by its
+with nn-systems/skills/walk-me-through/walk-files-ship.py, given by its walk text <name>.md, or by its
 minutes when it has no walk text, which the shipper refuses, so the worktree
 is kept, and each non-empty record directory under its cold-read-records/ and
 sanity-check-records/ with the shipper of that kind
@@ -164,7 +165,7 @@ equals that pull request's `refs/pull/<number>/head`, as GitHub reports just
 before, and that no open task on that machine names in its `branches` field.
 When GitHub cannot be reached, it deletes no branch with `-D`. It names each
 deleted branch in the report modes. origin/main is read as fetched; a stale
-ref only keeps more. A task list under ~/.claude/tasks/nedschorus-*-tasks
+ref only keeps more. A task list under ~/.claude/tasks/nedsnodes-*-tasks
 that cannot be read in full, or a ~/.claude/tasks that exists but cannot be
 listed, stops every `-D` deletion, as GitHub out of reach does. GitHub out of
 reach is named on a line of its own outside --only-done, and is no failure.
@@ -177,7 +178,7 @@ ONE NAMED WORKTREE OR BRANCH. --remove-worktree-and-force-delete-its-branch
 PATH and --force-delete-branch NAME act on the one worktree or branch named,
 for an agent-session that has decided its agent-seat will not carry it on;
 the first prompt's list,
-nc-systems/handoff/agent-seat-worktrees-and-branches-with-no-pull-request-first-prompt-list.py,
+nn-systems/handoff/agent-seat-worktrees-and-branches-with-no-pull-request-first-prompt-list.py,
 prints the command beside each entry. Unlike --remove,
 --remove-worktree-and-force-delete-its-branch does not keep a worktree
 because the agent-seat that owns it runs, since that agent-seat has decided;
@@ -225,11 +226,11 @@ typically because the worktree's directory is gone, which is what a
 temp-area clearing leaves behind — each with git's own reason, and the
 prune command. The line prints in every mode and is report only: the prune
 stays a deliberate human act (ruled 2026-08-18; R25 in
-docs/nedschorus-wiki/nedschorus-fleet-git-worktree-working-model.md).
+docs/nedsnodes-wiki/nedsnodes-fleet-git-worktree-working-model.md).
 
 Separately again, it handles work-snapshots, the copies of uncommitted work
 that scripts/uncommitted-work-snapshot-hook.py keeps under
-refs/work-snapshots/ (nc-systems/handoff/uncommitted-work-snapshots.py). A
+refs/work-snapshots/ (nn-systems/handoff/uncommitted-work-snapshots.py). A
 work-snapshot whose owner `claude` process is gone is reported with its age
 and whether the handoff-supervisor has listed it in a first prompt, which it
 does only when the worktree is gone or no longer holds its changes; --remove
@@ -240,7 +241,7 @@ id. --only-done prints only the ones --remove would delete.
 A live owner's work-snapshot is never touched.
 
 Last, it closes the tasks that `uncommitted-work-snapshots.py restore` opens,
-in every task list on the machine, ~/.claude/tasks/nedschorus-*-tasks, or under
+in every task list on the machine, ~/.claude/tasks/nedsnodes-*-tasks, or under
 the directory CLEAN_WORKTREES_TASK_LISTS_DIRECTORY_OVERRIDE names, which is how
 the tests keep out of the machine's task lists. Each
 task not marked completed whose subject starts with
@@ -280,7 +281,7 @@ and each branch it deletes to its machine's file in the log-store, whichever
 program ran it, so a removal can be traced afterwards without the caller's
 output:
 
-  nedlern@ned-box:/home/nedlern/nedschorus-logs/clean-worktrees-removed-worktrees-and-deleted-branches-log/<machine>.txt
+  nedlern@ned-box:/home/nedlern/nedsnodes-logs/clean-worktrees-removed-worktrees-and-deleted-branches-log/<machine>.txt
 
 <machine> is `ned-box` or `mac`. Each line is tab-separated: the UTC time,
 the machine, `removed-worktree` or `deleted-branch`, then key=value fields:
@@ -291,7 +292,7 @@ repository given with --repo, and the parent process that ran this one, its
 pid and command line, which tells the handoff-supervisor, cron and a shell
 apart. A commit git could not read is written as `unknown`. On ned-box the
 line is appended locally, on the Mac over ssh, with run_on_ned_box_or_here
-from nc-systems/handoff/handoff-user-review-of-agent-memory-stores-mark.py.
+from nn-systems/handoff/handoff-user-review-of-agent-memory-stores-mark.py.
 When a line cannot be written, the run prints a line containing FAILED
 with the cause, then the command that writes the unwritten line once the
 cause is fixed, then what to do if that command fails; it carries on
@@ -304,12 +305,12 @@ log-store.
 
 SCHEDULED. --remove runs once a day on both machines, from the reference
 clone, and at every session-handoff. The job is declared in
-nc-systems/general-tools/scheduled-jobs-on-each-machine.json and installed
-with nc-systems/general-tools/install-scheduled-jobs-on-this-machine.py: on
+nn-systems/general-tools/scheduled-jobs-on-each-machine.json and installed
+with nn-systems/general-tools/install-scheduled-jobs-on-this-machine.py: on
 the Mac a launchd job at 06:30, so a run missed while the Mac sleeps starts at
 the next wake; on ned-box the cron line
 
-    30 6 * * * /usr/bin/python3 /home/nedlern/Projects/nedschorus/scripts/clean-worktrees.py --remove >> /home/nedlern/.claude/clean-worktrees.log 2>&1
+    30 6 * * * /usr/bin/python3 /home/nedlern/Projects/nedsnodes/scripts/clean-worktrees.py --remove >> /home/nedlern/.claude/clean-worktrees.log 2>&1
 
 It does not fetch, apart from the fetch before it judges the restored branches'
 tasks; a stale origin/main only keeps more.
@@ -330,7 +331,6 @@ the run where it failed; with --remove-worktree-and-force-delete-its-branch
 or --force-delete-branch that is exit 1 with a FAILED line.
 """
 
-import contextlib
 import fnmatch
 import hashlib
 import importlib.util
@@ -342,7 +342,6 @@ import shutil
 import stat
 import subprocess
 import sys
-import tempfile
 import time
 from collections import Counter
 from dataclasses import dataclass, field
@@ -353,27 +352,27 @@ REPO_ROOT = Path(__file__).resolve().parent.parent
 
 _work_snapshots_spec = importlib.util.spec_from_file_location(
     "uncommitted_work_snapshots",
-    REPO_ROOT / "nc-systems" / "handoff" / "uncommitted-work-snapshots.py")
+    REPO_ROOT / "nn-systems" / "handoff" / "uncommitted-work-snapshots.py")
 work_snapshots = importlib.util.module_from_spec(_work_snapshots_spec)
 _work_snapshots_spec.loader.exec_module(work_snapshots)
 
 _git_output_spec = importlib.util.spec_from_file_location(
     "git_machine_readable_output_runner_and_parser_common",
-    REPO_ROOT / "nc-systems" / "general-tools"
+    REPO_ROOT / "nn-systems" / "general-tools"
     / "git-machine-readable-output-runner-and-parser-common.py")
 git_output = importlib.util.module_from_spec(_git_output_spec)
 _git_output_spec.loader.exec_module(git_output)
 
 _next_step_lines_spec = importlib.util.spec_from_file_location(
     "failed_command_tool_message_to_agent_rerun_once_then_stop_and_report_lines_common",
-    REPO_ROOT / "nc-systems" / "general-tools"
+    REPO_ROOT / "nn-systems" / "general-tools"
     / "failed-command-tool-message-to-agent-rerun-once-then-stop-and-report-lines-common.py")
 next_step_lines = importlib.util.module_from_spec(_next_step_lines_spec)
 _next_step_lines_spec.loader.exec_module(next_step_lines)
 
 _mark_spec = importlib.util.spec_from_file_location(
     "handoff_user_review_of_agent_memory_stores_mark",
-    REPO_ROOT / "nc-systems" / "handoff" / "handoff-user-review-of-agent-memory-stores-mark.py")
+    REPO_ROOT / "nn-systems" / "handoff" / "handoff-user-review-of-agent-memory-stores-mark.py")
 mark = importlib.util.module_from_spec(_mark_spec)
 _mark_spec.loader.exec_module(mark)
 
@@ -382,6 +381,13 @@ _merge_lane_common_spec = importlib.util.spec_from_file_location(
     REPO_ROOT / "scripts" / "merge-lane-pull-request-helpers-common-options-paths-and-token.py")
 merge_lane_common = importlib.util.module_from_spec(_merge_lane_common_spec)
 _merge_lane_common_spec.loader.exec_module(merge_lane_common)
+
+_task_file_rewrite_spec = importlib.util.spec_from_file_location(
+    "agent_seat_task_list_task_file_rewrite_common",
+    REPO_ROOT / "nn-systems" / "general-tools" / "agent-seat-task-list-task-file-rewrite-common.py")
+_task_file_rewrite = importlib.util.module_from_spec(_task_file_rewrite_spec)
+_task_file_rewrite_spec.loader.exec_module(_task_file_rewrite)
+agent_seat_task_list_task_file_rewrite = _task_file_rewrite.agent_seat_task_list_task_file_rewrite
 
 # After a merge, merge-lane-2's merge program removes pr<n>-head and pr<n>-merged and runs main's tests
 # in pr<n>-merge-commit-on-main-worktree; between its steps no process has a working directory
@@ -396,11 +402,11 @@ AGENT_HOME_MARKER_FILE_NAME = "agent-home-marker"
 MERGE_LANE_REVIEW_CHECKOUT_NAME_PULL_REQUEST_NUMBER_PART = re.compile(r"(?:pr)?(\d+)(?:r\d*)?[a-z]?")
 
 REMOVED_WORKTREES_AND_DELETED_BRANCHES_LOG_DIRECTORY = (
-    "/home/nedlern/nedschorus-logs/clean-worktrees-removed-worktrees-and-deleted-branches-log")
+    "/home/nedlern/nedsnodes-logs/clean-worktrees-removed-worktrees-and-deleted-branches-log")
 REMOVED_WORKTREES_AND_DELETED_BRANCHES_LOG_FILE_OVERRIDE_VARIABLE = (
     "CLEAN_WORKTREES_REMOVED_WORKTREES_AND_DELETED_BRANCHES_LOG_FILE_OVERRIDE")
 REMOVED_WORKTREES_AND_DELETED_BRANCHES_LOG_WRITE_TIMEOUT_SECONDS = 30
-# nc-systems/handoff/handoff-supervisor.py keeps the lines holding these in its handoff report.
+# nn-systems/handoff/handoff-supervisor.py keeps the lines holding these in its handoff report.
 LOG_OF_REMOVALS_RECORD_BY_HAND_PHRASE = ": to record it, run this once: "
 LOG_OF_REMOVALS_RECORD_BY_HAND_FAILED_PHRASE = (
     ": if that printf command fails too, do not run scripts/clean-worktrees.py again; ")
@@ -409,7 +415,7 @@ PRINTF_EACH_ARGUMENT_ON_ITS_OWN_LINE = r"%s\n"
 
 # The reference clone's walk shipper, given the path of one walk's file, ships that walk; loaded
 # as a module by walk_files_ship_module only so that which files make a walk is decided by its own rules.
-WALK_FILES_SHIPPER = REPO_ROOT / "nc-systems" / "skills" / "walk-me-through" / "walk-files-ship.py"
+WALK_FILES_SHIPPER = REPO_ROOT / "nn-systems" / "skills" / "walk-me-through" / "walk-files-ship.py"
 WALK_MINUTES_SUFFIX = "-minutes.md"
 _walk_files_ship = None
 
@@ -435,7 +441,7 @@ MAIN_BRANCH = "main"
 # One listing of every pull request serves the whole invocation; gh pages through them all.
 PULL_REQUEST_LISTING_TIMEOUT_SECONDS = 300
 PULL_REQUEST_LISTING_LIMIT = 100000
-PULL_REQUEST_HEAD_REFS_LISTING_TIMEOUT_SECONDS = 120
+PULL_REQUEST_HEAD_REFS_LISTING_TIMEOUT_SECONDS = 120  # pragma: no mutate, a limit a second longer or shorter changes nothing a test can see without a git ls-remote that runs for two minutes
 PULL_REQUEST_HEAD_REF = re.compile(r"refs/pull/(\d+)/head")
 FINISHED_PULL_REQUEST_STATES = ("MERGED", "CLOSED")
 FORCE_DELETABLE_BRANCH_LINE_START = (
@@ -443,7 +449,7 @@ FORCE_DELETABLE_BRANCH_LINE_START = (
     "git branch -D: ")
 
 # Its reader of the open tasks' `branches` fields decides which branches a task holds.
-FIRST_PROMPT_LIST = (REPO_ROOT / "nc-systems" / "handoff"
+FIRST_PROMPT_LIST = (REPO_ROOT / "nn-systems" / "handoff"
                      / "agent-seat-worktrees-and-branches-with-no-pull-request-first-prompt-list.py")
 _first_prompt_list = None
 
@@ -463,7 +469,7 @@ _owner_file_spec.loader.exec_module(owner_file)
 # Gitignored directories whose records belong in the log-store, each with the program that ships one
 # record of that kind. The reference clone's shippers, not the worktree's possibly older copies.
 LOG_STORE_RECORD_SHIPPERS = (
-    ("cold-read-records", REPO_ROOT / "nc-systems" / "cold-read" / "cold-read-record-ship.py"),
+    ("cold-read-records", REPO_ROOT / "nn-systems" / "cold-read" / "cold-read-record-ship.py"),
     ("sanity-check-records", REPO_ROOT / "scripts" / "sanity-check-record-ship.py"),
 )
 
@@ -684,8 +690,9 @@ def branch_refs_and_tips_with_no_worktree_not_fully_on_main(repo, freed_branches
                 for record in git_output.worktree_records(listing)} - set(freed_branches)
     unlanded = git_output.run_git(repo, ["for-each-ref", "--format=%(objectname) %(refname:lstrip=2)",
                                          "--no-merged", "origin/main", "refs/heads/"])
-    refs = [line.split(" ", 1) for line in os.fsdecode(unlanded).splitlines()]
-    return [(branch, tip) for tip, branch in refs if branch not in attached and branch != MAIN_BRANCH]
+    # Split on the ASCII space alone: a ref name can hold other whitespace, such as U+00A0.
+    refs = [line.partition(" ") for line in os.fsdecode(unlanded).splitlines()]
+    return [(branch, tip) for tip, _, branch in refs if branch not in attached and branch != MAIN_BRANCH]
 
 
 def first_prompt_list_module():
@@ -1980,7 +1987,7 @@ def task_lists_directory_from_override_or_home_claude_tasks():
     return Path(override) if override else Path.home() / ".claude" / "tasks"
 
 
-NEDSCHORUS_TASK_LISTS_GLOB = "nedschorus-*-tasks"
+NEDSNODES_TASK_LISTS_GLOB = "nedsnodes-*-tasks"
 
 
 def agent_seat_task_list_directory_paths_in_claude_code_tasks_directory_collect(task_lists_directory):
@@ -1993,7 +2000,7 @@ def agent_seat_task_list_directory_paths_in_claude_code_tasks_directory_collect(
     except FileNotFoundError:
         return []
     return [path for path in sorted(Path(task_lists_directory) / name for name in names
-                                    if fnmatch.fnmatchcase(name, NEDSCHORUS_TASK_LISTS_GLOB))
+                                    if fnmatch.fnmatchcase(name, NEDSNODES_TASK_LISTS_GLOB))
             if stat.S_ISDIR(os.stat(path).st_mode)]
 RESTORED_BRANCH_TASKS_CLOSE_GIT_FETCH_TIMEOUT_SECONDS = 300
 
@@ -2111,18 +2118,9 @@ def close_restored_branch_tasks(repo, remove, only_done, task_lists_directory=No
         task = dict(task, status="completed", description=(
             str(task.get("description", "")).rstrip("\n")
             + f"\nMarked completed by scripts/clean-worktrees.py at {now}: {reason}."))
-        partial = None
         try:
-            # A partial file of its own: cleaners run at the same time, one per session-handoff.
-            descriptor, partial = tempfile.mkstemp(prefix=f".{task_file.name}.", suffix=".partial",
-                                                   dir=task_file.parent)
-            with os.fdopen(descriptor, "w", encoding="utf-8") as stream:
-                stream.write(json.dumps(task, indent=2))
-            os.replace(partial, task_file)
+            agent_seat_task_list_task_file_rewrite(task_file, task)
         except OSError as error:
-            if partial is not None:
-                with contextlib.suppress(OSError):
-                    os.unlink(partial)
             out(f"FAILED: {name} could not be rewritten as completed ({type(error).__name__}: "
                 f"{error}); it is left as it was")
             failures += 1
@@ -2269,7 +2267,9 @@ def remove_one_named_worktree(repo, main_checkout, path):
             continue
         if not removal_never_began(record, listed):
             branch = record.get("branch")
-            if branch and branch != MAIN_BRANCH and commit_of(repo, f"refs/heads/{branch}") != "unknown":
+            if (branch and branch != MAIN_BRANCH and
+                    commit_of(repo, f"refs/heads/{branch}") != "unknown"  # pragma: no mutate, commit_of returns "unknown" or a hex commit name, and every hex digit sorts before "u", so < gives what != gives
+            ):
                 failure = push_branch_unless_origin_holds_its_last_commit_failure(repo, branch)
                 if failure is not None:
                     print(f"{Path(path).name}: kept — an earlier run of scripts/clean-worktrees.py "
@@ -2429,7 +2429,8 @@ def main(argv=None):
                    else WHAT_A_STOPPED_INVOCATION_REMOVED_WITHOUT_REMOVE)
         print(f"{STOPPED_LINE_START}{' '.join(str(error).split())}; {removed}\n"
               + next_step_lines.git_failure_next_step_lines(
-                  rerun, text_the_failure_line_contains=STOPPED_LINE_START.strip()),
+                  rerun, git_error_line_shown_in_tool_message_to_agent_checked_for_lock_file_path=str(error),
+                  text_the_failure_line_contains=STOPPED_LINE_START.strip()),
               file=sys.stderr)
         return 2
 

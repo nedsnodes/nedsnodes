@@ -68,7 +68,7 @@ def check(case_name, condition, detail=""):
 
 
 HANDOFF_INSTRUCTION_PATTERN = re.compile(
-    r"This session has used \d+% of its context window, which has reached the "
+    r"\[rule handoff-context-threshold-reached-run-handoff\] This session has used \d+% of its context window, which has reached the "
     r"reincarnation threshold\. Run the /handoff skill now\.")
 
 
@@ -91,7 +91,7 @@ for statement in ast.parse(guard_source.read_text(encoding="utf-8")).body:
             for target in statement.targets):
         reason = ast.literal_eval(statement.value)
         check("the refusal says the handoff writer adds the command without agent action",
-              "The handoff writer script, nc-systems/handoff/handoff-write-and-check-supervisor.py,"
+              "The handoff writer script, nn-systems/handoff/handoff-write-and-check-supervisor.py,"
               " adds the command to your session-handoff, so you need not." in reason,
               reason)
         break
@@ -110,7 +110,7 @@ def is_handoff_instruction(stderr):
 
 
 COMPACTED_HANDOFF_INSTRUCTION_PATTERN = re.compile(
-    r"This session has used \d+% \(\d+% counting the tokens its compactions dropped, "
+    r"\[rule handoff-context-threshold-reached-run-handoff\] This session has used \d+% \(\d+% counting the tokens its compactions dropped, "
     r"the figure compared with the threshold and the ceiling\) "
     r"of its context window, which has reached the reincarnation threshold\. "
     r"Run the /handoff skill now\.")
@@ -911,16 +911,16 @@ with tempfile.TemporaryDirectory() as workspace:
             ("python3 scripts/mutation-testing-changed-lines-quick-or-full-pass-survivors.py --quick", 105),
             ("gh pr checks 3101 --watch --interval 30", 0),
             ("gh run watch 12345", 0),
-            ("python3 -u scripts/watch-open-pull-requests-nbd.py --exit-after-first-poll-with-events", 0),
+            ("python3 -u scripts/watch-open-pull-requests-hack.py --exit-after-first-poll-with-events", 0),
             ("cd /home/nedlern/x && until grep -q done out.txt; do sleep 5; done", 0),
             ("while kill -0 4242; do sleep 30; done", 0),
             ("sleep 120; echo finished", 75),
             ("sleep 120 >/dev/null 2>&1", 0),
-            ("sleep 600 && python3 nc-systems/cold-read/cold-read-grid.py", 75),
+            ("sleep 600 && python3 nn-systems/cold-read/cold-read-grid.py", 75),
             ("until grep -q done out.txt; do sleep 5; done; python3 scripts/run-all-test-suites.py", 90),
-            ("until [ -f /tmp/r ]; do sleep 5; done; python3 nc-systems/cold-read/cold-read-grid.py --target CLAUDE.md", 75),
+            ("until [ -f /tmp/r ]; do sleep 5; done; python3 nn-systems/cold-read/cold-read-grid.py --target CLAUDE.md", 75),
             ("while pgrep -f x >/dev/null; do sleep 20; done; python3 scripts/merge-lane-pull-request-merge-through-merge-gate-with-stacked-pull-request-retarget.py 1 2 3", 75),
-            ("until [ -s first.out ]; do sleep 10; done && python3 nc-systems/cold-read/cold-read-fast-read.py --target a.md", 75),
+            ("until [ -s first.out ]; do sleep 10; done && python3 nn-systems/cold-read/cold-read-fast-read.py --target a.md", 75),
             ("until grep -q done out.txt; do sleep 5; done; cat out.txt | tail -5", 75),
             ("until [ -f x ]; do sleep 5; done; for p in 1 2 3; do python3 scripts/merge-lane-pull-request-merge-through-merge-gate-with-stacked-pull-request-retarget.py $p; done", 75),
             ("while kill -0 4242; do\n  sleep 30\ndone > /dev/null 2>&1", 0),
@@ -928,7 +928,7 @@ with tempfile.TemporaryDirectory() as workspace:
             ("while kill -0 4242; do sleep 30; done && echo finished; gh pr view 12", 75),
             ("for f in scripts/*-test.py; do python3 $f; done", 90),
             ("while read -r line; do echo \"$line\" >> out.txt; done < in.txt", 75),
-            ("python3 nc-systems/cold-read/cold-read-grid.py --target docs/x.md", 75),
+            ("python3 nn-systems/cold-read/cold-read-grid.py --target docs/x.md", 75),
             (None, 75)):
         seconds = hook.background_task_kind_and_wait_limit_minutes_from_command(command)[1] * 60
         check(f"the wait-limit of {command!r} is {expected_minutes} minutes",
@@ -936,7 +936,7 @@ with tempfile.TemporaryDirectory() as workspace:
 
     # Each waiting-task shape, as recorded background launches wrote it, gets 0 alone; with work
     # beside it, before it, after it or inside its loop, the command gets the no-match limit.
-    waiter = "/home/nedlern/nedschorus-logs/seats/merge-lane-2/merge-helpers/loop/watch-and-merge-provisional-ghi-md-edits.sh"
+    waiter = "/home/nedlern/nedsnodes-logs/seats/merge-lane-2/merge-helpers/loop/watch-and-merge-provisional-ghi-md-edits.sh"
     waiting_task_shapes = (
         "sleep 120",
         "sleep 120 >/dev/null 2>&1",
@@ -945,7 +945,7 @@ with tempfile.TemporaryDirectory() as workspace:
         f"bash {waiter}",
         waiter,
         f"bash {waiter} 2>&1 | tail -30",
-        "python3 -u scripts/watch-open-pull-requests-nbd.py --exit-after-first-poll-with-events",
+        "python3 -u scripts/watch-open-pull-requests-hack.py --exit-after-first-poll-with-events",
         "/tmp/claude-1000/x/scratchpad/wait-review-runs.sh",
         "until grep -q done out.txt; do sleep 5; done",
         "while kill -0 4242; do sleep 30; done",
@@ -984,7 +984,7 @@ with tempfile.TemporaryDirectory() as workspace:
             f"sleep 120 > $({work})",
             "sleep 120 >/dev/null;./work.sh",
             "gh run watch 12345 && gh pr merge 3101",
-            "cd /home/nedlern/agents/merge-lane-2; H=/home/nedlern/nedschorus-logs/seats/merge-lane-2/merge-helpers; "
+            "cd /home/nedlern/agents/merge-lane-2; H=/home/nedlern/nedsnodes-logs/seats/merge-lane-2/merge-helpers; "
             "python3 scripts/merge-lane-pull-request-merge-through-merge-gate-with-stacked-pull-request-retarget.py "
             "3220 abc t > $H/merge-3220.log 2>&1; while true; do bash $H/loop/watch-and-merge-provisional-ghi-md-edits.sh; done",
             "python3 scripts/merge-lane-pull-request-merge-through-merge-gate-with-stacked-pull-request-retarget.py 3220 abc t "
@@ -1011,7 +1011,7 @@ with tempfile.TemporaryDirectory() as workspace:
 
     eighty_minutes_after_launch = datetime(2026, 9, 15, 0, 1, 47, 899000, tzinfo=timezone.utc)
     for command, in_flight in (("python3 scripts/run-all-test-suites.py", True),
-                               ("python3 nc-systems/cold-read/cold-read-grid.py", False),
+                               ("python3 nn-systems/cold-read/cold-read-grid.py", False),
                                (None, False)):
         records = [usage_record(100_000, cache_read=450_000)]
         if command is not None:
@@ -1215,6 +1215,38 @@ with tempfile.TemporaryDirectory() as workspace:
           "background command never notified",
           flight.subagent_ids == [], str(flight.subagent_ids))
 
+    # The parent can stop the subagent's background command itself, not the subagent: the TaskStop
+    # and its task-notification are in the parent's transcript, and only the launch is in the
+    # subagent's own.
+    command_stopped_by_parent = transcript_of(workspace, "subagent-command-stopped-by-parent.jsonl", [
+        usage_record(100_000, cache_read=450_000),
+        subagent_spawn_record("a7cc5a91bf9dc978d"),
+        *notification_records(
+            "<task-notification>\n<task-id>a7cc5a91bf9dc978d</task-id>\n<status>completed"
+            "</status>\n<note>This agent stopped with background work of its own still running; "
+            "the result below may be interim.</note>\n<result>Waiting on the suites.</result>\n"
+            "</task-notification>"),
+        task_stop_record("b9otyo6lx", "local_bash"),
+        {"type": "queue-operation", "operation": "enqueue", "timestamp": GRID_LAUNCHED_AT,
+         "content": "<task-notification>\n<task-id>b9otyo6lx</task-id>\n<status>stopped</status>\n"
+                    "<summary>Task \"Wait for both close-suite runs to finish\" was stopped by main "
+                    "session</summary>\n</task-notification>"},
+    ])
+    command_stopped_own = hook.subagent_transcript_path(command_stopped_by_parent,
+                                                        "a7cc5a91bf9dc978d")
+    command_stopped_own.parent.mkdir(parents=True, exist_ok=True)
+    transcript_of(command_stopped_own.parent, command_stopped_own.name,
+                  [background_task_launch_record("b9otyo6lx")])
+    flight = hook.work_in_flight(str(command_stopped_by_parent), float("inf"), now=grid_at_13_minutes)
+    check("a subagent whose only background command the parent stopped with TaskStop, after the "
+          "subagent's interim report, is not in flight",
+          flight.subagent_ids == [], str(flight.subagent_ids))
+    own_flight = hook.work_in_flight(str(command_stopped_own), float("inf"), now=grid_at_13_minutes,
+                                     task_ids_ended_in_session_transcript=flight.ended_task_ids)
+    check("a subagent's own transcript, read with the ids the session transcript ended, shows no "
+          "background command the parent stopped",
+          own_flight.background_task_ids == [], str(own_flight.background_task_ids))
+
     # An interim notification queued before the TaskStop can be delivered after it; the stop holds.
     interim_copy_after_stop = transcript_of(workspace, "subagent-stopped-interim-copy-after.jsonl", [
         usage_record(100_000, cache_read=450_000),
@@ -1394,12 +1426,12 @@ with tempfile.TemporaryDirectory() as workspace:
         check("hook says only to run the skill",
               is_handoff_instruction(result.stderr), result.stderr[:160])
         check("hook gives the context share that reached the threshold",
-              result.stderr.strip().startswith("This session has used ")
+              result.stderr.strip().startswith("[rule handoff-context-threshold-reached-run-handoff] This session has used ")
               and "% of its context window" in result.stderr, result.stderr[:160])
         loud_share = hook.context_used_percentage_from_transcript(str(loud))
         check("the share it gives is the share the transcript reached",
               loud_share is not None and result.stderr.strip().startswith(
-                  f"This session has used {loud_share:.0f}% of its context window"),
+                  f"[rule handoff-context-threshold-reached-run-handoff] This session has used {loud_share:.0f}% of its context window"),
               (loud_share, result.stderr[:160]))
 
         result = run_hook({"session_id": PROBE_SESSION_ID, "transcript_path": str(loud)})
@@ -1598,7 +1630,7 @@ with tempfile.TemporaryDirectory() as workspace:
         check("the deferral names the work it waits for",
               "(subagent a2573a7737ae643dc)" in result.stderr, result.stderr[:600])
         check("the instruction on new work says the handoff writer, not the agent, adds stopped work to the session-handoff",
-              "When you run the handoff writer script, nc-systems/handoff/handoff-write-and-check-supervisor.py,"
+              "When you run the handoff writer script, nn-systems/handoff/handoff-write-and-check-supervisor.py,"
               " before this agent-session ends, it names in your session-handoff each subagent still working,"
               " whenever it started, and each background Bash task that started since this handoff-deferral"
               " began and is still running, so you need not add that work to your task list"
@@ -2134,7 +2166,7 @@ with tempfile.TemporaryDirectory() as workspace:
                 ("nc-mutation-testing",
                  "python3 scripts/mutation-testing-changed-lines-quick-or-full-pass-survivors.py", 105),
                 ("test-suite", "cd /tmp/x && python3 scripts/run-all-test-suites.py", 90),
-                ("a command no kind matches", "python3 nc-systems/cold-read/cold-read-grid.py", 75)):
+                ("a command no kind matches", "python3 nn-systems/cold-read/cold-read-grid.py", 75)):
             for age, holds in ((timedelta(minutes=limit_minutes), False),
                                (timedelta(minutes=limit_minutes) - timedelta(milliseconds=1), True)):
                 boundary_session = transcript_of(
@@ -2440,7 +2472,8 @@ with tempfile.TemporaryDirectory() as workspace:
                               extra_environment={"PATH": str(fake_claude_directory)},
                               background_tasks_list_is_missing=True)
             check("a deferral in progress hands off at the next Stop whose input lacks the list",
-                  result.returncode == 2 and result.stderr.startswith("This session has used ")
+                  result.returncode == 2 and result.stderr.startswith(
+                      "[rule handoff-context-threshold-reached-run-handoff] This session has used ")
                   and "Claude Code sent no background_tasks list" in result.stderr
                   and list_fired_marker_file.exists(),
                   f"code {result.returncode}, stderr {result.stderr[:300]}")
@@ -2778,6 +2811,13 @@ check("the reader returns a resume and a TaskStop",
        for event in read_line(line, "here", should_raise_on_unparseable_spawn_or_resume_line=True)]
       == [(hook.SUBAGENT_RESUMED_BY_SEND_MESSAGE_TASK_EVENT, RESUMED_SUBAGENT_ID),
           (hook.STOPPED_BY_TASK_STOP_EVENT, "b5x7")])
+# The marker key only in the line's text, as in a tool's output, passes the reader's first filter.
+unmarked_task_id_record = {"type": "user", "timestamp": GRID_LAUNCHED_AT, "toolUseResult": {
+    "task_id": "b5x7", "stdout": f'"{hook.TASK_STOP_TOOL_RESULT_MARKER_KEY}": "local_bash"'}}
+unmarked_task_id_events = read_line(json.dumps(unmarked_task_id_record), "here",
+                                    should_raise_on_unparseable_spawn_or_resume_line=True)
+check("the reader returns no TaskStop for a tool result with a task_id but not the TaskStop "
+      "marker key", unmarked_task_id_events == [], unmarked_task_id_events)
 cut_resume_line = json.dumps(subagent_resume_record())[:-30]
 for cut_line, marker in ((half_written_spawn_line(), "spawn"), (cut_resume_line, "resume")):
     try:
@@ -2806,6 +2846,37 @@ except TypeError:
     caller_must_choose = True
 check("a caller of the reader must choose whether a line that does not parse raises",
       caller_must_choose)
+try:
+    read_line(spawn_line, "here", True)
+    choice_must_be_named = False
+except TypeError:
+    choice_must_be_named = True
+check("a caller of the reader names that choice rather than passing it by position",
+      choice_must_be_named)
+check("the reader marks no spawn, resume or TaskStop interim",
+      [event.is_interim for line in (spawn_line, json.dumps(subagent_resume_record()),
+                                     json.dumps(task_stop_record("b5x7", "local_bash")))
+       for event in read_line(line, "here", should_raise_on_unparseable_spawn_or_resume_line=True)]
+      == [False, False, False])
+# Trimmed from a real transcript: a synchronous Agent call's result carries an agentId with status
+# "completed"; this one's prompt quotes the spawn marker, so the line passes the reader's first filter.
+synchronous_agent_result = {"type": "user", "timestamp": GRID_LAUNCHED_AT, "toolUseResult": {
+    "status": "completed", "prompt": f'Explain why the hook reads "{SPAWNED_SUBAGENT_MARKER}"',
+    "agentId": "a67fd15aba990765f", "agentType": "general-purpose",
+    "content": [{"type": "text", "text": "It marks an Agent call run in the background."}]}}
+synchronous_agent_events = read_line(json.dumps(synchronous_agent_result), "here",
+                                     should_raise_on_unparseable_spawn_or_resume_line=True)
+check("the reader returns no spawn for a synchronous Agent call's completed result",
+      synchronous_agent_events == [], synchronous_agent_events)
+long_cut_spawn_line = half_written_spawn_line()
+try:
+    read_line(long_cut_spawn_line, "here", should_raise_on_unparseable_spawn_or_resume_line=True)
+    long_cut_spawn_refusal = ""
+except hook.TranscriptCouldNotBeFullyRead as problem:
+    long_cut_spawn_refusal = str(problem)
+check("the reader's refusal quotes exactly the first 200 characters of a longer spawn line",
+      len(long_cut_spawn_line) > 201 and not long_cut_spawn_line[200].isspace()
+      and repr(long_cut_spawn_line[:200]) in long_cut_spawn_refusal, long_cut_spawn_refusal[-260:])
 
 # --help prints each flag's default, so an agent reads it there and not from the source.
 help_result = subprocess.run([sys.executable, str(HOOK_SCRIPT), "--help"],
@@ -2840,7 +2911,7 @@ def runtime_union_annotations(path):
 
 # The Mac's python3 is Apple's 3.9, which runs this hook and the handoff writer that imports it.
 for importing_script in (HOOK_SCRIPT,
-                         HOOK_SCRIPT.parent.parent / "nc-systems" / "handoff" / "handoff-write-and-check-supervisor.py"):
+                         HOOK_SCRIPT.parent.parent / "nn-systems" / "handoff" / "handoff-write-and-check-supervisor.py"):
     union_annotations = runtime_union_annotations(importing_script)
     check(f"{importing_script.name} imports under Python 3.9: no `X | None` annotation evaluated at import",
           not union_annotations, union_annotations)

@@ -1723,8 +1723,8 @@ check("--skip timeshift still greps the box's transcripts",
 # --------------------------------------------------------------------------
 
 timeshift_hit = FakeRunner([
-    ("ssh", (0, "HIT /mnt/backup/timeshift/snapshots/2026-08-13_10-00-00/localhost/home/nedlern/Projects/nedschorus/a/b.md\n"
-               "HIT /mnt/backup/timeshift/snapshots/2026-08-14_11-35-50/localhost/home/nedlern/Projects/nedschorus/a/b.md\n", "")),
+    ("ssh", (0, "HIT /mnt/backup/timeshift/snapshots/2026-08-13_10-00-00/localhost/home/nedlern/Projects/nedsnodes/a/b.md\n"
+               "HIT /mnt/backup/timeshift/snapshots/2026-08-14_11-35-50/localhost/home/nedlern/Projects/nedsnodes/a/b.md\n", "")),
 ])
 report = finder.search_timeshift("a/b.md", "nedlern@ned-box", "/mnt/backup/timeshift/snapshots",
                                  finder.DEFAULT_BOX_SEARCH_ROOTS, timeshift_hit)
@@ -1744,6 +1744,12 @@ generated = glob_probe.calls[0]
 check("a seat-directory root keeps its glob unquoted so the shell expands it",
       "/home/nedlern/agents/*" in generated and "'/home/nedlern/agents/*" not in generated
       and "agents/*'" not in generated,
+      generated)
+check("the snapshots are searched under the reference-checkout's name before the project rename too, which "
+      "snapshots taken before the rename hold",
+      '"$snap/localhost"/home/nedlern/Projects/nedsnodes ' in generated
+      and '"$snap/localhost"/home/nedlern/Projects/'
+      + finder.REFERENCE_CHECKOUT_DIRECTORY_NAME_BEFORE_PROJECT_RENAME + " " in generated,
       generated)
 check("the suffix pattern reaches find as one quoted word, so the shell cannot expand its '*'",
       "-path '*/a/b.md'" in generated, generated)
@@ -1801,7 +1807,7 @@ check("a Timeshift search that times out is UNAVAILABLE, not 'searched every sna
       report.status == UNAVAILABLE and any("did not complete" in l for l in report.lines),
       "%s %s" % (report.status, report.lines))
 
-timeshift_probefail = FakeRunner([("ssh", (0, "PROBEFAIL /mnt/backup/timeshift/snapshots/2026-08-13_10-00-00/localhost/home/nedlern/Projects/nedschorus\n", ""))])
+timeshift_probefail = FakeRunner([("ssh", (0, "PROBEFAIL /mnt/backup/timeshift/snapshots/2026-08-13_10-00-00/localhost/home/nedlern/Projects/nedsnodes\n", ""))])
 report = finder.search_timeshift("a/b.md", "nedlern@ned-box", "/mnt/backup/timeshift/snapshots",
                                  finder.DEFAULT_BOX_SEARCH_ROOTS, timeshift_probefail)
 check("a find that failed under a snapshot directory makes the surface UNAVAILABLE",
@@ -1855,7 +1861,7 @@ def log_store_fixture(tmp):
     repository path it was read at, as the real store does
     (cold-read-records/2026-09-15-explain-skill-draft/target/docs/drafts/explain-skill-draft.md).
     """
-    store = Path(tmp, "nedschorus-logs")
+    store = Path(tmp, "nedsnodes-logs")
     shipped = Path(store, "seats", "merge-lane")
     shipped.mkdir(parents=True)
     frozen = Path(store, "cold-read-records", "pr-main-process-design-2026-09-01", "target", "docs", "drafts")
@@ -2104,7 +2110,7 @@ with tempfile.TemporaryDirectory() as tmp:
 # path come back FOUND, exit 0, with a cp of another record's dispositions.md.
 FOUNDING_PATH = "md-review-records/2026-08-11-ghi-info-agent-design/dispositions.md"
 with tempfile.TemporaryDirectory() as tmp:
-    store = Path(tmp, "nedschorus-logs")
+    store = Path(tmp, "nedsnodes-logs")
     other_record = Path(store, "cold-read-records", "2026-09-05-SKILL", "dispositions.md")
     other_record.parent.mkdir(parents=True)
     other_record.write_text("another record's dispositions\n")
@@ -2504,7 +2510,7 @@ check("the Mac's copy is where the mirror writes it: <log-store>/agent-session-f
       copy_parts is not None
       and os.path.join(finder.DEFAULT_LOG_STORE_ROOT, *copy_parts)
       == str(mirror_transcripts_root / mirror.MACHINE_NAME_ELSEWHERE / "projects")
-      == "/home/nedlern/nedschorus-logs/agent-session-files-by-machine/mac/projects"
+      == "/home/nedlern/nedsnodes-logs/agent-session-files-by-machine/mac/projects"
       and ("projects", Path(".claude", "projects"), "projects") in [(name, Path(path), store)
                                                                    for name, path, store, _ in mirror.SOURCES]
       and Path(finder.DEFAULT_TRANSCRIPTS_DIR) == Path("~", ".claude", "projects"),
@@ -2750,12 +2756,12 @@ check("every mounted snapshot is released afterwards, with diskutil unmount and 
 
 tm_warm_hit = FakeRunner(WARM + [
     ("sudo -n mount_apfs", (0, "", "")),
-    (TM_FIND, (0, TM_DATA_ROOT + "/Users/el/Projects/nedschorus/a/b.md\n", "")),
+    (TM_FIND, (0, TM_DATA_ROOT + "/Users/el/Projects/nedsnodes/a/b.md\n", "")),
 ])
 report = finder.search_time_machine("a/b.md", newest_date_held="2026-08-14", runner=tm_warm_hit)
 check("with warm sudo, a hit is FOUND with the path inside the snapshot and a cp into the found-copies folder",
-      report.status == FOUND and any("holds /Users/el/Projects/nedschorus/a/b.md" in l for l in report.lines)
-      and any(("cp -n " + TM_DATA_ROOT + "/Users/el/Projects/nedschorus/a/b.md "
+      report.status == FOUND and any("holds /Users/el/Projects/nedsnodes/a/b.md" in l for l in report.lines)
+      and any(("cp -n " + TM_DATA_ROOT + "/Users/el/Projects/nedsnodes/a/b.md "
                + finder.found_copies_folder().path + "/timemachine-") in c for c in report.recovery),
       "%s %s %s" % (report.status, report.lines, report.recovery))
 check("... and its printed mount may ask for the password, since a warm credential can expire before it runs",
@@ -2775,7 +2781,7 @@ check("a mounted snapshot whose find fails is UNAVAILABLE quoting find, never a 
 # mounted snapshot of this backup volume. With the sudoers rule installed the
 # mount succeeds, so the wrong root turned an honest UNAVAILABLE into
 # "2 of 2 candidates searched ... and did not find it", exit 1, for
-# /Users/el/Projects/nedschorus/README.md, which is 6130 bytes in the backup.
+# /Users/el/Projects/nedsnodes/README.md, which is 6130 bytes in the backup.
 check("the find runs under <stamp>.backup/Data/Users, never at the mount point's own root",
       any(c.startswith("find " + TM_DATA_ROOT + "/Users") for c in tm_warm_hit.calls)
       and not any(c.startswith("find " + TM_MOUNT + "/Users") for c in tm_warm_hit.calls),
@@ -2783,17 +2789,17 @@ check("the find runs under <stamp>.backup/Data/Users, never at the mount point's
 
 tm_absolute = FakeRunner(WARM + [
     ("sudo -n mount_apfs", (0, "", "")),
-    ("test -e " + TM_DATA_ROOT + "/Users/el/Projects/nedschorus/README.md", (0, "", "")),
+    ("test -e " + TM_DATA_ROOT + "/Users/el/Projects/nedsnodes/README.md", (0, "", "")),
     ("test -e", (1, "", "")),
 ])
-report = finder.search_time_machine("/Users/el/Projects/nedschorus/README.md",
+report = finder.search_time_machine("/Users/el/Projects/nedsnodes/README.md",
                                     newest_date_held="2026-08-14", runner=tm_absolute)
 check("an absolute path is tested under <stamp>.backup/Data too, so a file that IS there is FOUND",
       report.status == FOUND
-      and any("holds /Users/el/Projects/nedschorus/README.md" in l for l in report.lines),
+      and any("holds /Users/el/Projects/nedsnodes/README.md" in l for l in report.lines),
       "%s %s" % (report.status, report.lines))
 check("... and the cp handed back reads from that root, not from the mount point",
-      any(("cp -n " + TM_DATA_ROOT + "/Users/el/Projects/nedschorus/README.md ") in c
+      any(("cp -n " + TM_DATA_ROOT + "/Users/el/Projects/nedsnodes/README.md ") in c
           for c in report.recovery),
       str(report.recovery))
 
@@ -2948,10 +2954,11 @@ code, text = run_main(["a/b.md", "--repo", "/nonexistent-not-a-repo", "--transcr
 check("exit 3 when no surface could be searched (git, its reflog, the log-store, transcripts, timeshift all UNAVAILABLE)",
       code == 3 and "Could NOT search: git, git reflog, log-store, transcripts, timeshift" in text,
       "exit=%s\n%s" % (code, text))
+git_failure_argv = ["/repo/a/b.md", "--repo", "/repo", "--transcripts-dir", "/nonexistent",
+                    "--box-ssh-host", "", "--skip", "timemachine", "--skip", "localsnapshots"]
 main_errors = io.StringIO()
 with contextlib.redirect_stderr(main_errors):
-    code, text = run_main(["/repo/a/b.md", "--repo", "/repo", "--transcripts-dir", "/nonexistent",
-                           "--box-ssh-host", "", "--skip", "timemachine", "--skip", "localsnapshots"],
+    code, text = run_main(git_failure_argv,
                           FakeRunner([("rev-parse --git-dir", (0, ".git\n", "")), TOP_LEVEL_FAILS]))
 check("an absolute path git cannot make repo-relative is searched as that absolute path, with git's words on stderr",
       code == 3 and "Searching every history the Mac and ned-box keep for: /repo/a/b.md" in text
@@ -2959,6 +2966,10 @@ check("an absolute path git cannot make repo-relative is searched as that absolu
       "exit=%s\n%s\n%s" % (code, text, main_errors.getvalue()))
 check("... and the docstring's exit-code block promises exactly that",
       "3 when" in finder.__doc__ and "could NOT be searched" in finder.__doc__)
+check("... and the git-failure lines tell the agent to rerun the very command it ran, every argument included",
+      finder.rerun_command(git_failure_argv) in main_errors.getvalue()
+      and "--repo /repo" in finder.rerun_command(git_failure_argv),
+      main_errors.getvalue())
 
 code, text = run_main(["a/b.md", "--repo", "/repo", "--skip", "transcripts", "--skip", "box",
                        "--skip", "timemachine", "--skip", "localsnapshots"],
@@ -3249,7 +3260,7 @@ COLD_THEN_PROMPTED = [
     ("sudo mount_apfs", (0, "", "")),
     ("diskutil unmount", (0, "", "")),
     TM_LAID_OUT,
-    (TM_FIND, (0, TM_DATA_ROOT + "/Users/el/Projects/nedschorus/a/b.md\n", "")),
+    (TM_FIND, (0, TM_DATA_ROOT + "/Users/el/Projects/nedsnodes/a/b.md\n", "")),
 ]
 
 tm_cold_default = FakeRunner(COLD_THEN_PROMPTED)
@@ -3270,7 +3281,7 @@ report = finder.search_time_machine("a/b.md", newest_date_held="2026-08-14",
                                     runner=tm_cold_prompted, prompt_for_root=True)
 check("with --prompt-for-root a cold sudo is crossed and the snapshot is searched",
       report.status == FOUND
-      and any("holds /Users/el/Projects/nedschorus/a/b.md" in l for l in report.lines),
+      and any("holds /Users/el/Projects/nedsnodes/a/b.md" in l for l in report.lines),
       "%s %s" % (report.status, report.lines))
 check("... by running the mount itself, without -n, so sudo can ask at the terminal",
       any(c == "sudo mount_apfs -o ro -s com.apple.TimeMachine.2026-08-13-183101.backup "
@@ -3325,7 +3336,7 @@ RULE_INSTALLED = [
     ("sudo -n mount_apfs", (0, "", "")),
     ("diskutil unmount", (0, "", "")),
     TM_LAID_OUT,
-    (TM_FIND, (0, TM_DATA_ROOT + "/Users/el/Projects/nedschorus/a/b.md\n", "")),
+    (TM_FIND, (0, TM_DATA_ROOT + "/Users/el/Projects/nedsnodes/a/b.md\n", "")),
 ]
 
 tm_rule_installed = FakeRunner(RULE_INSTALLED)
@@ -3399,14 +3410,14 @@ check("sudo's non-interactive refusal is told apart from mount_apfs's own failur
 
 plain = finder._plain_path_from_cited_query
 check("cited query: the scp form with a user and an absolute path is that path",
-      plain("nedlern@ned-box:/home/nedlern/nedschorus-logs/walk/x.md") == "/home/nedlern/nedschorus-logs/walk/x.md")
+      plain("nedlern@ned-box:/home/nedlern/nedsnodes-logs/walk/x.md") == "/home/nedlern/nedsnodes-logs/walk/x.md")
 check("cited query: a known host without a user is taken off too",
       plain("ned-box:/home/nedlern/x.md") == "/home/nedlern/x.md")
 check("cited query: ~ after a known host is that host's home, not this machine's",
-      plain("nedlern@ned-box:~/nedschorus-logs/x.md") == "/home/nedlern/nedschorus-logs/x.md"
+      plain("nedlern@ned-box:~/nedsnodes-logs/x.md") == "/home/nedlern/nedsnodes-logs/x.md"
       and plain("ned-box:~") == "/home/nedlern")
 check("cited query: a relative path after a known host is inside that host's home",
-      plain("nedlern@ned-box:nedschorus-logs/x.md") == "/home/nedlern/nedschorus-logs/x.md")
+      plain("nedlern@ned-box:nedsnodes-logs/x.md") == "/home/nedlern/nedsnodes-logs/x.md")
 check("cited query: an unknown host keeps an absolute path and a bare name",
       plain("someone@elsewhere:/srv/x.md") == "/srv/x.md" and plain("someone@elsewhere:x.md") == "x.md")
 try:
@@ -3482,7 +3493,7 @@ check("cited query: ... and the command line exits 2 with that instruction, sear
 # merge-lane-mac-helper-open-items-and-questions-2026-09-23, cited in the scp
 # form, read NOT FOUND, exit 1, from the path they sat at.
 with tempfile.TemporaryDirectory() as tmp:
-    store = Path(tmp, "nedschorus-logs")
+    store = Path(tmp, "nedsnodes-logs")
     minutes = Path(store, "walk", "some-walk-minutes.md")
     minutes.parent.mkdir(parents=True)
     minutes.write_text("the rulings\n")
@@ -4161,7 +4172,7 @@ with tempfile.TemporaryDirectory() as tmp:
                  "--skip", "timemachine"]
     rerun_lines = finder.next_step_lines.git_failure_next_step_lines(
         shlex.join(["python3", program] + arguments), "scripts/find-deleted-path-across-backups.py",
-        text_the_failure_line_contains="git's failure:")
+        git_error_line_shown_in_tool_message_to_agent_checked_for_lock_file_path="fatal: unable to read index", text_the_failure_line_contains="git's failure:")
     checkout = str(Path(program).parents[1])
     for how, typed, directory in (("by absolute path from another directory", program, str(elsewhere)),
                                   ("by a path relative to its checkout", os.path.relpath(program, checkout),
@@ -4193,6 +4204,20 @@ with tempfile.TemporaryDirectory() as tmp:
                % repo_rerun) in completed.stderr, "%r\n%s" % (repo_rerun, completed.stderr))
         check("... and names the program's absolute path, with every argument, as the command to rerun",
               completed.stderr.count(rerun_lines) == 1, "%r\n%s" % (rerun_lines, completed.stderr))
+    lock_table = tmp / "lock-table.json"
+    lock_table.write_text(json.dumps([
+        ["git -C %s rev-parse --git-dir" % repo, [0, ".git\n", ""]],
+        ["rev-parse --show-toplevel",
+         [128, "", "fatal: Unable to create '%s/.git/index.lock': File exists.\n" % repo]],
+    ]))
+    completed = subprocess.run(
+        [sys.executable, program] + arguments, cwd=str(elsewhere), capture_output=True, text=True,
+        env=dict(os.environ, PATH="%s%s%s" % (stand_ins, os.pathsep, os.environ["PATH"]),
+                 STAND_IN_TABLE=str(lock_table), STAND_IN_CALLS=str(calls)))
+    check("... and when git's error names a lock file, the next steps wait for that lock file instead of "
+          "offering the misspelt-name step",
+          "Git's error names the lock file %s/.git/index.lock: " % repo in completed.stderr
+          and "is misspelt" not in completed.stderr, completed.stderr)
     # Both git surfaces skipped, and the path after a -- separator.
     (tmp / "log-store").mkdir()
     skip_both = ["--repo", str(repo), "--found-copies-root", str(tmp / "found"), "--log-store-root", str(tmp / "log-store"),
@@ -4231,11 +4256,11 @@ for raised in ("RuntimeError('a case raised')", "KeyboardInterrupt()"):
         copy, copy_temp = tmp / "scripts", tmp / "temp"
         copy.mkdir()
         copy_temp.mkdir()
-        (tmp / "nc-systems" / "general-tools").mkdir(parents=True)
+        (tmp / "nn-systems" / "general-tools").mkdir(parents=True)
         shutil.copy(__file__, copy / Path(__file__).name)
         shutil.copy(Path(__file__).with_name("git-redirecting-environment-removal-test-fixture.py"), copy)
-        shutil.copy(Path(__file__).resolve().parents[1] / "nc-systems" / "general-tools"
-                    / "git-redirecting-environment-variables-removal-common.py", tmp / "nc-systems" / "general-tools")
+        shutil.copy(Path(__file__).resolve().parents[1] / "nn-systems" / "general-tools"
+                    / "git-redirecting-environment-variables-removal-common.py", tmp / "nn-systems" / "general-tools")
         (copy / "find-deleted-path-across-backups.py").write_text("raise %s\n" % raised)
         completed = subprocess.run([sys.executable, str(copy / Path(__file__).name)], capture_output=True, text=True,
                                    env=dict(os.environ, TMPDIR=str(copy_temp)))

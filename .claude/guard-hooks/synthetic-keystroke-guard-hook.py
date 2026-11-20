@@ -28,14 +28,14 @@ with _crash_notice.guard_hook_crash_fail_open_with_notice_context_manager(
         __file__, __name__ == "__main__" and sys.argv[1:2] != [CHECK_MODE_FLAG]):
     _shell_reader_spec = importlib.util.spec_from_file_location(
         "shell_command_tree_sitter_bash_reader_common",
-        Path(__file__).resolve().parents[2] / "nc-systems" / "general-tools"
+        Path(__file__).resolve().parents[2] / "nn-systems" / "general-tools"
         / "shell-command-tree-sitter-bash-reader-common.py")
     shell_reader = importlib.util.module_from_spec(_shell_reader_spec)
     _shell_reader_spec.loader.exec_module(shell_reader)
 
     _tmux_error_pattern_spec = importlib.util.spec_from_file_location(
         "tmux_target_or_server_does_not_exist_error_pattern_common",
-        Path(__file__).resolve().parents[2] / "nc-systems" / "general-tools"
+        Path(__file__).resolve().parents[2] / "nn-systems" / "general-tools"
         / "tmux-target-or-server-does-not-exist-error-pattern-common.py")
     tmux_error_pattern = importlib.util.module_from_spec(_tmux_error_pattern_spec)
     _tmux_error_pattern_spec.loader.exec_module(tmux_error_pattern)
@@ -73,7 +73,7 @@ ENVIRONMENT_ASSIGNMENT_PATTERN = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*=")
 
 
 SYNTHETIC_TYPING_REASON = (
-    "Blocked: AppleScript synthetic typing (iTerm `write text`, System Events "
+    "[rule bash-guard-applescript-synthetic-typing] Blocked: AppleScript synthetic typing (iTerm `write text`, System Events "
     "`keystroke` or `key code`) sends keystrokes that race the user's real typing "
     "and interleave with it.\n"
     "If you want a terminal window running a command for the user, run: "
@@ -94,7 +94,7 @@ SHOW_THE_USER_ELSEWHERE_LINE = (
 )
 
 ATTACHED_REASON = (
-    "Blocked: tmux session '{target}' has an attached client, so send-keys or "
+    "[rule bash-guard-tmux-keys-into-attached-session] Blocked: tmux session '{target}' has an attached client, so send-keys or "
     "paste-buffer would interleave with the typing of whoever is attached. "
     "Sending keystrokes is permitted only into detached sessions.\n"
     "If the keystrokes carry a message for another agent-seat, send the message "
@@ -107,7 +107,7 @@ ATTACHED_REASON = (
 )
 
 UNVERIFIED_REASON = (
-    "Blocked: could not verify that tmux target '{target}' has no attached "
+    "[rule bash-guard-tmux-keys-into-attached-session] Blocked: could not verify that tmux target '{target}' has no attached "
     "client ({error}). Keystrokes sent into a session someone is typing in "
     "interleave with that typing.\n"
     "Check the target with: {check_command}\n"
@@ -121,7 +121,7 @@ UNVERIFIED_REASON = (
 )
 
 NESTED_SSH_REASON = (
-    "Blocked: tmux target '{target}' is reached through more than one ssh hop, "
+    "[rule bash-guard-tmux-keys-into-attached-session] Blocked: tmux target '{target}' is reached through more than one ssh hop, "
     "and this guard cannot check through more than one hop that the session "
     "has no attached client. Keystrokes sent into a session someone is typing "
     "in interleave with that typing.\n"
@@ -134,7 +134,7 @@ NESTED_SSH_REASON = (
 )
 
 UNRESOLVED_TARGET_REASON = (
-    "Blocked: tmux target '{target}' holds an unexpanded variable (a shell "
+    "[rule bash-guard-tmux-keys-into-attached-session] Blocked: tmux target '{target}' holds an unexpanded variable (a shell "
     "variable or command substitution) or an xargs or parallel replacement "
     "string ({{}}), so this guard cannot check that the real session is "
     "detached.\n"
@@ -146,7 +146,7 @@ UNRESOLVED_TARGET_REASON = (
 )
 
 NO_TARGET_REASON = (
-    "Blocked: this send-keys or paste-buffer names no -t target, so the "
+    "[rule bash-guard-tmux-keys-into-attached-session] Blocked: this send-keys or paste-buffer names no -t target, so the "
     "keystrokes would go to tmux's current session, which may be the session "
     "the user is typing in.\n"
     "If the keystrokes are meant for a detached session, name that session with "

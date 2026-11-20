@@ -37,7 +37,7 @@ with _crash_notice.guard_hook_crash_fail_open_with_notice_context_manager(
         __file__, __name__ == "__main__"):
     _shell_reader_spec = importlib.util.spec_from_file_location(
         "shell_command_tree_sitter_bash_reader_common",
-        Path(__file__).resolve().parents[2] / "nc-systems" / "general-tools"
+        Path(__file__).resolve().parents[2] / "nn-systems" / "general-tools"
         / "shell-command-tree-sitter-bash-reader-common.py")
     shell_reader = importlib.util.module_from_spec(_shell_reader_spec)
     _shell_reader_spec.loader.exec_module(shell_reader)
@@ -58,7 +58,7 @@ TMUX_OTHER_VALUE_LETTERS = "cfT"
 KILL_COMMAND_PREFIXES = ("kill-ser", "kill-ses")
 
 REFUSAL_WITH_COMMAND_TEMPLATE = (
-    "Refused on purpose: `{kill}` names no tmux server, so tmux acts on the "
+    "[rule bash-guard-tmux-kill-without-socket-option] Refused on purpose: `{kill}` names no tmux server, so tmux acts on the "
     "server in $TMUX, which is the tmux server of the agent-seat you run in "
     "(or, with $TMUX unset, the default server, which holds other sessions). "
     "Killing it, or the wrong session on it, ends that agent-seat, its "
@@ -73,7 +73,7 @@ REFUSAL_WITH_COMMAND_TEMPLATE = (
 )
 
 REFUSAL_WITHOUT_COMMAND_MESSAGE = (
-    "Refused on purpose: this tmux kill names no tmux server, so tmux acts on "
+    "[rule bash-guard-tmux-kill-without-socket-option] Refused on purpose: this tmux kill names no tmux server, so tmux acts on "
     "the server in $TMUX, which is the tmux server of the agent-seat you run "
     "in (or, with $TMUX unset, the default server, which holds other "
     "sessions). Killing it, or the wrong session on it, ends that agent-seat, "

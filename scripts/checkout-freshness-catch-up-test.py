@@ -137,6 +137,11 @@ def configure_identity(repository: Path):
     git(["config", "user.name", "freshness test"], repository)
 
 
+def mark_as_agent_home(worktree: Path):
+    git_directory = Path(git(["rev-parse", "--absolute-git-dir"], worktree).stdout.strip())
+    (git_directory / "agent-home-marker").write_text("", encoding="utf-8")
+
+
 def commit_file(repository: Path, name: str, content: str, message: str):
     # Parents created: the telling's categories are decided by PATH, so its
     # cases need real ones (scripts/, docs/, .claude/skills/), not flat files.
@@ -561,11 +566,9 @@ with tempfile.TemporaryDirectory() as temporary_directory:
         "files listed above stay older here than on main.")
     detached_work_line = (
         "It holds work of its own.\n"
-        "If this checkout is an agent-home, git refuses commits in it: carry that work to a "
+        "This checkout is an agent-home, so git refuses commits in it: carry that work to a "
         "worktree of your own on an nc-topic-branch, as the refusal of `git commit` here says "
-        "how.\n"
-        "Otherwise run `git switch -c <branch name>` to put that work on a branch, and commit "
-        "any uncommitted changes there; from then on the hook's rules for a branch apply.")
+        "how.")
     detached_bisect_line = (
         "A bisect is in progress: finish it or abort it; the next turn's end moves the "
         "checkout forward.")
@@ -575,11 +578,13 @@ with tempfile.TemporaryDirectory() as temporary_directory:
         "If git names anything else, leave the checkout as it is: the refusal has been "
         "reported to the user.")
 
-    def detached_worktree_behind_main(name):
+    def detached_worktree_behind_main(name, agent_home=True):
         git(["fetch", "-q"], reference)
         path = tmp / name
         git(["worktree", "add", "-q", "--detach", str(path), "origin/main~1"], reference)
         configure_identity(path)
+        if agent_home:
+            mark_as_agent_home(path)
         return path
 
     def head_of(checkout):
@@ -601,6 +606,19 @@ with tempfile.TemporaryDirectory() as temporary_directory:
     result = run_catch_up(["--cwd", str(detached)])
     check("a detached HEAD already at origin/main prints nothing",
           result.stdout.strip() == "", result.stdout)
+
+    # A review worktree pinned at the commit under review, which main already
+    # holds: detached, behind, nothing of its own, but no agent-home.
+    pinned = detached_worktree_behind_main("detached-pinned-review-worktree", agent_home=False)
+    pinned_head = head_of(pinned)
+    result = run_catch_up(["--cwd", str(pinned)])
+    check("a detached HEAD at an ancestor of main that is not an agent-home is not moved",
+          head_of(pinned) == pinned_head and pinned_head != main_tip()
+          and not (pinned / "scripts/detached-advance.py").exists(), pinned_head)
+    check("and neither the agent nor the user is told anything, and no note is queued",
+          agent_text(result) == "" and display_text(result) == ""
+          and not stamp_of(pinned).get("pending_agent_notes"),
+          agent_text(result) + display_text(result) + str(stamp_of(pinned)))
 
     tracked = detached_worktree_behind_main("detached-tracked-change-worktree")
     tracked_head = head_of(tracked)
@@ -1308,26 +1326,26 @@ with tempfile.TemporaryDirectory() as naming_scratch:
     check("an uncategorised path is still surfaced rather than hidden",
           "other files (1): Makefile" in named(("Makefile", "a makefile")), named())
 
-    # nc-systems/ holds a system kept whole — its code, its tests and its
+    # nn-systems/ holds a system kept whole — its code, its tests and its
     # design of record in one directory — so a change there is named as what
     # it is. Until 2026-09-22 the directory matched no category and fell to
     # the catch-all: observed live that day, when
-    # nc-systems/handoff/handoff-design.md moved on main and this hook
+    # nn-systems/handoff/handoff-design.md moved on main and this hook
     # reported it as "other files". The pair is a design AND a program, so the
     # case proves the category is decided by the path's prefix, not by the
     # extension; the catch-all still holds this scratch repository's Makefile
-    # from the case above, so what is asserted is that nc-systems/ is not on
+    # from the case above, so what is asserted is that nn-systems/ is not on
     # that line.
-    systems_listing = named(("nc-systems/handoff/handoff-design.md", "a design of record"),
-                            ("nc-systems/handoff/handoff-supervisor.py", "the system's code"))
+    systems_listing = named(("nn-systems/handoff/handoff-design.md", "a design of record"),
+                            ("nn-systems/handoff/handoff-supervisor.py", "the system's code"))
     check("a system kept whole is named as one, its design of record and its code together",
           "systems you build on, code and design of record (2): "
-          "nc-systems/handoff/handoff-design.md, nc-systems/handoff/handoff-supervisor.py"
+          "nn-systems/handoff/handoff-design.md, nn-systems/handoff/handoff-supervisor.py"
           in systems_listing, systems_listing)
     catch_all_line = next((line for line in systems_listing.splitlines()
                            if line.lstrip().startswith("other files")), "")
     check("and never under the catch-all, the least informative label available",
-          "nc-systems/" not in catch_all_line, catch_all_line or systems_listing)
+          "nn-systems/" not in catch_all_line, catch_all_line or systems_listing)
 
     # A wide gap is capped, or the agent reads a wall and skims it. Its own
     # repository, so the count is exactly what this case put there.
@@ -1667,8 +1685,8 @@ with tempfile.TemporaryDirectory() as exception_scratch:
     rename_origin, rename_seat = seat_on_main("renamed-under-the-branch")
     commit_file(rename_seat, "scripts/main-will-move-this.py", "the seat's edit\n",
                 "the seat edits the script at its old path")
-    (rename_origin / "nc-systems").mkdir()
-    git(["mv", "scripts/main-will-move-this.py", "nc-systems/main-moved-it-here.py"],
+    (rename_origin / "nn-systems").mkdir()
+    git(["mv", "scripts/main-will-move-this.py", "nn-systems/main-moved-it-here.py"],
         rename_origin)
     git(["commit", "-q", "-m", "main moves the script out of scripts/"], rename_origin)
     merge_main_into(rename_seat)
@@ -2011,7 +2029,7 @@ with tempfile.TemporaryDirectory() as notes_scratch:
     origin_repo, notes_seat = notes_fixture()
     commit_file(origin_repo, ".claude/skills/walk-me-through/SKILL.md", "steps\n", "a skill changes")
     commit_file(origin_repo, "docs/agents/pr-reviewer-instructions.md", "rules\n", "instructions change")
-    commit_file(origin_repo, "nc-systems/cold-read/cold-read-fast-clarify-prompt.md", "p\n", "a prompt")
+    commit_file(origin_repo, "nn-systems/cold-read/cold-read-fast-clarify-prompt.md", "p\n", "a prompt")
     commit_file(origin_repo, ".claude/skills/walk-me-through/reference.md", "r\n", "not a SKILL.md")
     commit_file(origin_repo, "scripts/tool.py", "t\n", "a script")
     stop_only(notes_seat)
@@ -2022,7 +2040,7 @@ with tempfile.TemporaryDirectory() as notes_scratch:
           "its new text loads." in told, told)
     check("a changed -instructions.md and -prompt.md are told as standing instructions",
           "main changed docs/agents/pr-reviewer-instructions.md, a file of standing instructions."
-          in told and "main changed nc-systems/cold-read/cold-read-fast-clarify-prompt.md, a file"
+          in told and "main changed nn-systems/cold-read/cold-read-fast-clarify-prompt.md, a file"
           in told, told)
     check("a skill's other files and scripts are not told",
           "reference.md" not in told and "scripts/tool.py" not in told, told)
@@ -2143,6 +2161,7 @@ with tempfile.TemporaryDirectory() as notes_scratch:
     detached = notes_seat.parent / "detached"
     git(["worktree", "add", "-q", "--detach", str(detached), "main"], notes_seat.parent / "clone")
     configure_identity(detached)
+    mark_as_agent_home(detached)
     (detached / "shared.txt").write_text("dirty\n", encoding="utf-8")
     commit_file(origin_repo, "a.txt", "a\n", "advance a")
     stop_only(detached)
@@ -2320,7 +2339,7 @@ with tempfile.TemporaryDirectory() as notes_scratch:
             ("the did-not-fit line", catch_up_module.delivery_text(many)),
             ("the could-not-be-read line", catch_up_module.NOTES_UNREADABLE_LINE.format(
                 path="stamp.json", error="unreadable")),
-            ("the moved-without-a-list note", catch_up_module.MOVED_WITHOUT_LIST_NOTE.format(
+            ("the moved-without-a-list note", catch_up_module.MOVED_WITHOUT_LIST_NOTICE.format(
                 error="no list"))):
         check(f"{note_name} says to invoke the skill again, and to stop following a skill "
               f"main deleted, byte for byte", skill_reload_lines in rendered, rendered[:600])
@@ -2517,14 +2536,14 @@ with tempfile.TemporaryDirectory() as failing_git_scratch:
         git(["fetch", "-q", "origin"], seat_path)
         return origin_repo, seat_path
 
-    def failing_git_shim(name, shell_pattern):
-        """A git that exits 128 for argument lists matching shell_pattern and
+    def failing_git_shim(name, shell_pattern, stderr=INJECTED_STDERR):
+        """A git that exits 128, printing stderr, for argument lists matching shell_pattern and
         passes every other call to the real git."""
         directory = failing_tmp / name
         directory.mkdir()
         (directory / "git").write_text(
             "#!/bin/sh\n"
-            f'case " $* " in {shell_pattern}) echo "{INJECTED_STDERR}" >&2; exit 128;; esac\n'
+            f'case " $* " in {shell_pattern}) echo "{stderr}" >&2; exit 128;; esac\n'
             f'exec "{failing_real_git}" "$@"\n', encoding="utf-8")
         (directory / "git").chmod(0o755)
         return str(directory)
@@ -2729,7 +2748,7 @@ with tempfile.TemporaryDirectory() as failing_git_scratch:
     check("note delivery tells the agent when git cannot find the git directory, "
           "with the hook's next steps",
           run.returncode == 0 and INJECTED_STDERR in agent_text(run)
-          and "this check runs again when the next prompt arrives." in agent_text(run)
+          and catch_up_module.GIT_FAILED_NOTES_DELIVERY_AGENT_NEXT_STEP_LINES in agent_text(run)
           and "end of your next turn" not in agent_text(run)
           and "you gave that name to" not in agent_text(run), run.stdout + run.stderr)
     run = run_catch_up_once(["--report", "--repo", str(level_seat)], git_dir_fails)
@@ -2737,10 +2756,23 @@ with tempfile.TemporaryDirectory() as failing_git_scratch:
           run.returncode == 0 and INJECTED_STDERR in run.stdout
           and "not a git checkout" not in run.stdout
           and catch_up_module.next_step_lines.git_failure_next_step_lines(
-              f"`python3 {SCRIPT_PATH.resolve()} --report --repo {level_seat.resolve()}`",
+              f"python3 {SCRIPT_PATH.resolve()} --report --repo {level_seat.resolve()}",
+              git_error_line_shown_in_tool_message_to_agent_checked_for_lock_file_path=INJECTED_STDERR,
               text_the_failure_line_contains="because a git command failed") in run.stdout
           and "you gave" not in run.stdout
           and "Nothing needs rerunning" not in run.stdout, run.stdout + run.stderr)
+    lock_file = level_seat.resolve() / ".git" / "index.lock"
+    run = run_catch_up_once(["--report", "--repo", str(level_seat)], failing_git_shim(
+        "git-dir-fails-on-a-lock-file", '*" --absolute-git-dir "*',
+        f"fatal: Unable to create '{lock_file}': File exists."))
+    check("--report given a git error that names a lock file gives the step that waits for that "
+          "lock file, then reruns the same --report command",
+          f"Git's error names the lock file {lock_file}: " in run.stdout
+          and catch_up_module.next_step_lines.git_error_names_a_lock_file_wait_then_rerun_line_or_none(
+              f"fatal: Unable to create '{lock_file}': File exists.",
+              f"exactly `python3 {SCRIPT_PATH.resolve()} --report --repo {level_seat.resolve()}`")
+          in run.stdout,
+          run.stdout + run.stderr)
     worktree_list_fails = failing_git_shim("worktree-list-fails-in-modes", '*" worktree list "*')
     run = run_catch_up_once(["--reference-pull", "--repo", str(level_seat)], worktree_list_fails)
     check("--reference-pull prints the git failure instead of saying nothing, "

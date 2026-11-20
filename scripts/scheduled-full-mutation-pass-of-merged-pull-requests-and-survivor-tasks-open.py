@@ -131,7 +131,7 @@ the merge not yet run is run, until that time. That time is
 --second-pass-stops-starting-mutants-seconds-before-next-scheduled-run, by
 default 30 minutes, before cron next starts this program on ned-box, which
 this program reads from its schedule in --scheduled-jobs-on-each-machine-json-file,
-by default nc-systems/general-tools/scheduled-jobs-on-each-machine.json, a
+by default nn-systems/general-tools/scheduled-jobs-on-each-machine.json, a
 schedule of the form `<minute> <hour> * * *`: a run still going when cron
 starts the next one would make that one exit
 EXIT_ANOTHER_RUN_HOLDS_THE_LOCK. From that time on the second pass starts on
@@ -198,7 +198,7 @@ retired, the owner is merge-lane-2, the agent-seat
 SURVIVOR_TASK_AGENT_SEAT_WHEN_LINE_AUTHOR_IS_RETIRED_OR_UNKNOWN names. Before
 a task is opened or rewritten, each new mutant's diff file is written. A task
 is a Claude Code task file, `<id>.json` in the task list directory
-`nedschorus-<owner>-tasks` under --task-lists-directory, with the keys id,
+`nedsnodes-<owner>-tasks` under --task-lists-directory, with the keys id,
 subject, description, status, blocks and blockedBy. Its id is one more than
 the highest of the list's task ids and its `.highwatermark`, as Claude Code
 numbers a new task; the file is linked into place only where no file of that
@@ -291,7 +291,7 @@ merge is not recorded as tested.
 
 THE RECORD is one text file per run in the log-store:
 
-  nedlern@ned-box:/home/nedlern/nedschorus-logs/scheduled-full-mutation-pass-runs-of-merged-pull-requests/<UTC start>.txt
+  nedlern@ned-box:/home/nedlern/nedsnodes-logs/scheduled-full-mutation-pass-runs-of-merged-pull-requests/<UTC start>.txt
 
 It holds origin/main, the commit the run started after, a line per survivor
 task rechecked with its verdicts and what was done to the task, a line per
@@ -312,17 +312,17 @@ that cannot be written is printed on standard output instead, and the run
 exits EXIT_RECORD_NOT_WRITTEN.
 
 SCHEDULE. Installed on ned-box by
-nc-systems/general-tools/install-scheduled-jobs-on-this-machine.py from
-nc-systems/general-tools/scheduled-jobs-on-each-machine.json, with both output
+nn-systems/general-tools/install-scheduled-jobs-on-this-machine.py from
+nn-systems/general-tools/scheduled-jobs-on-each-machine.json, with both output
 streams appended to its log, which, with the record, is where its failures
 are read. Run by hand on ned-box, from an agent's shell too, as a unit of the
 user's systemd, which outlives the shell, with its output in the same log:
 
-    systemd-run --user --unit=scheduled-full-mutation-pass-of-merged-pull-requests-and-survivor-tasks-open-by-hand --collect -p StandardOutput=append:/home/nedlern/.claude/scheduled-full-mutation-pass-of-merged-pull-requests-and-survivor-tasks-open.log -p StandardError=append:/home/nedlern/.claude/scheduled-full-mutation-pass-of-merged-pull-requests-and-survivor-tasks-open.log /usr/bin/python3 /home/nedlern/Projects/nedschorus/scripts/scheduled-full-mutation-pass-of-merged-pull-requests-and-survivor-tasks-open.py
+    systemd-run --user --unit=scheduled-full-mutation-pass-of-merged-pull-requests-and-survivor-tasks-open-by-hand --collect -p StandardOutput=append:/home/nedlern/.claude/scheduled-full-mutation-pass-of-merged-pull-requests-and-survivor-tasks-open.log -p StandardError=append:/home/nedlern/.claude/scheduled-full-mutation-pass-of-merged-pull-requests-and-survivor-tasks-open.log /usr/bin/python3 /home/nedlern/Projects/nedsnodes/scripts/scheduled-full-mutation-pass-of-merged-pull-requests-and-survivor-tasks-open.py
 
 The cron line, at 00:30 in ned-box's local time, America/Los_Angeles (Pacific):
 
-    30 0 * * * /usr/bin/python3 /home/nedlern/Projects/nedschorus/scripts/scheduled-full-mutation-pass-of-merged-pull-requests-and-survivor-tasks-open.py >> /home/nedlern/.claude/scheduled-full-mutation-pass-of-merged-pull-requests-and-survivor-tasks-open.log 2>&1
+    30 0 * * * /usr/bin/python3 /home/nedlern/Projects/nedsnodes/scripts/scheduled-full-mutation-pass-of-merged-pull-requests-and-survivor-tasks-open.py >> /home/nedlern/.claude/scheduled-full-mutation-pass-of-merged-pull-requests-and-survivor-tasks-open.log 2>&1
 
 Exit codes: 0 every survivor task was rechecked and every merge since the last
 run had its first pass and its survivors and ERRORED mutants given tasks, or
@@ -347,7 +347,7 @@ applies: an unwritten record outranks a failed step, which outranks a lost
 task, which outranks an unjudged recheck, which outranks a carried-on merge.
 """
 
-# Messages here follow docs/nedschorus-wiki/nedschorus-how-to-write-a-tool-message-to-agent-such-as-a-hook-refusal-or-script-error.md.
+# Messages here follow docs/nedsnodes-wiki/nedsnodes-how-to-write-a-tool-message-to-agent-such-as-a-hook-refusal-or-script-error.md.
 
 import argparse
 import fcntl
@@ -374,16 +374,16 @@ JOB_LOG_FILE = f"/home/nedlern/.claude/{PROGRAM}.log"
 # user's systemd outlives it.
 RUN_BY_HAND = (f"systemd-run --user --unit={PROGRAM}-by-hand --collect "
                f"-p StandardOutput=append:{JOB_LOG_FILE} -p StandardError=append:{JOB_LOG_FILE} "
-               f"/usr/bin/python3 /home/nedlern/Projects/nedschorus/scripts/{PROGRAM}.py")
+               f"/usr/bin/python3 /home/nedlern/Projects/nedsnodes/scripts/{PROGRAM}.py")
 HAND_RUNS_DIRECTORY_NAME = "scheduled-full-mutation-pass-hand-runs"
 
 MUTATION_TESTING_PROGRAM = Path(__file__).resolve().with_name(
     "mutation-testing-changed-lines-quick-or-full-pass-survivors.py")
-DEFAULT_LOG_STORE_ROOT = "/home/nedlern/nedschorus-logs"
+DEFAULT_LOG_STORE_ROOT = "/home/nedlern/nedsnodes-logs"
 RECORDS_DIRECTORY_NAME = "scheduled-full-mutation-pass-runs-of-merged-pull-requests"
 SURVIVING_MUTANT_DIFFS_DIRECTORY_NAME = "surviving-mutant-diffs"
 LOG_STORE_HOST = "nedlern@ned-box"
-DEFAULT_STATE_DIRECTORY = (Path.home() / ".local" / "state" / "nedschorus"
+DEFAULT_STATE_DIRECTORY = (Path.home() / ".local" / "state" / "nedsnodes"
                            / "scheduled-full-mutation-pass-of-merged-pull-requests-and-survivor-tasks-open")
 STATE_FILE_NAME = "state.json"
 UNTESTABLE_MERGES_STATE_KEY = "untestable_merges"
@@ -391,7 +391,7 @@ MERGES_WITH_MUTANTS_NOT_RUN_STATE_KEY = "merges_with_mutants_not_run"
 ERRORED_MUTANT_KEYS_ALREADY_REPORTED_STATE_KEY = "errored_mutant_keys_already_reported"
 FIRST_PASS_MUTANTS_RUN_PER_MERGE_AT_MOST = 12
 SCHEDULED_JOBS_ON_EACH_MACHINE_JSON_FILE = (
-    REPOSITORY_ROOT / "nc-systems" / "general-tools" / "scheduled-jobs-on-each-machine.json")
+    REPOSITORY_ROOT / "nn-systems" / "general-tools" / "scheduled-jobs-on-each-machine.json")
 DEFAULT_SECOND_PASS_STOPS_STARTING_MUTANTS_SECONDS_BEFORE_NEXT_SCHEDULED_RUN = 30 * 60
 LOCK_FILE_NAME = "scheduled-full-mutation-pass-of-merged-pull-requests-and-survivor-tasks-open.lock"
 DEFAULT_TASK_LISTS_DIRECTORY = Path.home() / ".claude" / "tasks"
@@ -443,14 +443,18 @@ mutation_testing = module_loaded_by_path(
     "mutation_testing_changed_lines_quick_or_full_pass_survivors", MUTATION_TESTING_PROGRAM)
 git_redirecting_removal = module_loaded_by_path(
     "git_redirecting_environment_variables_removal_common",
-    REPOSITORY_ROOT / "nc-systems" / "general-tools"
+    REPOSITORY_ROOT / "nn-systems" / "general-tools"
     / "git-redirecting-environment-variables-removal-common.py")
 agent_seat_task_list = module_loaded_by_path(
     "agent_seat_task_list_new_pending_task_write_common",
-    REPOSITORY_ROOT / "nc-systems" / "general-tools"
+    REPOSITORY_ROOT / "nn-systems" / "general-tools"
     / "agent-seat-task-list-new-pending-task-write-common.py")
 agent_seat_task_list_new_pending_task_write = (
     agent_seat_task_list.agent_seat_task_list_new_pending_task_write)
+agent_seat_task_list_task_file_rewrite = module_loaded_by_path(
+    "agent_seat_task_list_task_file_rewrite_common",
+    REPOSITORY_ROOT / "nn-systems" / "general-tools"
+    / "agent-seat-task-list-task-file-rewrite-common.py").agent_seat_task_list_task_file_rewrite
 
 
 class StepFailed(Exception):
@@ -534,7 +538,7 @@ def mutant_key(mutant):
 
 def task_list_owner(author, task_lists_directory, agent_seats_directory):
     """(agent-seat whose list gets the task, why, when not the author)."""
-    if (task_lists_directory / f"nedschorus-{author}-tasks").is_dir() \
+    if (task_lists_directory / f"nedsnodes-{author}-tasks").is_dir() \
             and (agent_seats_directory / author).is_dir():
         return author, None
     return (SURVIVOR_TASK_AGENT_SEAT_WHEN_LINE_AUTHOR_IS_RETIRED_OR_UNKNOWN,
@@ -604,7 +608,7 @@ def lost_tasks_reported(state, arguments, record):
     file on the list cannot be read."""
     lost = []
     for key, given in list(state["tasks_opened"].items()):
-        list_directory = arguments.task_lists_directory / f"nedschorus-{given['agent_seat']}-tasks"
+        list_directory = arguments.task_lists_directory / f"nedsnodes-{given['agent_seat']}-tasks"
         task_file = list_directory / f"{given['task_id']}.json"
         completed = False
         open_task = False
@@ -693,13 +697,6 @@ def survivor_task_is_current(description, diff_files):
     return (f"This task's command: {survivor_task_recorded_mutant_killed_check_command_line(sorted(diff_files, key=str))}\n"
             in description and description.endswith(
                 SURVIVOR_TASK_DESCRIPTION_LAST_LINE_LEAVE_TASK_OPEN_FOR_NIGHTLY_RECHECK))
-
-
-def task_file_rewrite(task_file, task):
-    """Replace the task file with `task`. Raises OSError."""
-    partial = task_file.with_name(f".{task_file.name}.partial")
-    partial.write_text(json.dumps(task, indent=2), encoding="utf-8")
-    os.replace(partial, task_file)
 
 
 def program_run_with_limit(command, timeout_seconds):
@@ -813,7 +810,7 @@ def job_failure_task_opened_unless_open(subject, description, arguments,
     description, keeping what an agent-seat wrote there. Return (its id, True when opened
     now). Raises OSError."""
     list_directory = (arguments.task_lists_directory
-                      / f"nedschorus-{JOB_FAILURE_TASK_AGENT_SEAT}-tasks")
+                      / f"nedsnodes-{JOB_FAILURE_TASK_AGENT_SEAT}-tasks")
     if list_directory.is_dir():
         for path in sorted(list_directory.iterdir(), key=lambda path: path.name):
             if not TASK_FILE_NAME_PATTERN.fullmatch(path.name):
@@ -822,9 +819,9 @@ def job_failure_task_opened_unless_open(subject, description, arguments,
             if task is not None and task.get("status") != "completed" \
                     and task.get("subject") == subject:
                 if open_task_description_rewritten and task.get("description") != description:
-                    task_file_rewrite(path, {**task, "description": description})
+                    agent_seat_task_list_task_file_rewrite(path, {**task, "description": description})
                 elif open_task_description_addition:
-                    task_file_rewrite(path, {**task, "description": (
+                    agent_seat_task_list_task_file_rewrite(path, {**task, "description": (
                         f"{task.get('description', '')}\n\n{open_task_description_addition}")})
                 return int(path.stem), False
     return agent_seat_task_list_new_pending_task_write(list_directory, subject,
@@ -862,7 +859,7 @@ def survivor_tasks_rechecked(state, state_file, arguments, main_commit, record, 
     not_rechecked = []
     for (agent_seat, task_id), keys in tasks.items():
         named = f"task #{task_id} on {agent_seat}'s task list"
-        task_file = (arguments.task_lists_directory / f"nedschorus-{agent_seat}-tasks"
+        task_file = (arguments.task_lists_directory / f"nedsnodes-{agent_seat}-tasks"
                      / f"{task_id}.json")
         diff_files = {key: mutant_diff_file_path(arguments.log_store_root, key) for key in keys}
         verdicts_file = scratch / f"{agent_seat}-{task_id}-verdicts.json"
@@ -915,7 +912,7 @@ def survivor_task_rechecked_write(task_file, diff_files, surviving_diff_files, m
         return "left as it was: its file is not a task"
     description = str(task.get("description", ""))
     if not surviving_diff_files:
-        task_file_rewrite(task_file, dict(task, status="completed", description=(
+        agent_seat_task_list_task_file_rewrite(task_file, dict(task, status="completed", description=(
             f"{description}\n\nCompleted by the scheduled full mutation pass: on main at "
             f"{main_commit[:12]}, every mutant this task listed is killed or no longer exists. "
             f"Its record: {record_citation}")))
@@ -932,7 +929,7 @@ def survivor_task_rechecked_write(task_file, diff_files, surviving_diff_files, m
          for diff_file in surviving_diff_files], record_citation))
     if place_named:
         updated["subject"] = survivor_task_subject(place, len(surviving_diff_files))
-    task_file_rewrite(task_file, updated)
+    agent_seat_task_list_task_file_rewrite(task_file, updated)
     return "rewritten to list only the surviving mutants"
 
 
@@ -1206,7 +1203,7 @@ def test_one_merge(arguments, state, state_file, merge, record, record_citation,
                        if blame_line.startswith("author ")), "")
         owner, owner_reason = task_list_owner(author, arguments.task_lists_directory,
                                               arguments.agent_seats_directory)
-        list_directory = arguments.task_lists_directory / f"nedschorus-{owner}-tasks"
+        list_directory = arguments.task_lists_directory / f"nedsnodes-{owner}-tasks"
         mutants_and_diff_files = [
             (mutant, mutant_diff_file_path(arguments.log_store_root, mutant_key(mutant)))
             for mutant in not_given]
@@ -1248,7 +1245,7 @@ def test_one_merge(arguments, state, state_file, merge, record, record_citation,
                     f"to this task.",
                     [(diff if diff is not None else diff_file.read_text(encoding="utf-8"),
                       diff_file) for diff_file, diff in listed.items()], record_citation)
-                task_file_rewrite(list_directory / f"{found_id}.json", dict(
+                agent_seat_task_list_task_file_rewrite(list_directory / f"{found_id}.json", dict(
                     found_task, subject=survivor_task_subject(place, len(listed)),
                     description=description))
         except OSError as error:
@@ -1669,7 +1666,7 @@ def main_under_lock(arguments):
                   f"Fix what both errors name: the record's, in the line that begins "
                   f"\"{PROGRAM}: the record above was not written\", and the task's, in the "
                   f"first line of this message, such as the task list directory "
-                  f"{arguments.task_lists_directory / f'nedschorus-{JOB_FAILURE_TASK_AGENT_SEAT}-tasks'} "
+                  f"{arguments.task_lists_directory / f'nedsnodes-{JOB_FAILURE_TASK_AGENT_SEAT}-tasks'} "
                   f"not existing.\n"
                   f"Nothing this run found is lost: the tasks it opened for surviving mutants "
                   f"stay open, and {state_file} records the merges it tested, so the next run "

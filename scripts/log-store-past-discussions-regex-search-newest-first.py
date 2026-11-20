@@ -8,7 +8,7 @@ Usage:
       [--include-own-session]
 
 WHAT IT SEARCHES. Five kinds of record in the log-store,
-/home/nedlern/nedschorus-logs/ on ned-box:
+/home/nedlern/nedsnodes-logs/ on ned-box:
 
   walk               walk/: walk-documents, drafts, suggestions and walk-minutes
   cold-read-records  cold-read-records/
@@ -23,7 +23,7 @@ searched.
 
 Before it searches session-dialogs, it writes again each session dialog
 whose transcript changed since the dialog was written, as the dialogs
-refresher, scripts/log-store-session-dialogs-refresh-nbd.py, does every 10
+refresher, scripts/log-store-session-dialogs-refresh-hack.py, does every 10
 minutes, so a dialog is as current as the transcript the mirror last copied,
 about a minute behind the session. It writes them only with the dialog
 extractor, scripts/handoff-extract-conversation.py, subagent tracker and
@@ -115,14 +115,14 @@ says older transcripts were not read, in place of the count of all hits.
 FROM THE MAC. The whole log-store, the Mac's mirrored transcripts and session
 dialogs included, is on ned-box. When the log-store is not on this machine
 and this machine is not ned-box, the program runs ned-box's copy,
-/home/nedlern/Projects/nedschorus/scripts/<this program>, over
+/home/nedlern/Projects/nedsnodes/scripts/<this program>, over
 `ssh nedlern@ned-box` with the same arguments, and passes the running
 agent-session's identity and its last compaction, read from the Mac's live
 transcript, which ned-box's copy cannot see. When the Mac has no live
 transcript of the session, ned-box's copy reads the log-store's copy; when
 the Mac's copy finds one but cannot read it, it prints a FAILED line after
 ned-box's output and exits 2. Reading eleven gigabytes of
-transcripts through the Mac's mount /Volumes/nedhome/nedschorus-logs would
+transcripts through the Mac's mount /Volumes/nedhome/nedsnodes-logs would
 be slow, and ripgrep is not reliably on the Mac's PATH.
 
 FAILURES. A record that could not be searched prints a line opening FAILED,
@@ -186,10 +186,10 @@ refresh_common = load_sibling_module("log_store_session_dialogs_refresh_common",
 SESSION_DIALOG_FILE_NAME_SUFFIX = refresh_common.SESSION_DIALOG_FILE_NAME_SUFFIX
 
 PROGRAM_FILE_NAME = "log-store-past-discussions-regex-search-newest-first.py"
-DEFAULT_LOG_STORE_ROOT = Path("/home/nedlern/nedschorus-logs")
+DEFAULT_LOG_STORE_ROOT = Path("/home/nedlern/nedsnodes-logs")
 NED_BOX_HOSTNAME = "ned-box"
 NED_BOX_SSH_TARGET = "nedlern@ned-box"
-NED_BOX_PROGRAM_PATH = f"/home/nedlern/Projects/nedschorus/scripts/{PROGRAM_FILE_NAME}"
+NED_BOX_PROGRAM_PATH = f"/home/nedlern/Projects/nedsnodes/scripts/{PROGRAM_FILE_NAME}"
 SSH_OPTIONS = ["-o", "BatchMode=yes", "-o", "ConnectTimeout=10"]
 SSH_EXIT_CONNECTION_FAILED = 255
 
@@ -260,7 +260,7 @@ OTHER_EXTRACTOR_RECORDED_NOTE = (
     "tracker's files and log-store-session-dialogs-refresh-common.py in {scripts} is not the one {recorded} "
     "records, or none is recorded.\n"
     "If main changed one of those files and this checkout has the change, wait: the dialogs refresher, "
-    "scripts/log-store-session-dialogs-refresh-nbd.py, which runs from ned-box's main checkout every 10 minutes, "
+    "scripts/log-store-session-dialogs-refresh-hack.py, which runs from ned-box's main checkout every 10 minutes, "
     "brings the dialogs up to date within 10 minutes.\n"
     "If those files in this checkout differ from main's, as on a branch that changes them or in a worktree behind "
     "main, the recorded digest never matches them, since the refresher records the digest of main's: for a search "
@@ -755,7 +755,7 @@ def dialog_line_turn_times(transcript_text, dialog_text, wanted, written_left_ou
         return {}, (f"could not date the hits in the session dialog {dialog_text} by their turns, since it "
                     f"was written while the subagent tracker failed and lacks the subagent turns the dialog "
                     f"built again from {transcript_text} holds; the dialogs refresher, "
-                    f"scripts/log-store-session-dialogs-refresh-nbd.py, writes it whole once its transcript "
+                    f"scripts/log-store-session-dialogs-refresh-hack.py, writes it whole once its transcript "
                     f"or the extractor changes")
     stamps_by_line = collections.defaultdict(list)
     for line, stamp in built:

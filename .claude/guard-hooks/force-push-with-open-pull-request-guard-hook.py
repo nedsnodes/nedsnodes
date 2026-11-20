@@ -32,14 +32,14 @@ with _crash_notice.guard_hook_crash_fail_open_with_notice_context_manager(
         __file__, __name__ == "__main__"):
     _shell_reader_spec = importlib.util.spec_from_file_location(
         "shell_command_tree_sitter_bash_reader_common",
-        Path(__file__).resolve().parents[2] / "nc-systems" / "general-tools"
+        Path(__file__).resolve().parents[2] / "nn-systems" / "general-tools"
         / "shell-command-tree-sitter-bash-reader-common.py")
     shell_reader = importlib.util.module_from_spec(_shell_reader_spec)
     _shell_reader_spec.loader.exec_module(shell_reader)
 
     _rebase_or_replace_spec = importlib.util.spec_from_file_location(
         "pull_request_conflict_with_main_rebase_or_replace_answer_common",
-        Path(__file__).resolve().parents[2] / "nc-systems" / "general-tools"
+        Path(__file__).resolve().parents[2] / "nn-systems" / "general-tools"
         / "pull-request-conflict-with-main-rebase-or-replace-answer-common.py")
     rebase_or_replace = importlib.util.module_from_spec(_rebase_or_replace_spec)
     _rebase_or_replace_spec.loader.exec_module(rebase_or_replace)
@@ -72,7 +72,7 @@ WRAPPER_DIRECTORY_OPTIONS = {("env", "-C"), ("env", "--chdir"), ("sudo", "-D"), 
 UNEXPANDED_PATTERN = re.compile(r"[$`*?]|\{\}")
 
 DENY_REASON_TEMPLATE = (
-    "Refused: branch {branch} has an open pull request, \"{title}\" ({url}). "
+    "[rule bash-guard-git-push-force] Refused: branch {branch} has an open pull request, \"{title}\" ({url}). "
     "A force push would replace the commits under review.\n"
     "If you are force-pushing to restore what an earlier force push replaced, "
     "stop: leave the branch as it is and message merge-lane-2 with SendMessage "
@@ -88,7 +88,7 @@ DENY_REASON_TEMPLATE = (
 )
 
 UNRESOLVED_REASON_TEMPLATE = (
-    "Refused: this guard cannot read {word}, so it cannot check whether the "
+    "[rule bash-guard-git-push-force] Refused: this guard cannot read {word}, so it cannot check whether the "
     "branch has an open pull request.\n"
     "Run the push again with the checkout path and the branch name written "
     "out, so this guard can check it: git -C <checkout path> push --force "

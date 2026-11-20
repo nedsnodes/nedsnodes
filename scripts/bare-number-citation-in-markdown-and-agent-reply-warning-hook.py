@@ -7,7 +7,7 @@ in the agent's previous reply.
 One program, two hook events, told apart by the payload's hook_event_name:
 
   PostToolUse on Edit and Write of a .md or .markdown file: scan the text just
-      written, as style-guide-word-checker-markdown-edit-hook-nbd.py does. Edit
+      written, as style-guide-word-checker-markdown-edit-hook-hack.py does. Edit
       scans new_string alone. Write scans only the lines HEAD does not already
       hold, so an edit to a file whose old bare numbers are kept on purpose
       (agent-only files such as those under scripts/ and .claude/guard-hooks/) is
@@ -46,7 +46,7 @@ reference is not scanned itself, so a task subject that mentions another item
 is not reported; a bare reference after the name still is.
 
 A LINK TITLE is checked for a Markdown link outside code whose target is
-https://github.com/nedschorus/nedschorus/pull/<n> or .../issues/<n>, not a
+https://github.com/nedsnodes/nedsnodes/pull/<n> or .../issues/<n>, not a
 comment or a review in it, and whose text has at least
 TITLE_ATTEMPT_WORDS_AT_LEAST words; shorter text, such as "this PR" or
 "PR <number>", is no attempt at a title, and a URL is one word. The text and
@@ -104,7 +104,7 @@ non-blocking error and keeps the write and the prompt; stderr after exit 0 is
 recorded nowhere, so a fault reported that way would read as "no bare numbers".
 """
 
-# Tool-messages-to-agent follow docs/nedschorus-wiki/nedschorus-how-to-write-a-tool-message-to-agent-such-as-a-hook-refusal-or-script-error.md.
+# Tool-messages-to-agent follow docs/nedsnodes-wiki/nedsnodes-how-to-write-a-tool-message-to-agent-such-as-a-hook-refusal-or-script-error.md.
 
 import functools
 import importlib.util
@@ -125,8 +125,8 @@ LINK_TITLES_RECHECK_GH_TIMEOUT_SECONDS = 30
 LINK_TITLES_RECHECK_IN_FILE_COMMAND_LINE_FLAG = "--recheck-link-titles-in-file"
 LINK_TITLES_RECHECK_IN_REPLY_COMMAND_LINE_FLAG = "--recheck-link-titles-in-reply"
 EXIT_BAD_INVOCATION = 2
-GITHUB_REPOSITORY_OWNER = "nedschorus"
-GITHUB_REPOSITORY_NAME = "nedschorus"
+GITHUB_REPOSITORY_OWNER = "nedsnodes"
+GITHUB_REPOSITORY_NAME = "nedsnodes"
 TITLE_ATTEMPT_WORDS_AT_LEAST = 3
 EXCERPT_CHARACTERS_EACH_SIDE = 40
 SESSION_ID_SAFE_PATTERN = re.compile(r"^[A-Za-z0-9_-]{1,128}$")
@@ -166,8 +166,10 @@ STRAIGHT_QUOTED_NAME_PATTERN = re.compile(r"\"[^\"\n]+\"")
 CURLY_QUOTED_NAME_PATTERN = re.compile(r"\u201c[^\u201d\n]+\u201d")
 LINK_TEXT_AND_TARGET_PATTERN = re.compile(
     r"\[(?P<text>(?:[^\[\]\n]|\[[^\[\]\n]*\])*)\]\((?P<target>(?:[^()\s]|\([^()\s]*\))*)")
+# GitHub redirects the repository's old name, and text written before the rename still holds it.
+OLD_REPOSITORY = "nedschorus/nedschorus"
 REPOSITORY_ITEM_URL_PATTERN = re.compile(
-    r"^<?https://github\.com/" + GITHUB_REPOSITORY_OWNER + "/" + GITHUB_REPOSITORY_NAME
+    r"^<?https://github\.com/(?:" + GITHUB_REPOSITORY_OWNER + "/" + GITHUB_REPOSITORY_NAME + "|" + OLD_REPOSITORY + ")"
     + r"/(?:pull|issues)/(?P<number>\d+)"
     # A link to a comment or a review, a review comment on the files tab
     # (#r<id>) included, cites that comment, not the item's title.
@@ -182,7 +184,7 @@ SURROUNDING_QUOTE_PAIRS = (('"', '"'), ("'", "'"), ("\u201c", "\u201d"), ("\u201
 MASK_BARRIER_CHARACTER = "\x00"
 
 MARKDOWN_OPENING_LINES = (
-    "bare-number-citation-in-markdown-and-agent-reply-warning-hook: the text just written to {path} cites {count} pull "
+    "[rule bare-number-pull-request-ghi-or-task-citation-in-markdown-and-reply-warning] bare-number-citation-in-markdown-and-agent-reply-warning-hook: the text just written to {path} cites {count} pull "
     "request(s), GitHub issue(s) or task(s) by a bare number. A number alone tells a "
     "reader almost nothing; a title and a link are what a reader can read and open.",
     "Cite each one by its ID-type and its name, as a clickable link where it can be "
@@ -195,7 +197,7 @@ MARKDOWN_OPENING_LINES = (
     "as 'not PR #<number>', leave it as written.",
 )
 PREVIOUS_REPLY_OPENING_LINES = (
-    "bare-number-citation-in-markdown-and-agent-reply-warning-hook: your previous reply to the user cited {count} pull "
+    "[rule bare-number-pull-request-ghi-or-task-citation-in-markdown-and-reply-warning] bare-number-citation-in-markdown-and-agent-reply-warning-hook: your previous reply to the user cited {count} pull "
     "request(s), GitHub issue(s) or task(s) by a bare number. A number alone tells a "
     "reader almost nothing; a title and a link are what a reader can read and open.",
     "From now on, cite each one by its ID-type and its name, as a clickable link where "
@@ -219,7 +221,7 @@ NOTE_RECORD_FAILED_LINE = (
     "has noted, {record}, could not be {action} ({reason}), so this note may be sent again for the "
     "same reply, and in full. Nothing needs doing about the record.")
 MARKDOWN_TITLE_OPENING_LINES = (
-    "bare-number-citation-in-markdown-and-agent-reply-warning-hook: the text just written to {path} links {count} pull "
+    "[rule github-link-text-not-matching-item-title-warning] bare-number-citation-in-markdown-and-agent-reply-warning-hook: the text just written to {path} links {count} pull "
     "request(s) or GitHub issue(s) under link text that is not the title GitHub reports, or "
     "whose number is not the link's. A reader "
     "takes link text written as a title to be the linked item's title, so a different title points "
@@ -229,7 +231,7 @@ MARKDOWN_TITLE_OPENING_LINES = (
     "For each link whose text describes the item in your own words instead, leave the text as written.",
 )
 PREVIOUS_REPLY_TITLE_OPENING_LINES = (
-    "bare-number-citation-in-markdown-and-agent-reply-warning-hook: your previous reply to the user linked {count} pull "
+    "[rule github-link-text-not-matching-item-title-warning] bare-number-citation-in-markdown-and-agent-reply-warning-hook: your previous reply to the user linked {count} pull "
     "request(s) or GitHub issue(s) under link text that is not the title GitHub reports, or "
     "whose number is not the link's. A reader "
     "takes link text written as a title to be the linked item's title, so a different title points "
@@ -615,7 +617,7 @@ def _load_edited_file_path_within_checkout_root_and_git_check_ignore():
     """Return the shared checkout and git-tracking helpers, loaded by path; raises when they will not load."""
     specification = importlib.util.spec_from_file_location(
         "edited_file_path_within_checkout_root_and_git_check_ignore_common",
-        Path(__file__).resolve().parents[1] / "nc-systems" / "general-tools"
+        Path(__file__).resolve().parents[1] / "nn-systems" / "general-tools"
         / "edited-file-path-within-checkout-root-and-git-check-ignore-common.py")
     module = importlib.util.module_from_spec(specification)
     specification.loader.exec_module(module)
@@ -626,7 +628,7 @@ def _load_agent_session_unattended_by_user_check():
     """Return the shared check of whether a user attends the agent-session, loaded by path."""
     specification = importlib.util.spec_from_file_location(
         "agent_session_unattended_by_user_check_common",
-        Path(__file__).resolve().parents[1] / "nc-systems" / "general-tools"
+        Path(__file__).resolve().parents[1] / "nn-systems" / "general-tools"
         / "agent-session-unattended-by-user-check-common.py")
     module = importlib.util.module_from_spec(specification)
     specification.loader.exec_module(module)
@@ -840,7 +842,7 @@ def previous_reply_note(payload: dict, environment):
 def _load_failed_command_next_step_lines():
     specification = importlib.util.spec_from_file_location(
         "failed_command_tool_message_to_agent_rerun_once_then_stop_and_report_lines_common",
-        Path(__file__).resolve().parents[1] / "nc-systems" / "general-tools"
+        Path(__file__).resolve().parents[1] / "nn-systems" / "general-tools"
         / "failed-command-tool-message-to-agent-rerun-once-then-stop-and-report-lines-common.py")
     module = importlib.util.module_from_spec(specification)
     specification.loader.exec_module(module)

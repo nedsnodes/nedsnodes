@@ -118,7 +118,7 @@ not deferred and sends the agent to the user. The waiter's own failures are
 in its docstring.
 
 The messages follow
-docs/nedschorus-wiki/nedschorus-how-to-write-a-tool-message-to-agent-such-as-a-hook-refusal-or-script-error.md.
+docs/nedsnodes-wiki/nedsnodes-how-to-write-a-tool-message-to-agent-such-as-a-hook-refusal-or-script-error.md.
 """
 
 import fcntl
@@ -146,25 +146,25 @@ with _crash_notice.guard_hook_crash_fail_open_with_notice_context_manager(
         __file__, __name__ == "__main__"):
     _shell_reader_spec = importlib.util.spec_from_file_location(
         "shell_command_tree_sitter_bash_reader_common",
-        REPOSITORY_ROOT / "nc-systems" / "general-tools" / "shell-command-tree-sitter-bash-reader-common.py")
+        REPOSITORY_ROOT / "nn-systems" / "general-tools" / "shell-command-tree-sitter-bash-reader-common.py")
     shell_reader = importlib.util.module_from_spec(_shell_reader_spec)
     _shell_reader_spec.loader.exec_module(shell_reader)
 
     _git_output_spec = importlib.util.spec_from_file_location(
         "git_machine_readable_output_runner_and_parser_common",
-        REPOSITORY_ROOT / "nc-systems" / "general-tools" / "git-machine-readable-output-runner-and-parser-common.py")
+        REPOSITORY_ROOT / "nn-systems" / "general-tools" / "git-machine-readable-output-runner-and-parser-common.py")
     git_output = importlib.util.module_from_spec(_git_output_spec)
     _git_output_spec.loader.exec_module(git_output)
 
     _ned_box_home_spec = importlib.util.spec_from_file_location(
         "ned_box_home_directory_and_its_mac_mount_point_path_constants_common",
-        REPOSITORY_ROOT / "nc-systems" / "general-tools" / "ned-box-home-directory-and-its-mac-mount-point-path-constants-common.py")
+        REPOSITORY_ROOT / "nn-systems" / "general-tools" / "ned-box-home-directory-and-its-mac-mount-point-path-constants-common.py")
     ned_box_home_paths = importlib.util.module_from_spec(_ned_box_home_spec)
     _ned_box_home_spec.loader.exec_module(ned_box_home_paths)
 
     _next_step_lines_spec = importlib.util.spec_from_file_location(
         "failed_command_tool_message_to_agent_rerun_once_then_stop_and_report_lines_common",
-        REPOSITORY_ROOT / "nc-systems" / "general-tools"
+        REPOSITORY_ROOT / "nn-systems" / "general-tools"
         / "failed-command-tool-message-to-agent-rerun-once-then-stop-and-report-lines-common.py")
     next_step_lines = importlib.util.module_from_spec(_next_step_lines_spec)
     _next_step_lines_spec.loader.exec_module(next_step_lines)
@@ -172,7 +172,7 @@ is_program = shell_reader.is_program
 
 CLEAN_WORKTREES_SCRIPT = REPOSITORY_ROOT / "scripts" / "clean-worktrees.py"
 GIT_WORKTREE_REMOVE_DEFERRED_WAITER_SCRIPT = (
-    REPOSITORY_ROOT / "nc-systems" / "general-tools"
+    REPOSITORY_ROOT / "nn-systems" / "general-tools"
     / "git-worktree-remove-deferred-until-cold-read-record-and-sanity-check-record-being-written-locks-release-then-ship-to-log-store-waiter.py")
 GIT_WORKTREE_REMOVE_DEFERRED_WAITER_LOG_STORE_DIRECTORY_NAME = (
     "git-worktree-remove-deferred-until-cold-read-record-and-sanity-check-record-being-written-locks-release-then-ship-to-log-store-waiter-run-logs")
@@ -187,6 +187,7 @@ GIT_GLOBAL_VALUE_FLAGS = {"-C", "-c", "--git-dir", "--work-tree", "--namespace",
 TELL_THE_USER_OR_DISPATCHING_AGENT = "tell " + next_step_lines.REPORT_RECIPIENT_PHRASE_USER_OR_DISPATCHING_AGENT
 
 SHIPMENT_FAILED_REFUSAL_TEMPLATE = (
+    "[rule bash-guard-git-worktree-remove-cold-read-and-sanity-check-records-not-shipped] "
     "Refused on purpose: before a `git worktree remove`, this hook ships the cold-read-records "
     "and sanity-check records of the worktree it removes to the log-store{scope}, and "
     "{count} record(s) did not reach it. The folders cold-read-records/ and sanity-check-records/ "
@@ -221,6 +222,7 @@ SHIPMENT_FAILED_UNRESOLVED_SCOPE_TEMPLATE = (
 RECORD_CHECK_FAILED_LINE_TEMPLATE = "not shipped: this hook could not check or ship it: {error}"
 RECORD_BEING_WRITTEN_LINE_TEMPLATE = "Record {record} (worktree {worktree})\n"
 RECORD_BEING_WRITTEN_IN_REMOVED_WORKTREE_REFUSAL_TEMPLATE = (
+    "[rule bash-guard-git-worktree-remove-record-being-written] "
     "Refused on purpose: this command removes a worktree in which a running program, such as the "
     "cold-read-grid, is still writing a record. That program holds the record's being-written lock "
     "and ships the record to the log-store itself when it finishes; removing the worktree now would "
@@ -241,6 +243,7 @@ REMOVAL_NOT_DEFERRED_ENDING_TEMPLATE = (
     "finished:\", word for word.")
 REMOVAL_NOT_DEFERRED_FAILURE_TEMPLATE = "for {worktree}, {error}"
 REMOVED_WORKTREE_UNRESOLVED_REFUSAL_TEMPLATE = (
+    "[rule bash-guard-git-worktree-remove-record-being-written] "
     "Refused on purpose: this hook could not tell which worktree this command removes ({reason}), "
     "and a running program, such as the cold-read-grid, is still writing a record in the worktree "
     "each Record line below names. "
@@ -273,7 +276,7 @@ WORKTREE_REMOVE_FORCE_OPTIONS = {"-f", "--force"}
 SHIP_RECORDS_YOURSELF_NEXT_STEP_LINES = (
     "Before you remove another worktree, ship its records yourself with this command, which runs the "
     "two shippers inside that worktree, where `--all` means every record of that worktree: "
-    "`(cd <the worktree's absolute path> && python3 nc-systems/cold-read/cold-read-record-ship.py --all "
+    "`(cd <the worktree's absolute path> && python3 nn-systems/cold-read/cold-read-record-ship.py --all "
     "&& python3 scripts/sanity-check-record-ship.py --all)`\n"
     "If it exits 0, remove the worktree from a directory outside it, since git cannot remove the worktree "
     "your shell is in; the parentheses return your shell to the directory it was in.\n"
@@ -662,7 +665,7 @@ def git_worktree_remove_deferred_waiter_start_unless_one_already_waits(worktree,
             fcntl.flock(descriptor, fcntl.LOCK_EX | fcntl.LOCK_NB)
         except BlockingIOError:
             return None
-        log_directory = ned_box_home / "nedschorus-logs" / GIT_WORKTREE_REMOVE_DEFERRED_WAITER_LOG_STORE_DIRECTORY_NAME
+        log_directory = ned_box_home / "nedsnodes-logs" / GIT_WORKTREE_REMOVE_DEFERRED_WAITER_LOG_STORE_DIRECTORY_NAME
         log_directory.mkdir(parents=True, exist_ok=True)
         log_path = log_directory / f"{time.strftime('%Y%m%dT%H%M%SZ', time.gmtime())}-{Path(worktree).name}-{os.getpid()}.log"
         command = [sys.executable, str(GIT_WORKTREE_REMOVE_DEFERRED_WAITER_SCRIPT), "--worktree", str(worktree),

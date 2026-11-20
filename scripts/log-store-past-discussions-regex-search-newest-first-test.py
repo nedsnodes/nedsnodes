@@ -577,7 +577,7 @@ sys.exit(search.main(["start the heron plan", "--kind", "session-dialogs", "--jo
         agent("the stork plan", "2026-09-01T08:00:00Z"),
         agent("the stork plan", "2026-09-02T08:00:00Z")))
     left_out_section = ("## Subagent tasks and reports left out\n\nThe subagent tracker, "
-                        "handoff-extract-conversation-subagent-tracker-nbd.py, failed, so this dialog leaves out "
+                        "handoff-extract-conversation-subagent-tracker-hack.py, failed, so this dialog leaves out "
                         "every subagent task and report: RuntimeError: gone\n")
     egret_dialog = write(root / "session-dialogs" / "ned-box" / egret_key / "s22-dialog-complete.md",
                          "## Agent\n\nthe stork plan\n\n" + left_out_section)
@@ -1125,7 +1125,7 @@ print(json.dumps([hit.get("occurrence") for hit in kept]))
                  environment={PREFIX + "THIS_MACHINE_OVERRIDE": "mac", PREFIX + "SSH_PROGRAM_OVERRIDE": echoing})
     check("from the Mac, the program runs on ned-box with the same arguments, and passes its exit through",
           result.returncode == 1 and "ARG:nedlern@ned-box" in result.stdout
-          and ("ARG:python3 /home/nedlern/Projects/nedschorus/scripts/"
+          and ("ARG:python3 /home/nedlern/Projects/nedsnodes/scripts/"
                "log-store-past-discussions-regex-search-newest-first.py "
                "--own-session '' 'heron'\"'\"'s plan' --seat prime") in result.stdout.splitlines(), result.stdout)
     result = run(Path(scratch) / "absent", "heron",

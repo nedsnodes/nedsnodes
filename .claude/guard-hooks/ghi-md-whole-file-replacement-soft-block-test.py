@@ -90,7 +90,7 @@ def expected_refusal(checkout):
     ghi_md = checkout / "docs" / "issues" / "46-ghi-info-agent-design.md"
     marker = checkout / ".ghi-md-whole-file-replacement-reason"
     return (
-        f"Refused: this command replaces the whole GHI-MD {ghi_md}, which can undo changes "
+        f"[rule bash-guard-ghi-md-whole-file-replacement] Refused: this command replaces the whole GHI-MD {ghi_md}, which can undo changes "
         "merged into it on main after your copy was written.\n"
         "Change the GHI-MD with the Edit tool instead, one passage at a time, so main's other "
         "changes stay.\n"
@@ -251,7 +251,7 @@ with tempfile.TemporaryDirectory() as scratch:
     check("refused: a payload without cwd is read from the hook's own directory",
           code == 0 and got == refusal, (code, output))
 
-    replay_check = Path(__file__).resolve().parents[2] / "nc-systems" / "general-tools" / (
+    replay_check = Path(__file__).resolve().parents[2] / "nn-systems" / "general-tools" / (
         "bash-guards-verdict-changes-between-git-refs-on-recorded-commands-check.py")
     _replay_spec = importlib.util.spec_from_file_location("bash_guards_replay_check", replay_check)
     replay = importlib.util.module_from_spec(_replay_spec)

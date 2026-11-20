@@ -58,9 +58,9 @@ GUARD_HOOKS_DIRECTORY = CLONE_ROOT / ".claude" / "guard-hooks"
 HOOK_NAME = HOOK_PATH.stem
 
 LOG_STORE_KIND = "guarded-file-versions-and-approvals"
-NED_BOX_STORE = Path("/home/nedlern/nedschorus-logs") / LOG_STORE_KIND / "ned-box"
+NED_BOX_STORE = Path("/home/nedlern/nedsnodes-logs") / LOG_STORE_KIND / "ned-box"
 MAC_MOUNT_POINT = Path("/Volumes/nedhome")
-MAC_STORE = MAC_MOUNT_POINT / "nedschorus-logs" / LOG_STORE_KIND / "mac"
+MAC_STORE = MAC_MOUNT_POINT / "nedsnodes-logs" / LOG_STORE_KIND / "mac"
 LOG_STORE_HOSTNAME = "ned-box"
 MAC_MOUNT_FILESYSTEM_TYPE = "smbfs"
 
@@ -131,7 +131,8 @@ EXIT_DONE = 0
 EXIT_REFUSED = 1
 EXIT_BAD_INVOCATION = 64
 
-ASK_HEADER = (
+ASK_HEADER_LINE = (
+    "[rule guarded-file-changed-without-approval-ask-user-afterward] "
     "A guarded file changed, and the user has not approved the new version. The change stays in "
     "place while you ask him; this hook has kept a copy of the version.")
 ASK_FILE = "{path}, version {key}.{reason} Its change against the newest approved version:\n{diff}"
@@ -161,7 +162,8 @@ ASK_INSTRUCTIONS = (
     "If he declines, run: python3 {program} --restore {pairs}\n"
     "If he declines a version that is in a commit, also run, for each such file: "
     "git commit --only -m \"Put back the approved <file name>\" -- <path>")
-REMINDER = (
+UNAPPROVED_VERSION_REMINDER_MESSAGE = (
+    "[rule guarded-file-changed-without-approval-ask-user-afterward] "
     "Reminder: {path} still holds version {key}, which the user has not approved.\n"
     "If you are a subagent, and you wrote an obvious-fix marker and then made the change with a "
     "command other than Edit or Write, run once: python3 {program} --approve {path} {key}, then "
@@ -181,6 +183,7 @@ STORE_FAILED = (
     "Tell the user what failed, with this remedy: {remedy}\n"
     "Once the store can be reached, the next tool call checks the files again.")
 FIRST_RUN_VERSION_LOST = (
+    "[rule guarded-file-changed-without-approval-ask-user-afterward] "
     "The guarded-file backup could not approve version {blob} of {path}, the version this "
     "checkout held when the backup first ran here: git no longer holds it, most likely pruned "
     "after a reset or a rebase. {path} has no other approved version, so python3 {program} "
@@ -267,7 +270,7 @@ def guard():
 
 def snapshots():
     return loaded("uncommitted_work_snapshots",
-                  CLONE_ROOT / "nc-systems" / "handoff" / "uncommitted-work-snapshots.py")
+                  CLONE_ROOT / "nn-systems" / "handoff" / "uncommitted-work-snapshots.py")
 
 
 # ---------------------------------------------------------------- hashes and checked lines
@@ -1480,10 +1483,10 @@ def messages(asks, reminders):
         pairs = " ".join(f"{path} {key}" for path, key, _, _ in asks)
         files = "\n\n".join(ASK_FILE.format(path=path, key=key, reason=reason, diff=diff)
                             for path, key, diff, reason in asks)
-        out.append("\n\n".join([ASK_HEADER, files, ASK_INSTRUCTIONS.format(
+        out.append("\n\n".join([ASK_HEADER_LINE, files, ASK_INSTRUCTIONS.format(
             marker=APPROVAL_MARKER_NAME, program=program, pairs=pairs)]))
     for path, key in reminders:
-        out.append(REMINDER.format(path=path, key=key, marker=APPROVAL_MARKER_NAME,
+        out.append(UNAPPROVED_VERSION_REMINDER_MESSAGE.format(path=path, key=key, marker=APPROVAL_MARKER_NAME,
                                    program=HOOK_PATH))
     return out
 

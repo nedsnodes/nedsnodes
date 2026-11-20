@@ -34,7 +34,7 @@ with _crash_notice.guard_hook_crash_fail_open_with_notice_context_manager(
         __file__, __name__ == "__main__"):
     _shell_reader_spec = importlib.util.spec_from_file_location(
         "shell_command_tree_sitter_bash_reader_common",
-        Path(__file__).resolve().parents[2] / "nc-systems" / "general-tools"
+        Path(__file__).resolve().parents[2] / "nn-systems" / "general-tools"
         / "shell-command-tree-sitter-bash-reader-common.py")
     shell_reader = importlib.util.module_from_spec(_shell_reader_spec)
     _shell_reader_spec.loader.exec_module(shell_reader)
@@ -72,8 +72,8 @@ USAGE_LINE = (
     "[--deadline-minutes <minutes>] [--run-log <file>] "
     "[--prefetch-github '<gh arguments>']... [--resume <session-id>]")
 
-REFUSAL = (
-    "Refused: a hand-typed `codex exec`. Typed into a shell, `codex exec` keeps "
+CODEX_EXEC_REFUSAL = (
+    "[rule bash-guard-codex-exec-typed-by-hand] Refused: a hand-typed `codex exec`. Typed into a shell, `codex exec` keeps "
     "stdin open and, started in the background, waits for input forever with "
     "nothing to stop it.\n"
     "Write the prompt to a file and run the task with:\n"
@@ -189,7 +189,7 @@ def command_runs_codex_exec(command: str) -> bool:
 
 
 def refusal_for_command(command: str):
-    return REFUSAL if command_runs_codex_exec(command) else None
+    return CODEX_EXEC_REFUSAL if command_runs_codex_exec(command) else None
 
 
 def deny(reason):

@@ -8,18 +8,19 @@ Usage:
 
 The seams are flags the tests use; cron passes none, so each takes its default:
   --clone                       the clone this program is in
-  --state-file                  ~/.local/state/nedschorus/no-sandbox-test-suites-run-on-main-in-a-quiet-gap.json
-  --log-store-root              /home/nedlern/nedschorus-logs
+  --state-file                  ~/.local/state/nedsnodes/no-sandbox-test-suites-run-on-main-in-a-quiet-gap.json
+  --log-store-root              /home/nedlern/nedsnodes-logs
   --temporary-directory         Python's tempfile.gettempdir(), /tmp on ned-box
   --runner-lock-file            ~/.claude/.run-all-test-suites.lock, the runner's own default
   --test-suite-runner-program   scripts/run-all-test-suites.py in the worktree of step 6
 
 The design is GHI "Test suites that run without a sandbox leave per-change test
-runs and run apart, when their own files change or in a quiet gap",
-https://github.com/nedschorus/nedschorus/issues/2381, parts 2 and 4. A selective
-run of scripts/run-all-test-suites.py leaves out every suite listed in its
-SUITES_RUN_WITHOUT_ANY_SANDBOX, so this program is what runs them after a change
-reaches main. It runs on ned-box under cron every 10 minutes.
+runs unless the change edits a file they read, and run on main in a quiet gap",
+https://github.com/nedsnodes/nedsnodes/issues/2381, parts 2 and 4. A selective
+run of scripts/run-all-test-suites.py leaves out each suite listed in its
+SUITES_RUN_WITHOUT_ANY_SANDBOX unless the change edits a file that suite reads,
+so this program is what runs every one of them after a change reaches main. It
+runs on ned-box under cron every 10 minutes.
 
 WHAT ONE RUN DOES, in order:
   1. Takes its own lock, the --state-file path with .lock added, without
@@ -52,7 +53,9 @@ WHAT ONE RUN DOES, in order:
      is passed, and the commit becomes the passing commit; exit 1 is failed,
      with each suite the runner's FAIL lines name and its log copied beside the
      record, and an empty failing_suites list when it prints no FAIL line;
-     anything else is stopped, with the reason.
+     anything else is stopped, with the reason: each NOT RUN line the runner
+     prints, which says why that suite was not run, such as claude's usage
+     limit, or else the first line of the runner's stderr.
 
 THE STATE FILE, a JSON object written whole to a temporary file renamed into
 place, with these keys:
@@ -92,13 +95,13 @@ exits 0.
 EXIT. 0 the run finished, whatever the suites did, or no run was due, or
 another run or a no-sandbox suite held its lock; 2 bad invocation or a refused
 --record-follow-up-request-sent; 4 the run stopped: the fetch, the worktree, the
-runner or a write failed, which the state file records where it can.
+runner or a write failed, or the runner reported a suite NOT RUN, which the state file records where it can.
 
 SCHEDULE. Installed on ned-box alone by
-nc-systems/general-tools/install-scheduled-jobs-on-this-machine.py, from the
+nn-systems/general-tools/install-scheduled-jobs-on-this-machine.py, from the
 table beside it, scheduled-jobs-on-each-machine.json:
 
-    */10 * * * * /usr/bin/python3 /home/nedlern/Projects/nedschorus/scripts/no-sandbox-test-suites-run-on-main-in-a-quiet-gap.py >> /home/nedlern/.claude/no-sandbox-test-suites-run-on-main-in-a-quiet-gap.log 2>&1
+    */10 * * * * /usr/bin/python3 /home/nedlern/Projects/nedsnodes/scripts/no-sandbox-test-suites-run-on-main-in-a-quiet-gap.py >> /home/nedlern/.claude/no-sandbox-test-suites-run-on-main-in-a-quiet-gap.log 2>&1
 
 What it does not handle: it sees only whether a no-sandbox suite holds the lock
 at the moment it looks, not whether another run's suite is between two tries
@@ -126,9 +129,9 @@ from pathlib import Path
 PROGRAM = "no-sandbox-test-suites-run-on-main-in-a-quiet-gap"
 REPOSITORY_ROOT = Path(__file__).resolve().parent.parent
 
-DEFAULT_STATE_FILE = (Path.home() / ".local" / "state" / "nedschorus"
+DEFAULT_STATE_FILE = (Path.home() / ".local" / "state" / "nedsnodes"
                       / f"{PROGRAM}.json")
-DEFAULT_LOG_STORE_ROOT = "/home/nedlern/nedschorus-logs"
+DEFAULT_LOG_STORE_ROOT = "/home/nedlern/nedsnodes-logs"
 NO_SANDBOX_TEST_SUITES_RUNS_KIND_DIRECTORY_NAME = "no-sandbox-test-suites-runs"
 RUNNER_PATH_IN_WORKTREE = Path("scripts") / "run-all-test-suites.py"
 
@@ -159,11 +162,11 @@ def module_loaded_by_path(name, path):
 
 git_redirecting_environment = module_loaded_by_path(
     "git_redirecting_environment_variables_removal_common",
-    REPOSITORY_ROOT / "nc-systems" / "general-tools"
+    REPOSITORY_ROOT / "nn-systems" / "general-tools"
     / "git-redirecting-environment-variables-removal-common.py")
 git_output = module_loaded_by_path(
     "git_machine_readable_output_runner_and_parser_common",
-    REPOSITORY_ROOT / "nc-systems" / "general-tools"
+    REPOSITORY_ROOT / "nn-systems" / "general-tools"
     / "git-machine-readable-output-runner-and-parser-common.py")
 
 
@@ -279,7 +282,7 @@ def remove_worktree(clone, worktree):
         shutil.rmtree(worktree, ignore_errors=True)
     git(clone, "worktree", "prune")
     if worktree.exists():
-        return git_output.git_stderr_error_text_without_progress_lines(removed.stderr)
+        return git_output.git_stderr_first_error_message_else_last_line(removed.stderr)
     return None
 
 
@@ -405,12 +408,12 @@ def run_under_lock(arguments, state_file):
     if fetched.returncode != 0:
         return stopped(state_file, state, None, started,
                        "git fetch origin failed: "
-                       f"{git_output.git_stderr_error_text_without_progress_lines(fetched.stderr)}")
+                       f"{git_output.git_stderr_first_error_message_else_last_line(fetched.stderr)}")
     resolved = git(clone, "rev-parse", "--verify", "refs/remotes/origin/main^{commit}")
     if resolved.returncode != 0:
         return stopped(state_file, state, None, started,
                        "origin/main could not be resolved: "
-                       f"{git_output.git_stderr_error_text_without_progress_lines(resolved.stderr)}")
+                       f"{git_output.git_stderr_first_error_message_else_last_line(resolved.stderr)}")
     commit = resolved.stdout.strip()
     why_due = run_is_due(state, commit, started)
     if why_due is None:
@@ -441,7 +444,7 @@ def run_under_lock(arguments, state_file):
     if added.returncode != 0:
         return stopped(state_file, state, commit, started,
                        f"the worktree of {commit[:12]} could not be made: "
-                       f"{git_output.git_stderr_error_text_without_progress_lines(added.stderr)}",
+                       f"{git_output.git_stderr_first_error_message_else_last_line(added.stderr)}",
                        passing)
     try:
         try:
@@ -476,9 +479,13 @@ def run_under_lock(arguments, state_file):
         result, reason = RESULT_STOPPED, (f"the runner ran past {RUNNER_TIMEOUT_SECONDS:g} s "
                                           f"and was stopped")
     else:
+        # A NOT RUN suite's progress line, which carries no log path, says why it was not run.
+        not_run = [line for line in out.splitlines()
+                   if line.startswith(runner.NOT_RUN_SUITE_LINE_PREFIX)
+                   and runner.SUITE_LINE_LOG_MARK not in line]
         refusal = [line for line in err.splitlines() if line.strip()]
-        result, reason = RESULT_STOPPED, (f"the runner exited {code}: "
-                                          f"{refusal[0] if refusal else 'no detail'}")
+        detail = "; ".join(not_run) or (refusal[0] if refusal else "no detail")
+        result, reason = RESULT_STOPPED, f"the runner exited {code}: {detail}"
     last_run = {"commit": commit, "compared_with": passing, "started": stamp(started),
                 "ended": stamp(utc_now()), "result": result, "reason": reason,
                 "failing_suites": [], "record": None, "follow_up_request_sent": None}
@@ -564,7 +571,7 @@ def pull_requests_merged_between(clone, older, newer):
                  f"{older}..{newer}")
     if listed.returncode != 0:
         return ["the merged pull requests could not be read: "
-                f"{git_output.git_stderr_error_text_without_progress_lines(listed.stderr)}"]
+                f"{git_output.git_stderr_first_error_message_else_last_line(listed.stderr)}"]
     found = []
     for entry in listed.stdout.split("\n"):
         subject = entry.split("\t", 1)[0]
