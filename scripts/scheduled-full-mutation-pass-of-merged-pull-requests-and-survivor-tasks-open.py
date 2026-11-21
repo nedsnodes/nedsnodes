@@ -590,14 +590,18 @@ def task_on_list_open_for_line(list_directory, place):
 
 def task_ids_on_list_open_naming_mutant(list_directory, key):
     """Ids of the tasks on the list, not marked completed, whose description names the
-    mutant's diff file. Raises OSError."""
+    mutant's diff file; a task file gone since the listing is skipped. Raises OSError."""
     if not list_directory.is_dir():
         return []
     ids = []
     for path in sorted(list_directory.iterdir(), key=lambda path: path.name):
         if not TASK_FILE_NAME_PATTERN.fullmatch(path.name):
             continue
-        task = task_file_read(path)
+        try:
+            task = task_file_read(path)
+        except FileNotFoundError:
+            # Deleted since the listing, as by a session-handoff while the recheck runs.
+            continue
         if task_names_mutant(task, key) and task.get("status") != "completed":
             ids.append(int(path.stem))
     return ids
@@ -864,12 +868,16 @@ def survivor_tasks_rechecked(state, state_file, arguments, main_commit, record, 
     reported lost. Return one line per task the check gave no verdicts for. Raises StepFailed
     when a diff file, the record, the state, or a task file other than a gone one cannot be
     read or written."""
-    tasks = {}
-    for key, given in state["tasks_opened"].items():
-        tasks.setdefault((given["agent_seat"], given["task_id"]), []).append(key)
+    tasks = list(dict.fromkeys((given["agent_seat"], given["task_id"])
+                               for given in state["tasks_opened"].values()))
     limit = arguments.survivor_task_recorded_mutant_killed_check_timeout_seconds
     not_rechecked = []
-    for (agent_seat, task_id), keys in tasks.items():
+    for agent_seat, task_id in tasks:
+        # Read at the task's turn: a gone task rechecked earlier may have moved a mutant here.
+        keys = [key for key, given in state["tasks_opened"].items()
+                if (given["agent_seat"], given["task_id"]) == (agent_seat, task_id)]
+        if not keys:
+            continue
         named = f"task #{task_id} on {agent_seat}'s task list"
         task_file = (arguments.task_lists_directory / f"nedsnodes-{agent_seat}-tasks"
                      / f"{task_id}.json")

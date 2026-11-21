@@ -2215,6 +2215,74 @@ def run_cases():
                   and "TASK LOST" not in fixture.records()[-1].read_text(),
                   (completed.returncode, completed.stderr))
 
+    # A gone task's surviving mutant moved to a task rechecked later in the same run, as a task
+    # fold leaves it: that task keeps the mutant, though its own mutant is killed.
+    with tempfile.TemporaryDirectory() as scratch:
+        fixture = Fixture(scratch)
+        alpha_list = fixture.seat("alpha")
+        fixture.set_last(git(fixture.work, "rev-parse", "HEAD"))
+        merge = fixture.commit("scripts/thing.py", "def double(x):\n    return x + x\nVALUE = 1\n",
+                               author="alpha")
+        mutants = [survivor(), survivor(2, "core/ReplaceBinaryOperator_Add_Sub"),
+                   survivor(3, "core/ReplaceBinaryOperator_Add_Div")]
+        keys = [job.mutant_key(mutant) for mutant in mutants]
+        fixture.run({merge: {"json": verdict(survived=mutants)}})
+        state = fixture.state_json()["tasks_opened"]
+        second = json.loads((alpha_list / "2.json").read_text())
+        second["description"] += f"\n{job.mutant_diff_file_path(fixture.log_store, keys[1])}"
+        (alpha_list / "2.json").write_text(json.dumps(second))
+        completed = fixture.run({"recheck": {
+            "verdicts": {keys[0]: "killed", keys[2]: "killed"},
+            "files_deleted_during_recheck": [str(alpha_list / "1.json")]}})
+        record = fixture.records()[-1].read_text()
+        second = json.loads((alpha_list / "2.json").read_text())
+        check("a surviving mutant moved from a gone task to a task rechecked later in the run "
+              "is rechecked with that task, which stays open listing it, and the state points "
+              "it there",
+              [state[key]["task_id"] for key in keys] == [1, 1, 2]
+              and "TASK MOVED: the surviving mutant" in record
+              and "TASK LOST" not in record
+              and "RECHECKED task #2 on alpha's task list: 1 killed, 0 no longer exists, "
+                  "1 survived" in record
+              and second["status"] != "completed"
+              and f"{keys[1]}.diff" in second["description"]
+              and fixture.state_json()["tasks_opened"]
+              == {keys[1]: {"agent_seat": "alpha", "task_id": 2}},
+              (completed.returncode, record, second, fixture.state_json()))
+        completed = fixture.run({"recheck": {}})
+        check("the moved mutant is still held on the next run, and nothing is reported lost",
+              "TASK LOST" not in fixture.records()[-1].read_text()
+              and keys[1] in fixture.state_json()["tasks_opened"],
+              (completed.returncode, completed.stderr, fixture.state_json()))
+
+    # Two survivor task files deleted during the first recheck call: the second task's own
+    # turn handles its killed mutant, and only the first task's surviving one is reported lost.
+    with tempfile.TemporaryDirectory() as scratch:
+        fixture = Fixture(scratch)
+        alpha_list = fixture.seat("alpha")
+        fixture.set_last(git(fixture.work, "rev-parse", "HEAD"))
+        merge = fixture.commit("scripts/thing.py", "def double(x):\n    return x + x\nVALUE = 1\n",
+                               author="alpha")
+        mutants = [survivor(), survivor(2, "core/ReplaceBinaryOperator_Add_Sub"),
+                   survivor(3, "core/ReplaceBinaryOperator_Add_Div")]
+        keys = [job.mutant_key(mutant) for mutant in mutants]
+        fixture.run({merge: {"json": verdict(survived=mutants)}})
+        completed = fixture.run({"recheck": {
+            "verdicts": {keys[0]: "killed", keys[2]: "killed"},
+            "files_deleted_during_recheck": [str(alpha_list / "1.json"),
+                                             str(alpha_list / "2.json")]}})
+        record = fixture.records()[-1].read_text()
+        check("with two task files deleted during the first recheck call, only the first "
+              "task's surviving mutant is reported lost, the second task's killed mutant leaves "
+              "the state at its own turn, and the run exits 7",
+              completed.returncode == job.EXIT_OPENED_TASK_NO_LONGER_HOLDS_ITS_SURVIVOR
+              and record.count("TASK LOST: ") == 1
+              and f"{keys[1]}" in record.split("TASK LOST: ")[1].splitlines()[0]
+              and "FAILED" not in record
+              and "RECHECKED task #2 on alpha's task list: 1 killed" in record
+              and fixture.state_json()["tasks_opened"] == {},
+              (completed.returncode, record, completed.stderr, fixture.state_json()))
+
     # During the recheck, a diff file goes instead of the task file, or the task file goes and
     # the record cannot be written.
     for gone in ("diff file", "task file with the record unwritable"):
