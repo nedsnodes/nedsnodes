@@ -175,7 +175,8 @@ judge, because its worker raised, its suites could not be launched, a suite
 ran past its own time limit, which the runner's TIMEOUT line names, the
 suites ran past the limit on one run of them, or the runner exited nonzero without a
 suite failing by its own exit (it printed nothing, was not run to the end,
-could not write its records, or a suite's nc-test-sandbox did not start), is
+could not write its records, or a suite was NOT RUN, as scripts/run-all-test-suites.py's
+HOW EACH SUITE IS JUDGED says), is
 printed as ERRORED and counts against the run like a survivor. cosmic-ray
 itself reports every nonzero exit of the runner as a kill; this script does
 not. A mutant one of whose suites had a process killed at the suite's memory
@@ -328,7 +329,8 @@ REPOSITORY_WIDE_CHECKS = (
     "scripts/every-repository-program-help-option-test.py",
     "scripts/git-redirecting-environment-variables-defined-once-test.py",
     "scripts/git-redirecting-environment-variables-removed-by-every-caller-test.py",
-    "scripts/python-files-carry-no-try-except-pass-ruff-s110-test.py",
+    "scripts/python-files-pass-selected-ruff-rules-test.py",
+    "scripts/registered-hook-except-around-payload-read-or-whole-hook-never-exits-0-silently-test.py",
     "scripts/registered-hook-messages-carry-no-citations-test.py",
     "scripts/supervisor-file-names-defined-once-test.py",
     "scripts/test-suites-run-directly-ignore-git-redirecting-environment-test.py",

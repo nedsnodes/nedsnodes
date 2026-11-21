@@ -10,7 +10,7 @@ its GHI-MD and nothing else: one copy of every fact, GitHub
 holding the state and the file holding the content. Nothing could build that
 rule by hand, because a body of links needs its files on main first and main
 takes no direct push. This is the program that does it. Designed in
-docs/issues/46-ghi-guide-agent-design.md § The GHI write path; that design is
+docs/issues/46-ghi-guide-agent.system.design.md § The GHI write path; that design is
 the authority and this docstring does not restate it.
 
 WHAT IS AND IS NOT IN THIS SLICE. `create`, `edit` and `close`. There is no comment
@@ -430,10 +430,10 @@ DEFAULT_REPO = "nedsnodes/nedsnodes"
 GHI_MD_DIRECTORY = "docs/issues"
 SYSTEM_DIRECTORY = "nn-systems"
 # Where a design moves once its code lands: the `docs/` directory of the
-# directory its code is in, under a name ending `-design.md` that carries no
+# directory its code is in, under a name ending `.design.md` that carries no
 # issue number. See `landed_design_relative_path`.
 LANDED_DESIGN_DIRECTORY_NAME = "docs"
-LANDED_DESIGN_NAME_ENDING = "-design.md"
+LANDED_DESIGN_NAME_ENDING = ".design.md"
 PAIRING_KEY_PREFIX = "ghipair"
 RECONSIDERED_MARKER_NAME = ".ghi-issue-write-reconsidered"
 # What gh's stderr carries when the number names no issue, lowercased for
@@ -934,10 +934,10 @@ def issue_number_in_frontmatter(text):
 def landed_design_relative_path(relative: str) -> bool:
     """Whether this repository path is where a design sits once its code
     has landed: the `docs/` directory of a system's or a subsystem's
-    directory under nn-systems/, under a name ending `-design.md` that does
+    directory under nn-systems/, under a name ending `.design.md` that does
     not begin with an issue number — `nn-systems/handoff/docs/
-    handoff-recover-crashed-seats-design.md`, or
-    `nn-systems/skills/cold-read/docs/cold-read-design.md` for a
+    handoff-recover-crashed-seats.system.design.md`, or
+    `nn-systems/skills/cold-read/docs/cold-read.system.design.md` for a
     subsystem.
 
     That is the file-naming page's rule for a landed design,
@@ -1845,6 +1845,27 @@ def create_pull_request_for_branch(repo: str, branch: str, number: int,
     report((created.stdout or "").strip())
 
 
+# A design keeps its `.<kind>.design` ending in every name it takes, as the
+# naming page's section on designs says, so the guard and the fast read,
+# which match `.design.md`, still know it once it is filed.
+DESIGN_KIND_ENDING = re.compile(r"(\.[a-z]+\.design)\.md$")
+
+
+def _landed_name_without_number(title: str, source_name: str) -> str:
+    """The landed file's stem after `<number>-`: the name a ruling question
+    raised before the issue has a number is saved under, so the lookup by the
+    landed name finds it."""
+    kind_ending = DESIGN_KIND_ENDING.search(source_name)
+    return f"{slug(title)}{kind_ending.group(1) if kind_ending else ''}"
+
+
+def create_ghi_landing_path_for_ghi_md(number, title: str, source_name: str) -> str:
+    """Where create lands a GHI-MD: `docs/issues/<number>-<slug>.md`, or, for
+    a source named `<name>.<kind>.design.md`, `<number>-<slug>.<kind>.design.md`."""
+    return (f"{GHI_MD_DIRECTORY}/{number}-"
+            f"{_landed_name_without_number(title, source_name)}.md")
+
+
 def land_file(repo: str, number: int, title: str, source: Path,
               repository_root: Path, runner, report):
     """Step 4, in a throwaway worktree cut from a just-fetched origin/main,
@@ -1855,7 +1876,7 @@ def land_file(repo: str, number: int, title: str, source: Path,
     what this run would land before any branch is looked at: see the module
     docstring, WHAT A RERUN TESTS."""
     branch = f"ghi-{number}-{slug(title)}"
-    destination = f"{GHI_MD_DIRECTORY}/{number}-{slug(title)}.md"
+    destination = create_ghi_landing_path_for_ghi_md(number, title, source.name)
     source_text = source.read_text(encoding="utf-8")
     staged = with_issue_frontmatter(source_text, repo, number, title)
 
@@ -2113,11 +2134,12 @@ def create(path: Path, repo: str, repository_root: Path, runner, report):
         refuse_if_already_landed_on_main(repo, text, title, repository_root,
                                          runner)
         refuse_heading_with_date(title)
-        if earlier_ruling_question(slug(title), text, runner, report) is None:
+        question_name = _landed_name_without_number(title, path.name)
+        if earlier_ruling_question(question_name, text, runner, report) is None:
             conflict = adjudicate(repo, title, text, repository_root, runner,
                                   report)
             if conflict is not None:
-                record_ruling_question(slug(title), repo, conflict, title,
+                record_ruling_question(question_name, repo, conflict, title,
                                        key, runner, report, "filed")
         number = file_issue(repo, title, key, runner, report)
 
@@ -2249,7 +2271,7 @@ def validate_edit(path: Path, repository_root: Path):
                 f"lives directly in {GHI_MD_DIRECTORY}/ before its system's "
                 f"code starts and directly in {SYSTEM_DIRECTORY}/<system>/ "
                 "after, and in neither a queue nor an archive below them "
-                "(docs/issues/46-ghi-guide-agent-design.md § Where the tool "
+                "(docs/issues/46-ghi-guide-agent.system.design.md § Where the tool "
                 "may write). A design whose code has landed lives in the "
                 f"{LANDED_DESIGN_DIRECTORY_NAME}/ directory of its code's "
                 "directory, under a name with no number.\n"
@@ -3287,8 +3309,8 @@ def main_with_stop_signals_raising_system_exit(argv):
             refuse_heading_with_date(title)
             report(f"would file: {title}")
             report(f"pairing key: {pairing_key(text)}")
-            report(f"would land at: {GHI_MD_DIRECTORY}/<number>-"
-                   f"{slug(title)}.md")
+            report("would land at: "
+                   + create_ghi_landing_path_for_ghi_md("<number>", title, path.name))
             return 0
         if not path.is_file():
             # Asked before the checkout is looked for, because step 4 moves
