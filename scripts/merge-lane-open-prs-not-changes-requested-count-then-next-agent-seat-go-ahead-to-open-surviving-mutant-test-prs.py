@@ -1,14 +1,17 @@
 #!/usr/bin/env python3
-"""Release the next agent-seat holding mutant-test tasks when merge-lane-2's review queue is quiet. Exits 0 if it released an agent-seat, 1 if none was due, 2 if it could not tell or the message was not sent.
+"""Release the next agent-seat holding mutant-test tasks when merge-lane-2's queue is quiet. Exits 0 if it released an agent-seat, 1 if none was due, 2 if it could not tell or the message was not sent.
 
 Usage:
-  scripts/merge-lane-unreviewed-prs-count-then-next-agent-seat-go-ahead-to-open-surviving-mutant-test-prs.py
+  scripts/merge-lane-open-prs-not-changes-requested-count-then-next-agent-seat-go-ahead-to-open-surviving-mutant-test-prs.py
       [--state-directory DIR]
 
-The program counts the open pull requests, not drafts, that have no review
-from merge-lane-2 on their newest commit: no GitHub review by the account
-ned-review-merge, in any state, whose commit is the pull request's head
-commit. When that count is 10 or fewer and the agent-seats file names an
+The program counts the open pull requests that are not drafts, the
+mutant-test ones included, leaving out only those a merge-lane-2 review on
+their newest commit asks to change: those whose newest GitHub review by the
+account ned-review-merge on the pull request's head commit, among the reviews
+in the state APPROVED or CHANGES_REQUESTED, is CHANGES_REQUESTED. A review
+in another state, such as COMMENTED, neither leaves a pull request out nor
+brings it back. When that count is 10 or fewer and the agent-seats file names an
 agent-seat not yet recorded as released, the program sends the first such
 agent-seat, in the file's order, the release message with the idle sweep's own
 send code and prompt, unchanged, from
@@ -16,11 +19,12 @@ scripts/agent-seat-idle-sweep-headless-judge-wake-messages-send-and-user-alerts-
 It records the agent-seat as released only when the idle sweep's check of that
 send passes, and then prints `RELEASED <agent-seat>`; when the send or that
 check fails, it prints what failed and records nothing, so the next run, at
-the next merge or by hand, tries again. Otherwise it prints the count.
+the next merge or by hand, tries again. Otherwise it prints the count. The
+release message says what was counted.
 
 A mutant-test pull request only adds tests for surviving mutants. Such pull
-requests stay unopened until the agent-seat holding them is told that the
-review queue is quiet; the message says the agent-seat may then open them one
+requests stay unopened until the agent-seat holding them is told that
+merge-lane-2's queue is quiet; the message says the agent-seat may then open them one
 per source file, with at most 5 open at a time.
 
 --state-directory, by default
@@ -55,7 +59,7 @@ _sweep_spec.loader.exec_module(idle_sweep)
 
 REPOSITORY_OWNER, REPOSITORY_NAME = "nedsnodes", "nedsnodes"
 MERGE_LANE_ACCOUNT = "ned-review-merge"
-QUIET_REVIEW_QUEUE_MOST_UNREVIEWED_PULL_REQUESTS = 10
+QUIET_QUEUE_MOST_OPEN_PULL_REQUESTS_NOT_SENT_BACK = 10
 MUTANT_TEST_PULL_REQUESTS_OPEN_AT_ONCE_AT_MOST = 5
 DEFAULT_STATE_DIRECTORY = Path(
     "/home/nedlern/nedsnodes-logs/seats/merge-lane-2/surviving-mutant-test-prs-go-ahead")
@@ -69,7 +73,7 @@ EXIT_RELEASED = 0
 EXIT_NONE_DUE = 1
 EXIT_COULD_NOT_TELL = 2
 
-# reviews(last: 100): a pull request's reviews on its head commit are its newest.
+# reviews(last: 100), oldest first: a pull request's reviews on its head commit are its newest.
 OPEN_PULL_REQUESTS_QUERY = """
 query($owner: String!, $name: String!, $endCursor: String) {
   repository(owner: $owner, name: $name) {
@@ -77,7 +81,7 @@ query($owner: String!, $name: String!, $endCursor: String) {
       pageInfo { hasNextPage endCursor }
       nodes {
         number isDraft headRefOid
-        reviews(author: "%s", last: 100) { nodes { commit { oid } } }
+        reviews(author: "%s", last: 100) { nodes { state commit { oid } } }
       }
     }
   }
@@ -103,7 +107,14 @@ def parse_arguments(argv):
     return parser.parse_args(argv)
 
 
-def unreviewed_open_pull_requests_count():
+def sent_back_on_head_commit(pull_request):
+    verdicts = [review["state"] for review in pull_request["reviews"]["nodes"]
+                if (review["commit"] or {}).get("oid") == pull_request["headRefOid"]
+                and review["state"] in ("APPROVED", "CHANGES_REQUESTED")]
+    return bool(verdicts) and verdicts[-1] == "CHANGES_REQUESTED"
+
+
+def open_pull_requests_not_sent_back_count():
     gh = subprocess.run(
         ["gh", "api", "graphql", "--paginate", "--slurp",
          "-F", f"owner={REPOSITORY_OWNER}", "-F", f"name={REPOSITORY_NAME}",
@@ -122,9 +133,8 @@ def unreviewed_open_pull_requests_count():
     try:
         pull_requests = [node for page in json.loads(gh.stdout)
                          for node in page["data"]["repository"]["pullRequests"]["nodes"]]
-        return sum(1 for node in pull_requests if not node["isDraft"] and not any(
-            (review["commit"] or {}).get("oid") == node["headRefOid"]
-            for review in node["reviews"]["nodes"]))
+        return sum(1 for node in pull_requests
+                   if not node["isDraft"] and not sent_back_on_head_commit(node))
     except (ValueError, KeyError, TypeError) as error:
         raise CouldNotTell(f"gh api graphql exited 0 but printed output not in the shape this "
                            f"program reads ({type(error).__name__}: {error}); its first 300 "
@@ -227,33 +237,41 @@ def release_message_send_problems(state_directory, agent_seat, text):
     return idle_sweep.send_problems(outcome, [agent_seat])
 
 
+def counted_sentence(count):
+    return (f"{count} open pull requests that are not drafts wait for merge-lane-2 to review or "
+            f"merge them. The count includes pull requests that only add tests for surviving "
+            f"mutants, and leaves out only those whose newest commit a review by "
+            f"{MERGE_LANE_ACCOUNT} asks to change")
+
+
 def release_message(count):
-    return (f"merge-lane-2's review queue is quiet: {count} open pull requests, not drafts, "
-            f"wait for a review from merge-lane-2. You may now open your pull requests that only "
-            f"add tests for surviving mutants: one per source file, with at most "
-            f"{MUTANT_TEST_PULL_REQUESTS_OPEN_AT_ONCE_AT_MOST} open at a time.")
+    return (f"merge-lane-2's queue is quiet: {counted_sentence(count)}. You may now open your "
+            f"pull requests that only add tests for surviving mutants: one per source file, with "
+            f"at most {MUTANT_TEST_PULL_REQUESTS_OPEN_AT_ONCE_AT_MOST} open at a time.")
 
 
 def release_named_and_sent(state_directory):
-    count = unreviewed_open_pull_requests_count()
-    counted = (f"{count} open pull requests, not drafts, have no review from {MERGE_LANE_ACCOUNT} "
-               f"on their head commit")
-    if count > QUIET_REVIEW_QUEUE_MOST_UNREVIEWED_PULL_REQUESTS:
-        print(f"{counted}; the review queue is quiet at "
-              f"{QUIET_REVIEW_QUEUE_MOST_UNREVIEWED_PULL_REQUESTS} or fewer, so no agent-seat "
-              f"holding mutant-test tasks is released.")
+    count = open_pull_requests_not_sent_back_count()
+    counted = counted_sentence(count)
+    if count > QUIET_QUEUE_MOST_OPEN_PULL_REQUESTS_NOT_SENT_BACK:
+        print(f"{counted}. The count is over "
+              f"{QUIET_QUEUE_MOST_OPEN_PULL_REQUESTS_NOT_SENT_BACK}, the most at which "
+              f"merge-lane-2's queue is quiet, so no agent-seat holding mutant-test tasks is "
+              f"released.")
         return EXIT_NONE_DUE
     released = released_agent_seats(state_directory)
     waiting = [seat for seat in agent_seats_in_release_order(state_directory)
                if seat not in released]
     if not waiting:
-        print(f"{counted}, but every agent-seat in {state_directory / AGENT_SEATS_FILE_NAME} is "
-              f"already recorded as released in {state_directory / RELEASED_FILE_NAME}.")
+        print(f"{counted}. merge-lane-2's queue is quiet, but every agent-seat in "
+              f"{state_directory / AGENT_SEATS_FILE_NAME} is already recorded as released in "
+              f"{state_directory / RELEASED_FILE_NAME}.")
         return EXIT_NONE_DUE
     seat = waiting[0]
     problems = release_message_send_problems(state_directory, seat, release_message(count))
     if problems:
-        print(f"{counted}, so {seat} is due for release, but the release message was not sent: "
+        print(f"{counted}. merge-lane-2's queue is quiet, so {seat} is due for release, but the "
+              f"release message was not sent: "
               f"{'; '.join(problems)}.\n"
               f"Nothing was recorded, so the next merge tries again. To try now, run: "
               f"{PROGRAM_COMMAND}\n"
@@ -264,7 +282,7 @@ def release_named_and_sent(state_directory):
         return EXIT_COULD_NOT_TELL
     release_recorded(state_directory, seat)
     print(f"{RELEASED_LINE_PREFIX}{seat}\n"
-          f"{counted}. {seat} was sent this message, and is recorded as released in "
+          f"{counted}. {seat} was sent the message below, and is recorded as released in "
           f"{state_directory / RELEASED_FILE_NAME}:\n"
           f"{release_message(count)}")
     return EXIT_RELEASED

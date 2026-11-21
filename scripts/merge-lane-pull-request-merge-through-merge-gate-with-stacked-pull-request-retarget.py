@@ -80,10 +80,10 @@ from the same worktree at the same time may fail when the checkout moves
 files under it; such a review is run again.
 
 Last, once the pull request has merged, the program runs
-merge-lane-unreviewed-prs-count-then-next-agent-seat-go-ahead-to-open-surviving-mutant-test-prs.py,
+merge-lane-open-prs-not-changes-requested-count-then-next-agent-seat-go-ahead-to-open-surviving-mutant-test-prs.py,
 beside it, with the merge account's GH_TOKEN, and prints what it printed:
 `RELEASED <agent-seat>` when it sent that agent-seat the release message, what
-failed when it could not, or the count of pull requests waiting for a review. When it exits 2 or another code it does
+failed when it could not, or the count of pull requests waiting for merge-lane-2. When it exits 2 or another code it does
 not document, the program prints that too; the exit code below never depends
 on it.
 
@@ -156,7 +156,7 @@ EXIT_MERGE_OUTCOME_UNKNOWN = 4
 MERGE_GATE_DOCUMENTED_EXITS = (0, 1, 2)
 MERGE_GATE = Path("scripts") / "merge-gate.sh"
 SURVIVING_MUTANT_TEST_PRS_GO_AHEAD_PROGRAM = Path(__file__).resolve().with_name(
-    "merge-lane-unreviewed-prs-count-then-next-agent-seat-go-ahead-to-open-surviving-mutant-test-prs.py")
+    "merge-lane-open-prs-not-changes-requested-count-then-next-agent-seat-go-ahead-to-open-surviving-mutant-test-prs.py")
 # 0 named an agent-seat to release, 1 named none.
 SURVIVING_MUTANT_TEST_PRS_GO_AHEAD_ANSWERS = (0, 1)
 
