@@ -212,7 +212,13 @@ def cases(root):
             ("approved-not-merged", pull_request(11, reviews=[("APPROVED", "head")]), True),
             ("changes-requested", pull_request(11, reviews=[("CHANGES_REQUESTED", "head")]),
              False),
-            ("draft", pull_request(11, draft=True), False)):
+            ("draft", pull_request(11, draft=True), False),
+            ("sent-back-then-approved",
+             pull_request(11, reviews=[("CHANGES_REQUESTED", "head"), ("APPROVED", "head")]),
+             True),
+            ("approved-then-sent-back",
+             pull_request(11, reviews=[("APPROVED", "head"), ("CHANGES_REQUESTED", "head")]),
+             False)):
         case = Case(root, name)
         case.gh_answer(pages(ten_counted + [eleventh]))
         case.sender_answers(("sent", "reboot-test"))
