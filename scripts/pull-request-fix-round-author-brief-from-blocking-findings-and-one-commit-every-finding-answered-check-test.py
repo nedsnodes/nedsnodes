@@ -852,8 +852,26 @@ def stopped_round_cases(root, repository, made, frozen_head, dated_routes, submi
           and f"New head {fix}" in check_out, check_out + check_err)
 
     git(made, "reset", "-q", "--hard", frozen_head)
+    write_answers(GOOD_ANSWERS, 60)
+    code, out, err = run(root, repository, dated_routes)
+    check("stopped round: no fix-round commit and every answer written refuses the brief, exit 1, saying to finish "
+          "the round with --check, and leaves the answers file as it was",
+          code == 1 and out == ""
+          and f"is at the frozen-head {frozen_head[:12]} with no fix-round commit, and its answers file {answers} "
+          "answers every finding of this round, so a fix-round subagent that found nothing to fix stopped after "
+          "step 5.\nIf that subagent is still working there, wait for it to finish.\n" + finish in err
+          and answers.read_text() == GOOD_ANSWERS, err + out)
+    code, check_out, check_err = run(root, made, dated_routes, "--check")
+    check("stopped round: with no fix-round commit, the --check command that refusal names prints the message for "
+          "merge-lane-2",
+          code == 0 and "Send merge-lane-2 this message with SendMessage" in check_out, check_out + check_err)
+    write_answers(GOOD_ANSWERS, -60)
+    code, out, err = run(root, repository, dated_routes)
+    check("stopped round: with no fix-round commit, an answers file written before the review is replaced by the brief",
+          code == 0 and answers.read_text() == "1. \n2. \n", err + out)
     answers.unlink()
     answers.mkdir()
+    os.utime(answers, (submitted_seconds - 60, submitted_seconds - 60))
     code, out, err = run(root, repository, dated_routes)
     check("stopped round: an answers file the brief cannot write fails the brief with exit 2, naming it, with no brief",
           code == 2 and out == "" and f"could not write the answers file {answers}" in err, err + out)

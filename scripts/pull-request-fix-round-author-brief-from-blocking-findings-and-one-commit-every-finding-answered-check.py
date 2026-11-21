@@ -793,7 +793,7 @@ def answers_file_with_one_line_per_finding_write(path, finding_count):
 
 def topic_worktree_at_frozen_head(number, branch, frozen_head, finding_count, review_submitted_at):
     """The pull request's topic-worktree, made when this clone has none; refuse unless it is clean at frozen_head,
-    and say how to finish the round when a stopped fix-round subagent left its commit and every answer."""
+    and say how to finish the round when a stopped fix-round subagent left every answer, with its commit or none."""
     worktree = topic_worktree_of_branch(branch) or topic_worktree_made_by_creator(branch)
     in_worktree = ["-C", str(worktree)]
     # Ignored files are left out: they never reach a commit. So is the answers file this program writes, which a
@@ -814,9 +814,18 @@ def topic_worktree_at_frozen_head(number, branch, frozen_head, finding_count, re
                       f"git -C {quoted} clean -d --force, which leaves the ignored answers file in place.\n"
                       "Then run this again.")
     head = git([*in_worktree, "rev-parse", "HEAD"]).strip()
+    answers = worktree / answers_name
     if head == frozen_head:
+        if answers_file_answers_every_finding_of_round(answers, finding_count, review_submitted_at):
+            raise Refused(f"Pull request {number}'s topic-worktree {worktree} is at the frozen-head "
+                          f"{frozen_head[:12]} with no fix-round commit, and its answers file {answers} answers "
+                          "every finding of this round, so a fix-round subagent that found nothing to fix stopped "
+                          "after step 5.\n"
+                          "If that subagent is still working there, wait for it to finish.\n"
+                          f"Otherwise finish the round: run cd {quoted} && python3 {PROGRAM} {number} --check, and do "
+                          "what it says.\n"
+                          f"If you mean to start the round again instead, delete {answers} and run this again.")
         return worktree
-    answers = worktree / ANSWERS_FILE_NAME_FORMAT.format(number=number)
     if (git([*in_worktree, "rev-list", "--parents", "-n", "1", head]).split()[1:] == [frozen_head]
             and answers_file_answers_every_finding_of_round(answers, finding_count, review_submitted_at)):
         raise Refused(f"Pull request {number}'s topic-worktree {worktree} holds the unpushed commit {head[:12]} on "
