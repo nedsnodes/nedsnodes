@@ -20,6 +20,7 @@ A change is the difference an agent's work makes, from before it starts to after
 ## Exceptions: changes that need no approval, even when they fall under the list above
 
 - A user-approved-change.
+- Coining a system-term and adding its entry to the glossary of its system, creating that glossary in the system's directory when the directory has none, as Step 5 of `docs/nedsnodes-wiki/nedsnodes-how-to-choose-a-name-for-files-code-and-glossary-terms.md` says. Making a new system, by moving files that belong together into a new system directory, still needs the user's approval.
 - Deleting a guarded-file, as the project glossary defines it, even one the user has not retired and whose change the list above covers, such as `CLAUDE.md`, a skill or a hook; the guarded-file hook, `.claude/guard-hooks/guarded-file-unapproved-change-afterward-backup-and-ask-hook.py`, does not ask about a deletion either. A rename or a move is not a deletion: it is judged as the paragraph that begins "A change is the difference an agent's work makes" says. Emptying a file is a change to its text, not a deletion.
 - Removing whole sentences, list items, table rows or paragraphs of prose from any file other than `CLAUDE.md`, when nothing is added or reworded and no removed sentence states a user-ruling.
 - An obvious-error-fix, which the project glossary defines; it covers prose only.

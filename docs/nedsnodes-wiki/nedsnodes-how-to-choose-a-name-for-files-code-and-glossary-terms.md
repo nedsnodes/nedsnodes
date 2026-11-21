@@ -26,7 +26,7 @@ A fresh-reader here has the name, the glossaries, and what the glossaries refere
 
 You cannot judge your own name, because you already know what it means. So for a name that will be used beyond the place it is defined and will last longer than a month, such as a file name, a script name, a function or class used from other files, or a glossary term, ask a fresh subagent what it thinks the name means, giving it the name and nothing else. A branch name or a scratch file's name needs no check and is not changed once chosen. If its answer is wrong, or vague where your meaning is specific, add the words its answer lacked and ask again. A name used only inside one file needs no such check.
 
-For a new project-term or system-term, the user rules on the name, as Step 5 says.
+For a new project-term, the user rules on the name; a new system-term you add yourself, as Step 5 says.
 
 ## Step 1: look for an existing name for the thing
 
@@ -104,7 +104,7 @@ When a change makes a name untrue, rename the thing, and in the same commit upda
 
 Do not abbreviate, except with abbreviations the glossary lists, such as GHI and PR, or that any programmer reads without decoding, such as `id` and `url`. Write them in lowercase inside a name, as in `ghi-issue-write.py` or `pr-reviewer-instructions.md`. Write `pr` in a new file or directory name, never `pull-request`, as in `pr-reviewer-instructions.md`, even beside older files whose names start `pull-request-`, except that a test file keeps the name of the program it tests; a function name keeps `pull_request`, a branch name `pull-request` and a glossary term `pull request`. For any other thing, use its abbreviation or its full words, not both.
 
-## Step 5: use the same words everywhere, and coin new terms with the user
+## Step 5: use the same words everywhere, and coin new project-terms with the user
 
 A name keeps the same words in the same order in prose, in file names and in code; only the separator and the capitals change, as each language's naming convention requires. The project-term `agent-seat` is written in kebab-case `agent-seat` in prose and in file names, snake_case `agent_seat` for a Python variable or function, `AGENT_SEAT` for a Python constant, and CapWords `AgentSeat` for a Python class. Other languages and formats follow their own convention: `AGENT_SEAT` for a shell environment variable, `--agent-seat` for a command line flag. Search with a pattern that matches every form, as Step 3 says.
 
@@ -116,7 +116,7 @@ In prose, a hyphenated phrase marks a project-term or a system-term, such as age
 
 ### New project-terms and system-terms
 
-A new term is coined only when no existing name and no SDLC-term fits, and it is proposed to the user, with a definition of one sentence, before it is used. The glossary entries for project-term and system-term say which is which. An approved project-term goes into the project glossary; an approved system-term goes into the glossary of its system. If the system has no glossary yet, propose one to the user, named `<system-name>-glossary.md` in the system's directory, and list it at the top of the project glossary.
+A new term is coined only when no existing name and no SDLC-term fits. The glossary entries for project-term and system-term say which is which. Propose a new project-term to the user, with a definition of one sentence, before it is used; once he approves it, it goes into the project glossary. Add a new system-term yourself, without asking the user, with a definition of one sentence, to the glossary of its system. If the system's directory has no glossary yet, create one there, named `<system-name>-glossary.md`, and list it at the top of the project glossary. Ask the user before you make a new system, that is, before you move files that belong together into a new system directory; once he approves the directory, its glossary needs no separate approval.
 
 A hyphen makes a name easy to find with `git grep`; the words must also say what it names. When a project-term or system-term gives a generic software word, such as block or test, a meaning of this project's own, keep the generic word and add the words that say which one is meant, as agent-session does for session; a name such as block-type, which could mean any kind of block, does not say what it names.
 
@@ -136,4 +136,4 @@ A hyphen makes a name easy to find with `git grep`; the words must also say what
 4. Did the searches of your checkout, main and the open pull requests, with a pattern for every spelling, find no name it could be taken for?
 5. Does it tell the truth, with no history in it, and no abbreviation the glossary does not list or a programmer would have to decode?
 6. Does it use the same words in prose, file names and code?
-7. If it is a new project-term or system-term, has the user approved it, and is it in its glossary?
+7. If it is a new project-term, has the user approved it, and is it in the project glossary? If it is a new system-term, is it in the glossary of its system?
