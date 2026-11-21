@@ -16,31 +16,46 @@ a program so that no step depends on an agent remembering it:
    of the page, gives the three ranks of a contradicted or unsupported claim
    (must fix, fix later, nit), since the page at an older commit lacks them,
    and fixes the report's form, so this program can count the verdicts and
-   ranks. --writer-answers gives it the writer's answers to verdicts the
-   writer disputes, as the page's rounds allow.
+   ranks. --writer-answers FILE gives it the writer's answers to verdicts the
+   writer disputes, as the page's rounds allow. FILE is free text that quotes
+   each disputed assertion and gives the answer with the quoted line it rests
+   on; this program does not read it, only passes its path to every
+   fresh-agent, and refuses a FILE that is not a file.
 5. For each claim ranked must fix, runs one more fresh-agent, all of them in
    parallel, given that claim and not the first verdict or rank. The claim
    keeps the rank must fix only when that second answer ranks it must fix
    again; otherwise it is ranked fix later.
 6. Writes the report, the second answers after it, under a header this
    program writes, to
-   <report directory>/<overview file name without .md>/<overview blob>-<UTC time>.md.
+   <report directory>/<overview file name without .md>/<overview blob>-<UTC time>.md,
+   where <report directory> is --report-directory, by default
+   /home/nedlern/nedsnodes-logs/overview-write-architecture-overview-claim-check-reports.
    The blob names the overview's exact text, which holds the commit it is
    checked against, so a report stays valid across a rebase or a fix-round
    that leaves the overview's text alone, and no model runs again for it.
-7. Writes each claim ranked fix later that no
-   proposed-improvements-or-changes-file beside the overview holds yet,
-   matched by its exact text, to a new such file in the checkout the program
-   runs from. A follow-up pull request fixes them, except when origin/main
-   already holds such a file from this program: the run is then taken to be
-   that follow-up, or a later one, and its claims ranked fix later are left
-   to regular maintenance, so "later" is one step. Nits are listed in the
-   report only.
+7. Appends each claim ranked fix later that the overview's one
+   proposed-improvements-or-changes-file does not hold yet, matched by its
+   exact text, to that file in the checkout the program runs from, creating
+   the file when it is missing. The file is
+   nn-systems/<system>/docs/<system>-architecture-overview-proposed-improvements-or-changes-entries.md,
+   outside the wiki folder, so the wiki does not gain a file named after the
+   overview on every run. A
+   follow-up pull request fixes the claims this run appended, except when the
+   file on origin/main already holds a claim from this program, a line
+   starting "Claim: ", which only this program writes: the run is then taken
+   to be that follow-up, or a later one, and the claims this run appended are
+   left to regular maintenance, so claims ranked fix later get one follow-up
+   pull request, never a chain of them. Nits are listed in the report only.
+   The overview points to the file with one line under its first heading,
+   this program's PROPOSED_IMPROVEMENTS_OR_CHANGES_POINTER_LINE_TEMPLATE filled
+   in; for
+   docs/nedsnodes-wiki/nedsnodes-handoff-architecture-overview.md it is:
+   This document has proposed improvements or changes: read `handoff-architecture-overview-proposed-improvements-or-changes-entries.md` in `nn-systems/handoff/docs/`.
 
 scripts/pull-request-review-plan.py refuses a pull request that adds or changes
 an overview until the newest report for the overview's blob at the pull
-request's head says OVERVIEW_WRITE_ARCHITECTURE_OVERVIEW_CLAIM_CHECK_RESULT_ALL_CLAIMS_SUPPORTED or
-OVERVIEW_WRITE_ARCHITECTURE_OVERVIEW_CLAIM_CHECK_RESULT_NO_MUST_FIX_CLAIM_REMAINS; it reads reports with
+request's head says "all claims supported" or "no must-fix claim remains"; it
+reads reports with
 find_newest_architecture_overview_claim_check_report_path_and_result_for_overview_git_blob() from this file.
 
 Does not handle: counting rounds (the page stops the check at round 3 and
@@ -68,18 +83,19 @@ Usage:
 Exit 0: report written, and no claim ranked must fix remains. 1: refused,
 nothing run. 2: program defect. 3: md-drift-lint found problems, so no
 fresh-agent ran. 4: a fresh-agent failed, so no report was written. 5: report
-written, and a claim ranked must fix remains, or the report is malformed. 6:
-no claim ranked must fix remains, but git could not remove the temporary
-worktree; the report
-was still written, its result printed, and scripts/pull-request-review-plan.py
-accepts it as it accepts an exit-0 report.
+written, and a claim ranked must fix remains, or the report is malformed.
+6: no claim ranked must fix remains, but git could not remove the temporary
+worktree; the report was still written, its result printed, and
+scripts/pull-request-review-plan.py accepts it as it accepts an exit-0 report.
 
 The last line printed, on stdout, starts with "Next: " and says what to do for
 that exit, so the overview-write skill's step 3 is only to do what it says.
-For exits 0, 5 and 6, when step 7 wrote a file, the line says to commit it
-and either to open a follow-up pull request for its claims once this one
-merges or that regular maintenance takes them, and, when the overview lacks
-the line pointing to such files, to add that line and run the program again.
+For exits 0, 5 and 6, when step 7 appended claims to the file, the line says
+to commit the file and either to open a follow-up pull request for the appended
+claims once this one merges or that regular maintenance takes them. In that
+case only, when the overview also lacks the pointer line of step 7, the line
+quotes it and says to add it under the overview's first heading and run the
+program again.
 For exit 5 the program tells a malformed report apart from claims ranked
 must fix. On the first malformed report for an overview text, its
 last line tells the agent to run the program again; on the second and each
@@ -150,12 +166,15 @@ VERDICT_LINE = re.compile(r"^VERDICT (\d+) (supported|contradicted|unsupported)(
 COUNTS_LINE = re.compile(r"^COUNTS supported=(\d+) contradicted=(\d+) unsupported=(\d+)\s*$", re.MULTILINE)
 Claim = collections.namedtuple("Claim", "number verdict rank assertion evidence")
 
-PROPOSED_IMPROVEMENTS_OR_CHANGES_INFIX = "-proposed-improvements-or-changes-"
-PROPOSED_IMPROVEMENTS_OR_CHANGES_SOURCE = "overview-write-claim-check-by-fresh-agent"
+PROPOSED_IMPROVEMENTS_OR_CHANGES_FILE_PATH_TEMPLATE = (
+    "nn-systems/{system}/docs/{system}-architecture-overview-proposed-improvements-or-changes-entries.md")
+# The file's name and directory sit in separate backtick spans: stage 1 lints the overview at the checked-against
+# commit, where the file may not exist yet, and md-drift-lint checks only a backticked path holding a slash and an
+# extension.
 PROPOSED_IMPROVEMENTS_OR_CHANGES_POINTER_LINE_TEMPLATE = (
-    "This document has proposed improvements or changes: read every file in this folder whose name starts with "
-    "`{prefix}`.")
+    "This document has proposed improvements or changes: read `{name}` in `{directory}/`.")
 FIX_LATER_ENTRY_CLAIM_PREFIX = "Claim: "
+PROPOSED_IMPROVEMENTS_OR_CHANGES_ENTRY_NUMBER = re.compile(r"^## E(\d+) ", re.MULTILINE)
 
 CLAIM_RANK_DEFINITIONS_FOR_FRESH_AGENT_PROMPT = """\
 Give each contradicted or unsupported assertion one of three ranks:
@@ -215,13 +234,15 @@ NEXT_ACTION_WHEN_MUST_FIX_CLAIMS_REMAIN = (
     "files that bear it out. Commit, then run this program again, unless this was round 3 of the check on this pull "
     "request: then bring the report to the user, and stop.")
 NEXT_ACTION_SUFFIX_WHEN_FIX_LATER_CLAIMS_WRITTEN_TO_PROPOSED_IMPROVEMENTS_OR_CHANGES_FILE = (
-    " The claims ranked fix later that are new to this check are in {path}: commit that file on this branch. Once "
+    " The claims ranked fix later that are new to this check were appended to {path}: commit that file on this "
+    "branch. Once "
     "this pull request merges, open a follow-up pull request that fixes those claims in the overview and settles the "
     "file's entries. Nits are listed in the report only; regular maintenance cleans them up.")
 NEXT_ACTION_SUFFIX_WHEN_FOLLOW_UP_PULL_REQUEST_LEAVES_FIX_LATER_CLAIMS_TO_REGULAR_MAINTENANCE = (
-    " The claims ranked fix later that are new to this check are in {path}: commit that file on this branch. "
-    "origin/main already holds a proposed-improvements-or-changes-file from this program for the overview, so this "
-    "is a follow-up pull request, and regular maintenance takes these claims, not another follow-up. Nits are listed "
+    " The claims ranked fix later that are new to this check were appended to {path}: commit that file on this "
+    "branch. The overview's proposed-improvements-or-changes-file on origin/main already holds claims from this "
+    "program, so this is a follow-up pull request, and regular maintenance takes these claims, not another "
+    "follow-up. Nits are listed "
     "in the report only; regular maintenance cleans them up too.")
 NEXT_ACTION_SUFFIX_WHEN_OVERVIEW_LACKS_PROPOSED_IMPROVEMENTS_OR_CHANGES_POINTER_LINE = (
     " Before you push: add the line \"{line}\" under the overview's first heading, commit it, and run this program "
@@ -361,9 +382,20 @@ def result_from_fresh_agent_report(report, recheck_reports=None):
     return claims, result_from_ranked_claims(claims)
 
 
-def overview_pointer_line_to_proposed_improvements_or_changes_files(overview_path):
-    return PROPOSED_IMPROVEMENTS_OR_CHANGES_POINTER_LINE_TEMPLATE.format(
-        prefix=Path(overview_path).stem + PROPOSED_IMPROVEMENTS_OR_CHANGES_INFIX)
+def nc_architecture_overview_proposed_improvements_or_changes_file_path_from_page_path(overview_path):
+    """Return the repository-relative path of the overview's one proposed-improvements-or-changes-file."""
+    return PROPOSED_IMPROVEMENTS_OR_CHANGES_FILE_PATH_TEMPLATE.format(
+        system=nc_architecture_overview_described_system_name_from_page_path(overview_path))
+
+
+def overview_pointer_line_to_proposed_improvements_or_changes_file(overview_path):
+    path = Path(nc_architecture_overview_proposed_improvements_or_changes_file_path_from_page_path(overview_path))
+    return PROPOSED_IMPROVEMENTS_OR_CHANGES_POINTER_LINE_TEMPLATE.format(name=path.name, directory=path.parent)
+
+
+def claims_in_proposed_improvements_or_changes_file(text):
+    return {normalized_claim(line.removeprefix(FIX_LATER_ENTRY_CLAIM_PREFIX))
+            for line in text.splitlines() if line.startswith(FIX_LATER_ENTRY_CLAIM_PREFIX)}
 
 
 def normalized_claim(text):
@@ -372,14 +404,11 @@ def normalized_claim(text):
 
 def write_fix_later_claims_to_proposed_improvements_or_changes_file(repository, overview_path, claims, commit,
                                                                     report_path, for_regular_maintenance):
-    """Write the claims ranked fix later that no file beside the overview holds yet to a new
-    proposed-improvements-or-changes-file in the checkout; return its path, or None when no claim is new."""
-    directory = repository / Path(overview_path).parent
-    prefix = Path(overview_path).stem + PROPOSED_IMPROVEMENTS_OR_CHANGES_INFIX
-    recorded = {normalized_claim(line.removeprefix(FIX_LATER_ENTRY_CLAIM_PREFIX))
-                for existing in directory.glob(f"{prefix}*.md")
-                for line in existing.read_text(encoding="utf-8").splitlines()
-                if line.startswith(FIX_LATER_ENTRY_CLAIM_PREFIX)}
+    """Append the claims ranked fix later that the overview's proposed-improvements-or-changes-file does not hold yet
+    to that file in the checkout, creating it when it is missing; return its path, or None when no claim is new."""
+    destination = repository / nc_architecture_overview_proposed_improvements_or_changes_file_path_from_page_path(overview_path)
+    existing = destination.read_text(encoding="utf-8") if destination.exists() else ""
+    recorded = claims_in_proposed_improvements_or_changes_file(existing)
     new_claims = []
     for claim in claims:
         if claim.rank == RANK_FIX_LATER and normalized_claim(claim.assertion) not in recorded:
@@ -387,26 +416,27 @@ def write_fix_later_claims_to_proposed_improvements_or_changes_file(repository, 
             new_claims.append(claim)
     if not new_claims:
         return None
+    entry_number = max((int(number) for number in PROPOSED_IMPROVEMENTS_OR_CHANGES_ENTRY_NUMBER.findall(existing)),
+                       default=0)
+    lines = [existing.rstrip("\n")] if existing else [
+        f"# Proposed improvements or changes: {Path(overview_path).name}", "",
+        f"Each entry proposes a change to the nc-architecture-overview {overview_path} or to the system it describes. "
+        "An entry with a Claim: line is an assertion of the overview that the overview claim check found "
+        "contradicted or unsupported and ranked fix later: loose, incomplete or badly worded, but no agent would act "
+        "wrongly on it."]
     date = datetime.datetime.now(datetime.timezone.utc).strftime("%Y-%m-%d")
-    name = f"{prefix}{PROPOSED_IMPROVEMENTS_OR_CHANGES_SOURCE}-{date}"
-    destination, suffix = directory / f"{name}.md", 1
-    while destination.exists():
-        suffix += 1
-        destination = directory / f"{name}-{suffix}.md"
-    lines = [f"# Proposed improvements or changes: {Path(overview_path).name} (overview claim check, {date})", "",
-             f"Assertions of the overview that the claim check against commit {commit} found contradicted or "
-             "unsupported and ranked fix later: loose, incomplete or badly worded, but no agent would act wrongly on "
-             f"them. Its report is {report_path}. "
-             + ("Regular maintenance fixes them in the overview." if for_regular_maintenance
-                else "A follow-up pull request fixes them in the overview.")]
-    for entry, claim in enumerate(new_claims, start=1):
-        lines += ["", f"## E{entry} — possible problem: an assertion of the overview is {claim.verdict}", "",
+    for claim in new_claims:
+        entry_number += 1
+        lines += ["", f"## E{entry_number} — possible problem: an assertion of the overview is {claim.verdict}", "",
                   f"{FIX_LATER_ENTRY_CLAIM_PREFIX}{normalized_claim(claim.assertion)}",
+                  f"Found by: the overview claim check of {date} against commit {commit}; its report is {report_path}.",
+                  "Fixed by: " + ("regular maintenance, in the overview." if for_regular_maintenance
+                                  else "a follow-up pull request, in the overview."),
                   "Goes wrong when: a reader takes the assertion as exact.",
                   "The claim check's evidence:"]
         lines += [f"> {line}".rstrip() for line in claim.evidence.splitlines()] or ["> none given"]
         lines += ["State: open"]
-    directory.mkdir(parents=True, exist_ok=True)
+    destination.parent.mkdir(parents=True, exist_ok=True)
     destination.write_text("\n".join(lines) + "\n", encoding="utf-8")
     return destination
 
@@ -420,6 +450,13 @@ def run_git(repository, *arguments, check=True):
             f"`git {' '.join(arguments)}` failed with exit {result.returncode}: {result.stderr.strip()}\n"
             "If the repository is damaged or the revision is wrong: fix that, then run this again.")
     return result
+
+
+def text_at_revision_or_empty(repository, revision, path):
+    """Return the file's text at the revision, or "" when the revision holds no such file."""
+    if run_git(repository, "rev-parse", "--verify", "--quiet", f"{revision}:{path}", check=False).returncode:
+        return ""
+    return run_git(repository, "show", f"{revision}:{path}").stdout
 
 
 def fresh_agent_prompt(template, overview_path, commit, writer_answers, assertion=None):
@@ -520,12 +557,9 @@ def check_overview_claims(arguments):
         raise ClaimCheckRefusal(f"origin/main is missing from the repository at {repository}, so this program cannot "
                                 "tell whether a follow-up pull request is due for claims ranked fix later.\n"
                                 f"To make it available: run `git -C {repository} fetch origin`, then run this again.")
-    program_file_prefix = (Path(overview_path).stem + PROPOSED_IMPROVEMENTS_OR_CHANGES_INFIX
-                           + PROPOSED_IMPROVEMENTS_OR_CHANGES_SOURCE + "-")
-    fix_later_for_regular_maintenance = any(
-        Path(path).name.startswith(program_file_prefix)
-        for path in run_git(repository, "ls-tree", "--name-only", "refs/remotes/origin/main",
-                            f"{Path(overview_path).parent}/").stdout.splitlines())
+    proposals_path = nc_architecture_overview_proposed_improvements_or_changes_file_path_from_page_path(overview_path)
+    fix_later_for_regular_maintenance = bool(claims_in_proposed_improvements_or_changes_file(
+        text_at_revision_or_empty(repository, "refs/remotes/origin/main", proposals_path)))
     report_directory = Path(arguments.report_directory)
     if not report_directory.parent.is_dir():
         raise ClaimCheckRefusal(
@@ -610,7 +644,7 @@ def check_overview_claims(arguments):
                    if fix_later_for_regular_maintenance
                    else NEXT_ACTION_SUFFIX_WHEN_FIX_LATER_CLAIMS_WRITTEN_TO_PROPOSED_IMPROVEMENTS_OR_CHANGES_FILE
                    ).format(path=fix_later_file)
-        pointer_line = overview_pointer_line_to_proposed_improvements_or_changes_files(overview_path)
+        pointer_line = overview_pointer_line_to_proposed_improvements_or_changes_file(overview_path)
         if pointer_line not in text.splitlines():
             action += NEXT_ACTION_SUFFIX_WHEN_OVERVIEW_LACKS_PROPOSED_IMPROVEMENTS_OR_CHANGES_POINTER_LINE.format(line=pointer_line)
     arguments.next_action = action
@@ -623,9 +657,10 @@ def main(argv=None):
                         help="the overview's path, relative to the top of the checkout")
     parser.add_argument("--revision", default="HEAD", help="the commit or branch whose overview text is checked")
     parser.add_argument("--writer-answers", type=Path, metavar="FILE",
-                        help="the writer's answers to disputed verdicts of an earlier report")
+                        help="a free-text file of the writer's answers to disputed verdicts of an earlier report; "
+                             "see step 4 above")
     parser.add_argument("--report-directory", type=Path, default=OVERVIEW_WRITE_ARCHITECTURE_OVERVIEW_CLAIM_CHECK_REPORT_DIRECTORY,
-                        metavar="DIR")
+                        metavar="DIR", help="where reports are written; default %(default)s")
     arguments = None
     try:
         arguments = parser.parse_args(argv)

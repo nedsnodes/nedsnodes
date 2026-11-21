@@ -1161,6 +1161,28 @@ def run_cases(scratch: Path):
           and not landed_on_main_before_rename.ran("gh pr create"),
           (land_lines, landed_on_main_before_rename.commands()))
 
+    # A design keeps its `.<kind>.design` ending once filed, whatever its
+    # heading says, so the guard and the fast read still class it as a design.
+    design_source = source.with_name("widget.tool.design.md")
+    design_source.write_text(source.read_text(encoding="utf-8"), encoding="utf-8")
+    design_title = "Widget design"
+    design_destination = "docs/issues/9001-widget-design.tool.design.md"
+    design_staged = tool.with_issue_frontmatter(design_source.read_text(encoding="utf-8"),
+                                                REPO, 9001, design_title)
+    design_lines = []
+    design_landed = Recorder({
+        f"git show origin/main:{design_destination}": Completed(design_staged),
+    })
+    design_returned = tool.land_file(REPO, 9001, design_title, design_source, scratch,
+                                     design_landed, design_lines.append)
+    check("create lands a design named <name>.tool.design.md under a name ending .tool.design.md",
+          design_returned == design_destination
+          and tool.create_ghi_landing_path_for_ghi_md(9001, "Widget.tool.design", "widget.system.design.md")
+          == "docs/issues/9001-widget-tool-design.system.design.md"
+          and tool.create_ghi_landing_path_for_ghi_md(570, land_title, "statusline-drops-branch.md") == land_destination,
+          (design_returned, design_lines))
+    design_source.unlink()
+
     # The comparison is computed under the number the PATH carries. The same
     # content landed under a different issue is a different file, and must
     # not stop this one being filed.
@@ -1711,7 +1733,7 @@ def run_cases(scratch: Path):
             except tool.Refused as refusal:
                 lines_out = str(refusal).splitlines()
                 check(failure_name,
-                      lambda: (refusal.code == 1 and len(lines_out) == 4
+                      lambda: (refusal.code == 1 and len(lines_out) == 4  # noqa: F821 check() runs this lambda inside the except, while refusal is bound
                       and lines_out[0].startswith(
                           "Nothing was filed: ghi-guide-agent raised a question "
                           "about a ruling of the user's, and writing that "
@@ -1816,6 +1838,48 @@ def run_cases(scratch: Path):
         except Exception as other:                    # noqa: BLE001
             check(resumed_name, False,
                   f"{other!r}; {resumed_create.commands()}")
+
+        # A design's question is saved under the name the design lands
+        # under, `<slug>.tool.design`, so the run's last lines find it.
+        design_store = log_store_at(scratch / "design-question-store")
+        design_dir = scratch / "design-draft-dir"
+        design_dir.mkdir()
+        design_question_source = written(
+            design_dir, name="frozen-issue-reopened.tool.design.md",
+            text=conflicting_text)
+        design_create = StagedReader({
+            ASK: Completed("", returncode=3, stderr=ruling_stderr(
+                "#46 closed issues are frozen")),
+            "gh issue view 46": Completed("Closed issues are frozen\n"),
+            "gh issue list": Completed("[]"),
+            "gh issue create": Completed(
+                "https://github.com/nedsnodes/nedsnodes/issues/573\n"),
+            "git show": Completed("", returncode=1),
+            "git ls-remote": Completed(""),
+            "git ls-tree": Completed(""),
+            "gh pr create": Completed("https://github.com/x/y/pull/13\n"),
+        })
+        design_question_lines = []
+        design_question_name = ("create of a design with a ruling question "
+                                "saves it under the landed name and reports "
+                                "it in the run's last lines")
+        try:
+            tool.create(design_question_source, REPO, scratch, design_create,
+                        design_question_lines.append)
+            check(design_question_name,
+                  lambda: (sorted(design_create.staged)
+                  == [f"docs/issues/573-{draft_slug}.tool.design.md"]
+                  and sorted(item.name for item in design_store.iterdir())
+                  == [f"{draft_slug}.tool.design-proposed-improvements-or-"
+                      "changes-ghi-guide-agent-2026-10-03.md"]
+                  and design_question_lines[-1].startswith("Filed GHI 573.")
+                  and "Dispatch a forked subagent now"
+                  in design_question_lines[-1]),
+                  lambda: (sorted(item.name for item in design_store.iterdir()),
+                           design_question_lines[-1:]))
+        except Exception as other:                    # noqa: BLE001
+            check(design_question_name, False,
+                  f"{other!r}; {design_create.commands()}")
 
         # A first run that wrote the file and then failed to file the issue:
         # the rerun finds no issue, so it would adjudicate, but the log-store
@@ -2933,7 +2997,7 @@ def run_edit_cases(scratch: Path):
     MAIN_TREE = (
         "docs/issues/18-write-test-plan-riders-and-test-evidence-rules.md\0"
         "docs/issues/3-credential-work-measured-state-and-rulings.md\0"
-        "docs/issues/3-dismiss-stale-reviews-experiment-design.md\0"
+        "docs/issues/3-dismiss-stale-reviews-experiment.tool.design.md\0"
         "docs/issues/3-main-gatekeeper-build-slice-plan.md\0"
         "docs/issues/3-slice-6-review-evidence-not-built.md\0"
         "docs/issues/45-remote-named-agent-launch-and-reattach.md\0"
@@ -2943,14 +3007,14 @@ def run_edit_cases(scratch: Path):
         "docs/issues/queue/3-checks-note-still-waiting-in-the-queue.md\0"
         "docs/issues/queue/45-inventory-still-waiting-in-the-queue.md\0"
         "docs/issues/queue/45-riders-still-waiting-in-the-queue.md\0"
-        "nn-systems/main-gatekeeper/main-gatekeeper-design.md\0")
+        "nn-systems/main-gatekeeper/main-gatekeeper.system.design.md\0")
 
     main_tree = Recorder({"git ls-tree": Completed(MAIN_TREE)})
     check("issue 3's files are the four directly under docs/issues/, which "
           "is the count the ruling's own worked example gives",
           tool.ghi_md_paths_for_issue(3, scratch, main_tree) == [
               "docs/issues/3-credential-work-measured-state-and-rulings.md",
-              "docs/issues/3-dismiss-stale-reviews-experiment-design.md",
+              "docs/issues/3-dismiss-stale-reviews-experiment.tool.design.md",
               "docs/issues/3-main-gatekeeper-build-slice-plan.md",
               "docs/issues/3-slice-6-review-evidence-not-built.md"],
           str(tool.ghi_md_paths_for_issue(3, scratch, main_tree)))
@@ -3153,10 +3217,10 @@ def run_edit_cases(scratch: Path):
             check(lookup_name, False, "it reported success")
         except tool.Refused as refusal:
             check(lookup_name,
-                  lambda: (refusal.code == 1
-                  and str(refusal).startswith("Nothing was edited:")
+                  lambda: (refusal.code == 1  # noqa: F821 check() runs this lambda inside the except, while refusal is bound
+                  and str(refusal).startswith("Nothing was edited:")  # noqa: F821 check() runs this lambda inside the except, while refusal is bound
                   and "Run the same scripts/ghi-issue-write.py command again "
-                  "now; the user need not answer anything first." in str(refusal)
+                  "now; the user need not answer anything first." in str(refusal)  # noqa: F821 check() runs this lambda inside the except, while refusal is bound
                   and not failing_lookup.ran("git push")
                   and not lookup_store.exists()
                   and source.read_text() == FILE_TEXT),
@@ -3549,7 +3613,7 @@ def run_edit_cases(scratch: Path):
             check(rejected_case, False, "it proceeded")
         except tool.Refused as refusal:
             check(rejected_case,
-                  lambda: (refusal.code == 66
+                  lambda: (refusal.code == 66  # noqa: F821 check() runs this lambda inside the except, while refusal is bound
                   and rejected_with_question.ran(ASK)
                   and not rejected_with_question.ran("gh issue view 46")
                   and not rejected_store.exists()
@@ -4681,8 +4745,8 @@ def run_stop_signal_cleanup_cases(scratch: Path):
 # below are the first such move, nn-systems/handoff/docs/, and the shape a
 # subsystem's takes, nn-systems/skills/cold-read/docs/.
 
-LANDED_DESIGN = "nn-systems/handoff/docs/handoff-recover-crashed-seats-design.md"
-SUBSYSTEM_DESIGN = "nn-systems/skills/cold-read/docs/cold-read-design.md"
+LANDED_DESIGN = "nn-systems/handoff/docs/handoff-recover-crashed-seats.tool.design.md"
+SUBSYSTEM_DESIGN = "nn-systems/skills/cold-read/docs/cold-read.system.design.md"
 LANDED_TITLE = ("Crash recovery for seats that died without a handoff: find "
                 "the last live transcript, resume it supervised")
 LANDED_TEXT = ("---\nstatus: overview\n---\n\n"
@@ -4702,22 +4766,26 @@ def run_landed_design_cases(scratch: Path):
     for case_name, relative in [
             ("a numbered name in docs/ is not a landed design, so one file "
              "cannot be filed by its name and by its issue: line",
-             "nn-systems/handoff/docs/120-recover-crashed-seats-design.md"),
+             "nn-systems/handoff/docs/120-recover-crashed-seats.system.design.md"),
             ("a file in docs/ that is not a design is not one",
              "nn-systems/handoff/docs/handoff-system-overview.md"),
             ("a docs/ directly under nn-systems/, belonging to no system, "
-             "holds none", "nn-systems/docs/loose-design.md"),
+             "holds none", "nn-systems/docs/loose.tool.design.md"),
             ("a design level with its system's code is not one",
-             "nn-systems/main-gatekeeper/main-gatekeeper-design.md"),
+             "nn-systems/main-gatekeeper/main-gatekeeper.system.design.md"),
             ("nor one level with a subsystem's code, four parts deep but "
              "not in a docs/ directory",
-             "nn-systems/skills/cold-read/cold-read-design.md"),
+             "nn-systems/skills/cold-read/cold-read.system.design.md"),
             ("a docs/ directory outside nn-systems/ holds none, however "
-             "deep", "a/b/docs/x-design.md"),
+             "deep", "a/b/docs/x.tool.design.md"),
             ("nor is a design still in docs/issues/",
-             "docs/issues/116-fleet-survives-machine-restart-design.md"),
+             "docs/issues/116-fleet-survives-machine-restart.system.design.md"),
             ("nor one in the issues queue",
-             "docs/issues/queue/xstate-recovery-design.md")]:
+             "docs/issues/queue/xstate-recovery.tool.design.md"),
+            ("a name ending -design.md, with a hyphen where the dot goes, "
+             "is not one", "nn-systems/handoff/docs/handoff-old-form-design.md"),
+            ("nor is a test-design beside a landed design",
+             "nn-systems/handoff/docs/handoff-recover-crashed-seats.system.test-design.md")]:
         check(case_name, not tool.landed_design_relative_path(relative))
 
     check("the edit operation writes a landed design's path",
@@ -4755,12 +4823,12 @@ def run_landed_design_cases(scratch: Path):
 
     listing = Recorder({
         "git ls-tree": Completed(
-            "docs/issues/120-crash-recovery-for-seats-design.md\0"
+            "docs/issues/120-crash-recovery-for-seats.tool.design.md\0"
             "docs/issues/queue/120-recovery-notes.md\0"
             f"{LANDED_DESIGN}\0"
             f"{SUBSYSTEM_DESIGN}\0"
-            "nn-systems/handoff/docs/handoff-unfiled-design.md\0"
-            "nn-systems/handoff/docs/120-numbered-design.md\0"
+            "nn-systems/handoff/docs/handoff-unfiled.tool.design.md\0"
+            "nn-systems/handoff/docs/120-numbered.tool.design.md\0"
             "nn-systems/handoff/handoff-supervisor.py\0"),
         f"git show origin/main:{LANDED_DESIGN}": Completed(landed_form()),
         f"git show origin/main:{SUBSYSTEM_DESIGN}": Completed(
@@ -4774,7 +4842,7 @@ def run_landed_design_cases(scratch: Path):
           "whose issue: line names it, and not a queue note, a design "
           "naming another issue, one naming none, or a numbered name in "
           "docs/",
-          found == ["docs/issues/120-crash-recovery-for-seats-design.md",
+          found == ["docs/issues/120-crash-recovery-for-seats.tool.design.md",
                     LANDED_DESIGN], str(found))
     check("only landed designs are read, so the rest of the tree costs no "
           "git show",
@@ -4831,7 +4899,7 @@ def run_landed_design_cases(scratch: Path):
           and title == "Crash recovery for seats — recover-crashed-seats.py",
           f"{number} {relative} {title!r}")
 
-    unfiled = scratch / "nn-systems/handoff/docs/handoff-unfiled-design.md"
+    unfiled = scratch / "nn-systems/handoff/docs/handoff-unfiled.tool.design.md"
     unfiled.write_text(LANDED_TEXT, encoding="utf-8")
     try:
         tool.validate_edit(unfiled, scratch)
@@ -4850,7 +4918,7 @@ def run_landed_design_cases(scratch: Path):
     disagreeing = Recorder({
         "git ls-tree": Completed(f"{LANDED_DESIGN}\0"
                                  "nn-systems/handoff/docs/"
-                                 "handoff-unfiled-design.md\0"),
+                                 "handoff-unfiled.tool.design.md\0"),
         f"git show origin/main:{LANDED_DESIGN}": Completed(LANDED_TEXT),
         "git show origin/main:nn-systems/handoff/docs/handoff-unfiled":
             Completed(landed_form()),
@@ -4858,10 +4926,10 @@ def run_landed_design_cases(scratch: Path):
     from_main = tool.ghi_md_paths_for_issue(120, scratch, disagreeing)
     check("an issue's landed designs are the ones whose issue: line on "
           "main names it, whatever the working tree's copy says",
-          from_main == ["nn-systems/handoff/docs/handoff-unfiled-design.md"],
+          from_main == ["nn-systems/handoff/docs/handoff-unfiled.tool.design.md"],
           str(from_main))
 
-    elsewhere = scratch / "docs" / "drafts" / "handoff-notes-design.md"
+    elsewhere = scratch / "docs" / "drafts" / "handoff-notes.tool.design.md"
     elsewhere.parent.mkdir(parents=True, exist_ok=True)
     elsewhere.write_text(landed_form(), encoding="utf-8")
     try:
@@ -4877,7 +4945,7 @@ def run_landed_design_cases(scratch: Path):
     # The rerun after the move merged: main's copy is this file, so nothing
     # lands, and the body is relinked to the file where it now sits.
     old_body = tool.links_body(
-        REPO, ["docs/issues/120-crash-recovery-for-seats-design.md"])
+        REPO, ["docs/issues/120-crash-recovery-for-seats.tool.design.md"])
     rerun = Recorder({
         f"git show {MAIN_COMMIT}:{LANDED_DESIGN}": Completed(landed_form()),
         "gh issue view": issue_json(LANDED_TITLE, old_body),
@@ -4931,7 +4999,7 @@ def run_landed_design_cases(scratch: Path):
     only_file = adding_the_line(
         [LANDED_DESIGN],
         tool.links_body(REPO,
-                        ["docs/issues/120-crash-recovery-for-seats-design.md"]))
+                        ["docs/issues/120-crash-recovery-for-seats.tool.design.md"]))
     tool.edit(design, REPO, scratch, only_file, quiet)
     bodies = [call[call.index("--body") + 1] for call in only_file.calls
               if call[:3] == ["gh", "issue", "edit"] and "--body" in call]
@@ -5030,7 +5098,7 @@ def run_landed_design_cases(scratch: Path):
           other_design.ran(f"git show {MAIN_COMMIT}:{LANDED_DESIGN}"),
           str(other_design.commands()))
 
-    fresh = scratch / "docs" / "issues" / "queue" / "fresh-design.md"
+    fresh = scratch / "docs" / "issues" / "queue" / "fresh.tool.design.md"
     fresh.parent.mkdir(parents=True, exist_ok=True)
     fresh.write_text(LANDED_TEXT, encoding="utf-8")
     check("a fresh source with no issue: line still validates for create",

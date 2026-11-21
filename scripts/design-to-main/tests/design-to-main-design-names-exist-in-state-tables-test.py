@@ -44,7 +44,7 @@ import unittest
 
 MACHINE_DIRECTORY = pathlib.Path(__file__).resolve().parent.parent
 REPOSITORY_ROOT = MACHINE_DIRECTORY.parent.parent
-DESIGN_RELATIVE_PATH = "docs/design-to-main/design-to-main-state-machine-design.md"
+DESIGN_RELATIVE_PATH = "docs/design-to-main/design-to-main-state-machine.system.design.md"
 DESIGN_PATH = REPOSITORY_ROOT / DESIGN_RELATIVE_PATH
 
 _rule_failure_lines_spec = importlib.util.spec_from_file_location(
@@ -345,8 +345,8 @@ class TheCheckerFailsOnANameTheCodeDoesNotHave(unittest.TestCase):
         self.assertEqual(self.undefined_in(text), {"reject the tests"})
 
     def test_a_misspelled_state_exit_field_fails(self):
-        text = self.design_text + "\nIt writes `held-rulings`.\n"
-        self.assertEqual(self.undefined_in(text), {"held-rulings"})
+        text = self.design_text + "\nIt writes `named-file`.\n"
+        self.assertEqual(self.undefined_in(text), {"named-file"})
 
     def test_a_name_the_code_no_longer_defines_fails(self):
         without_flaky_test = dict(self.name_classes)
