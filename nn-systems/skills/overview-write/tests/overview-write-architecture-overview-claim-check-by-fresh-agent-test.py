@@ -61,6 +61,12 @@ __import__("time").sleep(answer.get("sleep_seconds", 0))
 if "append_while_running" in answer:
     with open(answer["append_while_running"]["path"], "a", encoding="utf-8") as changed:
         changed.write(answer["append_while_running"]["text"])
+if "replace_while_running" in answer:
+    replaced = answer["replace_while_running"]
+    with open(replaced["path"], encoding="utf-8") as before:
+        text = before.read()
+    with open(replaced["path"], "w", encoding="utf-8") as after:
+        after.write(text.replace(replaced["old"], replaced["new"], 1))
 sys.stdout.write(answer["stdout"])
 sys.stderr.write(answer.get("stderr", ""))
 sys.exit(answer.get("exit_code", 0))
@@ -133,7 +139,8 @@ class Fixture:
                claude_sleep=0, lint_sleep=0, rechecks=None, covering_judge=None):
         """rechecks maps an assertion to the {"stdout", "exit_code"} the stand-in gives a recheck prompt naming it;
         covering_judge is the {"stdout", "exit_code"} it gives the covering judge's prompt, with an optional
-        "append_while_running": {"path", "text"} that it appends to that file before it answers."""
+        "append_while_running": {"path", "text"} that it appends to that file, or "replace_while_running":
+        {"path", "old", "new"} with which it replaces the first "old" in that file, before it answers."""
         (self.control / "claude.json").write_text(json.dumps(
             {"stdout": claude_stdout, "exit_code": claude_exit, "sleep_seconds": claude_sleep,
              "rechecks": rechecks or {}, **({"covering_judge": covering_judge} if covering_judge else {})}))
@@ -280,18 +287,25 @@ def run_covering_judge_unit_cases():
     def judged(answer, claim_numbers=(1, 2), unsettled_entry_numbers=frozenset({3, 4})):
         return claim_check.claim_number_to_covering_unsettled_entry_number_from_judge_answer(answer, list(claim_numbers), set(unsettled_entry_numbers))
 
-    check("a judge answer gives each covered claim its entry, leaves out new claims, and ignores other lines",
-          judged("Here is my answer.\nCLAIM 1 covered-by E4\nCLAIM 2 new\n") == ({1: 4}, None))
+    check("a judge answer gives each covered claim its entry, leaves out new claims, and reads past blank lines",
+          judged("\nCLAIM 1 covered-by E4\n\nCLAIM 2 new\n\n") == ({1: 4}, None))
     check("a judge answer that skips a claim is malformed",
           judged("CLAIM 1 new\n") == (None, "it gives no answer for CLAIM 2"))
     check("a judge answer that answers a claim twice is malformed",
           judged("CLAIM 1 new\nCLAIM 1 covered-by E3\nCLAIM 2 new\n") == (None, "it answers CLAIM 1 twice"))
     check("a judge answer that corrects a claim in a CLAIM line not in either form is malformed, not read as its first answer",
           judged("CLAIM 1 covered-by E3\nCLAIM 1 new (correction)\nCLAIM 2 new\n")
-          == (None, "its line `CLAIM 1 new (correction)` starts with CLAIM but is not `CLAIM <number> covered-by E<number>` "
-                    "or `CLAIM <number> new`"))
-    check("a judge answer with prose lines that do not start with CLAIM is read",
-          judged("My reasoning: claim 1 repeats E3.\nCLAIM 1 covered-by E3\nCLAIM 2 new\nDone.\n") == ({1: 3}, None))
+          == (None, "its line `CLAIM 1 new (correction)` is not `CLAIM <number> covered-by E<number>` "
+                    "or `CLAIM <number> new`, the only lines an answer may hold"))
+    for case, correction in (("an indented", "  CLAIM 1 new"), ("a bulleted", "- CLAIM 1 new"), ("a backticked", "`CLAIM 1 new`")):
+        check(f"a judge answer that corrects a claim in {case} CLAIM line is malformed, not read as its first answer",
+              judged(f"CLAIM 1 covered-by E3\n{correction}\nCLAIM 2 new\n")
+              == (None, f"its line `{correction.strip()}` is not `CLAIM <number> covered-by E<number>` "
+                        "or `CLAIM <number> new`, the only lines an answer may hold"))
+    check("a judge answer with a prose line is malformed",
+          judged("My reasoning: claim 1 repeats E3.\nCLAIM 1 covered-by E3\nCLAIM 2 new\n")
+          == (None, "its line `My reasoning: claim 1 repeats E3.` is not `CLAIM <number> covered-by E<number>` "
+                    "or `CLAIM <number> new`, the only lines an answer may hold"))
     check("a judge answer about a claim it was not asked about is malformed",
           judged("CLAIM 1 new\nCLAIM 2 new\nCLAIM 9 new\n") == (None, "it answers CLAIM 9, which it was not asked about"))
     check("a judge answer naming an entry that is not one of the unsettled entries it was given, such as a settled one, is "
@@ -553,20 +567,27 @@ def run_covering_judge_cases(fixture):
               and (fixture.repository / PROPOSALS).read_text() == ENTRIES_WITH_EACH_STATE
               and last_stdout_line(result) == next_action_line(claim_check.NEXT_ACTION_BY_EXIT_CODE[4]),
               (result, covering_judge))
-    for case, appended_text in (
-            ("another claim check appends an entry", "\n## E7 — possible problem: an assertion of the overview is unsupported\n\n"
-                                                    "Claim: the tool is fast\nState: open\n"),
-            ("a handler settles the entry the judge names", "\nState: settled by a handler meanwhile\n")):
+    settled_e3 = ENTRIES_WITH_EACH_STATE.replace("> tool.py:1\nState: open\n", "> tool.py:1\nState: settled by a handler meanwhile\n", 1)
+    for case, change, changed_text in (
+            ("another claim check appends an entry",
+             {"append_while_running": {"path": str(fixture.repository / PROPOSALS),
+                                       "text": "\n## E7 — possible problem: an assertion of the overview is unsupported\n\n"
+                                               "Claim: the tool is fast\nState: open\n"}},
+             ENTRIES_WITH_EACH_STATE + "\n## E7 — possible problem: an assertion of the overview is unsupported\n\n"
+                                       "Claim: the tool is fast\nState: open\n"),
+            ("a handler settles the entry the judge names",
+             {"replace_while_running": {"path": str(fixture.repository / PROPOSALS),
+                                        "old": "> tool.py:1\nState: open\n",
+                                        "new": "> tool.py:1\nState: settled by a handler meanwhile\n"}},
+             settled_e3)):
         fixture.write(PROPOSALS, ENTRIES_WITH_EACH_STATE)
-        fixture.answer(claude_stdout=report, covering_judge={
-            "stdout": "CLAIM 1 covered-by E3\nCLAIM 2 new\n",
-            "append_while_running": {"path": str(fixture.repository / PROPOSALS), "text": appended_text}})
+        fixture.answer(claude_stdout=report, covering_judge={"stdout": "CLAIM 1 covered-by E3\nCLAIM 2 new\n", **change})
         result = fixture.run()
         check(f"when {case} while the covering judge runs, the run exits 4, writes no report, appends nothing and "
               "says to run it again",
               result.returncode == 4 and "changed while this claim check decided" in result.stderr
               and len(fixture.reports_written()) == count
-              and (fixture.repository / PROPOSALS).read_text() == ENTRIES_WITH_EACH_STATE + appended_text
+              and (fixture.repository / PROPOSALS).read_text() == changed_text
               and last_stdout_line(result) == next_action_line(claim_check.NEXT_ACTION_BY_EXIT_CODE[4]), result)
     fixture.write(PROPOSALS, ENTRIES_WITH_EACH_STATE)
     fixture.answer(claude_stdout=report, covering_judge={"stdout": "CLAIM 1 new\nCLAIM 2 new\n", "sleep_seconds": 5})

@@ -69,7 +69,11 @@ find_newest_architecture_overview_claim_check_report_path_and_result_for_overvie
 Does not handle: counting rounds (the page stops the check at round 3 and
 sends what is left to the user; no report records what he decides); an
 overview not on the path the page gives; a run on the Mac, where the
-log-store is not local; a repository without origin/main, which is refused.
+log-store is not local; a repository without origin/main, which is refused;
+another claim check appending the same claim between this run's last read of
+the proposals file and its append, which writes the claim twice; a report
+write that fails after the append, which leaves entries citing a report that
+was not written.
 Failures: every failure is printed to stderr with what to do and exits
 nonzero; no report is written unless every fresh-agent produced output. The
 temporary worktree is removed on every path, including a failure; when git
@@ -229,7 +233,7 @@ The claims, each with the evidence the check gave:
 {claims}
 The unsettled entries:
 {entries}
-Your final message is the answer. A program reads it and treats an answer in any other form as a failed check, so give one line per claim, in the claims' order: `CLAIM <number> covered-by E<entry number>`, naming one unsettled entry that covers it, or `CLAIM <number> new` when none does.
+Your final message is the answer. A program reads it and treats an answer in any other form as a failed check, so give one line per claim, in the claims' order: `CLAIM <number> covered-by E<entry number>`, naming one unsettled entry that covers it, or `CLAIM <number> new` when none does, and no other text; blank lines are allowed.
 """
 
 
@@ -451,11 +455,11 @@ def claim_number_to_covering_unsettled_entry_number_from_judge_answer(answer, cl
     """Return ({claim number: the unsettled entry that covers it}, None), or (None, why the answer is malformed)."""
     judged = {}
     for line in answer.splitlines():
-        if not line.startswith("CLAIM"):
+        if not line.strip():
             continue
         match = UNSETTLED_ENTRY_COVERS_FIX_LATER_CLAIM_JUDGE_ANSWER_LINE.fullmatch(line)
         if not match:
-            return None, f"its line `{line.strip()}` starts with CLAIM but is not `CLAIM <number> covered-by E<number>` or `CLAIM <number> new`"
+            return None, f"its line `{line.strip()}` is not `CLAIM <number> covered-by E<number>` or `CLAIM <number> new`, the only lines an answer may hold"
         number, entry = int(match.group(1)), match.group(2) and int(match.group(2))
         if number not in claim_numbers:
             return None, f"it answers CLAIM {number}, which it was not asked about"
