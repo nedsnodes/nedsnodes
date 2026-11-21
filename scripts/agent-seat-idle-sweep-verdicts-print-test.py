@@ -698,7 +698,12 @@ try:
         "timeout -s KILL 2d x": "2026-11-04T11:00:00Z",
         "timeout -k5 30s x": "2026-11-02T11:00:30Z",
         "timeout --preserve-status -v 3m x": "2026-11-02T11:03:00Z",
-        "cd a && timeout 5 x": None, "timeoutx 5 y": None, "timeout 5": None}
+        "cd a && timeout 5 x": None, "timeoutx 5 y": None, "timeout 5": None,
+        "timeout 5m prepare && run-tests": None, "timeout 5m a; b": None, "timeout 5m a || b": None,
+        "timeout 5m a\nb": None, "timeout 5m a & b": None,
+        "timeout 5m a 2>&1 | tail -5": "2026-11-02T11:05:00Z",
+        "timeout 5m bash -c 'a && b; c' &>log": "2026-11-02T11:05:00Z",
+        "timeout 5m grep \";\" f $(cd d && ls) \\\n -q": "2026-11-02T11:05:00Z"}
     machine = Machine()
     machine.seat("alpha", [user("go")] + [
         record for number, command in enumerate(TIMEOUT_END_BY_COMMAND_LINE)
@@ -709,7 +714,9 @@ try:
     found = {command: entry["timeout_ends_at"] for command, entry in zip(
         TIMEOUT_END_BY_COMMAND_LINE, verdicts["alpha"]["running"]["background_commands"])}
     check("the timeout end of a command line starting with coreutils `timeout`, after any options, "
-          "with each duration unit; none for a timeout later in the line or no duration",
+          "with each duration unit, piped or not; none for a timeout later in the line, no duration, "
+          "or a `;`, `&&`, `||`, `&` or line break outside quotes, which runs a command the timeout "
+          "does not stop",
           found == TIMEOUT_END_BY_COMMAND_LINE, found)
 
 
