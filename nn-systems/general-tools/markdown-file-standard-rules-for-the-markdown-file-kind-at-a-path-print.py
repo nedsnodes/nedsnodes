@@ -24,29 +24,35 @@ MARKDOWN_FILE_STANDARD_PATH = (
     / "nedsnodes-markdown-file-standard-common-part-and-one-section-per-kind.md")
 COMMON_PART_HEADING = "Common part"
 
-# A test-design and a design-contract sit beside their design, under names the Designs and
-# GHI-MDs patterns also match, but design-to-main's agent-instructions say what they hold.
-UNCOVERED_PATH_PATTERNS = [r"-test-design\.md$", r"-contract\.md$"]
+# A test-design and a design-contract in docs/issues/ have names the GHI-MD pattern also
+# matches, but design-to-main's agent-instructions say what they hold.
+UNCOVERED_PATH_PATTERNS = [r"\.test-design\.md$", r"\.contract\.md$"]
 
-# The first pattern that matches the path picks the section, so a narrower kind comes before
-# a wider one that also matches its paths: a design in docs/issues/ before the GHI-MDs, and
-# the glossary before the wiki pages. Each pattern is anchored at a path component, so it
-# matches the same file in any checkout.
+# Each heading is a kind's name as the project glossary's "Kinds of Markdown file" spells it.
+# The first pattern that matches the path picks the section, so the patterns keep that list's
+# order, in which a kind is asked before any later kind that also matches its paths, such as
+# a prompt template in a skill's directory before the skill. Each pattern is anchored at a path
+# component, so it matches the same file in any checkout.
 KIND_SECTION_HEADING_AND_PATH_PATTERNS = [
-    ("Handoff next step files", r"(^|/)\.claude/handoffs/[^/]+-next-step-[^/]*\.md$"),
-    ("Seat-briefs", r"(^|/)CLAUDE\.local\.md$"),
-    ("The project glossary", r"(^|/)docs/nedsnodes-wiki/nedsnodes-glossary\.md$"),
-    ("Designs", r"(^|/)[^/]+-design\.md$"),
+    ("project instructions", r"(^|/)(CLAUDE|AGENTS)\.md$"),
+    ("seat-brief", r"(^|/)CLAUDE\.local\.md$"),
+    ("agent definition", r"(^|/)\.claude/agents/[^/]+\.md$"),
+    # Only a program reads design-to-main's -agent-instructions.md files; an agent reads other
+    # -instructions.md files, so their path does not say their kind.
+    ("prompt template", r"(^|/)[^/]+(-prompt|-agent-instructions)\.md$"),
+    ("skill", r"(^|/)(\.claude|nn-systems)/skills/[^/]+/[^/]+\.md$"),
+    ("session-handoff or next step file", r"(^|/)\.claude/handoffs/[^/]+-next-step-[^/]*\.md$"),
+    ("glossary", r"(^|/)([^/]+-glossary|nedsnodes-sdlc-terms)\.md$"),
+    ("design", r"(^|/)[^/]+\.design\.md$"),
+    ("GHI-MD", r"(^|/)docs/issues/(queue/[^/]+|\d+-[^/]+)\.md$"),
     # A claim-check's proposed-improvements-or-changes-file sits beside its overview but is a
     # record of what the claim-check found, not a page.
-    ("Wiki pages",
+    ("wiki page",
      r"(^|/)docs/nedsnodes-wiki/(queue/)?(?![^/]*-proposed-improvements-or-changes-)[^/]+\.md$"),
-    ("GHI-MDs", r"(^|/)docs/issues/(queue/[^/]+|\d+-[^/]+)\.md$"),
 ]
 
 
-# ghi-issue-write.py names a GHI-MD from its title, so a design GHI-MD's name need not end
-# -design.md; /ghi-write marks it with this front matter line instead.
+# /ghi-write marks a design GHI-MD with this front matter line, whatever its name ends in.
 DESIGN_FRONT_MATTER_PATTERN = re.compile(r"\A---\n(?:.*\n)*?kind: design\n(?:.*\n)*?---\n")
 
 
@@ -57,8 +63,8 @@ def kind_section_heading_for_path(path):
         return None
     for heading, pattern in KIND_SECTION_HEADING_AND_PATH_PATTERNS:
         if re.search(pattern, normalized):
-            if heading == "GHI-MDs" and is_design_by_front_matter(normalized):
-                return "Designs"
+            if heading == "GHI-MD" and is_design_by_front_matter(normalized):
+                return "design"
             return heading
     return None
 

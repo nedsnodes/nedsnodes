@@ -50,21 +50,32 @@ def run(argv, standard_path=program.MARKDOWN_FILE_STANDARD_PATH):
 
 # Each kind's paths, including the ones a wider pattern also matches.
 expected_kinds = {
-    "/home/nedlern/.claude/handoffs/merge-lane-2-next-step-20261117-133829.md": "Handoff next step files",
-    "/Volumes/nedhome/.claude/handoffs/reboot-test-next-step-20261117-105148.md": "Handoff next step files",
-    "/home/nedlern/agents/merge-lane-2/CLAUDE.local.md": "Seat-briefs",
-    "CLAUDE.local.md": "Seat-briefs",
-    "docs/nedsnodes-wiki/nedsnodes-glossary.md": "The project glossary",
-    "/home/nedlern/agents/x-wt/docs/nedsnodes-wiki/nedsnodes-glossary.md": "The project glossary",
-    "docs/issues/46-ghi-guide-agent-design.md": "Designs",
-    "docs/issues/queue/topic-branch-creation-script-design.md": "Designs",
-    "nn-systems/handoff/handoff-design.md": "Designs",
-    "docs/nedsnodes-wiki/nedsnodes-style-guide.md": "Wiki pages",
-    "docs/nedsnodes-wiki/queue/nedsnodes-markdown-file-standard-common-part-and-one-section-per-kind.md": "Wiki pages",
-    "docs/nedsnodes-wiki/nedsnodes-handoff-architecture-overview.md": "Wiki pages",
-    "/Volumes/nedhome/Projects/nedsnodes/docs/nedsnodes-wiki/nedsnodes-agent-seat-model.md": "Wiki pages",
-    "docs/issues/1080-type-definitions-for-the-project-s-kinds-of.md": "GHI-MDs",
-    "docs/issues/queue/the-signal-sandbox-test-fails.md": "GHI-MDs",
+    "CLAUDE.md": "project instructions",
+    "/home/nedlern/agents/x-wt/AGENTS.md": "project instructions",
+    "/home/nedlern/agents/merge-lane-2/CLAUDE.local.md": "seat-brief",
+    "CLAUDE.local.md": "seat-brief",
+    ".claude/agents/new-name-propose-and-check-fresh-agent.md": "agent definition",
+    "docs/agents/sanity-checker-cut-adversarial-prompt.md": "prompt template",
+    ".claude/skills/cold-read/prompts/defect-hunt-prompt.md": "prompt template",
+    "docs/agents/queue/design-to-main-design-writing-agent-instructions.md": "prompt template",
+    ".claude/skills/ghi-write/SKILL.md": "skill",
+    "nn-systems/skills/explain/explain-how-to-write-an-identifier-instructions.md": "skill",
+    "/home/nedlern/.claude/handoffs/merge-lane-2-next-step-20261117-133829.md": "session-handoff or next step file",
+    "/Volumes/nedhome/.claude/handoffs/reboot-test-next-step-20261117-105148.md": "session-handoff or next step file",
+    "docs/nedsnodes-wiki/nedsnodes-glossary.md": "glossary",
+    "/home/nedlern/agents/x-wt/docs/nedsnodes-wiki/nedsnodes-glossary.md": "glossary",
+    "nn-systems/handoff/handoff-system-glossary.md": "glossary",
+    ".claude/skills/skills-glossary.md": "glossary",
+    "docs/nedsnodes-wiki/nedsnodes-sdlc-terms.md": "glossary",
+    "docs/issues/46-ghi-guide-agent.system.design.md": "design",
+    "docs/issues/queue/topic-branch-creation-script.tool.design.md": "design",
+    "docs/design-to-main/design-to-main-state-machine.system.design.md": "design",
+    "docs/nedsnodes-wiki/nedsnodes-style-guide.md": "wiki page",
+    "docs/nedsnodes-wiki/queue/nedsnodes-markdown-file-standard-common-part-and-one-section-per-kind.md": "wiki page",
+    "docs/nedsnodes-wiki/nedsnodes-handoff-architecture-overview.md": "wiki page",
+    "/Volumes/nedhome/Projects/nedsnodes/docs/nedsnodes-wiki/nedsnodes-agent-seat-model.md": "wiki page",
+    "docs/issues/1080-type-definitions-for-the-project-s-kinds-of.md": "GHI-MD",
+    "docs/issues/queue/the-signal-sandbox-test-fails.md": "GHI-MD",
 }
 for path, kind in expected_kinds.items():
     got = program.kind_section_heading_for_path(path)
@@ -74,10 +85,12 @@ for path, kind in expected_kinds.items():
 for path in [
     "README.md",
     "docs/issues/README.md",
-    "docs/issues/queue/x-test-design.md",
-    "docs/issues/46-ghi-guide-agent-test-design.md",
-    "nn-systems/handoff/handoff-contract.md",
-    "nn-systems/handoff/handoff-system-glossary.md",
+    "docs/issues/queue/x.tool.test-design.md",
+    "docs/issues/46-ghi-guide-agent.system.test-design.md",
+    "docs/issues/46-ghi-guide-agent.system.contract.md",
+    "nn-systems/handoff/handoff-design.md",
+    "docs/agents/pr-reviewer-instructions.md",
+    "nn-systems/skills/explain/tests/explain-reply-cold-read-fast-read-fixtures/capture-note.md",
     "docs/nedsnodes-wiki/nedsnodes-handoff-architecture-overview-proposed-improvements-or-changes-overview-write-claim-check-by-fresh-agent-2026-11-04.md",
     "docs/walk/walk-me-through-skill-refactor-approval-walk-2026-11-02.md",
     "notes-CLAUDE.local.md.bak",
@@ -91,10 +104,11 @@ tracked = subprocess.run(["git", "-C", str(REPOSITORY_ROOT), "ls-files", "*.md"]
 check("the project glossary exists where its pattern looks",
       (REPOSITORY_ROOT / "docs/nedsnodes-wiki/nedsnodes-glossary.md").is_file())
 covered_kinds = {program.kind_section_heading_for_path(str(REPOSITORY_ROOT / name)) for name in tracked}
-for kind in ["The project glossary", "Designs", "Wiki pages", "GHI-MDs"]:
+for kind in ["project instructions", "agent definition", "prompt template", "skill", "glossary", "design",
+             "wiki page", "GHI-MD"]:
     check(f"a tracked file is covered by {kind}", kind in covered_kinds, sorted(map(str, covered_kinds)))
-check("the standard's own path is covered by Wiki pages",
-      program.kind_section_heading_for_path(str(program.MARKDOWN_FILE_STANDARD_PATH)) == "Wiki pages")
+check("the standard's own path is covered by wiki page",
+      program.kind_section_heading_for_path(str(program.MARKDOWN_FILE_STANDARD_PATH)) == "wiki page")
 
 with tempfile.TemporaryDirectory() as scratch:
     issues = Path(scratch) / "docs" / "issues"
@@ -103,10 +117,10 @@ with tempfile.TemporaryDirectory() as scratch:
     design.write_text('---\nissue: "[t](u)"\nkind: design\n---\n\n# T\n', encoding="utf-8")
     plain = issues / "13-a-bug.md"
     plain.write_text('---\nissue: "[t](u)"\n---\n\n# T\n\nkind: design\n', encoding="utf-8")
-    check("a GHI-MD whose front matter carries kind: design is covered by Designs",
-          program.kind_section_heading_for_path(str(design)) == "Designs")
+    check("a GHI-MD whose front matter carries kind: design is covered by design",
+          program.kind_section_heading_for_path(str(design)) == "design")
     check("kind: design outside the front matter does not make a design",
-          program.kind_section_heading_for_path(str(plain)) == "GHI-MDs")
+          program.kind_section_heading_for_path(str(plain)) == "GHI-MD")
 
 # The real standard holds every heading the constants name.
 real_sections = program.markdown_file_standard_sections()
@@ -114,11 +128,11 @@ for heading in [program.COMMON_PART_HEADING] + [h for h, _ in program.KIND_SECTI
     check(f"the standard has the heading ## {heading}", heading in real_sections, sorted(real_sections))
 
 # A covered path prints the common part, then its section, and nothing of other sections.
-code, out, err = run(["docs/issues/46-ghi-guide-agent-design.md"])
+code, out, err = run(["docs/issues/46-ghi-guide-agent.system.design.md"])
 check("a covered path exits 0", code == 0, (code, err))
 check("a covered path prints the common part first", out.startswith("## Common part\n"), out[:80])
-check("a covered path prints its section", "\n## Designs\n" in out, out[-200:])
-check("a covered path prints no other section", "## GHI-MDs" not in out and "## Seat-briefs" not in out, out)
+check("a covered path prints its section", "\n## design\n" in out, out[-200:])
+check("a covered path prints no other section", "## GHI-MD" not in out and "## seat-brief" not in out, out)
 check("a covered path prints nothing on stderr", err == "", err)
 
 # A path no section covers: the common part alone, a message on stderr, exit 1.
@@ -138,13 +152,13 @@ with tempfile.TemporaryDirectory() as scratch:
     # A standard missing a heading the constants name: exit 2, naming the heading.
     partial = Path(scratch) / "partial.md"
     partial.write_text(
-        "# Standard\n\n## Common part\n\ncommon\n\n```\n## Designs\n```\n\n"
+        "# Standard\n\n## Common part\n\ncommon\n\n```\n## design\n```\n\n"
         + "".join(f"## {h}\n\nbody\n\n" for h, _ in program.KIND_SECTION_HEADING_AND_PATH_PATTERNS
-                  if h != "Designs"),
+                  if h != "design"),
         encoding="utf-8")
-    code, out, err = run(["nn-systems/handoff/handoff-design.md"], partial)
+    code, out, err = run(["nn-systems/handoff/handoff.system.design.md"], partial)
     check("a standard missing a heading exits 2", code == 2, code)
-    check("a heading inside a code fence does not count", '"## Designs"' in err, err)
+    check("a heading inside a code fence does not count", '"## design"' in err, err)
 
 # Called wrongly, and asked for help, as a separate process.
 for argv, expected_code in [([], 2), (["a.md", "b.md"], 2), (["--help"], 0)]:

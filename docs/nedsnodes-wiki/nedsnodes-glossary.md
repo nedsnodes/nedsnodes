@@ -1,6 +1,6 @@
 # nedschorus glossary
 
-A list of the phrases and terms of this project approved by the user, in alphabetical order, skills first. Generic SDLC vocabulary is deliberately absent.
+A list of the phrases and terms of this project approved by the user, in alphabetical order, skills first, followed by the one list of the kinds of GHI and the one list of the kinds of Markdown file, each numbered in the order its kinds are tried. Generic SDLC vocabulary is deliberately absent.
 
 Every project-term should be listed here; a term this page does not list is not a project-term, at least not yet. A term used by one system or subsystem alone is a system-term, not a project-term: it is defined in that system's own glossary, so when this page does not list a term, look in the glossary of the system whose files you are in. Each term has one entry, in the glossary of the widest scope that uses it: a term more than one system uses is defined here and in no system glossary. If a term should be added to this list, ask the user to review it. A word needs a project-term only where this project does something unexpected with it or gives it a meaning that would be hard to guess; otherwise it stays ordinary prose. A project-term takes one of four forms: an abbreviation such as GHI, a skill's slash name such as /handoff, a hyphenated phrase such as agent-seat, or a filename suffix such as -draft. The hyphens mark a phrase as a project-term or a system-term with a meaning this project gives it, so a reader knows to look it up, here or in that system's glossary, and an ordinary word keeps its ordinary meaning. A word whose standard spelling, in a dictionary or in computing, has a hyphen, such as fast-forward, is neither a project-term nor a system-term; such words are listed in `docs/nedsnodes-wiki/nedsnodes-ordinary-hyphenated-words-list.md`, and a writer who uses one the list lacks adds it there.
 
@@ -131,3 +131,37 @@ An entry that defines a kind of text, a change to text, or a check on text ends 
 - **user-ruling** — a decision by the user, recorded where it applies in the form (user-ruled YYYY-MM-DD), or recorded with his words and its date elsewhere, such as in walk-minutes.
 - **walk-minutes** — the file `docs/walk/<name>-minutes.md`, in which the /walk-me-through skill records the outcome of each item of an approval-walk; shipped to the log-store's `walk/` directory by `nn-systems/skills/walk-me-through/walk-files-ship.py`.
 - **work-snapshot** — a git commit, kept under `refs/work-snapshots/` and never on a branch, that copies one worktree's uncommitted changes so they survive a crash; an agent-seat's leftover work-snapshots that hold lost work are listed in the initial-agent-instructions of its next agent-session, and by `python3 nn-systems/handoff/uncommitted-work-snapshots.py list --agent-seat <name>`.
+
+## Kinds of GHI
+
+The kind of a GHI is the kind of work it asks for. Try the kinds below in order and take the first whose definition fits the GHI, so no GHI has two kinds. A GHI that names no defined work, only ideas, notes or a record that something is deferred, has no kind: it is closed, and its text kept in the log-store. A GHI that names work but defers it takes the kind of that work. Whether a GHI-MD holds a design is a separate question, answered by its front matter line `kind: design`. The filename suffix after each kind's name is the one a GHI-MD of that kind takes.
+
+1. **research** (`.research.md`) — a GHI that asks for an answer to a question rather than a change, and closes once the answer is found; a suspected defect that nobody has reproduced is research.
+2. **bug** (`.bug.md`) — a GHI about something that already exists, such as a program, hook, test, skill, instruction or document, that fails to do or say what its design, documentation or instructions promise, however the fix is made.
+3. **chore** (`.chore.md`) — a GHI that asks for upkeep of the project's working state that changes the content of no code, skill, instruction or document, such as pruning task lists, branches, worktrees or archives, or administering machines and accounts.
+4. **refactor** (`.refactor.md`) — a GHI that asks to change how existing code, skills, instructions or files are built or arranged, such as moving, splitting or renaming them or turning an agent's hand step into a program, while what their design, documentation or instructions say they deliver stays the same.
+5. **feature** (`.feature.md`) — a GHI that asks to add something the project does not have, or to change what a design, documentation or instructions say an existing thing delivers.
+
+## Kinds of Markdown file
+
+The kind of a Markdown file is who reads it and what it is for. Try the kinds below in order and take the first whose definition fits the file, so no file has two kinds. A file in `docs/issues/queue/`, `docs/agents/queue/` or `docs/nedsnodes-wiki/queue/`, or a `-draft` file, takes the kind it will become. Kinds 5 to 9 are the five kinds of agent-instructions, told apart by who puts the text in front of the model: Claude Code or Codex at the start of every agent-session (5 and 6), Claude Code for a named subagent (7), a program of this project (8), and Claude Code when a skill is invoked (9).
+
+1. **test fixture** — a file that a test reads as input or as expected output.
+2. **record** — a file outside `docs/issues/` that records what happened or what was found, written once and not kept up to date, such as a review report, a triage list, a frozen-copy, a conversation-tail or a status file a program writes.
+3. **walk-minutes** — as its entry above defines it.
+4. **walk-document** — as its entry in `.claude/skills/skills-glossary.md` defines it.
+5. **project instructions** — the file that Claude Code or Codex loads into every agent-session started in a checkout, `CLAUDE.md` or `AGENTS.md`.
+6. **seat-brief** — as its entry above defines it.
+7. **agent definition** — the file `.claude/agents/<name>.md` that Claude Code uses as the instructions of the subagent of that name.
+8. **prompt template** — a file whose text a program of this project puts into a model's prompt, such as `.claude/skills/cold-read/prompts/defect-hunt-prompt.md`.
+9. **skill** — the `SKILL.md` that Claude Code loads when its skill is invoked, or a file that the `SKILL.md` tells the agent to read, such as `nn-systems/skills/explain/explain-how-to-write-an-identifier-instructions.md`.
+10. **session-handoff or next step file** — a file written for the next agent-session of an agent-seat to start from: a session-handoff, or the next step file that `/handoff` writes in `~/.claude/handoffs/` for the session-handoff to copy.
+11. **glossary** — a file that lists terms and gives each one definition, such as this page or `nn-systems/handoff/handoff-system-glossary.md`.
+12. **proposed-improvements-or-changes-file** — as its entry above defines it.
+13. **test-design** — as its entry above defines it.
+14. **design** — a file that decides how something will be built: one whose name ends `.design.md`, or one whose front matter carries the line `kind: design`.
+15. **GHI-MD** — as its entry above defines it.
+16. **supporting-document** — as its entry above defines it.
+17. **wiki page** — a page in `docs/nedsnodes-wiki/` that gives rules or facts to look up, the steps of one job, or how part of the project works.
+18. **intake note** — a note in `nn-queue/` kept at the user's request until its first approval-walk sends its parts to their places.
+19. **README** — a file that tells a reader what a directory or the project holds, such as `README.md`.

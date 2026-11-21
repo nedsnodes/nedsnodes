@@ -1,6 +1,6 @@
 # Markdown file standard: a common part and one section per kind
 
-This page is the standard for the project's Markdown files: a common part that every Markdown file follows, then one section for each of six kinds of file, saying what a file of that kind contains, what it leaves out and its length in words. Do not read the whole page before you write or edit a file. Run `nn-systems/general-tools/markdown-file-standard-rules-for-the-markdown-file-kind-at-a-path-print.py <path of the file>`, giving the path the file will have once it is in place, such as `CLAUDE.local.md` for a seat-brief drafted in a scratchpad. It prints the common part and the one section for that file's kind, or the common part alone when no section covers the path; read another section only where the printed one points to it. The program picks the kind by the path, and, for a GHI-MD that already exists, also by its front matter, as the GHI-MDs section says. It reads this page's level-2 headings as data, and holds this page's path: a heading is renamed, or the page moved, only together with the program's constant that holds it.
+This page is the standard for the project's Markdown files: a common part that every Markdown file follows, then one section for each of ten kinds of file, saying what a file of that kind contains, what it leaves out and its length in words. The kinds are those the project glossary, `docs/nedsnodes-wiki/nedsnodes-glossary.md`, lists under "Kinds of Markdown file", and each section's heading is a kind's name as that list spells it; a file of a kind with no section here follows the common part alone. Do not read the whole page before you write or edit a file. Run `nn-systems/general-tools/markdown-file-standard-rules-for-the-markdown-file-kind-at-a-path-print.py <path of the file>`, giving the path the file will have once it is in place, such as `CLAUDE.local.md` for a seat-brief drafted in a scratchpad. It prints the common part and the one section for that file's kind, or the common part alone when no section covers the path; read another section only where the printed one points to it. The program picks the kind by the path, and, for a GHI-MD that already exists, also by its front matter, as the GHI-MD section says. It reads this page's level-2 headings as data, and holds this page's path: a heading is renamed, or the page moved, only together with the program's constant that holds it. `nn-systems/general-tools/tests/markdown-file-standard-rules-for-the-markdown-file-kind-at-a-path-print-every-kind-named-is-in-project-glossary-test.py` fails when a heading of this page, a kind the program names, or a kind of work the GHI-MD section names is missing from the glossary's lists.
 
 ## Common part
 
@@ -13,74 +13,21 @@ This page is the standard for the project's Markdown files: a common part that e
 - **Kept true.** When the thing a file describes changes, change the sentence that describes it. Do not append a dated note, an "Update:" paragraph or an "as of" line beside the old sentence.
 - **Exemptions and precedence.** A file whose job is to record what happened, such as a log, walk-minutes, a report, a commit message or a pull request description, is exempt from the rules State what is and Kept true, and a word-for-word copy, such as a frozen-copy, follows none of this standard. Where a kind's section asks for something a common-part rule tells writers to leave out, such as the exact command in a bug's `## Reproduction`, the kind's section wins.
 
-## GHI-MDs
+## project instructions
 
-This section covers each GHI-MD in `docs/issues/`, and each MD in `docs/issues/queue/` on its way to becoming one. `.claude/skills/ghi-write/SKILL.md` says how it is routed, titled, filed and edited; this section says what it holds. A GHI-MD that is a design, whose front matter carries `kind: design`, follows the Designs section instead. The program prints the Designs section for it only once the file exists with that line; for a new design GHI-MD, it prints this section, so read the Designs section on this page and follow it instead.
+A project instructions file, `CLAUDE.md` or `AGENTS.md` at the root of a checkout, is in context for the whole of every agent-session started in the checkout, so each word costs every agent-session of every agent-seat. `AGENTS.md` sends Codex to `CLAUDE.md`, so a rule goes in `CLAUDE.md`.
 
-A GHI-MD that is not a design is one of four kinds: a bug, code that does not do what its design, design-contract or documentation says; a change request, a change to what a design or design-contract promises once its code has merged; a chore, upkeep that changes no behaviour; and research, a question to answer, with no code promised. A bug whose fault turns out to be in the design is a change request.
+It contains a level-1 heading naming the project, then each rule that every agent-session in the checkout needs, whatever its agent-seat or task, as one paragraph or list item: the instruction, the condition it applies under, and a reason only where it helps. Where another file holds a rule's detail, the rule gives that file's path and the condition under which to read it, such as the rule that sends a reviewer of a pull request to `docs/agents/pr-reviewer-instructions.md`.
 
-It contains, in this order:
+A project instructions file leaves out:
 
-1. The first heading, the GHI's title, by the rules of `/ghi-write` step 4.
-2. For a bug, `## Reproduction`: the command or steps, what happened, and what should have happened, naming the file that promises it. For a change request, `## Change`: the design it changes, and its design-contract where it has one, what should change, and which of four of the maintenance types that ISO/IEC/IEEE 14764:2022 (https://www.iso.org/standard/80710.html) defines the change is: corrective, adaptive, perfective or preventive. For a chore, `## Work`: the upkeep to do, the files or programs it touches, and why it is due now. For research, `## Question`: the question, and what each likely answer would lead to.
-3. `## Why`: who or what the problem or gap costs, and how often.
-4. `## Next action`: one action a fresh-reader can take.
-5. `## Done when`: the condition that closes the GHI.
-6. `## Relations`: each related GHI by title and link, with one clause on how it relates. Leave the section out when there are none.
-7. `## Outcome`, added when the work is done: what was done, by pull request link, in one paragraph. When Outcome is added, `## Next action` is deleted, because it is then no longer true.
-8. `## Provisional additions (not yet vetted by the user)`, always last, when the GHI-MD holds provisional-additions.
+- A rule that one agent-seat, one skill or one kind of task alone needs: it goes in that seat-brief, skill or wiki page, and a rule names that file only when every agent-session must know to read it.
+- Steps that need no judgment, and the order of steps: a program holds them, as the code-prompt-code rule in `CLAUDE.md` says.
+- History and citations, which `CLAUDE.md` keeps out of standing instructions.
 
-A GHI-MD leaves out:
+Length: at most 1,500 words. A project instructions file over 2,000 words holds rules that belong in a seat-brief, a skill, a wiki page or a program.
 
-- A dated account of events, such as a "Status on" section, a list of where a failure was seen beyond the one example that reproduces it, or the rounds of a review. A new event changes the section it affects, such as Why or Next action.
-- A record of how a decision was reached. A user-ruling the work rests on is stated as what is decided, in the section it governs, followed by its walk-minutes citation in parentheses, because an agent must verify it before it acts against it.
-- Data, measurements and working notes: they go in supporting-documents that the GHI links, as `/ghi-write` step 2 says.
-
-Length: at most 600 words; Outcome and Provisional additions aside. A GHI-MD over 1,000 words usually holds a design, which goes in a GHI-MD of its own that carries `kind: design`, or material for a supporting-document.
-
-## Designs
-
-A design decides how something will be built. It is a GHI-MD whose front matter carries `kind: design`, as `/ghi-write` step 4 says, or a file whose name ends `-design.md`, such as a design moved to its code's `docs/` directory. No section of this page covers a test-design or a design-contract, and the program prints the common part alone for either. `docs/nedsnodes-wiki/nedsnodes-file-naming-and-location-standards.md` says where it lives and how it is named at each stage.
-
-A design has these seven level-2 headings, in this order. A design that does not need one of the seven keeps its heading, and the section's whole body is one line, `Not needed:` followed by the reason.
-
-1. `## Problem`: what is wrong or missing, who it costs, and what the design must achieve, measurable where it can be.
-2. `## Goals and non-goals`: what the design delivers, and what it deliberately does not, one line each.
-3. `## Design`: the components, the data each holds or passes, and how they work together, at the level a builder needs; subsections as the design needs them.
-4. `## Steps that need judgment`: each step given to a model, and why code cannot do it. Every step not listed here is code.
-5. `## Failure handling`: each failure the design handles, how the program reports it, and, for a guard, validation, retry or workaround, the failure that `CLAUDE.md`'s two conditions require.
-6. `## Testing`: how each design-requirement is tested, or the test-design that says so.
-7. `## Alternatives considered`: each alternative rejected, in one or two sentences with its reason.
-
-These headings follow the seven when the design has them, and are left out when it does not: `## Deferred-decisions`, one line for each case the design leaves open, and `## Decided elsewhere`, one line for each decision another component, document or agent-seat makes, naming that owner, each line in the form the paragraph headed `initiate-design-to-main` in `docs/design-to-main/design-to-main-state-machine-design.md` gives, such as a deferred line marked `#not_in_this_run` with its reason; `## Defects fixed`, a `#root_cause` or `#root_cause_not_fixed` line for each defect the design's code fixes, or the line `#no_defect_fixed`, as `CLAUDE.md` gives them for a pull request description and `scripts/merge-gate.sh` checks them; `## Relations`; and, for a design that is a GHI-MD, the GHI-MDs section's `## Next action`, `## Done when`, `## Outcome` and `## Provisional additions (not yet vetted by the user)`, as that section describes them. A design that is a GHI-MD also opens with the front matter `/ghi-write` step 4 gives it, then the GHI's title heading.
-
-A design leaves out:
-
-- Its own revision history, such as "this revision folds in", and the dates its decisions were made. The `**Pinned to what landed:**` lines that `docs/nedsnodes-wiki/nedsnodes-file-naming-and-location-standards.md` asks for after each merge stay, because `scripts/stale-code-citation-check.py` reads them. A user-ruling the design rests on is stated as what is decided, followed by its walk-minutes citation in parentheses.
-- Detail the design-contract or the test-design holds.
-- Once its code has merged, any detail the code now states. From then on, a change to what the design promises goes through a GHI-MD that is a change request.
-
-Length: at most 3,000 words for a system, at most 1,200 for a single program. A design over 4,000 words usually holds two designs, or detail that belongs in the design-contract, the test-design or the code.
-
-## The project glossary
-
-The project glossary is `docs/nedsnodes-wiki/nedsnodes-glossary.md`. Its opening paragraphs say what qualifies as a project-term, which glossary holds a term, the order of entries and when an entry carries the labels #prose, #code and #data; this section says what an entry holds.
-
-Every entry follows one template, on one line, in which `[…]` marks an optional part:
-
-```
-- **<term>** — <definition>[, such as <one example>].[ <one sentence naming the document or program that holds the detail, such as "The program is `<path>`.">][ <labels>]
-```
-
-- The definition is one sentence. It starts with the kind of thing the term names, such as "a skill", "the program" or "a filename suffix", then says what sets it apart from others of that kind. It does not use the term itself.
-- The example is a real one from this repository, given only where the definition alone leaves a reader unsure what counts.
-- The sentence naming the detail's canonical location, such as the program that implements the term, is given where one exists.
-
-An entry leaves out history, user-rulings, quotations of the user, the reasons for the term or the thing it names, how-to steps, design detail, a list of the term's cases, and anything the linked document says.
-
-Length: at most 50 words an entry. An entry over 60 words holds detail that belongs in the linked document.
-
-## Seat-briefs
+## seat-brief
 
 A seat-brief is in context for the whole of every agent-session of its agent-seat, so each word costs every agent-session. `.claude/skills/start-agent-seat/SKILL.md` step 2 says how a new one is written and approved; this section says what it holds, for a new seat-brief and for each edit of one.
 
@@ -100,9 +47,62 @@ A seat-brief leaves out:
 
 Length: at most 800 words. A seat-brief over 1,000 words holds procedures that belong in a skill or a program. When a skill or a program takes over a rule, the rule leaves the seat-brief in the same change.
 
-## Handoff next step files
+## agent definition
 
-A next step file is the file `/handoff` step 2 writes in `~/.claude/handoffs/`; `nn-systems/handoff/handoff-write-and-check-supervisor.py` copies its text into the session-handoff, which the successor agent-session, which did not see the work, starts from. `.claude/skills/handoff/SKILL.md` step 2 says what goes in it and what stays out; this section adds the order, the form and the length.
+An agent definition is the file `.claude/agents/<name>.md` that Claude Code uses as the instructions of the subagent of that name. The dispatching agent reads its front matter's `description` to choose the subagent and to know what to send it, so the `description` is in context in every agent-session.
+
+It contains, in this order:
+
+1. The front matter Claude Code reads: `name`, the file's name without `.md`; `description`, saying when to use the subagent and what to send it; and `tools`, the tools the subagent needs and no others.
+2. The body: the subagent's job, what it is sent, the steps that need judgment, each with what the subagent judges by, and what it returns, in the form the dispatching agent reads.
+
+An agent definition leaves out:
+
+- What `CLAUDE.md` already says, which the subagent has in context too.
+- Steps that need no judgment: a program does them, and the body names the program.
+- History and citations, which `CLAUDE.md` keeps out of standing instructions.
+
+Length: the `description` at most 60 words; the whole file at most 800. An agent definition over 1,000 words holds steps that belong in a program.
+
+## prompt template
+
+A prompt template is a file whose text a program of this project puts into a model's prompt, such as the cold-read prompts in `.claude/skills/cold-read/prompts/`. Its reader is the model the program runs, which has the prompt and what the prompt names, and none of the conversation that led to the run.
+
+It contains, in this order:
+
+1. A first paragraph: the model's job, and what the program gives it.
+2. The steps that need judgment, each with what the model judges by.
+3. The output: its form, exactly as the program reads it, or the path of the JSON Schema the program checks it against.
+
+A prompt template leaves out:
+
+- Steps the program does, such as reading and writing files, putting steps in order, retrying and checking the output's form, as the code-prompt-code rule in `CLAUDE.md` says.
+- The text the program puts in place of a placeholder.
+- History and citations, which `CLAUDE.md` keeps out of standing instructions.
+
+Length: at most 2,000 words. A prompt template over 2,500 words usually holds steps that belong in its program.
+
+## skill
+
+A skill is a skill's `SKILL.md` in `.claude/skills/<name>/`, which Claude Code loads when the skill is invoked, or a Markdown file beside it or in `nn-systems/skills/<name>/` that the `SKILL.md` tells the agent to read; a prompt template among them follows the prompt template section. The `description` in a `SKILL.md`'s front matter is in context in every agent-session, which reads it to decide when to invoke the skill, so each of its words costs every agent-session.
+
+It contains, in this order:
+
+1. For a `SKILL.md`, the front matter Claude Code reads: `name`, the skill's directory name, and `description`: the situations and the user's words that call for the skill, then what it does, in one sentence.
+2. A level-1 heading naming the skill, or, in another file of the skill, naming that file's subject.
+3. The steps that need judgment, each an action with what the agent judges by. Where the skill's steps run in a fixed order, a program holds that order and the record of which steps are done, as the code-prompt-code rule in `CLAUDE.md` says, and the skill gives the command the agent runs to ask it for its next step.
+
+A skill leaves out:
+
+- What `CLAUDE.md` or another skill already says: the skill names that file instead.
+- Steps that need no judgment, which its program does.
+- History and citations, which `CLAUDE.md` keeps out of standing instructions.
+
+Length: the `description` at most 120 words; the rest of a `SKILL.md` at most 2,000, and each file it tells the agent to read at most 2,000. A skill over 3,000 words usually holds ordered steps that belong in a program.
+
+## session-handoff or next step file
+
+This section covers the next step file that `/handoff` step 2 writes in `~/.claude/handoffs/`; `nn-systems/handoff/handoff-write-and-check-supervisor.py` copies its text into the session-handoff, which the successor agent-session, which did not see the work, starts from, and writes the rest of the session-handoff itself, so no section of this page covers the session-handoff file. `.claude/skills/handoff/SKILL.md` step 2 says what goes in a next step file and what stays out; this section adds the order, the form and the length.
 
 It contains, in this order:
 
@@ -114,11 +114,84 @@ A next step file leaves out what this agent-session did, the text of an approval
 
 Length: at most 400 words. A next step file over 500 words holds work that belongs in tasks.
 
-## Wiki pages
+## glossary
 
-A wiki page is a page in `docs/nedsnodes-wiki/`, or one in `docs/nedsnodes-wiki/queue/` pending approval, other than the project glossary and each proposed-improvements-or-changes-file beside an nc-architecture-overview. An nc-architecture-overview also follows `docs/nedsnodes-wiki/nedsnodes-how-to-write-an-architecture-overview.md`, which wins where the two differ.
+This section covers each glossary: the project glossary, `docs/nedsnodes-wiki/nedsnodes-glossary.md`, each system glossary it names, and `docs/nedsnodes-wiki/nedsnodes-sdlc-terms.md`. The project glossary's opening paragraphs say what qualifies as a project-term, which glossary holds a term, the order of entries and when an entry carries the labels #prose, #code and #data; this section says what an entry holds.
 
-Each page is one of three kinds, and keeps to its kind: a reference page lists rules or facts a reader looks up, such as `docs/nedsnodes-wiki/nedsnodes-style-guide.md`; a how-to page gives the steps of one job, such as `docs/nedsnodes-wiki/nedsnodes-how-to-choose-a-name-for-files-code-and-glossary-terms.md`; an explanation page says how part of the project works and why, such as `docs/nedsnodes-wiki/nedsnodes-agent-seat-model.md`. When a page grows material of another kind, move that material to a page of its own and link to it.
+Every entry follows one template, on one line, in which `[…]` marks an optional part:
+
+```
+- **<term>** — <definition>[, such as <one example>].[ <one sentence naming the document or program that holds the detail, such as "The program is `<path>`.">][ <labels>]
+```
+
+- The definition is one sentence. It starts with the kind of thing the term names, such as "a skill", "the program" or "a filename suffix", then says what sets it apart from others of that kind. It does not use the term itself.
+- The example is a real one from this repository, given only where the definition alone leaves a reader unsure what counts.
+- The sentence naming the detail's canonical location, such as the program that implements the term, is given where one exists.
+- In the project glossary's two lists of kinds, an entry is a numbered item instead, in the order its kind is tried, and a kind that an entry of its own already defines points to that entry instead of defining it again.
+
+An entry leaves out history, user-rulings, quotations of the user, the reasons for the term or the thing it names, how-to steps, design detail, a list of the term's cases, and anything the linked document says.
+
+Length: at most 50 words an entry. An entry over 60 words holds detail that belongs in the linked document.
+
+## design
+
+A design decides how something will be built. It is a file whose name ends `.design.md`, as `docs/nedsnodes-wiki/nedsnodes-file-naming-and-location-standards.md` names one at each stage and says where it lives, or a GHI-MD whose front matter carries `kind: design`, as `/ghi-write` step 4 says. No section of this page covers a test-design or a design-contract, and the program prints the common part alone for either.
+
+A design has these seven level-2 headings, in this order. A design that does not need one of the seven keeps its heading, and the section's whole body is one line, `Not needed:` followed by the reason.
+
+1. `## Problem`: what is wrong or missing, who it costs, and what the design must achieve, measurable where it can be.
+2. `## Goals and non-goals`: what the design delivers, and what it deliberately does not, one line each.
+3. `## Design`: the components, the data each holds or passes, and how they work together, at the level a builder needs; subsections as the design needs them.
+4. `## Steps that need judgment`: each step given to a model, and why code cannot do it. Every step not listed here is code.
+5. `## Failure handling`: each failure the design handles, how the program reports it, and, for a guard, validation, retry or workaround, the failure that `CLAUDE.md`'s two conditions require.
+6. `## Testing`: how each design-requirement is tested, or the test-design that says so.
+7. `## Alternatives considered`: each alternative rejected, in one or two sentences with its reason.
+
+These headings follow the seven when the design has them, and are left out when it does not: `## Deferred-decisions`, one line for each case the design leaves open, and `## Decided elsewhere`, one line for each decision another component, document or agent-seat makes, naming that owner, each line in the form the paragraph headed `initiate-design-to-main` in `docs/design-to-main/design-to-main-state-machine.system.design.md` gives, such as a deferred line marked `#not_in_this_run` with its reason; `## Defects fixed`, a `#root_cause` or `#root_cause_not_fixed` line for each defect the design's code fixes, or the line `#no_defect_fixed`, as `CLAUDE.md` gives them for a pull request description and `scripts/merge-gate.sh` checks them; `## Relations`; and, for a design that is a GHI-MD, the GHI-MD section's `## Next action`, `## Done when`, `## Outcome` and `## Provisional additions (not yet vetted by the user)`, as that section describes them. A design that is a GHI-MD also opens with the front matter `/ghi-write` step 4 gives it, then the GHI's title heading.
+
+A design leaves out:
+
+- Its own revision history, such as "this revision folds in", and the dates its decisions were made. The `**Pinned to what landed:**` lines that `docs/nedsnodes-wiki/nedsnodes-file-naming-and-location-standards.md` asks for after each merge stay, because `scripts/stale-code-citation-check.py` reads them. A user-ruling the design rests on is stated as what is decided, followed by its walk-minutes citation in parentheses.
+- Detail the design-contract or the test-design holds.
+- Once its code has merged, any detail the code now states. From then on, a change to what the design promises goes through a GHI-MD for a feature, which revises the design before the code.
+
+Length: at most 3,000 words for a system, at most 1,200 for a single program. A design over 4,000 words usually holds two designs, or detail that belongs in the design-contract, the test-design or the code.
+
+## GHI-MD
+
+This section covers each GHI-MD in `docs/issues/`, and each MD in `docs/issues/queue/` on its way to becoming one. `.claude/skills/ghi-write/SKILL.md` says how it is routed, titled, filed and edited; this section says what it holds. A GHI-MD that is a design follows the design section instead. The program prints the design section for it by its name, which ends `.design.md`, or, for a GHI-MD that exists and carries the front matter line `kind: design`, by that line.
+
+Its GHI is of one of the five kinds of work the project glossary lists under "Kinds of GHI". A bug whose fault turns out to be in its design is a feature, because the fix changes what the design promises.
+
+It contains, in this order:
+
+1. The first heading, the GHI's title, by the rules of `/ghi-write` step 4.
+2. The one heading its kind of work takes:
+   - **research**: `## Question`: the question, and what each likely answer would lead to.
+   - **bug**: `## Reproduction`: the command or steps, what happened, and what should have happened, naming the file that promises it.
+   - **chore**: `## Work`: the upkeep to do, the files or programs it touches, and why it is due now.
+   - **refactor**: `## Change`: what is rebuilt or rearranged, and the design, documentation or tests that show that what it delivers stays the same.
+   - **feature**: `## Change`: what is added, or what an existing thing will deliver differently, and the design, design-contract or documentation that promises it, or that none exists yet.
+3. `## Why`: who or what the problem or gap costs, and how often.
+4. `## Next action`: one action a fresh-reader can take.
+5. `## Done when`: the condition that closes the GHI.
+6. `## Relations`: each related GHI by title and link, with one clause on how it relates. Leave the section out when there are none.
+7. `## Outcome`, added when the work is done: what was done, by pull request link, in one paragraph. When Outcome is added, `## Next action` is deleted, because it is then no longer true.
+8. `## Provisional additions (not yet vetted by the user)`, always last, when the GHI-MD holds provisional-additions.
+
+A GHI-MD leaves out:
+
+- A dated account of events, such as a "Status on" section, a list of where a failure was seen beyond the one example that reproduces it, or the rounds of a review. A new event changes the section it affects, such as Why or Next action.
+- A record of how a decision was reached. A user-ruling the work rests on is stated as what is decided, in the section it governs, followed by its walk-minutes citation in parentheses, because an agent must verify it before it acts against it.
+- Data, measurements and working notes: they go in supporting-documents that the GHI links, as `/ghi-write` step 2 says.
+
+Length: at most 600 words; Outcome and Provisional additions aside. A GHI-MD over 1,000 words usually holds a design, which goes in a GHI-MD of its own that carries `kind: design`, or material for a supporting-document.
+
+## wiki page
+
+A wiki page is a page in `docs/nedsnodes-wiki/`, or one in `docs/nedsnodes-wiki/queue/` pending approval, other than a glossary and each proposed-improvements-or-changes-file beside an nc-architecture-overview. An nc-architecture-overview also follows `docs/nedsnodes-wiki/nedsnodes-how-to-write-an-architecture-overview.md`, which wins where the two differ.
+
+Each page is a reference page, a how-to page or an explanation page, and keeps to what that one holds: a reference page lists rules or facts a reader looks up, such as `docs/nedsnodes-wiki/nedsnodes-style-guide.md`; a how-to page gives the steps of one job, such as `docs/nedsnodes-wiki/nedsnodes-how-to-choose-a-name-for-files-code-and-glossary-terms.md`; an explanation page says how part of the project works and why, such as `docs/nedsnodes-wiki/nedsnodes-agent-seat-model.md`. When a page grows material that belongs on another of the three, move that material to a page of its own and link to it.
 
 A page contains, in this order:
 
