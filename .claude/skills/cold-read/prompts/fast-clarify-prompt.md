@@ -8,7 +8,7 @@ Restate each document or source text as follows. For each sentence, write its id
 
 ## Question 2: Where you struggled
 
-Note where an agent might waste tokens or come to incorrect conclusions:
+Note where the reader the text is written for might waste effort or come to incorrect conclusions:
 
 * every place in the text that seemed unclear, opaque, incoherent.
 * ambiguities - phrases or sentences that could read two different ways, in which case describe both readings, including the use of pronouns with ambiguous subjects

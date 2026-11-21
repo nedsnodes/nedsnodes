@@ -143,7 +143,7 @@ says where the text came from. The template is the user's own text:
 it, landed by PR #274 on 2026-09-07, copied here verbatim. A change to the
 instructions is a one-hunk change to that one constant; outside it, this file
 knows only the three placeholders it fills itself (see THE EDIT and THE
-READER). The prompt file under the skill is not read by this program, so the
+READER); the launcher fills the other two, {TARGET_PATH} and {REPORT_PATH}. The prompt file under the skill is not read by this program, so the
 two are kept in step by hand.
 
 THE READER. --text-intended-reader-category names the cold-read-target's
@@ -383,7 +383,7 @@ Restate each document or source text as follows. For each sentence, write its id
 
 ## Question 2: Where you struggled
 
-Note where an agent might waste tokens or come to incorrect conclusions:
+Note where the reader the text is written for might waste effort or come to incorrect conclusions:
 
 * every place in the text that seemed unclear, opaque, incoherent.
 * ambiguities - phrases or sentences that could read two different ways, in which case describe both readings, including the use of pronouns with ambiguous subjects
