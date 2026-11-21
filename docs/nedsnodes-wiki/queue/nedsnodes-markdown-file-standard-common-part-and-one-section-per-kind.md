@@ -159,7 +159,7 @@ Length: at most 3,000 words for a system, at most 1,200 for a single program. A 
 
 ## GHI-MD
 
-This section covers each GHI-MD in `docs/issues/`, and each MD in `docs/issues/queue/` on its way to becoming one. `.claude/skills/ghi-write/SKILL.md` says how it is routed, titled, filed and edited; this section says what it holds. A GHI-MD that is a design follows the design section instead. The program prints the design section for it by its name, which ends `.design.md`, or, for a GHI-MD that exists and carries the front matter line `kind: design`, by that line.
+This section covers each GHI-MD in `docs/issues/`, and each MD in `docs/issues/queue/` on its way to becoming one. `.claude/skills/ghi-write/SKILL.md` says how it is routed, titled, filed and edited; this section says what it holds. A GHI-MD that is a design, whose name ends `.design.md` or whose front matter carries `kind: design`, follows the design section instead. The program prints the design section for it by that name, or, once the file exists, by that line; for a new design GHI-MD whose name does not end `.design.md`, such as one `scripts/ghi-issue-write.py` names from its title, it prints this section, so read the design section on this page and follow it instead.
 
 Its GHI is of one of the five kinds of work the project glossary lists under "Kinds of GHI". A bug whose fault turns out to be in its design is a feature, because the fix changes what the design promises.
 
