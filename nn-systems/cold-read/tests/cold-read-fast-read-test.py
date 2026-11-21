@@ -2253,7 +2253,7 @@ check("the Question 4 prompt carries the fast-clarify prompt's reading rules who
       "from their first sentence to their last",
       warning_module.FAST_CLARIFY_PROMPT_DOCUMENT_READING_RULES.startswith(warning_module.FAST_CLARIFY_PROMPT_DOCUMENT_READING_RULES_OPENING_WORDS)
       and warning_module.FAST_CLARIFY_PROMPT_DOCUMENT_READING_RULES.endswith(warning_module.FAST_CLARIFY_PROMPT_DOCUMENT_READING_RULES_CLOSING_WORDS)
-      and "Never open a credential file" in warning_module.FAST_CLARIFY_PROMPT_DOCUMENT_READING_RULES
+      and "Never open a file or store that holds credentials" in warning_module.FAST_CLARIFY_PROMPT_DOCUMENT_READING_RULES
       and warning_module.FAST_CLARIFY_PROMPT_DOCUMENT_READING_RULES in warning_module.COLD_READ_FAST_READ_WHAT_SHOULD_BE_CODE_QUESTION_PROMPT_TEMPLATE,
       repr(warning_module.FAST_CLARIFY_PROMPT_DOCUMENT_READING_RULES[:200]))
 class_of = warning_module.full_run_class_of_target
