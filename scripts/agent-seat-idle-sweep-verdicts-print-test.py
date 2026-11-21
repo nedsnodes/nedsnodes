@@ -699,18 +699,57 @@ try:
         "timeout -k5 30s x": "2026-11-02T11:00:30Z",
         "timeout --preserve-status -v 3m x": "2026-11-02T11:03:00Z",
         "cd a && timeout 5 x": None, "timeoutx 5 y": None, "timeout 5": None}
+    BOUNDED = "2026-11-02T12:00:00Z"
+    TIMEOUT_END_BY_COMMAND_LINE_WITH_SHELL_OPERATORS = {
+        "timeout 1h build": BOUNDED,
+        "timeout 1h build\n": BOUNDED,
+        "timeout 1h sh -c 'a; b'": BOUNDED,
+        'timeout 1h bash -c "a && b | c &"': BOUNDED,
+        "timeout 1h printf 'a\nb'": BOUNDED,
+        "timeout 1h build > log 2>&1": BOUNDED,
+        "timeout 1h build &>>log <input": BOUNDED,
+        "timeout 1h build && publish": None,
+        "timeout 1h build&&publish": None,
+        "timeout 1h build || publish": None,
+        "timeout 1h build; sleep 99999": None,
+        "timeout 1h build | tee log": None,
+        "timeout 1h build |& tee log": None,
+        "timeout 1h build &": None,
+        "timeout 1h build & sleep 99999": None,
+        "timeout 1h build\nsleep 99999": None,
+        "timeout 1h build # note\nsleep 99999": None,
+        "timeout 1h echo $(sleep 99999)": None,
+        'timeout 1h echo "$(sleep 99999)"': None,
+        "timeout 1h echo `sleep 99999`": None,
+        # An unclosed quote, which shlex cannot tokenize.
+        "timeout 1h sh -c 'a": None,
+        # shlex drops the backslash and the quotes, so these words read as operators or a substitution.
+        "timeout 1h find . -exec rm {} \\;": None,
+        "timeout 1h grep '|' f": None,
+        "timeout 1h sh -c 'x=$(y)'": None,
+        "timeout 1h build \\\n  --flag": None}
+    command_lines = {**TIMEOUT_END_BY_COMMAND_LINE, **TIMEOUT_END_BY_COMMAND_LINE_WITH_SHELL_OPERATORS}
     machine = Machine()
     machine.seat("alpha", [user("go")] + [
-        record for number, command in enumerate(TIMEOUT_END_BY_COMMAND_LINE)
+        record for number, command in enumerate(command_lines)
         for record in background_bash_launch(f"bk{number}", {"command": command, "description": "d"},
                                              "2026-11-02T11:00:00Z", f"tb{number}")]
         + [assistant("Waiting on them."), turn_end()])
     _, verdicts, _ = machine.run()
     found = {command: entry["timeout_ends_at"] for command, entry in zip(
-        TIMEOUT_END_BY_COMMAND_LINE, verdicts["alpha"]["running"]["background_commands"])}
+        command_lines, verdicts["alpha"]["running"]["background_commands"])}
     check("the timeout end of a command line starting with coreutils `timeout`, after any options, "
           "with each duration unit; none for a timeout later in the line or no duration",
-          found == TIMEOUT_END_BY_COMMAND_LINE, found)
+          {command: found[command] for command in TIMEOUT_END_BY_COMMAND_LINE}
+          == TIMEOUT_END_BY_COMMAND_LINE, found)
+    check("a command line gets a timeout end only when no unquoted control operator follows the "
+          "timeout command, since `timeout` does not bound what the operator starts; quoted operators "
+          "and redirections keep it, and a command substitution or a line shlex cannot tokenize "
+          "gets none",
+          {command: found[command] for command in TIMEOUT_END_BY_COMMAND_LINE_WITH_SHELL_OPERATORS}
+          == TIMEOUT_END_BY_COMMAND_LINE_WITH_SHELL_OPERATORS,
+          {command: found[command] for command in TIMEOUT_END_BY_COMMAND_LINE_WITH_SHELL_OPERATORS
+           if found[command] != TIMEOUT_END_BY_COMMAND_LINE_WITH_SHELL_OPERATORS[command]})
 
 
     def subagent_report(agent_id, result, at, interim):

@@ -26,8 +26,8 @@ It prints one JSON object per agent-seat, one per line. Each holds what the late
 without reading anything again: the session id, the transcript path, the last time a token was
 spent and the file that showed it, what is running and since when, Workflow-tool runs included, each
 background command with the description of the Bash call that started it and, when its command line
-starts with coreutils `timeout <duration>`, the time that timeout stops it (a subagent that reported and
-stopped while background commands it launched still run gets the time of its report under
+is a single command run under coreutils `timeout <duration>`, the time that timeout stops it (a
+subagent that reported and stopped while background commands it launched still run gets the time of its report under
 `stopped_at` and a list of those commands under `own_running_background_commands`), the matched sentences with the code's reading of each, the agent-seat's last message, the tool calls a judge of the sentences
 looks through, the rule that applies and its decision.
 
@@ -58,6 +58,7 @@ import argparse
 import importlib.util
 import json
 import re
+import shlex
 import sys
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
@@ -107,6 +108,13 @@ TIMEOUT_COMMAND_LINE_START_PATTERN = re.compile(
     r"|--(?:kill-after|signal)(?:=|\s+)\S+|-[ks]\s*\S+))*"
     r"\s+(?P<number>\d+(?:\.\d*)?|\.\d+)(?P<unit>[smhd]?)\s")
 SECONDS_BY_TIMEOUT_DURATION_UNIT = {"": 1, "s": 1, "m": 60, "h": 3600, "d": 86400}
+# The characters bash builds its control and redirection operators from, newline included, since a
+# newline ends a command as `;` does.
+SHELL_OPERATOR_CHARACTERS = ";&|()<>\n"
+# The redirection operators, which only send the timeout command's own input and output elsewhere.
+# Every other run of SHELL_OPERATOR_CHARACTERS starts a command `timeout` does not bound.
+SHELL_REDIRECTION_OPERATORS = frozenset(
+    ("<", ">", ">>", "<<", "<<<", "<>", ">|", "<&", ">&", "&>", "&>>"))
 HANDOFF_PUT_OFF_TEXT = ("Your handoff was put off at {time} and nothing is running now. "
                         "Is now a good time to hand off?")
 
@@ -412,12 +420,39 @@ class BackgroundCommandCalls:
 
 
 def timeout_seconds_of_command_line(command):
-    """The duration of the coreutils `timeout` a command line starts with, in seconds; None when it
-    starts with none, and 0 for a duration of 0, which disables the timeout."""
+    """The duration of the coreutils `timeout` that bounds the whole command line, in seconds: the
+    line starts with `timeout <duration>`, no unquoted control operator, such as `;`, `&&`, `|`, `&`
+    or a newline, follows, and no command substitution, `$(…)` or a backquote, appears, since
+    `timeout` does not bound what such an operator starts, and bash runs a substitution before
+    `timeout` starts. None for any other line, and 0 for a duration of 0, which disables the
+    timeout."""
+    command = command.strip()
     match = TIMEOUT_COMMAND_LINE_START_PATTERN.match(command)
-    if not match:
+    if not match or command_line_runs_more_than_one_command(command):
         return None
     return float(match["number"]) * SECONDS_BY_TIMEOUT_DURATION_UNIT[match["unit"]]
+
+
+def command_line_runs_more_than_one_command(command):
+    """Whether the command line holds an unquoted control operator or a command substitution. A
+    line shlex cannot tokenize, such as one with an unclosed quote, counts as holding one.
+
+    Trap: shlex drops the quotes and backslashes around a word, so a word that is wholly an operator,
+    such as the `\\;` ending `find -exec`, the `'|'` of `grep '|'`, or a backslash that continues a
+    line, reads as that operator, and a single-quoted `$(` reads as a substitution. Each such
+    misreading only takes the line's timeout end away."""
+    lexer = shlex.shlex(command, posix=True, punctuation_chars=SHELL_OPERATOR_CHARACTERS)
+    lexer.whitespace_split = True
+    lexer.whitespace = " \t\r"
+    # shlex reads a comment through the newline that ends the comment, which would hide that newline.
+    lexer.commenters = ""
+    try:
+        tokens = list(lexer)
+    except ValueError:
+        return True
+    return any((set(token) <= set(SHELL_OPERATOR_CHARACTERS)
+                and token not in SHELL_REDIRECTION_OPERATORS)
+               or "$(" in token or "`" in token for token in tokens if token)
 
 
 def task_notification_carrier_text(record):
