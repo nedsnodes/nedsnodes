@@ -291,6 +291,17 @@ with tempfile.TemporaryDirectory() as scratch:
           + CODEX_LOGGED_OUT_LINE.split(" ", 1)[1] in result.stderr,
           repr(result.stderr))
 
+    # --- Each attempt starts with no answer file -----------------------------
+    # Otherwise a model that exits 0 without writing -o would have the last
+    # model's refused answer read as its own.
+    stale_answer_file = scratch / "stale-codex-answer.json"
+    stale_answer_file.write_text('{"document_kind": "the last attempt\'s answer"}', encoding="utf-8")
+    build_invocation = codex_module.structured_answer_invocation_builder(
+        "xhigh", scratch / "schema.json", stale_answer_file)
+    build_invocation("gpt-6-luna", "the prompt")
+    check("building the next attempt's command removes the last attempt's answer file",
+          not stale_answer_file.exists(), "the stale answer file is still there")
+
     # --- A --cell outside the list, without --prompt-file, is a refusal ----
     # The check left argparse (it depends on --prompt-file, which argparse
     # cannot see while validating --cell) and must still exit by the same
