@@ -333,7 +333,8 @@ def scratch_home_for(stub_directory):
 
 
 def run_agy_cell(repository, stub_directory, plan, report_path, *arguments,
-                 tier="fast", path_override=None, gemini_api_key=None, pass_fds=()):
+                 tier="fast", path_override=None, gemini_api_key=None, pass_fds=(),
+                 environment_overrides=None):
     install_stub_agy(stub_directory)
     environment = dict(os.environ)
     environment.pop("GEMINI_API_KEY", None)
@@ -344,6 +345,7 @@ def run_agy_cell(repository, stub_directory, plan, report_path, *arguments,
                            path_with_stub_agy_first(stub_directory, environment))
     environment["COLD_READ_AGY_CELL_TEST_STUB_PLAN"] = json.dumps(plan)
     environment["COLD_READ_AGY_CELL_TEST_STUB_REPORT_PATH"] = str(report_path)
+    environment.update(environment_overrides or {})
     return subprocess.run(
         [sys.executable, str(repository / "nn-systems" / "cold-read" / "cold-read-agy-cell.py"),
          "--cell", "fast-clarify", "--tier", tier,
@@ -627,6 +629,26 @@ with tempfile.TemporaryDirectory() as scratch:
               f"exit {result.returncode}; stderr={result.stderr!r}")
         check(f"--tier {other_tier} never launches agy",
               not report.exists(), "the stub agy ran and wrote the report")
+
+    # --- A JSON-answer cell is refused: agy cannot be asked for a JSON answer ---
+    repository = build_scratch_repository(scratch)
+    report = report_path_for(repository, "json-answer-cell-refused")
+    argv_dump = scratch / "json-answer-cell-refused-argv.json"
+    json_answer_temporary_directory = scratch / "temporary-directory-json-answer-cell-refused"
+    json_answer_temporary_directory.mkdir()
+    # argparse keeps the last --cell, so this one replaces run_agy_cell's fast-clarify.
+    result = run_agy_cell(
+        repository, stubs, {"*": {"report": "STUB AGY REVIEW\n", "dump_argv": str(argv_dump)}},
+        report, "--cell", "terminology", tier="fast",
+        environment_overrides={"TMPDIR": str(json_answer_temporary_directory)},
+    )
+    left_over = sorted(path.name for path in json_answer_temporary_directory.glob("cold-read-answer-*"))
+    check("the terminology cell is refused by the agy launcher with exit 64 and the remedy, "
+          "no agy started and no answer directory left",
+          result.returncode == 64 and "cannot ask its agent-binary for a JSON answer" in result.stderr
+          and "cold-read-claude-cell.py or" in result.stderr
+          and not argv_dump.exists() and not report.exists() and left_over == [],
+          f"exit {result.returncode}; left {left_over}; stderr={result.stderr[-600:]!r}")
 
     # --- Chat instead of file: a long result response is the review ------
     repository = build_scratch_repository(scratch)
