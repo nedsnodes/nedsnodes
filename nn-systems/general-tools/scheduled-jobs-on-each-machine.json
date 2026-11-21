@@ -223,6 +223,7 @@
     },
     {
       "name": "agent-seat-terminal-captures-older-than-seven-days-delete",
+      "owner": "MD-skills-2",
       "program": "nn-systems/handoff/agent-seat-terminal-captures-older-than-seven-days-delete.py",
       "arguments": [],
       "output": ".claude/agent-seat-terminal-captures-older-than-seven-days-delete.log",
