@@ -9,7 +9,8 @@ run, hashes only a file whose stat data differs, logs each new version in this m
 directory of the log-store kind guarded-file-versions-and-approvals/, copies it there unless
 the file's checkout is on a branch whose HEAD commit holds it, and, when the version is not in its path's
 approved set, tells the agent to show the user the change and run this program with --approve
-or --restore. A version that the checkout's local origin/main holds at the same path enters the
+or --restore; for a file whose path has no approved version and that origin/main does not hold,
+when the store keeps its copy, it also offers the rm that deletes it. A version that the checkout's local origin/main holds at the same path enters the
 approved set without asking, since main's versions came through reviewed pull requests; when
 git cannot read origin/main, the run reports that failure and settles nothing. A deletion of a
 guarded file enters the approved set without asking, wherever it came from; a rename's new path
@@ -179,7 +180,7 @@ UNAPPROVED_VERSION_REMINDER_MESSAGE = (
     "If he approves, write his words into {marker} at the top of your session's checkout, then "
     "run: python3 {program} --approve {path} {key}\n"
     "If he declines, run: python3 {program} --restore {path} {key}")
-DELETION_OFFER_LINE = (
+GUARDED_FILE_WITH_NO_APPROVED_VERSION_DELETE_WITHOUT_ASKING_INSTRUCTIONS = (
     "Whether or not you are a subagent: if {path} should not exist, as when you made it by "
     "mistake or only for your own notes, delete it without asking anyone, and do none of the "
     "other steps for it: rm -- {quoted_path}\n"
@@ -1003,7 +1004,7 @@ def approval_takes(store, path, key, rule):
 
 
 def store_phase(store, session, owner, checks, unsettled_unchanged, approvals, quiet,
-                origin_main_paths=frozenset()):
+                origin_main_paths):
     """Everything that touches the store. Returns (asks, reminders, settled paths); each ask and
     each reminder ends with whether its message offers to delete the file.
 
@@ -1521,7 +1522,8 @@ def messages(asks, reminders):
 
 
 def deletion_offers(paths):
-    return "".join(DELETION_OFFER_LINE.format(path=path, quoted_path=shlex.quote(path))
+    return "".join(GUARDED_FILE_WITH_NO_APPROVED_VERSION_DELETE_WITHOUT_ASKING_INSTRUCTIONS.format(
+        path=path, quoted_path=shlex.quote(path))
                    for path in paths)
 
 
