@@ -1064,12 +1064,118 @@ check("one GitHub budget for the whole run: once the due-task pass spends it, th
       gh_calls_made == ["301", "302"], gh_calls_made)
 # A second budget would ask gh about task 3's prerequisite too, and report that failure as well.
 check("one GitHub budget for the whole run: each condition gh could not answer is reported "
-      "once, and the condition past the spent budget is not reported",
+      "once, and the condition past the spent budget is reported as skipped, not as failed",
       text.startswith(NEXT_ACTION_FIRST_LINE)
       and text.count("could not ask GitHub whether PR 301 is merged") == 1
       and text.count("could not ask GitHub whether PR 302 is merged") == 1
       and "could not ask GitHub whether PR 303 is merged" not in text
+      and text.count("before it asked about PR 303, so task 3 ") == 1
       and "3 more open task(s) are not listed" in text, text)
+
+
+# --- the GitHub budget goes to tasks no blockedBy holds, and a skip is reported ---------------
+# Each fake gh call moves the budget's clock by `seconds_per_call`; the budget is the real one.
+def run_with_fake_gh(seconds_per_call, merged, action):
+    """Run `action()` with gh answered in-process; returns (its result, the numbers gh was asked about)."""
+    clock_seconds = [0.0]
+    asked = []
+
+    def fake_ask_gh(kind, number, timeout_seconds):
+        asked.append(number)
+        clock_seconds[0] += seconds_per_call
+        return {"met": number in merged, hook.CLOSED_WITHOUT_MERGING_ANSWER_KEY: False,
+                "title": f"T{number}", "url": f"https://x/{number}"}
+
+    real_ask_gh = hook.GitHubConditionChecker.__dict__["ask_gh"]
+    real_checker_clock = hook.GitHubConditionChecker.__dict__["clock"]
+    hook.GitHubConditionChecker.ask_gh = staticmethod(fake_ask_gh)
+    hook.GitHubConditionChecker.clock = staticmethod(lambda: clock_seconds[0])
+    try:
+        return action(), asked
+    finally:
+        hook.GitHubConditionChecker.ask_gh = real_ask_gh
+        hook.GitHubConditionChecker.clock = real_checker_clock
+
+
+seat = Seat()
+seat.task("1", subject="blocker, still open")
+seat.task("2", blocked_by=["1"],
+          metadata={"prerequisites": [{"pr_merged": 11}, {"pr_merged": 12}, {"pr_merged": 13}]})
+seat.task("3", metadata={"prerequisites": [{"pr_merged": 99}]}, subject="ready")
+state = {"raised": {}, "checks": {}}
+(lines, _, _, _), asked = run_with_fake_gh(7, {99}, lambda: hook.due_task_lines(
+    hook.read_tasks(seat.task_directory), seat.task_directory, state,
+    hook.GitHubConditionChecker(state["checks"], 0)))
+check("budget: a task blockedBy holds, whose slow gh calls would spend the budget, is checked "
+      "only after the ready task, which is raised",
+      asked[0] == 99 and len(lines) == 1 and lines[0].startswith(
+          '[rule due-task-raise-when-prerequisites-met] Act on task 3 "ready"'), (asked, lines))
+
+(unheld, held), asked = run_with_fake_gh(7, {99}, lambda: hook.unheld_and_held_tasks(
+    hook.read_tasks(seat.task_directory), seat.task_directory,
+    hook.GitHubConditionChecker({}, 0), {}))
+check("budget: the next-action list and the idle sweep also check the ready task first, and "
+      "list it, oldest first",
+      asked[0] == 99 and unheld == ["1", "3"] and held == 1, (asked, unheld, held))
+
+
+def hook_run_in_process(seat):
+    return hook.run(STOP_PAYLOAD, {**seat_session_environment(),
+                                   "CLAUDE_CODE_TASK_LIST_ID": TASK_LIST_ID},
+                    seat.home, hook.datetime.now(hook.timezone.utc))
+
+
+BUDGET_SKIP_INSTRUCTIONS = (
+    "If you have other work, nothing is needed for a task named above as not checked: the next "
+    "stop asks GitHub again and raises the task when what it waits on is done.\n"
+    "If you are about to end your turn with no other work, check each such pull request or GHI "
+    "yourself with `gh pr view <number> --repo nedsnodes/nedsnodes --json state` or `gh issue "
+    "view <number> --repo nedsnodes/nedsnodes --json state`, and act on the task now if every "
+    "prerequisite is done.")
+
+# The first call uses the whole budget, so the remaining budget is exactly 0 for the second.
+seat = Seat()
+seat.task("4", metadata={"prerequisites": [{"pr_merged": 401}]}, subject="first")
+seat.task("5", metadata={"prerequisites": [{"pr_merged": 402}, {"issue_closed": 403}]},
+          subject="second")
+output, asked = run_with_fake_gh(hook.GH_CALLS_TOTAL_BUDGET_SECONDS, {401, 402, 403},
+                                 lambda: hook_run_in_process(seat))
+text = json.loads(output)["hookSpecificOutput"]["additionalContext"] if output else ""
+check("budget spent, with a task raised: each task skipped is named after the raise, with "
+      "what was not asked and the instructions",
+      asked == [401] and text.startswith("[rule due-task-raise-when-prerequisites-met] Act on task 4 ")
+      and text.endswith(
+          "\nAt this stop this hook ran out of its 20-second budget for GitHub calls before it "
+          'asked about PR 402, GHI 403, so task 5 "second", which waits on them, was treated as '
+          "still waiting and not raised.\n" + BUDGET_SKIP_INSTRUCTIONS), (asked, text))
+
+seat = Seat()
+seat.task("6", metadata={"prerequisites": [{"pr_merged": 601}]})
+seat.task("7", metadata={"prerequisites": [{"pr_merged": 602}]}, subject="skipped")
+seat.task("8", metadata={})  # no prerequisites to read
+seat.task("9", status="completed", metadata={"prerequisites": [{"pr_merged": 602}]})
+try:
+    output, asked = run_with_fake_gh(hook.GH_CALLS_TOTAL_BUDGET_SECONDS, set(),
+                                     lambda: hook_run_in_process(seat))
+    fault = None
+except hook.HookFault as error:
+    output, fault = None, str(error)
+check("budget spent, with nothing else to say: the skip is a fault, so it does not keep the "
+      "agent from stopping",
+      fault is not None and fault.startswith(
+          "At this stop this hook ran out of its 20-second budget for GitHub calls before it "
+          'asked about PR 602, so task 7 "skipped", which waits on it, was treated as still '
+          "waiting and not raised.") and "task 6" not in fault and "task 8" not in fault
+      and "task 9" not in fault, (output, fault))
+
+CountingChecker.clock = staticmethod(lambda: 0.0)
+checker = CountingChecker({}, 0)
+CountingChecker.asked = []
+checker.started = 0.001 - hook.GH_CALLS_TOTAL_BUDGET_SECONDS
+checker.answer("pr_merged", 2)
+check("budget boundary: a call is made while any budget is left, and no skip is recorded",
+      CountingChecker.asked == [("pr_merged", 2)]
+      and checker.conditions_skipped_for_budget == [], CountingChecker.asked)
 
 
 seat = IdleSeat()

@@ -113,7 +113,11 @@ recorded as a failure with its time so it too waits the interval, and the
 stop that asked reports it, as OUTPUT says. No condition is checked for a
 task already raised for its current prerequisites; of a task held by
 blockedBy, only its `pr_merged` pull requests not yet raised as closed without
-merging are checked. An agent-seat whose tasks have no prerequisites makes no
+merging are checked. Tasks no blockedBy holds are checked first, so a held
+task's checks spend only the budget they leave. A condition not checked
+because the budget is spent is answered not met and not cached, so the next
+stop asks gh, and this stop names each open task that waits on it, as OUTPUT
+says. An agent-seat whose tasks have no prerequisites makes no
 network call. The same call
 fetches the title and URL the raise line cites; a condition gh never
 answered is cited by its number alone.
@@ -164,10 +168,12 @@ then one line per task whose pull request closed without merging and, when
 there is any, the instructions for re-planning it, then two lines per
 prerequisites list the hook cannot use, then the
 next-action prompt's lines, then one line per condition gh could not answer
-at this stop. Nothing to raise or name and no next-action prompt:
+at this stop, then one line per open task that waits on a condition the
+budget left unchecked and, when there is any, the instructions for it. Nothing to raise or name and no next-action prompt:
 nothing printed, exit 0. A fault, such as a payload
 that is not a JSON object, a state file that cannot be written, a condition
-gh could not answer at a stop with nothing else to print, or any exception:
+gh could not answer or the budget left unchecked at a stop with nothing else
+to print, or any exception:
 one line on stderr naming the hook and the fault, nothing on stdout, exit 1.
 The line for a failed state write says how many due tasks went unraised, or
 that none was due, and that the first stop after the state file can be
@@ -283,6 +289,18 @@ CLOSED_WITHOUT_MERGING_INSTRUCTIONS = (
 PREREQUISITES_PROBLEM_LINE_TEMPLATE = (
     '[rule due-task-prerequisites-unusable-correct-them] Task {task_id} "{subject}" is never raised as its metadata.prerequisites stand, because '
     "{problem}.")
+BUDGET_SKIPPED_TASK_LINE_TEMPLATE = (
+    "At this stop this hook ran out of its {budget}-second budget for GitHub calls before it asked "
+    'about {conditions}, so task {task_id} "{subject}", which waits on {pronoun}, was treated as '
+    "still waiting and not raised.")
+BUDGET_SKIPPED_INSTRUCTIONS = (
+    "If you have other work, nothing is needed for a task named above as not checked: the next "
+    "stop asks GitHub again and raises the task when what it waits on is done.",
+    "If you are about to end your turn with no other work, check each such pull request or GHI "
+    "yourself with `gh pr view <number> --repo nedsnodes/nedsnodes --json state` or `gh issue "
+    "view <number> --repo nedsnodes/nedsnodes --json state`, and act on the task now if every "
+    "prerequisite is done.",
+)
 PREREQUISITES_CORRECTION_INSTRUCTION = (
     'Correct the task with TaskUpdate, giving its metadata a "prerequisites" list whose entries '
     "are each one of " + PREREQUISITE_FORMS + '; if the task waits on no pull request, GHI or '
@@ -506,6 +524,8 @@ class GitHubConditionChecker:
     `gh_failures` gets a (kind, number, cause) entry for every failed answer `answer` returns,
     fresh or cached, so one condition answered twice is listed twice; a caller that answers
     for several agent-seats reads the entries its own calls appended.
+    `conditions_skipped_for_budget` gets a (kind, number) entry for every condition answered
+    not met because the budget was spent, in the same way.
     """
 
     # The budget's clock; the test replaces it so its budget cases do not depend on machine speed.
@@ -517,6 +537,7 @@ class GitHubConditionChecker:
         self.started = self.clock()
         self.changed = False
         self.gh_failures = []
+        self.conditions_skipped_for_budget = []
 
     def answer(self, kind: str, number: int) -> dict:
         answer = self.cached_or_fresh_answer(kind, number)
@@ -534,8 +555,8 @@ class GitHubConditionChecker:
             return cached
         remaining = GH_CALLS_TOTAL_BUDGET_SECONDS - (self.clock() - self.started)
         if remaining <= 0:
-            # Out of budget: not met this run, and not recorded, so the next
-            # run checks it.
+            # Not cached, so the next stop asks gh about it.
+            self.conditions_skipped_for_budget.append((kind, number))
             return {"met": False}
         fresh = self.ask_gh(kind, number, min(GH_CALL_TIMEOUT_SECONDS, remaining))
         fresh["checked_at_epoch"] = self.now_epoch
@@ -629,6 +650,33 @@ def gh_failure_line(kind: str, number: int, cause: str) -> str:
             f"the user to run `gh auth login` on this machine.")
 
 
+def budget_skipped_task_lines(tasks: dict, skipped_conditions) -> list:
+    """One line per open task that names a condition the checker skipped for lack of budget,
+    then the instructions, or nothing when no open task names one."""
+    skipped = set(skipped_conditions)
+    lines = []
+    for task_id in sorted(tasks, key=lambda text: (len(text), text)):
+        task = tasks[task_id]
+        metadata = task.get("metadata")
+        if task.get("status") not in OPEN_TASK_STATUSES or not isinstance(metadata, dict):
+            continue
+        try:
+            conditions = parse_prerequisites(metadata.get(PREREQUISITES_KEY))
+        except UnreadablePrerequisites:
+            continue
+        names = list(dict.fromkeys(f"{CONDITION_KINDS[kind][2]} {number}"
+                                   for kind, number in conditions
+                                   if kind in CONDITION_KINDS and (kind, number) in skipped))
+        if names:
+            lines.append(BUDGET_SKIPPED_TASK_LINE_TEMPLATE.format(
+                budget=GH_CALLS_TOTAL_BUDGET_SECONDS, conditions=", ".join(names),
+                task_id=task["id"], subject=single_line(task.get("subject", "")),
+                pronoun="it" if len(names) == 1 else "them"))
+    if lines:
+        lines += BUDGET_SKIPPED_INSTRUCTIONS
+    return lines
+
+
 def raise_line(task: dict, met_citations, done_blockers=None) -> str:
     reasons = []
     if met_citations is not None:
@@ -655,8 +703,12 @@ def due_task_lines(tasks: dict, directory: Path, state: dict,
     problem_lines = []
     state_changed = False
     conditions_still_named = set()
+    held_task_ids = {task_id for task_id, task in tasks.items()
+                     if task.get("status") in OPEN_TASK_STATUSES
+                     and is_held_by_blockers(task, tasks, directory)}
 
-    for task_id in sorted(tasks, key=lambda text: (len(text), text)):
+    # Tasks no blockedBy holds come first, so they spend the gh budget before held tasks do.
+    for task_id in sorted(tasks, key=lambda text: (text in held_task_ids, len(text), text)):
         task = tasks[task_id]
         if task.get("status") not in OPEN_TASK_STATUSES:
             continue
@@ -695,7 +747,7 @@ def due_task_lines(tasks: dict, directory: Path, state: dict,
 
         prerequisite_citations = None
         done_blockers = None
-        if not is_held_by_blockers(task, tasks, directory):
+        if task_id not in held_task_ids:
             blockers = completed_blockers(task, tasks)
             already_raised_for_prerequisites = False
             if conditions is not None:
@@ -836,7 +888,11 @@ def unheld_and_held_tasks(tasks: dict, directory: Path, checker,
     first, and the count of the rest."""
     unheld = []
     held = 0
-    for task_id in sorted(tasks, key=lambda text: (len(text), text)):
+    held_by_blockers = {task_id for task_id, task in tasks.items()
+                        if task.get("status") in OPEN_TASK_STATUSES
+                        and is_held_by_blockers(task, tasks, directory)}
+    # Tasks no blockedBy holds come first, so they spend the gh budget before held tasks do.
+    for task_id in sorted(tasks, key=lambda text: (text in held_by_blockers, len(text), text)):
         task = tasks[task_id]
         if task.get("status") not in OPEN_TASK_STATUSES:
             continue
@@ -853,7 +909,7 @@ def unheld_and_held_tasks(tasks: dict, directory: Path, checker,
                 pull_request_conditions_not_raised_as_closed(conditions, record), checker):
             unheld.append(task_id)  # its agent must re-plan it, whatever else holds it
             continue
-        if is_held_by_blockers(task, tasks, directory):
+        if task_id in held_by_blockers:
             held += 1
             continue
         if prerequisites_value is not None:
@@ -863,7 +919,7 @@ def unheld_and_held_tasks(tasks: dict, directory: Path, checker,
                 held += 1
                 continue
         unheld.append(task_id)
-    return unheld, held
+    return sorted(unheld, key=lambda text: (len(text), text)), held
 
 
 def listed_with_limit(header: str, entries: list, limit: int) -> list:
@@ -984,6 +1040,7 @@ def run(stdin_text: str, environment, home: Path, now: datetime) -> "str | None"
     state_changed = state_changed or checker.changed
     gh_failure_lines = [gh_failure_line(kind, number, cause)
                         for kind, number, cause in dict.fromkeys(checker.gh_failures)]
+    gh_failure_lines += budget_skipped_task_lines(tasks, checker.conditions_skipped_for_budget)
     if state_changed:
         try:
             write_state_atomically(state_path, state)
