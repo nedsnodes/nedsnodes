@@ -3302,6 +3302,19 @@ for worded_document, worded_sentence in (("---\ndescription: |\n  Warning:\n---\
           "makes one unit",
           worded_found[1] == {"s1": worded_sentence}, repr(worded_found))
 
+stamped_with_category = _fast_read.with_text_intended_reader_category_in_provenance_stamp(
+    "<!-- provenance: runtime=agy cell=fast-clarify target_sha256=ab target=/a b.md -->\n\nbody\n",
+    "agent-readable")
+check("the category goes into an existing stamp before target_sha256=, the rest of the report unchanged",
+      stamped_with_category == "<!-- provenance: runtime=agy cell=fast-clarify "
+      "text_intended_reader_category=agent-readable target_sha256=ab target=/a b.md -->\n\nbody\n",
+      repr(stamped_with_category))
+unstamped_with_category = _fast_read.with_text_intended_reader_category_in_provenance_stamp(
+    "body\n", "human-readable")
+check("a report with no provenance stamp gets one holding only the category",
+      unstamped_with_category == "<!-- provenance: text_intended_reader_category=human-readable -->\n\nbody\n",
+      repr(unstamped_with_category))
+
 with tempfile.TemporaryDirectory() as placeholder_scratch:
     placeholder_template = Path(placeholder_scratch) / "prompt.md"
     placeholder_template.write_text(
