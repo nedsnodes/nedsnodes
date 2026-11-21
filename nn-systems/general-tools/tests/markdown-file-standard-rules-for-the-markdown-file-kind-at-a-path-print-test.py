@@ -2,6 +2,7 @@
 """Tests for nn-systems/general-tools/markdown-file-standard-rules-for-the-markdown-file-kind-at-a-path-print.py.
 
 The program must pick the right section of the Markdown file standard for each kind of path,
+print the common part and its exemption rule for a record or walk-minutes path,
 print the common part alone and exit 1 for a path no section covers, and exit 2 when the
 standard is missing, lacks a heading, or the program is called wrongly. The real standard
 must hold every heading the program's constants name.
@@ -81,6 +82,35 @@ for path, kind in expected_kinds.items():
     got = program.kind_section_heading_for_path(path)
     check(f"{path} is covered by {kind}", got == kind, got)
 
+# Paths of a record or walk-minutes, which get the common part's exemption rule instead of a section,
+# including ones a section's pattern would also match, such as a frozen-copy of a prompt template.
+expected_record_kinds = {
+    "docs/walk/1058-daily-maintenance-in-one-daily-step-starting-with-2026-10-13-2-minutes.md": "walk-minutes",
+    "/home/nedlern/nedsnodes-logs/walk/1206-the-daily-full-test-runs-tell-the-user-2026-10-12-minutes.md":
+        "walk-minutes",
+    "cold-read-records/2026-08-24-composed-defect-hunt/cold-read-triage.md": "record",
+    "/home/nedlern/agents/MD-skills/cold-read-records/1-2026-11-12/claude-hunt-deep.md": "record",
+    "/Volumes/nedhome/nedsnodes-logs/cold-read-records/1-2026-11-12/item-3-with-sentence-ids.md": "record",
+    "cold-read-records/1-2026-11-12/sanity-checker-cut-adversarial-prompt.md": "record",
+    "cold-read-records/1-2026-11-12/CLAUDE.md": "record",
+    "sanity-check-records/2026-08-25-cold-read-tooling-design/cut-claude.md": "record",
+    "/home/nedlern/.claude/handoffs/merge-lane-2-dialog-0002.md": "record",
+}
+for path, kind in expected_record_kinds.items():
+    got = program.record_or_walk_minutes_kind_for_path(path)
+    check(f"{path} is a {kind}", got == kind, got)
+    check(f"no section covers the {kind} {path}", program.kind_section_heading_for_path(path) is None,
+          program.kind_section_heading_for_path(path))
+for path in [
+    "docs/walk/walk-me-through-skill-refactor-approval-walk-2026-11-02.md",
+    "docs/walk/1058-daily-maintenance-2026-10-13-2-draft.md",
+    "docs/issues/queue/walk-minutes.md",
+    "/home/nedlern/.claude/handoffs/merge-lane-2-next-step-20261117-133829.md",
+    "docs/nedsnodes-wiki/nedsnodes-glossary.md",
+]:
+    got = program.record_or_walk_minutes_kind_for_path(path)
+    check(f"{path} is not a record or walk-minutes", got is None, got)
+
 # Paths no section covers.
 for path in [
     "README.md",
@@ -122,10 +152,13 @@ with tempfile.TemporaryDirectory() as scratch:
     check("kind: design outside the front matter does not make a design",
           program.kind_section_heading_for_path(str(plain)) == "GHI-MD")
 
-# The real standard holds every heading the constants name.
+# The real standard holds every heading the constants name, and the exemption rule.
 real_sections = program.markdown_file_standard_sections()
 for heading in [program.COMMON_PART_HEADING] + [h for h, _ in program.KIND_SECTION_HEADING_AND_PATH_PATTERNS]:
     check(f"the standard has the heading ## {heading}", heading in real_sections, sorted(real_sections))
+check("the standard's common part has the exemption rule",
+      f"\n{program.COMMON_PART_EXEMPTIONS_AND_PRECEDENCE_BULLET_PREFIX}"
+      in real_sections[program.COMMON_PART_HEADING])
 
 # A covered path prints the common part, then its section, and nothing of other sections.
 code, out, err = run(["docs/issues/46-ghi-guide-agent.system.design.md"])
@@ -142,7 +175,32 @@ check("an uncovered path prints the common part alone",
       out.startswith("## Common part\n") and "\n## " not in out, out)
 check("an uncovered path says no section covers it", "no section of the standard covers README.md" in err, err)
 
+# A record: the common part, then the kind and the exemption rule again, exit 0.
+code, out, err = run(["cold-read-records/1-2026-11-12/cold-read-triage.md"])
+exemption_line = program.exemptions_and_precedence_bullet(program.markdown_file_standard_sections())
+check("a record exits 0", code == 0, (code, err))
+check("a record prints the common part first", out.startswith("## Common part\n"), out[:80])
+check("a record prints no section", out.count("\n## ") == 0, out)
+check("a record is named as one after the common part",
+      "\ncold-read-records/1-2026-11-12/cold-read-triage.md is a record" in out, out[-400:])
+check("a record prints the exemption rule last", out.endswith(exemption_line + "\n"), out[-400:])
+check("a record prints nothing on stderr", err == "", err)
+code, out, err = run(["docs/walk/x-2026-11-20-minutes.md"])
+check("walk-minutes exit 0 and are named as walk-minutes",
+      code == 0 and "docs/walk/x-2026-11-20-minutes.md is a walk-minutes" in out, (code, out[-400:]))
+
 with tempfile.TemporaryDirectory() as scratch:
+    # A standard with no exemption rule in its common part: exit 2, naming the rule.
+    no_exemption = Path(scratch) / "no-exemption.md"
+    no_exemption.write_text(
+        "# Standard\n\n## Common part\n\n- **Length.** common\n\n"
+        + "".join(f"## {h}\n\nbody\n\n" for h, _ in program.KIND_SECTION_HEADING_AND_PATH_PATTERNS),
+        encoding="utf-8")
+    code, out, err = run(["README.md"], no_exemption)
+    check("a standard whose common part lacks the exemption rule exits 2", code == 2, code)
+    check("a standard whose common part lacks the exemption rule names it on stderr",
+          program.COMMON_PART_EXEMPTIONS_AND_PRECEDENCE_BULLET_PREFIX in err, err)
+
     # A standard that cannot be read: exit 2, nothing on stdout.
     code, out, err = run(["README.md"], Path(scratch) / "missing.md")
     check("a standard that cannot be read exits 2", code == 2, code)

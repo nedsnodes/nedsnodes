@@ -4,8 +4,10 @@
 Usage: markdown-file-standard-rules-for-the-markdown-file-kind-at-a-path-print.py <path of a Markdown file>
 
 Exits 0 if a section of the standard covers the path, and prints the common part and that
-section; 1 if no section covers it, and prints the common part alone; 2 if the standard
-could not be read or lacks a heading this program needs, or the program was called wrongly.
+section, or if the path is a record's or walk-minutes', and prints the common part, the file's
+kind and the common part's rule Exemptions and precedence; 1 if neither holds, and prints the
+common part alone; 2 if the standard could not be read or lacks a heading or rule this program
+needs, or the program was called wrongly.
 
 The kind is picked from the path, so the file need not exist yet; a GHI-MD that already exists
 and whose front matter carries `kind: design` is a design, as /ghi-write names one. The path may be
@@ -23,6 +25,18 @@ MARKDOWN_FILE_STANDARD_PATH = (
     Path(__file__).resolve().parents[2] / "docs" / "nedsnodes-wiki" / "queue"
     / "nedsnodes-markdown-file-standard-common-part-and-one-section-per-kind.md")
 COMMON_PART_HEADING = "Common part"
+COMMON_PART_EXEMPTIONS_AND_PRECEDENCE_BULLET_PREFIX = "- **Exemptions and precedence.**"
+
+# Each kind's name is spelled as the project glossary's "Kinds of Markdown file" spells it. The
+# standard has no section for these kinds, only the common part's exemption rule. They are asked
+# before any section's kind, as the glossary's list orders them, because a record can be a
+# frozen-copy of a file another pattern matches, such as a prompt template's. A frozen-copy has no
+# name of its own in a cold-read-record, so the exemption rule printed names both cases.
+RECORD_AND_WALK_MINUTES_MARKDOWN_FILE_KIND_AND_PATH_PATTERNS = [
+    ("record", r"(^|/)(cold-read-records|sanity-check-records)/.+\.md$"),
+    ("record", r"(^|/)\.claude/handoffs/[^/]+-dialog-\d+\.md$"),
+    ("walk-minutes", r"(^|/)(docs|nedsnodes-logs)/walk/[^/]+-minutes\.md$"),
+]
 
 # A test-design and a design-contract in docs/issues/ have names the GHI-MD pattern also
 # matches, but design-to-main's agent-instructions say what they hold.
@@ -56,9 +70,24 @@ KIND_SECTION_HEADING_AND_PATH_PATTERNS = [
 DESIGN_FRONT_MATTER_PATTERN = re.compile(r"\A---\n(?:.*\n)*?kind: design\n(?:.*\n)*?---\n")
 
 
+def normalized_path(path):
+    return Path(os.path.expanduser(path)).as_posix()
+
+
+def record_or_walk_minutes_kind_for_path(path):
+    """The kind, record or walk-minutes, whose path patterns match the path, or None."""
+    normalized = normalized_path(path)
+    for kind, pattern in RECORD_AND_WALK_MINUTES_MARKDOWN_FILE_KIND_AND_PATH_PATTERNS:
+        if re.search(pattern, normalized):
+            return kind
+    return None
+
+
 def kind_section_heading_for_path(path):
     """The heading of the standard's section that covers the path, or None when none does."""
-    normalized = Path(os.path.expanduser(path)).as_posix()
+    normalized = normalized_path(path)
+    if record_or_walk_minutes_kind_for_path(normalized) is not None:
+        return None
     if any(re.search(pattern, normalized) for pattern in UNCOVERED_PATH_PATTERNS):
         return None
     for heading, pattern in KIND_SECTION_HEADING_AND_PATH_PATTERNS:
@@ -114,7 +143,18 @@ def markdown_file_standard_sections(standard_path=MARKDOWN_FILE_STANDARD_PATH):
             f"{standard_path} has no level-2 heading "
             + ", ".join(f'"## {heading}"' for heading in missing)
             + f", which {PROGRAM_NAME}.py's constants name")
+    if exemptions_and_precedence_bullet(sections) is None:
+        raise MarkdownFileStandardUnreadable(
+            f"{standard_path}'s \"## {COMMON_PART_HEADING}\" has no line beginning "
+            f"\"{COMMON_PART_EXEMPTIONS_AND_PRECEDENCE_BULLET_PREFIX}\", which {PROGRAM_NAME}.py's "
+            "COMMON_PART_EXEMPTIONS_AND_PRECEDENCE_BULLET_PREFIX names")
     return sections
+
+
+def exemptions_and_precedence_bullet(sections):
+    """The common part's rule Exemptions and precedence, found by its prefix, or None."""
+    return next((line for line in sections.get(COMMON_PART_HEADING, "").splitlines()
+                 if line.startswith(COMMON_PART_EXEMPTIONS_AND_PRECEDENCE_BULLET_PREFIX)), None)
 
 
 def main(argv, standard_path=MARKDOWN_FILE_STANDARD_PATH):
@@ -134,6 +174,12 @@ def main(argv, standard_path=MARKDOWN_FILE_STANDARD_PATH):
         return 2
     heading = kind_section_heading_for_path(argv[0])
     sys.stdout.write(sections[COMMON_PART_HEADING].rstrip("\n") + "\n")
+    record_kind = record_or_walk_minutes_kind_for_path(argv[0])
+    if record_kind is not None:
+        print(f"\n{argv[0]} is a {record_kind} file, which the standard gives no section; "
+              "the common part's exemption rule says which of the rules above it follows:\n"
+              + exemptions_and_precedence_bullet(sections))
+        return 0
     if heading is None:
         kinds = ", ".join(heading for heading, _ in KIND_SECTION_HEADING_AND_PATH_PATTERNS)
         print(f"{PROGRAM_NAME}: no section of the standard covers {argv[0]}; "

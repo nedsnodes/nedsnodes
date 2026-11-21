@@ -6,7 +6,8 @@ Markdown file and the one list of the kinds of GHI, each a numbered list under i
 heading. The standard names a kind of Markdown file in each level-2 heading other than its
 common part, and a kind of GHI in each `- **<kind>**:` item of its GHI-MD section; the program,
 nn-systems/general-tools/markdown-file-standard-rules-for-the-markdown-file-kind-at-a-path-print.py,
-names a kind of Markdown file in each heading of KIND_SECTION_HEADING_AND_PATH_PATTERNS. A kind
+names a kind of Markdown file in each heading of KIND_SECTION_HEADING_AND_PATH_PATTERNS and each
+kind of RECORD_AND_WALK_MINUTES_MARKDOWN_FILE_KIND_AND_PATH_PATTERNS. A kind
 named there that the glossary's list lacks fails here. Only that direction is checked: most kinds
 have no section of the standard.
 
@@ -66,7 +67,7 @@ def kinds_listed_under(sections, heading):
 
 
 def kinds_named_by_the_standard_or_the_program_missing_from_the_glossary(
-        glossary_text, standard_text, program_headings):
+        glossary_text, standard_text, program_headings, program_record_kinds=()):
     """One failure message per kind named but not listed; empty when every kind is listed."""
     glossary_sections = program.level_two_sections(glossary_text)
     standard_sections = program.level_two_sections(standard_text)
@@ -105,6 +106,10 @@ def kinds_named_by_the_standard_or_the_program_missing_from_the_glossary(
         missing(heading, file_kinds, MARKDOWN_FILE_KINDS_HEADING,
                 f"KIND_SECTION_HEADING_AND_PATH_PATTERNS in {PROGRAM_RELATIVE_PATH}",
                 "change the constant, and the standard's heading it names,")
+    for kind in program_record_kinds:
+        missing(kind, file_kinds, MARKDOWN_FILE_KINDS_HEADING,
+                f"RECORD_AND_WALK_MINUTES_MARKDOWN_FILE_KIND_AND_PATH_PATTERNS in {PROGRAM_RELATIVE_PATH}",
+                "change the constant")
     ghi_md_section = standard_sections.get(STANDARD_GHI_MD_SECTION_HEADING, "")
     named_ghi_kinds = [match.group(1) for line in ghi_md_section.splitlines()
                        if (match := GHI_KIND_ITEM.match(line))]
@@ -123,7 +128,8 @@ def kinds_named_by_the_standard_or_the_program_missing_from_the_glossary(
 real_messages = kinds_named_by_the_standard_or_the_program_missing_from_the_glossary(
     (REPOSITORY_ROOT / PROJECT_GLOSSARY_RELATIVE_PATH).read_text(encoding="utf-8"),
     program.MARKDOWN_FILE_STANDARD_PATH.read_text(encoding="utf-8"),
-    [heading for heading, _ in program.KIND_SECTION_HEADING_AND_PATH_PATTERNS])
+    [heading for heading, _ in program.KIND_SECTION_HEADING_AND_PATH_PATTERNS],
+    [kind for kind, _ in program.RECORD_AND_WALK_MINUTES_MARKDOWN_FILE_KIND_AND_PATH_PATTERNS])
 check("every kind the standard or the program names is in the project glossary's lists",
       not real_messages, "\n\n".join(real_messages))
 
@@ -186,6 +192,13 @@ messages = fixture_messages(program_headings=FIXTURE_PROGRAM_HEADINGS + ["Seat-b
 check("a heading the program names that the glossary lacks fails, naming the program",
       len(messages) == 1 and "KIND_SECTION_HEADING_AND_PATH_PATTERNS" in messages[0]
       and '"Seat-briefs"' in messages[0], messages)
+
+messages = kinds_named_by_the_standard_or_the_program_missing_from_the_glossary(
+    FIXTURE_GLOSSARY, FIXTURE_STANDARD, FIXTURE_PROGRAM_HEADINGS, ["skill", "records"])
+check("a record kind the program names that the glossary lacks fails, naming its constant",
+      len(messages) == 1 and '"records"' in messages[0]
+      and "RECORD_AND_WALK_MINUTES_MARKDOWN_FILE_KIND_AND_PATH_PATTERNS" in messages[0],
+      messages)
 
 messages = fixture_messages(standard=FIXTURE_STANDARD.replace("- **bug**:", "- **change request**:"))
 check("a kind of GHI the GHI-MD section names that the glossary lacks fails",
