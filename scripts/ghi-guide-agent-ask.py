@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """Ask ghi-guide-agent, the project's knowledge agent over its GitHub-issue corpus
-(nedschorus#46, design doc docs/issues/46-ghi-guide-agent-design.md § The
+(nedschorus#46, design doc docs/issues/46-ghi-guide-agent.system.design.md § The
 ask path). Run by any agent — and by the ghi-write skill's step 1 — before
 filing or editing an issue, to learn what already covers the ground.
 
@@ -189,7 +189,7 @@ LOCK_FILE_NAME = ".ghi-guide-agent-state.lock"
 # Model: named constant + env override, per issue #46's own framing —
 # "settled empirically." Starting pick for this build, not a measured
 # choice among fable/opus/sonnet.
-GHI_GUIDE_AGENT_MODEL = os.environ.get("GHI_GUIDE_AGENT_MODEL", "claude-sonnet-5")
+GHI_GUIDE_AGENT_MODEL = os.environ.get("GHI_GUIDE_AGENT_MODEL", "claude-sonnet-5-5")
 # ghi-guide-agent only reads: the mirror, the files open issues link to, and the log-store.
 GHI_GUIDE_AGENT_ALLOWED_TOOLS = "Read,Grep,Glob"
 # "One overall timeout (inside the hook budget)" (design § The ask path) —

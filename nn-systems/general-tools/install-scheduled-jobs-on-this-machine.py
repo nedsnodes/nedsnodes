@@ -53,8 +53,9 @@ by, the interpreter its jobs run under, the reference clone they run from, and
 on the Mac the PATH a launchd job is given, because launchd's own has neither
 Homebrew nor ~/.local/bin. `jobs` names each job: its program, relative to the
 clone; its arguments; the file under the home directory that both of its
-output streams are appended to; and under `on`, for each machine that runs it,
-the scheduler and the schedule. A machine a job does not name does not run it.
+output streams are appended to; its `owner`, the agent-seat that owns it; and
+under `on`, for each machine that runs it, the scheduler and the schedule. A
+machine a job does not name does not run it.
 
 This program runs on whichever machine it is started on and installs only that
 machine's part. A machine whose platform and home directory match no entry is
@@ -248,6 +249,11 @@ def load_table(table_path: Path) -> dict:
             raise table_refusal(
                 table_path, f"gives job `{name}` a missing or wrongly typed `program`, `arguments`, "
                             f"`output` or `on`")
+        if not isinstance(job.get("owner"), str) or not job["owner"]:
+            raise table_refusal(
+                table_path, f"gives job `{name}` no `owner`, or an `owner` that is not a "
+                            f"non-empty string; add `\"owner\": \"<agent-seat>\"` naming the "
+                            f"agent-seat that owns the job")
         # Cron matching uses program filenames; duplicates would claim each other's lines.
         program_file_name = Path(job["program"]).name
         if name in names or program_file_name in program_file_names:
@@ -307,8 +313,8 @@ def jobs_placed_on(table: dict, table_path: Path, machine_name: str, selected_na
             raise Refusal(
                 f"{PROGRAM}: not run — the table places job `{name}` on "
                 f"{', '.join(job['on'])}, not on this machine, `{machine_name}`.",
-                f"Run this on a machine the job is placed on, or pass --job with a job of "
-                f"this machine.")
+                "Run this on a machine the job is placed on, or pass --job with a job of "
+                "this machine.")
     return [(job, job["on"][machine_name]) for job in table["jobs"]
             if machine_name in job["on"] and (not selected_names or job["name"] in selected_names)]
 
