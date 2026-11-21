@@ -450,7 +450,12 @@ def unsettled_entry_covers_fix_later_claim_judge_prompt(overview_path, claims, u
 def claim_number_to_covering_unsettled_entry_number_from_judge_answer(answer, claim_numbers, unsettled_entry_numbers):
     """Return ({claim number: the unsettled entry that covers it}, None), or (None, why the answer is malformed)."""
     judged = {}
-    for match in UNSETTLED_ENTRY_COVERS_FIX_LATER_CLAIM_JUDGE_ANSWER_LINE.finditer(answer):
+    for line in answer.splitlines():
+        if not line.startswith("CLAIM"):
+            continue
+        match = UNSETTLED_ENTRY_COVERS_FIX_LATER_CLAIM_JUDGE_ANSWER_LINE.fullmatch(line)
+        if not match:
+            return None, f"its line `{line.strip()}` starts with CLAIM but is not `CLAIM <number> covered-by E<number>` or `CLAIM <number> new`"
         number, entry = int(match.group(1)), match.group(2) and int(match.group(2))
         if number not in claim_numbers:
             return None, f"it answers CLAIM {number}, which it was not asked about"
@@ -466,7 +471,8 @@ def claim_number_to_covering_unsettled_entry_number_from_judge_answer(answer, cl
 
 
 def fix_later_claims_uncovered_by_unsettled_entries_after_judge_run(repository, overview_path, claims):
-    """Return (the claims ranked fix later to append, {claim number: covering entry}, the judge's answer or None).
+    """Return (the claims ranked fix later to append, {claim number: covering entry}, the judge's answer or None,
+    the file's text these were decided against).
 
     Runs the covering judge only when a claim is new word for word and the file has an unsettled entry."""
     path = repository / nc_architecture_overview_proposed_improvements_or_changes_file_path_from_page_path(overview_path)
@@ -474,7 +480,7 @@ def fix_later_claims_uncovered_by_unsettled_entries_after_judge_run(repository, 
     new_claims = fix_later_claims_not_yet_in_proposed_improvements_or_changes_file(text, claims)
     unsettled_entries = unsettled_entries_in_proposed_improvements_or_changes_file(text)
     if not new_claims or not unsettled_entries:
-        return new_claims, {}, None
+        return new_claims, {}, None, text
     answer = run_fresh_agent(repository, unsettled_entry_covers_fix_later_claim_judge_prompt(overview_path, new_claims, unsettled_entries),
                              tools=UNSETTLED_ENTRY_COVERS_FIX_LATER_CLAIM_JUDGE_TOOLS)
     covering, malformed = claim_number_to_covering_unsettled_entry_number_from_judge_answer(
@@ -484,7 +490,17 @@ def fix_later_claims_uncovered_by_unsettled_entries_after_judge_run(repository, 
             f"the fresh-agent that judges whether an unsettled entry of {path} covers a claim ranked fix later gave an "
             f"answer this program cannot use: {malformed}, so no report was written.\nIts answer: "
             f"{answer.strip()[-2000:]}\nRun this again; if its answer is unusable again, tell the user.", exit_code=4)
-    return [claim for claim in new_claims if claim.number not in covering], covering, answer
+    return [claim for claim in new_claims if claim.number not in covering], covering, answer, text
+
+
+def refuse_when_proposed_improvements_or_changes_file_changed_since_decided(repository, overview_path, decided_text):
+    """Another claim check or a handler can change the file while the covering judge runs; its decisions then may not
+    fit the file, so neither a skip nor an append is safe."""
+    path = repository / nc_architecture_overview_proposed_improvements_or_changes_file_path_from_page_path(overview_path)
+    if (path.read_text(encoding="utf-8") if path.exists() else "") != decided_text:
+        raise ClaimCheckRefusal(
+            f"{path} changed while this claim check decided which claims ranked fix later to append, so it appended "
+            "nothing and wrote no report.\nRun this again, so that it decides against the file as it is now.", exit_code=4)
 
 
 def claims_in_proposed_improvements_or_changes_file(text):
@@ -698,8 +714,9 @@ def check_overview_claims(arguments):
                       "the user.", file=sys.stderr)
 
     claims, result = result_from_fresh_agent_report(report, recheck_reports)
-    new_fix_later_claims, covering_entries, covering_answer = (
-        fix_later_claims_uncovered_by_unsettled_entries_after_judge_run(repository, overview_path, claims) if claims else ([], {}, None))
+    new_fix_later_claims, covering_entries, covering_answer, decided_text = (
+        fix_later_claims_uncovered_by_unsettled_entries_after_judge_run(repository, overview_path, claims) if claims
+        else ([], {}, None, None))
     destination_directory = overview_write_architecture_overview_claim_check_report_directory_for_overview(report_directory, overview_path)
     destination_directory.mkdir(parents=True, exist_ok=True)
     stamp = datetime.datetime.now(datetime.timezone.utc).strftime("%Y-%m-%dT%H-%M-%S-%fZ")
@@ -710,6 +727,12 @@ def check_overview_claims(arguments):
     if covering_answer is not None:
         appended_sections += ("\n\n# Which unsettled entry of the proposed-improvements-or-changes-file covers each claim ranked "
                               f"fix later that it did not hold word for word\n\n{covering_answer}")
+    fix_later_file = None
+    if claims is not None:
+        if decided_text is not None:
+            refuse_when_proposed_improvements_or_changes_file_changed_since_decided(repository, overview_path, decided_text)
+        fix_later_file = write_fix_later_claims_to_proposed_improvements_or_changes_file(
+            repository, overview_path, new_fix_later_claims, commit, destination, fix_later_for_regular_maintenance)
     destination.write_text(
         f"overview: {overview_path}\noverview blob: {blob}\nrevision: {revision}\nchecked against: {commit}\n"
         f"writer answers: {writer_answers or 'none'}\n{RESULT_LINE_PREFIX}{result}\n"
@@ -724,8 +747,6 @@ def check_overview_claims(arguments):
     for number, entry in sorted(covering_entries.items()):
         print(f"{PROGRAM}: the claim of VERDICT {number}, ranked fix later, is not appended: unsettled entry E{entry} of "
               f"{proposals_path} covers it")
-    fix_later_file = write_fix_later_claims_to_proposed_improvements_or_changes_file(
-        repository, overview_path, new_fix_later_claims, commit, destination, fix_later_for_regular_maintenance)
     all_supported = result == OVERVIEW_WRITE_ARCHITECTURE_OVERVIEW_CLAIM_CHECK_RESULT_ALL_CLAIMS_SUPPORTED
     if not all_supported and result != OVERVIEW_WRITE_ARCHITECTURE_OVERVIEW_CLAIM_CHECK_RESULT_NO_MUST_FIX_CLAIM_REMAINS:
         code, action = 5, NEXT_ACTION_WHEN_MUST_FIX_CLAIMS_REMAIN

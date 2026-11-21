@@ -58,6 +58,9 @@ for assertion, recheck in answer.get("rechecks", {{}}).items():
 if prompt.startswith({claim_check.UNSETTLED_ENTRY_COVERS_FIX_LATER_CLAIM_JUDGE_PROMPT_TEMPLATE[:60]!r}):
     answer = answer.get("covering_judge", {{"stdout": "no judge answer was given for this case\\n"}})
 __import__("time").sleep(answer.get("sleep_seconds", 0))
+if "append_while_running" in answer:
+    with open(answer["append_while_running"]["path"], "a", encoding="utf-8") as changed:
+        changed.write(answer["append_while_running"]["text"])
 sys.stdout.write(answer["stdout"])
 sys.stderr.write(answer.get("stderr", ""))
 sys.exit(answer.get("exit_code", 0))
@@ -129,7 +132,8 @@ class Fixture:
     def answer(self, *, claude_stdout=GOOD_REPORT, claude_exit=0, lint_stdout="", lint_exit=0,
                claude_sleep=0, lint_sleep=0, rechecks=None, covering_judge=None):
         """rechecks maps an assertion to the {"stdout", "exit_code"} the stand-in gives a recheck prompt naming it;
-        covering_judge is the {"stdout", "exit_code"} it gives the covering judge's prompt."""
+        covering_judge is the {"stdout", "exit_code"} it gives the covering judge's prompt, with an optional
+        "append_while_running": {"path", "text"} that it appends to that file before it answers."""
         (self.control / "claude.json").write_text(json.dumps(
             {"stdout": claude_stdout, "exit_code": claude_exit, "sleep_seconds": claude_sleep,
              "rechecks": rechecks or {}, **({"covering_judge": covering_judge} if covering_judge else {})}))
@@ -282,6 +286,12 @@ def run_covering_judge_unit_cases():
           judged("CLAIM 1 new\n") == (None, "it gives no answer for CLAIM 2"))
     check("a judge answer that answers a claim twice is malformed",
           judged("CLAIM 1 new\nCLAIM 1 covered-by E3\nCLAIM 2 new\n") == (None, "it answers CLAIM 1 twice"))
+    check("a judge answer that corrects a claim in a CLAIM line not in either form is malformed, not read as its first answer",
+          judged("CLAIM 1 covered-by E3\nCLAIM 1 new (correction)\nCLAIM 2 new\n")
+          == (None, "its line `CLAIM 1 new (correction)` starts with CLAIM but is not `CLAIM <number> covered-by E<number>` "
+                    "or `CLAIM <number> new`"))
+    check("a judge answer with prose lines that do not start with CLAIM is read",
+          judged("My reasoning: claim 1 repeats E3.\nCLAIM 1 covered-by E3\nCLAIM 2 new\nDone.\n") == ({1: 3}, None))
     check("a judge answer about a claim it was not asked about is malformed",
           judged("CLAIM 1 new\nCLAIM 2 new\nCLAIM 9 new\n") == (None, "it answers CLAIM 9, which it was not asked about"))
     check("a judge answer naming an entry that is not one of the unsettled entries it was given, such as a settled one, is "
@@ -543,6 +553,22 @@ def run_covering_judge_cases(fixture):
               and (fixture.repository / PROPOSALS).read_text() == ENTRIES_WITH_EACH_STATE
               and last_stdout_line(result) == next_action_line(claim_check.NEXT_ACTION_BY_EXIT_CODE[4]),
               (result, covering_judge))
+    for case, appended_text in (
+            ("another claim check appends an entry", "\n## E7 — possible problem: an assertion of the overview is unsupported\n\n"
+                                                    "Claim: the tool is fast\nState: open\n"),
+            ("a handler settles the entry the judge names", "\nState: settled by a handler meanwhile\n")):
+        fixture.write(PROPOSALS, ENTRIES_WITH_EACH_STATE)
+        fixture.answer(claude_stdout=report, covering_judge={
+            "stdout": "CLAIM 1 covered-by E3\nCLAIM 2 new\n",
+            "append_while_running": {"path": str(fixture.repository / PROPOSALS), "text": appended_text}})
+        result = fixture.run()
+        check(f"when {case} while the covering judge runs, the run exits 4, writes no report, appends nothing and "
+              "says to run it again",
+              result.returncode == 4 and "changed while this claim check decided" in result.stderr
+              and len(fixture.reports_written()) == count
+              and (fixture.repository / PROPOSALS).read_text() == ENTRIES_WITH_EACH_STATE + appended_text
+              and last_stdout_line(result) == next_action_line(claim_check.NEXT_ACTION_BY_EXIT_CODE[4]), result)
+    fixture.write(PROPOSALS, ENTRIES_WITH_EACH_STATE)
     fixture.answer(claude_stdout=report, covering_judge={"stdout": "CLAIM 1 new\nCLAIM 2 new\n", "sleep_seconds": 5})
     code, stderr = fixture.run_in_process_with_timeouts(fresh_agent_seconds=2)
     check("a covering judge that runs past its timeout exits 4 and writes no report",
