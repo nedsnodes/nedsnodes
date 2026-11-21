@@ -16,7 +16,7 @@ For each flag also propose the exact words of the best fix:
 (a) a glossary already has the name: give that one term, as the glossary writes it, and nothing else;
 (b) a standard term fits: give it;
 (c) {TARGET_PATH} already uses a better term elsewhere: give that term, for use everywhere;
-(d) no name exists: propose a project-term, or a system-term when one system alone would use it, a project-term when you cannot tell, built by the rules for a name's words in `docs/nedsnodes-wiki/nedsnodes-how-to-choose-a-name-for-files-code-and-glossary-terms.md`, without running that page's searches: a hyphenated phrase, with as many words as it takes to be clear and to clash with nothing in the glossaries or in {TARGET_PATH}, and with the standard term inside it where one exists. Give it a one-sentence definition. It is only a candidate: the user alone adds project-terms and system-terms.
+(d) no name exists: propose a project-term, or a system-term when one system alone would use it, a project-term when you cannot tell, built by the rules for a name's words in `docs/nedsnodes-wiki/nedsnodes-how-to-choose-a-name-for-files-code-and-glossary-terms.md`, without running that page's searches: a hyphenated phrase, with as many words as it takes to be clear and to clash with nothing in the glossaries or in {TARGET_PATH}, and with the standard term inside it where one exists. Give it a one-sentence definition. A proposed project-term is only a candidate: the user alone adds project-terms.
 (e) the word should stay ordinary prose: say it in plain words, and give those words.
 For a term flagged under (3), give one fix for each meaning.
 
