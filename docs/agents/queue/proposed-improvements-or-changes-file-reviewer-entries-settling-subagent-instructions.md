@@ -51,9 +51,12 @@ A second, independent agent must agree:
 
 Make the change now: a removal, an archiving, a simplification, an addition, or bringing the GHI-MD into line with the user-ruling. Removing or archiving is a change in its own right, not the side effect of a fix. Make a change to the GHI-MD through `scripts/ghi-issue-write.py edit`, as the /ghi-write skill, `.claude/skills/ghi-write/SKILL.md`, says. Once the edit's pull request is open, mark the entry with `settle --kind done`, naming the pull request in `--how`. The file in the log-store never goes into a pull request.
 
-### Worth doing, as new work
+### Worth doing, outside this GHI-MD
 
-When the change is new work rather than an edit of the GHI-MD, file a new GHI, as `.claude/skills/ghi-write/SKILL.md` says, and mark the entry with `settle --kind new-ghi`, giving the GHI's link in `--how`.
+When the change does not belong in this GHI-MD, ask ghi-guide-agent whether a GHI already covers it, as the /ghi-write skill, `.claude/skills/ghi-write/SKILL.md`, says.
+
+- If a GHI covers it, edit that GHI's GHI-MD through `scripts/ghi-issue-write.py edit`, as the skill says. Once the edit's pull request is open, mark the entry with `settle --kind done`, naming the pull request in `--how`.
+- If none does, write one new GHI for each group of entries whose changes share a cause or follow from one another, taking the entries from every proposed-improvements-or-changes-file that `show` listed; an entry that shares a cause with no other is a group of its own. File each GHI as the skill says, then mark each entry of its group with `settle --kind new-ghi`, giving that GHI's link in `--how`: run `settle` once for each entry, in the file that holds it.
 
 ### Worth doing, but not doable now
 
