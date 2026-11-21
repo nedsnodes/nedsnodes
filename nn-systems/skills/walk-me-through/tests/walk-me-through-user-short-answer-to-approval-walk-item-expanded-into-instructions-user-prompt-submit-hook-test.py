@@ -2273,6 +2273,43 @@ def test_a_mark_typed_in_capitals_in_the_message_is_the_same_kind_of_line():
           counted(lines) and not case.model_calls(), f"lines {lines!r}")
 
 
+def test_a_paragraph_that_negates_a_new_text_shown_without_its_mark_goes_to_the_model():
+    item = DECISION_ITEM.replace("#new Hide rows older than a year.", "#new delete the old config file")
+    for shown_text in ("Do not delete the old config file", "We will never delete the old config file"):
+        case = Case(next_to_present="item 4 of 9", document="# A walk\n\n" + item + "\n", model="changed")
+        shown = item.replace("#new delete the old config file", shown_text)
+        lines = case.lines("a", case.transcript(f"{shown}\n\n{ITEM_4_CLOSING_LINE}"))
+        check(f"an answer goes to the model and is refused when the message showed \"{shown_text}\" for the item's "
+              "`#new delete the old config file`",
+              len(case.model_calls()) == 1 and lines is not None and not counted(lines), f"lines {lines!r}")
+
+
+def test_words_put_before_a_line_shown_without_its_mark_send_it_to_the_model():
+    # Each shown text below passes with no model call in the tests above until "Do not" or the other kind's lead-in
+    # is put before it.
+    marks_dropped = (DECISION_ITEM.replace("#new Hide", "Hide")
+                     .replace("#new_if_d Show", "If you disapprove, the new text: Show")
+                     .replace("[advisor] #case_against weak", "Case against (weak)"))
+    cases = [(f"\"Do not\" before {name}", DECISION_ITEM, marks_dropped.replace(old, f"Do not {old[0].lower()}{old[1:]}"))
+             for name, old in (("the `#new` text", "Hide rows"),
+                               ("the `#new_if_d` text after its lead-in", "Show every row"),
+                               ("the `#case_against` lead-in", "Case against (weak)"))]
+    cases.append(("the `#new` and `#new_if_d` lead-ins swapped", DECISION_ITEM,
+                  marks_dropped.replace("Hide rows", "If you disapprove, the new text: Hide rows")
+                  .replace("If you disapprove, the new text: Show", "If you approve, the new text: Show")))
+    for name, block in (("a list", "- Hide rows older than a year.\n- Keep the rest."),
+                        ("a quotation", "> Hide rows older than a year.\n>\n> Keep the rest.")):
+        item = QUOTED_PROPOSAL_ITEM.replace("#new\n> Hide rows older than a year.\n> Keep the rest.",
+                                            f"#new\n\n{block}")
+        cases.append((f"\"Do not\" before {name} a bare `#new` introduces, shown without the mark", item,
+                      item.replace("#new\n\n", "").replace("Hide rows", "Do not hide rows")))
+    for name, item, shown in cases:
+        case = Case(next_to_present="item 4 of 9", document="# A walk\n\n" + item + "\n", model="changed")
+        lines = case.lines("a", case.transcript(f"{shown}\n\n{ITEM_4_CLOSING_LINE}"))
+        check(f"an answer goes to the model and is refused when the message showed {name}",
+              len(case.model_calls()) == 1 and lines is not None and not counted(lines), f"lines {lines!r}")
+
+
 def test_a_bare_new_mark_ending_a_paragraph_after_a_label_takes_the_block_below_it():
     item = """## Item 4 of 9: a filter
 
