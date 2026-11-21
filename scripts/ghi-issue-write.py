@@ -1870,7 +1870,9 @@ def land_file(repo: str, number: int, title: str, source: Path,
               repository_root: Path, runner, report):
     """Step 4, in a throwaway worktree cut from a just-fetched origin/main,
     so the commit is never made against stale or dirty disk. Returns the
-    destination.
+    path the issue's file will have on main once step 4's pull request
+    merges: the destination, or, when the branch was already pushed, the
+    file that branch holds (`ghi_md_path_on_pushed_filing_branch`).
 
     Safe to run twice through main's copy of the destination, compared with
     what this run would land before any branch is looked at: see the module
@@ -1891,18 +1893,21 @@ def land_file(repo: str, number: int, title: str, source: Path,
         ["git", "ls-remote", "--heads", "origin", branch],
         cwd=str(repository_root))
     if (on_remote.stdout or "").strip():
+        pushed = ghi_md_path_on_pushed_filing_branch(
+            number, branch, on_remote.stdout.split()[0], repository_root,
+            runner)
         waiting = existing_pull_request_for_branch(repo, branch, runner)
         if waiting:
             report(f"step 4 already done: pull request "
                    f"[{waiting.get('title')}]({waiting.get('url')}) is "
                    "waiting for merge-lane")
-            return destination
+            return pushed
         report(f"branch {branch} is on the remote with no pull request "
                "open on it, so an earlier run stopped between its push "
                "and its pull request")
         create_pull_request_for_branch(repo, branch, number, title,
                                        repository_root, runner, report)
-        return destination
+        return pushed
 
     worktree_parent = Path(tempfile.mkdtemp(prefix="ghi-issue-write-"))
     worktree = worktree_parent / "worktree"
@@ -1946,6 +1951,30 @@ def land_file(repo: str, number: int, title: str, source: Path,
         else:
             shutil.rmtree(worktree_parent, ignore_errors=True)
     return destination
+
+
+def ghi_md_path_on_pushed_filing_branch(number: int, branch: str,
+                                        commit: str, repository_root: Path,
+                                        runner) -> str:
+    """The issue's file on a filing branch already on the remote, read from
+    the branch rather than recomputed: the branch may hold a name the naming
+    rule of the run that pushed it gave, and step 5's rerun line must name
+    the file the merge puts on main. `commit` is the branch's head as
+    `git ls-remote` printed it, read by its hash because the next
+    `git fetch origin main` overwrites FETCH_HEAD."""
+    runner(["git", "fetch", "origin", branch], cwd=str(repository_root))
+    paths = ghi_md_paths_for_issue(number, repository_root, runner,
+                                   revision=commit)
+    if len(paths) != 1:
+        raise Refused(
+            f"branch {branch} on the remote should hold one file for issue "
+            f"{number}, and holds {len(paths)}: {', '.join(paths) or 'none'}. "
+            "This run cannot tell which file step 5's rerun needs, and "
+            "stopped before step 5.\n"
+            f"Read the branch with `git fetch origin {branch}` and "
+            f"`git show --stat {commit}`, and tell the user what it holds: "
+            "a filing branch holds the one file step 4 pushed.", 1)
+    return paths[0]
 
 
 def source_path_on_main(source: Path, repository_root: Path, runner):
@@ -2067,7 +2096,9 @@ def link_body(repo: str, number: int, repository_root: Path, runner, report,
     `rerun_on` is the path the rerun must be given, which is not always the
     path this run was given: filing moves a source that was already tracked
     on main, so after the merge that source is gone and its landed copy is
-    the file that exists.
+    the file that exists. It is the path `land_file` returned, which is the
+    file the pushed branch holds, so it names a file that exists after the
+    merge even when the naming rule has changed since that branch was pushed.
 
     The fetch raises rather than being ignored. A fetch that failed leaves
     the list below empty exactly as a main with nothing filed does, and the
