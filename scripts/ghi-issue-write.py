@@ -87,7 +87,9 @@ The branch test that remains answers a different question — is a pull
 request open on it — and it asks GitHub rather than assuming: a run whose
 push succeeded and whose `gh pr create` then failed leaves a branch with no
 pull request, and every rerun after that would otherwise report one waiting
-forever. Finding none, the rerun opens it.
+forever. Finding none, the rerun opens it. Either way the rerun reads the
+file the branch holds, which step 5's rerun line names
+(`ghi_md_path_on_pushed_filing_branch`).
 
 WHAT ELSE STOPS A SECOND ISSUE, the pairing key having limits. The key is a
 hash of the source's content, so it finds a filing only while that filing's
