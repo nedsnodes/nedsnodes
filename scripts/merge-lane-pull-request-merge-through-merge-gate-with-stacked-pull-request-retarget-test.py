@@ -38,6 +38,18 @@ SURVIVING_MUTANT_TEST_PRS_GO_AHEAD_PROGRAM is a fake that logs the GH_TOKEN it
 saw and answers from the output and exit code the case gives, so no case reads
 GitHub or the log-store through the real one.
 
+Unless a case gives its own head test run test logs, each case has one passing
+record of the nc-head-commit, filed under a pr10-merged commit whose second
+parent is HEAD, so the merge goes on without a head test run. The review tools
+clone's scripts/ holds a fake of each step the program runs when the head has no
+record: the fake rebuild logs its arguments and exits with the code the case
+gives; the fake head test run step logs its arguments and either exits with the
+code the case gives, or runs origin's Markdown-reading suite in pr10-merged,
+files a record in the real format under hr/pr10/log-store named by
+pr10-merged's commit, and exits with the suite's code. A case may instead have
+the real rebuild program, linked into the clone, build pr10-merged from a real
+head that origin serves as refs/pull/10/head.
+
 Run: python3 scripts/merge-lane-pull-request-merge-through-merge-gate-with-stacked-pull-request-retarget-test.py
 """
 
@@ -179,6 +191,54 @@ sys.exit(answer[1])
 '''
 GO_AHEAD_COUNT_ONLY = ("12 open pull requests, not drafts, have no review from ned-review-merge "
                        "on their head commit; fake go-ahead\n", 1)
+FAKE_REVIEW_WORKTREES_REBUILD = r'''#!/usr/bin/env python3
+import json, os, sys
+directory = os.environ["MERGE_LANE_MERGE_TEST_DIRECTORY"]
+with open(os.path.join(directory, "rebuild-calls.log"), "a") as log:
+    log.write(json.dumps(sys.argv[1:]) + "\n")
+answer = os.path.join(directory, "rebuild.exit")
+code = int(open(answer).read()) if os.path.exists(answer) else 0
+print("PR 10: fake rebuild exit %d" % code)
+sys.exit(code)
+'''
+FAKE_HEAD_TEST_RUN_STEP = r'''#!/usr/bin/env python3
+import json, os, subprocess, sys
+directory = os.environ["MERGE_LANE_MERGE_TEST_DIRECTORY"]
+argv = sys.argv[1:]
+with open(os.path.join(directory, "head-test-step-calls.log"), "a") as log:
+    log.write(json.dumps(argv) + "\n")
+answer = json.load(open(os.path.join(directory, "head-test-step.json")))
+if "exit" in answer:
+    print("PR 10 head test run: exit %d; fake head test run step" % answer["exit"])
+    sys.exit(answer["exit"])
+merged = os.path.join(argv[argv.index("--merge-lane-review-worktrees-directory") + 1],
+                      "pr10-merged")
+outputs = argv[argv.index("--merge-lane-worktrees-and-outputs-directory") + 1]
+suite = subprocess.run([sys.executable, "scripts/standing-instructions-carry-no-citations-test.py"],
+                       cwd=merged, capture_output=True, text=True)
+commit = subprocess.run(["git", "-C", merged, "rev-parse", "HEAD"], capture_output=True,
+                        text=True, check=True).stdout.strip()
+code = 0 if suite.returncode == 0 else 1
+lines = ["head: commit %s (\"Merge commit\")" % commit, "runner exit code: %d" % code,
+         "pull-request-head-test-run exit code: %d" % code]
+machine = os.path.join(outputs, "hr", "pr10", "log-store", "pull-request-head-test-runs",
+                       "ned-box")
+os.makedirs(machine, exist_ok=True)
+with open(os.path.join(machine, commit + ".txt"), "a") as test_log:
+    test_log.write("\n".join(["pull-request-head-test-run: ned-box, started 2026-11-21T10:00:00Z, "
+                              "a record of %d lines" % (len(lines) + 1)] + lines) + "\n")
+sys.stdout.write(suite.stdout)
+print("PR 10 head test run: exit %d; SUMMARY: %d passed, %d failed, 1 total" % (
+    code, 1 - code, code))
+sys.exit(code)
+'''
+# Fails, as the real suite does, on a date in a standing instruction.
+MARKDOWN_READING_SUITE = r'''import pathlib, re, sys
+found = [str(path) for path in pathlib.Path(".").rglob("*.md")
+         if re.search(r"\b20\d\d-\d\d-\d\d\b", path.read_text())]
+print("FAIL citation in " + ", ".join(found) if found else "PASS no citations")
+sys.exit(1 if found else 0)
+'''
 RUNNER_PASSED_SUMMARY ="SUMMARY: 1 passed, 0 failed, 1 total; fake runner"
 RUNNER_FAILED = ("PASS scripts/some-test.py (1s)\n"
                  "FAIL scripts/broken-test.py exit 1 (2s)\n"
@@ -267,11 +327,13 @@ STACKED_AND_NOT = [{"number": 20, "baseRefName": BRANCH},
 def run_case(scratch, name, gate_answers, routes, token=TOKEN, review_tools_state="at-main",
              review_worktrees_state="none", git_killed_on_worktree_remove=None,
              git_fails_after_merge_on=None, git_killed_before_the_merge_on=None,
-             runner_answer=None, head_test_run_test_logs=(),
+             runner_answer=None, head_test_run_test_logs=None,
              origin_files=None, before_the_program_runs=None,
              merge_commit_new_to_the_clone=False,
              another_fetch_races_the_after_merge_fetch=False,
-             go_ahead_answer=GO_AHEAD_COUNT_ONLY):
+             go_ahead_answer=GO_AHEAD_COUNT_ONLY, head=HEAD, merged_second_parent=HEAD,
+             rebuild_exit=0, head_test_step_answer=None, pull_request_head_files=None,
+             real_review_worktrees_rebuild=False, runs=1):
     """Run main() once; return (exit code, output, gh calls, gate calls, waits).
 
     Each "MERGE_COMMIT" in routes becomes origin's commit, and each "ORIGIN"
@@ -284,12 +346,26 @@ def run_case(scratch, name, gate_answers, routes, token=TOKEN, review_tools_stat
     the merge must hold for the fake git to kill itself.
     runner_answer: None, for a fake runner that passes, or (output, exit code);
     a negative exit code -N makes the fake runner kill itself with signal N.
-    head_test_run_test_logs: (file name, contents) pairs, each written as a head
+    head_test_run_test_logs: None, for one passing record of the head, or (file
+    name, contents) pairs, each written as a head
     test run's test log under outputs/hr/pr10/log-store; contents None makes a
     directory there instead, and bytes are written as they are. Each "MERGED"
     in a file name or a text becomes a commit made in the review tools clone
-    with the tree of origin's commit, as pr10-merged has when main has not
-    moved since the head test run; its hash is in the case's merged-commit file.
+    with the tree of origin's commit and the parents origin's commit and
+    merged_second_parent, as pr10-merged has when main has not moved since the
+    head test run; its hash is in the case's merged-commit file.
+    head: the nc-head-commit the program is given; "PULL_REQUEST_HEAD" gives the
+    commit pull_request_head_files made, which then replaces HEAD in the gate's answers.
+    rebuild_exit: the fake rebuild's exit code.
+    head_test_step_answer: None, for a fake head test run step that exits 0, or
+    {"exit": code}, or {} to run origin's Markdown-reading suite in pr10-merged.
+    pull_request_head_files: None, or path -> body committed on origin's first
+    commit and served by origin as refs/pull/10/head; its hash is in the case's
+    pull-request-head file.
+    real_review_worktrees_rebuild: link the real rebuild program into the clone
+    in place of the fake.
+    runs: how many times main() runs; the exit code is the last run's, and the
+    output holds every run's, in order.
     origin_files: path -> body, added to origin's one commit.
     before_the_program_runs: None, or a function given the case's directory, called last
     before main() runs.
@@ -338,6 +414,17 @@ def run_case(scratch, name, gate_answers, routes, token=TOKEN, review_tools_stat
             f'exec {shutil.which("git")} "$@"\n')
         (bin_directory / "git").chmod(0o755)
     origin = origin_with_one_commit(directory, origin_files)
+    if pull_request_head_files is not None:
+        seed = directory / "origin-seed"
+        git("checkout", "-q", "-b", "pull-request-10", cwd=seed)
+        for relative, body in pull_request_head_files.items():
+            (seed / relative).parent.mkdir(parents=True, exist_ok=True)
+            (seed / relative).write_text(body)
+        git("add", "-A", cwd=seed)
+        git("commit", "-q", "-m", "pull request 10's change", cwd=seed)
+        git("push", "-q", str(origin), "HEAD:refs/pull/10/head", cwd=seed)
+        (directory / "pull-request-head").write_text(git_output(seed, "rev-parse", "HEAD"))
+        git("checkout", "-q", "main", cwd=seed)
     review_tools = directory / "review-tools"
     git("clone", "-q", str(origin), str(review_tools))
     git("checkout", "-q", "--detach", "origin/main", cwd=review_tools)
@@ -354,6 +441,17 @@ def run_case(scratch, name, gate_answers, routes, token=TOKEN, review_tools_stat
     if review_tools_state != "no-gate":
         (review_tools / "scripts").mkdir(parents=True, exist_ok=True)
         (review_tools / "scripts" / "merge-gate.sh").write_text(FAKE_GATE)
+    rebuild = review_tools / "scripts" / "merge-lane-pull-request-head-and-merged-worktrees-rebuild.py"
+    rebuild.parent.mkdir(parents=True, exist_ok=True)
+    if real_review_worktrees_rebuild:
+        rebuild.symlink_to(PROGRAM.resolve().with_name(rebuild.name))
+    else:
+        rebuild.write_text(FAKE_REVIEW_WORKTREES_REBUILD)
+    (review_tools / "scripts" / "merge-lane-pull-request-head-test-run-on-merged-worktree.py"
+     ).write_text(FAKE_HEAD_TEST_RUN_STEP)
+    (directory / "rebuild.exit").write_text(str(rebuild_exit))
+    (directory / "head-test-step.json").write_text(json.dumps(
+        {"exit": 0} if head_test_step_answer is None else head_test_step_answer))
     if review_tools_state == "behind-main":
         seed = directory / "origin-seed"
         (seed / "README").write_text("moved on\n")
@@ -372,11 +470,20 @@ def run_case(scratch, name, gate_answers, routes, token=TOKEN, review_tools_stat
         git("worktree", "add", "-q", "--detach", str(review_worktrees / "pr10-merged"),
             cwd=review_tools)
         (review_worktrees / "pr10-merged" / "left-by-a-test-run.txt").write_text("untracked\n")
+    if head_test_run_test_logs is None:
+        head_test_run_test_logs = [("MERGED.txt", head_test_run_record("MERGED", 0))]
     if head_test_run_test_logs:
+        # hash-object, because commit-tree refuses a parent the clone lacks, such as HEAD.
+        commit_object = (f"tree {git_output(review_tools, 'rev-parse', 'HEAD^{tree}')}\n"
+                         f"parent {git_output(review_tools, 'rev-parse', 'HEAD')}\n"
+                         f"parent {merged_second_parent}\n"
+                         f"author merge-lane-test <test@example.invalid> 1 +0000\n"
+                         f"committer merge-lane-test <test@example.invalid> 1 +0000\n\n"
+                         f"Merge commit into HEAD\n")
         merged = subprocess.run(
-            ["git", *GIT_IDENTITY, "-C", str(review_tools), "commit-tree", "HEAD^{tree}",
-             "-p", "HEAD", "-m", "Merge commit into HEAD"],
-            capture_output=True, text=True, env=GIT_ENVIRONMENT, check=True).stdout.strip()
+            ["git", "-C", str(review_tools), "hash-object", "-t", "commit", "-w", "--stdin"],
+            input=commit_object, capture_output=True, text=True, env=GIT_ENVIRONMENT,
+            check=True).stdout.strip()
         (directory / "merged-commit").write_text(merged)
         machine_directory = (directory / "outputs" / "hr" / "pr10" / "log-store"
                              / "pull-request-head-test-runs" / "ned-box")
@@ -391,6 +498,10 @@ def run_case(scratch, name, gate_answers, routes, token=TOKEN, review_tools_stat
                 test_log.write_text(contents.replace("MERGED", merged))
     if review_tools_state == "no-origin":
         shutil.rmtree(origin)
+    if head == "PULL_REQUEST_HEAD":
+        head = (directory / "pull-request-head").read_text()
+        gate_answers = [(output.replace(HEAD, head), exit_code)
+                        for output, exit_code in gate_answers]
     for number, (output, exit_code) in enumerate(gate_answers, start=1):
         (directory / f"gate-{number}.out").write_text(output)
         (directory / f"gate-{number}.exit").write_text(str(exit_code))
@@ -425,11 +536,15 @@ def run_case(scratch, name, gate_answers, routes, token=TOKEN, review_tools_stat
         before_the_program_runs(directory)
     try:
         with contextlib.redirect_stdout(output):
-            exit_code = program.main([PULL_REQUEST, HEAD, SINCE, "--review-tools-worktree-at-main",
-                                      str(review_tools), "--merge-lane-review-worktrees-directory",
-                                      str(review_worktrees),
-                                      "--merge-lane-worktrees-and-outputs-directory",
-                                      str(directory / "outputs")], wait=waits.append)
+            for run in range(1, runs + 1):
+                if run > 1:
+                    print(f"=== run {run} ===")
+                exit_code = program.main([PULL_REQUEST, head, SINCE,
+                                          "--review-tools-worktree-at-main", str(review_tools),
+                                          "--merge-lane-review-worktrees-directory",
+                                          str(review_worktrees),
+                                          "--merge-lane-worktrees-and-outputs-directory",
+                                          str(directory / "outputs")], wait=waits.append)
     finally:
         runner.DEFAULT_RECORDED_INPUTS_DIRECTORY = saved_default
         program.SURVIVING_MUTANT_TEST_PRS_GO_AHEAD_PROGRAM = saved_go_ahead
@@ -509,6 +624,17 @@ def go_ahead_calls_of(scratch, name):
 def runner_calls(scratch, name):
     log = scratch / name / "runner-calls.log"
     return [json.loads(line) for line in log.read_text().splitlines()] if log.exists() else []
+
+
+def step_calls(scratch, name, log_name):
+    log = scratch / name / log_name
+    return [json.loads(line) for line in log.read_text().splitlines()] if log.exists() else []
+
+
+def neither_gate_nor_retarget_nor_merge_ran(gh_calls, gate_calls):
+    calls = argvs(gh_calls)
+    return (gate_calls == [] and index_of(calls, ["pr", "edit"]) is None
+            and index_of(calls, ["pr", "merge"]) is None)
 
 
 def origin_commit(scratch, name):
@@ -966,7 +1092,8 @@ def main():
               f"exit {exit_code}\n{output}")
 
         exit_code, output, _, _, _ = run_case(
-            scratch, "after-merge-passes", [(GATE_PASSED, 0)], default_routes(STACKED_AND_NOT))
+            scratch, "after-merge-passes", [(GATE_PASSED, 0)], default_routes(STACKED_AND_NOT),
+            head_test_run_test_logs=())
         merge_commit = origin_commit(scratch, "after-merge-passes")
         merge_commit_worktree = scratch / "after-merge-passes" / "review-worktrees" / "pr10-merge-commit-on-main-worktree"
         log_dir = (scratch / "after-merge-passes" / "outputs"
@@ -1270,13 +1397,6 @@ def main():
               f"exit {exit_code}\n{output}\n{json.dumps(calls)}")
 
         for name, test_logs, notice in (
-                ("since-head-when-last-record-failed",
-                 [("MERGED.txt", head_test_run_record("MERGED", 0)
-                   + head_test_run_record("MERGED", 1, "2026-11-07T22:00:00Z"))],
-                 "no readable head test run record under"),
-                ("since-head-when-record-names-another-commit",
-                 [("MERGED.txt", head_test_run_record("b" * 40, 0))],
-                 "no readable head test run record under"),
                 ("since-head-when-test-log-is-a-directory", [("MERGED.txt", None)],
                  "could not be read, so it is not used"),
                 ("since-head-when-record-is-torn",
@@ -1446,7 +1566,8 @@ def main():
         routes = default_routes(STACKED_AND_NOT)
         routes["view-state"] = {"exit": 1, "stderr": "HTTP 502\n"}
         exit_code, output, _, _, _ = run_case(
-            scratch, "merge-commit-unread", [(GATE_PASSED, 0)], routes)
+            scratch, "merge-commit-unread", [(GATE_PASSED, 0)], routes,
+            head_test_run_test_logs=())
         check("a merge commit that cannot be read after the merge exits 3 without a test run, "
               "saying how to run it by hand",
               exit_code == 3 and runner_calls(scratch, "merge-commit-unread") == []
@@ -1617,6 +1738,140 @@ def main():
         merges = [argv for argv in argvs(gh_calls) if argv[:2] == ["pr", "merge"]]
         check("a merge GitHub refuses for any other reason is not run again, exit 1",
               exit_code == 1 and len(merges) == 1 and waits == [], f"exit {exit_code}\n{output}")
+        name = "head-with-no-record-whose-markdown-a-suite-fails"
+        skill = ".claude/skills/walk-me-through/SKILL.md"
+        exit_code, output, gh_calls, gate_calls, _ = run_case(
+            scratch, name, [(GATE_PASSED, 0)], default_routes(STACKED_AND_NOT),
+            head="PULL_REQUEST_HEAD", head_test_run_test_logs=(), head_test_step_answer={},
+            origin_files={"scripts/standing-instructions-carry-no-citations-test.py":
+                          MARKDOWN_READING_SUITE},
+            pull_request_head_files={skill: "The user decided this on 2026-11-17.\n"},
+            real_review_worktrees_rebuild=True, review_tools_state="behind-main",
+            review_worktrees_state="merged-only", runs=2)
+        first_run, _, second_run = output.partition("=== run 2 ===")
+        head = (scratch / name / "pull-request-head").read_text()
+        merged_worktree = scratch / name / "review-worktrees" / "pr10-merged"
+        check("a prose-only head with no head test run record, whose Markdown a suite reads "
+              "and fails, is refused before the gate, the retargets and the merge, exit 1",
+              exit_code == 1 and f"FAIL citation in {skill}" in first_run
+              and f"STOP: not merged: the head test run on pr10-merged, the nc-head-commit "
+                  f"{head} merged with main" in first_run
+              and neither_gate_nor_retarget_nor_merge_ran(gh_calls, gate_calls),
+              f"exit {exit_code}\n{output}")
+        check("the head test run before the merge runs on pr10-merged rebuilt from the head "
+              "merged with origin's current main, not on the stale pr10-merged left on an "
+              "older main",
+              git_output(merged_worktree, "rev-parse", "HEAD^1", check=False)
+              == origin_commit(scratch, name)
+              and git_output(merged_worktree, "rev-parse", "HEAD^2", check=False) == head
+              and (merged_worktree / "new-on-main.txt").exists()
+              and not (merged_worktree / "left-by-a-test-run.txt").exists(),
+              f"{output}")
+        check("a second run on the same head reads the failed record the first run filed, and "
+              "refuses without a new head test run",
+              len(step_calls(scratch, name, "head-test-step-calls.log")) == 1
+              and "STOP: not merged: the newest head test run record of the nc-head-commit "
+                  f"{head}" in second_run and "did not pass, so this program does not merge "
+                  "and does not run the tests again." in second_run,
+              f"{json.dumps(step_calls(scratch, name, 'head-test-step-calls.log'))}\n{output}")
+
+        name = "head-with-no-record-passes-then-merges"
+        exit_code, output, gh_calls, _, _ = run_case(
+            scratch, name, [(GATE_PASSED, 0)], default_routes(STACKED_AND_NOT),
+            head_test_run_test_logs=(), review_tools_state="behind-main")
+        directory_options = ["--merge-lane-worktrees-and-outputs-directory",
+                             str(scratch / name / "outputs"),
+                             "--merge-lane-review-worktrees-directory",
+                             str(scratch / name / "review-worktrees"),
+                             "--review-tools-worktree-at-main", str(scratch / name / "review-tools")]
+        check("a head with no record gets the rebuild on origin's current main and then the "
+              "head test run, both main's copies, and then merges when the run passes",
+              exit_code == 0 and index_of(argvs(gh_calls), ["pr", "merge"]) is not None
+              and step_calls(scratch, name, "rebuild-calls.log") == [
+                  [PULL_REQUEST, HEAD, origin_commit(scratch, name), *directory_options]]
+              and step_calls(scratch, name, "head-test-step-calls.log") == [
+                  [PULL_REQUEST, *directory_options]]
+              and printed_in_order(output, "has no head test run record: rebuilding pr10-merged",
+                                   "fake head test run step", "gate passed"),
+              f"exit {exit_code}\n{output}")
+
+        exit_code, output, gh_calls, gate_calls, _ = run_case(
+            scratch, "head-with-a-passing-record", [(GATE_PASSED, 0)],
+            default_routes(STACKED_AND_NOT))
+        check("a head whose newest record passed merges as before, with no rebuild and no "
+              "head test run",
+              exit_code == 0 and gate_calls
+              and step_calls(scratch, "head-with-a-passing-record", "rebuild-calls.log") == []
+              and step_calls(scratch, "head-with-a-passing-record",
+                             "head-test-step-calls.log") == []
+              and "passed on" in output and "no new head test run" in output,
+              f"exit {exit_code}\n{output}")
+
+        for name, test_logs, why in (
+                ("newest-record-failed",
+                 [("MERGED.txt", head_test_run_record("MERGED", 0)
+                   + head_test_run_record("MERGED", 1, "2026-11-07T22:00:00Z"))],
+                 "the newest record exited 1"),
+                ("newest-record-names-another-commit",
+                 [("MERGED.txt", head_test_run_record("b" * 40, 0))],
+                 "the newest record says it tested another commit")):
+            exit_code, output, gh_calls, gate_calls, _ = run_case(
+                scratch, name, [(GATE_PASSED, 0)], default_routes(STACKED_AND_NOT),
+                head_test_run_test_logs=test_logs)
+            check(f"{why}: the merge is refused without a new run, before the gate, exit 1",
+                  exit_code == 1
+                  and "STOP: not merged: the newest head test run record of the nc-head-commit "
+                      f"{HEAD}" in output
+                  and step_calls(scratch, name, "head-test-step-calls.log") == []
+                  and step_calls(scratch, name, "rebuild-calls.log") == []
+                  and neither_gate_nor_retarget_nor_merge_ran(gh_calls, gate_calls),
+                  f"exit {exit_code}\n{output}")
+
+        name = "newest-record-passed-after-a-failed-one"
+        exit_code, output, _, _, _ = run_case(
+            scratch, name, [(GATE_PASSED, 0)], default_routes(STACKED_AND_NOT),
+            head_test_run_test_logs=[
+                ("MERGED.txt", head_test_run_record("MERGED", 1, "2026-11-07T20:00:00Z")
+                 + head_test_run_record("MERGED", 0))])
+        check("a head whose newest record passed after an older one failed merges with no new run",
+              exit_code == 0 and step_calls(scratch, name, "head-test-step-calls.log") == [],
+              f"exit {exit_code}\n{output}")
+
+        for name, test_logs, notice in (
+                ("record-of-an-older-head-only", [("MERGED.txt", head_test_run_record("MERGED", 0))],
+                 None),
+                ("record-names-a-commit-git-cannot-read",
+                 [(f"{'0' * 40}.txt", head_test_run_record("0" * 40, 0))],
+                 f"names the commit {'0' * 40}, which git in")):
+            exit_code, output, _, _, _ = run_case(
+                scratch, name, [(GATE_PASSED, 0)], default_routes(STACKED_AND_NOT),
+                head_test_run_test_logs=test_logs, merged_second_parent="b" * 40)
+            check(f"{name.replace('-', ' ')}: the record is not the head's, so the head test run "
+                  f"runs before the merge",
+                  exit_code == 0 and len(step_calls(scratch, name, "head-test-step-calls.log")) == 1
+                  and (notice is None or notice in output), f"exit {exit_code}\n{output}")
+
+        for name, options, code, expected in (
+                ("rebuild-fails", {"rebuild_exit": 1}, 2,
+                 "STOP: not merged: merge-lane-pull-request-head-and-merged-worktrees-rebuild.py "
+                 "exited 1, so no head test run ran"),
+                ("head-test-run-step-fails", {"head_test_step_answer": {"exit": 2}}, 1,
+                 "STOP: not merged: the head test run on pr10-merged, the nc-head-commit "
+                 f"{HEAD} merged with main"),
+                ("head-test-run-step-missing", {"before_the_program_runs": lambda directory: (
+                    directory / "review-tools" / "scripts"
+                    / "merge-lane-pull-request-head-test-run-on-merged-worktree.py").unlink()}, 2,
+                 "has no head test run record, and the head test run cannot be run: "),
+                ("origin-main-unreadable",
+                 {"git_killed_before_the_merge_on": "origin/main^{commit}"}, 2,
+                 "origin/main could not be read in")):
+            exit_code, output, gh_calls, gate_calls, _ = run_case(
+                scratch, name, [(GATE_PASSED, 0)], default_routes(STACKED_AND_NOT),
+                head_test_run_test_logs=(), **options)
+            check(f"{name.replace('-', ' ')}: the merge is refused before the gate, exit {code}",
+                  exit_code == code and expected in output
+                  and neither_gate_nor_retarget_nor_merge_ran(gh_calls, gate_calls),
+                  f"exit {exit_code}\n{output}")
     finally:
         shutil.rmtree(scratch, ignore_errors=True)
 

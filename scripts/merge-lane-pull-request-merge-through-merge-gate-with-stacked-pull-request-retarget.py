@@ -6,7 +6,25 @@ Usage:
       <nc-head-commit, all 40 characters> <reviewed-since>
       [--merge-lane-worktrees-and-outputs-directory DIR] [--merge-lane-review-worktrees-directory DIR] [--review-tools-worktree-at-main DIR]
 
-Runs --review-tools-worktree-at-main's scripts/merge-gate.sh, never the pull
+First the nc-head-commit's head test run records decide whether the merge may
+go on. A record is the nc-head-commit's when its test log, under hr/pr<n>/log-store
+in the worktrees and outputs directory, is named by a pr<n>-merged commit whose
+second parent is the nc-head-commit, as git in --review-tools-worktree-at-main
+reads it; a test log git cannot read, or named by a commit git cannot read, is
+not the nc-head-commit's, which the program prints. When the newest such
+record, by the time it started, passed, the merge goes on. When it did not
+pass, the program refuses the merge without a new run. When there is no such
+record, the program runs --review-tools-worktree-at-main's
+scripts/merge-lane-pull-request-head-and-merged-worktrees-rebuild.py, which
+builds pr<n>-merged anew from the nc-head-commit merged with origin/main as
+that worktree has it after its fetch, never reusing an older pr<n>-merged; then
+its scripts/merge-lane-pull-request-head-test-run-on-merged-worktree.py, which
+files its record where this program reads one, so a later run on the same
+nc-head-commit uses that record. It refuses the merge when either exits
+nonzero. All of this runs before the gate, so the gate's verdict is read just
+before the merge however long the test run took.
+
+Then it runs --review-tools-worktree-at-main's scripts/merge-gate.sh, never the pull
 request's own copy, with the three arguments. While the gate
 refuses with "mergeStateStatus is UNKNOWN", it runs the gate again, 5 seconds
 apart, at most 8 times in all. When the gate passes, the merge command it
@@ -88,11 +106,15 @@ not document, the program prints that too; the exit code below never depends
 on it.
 
 Exit codes: 0 merged, with the review worktrees removed, and main's after-merge
-test run passed; 1 the gate refused,
+test run passed; 1 the nc-head-commit's newest head test run record did not
+pass, the head test run this program ran exited nonzero, the gate refused,
 printed a merge command other than the expected one, or the pull request is
 not merged after the merge command ran; 2 the token file could not be read or
 was empty, --review-tools-worktree-at-main has no scripts/merge-gate.sh, could
-not be fetched, holds work of its own or could not be checked out at origin/main, the gate could not run or exited with
+not be fetched, holds work of its own or could not be checked out at origin/main,
+the head test run this program would run could not start because a step
+script is missing or origin/main could not be read, the rebuild of the review
+worktrees exited nonzero, the gate could not run or exited with
 a code it does not document, or a read or a retarget on GitHub failed, each
 before any merge; 3 merged, but a step after the merge was not done: a review
 worktree or the pr<n>-merge-commit-on-main-worktree worktree could not be removed, the
@@ -155,6 +177,9 @@ EXIT_MERGED_BUT_A_STEP_AFTER_THE_MERGE_NOT_DONE = 3
 EXIT_MERGE_OUTCOME_UNKNOWN = 4
 MERGE_GATE_DOCUMENTED_EXITS = (0, 1, 2)
 MERGE_GATE = Path("scripts") / "merge-gate.sh"
+REVIEW_WORKTREES_REBUILD = Path("scripts") / "merge-lane-pull-request-head-and-merged-worktrees-rebuild.py"
+HEAD_TEST_RUN_ON_MERGED_WORKTREE = (
+    Path("scripts") / "merge-lane-pull-request-head-test-run-on-merged-worktree.py")
 SURVIVING_MUTANT_TEST_PRS_GO_AHEAD_PROGRAM = Path(__file__).resolve().with_name(
     "merge-lane-unreviewed-prs-count-then-next-agent-seat-go-ahead-to-open-surviving-mutant-test-prs.py")
 # 0 named an agent-seat to release, 1 named none.
@@ -415,12 +440,13 @@ def review_worktrees_remove(arguments):
     return exit_code
 
 
-def head_test_run_passed_merged_commit(arguments):
-    """Return (the pr<n>-merged commit of the newest passing head test run record, None),
-    or (None, why no record gave one)."""
+def head_test_run_newest_records(arguments):
+    """Return (started, pr<n>-merged commit, passed, test log) for the last record of each
+    readable test log the head test runs filed for this pull request; print each that could
+    not be read."""
     kind = (common.pull_request_head_test_run_log_store_root_directory(arguments, arguments.pull_request)
             / head_test_run.PULL_REQUEST_HEAD_TEST_RUNS_KIND_DIRECTORY_NAME)
-    newest = None
+    newest_records = []
     for test_log in sorted(kind.glob("*/*.txt")):
         commit = test_log.stem
         try:
@@ -433,14 +459,124 @@ def head_test_run_passed_merged_commit(arguments):
                   f"used: {error}\n"
                   f"Nothing to do: without it the test run selects more suites, never fewer.")
             continue
-        if not head_test_run.pull_request_head_test_run_record_passed_on_commit_check(
-                record, commit):
-            continue
-        if newest is None or started > newest[0]:
-            newest = (started, commit)
-    if newest is None:
+        newest_records.append((started, commit, head_test_run.pull_request_head_test_run_record_passed_on_commit_check(
+            record, commit), test_log))
+    return newest_records
+
+
+def head_test_run_passed_merged_commit(arguments):
+    """Return (the pr<n>-merged commit of the newest passing head test run record, None),
+    or (None, why no record gave one)."""
+    passed = [(started, commit) for started, commit, passed, _ in
+              head_test_run_newest_records(arguments) if passed]
+    if not passed:
+        kind = (common.pull_request_head_test_run_log_store_root_directory(
+                    arguments, arguments.pull_request)
+                / head_test_run.PULL_REQUEST_HEAD_TEST_RUNS_KIND_DIRECTORY_NAME)
         return None, f"no readable head test run record under {kind} passed"
-    return newest[1], None
+    return max(passed)[1], None
+
+
+def merged_commit_of_the_head_check(arguments, merged_commit, test_log):
+    """Return whether merged_commit's second parent is the nc-head-commit; print why not
+    when git cannot read merged_commit."""
+    # cat-file reads the commit alone; git log would also read each parent, which a
+    # pull request's older head may no longer have in this clone.
+    read = subprocess.run(
+        ["git", "-C", str(arguments.review_tools_worktree_at_main), "cat-file", "commit",
+         merged_commit], capture_output=True, text=True, stdin=subprocess.DEVNULL,
+        env=common.run_all_test_suites.environment_without_git_redirecting_variables())
+    if read.returncode != 0:
+        print(f"the head test run record {test_log} names the commit {merged_commit}, which "
+              f"git in {arguments.review_tools_worktree_at_main} cannot read, so whether it "
+              f"tested the nc-head-commit cannot be told, and it is not used: "
+              f"{git_error(read)}\n"
+              f"Nothing to do: without it this program runs the head test run itself.")
+        return False
+    header = read.stdout.partition("\n\n")[0].splitlines()
+    parents = [line.split(" ", 1)[1] for line in header if line.startswith("parent ")]
+    return parents[1:] == [arguments.head_commit]
+
+
+def head_test_run_before_merge_refusal_exit_code(arguments):
+    """Return None when the nc-head-commit's newest head test run record passed, or when it
+    had none and the head test run this program then ran passed; else an exit code."""
+    head = arguments.head_commit
+    of_the_head = [(started, commit, passed, test_log)
+                   for started, commit, passed, test_log in head_test_run_newest_records(arguments)
+                   if merged_commit_of_the_head_check(arguments, commit, test_log)]
+    if of_the_head:
+        started, commit, passed, test_log = max(of_the_head)
+        if passed:
+            print(f"the newest head test run record of the nc-head-commit {head[:12]}, "
+                  f"{test_log}, started {started}, passed on {commit[:12]}; no new head test "
+                  f"run", flush=True)
+            return None
+        print(f"STOP: not merged: the newest head test run record of the nc-head-commit "
+              f"{head}, {test_log}, started {started}, did not pass, so this program does not "
+              f"merge and does not run the tests again.\n"
+              f"Read that record. When it names a failed suite, send the pull request back to "
+              f"its author, whose fix makes a new nc-head-commit.\n"
+              f"When it shows the run failed for a cause outside the tests, such as a missing "
+              f"tool, fix that cause, run the head test run again with "
+              f"{arguments.review_tools_worktree_at_main / HEAD_TEST_RUN_ON_MERGED_WORKTREE} "
+              f"{arguments.pull_request}, after "
+              f"{arguments.review_tools_worktree_at_main / REVIEW_WORKTREES_REBUILD} has "
+              f"rebuilt pr{arguments.pull_request}-merged on the current main, and then run "
+              f"this program again.")
+        return EXIT_REFUSED
+    for step in (REVIEW_WORKTREES_REBUILD, HEAD_TEST_RUN_ON_MERGED_WORKTREE):
+        missing = common.review_tool_missing_message(arguments, step)
+        if missing:
+            print(f"STOP: not merged: the nc-head-commit {head} has no head test run record, "
+                  f"and the head test run cannot be run: {missing}")
+            return EXIT_COULD_NOT_RUN
+    environment = common.run_all_test_suites.environment_without_git_redirecting_variables()
+    main_read = subprocess.run(
+        ["git", "-C", str(arguments.review_tools_worktree_at_main), "rev-parse", "--verify",
+         "origin/main^{commit}"], capture_output=True, text=True, env=environment,
+        stdin=subprocess.DEVNULL)
+    if main_read.returncode != 0:
+        print(f"STOP: not merged: the nc-head-commit {head} has no head test run record, and "
+              f"origin/main could not be read in {arguments.review_tools_worktree_at_main} to "
+              f"run one on: {git_error(main_read)}\n"
+              f"Run this again once; if it fails the same way, tell the user this message as "
+              f"printed, from its STOP line, which quotes git's error, through this line.")
+        return EXIT_COULD_NOT_RUN
+    main_commit = main_read.stdout.strip()
+    print(f"the nc-head-commit {head[:12]} has no head test run record: rebuilding "
+          f"pr{arguments.pull_request}-merged on main {main_commit[:12]} and running the head "
+          f"test run on it before the merge", flush=True)
+
+    def step_run(step, step_arguments):
+        # The head test run's progress goes to stderr, which passes through as it comes.
+        completed = subprocess.run(
+            [sys.executable, str(arguments.review_tools_worktree_at_main / step),
+             *step_arguments, *common.directory_options_argv(arguments)],
+            stdout=subprocess.PIPE, text=True, errors="replace", env=environment,
+            stdin=subprocess.DEVNULL)
+        print(completed.stdout, end="" if completed.stdout.endswith("\n") or not completed.stdout
+              else "\n", flush=True)
+        return completed.returncode
+
+    rebuild = step_run(REVIEW_WORKTREES_REBUILD,
+                       [arguments.pull_request, head, main_commit])
+    if rebuild != 0:
+        print(f"STOP: not merged: {REVIEW_WORKTREES_REBUILD.name} exited {rebuild}, so no head "
+              f"test run ran on the nc-head-commit {head}.\n"
+              f"Follow that program's own instructions, printed above, then run this program "
+              f"again.")
+        return EXIT_COULD_NOT_RUN
+    test_run = step_run(HEAD_TEST_RUN_ON_MERGED_WORKTREE, [arguments.pull_request])
+    if test_run != 0:
+        print(f"STOP: not merged: the head test run on pr{arguments.pull_request}-merged, the "
+              f"nc-head-commit {head} merged with main {main_commit[:12]}, exited {test_run}.\n"
+              f"Read its output above and its record under "
+              f"{common.pull_request_head_test_run_log_store_root_directory(arguments, arguments.pull_request)}. "
+              f"When a suite failed, send the pull request back to its author. Otherwise, "
+              f"follow what the output above says, then run this program again.")
+        return EXIT_REFUSED
+    return None
 
 
 def recordings_matching_the_merge_commit_adopted(worktree, source, which_source, into,
@@ -641,6 +777,10 @@ def main(argv=None, wait=time.sleep):
     if refusal:
         print(f"STOP: not merged: {refusal}")
         return EXIT_COULD_NOT_RUN
+
+    test_refusal = head_test_run_before_merge_refusal_exit_code(arguments)
+    if test_refusal is not None:
+        return test_refusal
 
     gate = merge_gate_after_retries(arguments, environment, wait)
     print(gate.stdout, end="" if gate.stdout.endswith("\n") or not gate.stdout else "\n")
