@@ -449,13 +449,15 @@ with tempfile.TemporaryDirectory() as temporary:
     readonly_seat.mkdir()
     os.chmod(readonly_seat, 0o500)
     try:
-        err = io.StringIO()
-        with contextlib.redirect_stderr(err), contextlib.redirect_stdout(io.StringIO()):
+        err, out = io.StringIO(), io.StringIO()
+        with contextlib.redirect_stderr(err), contextlib.redirect_stdout(out):
             exit_code = ghi_ask.main(["q", "--seat-dir", str(readonly_seat)])
-        check("an unwritable seat directory exits 1 with one line, no traceback",
+        check("an unwritable seat directory exits 1 with one line, no traceback, "
+              "and VERDICT: ASK-FAILED on stdout",
               exit_code == 1 and "Traceback" not in err.getvalue()
-              and "not usable" in err.getvalue(),
-              err.getvalue())
+              and "not usable" in err.getvalue()
+              and out.getvalue() == "VERDICT: ASK-FAILED\n",
+              (err.getvalue(), out.getvalue()))
     finally:
         os.chmod(readonly_seat, 0o700)
 
@@ -540,11 +542,12 @@ with tempfile.TemporaryDirectory() as temporary:
     missing_result = real_subprocess.run(
         ["/bin/sh", "-c", replayed], capture_output=True, text=True,
         env={"HOME": str(empty_home), "PATH": "/usr/bin:/bin"})
-    check("a box with no seat exits 1, names the path, and runs no ask",
+    check("a box with no seat exits 1, names the path, runs no ask, and "
+          "prints VERDICT: ASK-FAILED as its only stdout",
           missing_result.returncode == 1
           and "could not enter the ghi-guide-agent seat at" in missing_result.stderr
           and str(empty_home / "agents" / "ghi-guide-agent") in missing_result.stderr
-          and "ARG:[" not in missing_result.stdout,
+          and missing_result.stdout == "VERDICT: ASK-FAILED\n",
           (missing_result.returncode, missing_result.stderr, missing_result.stdout))
 
 
@@ -565,29 +568,40 @@ try:
         with contextlib.redirect_stdout(out):
             exit_code = ghi_ask.main(["q", "--seat-dir", str(seat), "--repo", "x/y"])
         check("main() with an explicit --seat-dir runs locally and exits 0",
-              exit_code == 0 and out.getvalue().strip() == "read #1", out.getvalue())
+              exit_code == 0
+              and out.getvalue() == "read #1\nVERDICT: READING-LIST-REPLY\n",
+              out.getvalue())
 
         missing = root / "no-such-seat"
-        err = io.StringIO()
-        with contextlib.redirect_stdout(io.StringIO()), contextlib.redirect_stderr(err):
+        err, out = io.StringIO(), io.StringIO()
+        with contextlib.redirect_stdout(out), contextlib.redirect_stderr(err):
             exit_code = ghi_ask.main(["q", "--seat-dir", str(missing)])
-        check("main() with a missing explicit --seat-dir errors cleanly, no traceback",
+        check("main() with a missing explicit --seat-dir exits 1 cleanly, no "
+              "traceback, with VERDICT: ASK-FAILED on stdout",
               exit_code == 1 and "does not exist on ned-box" in err.getvalue()
-              and str(missing) in err.getvalue(),
-              err.getvalue())
+              and str(missing) in err.getvalue()
+              and out.getvalue() == "VERDICT: ASK-FAILED\n",
+              (err.getvalue(), out.getvalue()))
 finally:
     patch_module_function(ghi_ask.mirror_refresh, "refresh", mirror_orig)
     patch("run_claude", run_claude_orig)
 
 
-# --- main(): the two boundary replies reach the caller as errors -----------
-# User-ruled 2026-09-29 (walk SKILL-ghi-write-2026-09-29-4, item 1 revised):
-# the two bare replies are no longer passed through on stdout with exit 0.
-# Renamed 2026-10-01: out-of-scope became not-about-issues, and escalate:
-# became ask-user-about-ruling:; the old words are still read (the module's
-# RETIRED_BOUNDARY_REPLY_WORDS), so both are sent here.
+# --- main(): the two boundary replies exit 0 with their verdict line --------
+# Each bare reply reaches the caller as exit 0, its verdict line alone on
+# stdout and its approved message on stderr. The retired words are still read
+# (the module's RETIRED_BOUNDARY_REPLY_WORDS), so both are sent here.
 # The expected text is typed out here rather than read from the module, so a
-# change to the approved wording fails this file.
+# change to the approved wording or to a verdict line fails this file.
+NOT_ABOUT_ISSUES_VERDICT_STDOUT = "VERDICT: NOT-ABOUT-ISSUES\n"
+RULING_VERDICT_STDOUT = "VERDICT: ASK-USER-ABOUT-RULING\n"
+READING_LIST_REPLY_VERDICT_STDOUT = "VERDICT: READING-LIST-REPLY\n"
+DRAFT_ADJUDICATION_VERDICT_STDOUT = (
+    "VERDICT: DRAFT-ISSUE-VS-OPEN-ISSUES-ADJUDICATION-REPLY\n")
+OFF_PROTOCOL_REPLY_VERDICT_STDOUT = "VERDICT: OFF-PROTOCOL-REPLY\n"
+ASK_FAILED_VERDICT_STDOUT = "VERDICT: ASK-FAILED\n"
+CALLED_THE_WRONG_WAY_VERDICT_STDOUT = "VERDICT: CALLED-THE-WRONG-WAY\n"
+ASK_OUTCOME_UNKNOWN_VERDICT_STDOUT = "VERDICT: ASK-OUTCOME-UNKNOWN\n"
 APPROVED_NOT_ABOUT_ISSUES_MESSAGE = (
     "Not a question about GitHub issues: ghi-guide-agent reports which issues relate to a subject.\n"
     'Ask again as: scripts/ghi-guide-agent-ask.py "Which issues cover <your subject>?"\n'
@@ -636,24 +650,26 @@ try:
             seat_scope = root / f"seat-not-a-question-{index}"
             seat_scope.mkdir()
             exit_code, out, err = main_with_reply(seat_scope, word)
-            check(f"a {word} reply exits 2",
-                  exit_code == ghi_ask.EXIT_NOT_ABOUT_ISSUES == 2, exit_code)
+            check(f"a {word} reply exits 0", exit_code == 0, exit_code)
             check(f"a {word} reply prints the approved message on stderr, and only it",
                   err.endswith(APPROVED_NOT_ABOUT_ISSUES_MESSAGE)
                   and word not in err, err)
-            check(f"a {word} reply prints nothing on stdout", out == "", out)
+            check(f"a {word} reply prints only the NOT-ABOUT-ISSUES verdict line on stdout",
+                  out == NOT_ABOUT_ISSUES_VERDICT_STDOUT, out)
 
         for index, prefix in enumerate(("ask-user-about-ruling:", "escalate:")):
             seat_ruling = root / f"seat-ruling-question-{index}"
             seat_ruling.mkdir()
             exit_code, out, err = main_with_reply(
                 seat_ruling, prefix + " " + ESCALATE_SENTENCE + "  ")
-            check(f"a {prefix} reply exits 3",
-                  exit_code == ghi_ask.EXIT_RULING_QUESTION == 3, exit_code)
+            check(f"a {prefix} reply exits 0", exit_code == 0, exit_code)
             check(f"a {prefix} reply prints the approved message on stderr, carrying ghi-guide-agent's sentence",
                   err.endswith(APPROVED_RULING_QUESTION_MESSAGE)
                   and prefix not in err, err)
-            check(f"a {prefix} reply prints nothing on stdout", out == "", out)
+            check(f"a {prefix} reply prints the ruling question on one stdout line, "
+                  "then the ASK-USER-ABOUT-RULING verdict line",
+                  out == "RULING-QUESTION: " + ESCALATE_SENTENCE + "\n"
+                  + RULING_VERDICT_STDOUT, out)
 
         # ghi-guide-agent opens every ruling question with the issue holding the
         # ruling. The number reaches the caller after the sentence, and,
@@ -668,8 +684,12 @@ try:
             seat_numbered, "ask-user-about-ruling: " + numbered)
         check("a ruling question opening with its issue number reaches the "
               "caller with the number moved to the end, and asks ghi-guide-agent "
-              "nothing more",
-              exit_code == 3 and out == ""
+              "nothing more, and its number and sentence on stdout",
+              exit_code == 0
+              and out == ("RULING-QUESTION-ISSUE-NUMBER: 783\n"
+                          "RULING-QUESTION: the ruling that a closed issue is "
+                          "frozen may not cover a reopened issue\n"
+                          + RULING_VERDICT_STDOUT)
               and ("ghi-guide-agent found a ruling of the user's that it cannot tell "
                    "still applies: the ruling that a closed issue is frozen "
                    "may not cover a reopened issue (held in GHI 783)\n")
@@ -679,11 +699,13 @@ try:
         seat_list = root / "seat-reading-list"
         seat_list.mkdir()
         exit_code, out, err = main_with_reply(seat_list, "read #1")
-        check("a reading list still prints on stdout with exit 0",
-              exit_code == 0 and out.strip() == "read #1", (exit_code, out, err))
+        check("a reading list still prints on stdout with exit 0, then its verdict line",
+              exit_code == 0 and out == "read #1\n" + READING_LIST_REPLY_VERDICT_STDOUT,
+              (exit_code, out, err))
         check("a reading list asked without --include-closed ends stderr with "
-              "the hint naming the flag, and leaves stdout the reading list alone",
-              exit_code == 0 and out == "read #1\n"
+              "the hint naming the flag, and leaves stdout the reading list and "
+              "its verdict line alone",
+              exit_code == 0 and out == "read #1\n" + READING_LIST_REPLY_VERDICT_STDOUT
               and err.endswith(EXPECTED_OPEN_ISSUES_ONLY_HINT), (exit_code, out, err))
 
         seat_closed = root / "seat-reading-list-with-flag"
@@ -691,7 +713,7 @@ try:
         exit_code, out, err = main_with_reply(seat_closed, "read #1",
                                               ("--include-closed",))
         check("a reading list asked with --include-closed carries no hint",
-              exit_code == 0 and out == "read #1\n"
+              exit_code == 0 and out == "read #1\n" + READING_LIST_REPLY_VERDICT_STDOUT
               and "--include-closed" not in err and "open issues only" not in err,
               (exit_code, out, err))
 
@@ -702,10 +724,14 @@ try:
           and ghi_ask.caller_message_for_passthrough_reply(
               "Not-about-issues reasons are listed in #5") is None)
     check("the two bare replies are still recognized case-insensitively",
-          ghi_ask.caller_message_for_passthrough_reply("NOT-ABOUT-ISSUES")[1] == 2
-          and ghi_ask.caller_message_for_passthrough_reply("Ask-User-About-Ruling: x")[1] == 3
-          and ghi_ask.caller_message_for_passthrough_reply("OUT-OF-SCOPE")[1] == 2
-          and ghi_ask.caller_message_for_passthrough_reply("Escalate: x")[1] == 3)
+          ghi_ask.caller_message_for_passthrough_reply("NOT-ABOUT-ISSUES")[1][-1]
+          == NOT_ABOUT_ISSUES_VERDICT_STDOUT.strip()
+          and ghi_ask.caller_message_for_passthrough_reply("Ask-User-About-Ruling: x")[1][-1]
+          == RULING_VERDICT_STDOUT.strip()
+          and ghi_ask.caller_message_for_passthrough_reply("OUT-OF-SCOPE")[1][-1]
+          == NOT_ABOUT_ISSUES_VERDICT_STDOUT.strip()
+          and ghi_ask.caller_message_for_passthrough_reply("Escalate: x")[1][-1]
+          == RULING_VERDICT_STDOUT.strip())
     check("the cold-start prompt teaches ghi-guide-agent the new reply words, not the old ones",
           "reply exactly: not-about-issues." in ghi_ask.COLD_START_PROMPT_TEMPLATE
           and "Reply: ask-user-about-ruling: #<issue> <" in ghi_ask.COLD_START_PROMPT_TEMPLATE
@@ -995,21 +1021,21 @@ with tempfile.TemporaryDirectory() as temporary:
 
 
     # --- the run's last message is not always the answer -----------------
-    # Measured 2026-09-17: ghi-guide-agent answered the question at 20:16:59Z and
-    # then answered the checkout-freshness Stop hook 13 seconds later, and
-    # this script returns the run's last message. The hooks are gone from the
-    # run now; this check is what catches whatever else says something last.
-    check("a reply naming an issue is an answer",
-          ghi_ask.reply_answers_the_question("read #39, #29 — start with #39"))
-    check("the two passthrough replies are answers, in the new words and the old",
-          ghi_ask.reply_answers_the_question("not-about-issues")
-          and ghi_ask.reply_answers_the_question("ask-user-about-ruling: an old ruling may bind")
-          and ghi_ask.reply_answers_the_question("out-of-scope")
-          and ghi_ask.reply_answers_the_question("escalate: an old ruling may bind"))
-    check("a reply to a Stop hook is not an answer",
-          not ghi_ask.reply_answers_the_question(
-              "No action needed on my part — this session hasn't touched any "
-              "scripts or tests; I only read the GHI mirror to answer requests."))
+    # ghi-guide-agent once answered the question and then answered a Stop
+    # hook, and this script returns the run's last message. Every reply is
+    # passed on, under a verdict line naming its kind, so a reply that is
+    # no answer reaches the caller as OFF-PROTOCOL-REPLY, not as an answer.
+    def kind(text):
+        return ghi_ask.reply_kind_verdict_line(text)
+    check("a reply naming an issue is a reading list",
+          kind("read #39, #29 — start with #39") == READING_LIST_REPLY_VERDICT_STDOUT.strip())
+    check("a reply to a Stop hook is off protocol",
+          kind("No action needed on my part — this session hasn't touched any "
+               "scripts or tests; I only read the GHI mirror to answer requests.")
+          == OFF_PROTOCOL_REPLY_VERDICT_STDOUT.strip())
+    check("a prose \"nothing covers this\" is off protocol, for its reader to judge",
+          kind("No open issue covers this subject.")
+          == OFF_PROTOCOL_REPLY_VERDICT_STDOUT.strip())
 
     # A draft-body request's "nothing covers this" names no issue; its verdict
     # line is what makes it an answer. Both replies below are ghi-guide-agent's own.
@@ -1020,17 +1046,20 @@ with tempfile.TemporaryDirectory() as temporary:
         "resolving a program's repository argument via `git rev-parse "
         "--show-toplevel`. Grepped both issues-open.md and issues-closed.md "
         "for all of those terms — no matches anywhere.\n\nverdict: unrelated")
-    check("a verdict: unrelated line is an answer, with reasons above it or alone",
-          ghi_ask.reply_answers_the_question(unrelated_with_reasons)
-          and ghi_ask.reply_answers_the_question("verdict: unrelated")
-          and ghi_ask.reply_answers_the_question("Verdict: Unrelated  "))
-    check("a reply that only mentions the verdict is not an answer",
-          not ghi_ask.reply_answers_the_question(
-              "I would reply verdict: unrelated, but I have not read the draft.")
-          and not ghi_ask.reply_answers_the_question(
-              "I have not read the draft.\nOtherwise I would reply verdict: unrelated")
-          and not ghi_ask.reply_answers_the_question("verdict: unrelated to memory")
-          and not ghi_ask.reply_answers_the_question("verdict:"))
+    adjudication = DRAFT_ADJUDICATION_VERDICT_STDOUT.strip()
+    check("each draft verdict line is a draft adjudication, with reasons above it or alone",
+          kind(unrelated_with_reasons) == adjudication
+          and kind("verdict: unrelated") == adjudication
+          and kind("Verdict: Unrelated  ") == adjudication
+          and kind("verdict: too-similar #13") == adjudication
+          and kind("verdict: related #4,#9") == adjudication)
+    check("a reply that only mentions a verdict is no draft adjudication",
+          kind("I would reply verdict: unrelated, but I have not read the draft.")
+          == OFF_PROTOCOL_REPLY_VERDICT_STDOUT.strip()
+          and kind("I have not read the draft.\nOtherwise I would reply verdict: unrelated")
+          == OFF_PROTOCOL_REPLY_VERDICT_STDOUT.strip()
+          and kind("verdict: unrelated to memory") == OFF_PROTOCOL_REPLY_VERDICT_STDOUT.strip()
+          and kind("verdict:") == OFF_PROTOCOL_REPLY_VERDICT_STDOUT.strip())
 
     seat_unrelated = root / "seat-unrelated-reply"
     seat_unrelated.mkdir()
@@ -1052,10 +1081,22 @@ with tempfile.TemporaryDirectory() as temporary:
     fake_claude_queue([({"session_id": "sess-H",
                          "result": "No action needed on my part — this session "
                                    "hasn't touched any scripts or tests."}, None)])
-    answer, error = ghi_ask.ask("what covers memory policy?", False, seat_hook, "x/y")
-    check("such a reply fails the ask instead of being returned",
-          answer is None and error is not None and "names no issue" in error,
-          (answer, error))
+    hook_reply = ("No action needed on my part — this session hasn't touched "
+                  "any scripts or tests.")
+    out, err = io.StringIO(), io.StringIO()
+    with contextlib.redirect_stdout(out), contextlib.redirect_stderr(err):
+        exit_code = ghi_ask.main(["what covers memory policy?", "--seat-dir",
+                                  str(seat_hook), "--repo", "x/y"])
+    check("such a reply exits 0, printed on stdout under VERDICT: OFF-PROTOCOL-REPLY",
+          exit_code == 0
+          and out.getvalue() == hook_reply + "\n" + OFF_PROTOCOL_REPLY_VERDICT_STDOUT,
+          (exit_code, out.getvalue()))
+    check("and stderr tells the agent to judge the reply, retry once, then "
+          "treat it as a failed ask",
+          "If the reply answers your question, use it as the answer." in err.getvalue()
+          and "run the same command again once" in err.getvalue()
+          and ".claude/skills/ghi-write/SKILL.md" in err.getvalue()
+          and "open issues only" not in err.getvalue(), err.getvalue())
 
     # And the run itself no longer loads this project's hooks.
     seat_flag = root / "seat-setting-sources"
@@ -1137,25 +1178,33 @@ with tempfile.TemporaryDirectory() as temporary:
               exit_code == 0 and hint == EXPECTED_OPEN_ISSUES_ONLY_HINT
               and "Bob" not in hint, hint)
 
-        unreadable_error = io.StringIO()
-        with contextlib.redirect_stdout(io.StringIO()), \
+        unreadable_error, unreadable_out = io.StringIO(), io.StringIO()
+        with contextlib.redirect_stdout(unreadable_out), \
                 contextlib.redirect_stderr(unreadable_error):
             exit_code = ghi_ask.main(["--question-file", str(root / "absent.txt"),
                                       "--seat-dir", str(seat_flag)])
-        check("an unreadable --question-file is a failed ask, exit 1, saying so",
-              exit_code == 1 and "could not read the question file"
-              in unreadable_error.getvalue(), unreadable_error.getvalue())
+        check("an unreadable --question-file is a wrong call, exit 2, saying so, "
+              "with VERDICT: CALLED-THE-WRONG-WAY on stdout",
+              exit_code == 2 and "could not read the question file"
+              in unreadable_error.getvalue()
+              and unreadable_out.getvalue() == CALLED_THE_WRONG_WAY_VERDICT_STDOUT,
+              (unreadable_error.getvalue(), unreadable_out.getvalue()))
 
         for arguments, name in (([], "neither"), (["q", "--question-file",
                                                     str(question_path)], "both")):
+            usage_out = io.StringIO()
             try:
-                with contextlib.redirect_stderr(io.StringIO()):
+                with contextlib.redirect_stderr(io.StringIO()), \
+                        contextlib.redirect_stdout(usage_out):
                     ghi_ask.main(arguments + ["--seat-dir", str(seat_flag)])
                 check(f"{name} a question nor a --question-file is refused", False,
                       "accepted")
             except SystemExit as refusal:
                 check(f"{name} of a question and --question-file is refused as a "
-                      "usage error", refusal.code == 2, refusal.code)
+                      "usage error, with VERDICT: CALLED-THE-WRONG-WAY on stdout",
+                      refusal.code == 2
+                      and usage_out.getvalue() == CALLED_THE_WRONG_WAY_VERDICT_STDOUT,
+                      (refusal.code, usage_out.getvalue()))
 
         # Off the box, the file's text goes to the box on ssh's stdin, and the
         # box-side run reads it from there.
@@ -1164,7 +1213,7 @@ with tempfile.TemporaryDirectory() as temporary:
         def ssh_recording_run(command, **keywords):
             remote["argv"] = command
             remote["input"] = keywords.get("input")
-            return FakeCompletedProcess(0, "verdict: unrelated\n")
+            return FakeCompletedProcess(0, "verdict: unrelated\n" + DRAFT_ADJUDICATION_VERDICT_STDOUT)
 
         patch_module_function(ghi_ask.subprocess, "run", ssh_recording_run)
         running_on_ned_box_orig = ghi_ask.running_on_ned_box
@@ -1234,6 +1283,8 @@ with tempfile.TemporaryDirectory() as temporary:
         # Off the box, an ssh call that times out or cannot start is reported
         # as the ssh call failing, naming the machine, never as the machine
         # having died: an agent told ned-box is down stops every ned-box step.
+        # A timeout leaves the outcome unknown (2); ssh that never started
+        # sent no ask (1).
         def ssh_timing_out(command, **keywords):
             raise ghi_ask.subprocess.TimeoutExpired(command, ghi_ask.SSH_TIMEOUT_SECONDS)
 
@@ -1242,23 +1293,81 @@ with tempfile.TemporaryDirectory() as temporary:
 
         patch("running_on_ned_box", lambda: False)
         try:
-            for name, fake, expected in (
-                    ("times out", ssh_timing_out,
+            for name, fake, expected_code, expected_opening, expected_out in (
+                    ("times out", ssh_timing_out, 2,
                      f"ghi-guide-agent-ask: the ssh call to {ghi_ask.AGENT_BOX} did not "
                      f"finish within {ghi_ask.SSH_TIMEOUT_SECONDS}s, so this script "
-                     f"stopped it; that alone does not show {ghi_ask.AGENT_BOX} is down.\n"),
-                    ("cannot start", ssh_not_starting,
-                     f"ghi-guide-agent-ask: could not start ssh to {ghi_ask.AGENT_BOX}: "
-                     "ssh\n")):
+                     f"stopped it; that alone does not show {ghi_ask.AGENT_BOX} is down",
+                     ASK_OUTCOME_UNKNOWN_VERDICT_STDOUT),
+                    ("cannot start", ssh_not_starting, 1,
+                     f"ghi-guide-agent-ask: could not start ssh to {ghi_ask.AGENT_BOX}, "
+                     "so no ask was sent: ssh.",
+                     ASK_FAILED_VERDICT_STDOUT)):
                 patch_module_function(ghi_ask.subprocess, "run", fake)
-                caller_error = io.StringIO()
-                with contextlib.redirect_stdout(io.StringIO()), \
+                caller_error, caller_out = io.StringIO(), io.StringIO()
+                with contextlib.redirect_stdout(caller_out), \
                         contextlib.redirect_stderr(caller_error):
                     exit_code = ghi_ask.main([argument_question])
-                check(f"off the box, an ssh call that {name} exits 1 saying the "
-                      "ssh call failed, naming the machine",
-                      exit_code == 1 and caller_error.getvalue() == expected,
-                      (exit_code, caller_error.getvalue()))
+                check(f"off the box, an ssh call that {name} exits {expected_code} "
+                      "saying the ssh call failed, naming the machine, with its "
+                      "verdict line on stdout",
+                      exit_code == expected_code
+                      and caller_error.getvalue().startswith(expected_opening)
+                      and "Run the same command again once" in caller_error.getvalue()
+                      and caller_out.getvalue() == expected_out,
+                      (exit_code, caller_error.getvalue(), caller_out.getvalue()))
+        finally:
+            patch("running_on_ned_box", running_on_ned_box_orig)
+            ghi_ask.subprocess.run = subprocess_run_orig
+
+        # Off the box, a run that ends without one of this program's verdict
+        # lines, or with a code above 2, leaves the outcome unknown: exit 2.
+        patch("running_on_ned_box", lambda: False)
+        try:
+            for name, completed, expected_stdout, expected_cause in (
+                    ("ssh exits 255",
+                     FakeCompletedProcess(255, "", "ssh: connect to host ned: "
+                                          "Connection refused\n"),
+                     ASK_OUTCOME_UNKNOWN_VERDICT_STDOUT,
+                     "exited 255: it could not connect, or the connection dropped"),
+                    ("the box-side shell exits 127",
+                     FakeCompletedProcess(127, "", "python3: command not found\n"),
+                     ASK_OUTCOME_UNKNOWN_VERDICT_STDOUT,
+                     "exited 127 without printing a verdict line"),
+                    ("the box-side run exits 1 with no verdict line",
+                     FakeCompletedProcess(1, "partial output", "Traceback ...\n"),
+                     "partial output\n" + ASK_OUTCOME_UNKNOWN_VERDICT_STDOUT,
+                     "exited 1 without printing a verdict line"),
+                    ("the box-side run exits 0 with a verdict line not last",
+                     FakeCompletedProcess(0, "VERDICT: READING-LIST-REPLY\nmore\n"),
+                     "VERDICT: READING-LIST-REPLY\nmore\n"
+                     + ASK_OUTCOME_UNKNOWN_VERDICT_STDOUT,
+                     "exited 0 without printing a verdict line")):
+                patch_module_function(ghi_ask.subprocess, "run",
+                                      lambda command, completed=completed, **keywords: completed)
+                caller_error, caller_out = io.StringIO(), io.StringIO()
+                with contextlib.redirect_stdout(caller_out), \
+                        contextlib.redirect_stderr(caller_error):
+                    exit_code = ghi_ask.main([argument_question])
+                check(f"off the box, when {name}, the ask exits 2 with the box's "
+                      "stderr relayed, the cause, and VERDICT: ASK-OUTCOME-UNKNOWN last",
+                      exit_code == 2
+                      and caller_error.getvalue().startswith(completed.stderr)
+                      and expected_cause in caller_error.getvalue()
+                      and caller_out.getvalue() == expected_stdout,
+                      (exit_code, caller_error.getvalue(), caller_out.getvalue()))
+
+            relayed = FakeCompletedProcess(1, "VERDICT: ASK-FAILED\n", "the cause\n")
+            patch_module_function(ghi_ask.subprocess, "run",
+                                  lambda command, **keywords: relayed)
+            caller_error, caller_out = io.StringIO(), io.StringIO()
+            with contextlib.redirect_stdout(caller_out), \
+                    contextlib.redirect_stderr(caller_error):
+                exit_code = ghi_ask.main([argument_question])
+            check("off the box, a box-side exit 1 with its verdict line is relayed unchanged",
+                  exit_code == 1 and caller_out.getvalue() == ASK_FAILED_VERDICT_STDOUT
+                  and caller_error.getvalue() == "the cause\n",
+                  (exit_code, caller_out.getvalue(), caller_error.getvalue()))
         finally:
             patch("running_on_ned_box", running_on_ned_box_orig)
             ghi_ask.subprocess.run = subprocess_run_orig
@@ -1271,7 +1380,7 @@ with tempfile.TemporaryDirectory() as temporary:
 
         def ssh_call_recording_run(command, **keywords):
             ssh_calls.append(command)
-            return FakeCompletedProcess(0, "verdict: unrelated\n")
+            return FakeCompletedProcess(0, "verdict: unrelated\n" + DRAFT_ADJUDICATION_VERDICT_STDOUT)
 
         def asks_with_hostname(hostname, seat_directory):
             ssh_calls.clear()
@@ -1397,6 +1506,49 @@ with tempfile.TemporaryDirectory() as home:
           and local.stdout.strip() == box_side.stdout
           and box_side.stdout.startswith(home + "/"),
           (local, box_side))
+
+# An exception nothing in main() catches exits 2 with its cause on stderr,
+# not Python's own exit 1, which a caller reads as a failed ask.
+main_orig = ghi_ask.main
+
+
+def main_that_crashes(argv=None):
+    raise KeyError("session_id")
+
+
+ghi_ask.main = main_that_crashes
+try:
+    crash_out, crash_err = io.StringIO(), io.StringIO()
+    with contextlib.redirect_stdout(crash_out), contextlib.redirect_stderr(crash_err):
+        exit_code = ghi_ask.main_reporting_a_crash_as_exit_2(["q"])
+finally:
+    ghi_ask.main = main_orig
+check("a crash in main() exits 2, naming the exception on stderr and printing "
+      "VERDICT: ASK-OUTCOME-UNKNOWN on stdout",
+      exit_code == 2 and crash_out.getvalue() == ASK_OUTCOME_UNKNOWN_VERDICT_STDOUT
+      and "crashed" in crash_err.getvalue()
+      and "KeyError" in crash_err.getvalue()
+      and "Traceback" not in crash_err.getvalue(),
+      (exit_code, crash_out.getvalue(), crash_err.getvalue()))
+
+wrong_call = real_subprocess.run(
+    [sys.executable, str(SCRIPT_PATH), "--no-such-flag"],
+    capture_output=True, text=True, check=False, timeout=60)
+check("a wrong call run as a program still exits 2, with argparse's usage on "
+      "stderr and VERDICT: CALLED-THE-WRONG-WAY on stdout",
+      wrong_call.returncode == 2 and "usage:" in wrong_call.stderr
+      and "error: unrecognized arguments: --no-such-flag" in wrong_call.stderr
+      and wrong_call.stdout == CALLED_THE_WRONG_WAY_VERDICT_STDOUT,
+      (wrong_call.returncode, wrong_call.stderr, wrong_call.stdout))
+
+help_call = real_subprocess.run(
+    [sys.executable, str(SCRIPT_PATH), "--help"],
+    capture_output=True, text=True, check=False, timeout=60)
+check("--help exits 0, says a verdict line ends stdout, and names every verdict line",
+      help_call.returncode == 0
+      and "Prints a verdict line naming the outcome" in help_call.stdout
+      and all(line in help_call.stdout for line in ghi_ask.VERDICT_LINES),
+      help_call.stdout[-400:])
 
 repository_root = SCRIPT_PATH.resolve().parent.parent
 for file_name in (ghi_ask.STATE_FILE_NAME, ghi_ask.LOCK_FILE_NAME,
