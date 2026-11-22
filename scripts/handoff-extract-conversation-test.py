@@ -8,7 +8,9 @@ Every case builds its own transcript in a temporary directory, so the tests
 never read a real session and never touch ~/.claude.
 """
 
+import contextlib
 import importlib.util
+import io
 import json
 import sys
 import tempfile
@@ -422,13 +424,32 @@ with tempfile.TemporaryDirectory() as workspace:
           selected[-1]["text"] == "handoff please",
           selected[-1]["text"][:60])
 
+    # The malformed line gives the run a skip count to report.
+    path = write_transcript(workspace, "tail-fragment-with-malformed-line.jsonl", tail_fragment,
+                            trailing_raw_lines=['{"type": "user", "message": BROKEN}\n'])
     fragment_output = Path(workspace) / "fragment-out.md"
-    exit_code = extractor.main(["--transcript-path", str(path),
-                                "--minimum-words", "10",
-                                "--output", str(fragment_output)])
+    fragment_stderr = io.StringIO()
+    with contextlib.redirect_stderr(fragment_stderr):
+        exit_code = extractor.main(["--transcript-path", str(path),
+                                    "--minimum-words", "10",
+                                    "--output", str(fragment_output)])
     fragment_text = fragment_output.read_text(encoding="utf-8")
-    check("header reports the trimmed fragment count",
-          "Trimmed from the end: 1 short agent turn(s)" in fragment_text,
+    fragment_errors = fragment_stderr.getvalue()
+    check("stderr reports the trimmed fragment count",
+          "Trimmed from the end: 1 short agent turn(s)" in fragment_errors,
+          fragment_errors[:400])
+    check("stderr reports the records skipped while reading",
+          "Records skipped while reading: 1 malformed." in fragment_errors,
+          fragment_errors[:400])
+    check("stderr says turn counts are dialog only",
+          "Turn counts are dialog only" in fragment_errors,
+          fragment_errors[:400])
+    check("the tail's header holds none of the lines stderr carries",
+          not any(part in fragment_text for part in
+                  ("Trimmed from the end", "Records skipped while reading", "Turn counts are dialog only")),
+          fragment_text[:400])
+    check("the tail's header keeps its boundary and turn counts",
+          "Boundary: " in fragment_text and "Turns carried: 3 of 4 (104 words)." in fragment_text.split("\n") in fragment_text,
           fragment_text[:400])
 
     # argparse refuses via SystemExit(2); catch it so the suite survives.
