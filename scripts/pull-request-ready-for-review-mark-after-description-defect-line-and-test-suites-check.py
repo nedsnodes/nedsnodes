@@ -14,8 +14,9 @@ Run it from the pull request's own checkout, with its nn-head-commit checked out
    #no_defect_fixed), read by the same reader scripts/merge-gate.sh uses; a placeholder
    description has none;
 4. runs this checkout's test suites whose recorded inputs changed since the checkout's merge
-   base with origin/main, so a change main made after the branch started selects no suite, with
-   this checkout's own scripts/run-all-test-suites.py, and refuses when any fails;
+   base with origin/main, so a change main made after the branch started selects no suite unless
+   a suite's newer recording read main's copy of a file, with this checkout's own
+   scripts/run-all-test-suites.py, and refuses when any fails;
 5. marks the pull request ready for review with gh pr ready.
 
 It does not check what scripts/merge-gate.sh checks again before merging, such as a not-fixed
