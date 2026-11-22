@@ -63,7 +63,7 @@ WHAT ONE RUN DOES, in order:
 
 THE STATE FILE, a JSON object written whole to a temporary file renamed into
 place, with these keys; a run that exits at step 1, 4 or 5 writes nothing to
-it, so the file, readable or not, stays as it is:
+it:
   passing_commit           the last commit whose run passed, or null; a run that
                            fails or stops keeps it
   last_run.commit          the commit tested, or null when step 3 stopped the run
