@@ -889,7 +889,8 @@ class Watcher:
         record.pop("left_alone_verdict", None)
         # A noticed refusal handles its death, but its report restarted nothing: a crash
         # found once the refusal clears is that same death, still the watcher's to restart.
-        crash_beneath_noticed_refusal = kind == "crash" and record.get("refusal_noticed")  # pragma: no mutate, kind is a literal down_kind returns, "crash", "for-the-user" or "refused", so is gives what == gives and both others sort after "crash", so <= does too
+        crash_beneath_noticed_refusal = (kind == "crash"  # pragma: no mutate, kind is a literal down_kind returns, "crash", "for-the-user" or "refused", so is gives what == gives and both others sort after "crash", so <= does too
+                                         and record.get("refusal_noticed"))
         if not crash_beneath_noticed_refusal and self.death_already_handled(seat, record):
             return
         last_seen_running = parse_timestamp(record.get("last_seen_running_at"))

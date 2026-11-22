@@ -816,10 +816,8 @@ def run_refused_cases(root: Path):
           harness.reports() == [], repr(harness.reports()))
 
     harness = Harness(root / "refused-stop-on-purpose-unreadable")
-    records_reads = []
 
     def records_unreadable(seat):
-        records_reads.append(seat)
         raise OSError("the supervisor state cannot be read")
     harness.recorded_stop_on_purpose = records_unreadable
     refused_after_running(harness, "refuse", "detail")
@@ -829,12 +827,15 @@ def run_refused_cases(root: Path):
           "logged", len(harness.reports()) == 1 and logged
           and "the supervisor state cannot be read" in logged[0]["error"],
           repr((harness.reports(), harness.decisions())))
-    reads_by_the_notice = len(records_reads)
+    logged_by_the_notice = len(logged)
     for minute in range(9, 30):
         harness.run(SEEN_RUNNING + timedelta(minutes=minute))
-    check("after its notice, a lasting refusal's records are not read again on later runs",
-          len(records_reads) == reads_by_the_notice and len(harness.reports()) == 1,
-          repr((records_reads, harness.reports())))
+    logged = [entry for entry in harness.decisions()
+              if entry["decision"].startswith("could not read whether it stopped on purpose")]
+    check("after its notice, a lasting refusal is neither reported nor its unreadable records "
+          "logged again on later runs",
+          len(logged) == logged_by_the_notice and len(harness.reports()) == 1,
+          repr((logged, harness.reports())))
 
     harness = Harness(root / "leftover-shell-over-a-crash")
     asked = []
