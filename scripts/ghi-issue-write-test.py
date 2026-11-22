@@ -304,7 +304,7 @@ def ask_answer(exit_code=0, **fields):
                        .ghi_guide_agent_answer_extract_and_schema_check_from_claude_result(
                            {"structured_output": fields},
                            _ghi_guide_agent_ask.GHI_GUIDE_AGENT_ANSWER_KINDS_EACH_REQUEST_FORM_ALLOWS[
-                               _ghi_guide_agent_ask.GHI_GUIDE_AGENT_REQUEST_FORM_DRAFT_VERDICT]))
+                               _ghi_guide_agent_ask.GHI_GUIDE_AGENT_REQUEST_FORM_VALUE_ASKING_FOR_VERDICT_ON_DRAFT_ISSUE]))
     assert answer is not None, problem
     return Completed(json.dumps(answer) + "\n", returncode=exit_code)
 
@@ -1559,7 +1559,7 @@ def run_cases(scratch: Path):
     # unusable answer's line is followed by an instruction for agents, so
     # that line is carried instead of the last.
     check("the not-usable opening this program looks for is the ask program's own",
-          tool.GHI_GUIDE_AGENT_ASK_ANSWER_NOT_USABLE_MESSAGE_OPENING
+          tool.GHI_GUIDE_AGENT_ASK_ANSWER_NOT_USABLE_STDERR_LINE_OPENING_TO_MATCH
           == _ghi_guide_agent_ask.GHI_GUIDE_AGENT_ANSWER_NOT_USABLE_MESSAGE_OPENING)
     for case_name, stderr, expected in [
             ("an unusable answer's line is carried into the report, not the "

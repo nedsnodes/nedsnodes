@@ -452,7 +452,7 @@ ADJUDICATION_TIMEOUT_SECONDS = 420
 # Copied rather than imported, because this program runs that one as a
 # subprocess and loads nothing from it; ghi-issue-write-test.py checks the two
 # stay equal.
-GHI_GUIDE_AGENT_ASK_ANSWER_NOT_USABLE_MESSAGE_OPENING = "ghi-guide-agent's answer is not usable:"
+GHI_GUIDE_AGENT_ASK_ANSWER_NOT_USABLE_STDERR_LINE_OPENING_TO_MATCH = "ghi-guide-agent's answer is not usable:"
 # ghi-guide-agent's ruling questions are kept in the log-store on ned-box, never on
 # main: one proposed-improvements-or-changes-file each (the glossary's entry),
 # named `<GHI-MD name>-proposed-improvements-or-changes-ghi-guide-agent-<YYYY-MM-DD>[-<n>].md`.
@@ -1145,7 +1145,7 @@ def adjudicate(repo: str, title: str, text: str, repository_root: Path,
         stderr_lines = [line.strip() for line in
                         (completed.stderr or "").splitlines() if line.strip()]
         why = next((line for line in stderr_lines if
-                    GHI_GUIDE_AGENT_ASK_ANSWER_NOT_USABLE_MESSAGE_OPENING in line),
+                    GHI_GUIDE_AGENT_ASK_ANSWER_NOT_USABLE_STDERR_LINE_OPENING_TO_MATCH in line),
                    stderr_lines[-1] if stderr_lines else None)
         report("adjudication skipped: ghi-guide-agent did not answer" +
                (f": {why}" if why else ""))

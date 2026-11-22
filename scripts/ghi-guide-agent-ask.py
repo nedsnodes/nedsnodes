@@ -290,15 +290,15 @@ GHI_GUIDE_AGENT_ANSWER_OPTIONAL_FIELDS_EACH_KIND_MAY_GIVE = {
 }
 # The answer kinds each --request-form allows. No program sends form 4, a link
 # repair, so no request form allows `repair`.
-GHI_GUIDE_AGENT_REQUEST_FORM_READING_LIST = "reading-list"
-GHI_GUIDE_AGENT_REQUEST_FORM_DRAFT_VERDICT = "draft-verdict"
+GHI_GUIDE_AGENT_REQUEST_FORM_VALUE_ASKING_FOR_READING_LIST = "reading-list"
+GHI_GUIDE_AGENT_REQUEST_FORM_VALUE_ASKING_FOR_VERDICT_ON_DRAFT_ISSUE = "draft-verdict"
 GHI_GUIDE_AGENT_ANSWER_KINDS_EACH_REQUEST_FORM_ALLOWS = {
-    GHI_GUIDE_AGENT_REQUEST_FORM_READING_LIST: (
+    GHI_GUIDE_AGENT_REQUEST_FORM_VALUE_ASKING_FOR_READING_LIST: (
         GHI_GUIDE_AGENT_ANSWER_KIND_READING_LIST, GHI_GUIDE_AGENT_ANSWER_KIND_NOT_ABOUT_ISSUES,
         GHI_GUIDE_AGENT_ANSWER_KIND_ASK_USER_ABOUT_RULING),
     # scripts/ghi-issue-write.py's adjudication, whose question is always a
     # draft GHI-MD and so is always about issues.
-    GHI_GUIDE_AGENT_REQUEST_FORM_DRAFT_VERDICT: (
+    GHI_GUIDE_AGENT_REQUEST_FORM_VALUE_ASKING_FOR_VERDICT_ON_DRAFT_ISSUE: (
         GHI_GUIDE_AGENT_ANSWER_KIND_VERDICT, GHI_GUIDE_AGENT_ANSWER_KIND_ASK_USER_ABOUT_RULING),
 }
 
@@ -730,7 +730,7 @@ def run_claude(prompt: str, resume_session_id, seat_dir: Path, timeout_seconds: 
 def ask(question: str, include_closed: bool, seat_dir: Path, repo: str,
        timeout_seconds: int = ASK_TIMEOUT_SECONDS,
        projects_root: Path = None,
-       request_form: str = GHI_GUIDE_AGENT_REQUEST_FORM_READING_LIST):
+       request_form: str = GHI_GUIDE_AGENT_REQUEST_FORM_VALUE_ASKING_FOR_READING_LIST):
     """The whole ask path (design § The ask path, steps 1-5). Returns
     (answer, closed_on, error): the checked answer object, of a kind
     `request_form` allows, and closed_issue_dates of its issue numbers, or
@@ -996,7 +996,7 @@ def _ask_within_lock(question, include_closed, seat_dir, repo, projects_root,
 def build_remote_command(question: str, include_closed: bool, repo: str,
                          question_on_stdin: bool = False,
                          print_answer_json: bool = False,
-                         request_form: str = GHI_GUIDE_AGENT_REQUEST_FORM_READING_LIST) -> str:
+                         request_form: str = GHI_GUIDE_AGENT_REQUEST_FORM_VALUE_ASKING_FOR_READING_LIST) -> str:
     """The command the box runs, as one string: ssh hands it to the box's
     login shell, which parses it exactly once — no second parse layer here
     (unlike the launchers, which also cross tmux's pane-command parse), so
@@ -1028,7 +1028,7 @@ def build_remote_command(question: str, include_closed: bool, repo: str,
         invocation += " --include-closed"
     if print_answer_json:
         invocation += " --print-answer-json"
-    if request_form != GHI_GUIDE_AGENT_REQUEST_FORM_READING_LIST:
+    if request_form != GHI_GUIDE_AGENT_REQUEST_FORM_VALUE_ASKING_FOR_READING_LIST:
         invocation += " --request-form " + shlex.quote(request_form)
     invocation += " --repo " + shlex.quote(repo)
     invocation += ' --seat-dir "$PWD"'
@@ -1063,7 +1063,7 @@ def main(argv=None) -> int:
                         help="print ghi-guide-agent's answer as one JSON object on stdout, "
                              "whatever the exit code, instead of the text printed by default")
     parser.add_argument("--request-form", choices=list(GHI_GUIDE_AGENT_ANSWER_KINDS_EACH_REQUEST_FORM_ALLOWS),
-                        default=GHI_GUIDE_AGENT_REQUEST_FORM_READING_LIST,
+                        default=GHI_GUIDE_AGENT_REQUEST_FORM_VALUE_ASKING_FOR_READING_LIST,
                         help="reading-list (default): the answer is a reading list; draft-verdict: "
                              "the question holds a draft GHI-MD, and the answer is a "
                              "verdict or a ruling question")
