@@ -185,6 +185,16 @@ with tempfile.TemporaryDirectory() as scratch:
     check("a user's message carries the time he sent it",
           "2026-09-28T09:01:00Z  user-messages" in result.stdout, result.stdout)
 
+    staging_copy = root / "cold-read-records" / ".ship-staging-egret-plan-2026-09-21-k3j9" / "fast-read.md"
+    write(root / "cold-read-records" / "egret-plan-2026-09-21" / "fast-read.md", "the egret plan is unclear\n")
+    write(staging_copy, "the egret plan is unclear\n")
+    result = run(root, "egret plan", "--kind", "cold-read-records")
+    shutil.rmtree(root / "cold-read-records" / "egret-plan-2026-09-21")
+    shutil.rmtree(staging_copy.parent)
+    check("a shipment's leftover staging copy of a cold-read-record gives no hit of its own",
+          result.returncode == 0 and len(hit_headers(result.stdout)) == 1
+          and ".ship-staging-" not in result.stdout, result.stdout + result.stderr)
+
     result = run(root, "heron plan", "--kind", "session-dialogs", "--since", "2026-11-01")
     check("--since leaves out a session dialog whose transcript ended before it, whatever the dialog's modification time",
           result.returncode == 1 and not hit_headers(result.stdout), result.stdout)
