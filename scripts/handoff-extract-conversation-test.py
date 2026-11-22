@@ -449,7 +449,7 @@ with tempfile.TemporaryDirectory() as workspace:
                   ("Trimmed from the end", "Records skipped while reading", "Turn counts are dialog only")),
           fragment_text[:400])
     check("the tail's header keeps its boundary and turn counts",
-          "Boundary: " in fragment_text and "Turns carried: 3 of 4 (104 words)." in fragment_text.split("\n") in fragment_text,
+          "Boundary: " in fragment_text and "Turns carried: 3 of 4 (104 words)." in fragment_text.split("\n"),
           fragment_text[:400])
 
     # argparse refuses via SystemExit(2); catch it so the suite survives.
