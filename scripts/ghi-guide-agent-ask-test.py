@@ -1182,24 +1182,57 @@ with tempfile.TemporaryDirectory() as temporary:
           len(recheck_calls) == 3 and answer == reading_list(13)
           and closed_on == {13: "2026-08-08"}, (recheck_calls, answer, closed_on, error))
 
-    # A drift recheck after a verdict is held to the draft-verdict kinds, as
-    # every turn of that ask is, so a reading list given to the drift notice
-    # is not usable and the first verdict stands.
-    seat_verdict_recheck = root / "seat-verdict-recheck"
-    seat_verdict_recheck.mkdir()
-    fake_refresh_queue([([13], {"13": issue(13, state="CLOSED",
-                                            closed_at="2026-08-08T00:00:00Z")}, None)])
+    # A verdict that cites a closed GHI is used only when its drift recheck
+    # gives a usable verdict citing no closed GHI; otherwise the ask fails as
+    # not usable, which ghi-issue-write.py reports as adjudication skipped.
     first_verdict = {"kind": "verdict", "verdict": "too-similar", "issues": [13]}
-    verdict_recheck_calls = fake_claude_queue([
-        ({"session_id": "sess-W", "result": "(ack)"}, None),
-        ({"session_id": "sess-W", "structured_output": first_verdict}, None),
-        ({"session_id": "sess-W", "structured_output": reading_list(14)}, None),
+    for case_name, recheck, expected in [
+            ("a drift recheck after a verdict that answers with a reading list fails the ask",
+             ({"session_id": "sess-W", "structured_output": reading_list(14)}, None),
+             "kind 'reading-list' is none the schema allows"),
+            ("a drift recheck after a verdict that gives no JSON answer fails the ask",
+             ({"session_id": "sess-W", "structured_output": None, "result": "hm"}, None),
+             "claude returned no JSON answer"),
+            ("a drift recheck after a verdict whose turn fails fails the ask",
+             (None, "claude timed out"), "the turn failed: claude timed out"),
+            ("a drift recheck after a verdict that gives a too-similar verdict naming no GHI fails the ask",
+             ({"session_id": "sess-W", "structured_output":
+               {"kind": "verdict", "verdict": "too-similar", "issues": []}}, None),
+             "names no issue it is too similar to"),
+            ("a drift recheck after a verdict that cites the closed GHI again fails the ask",
+             ({"session_id": "sess-W", "structured_output": first_verdict}, None),
+             "the rechecked verdict still cites a closed GHI")]:
+        seat_verdict_recheck = root / ("seat-" + case_name.replace(" ", "-")[:60])
+        seat_verdict_recheck.mkdir()
+        fake_refresh_queue([([13], {"13": issue(13, state="CLOSED",
+                                                closed_at="2026-08-08T00:00:00Z")}, None)])
+        verdict_recheck_calls = fake_claude_queue([
+            ({"session_id": "sess-W", "result": "(ack)"}, None),
+            ({"session_id": "sess-W", "structured_output": first_verdict}, None),
+            recheck,
+        ])
+        answer, closed_on, error = ghi_ask.ask("q", False, seat_verdict_recheck, "x/y",
+                                               request_form="draft-verdict")
+        check(case_name,
+              len(verdict_recheck_calls) == 3 and answer is None and error is not None
+              and error.startswith(ghi_ask.GHI_GUIDE_AGENT_ANSWER_NOT_USABLE_MESSAGE_OPENING)
+              and "the verdict cited closed GHI #13" in error and expected in error,
+              (verdict_recheck_calls, answer, error))
+    seat_verdict_corrected = root / "seat-verdict-corrected"
+    seat_verdict_corrected.mkdir()
+    fake_refresh_queue([([13], {"13": issue(13, state="CLOSED", closed_at="2026-08-08T00:00:00Z"),
+                                "14": issue(14)}, None)])
+    corrected_verdict = {"kind": "verdict", "verdict": "too-similar", "issues": [14]}
+    fake_claude_queue([
+        ({"session_id": "sess-X", "result": "(ack)"}, None),
+        ({"session_id": "sess-X", "structured_output": first_verdict}, None),
+        ({"session_id": "sess-X", "structured_output": corrected_verdict}, None),
     ])
-    answer, closed_on, error = ghi_ask.ask("q", False, seat_verdict_recheck, "x/y",
+    answer, closed_on, error = ghi_ask.ask("q", False, seat_verdict_corrected, "x/y",
                                            request_form="draft-verdict")
-    check("a drift recheck after a verdict that answers with a reading list keeps the verdict",
-          len(verdict_recheck_calls) == 3 and answer == first_verdict and error is None,
-          (verdict_recheck_calls, answer, error))
+    check("a drift recheck after a verdict that cites only open GHIs is the final answer",
+          answer == corrected_verdict and closed_on == {} and error is None,
+          (answer, closed_on, error))
     draft_verdict_schema = ghi_ask.ghi_guide_agent_answer_json_schema_build_for_kinds(
         ("verdict", "ask-user-about-ruling"))
     check("every turn of a draft-verdict ask, the cold start and the drift "

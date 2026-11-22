@@ -1157,9 +1157,15 @@ def adjudicate(repo: str, title: str, text: str, repository_root: Path,
         report("ghi-guide-agent raised a question about a ruling of the "
                "user's; the write goes ahead and records it in a "
                "proposed-improvements-or-changes-file in the log-store")
+        # The saved file holds the question on one line, and
+        # ruling_question_lines() reads back only that line.
         return RulingConflict(answer.get("ruling_issue"),
-                              str(answer.get("sentence", "")).strip())
+                              " ".join(str(answer.get("sentence", "")).split()))
     issues = answer.get("issues") or []
+    if exclude_issue is not None and exclude_issue in issues:
+        report(f"adjudication skipped: ghi-guide-agent's verdict names #{exclude_issue}, "
+               "the issue being edited, which the question told it to leave out")
+        return None
     verdict = f"verdict: {answer.get('verdict')}" + (
         " " + ",".join(f"#{number}" for number in issues) if issues else "")
     if answer.get("verdict") == "too-similar":

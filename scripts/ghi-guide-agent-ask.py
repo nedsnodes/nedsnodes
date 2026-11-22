@@ -975,14 +975,28 @@ def _ask_within_lock(question, include_closed, seat_dir, repo, projects_root,
         if unexpected:
             stale = True
             drift_reply, error = turn(compose_drift_notice(unexpected), session_id)
-            if drift_reply is not None:
+            if drift_reply is None:
+                corrected, recheck_problem = None, f"the turn failed: {error}"
+            else:
                 session_id = drift_reply.get("session_id", session_id)
-                corrected, _ = ghi_guide_agent_answer_extract_and_schema_check_from_claude_result(drift_reply, kinds)
-                if corrected is not None:
-                    answer = corrected
-            # A failed recheck keeps the first answer rather than failing
-            # the whole ask: a closed issue in a reading list is tagged as
-            # closed, which is better than no answer at all.
+                corrected, recheck_problem = ghi_guide_agent_answer_extract_and_schema_check_from_claude_result(drift_reply, kinds)
+            # A reading list whose recheck fails is kept, its closed issue
+            # tagged as closed. A verdict is not: ghi-issue-write.py acts on
+            # it, and a too-similar verdict naming a closed GHI refuses the
+            # write and sends the author to merge into that closed GHI.
+            if answer["kind"] == GHI_GUIDE_AGENT_ANSWER_KIND_VERDICT:
+                cited = ", ".join(f"#{number}" for number, _ in unexpected)
+                still_closed = corrected is not None and find_unexpected_closed_pointers(
+                    answer_issue_numbers(corrected), cache, include_closed)
+                if still_closed:
+                    recheck_problem = ("the rechecked verdict still cites a closed GHI: "
+                                       f"{json.dumps(corrected)[:300]}")
+                if corrected is None or still_closed:
+                    answer, problem = None, (
+                        f"the verdict cited closed GHI {cited}, and the drift "
+                        f"recheck gave no usable verdict: {recheck_problem}")
+            if corrected is not None and answer is not None:
+                answer = corrected
 
     if locked:
         if cold_starting:
