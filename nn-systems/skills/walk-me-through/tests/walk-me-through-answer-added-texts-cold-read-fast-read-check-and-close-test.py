@@ -2250,6 +2250,8 @@ def test_only_a_line_the_program_writes_records_a_decision_or_a_deferral():
             ("item 3 of 9: not asked, kind 6; every text the change adds has had a fast read. <accepted>\n",
              ({"3"}, {}), "the line close writes for an item settled as kind 6 decides it"),
             ("item 3 of 9: not asked, kind 7; every text the change adds has had a fast read. <accepted>\n",
+             ({"3"}, {}), "the line close writes for an item settled as kind 7 decides it"),
+            ("item 3 of 9: not asked, kind 8; every text the change adds has had a fast read. <accepted>\n",
              (set(), {}), "close's took-effect form with a kind --not-asked never accepts records nothing"),
             ("item 3 of 9: part 1 approved <rejected>; every text the change adds has had a fast read.\n",
              (set(), {}), "close's parts form pairing a part's answer with the other answer's outcome records "
@@ -3802,7 +3804,7 @@ def refused_as_rated_none(case, *problems):
 def test_an_item_of_no_kind_is_refused_when_rated_above_weak_or_rated_none_and_touching_a_guarded_file():
     check("an item of no kind rated medium is refused",
           *refused_as_rated_none(rated_none_case(rating="medium: the option changes what users see."),
-                                 "rates the case against medium; an item of none of the kinds 1 to 6 that `--help` "
+                                 "rates the case against medium; an item of none of the kinds 1 to 7 that `--help` "
                                  "lists under `--not-asked` settles without the user only when its case against is "
                                  "rated none, or weak with a case against that names only cost, or only that the change "
                                  "alters text the user approved word for word on an earlier date"))
@@ -3821,7 +3823,7 @@ def test_an_item_of_no_kind_is_refused_when_rated_above_weak_or_rated_none_and_t
 
 WEAK_COST_ONLY = "weak: the option costs a few lines of code."
 WEAK_COST_ONLY_SETTLED = "item 1 of 3 is recorded as settled without asking the user, case against weak, cost only;"
-PERMISSIONS_JUDGEMENT = ("item 1 of 3 is of none of the kinds 1 to 6 that `--help` lists under `--not-asked` and "
+PERMISSIONS_JUDGEMENT = ("item 1 of 3 is of none of the kinds 1 to 7 that `--help` lists under `--not-asked` and "
                          "its case against is rated weak: if its change "
                          "widens an agent's permissions, as a settings change can, or turns off a guard, do not run "
                          "close: present item 1 of 3 to the user.")
@@ -3872,7 +3874,7 @@ def test_an_item_of_no_kind_rated_weak_settles_when_it_touches_guarded_code_but_
               result.returncode == 1
               and "cannot be settled without asking the user as case against weak, cost only, because:" in result.stderr
               and f"`#not_asked_touches` names {path}, a Markdown file the instruction-file guard protects; this item "
-                  "is of none of the kinds 1 to 6 that `--help` lists under `--not-asked` and rated weak, and it "
+                  "is of none of the kinds 1 to 7 that `--help` lists under `--not-asked` and rated weak, and it "
                   "changes such a file, so it is shown to the user."
                   in result.stderr
               and "which the instruction-file guard protects;" not in result.stderr
@@ -4008,12 +4010,12 @@ def test_walk_minutes_written_before_the_ground_was_named_are_still_read():
 
 
 def test_a_not_asked_value_other_than_a_kind_or_a_no_kind_value_is_refused_as_usage():
-    for value in ("7", "0", "weak"):
+    for value in ("8", "0", "weak"):
         case = rated_none_case()
         result = case.run("check", "--not-asked", value)
         check(f"`--not-asked {value}` is refused as usage, writing nothing",
               result.returncode == 2
-              and f"`{value}` is not a kind: give 1, 2, 3, 4, 5, 6, or, for an item of no kind, none, "
+              and f"`{value}` is not a kind: give 1, 2, 3, 4, 5, 6, 7, or, for an item of no kind, none, "
                   "weak-cost-only or weak-alters-earlier-approved-text-only" in result.stderr
               and case.minutes.read_text().rstrip().endswith("#next_to_present item 1 of 3"), described(result))
 
@@ -4235,6 +4237,43 @@ def test_kind_6_is_refused_unless_markdown_prose_outside_a_glossary_gets_a_liste
                    "`(poem` on its `#not_asked_hashtag_marker` line is not a hashtag marker"))
     check("kind 6 is refused when its case against is rated above weak",
           *refused(kind_6_case("#not_asked_glossary_term poem-index\n\n#case_against medium: misread meaning."), 6,
+                   "rates the case against medium"))
+
+
+def kind_7_case(touches, files=None, evidence=""):
+    """Item 4 of the fixture made a kind 7 item: its rename line replaced by the evidence given, touching the files
+    named; the fixture's docs/poems-glossary.md stands for a system glossary."""
+    files = {"docs/nedsnodes-wiki/nedsnodes-glossary.md": "- **poem** — a poem.\n", **(files or {})}
+    return kind_6_case(evidence, files, touches)
+
+
+def test_a_system_glossary_entry_added_or_changed_settles_as_kind_7_and_close_records_it():
+    case = kind_7_case("docs/poems-glossary.md .claude/skills/skills-glossary.md",
+                       {".claude/skills/skills-glossary.md": "- **poem-line** — one line of a poem.\n"})
+    result = case.run("check", "--not-asked", "7")
+    check("kind 7 settles an item that touches only system glossaries",
+          result.returncode == 0 and "settled without asking the user, not asked, kind 7 " in case.minutes.read_text(),
+          described(result))
+    closed = case.run("close")
+    check("close records a settled kind 7 item as accepted",
+          closed.returncode == 0 and "\nitem 4 of 7: not asked, kind 7; every text the change adds has had a fast read. "
+                                     "<accepted>\n" in case.minutes.read_text(), described(closed))
+
+
+def test_kind_7_is_refused_unless_every_touched_file_is_a_system_glossary():
+    check("kind 7 is refused when the item lists no file it touches",
+          *refused(kind_7_case(""), 7, "it has no `#not_asked_touches` line"))
+    check("kind 7 is refused when it touches the project glossary",
+          *refused(kind_7_case("docs/nedsnodes-wiki/nedsnodes-glossary.md"), 7,
+                   "`#not_asked_touches` names docs/nedsnodes-wiki/nedsnodes-glossary.md, which is not a system glossary"))
+    check("kind 7 is refused when it touches a file that is not a glossary as well as a system glossary",
+          *refused(kind_7_case("docs/poems-glossary.md docs/poems/index.md"), 7,
+                   "`#not_asked_touches` names docs/poems/index.md, which is not a system glossary"))
+    check("kind 7 is refused when it touches a glossary not in the checkout",
+          *refused(kind_7_case("docs/missing-glossary.md"), 7,
+                   "`#not_asked_touches` names docs/missing-glossary.md, which is not in the checkout"))
+    check("kind 7 is refused when its case against is rated above weak",
+          *refused(kind_7_case("docs/poems-glossary.md", evidence="#case_against medium: misread meaning."), 7,
                    "rates the case against medium"))
 
 
