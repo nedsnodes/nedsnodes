@@ -1272,7 +1272,12 @@ def message_copy_of_item(heading_line, message_heading_line, after_heading, numb
     walk-document, so that under a heading several items share, only this item's own text is compared; the text of
     every unit that names the item, as when the message puts a heading for item 11 inside the range `Items 10 to 12`;
     after_heading whole when the finder reads no item number there. The message's heading level counts, not the
-    walk-document's, since a `### Explanation` ends a `###` item but not a `##` one."""
+    walk-document's, since a `### Explanation` ends a `###` item but not a `##` one.
+
+    Not handled: when one message shows two items under plain `Item N of M` titles with one closing line after both,
+    the second item's lines, a `## Explanation` heading among them, stay in the first item's copy, so a `#new` line
+    the message left out of the first item can be matched by a line of the second, and its answer counts with no
+    model call."""
     walk_finder = load_walk_finder()
     parser = walk_finder.markdown_parser()
     opening = parser.parse(f"{message_heading_line}\n{after_heading}", {})
