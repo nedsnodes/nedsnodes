@@ -1120,7 +1120,9 @@ def failing_suites_in_scratch_worktree(commit, command_for_checkout):
 def suites_the_round_broke_and_suites_failing_at_frozen_head_too(frozen_head, commit):
     """Run the suites at commit, and those that fail there at frozen_head too; return
     (failing at commit only, failing at both)."""
-    at_commit = failing_suites_in_scratch_worktree(commit, ready_command.selective_test_run_command)
+    merge_base = git(["merge-base", "refs/remotes/origin/main", commit]).strip()
+    at_commit = failing_suites_in_scratch_worktree(
+        commit, lambda checkout: ready_command.selective_test_run_command(checkout, merge_base))
     at_frozen_head = [suite for suite in at_commit if file_exists_at(frozen_head, suite)]
     if at_frozen_head:
         failing_there = failing_suites_in_scratch_worktree(frozen_head, lambda checkout: [
@@ -1452,7 +1454,7 @@ def move_finish(number, title, body_file):
         raise Refused(f"{new_branch} holds no change beside origin/main, so there is nothing to move.\n"
                       "Bring the moved change onto it, by hand or by naming whole files to "
                       "--move-change-to-own-pull-request-cut-new-topic-branch, and run this again.")
-    test_command = ready_command.selective_test_run_command(root)
+    test_command = ready_command.selective_test_run_command(root, git(["merge-base", "origin/main", "HEAD"]).strip())
     tests = subprocess.run(test_command, cwd=root, stdin=subprocess.DEVNULL)
     if tests.returncode:
         raise Refused(f"The test command exited {tests.returncode} on {new_branch}: {shlex.join(test_command)}\n"
