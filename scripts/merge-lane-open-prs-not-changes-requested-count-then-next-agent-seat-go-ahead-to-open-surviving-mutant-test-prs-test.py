@@ -6,12 +6,15 @@ scratch --state-directory and a fake `gh` first on PATH. The fake gh logs its
 arguments and prints the pages a case writes, as `gh api graphql --paginate
 --slurp` prints them, or exits with the code and error a case writes. The idle
 sweep's run_headless is replaced by a fake sender that logs its prompt and
-returns the outcome a case sets, so the idle sweep's own check judges it.
+returns the outcome a case sets, so the idle sweep's own check judges it. HOME
+is a scratch folder holding, for each agent-seat, a handoff-supervisor state
+and Claude Code's session record of the agent-session it launched.
 
 Run: python3 scripts/merge-lane-open-prs-not-changes-requested-count-then-next-agent-seat-go-ahead-to-open-surviving-mutant-test-prs-test.py
 """
 
 import contextlib
+import hashlib
 import importlib.util
 import io
 import json
@@ -51,6 +54,11 @@ def check(name, condition, detail=""):
             print("      " + str(detail).replace("\n", "\n      "))
 
 
+def listed_ref(seat):
+    """The [ref] ListAgents gives the agent-session Case records for the agent-seat."""
+    return hashlib.sha256(f"session:/run/user/1000/cc-socks/{seat}.sock".encode()).hexdigest()[:6]
+
+
 def pull_request(number, draft=False, reviews=()):
     """reviews: (state, on) pairs, oldest first; on is "head", "older" or "deleted-commit"."""
     head = f"{number:040x}"
@@ -78,14 +86,27 @@ class Case:
             (self.state / program.AGENT_SEATS_FILE_NAME).write_text("\n".join(seats) + "\n\n")
         if released is not None:
             (self.state / program.RELEASED_FILE_NAME).write_text(released)
+        self.home = self.directory / "home"
+        (self.home / ".claude" / "handoffs").mkdir(parents=True)
+        (self.home / ".claude" / "sessions").mkdir()
+        for seat in SEATS:
+            self.supervisor_state(seat).write_text(
+                json.dumps({"launched_session_id": f"session-{seat}"}))
+            (self.home / ".claude" / "sessions" / f"{seat}.json").write_text(json.dumps(
+                {"sessionId": f"session-{seat}",
+                 "messagingSocketPath": f"/run/user/1000/cc-socks/{seat}.sock"}))
         self.sender_answers()
+
+    def supervisor_state(self, seat):
+        return self.home / ".claude" / "handoffs" / f"{seat}-supervisor-state.json"
 
     def gh_answer(self, stdout="", exit_code=0, stderr=""):
         (self.directory / "gh-answer.json").write_text(
             json.dumps({"stdout": stdout, "exit": exit_code, "stderr": stderr}))
 
     def run(self, *extra):
-        saved_path = os.environ["PATH"]
+        saved_path, saved_home = os.environ["PATH"], os.environ.get("HOME")
+        os.environ["HOME"] = str(self.home)
         saved_run_headless = program.idle_sweep.run_headless
         program.idle_sweep.run_headless = self.fake_run_headless
         os.environ["PATH"] = f"{self.directory / 'bin'}{os.pathsep}{saved_path}"
@@ -96,6 +117,10 @@ class Case:
                 code = program.main(["--state-directory", str(self.state), *extra])
         finally:
             os.environ["PATH"] = saved_path
+            if saved_home is None:
+                del os.environ["HOME"]
+            else:
+                os.environ["HOME"] = saved_home
             program.idle_sweep.run_headless = saved_run_headless
         return code, output.getvalue()
 
@@ -121,8 +146,8 @@ class Case:
             # The text code wrote is the prompt's text between its two lines of dashes.
             text = prompt.split("----------\n", 1)[1].rsplit("\n----------", 1)[0]
             seat, message = (SEATS[0], value) if kind == "sent-text" else (value, text)
-            outcome.sends = [{"to": f"{seat} [1c88e6]", "message": message, "succeeded": True,
-                              "result": "ok"}]
+            outcome.sends = [{"to": f"{seat} [{listed_ref(seat)}]", "message": message,
+                              "succeeded": True, "result": "ok"}]
             outcome.answer = {"sent": True, "reason": "sent"}
         return outcome
 
@@ -160,7 +185,8 @@ def cases(root):
           "most 5 at a time",
           len(case.prompts) == 1
           and prompt.startswith(program.idle_sweep.SENDER_PROMPT.split("{seat}")[0])
-          and program.idle_sweep.FIND_THE_ENTRY.format(seat="reboot-test") in prompt
+          and program.idle_sweep.FIND_THE_ENTRY.format(
+              seat="reboot-test", ref=listed_ref("reboot-test")) in prompt
           and "You may now open your pull requests that only add tests for surviving mutants: "
               "one per source file, with at most 5 open at a time." in prompt
           and program.idle_sweep.DO_NOT_REPLY_SENTENCE in prompt
@@ -206,6 +232,26 @@ def cases(root):
         check(f"after the {name.split('-')[0]} {'differed' if name == 'text-differs' else 'failed'}, the next run sends to the same agent-seat "
               f"again",
               code == 0 and output.startswith("RELEASED reboot-test\n"), f"exit {code}\n{output}")
+
+    for name, breaks in (
+            ("no-running-session",
+             lambda case: (case.home / ".claude" / "sessions" / "reboot-test.json").unlink()),
+            ("state-not-json", lambda case: case.supervisor_state("reboot-test").write_text("{x")),
+            ("state-not-object", lambda case: case.supervisor_state("reboot-test").write_text("[]")),
+            ("no-state", lambda case: case.supervisor_state("reboot-test").unlink()),
+            # A record with no sessionId must not match a state that names no agent-session.
+            ("state-names-none", lambda case: (
+                case.supervisor_state("reboot-test").write_text("{}"),
+                (case.home / ".claude" / "sessions" / "no-id.json").write_text(json.dumps(
+                    {"messagingSocketPath": "/run/user/1000/cc-socks/no-id.sock"}))))):
+        case = Case(root, name)
+        case.gh_answer(pages(ten_counted))
+        breaks(case)
+        code, output = case.run()
+        check(f"{name}: with no running agent-session of the agent-seat's supervisor to find, no "
+              f"sender is started, nothing is recorded, exit 2",
+              code == 2 and case.prompts == [] and case.released() == []
+              and "no running agent-session of reboot-test" in output, f"exit {code}\n{output}")
 
     case = Case(root, "eleven")
     case.gh_answer(pages([pull_request(number) for number in range(1, 12)]))
