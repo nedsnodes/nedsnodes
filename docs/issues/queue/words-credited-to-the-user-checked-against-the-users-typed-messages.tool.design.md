@@ -32,13 +32,13 @@ Item 6.3 of approval-walk ned-box-helper-combined-open-items-2026-10-22, "A hook
 
 1. A small Python program does the check. When the user sends a message, a hook runs it on the agent's previous reply. It takes each quote the reply credits to him, after cues such as "you said", "your words" or "your ruling was". It searches the transcript, his typed messages in the session dialogs, and the walk records, which hold rulings he approved with a letter. It allows for case, spacing and "…". When a quote is not found, the hook tells the agent: "I couldn't find '…' in the user's messages or rulings. Check the source and quote the user exactly, or say you are paraphrasing."
 2. A skill, `/check-quote`, runs the same program on any quote the user or an agent gives it. It prints where the quote appears, or the nearest match.
-3. The program, the hook and the skill are built as part of cold-read-improvement's quote checker.
+3. cold-read-improvement builds the program, the hook and the skill.
 
 The hook warns and never blocks.
 
 ## How it works
 
-- **Program:** proposed name `scripts/user-quote-in-agent-reply-check.py`. It reads text on standard input, or one quote with `--quote`.
+- **Program:** proposed name `scripts/user-quote-in-agent-reply-check.py`. It reads a reply on standard input and finds the quotes in it, or takes one bare quote with `--quote`, which needs no cue. It exits 0 when every quote is found, 1 when one or more is not, and 2 when it could not finish, such as on an unreadable transcript.
 - **Finding the quotes:** it takes each quoted span of four words or more that follows a cue crediting the user, within the same sentence or as the block quote that follows. The cues are the ones the study lists in its section 4:
   - "you said", "you wrote", "you asked", "you told";
   - "your words", "your own words", "your exact words";
@@ -46,15 +46,17 @@ The hook warns and never blocks.
   - "as you put it";
   - "user-ruled YYYY-MM-DD:".
 
-  Hypothetical examples, quoted titles and quotes the reply credits to a file are skipped.
+  It skips a quote by fixed rules, never by judgment: a cue after "if", "say" or "e.g." marks a hypothetical; a quote within the same sentence as a file path or a backticked file name is credited to that file; a quote that is a whole link text or heading is a title. The study's 100 sampled replies are the test cases for these rules.
+- **Length:** the whole quote must be four words or more; a piece between "…" may be shorter.
 - **Where it searches:**
   - his typed messages, as `scripts/search-user-messages-in-transcripts.py` reads them. `scripts/log-store-past-discussions-regex-search-newest-first.py --kind user-messages` already uses that reader, so the program reuses it rather than parsing transcripts again;
-  - the current agent-session's transcript;
-  - walk-documents and walk-minutes, both `/home/nedlern/agents/*/docs/walk/` and `nedlern@ned-box:/home/nedlern/nedsnodes-logs/walk/`. There an approved item's `#new` text counts as his words, because he approved it word for word.
-- **Matching:** case, whitespace, straight and curly quotes, and punctuation are made equal. "…" or "..." splits the quote into pieces that must appear in order, in one message or one item. An agent's own repetition of the quote is never a match.
-- **Hook:** a UserPromptSubmit hook, built like `scripts/bare-number-citation-in-markdown-and-agent-reply-warning-hook.py`, which already reads the agent's previous reply at that event. It prints item 6.3's message for each quote not found, with the nearest match when there is one.
+  - the user turns of the current agent-session's transcript, never its agent turns;
+  - walk-documents and walk-minutes, in each agent-home's `docs/walk/` and in the log-store's `walk/` folder. On the Mac the program reaches the log-store over ssh to ned-box. An item's `#new` text counts as his words when the walk-minutes record "the user answered approved" for that item, because he approved it word for word.
+- **Matching:** case, whitespace, straight and curly quotes, and punctuation are made equal. "…" or "..." splits the quote into pieces that must appear in order, in one message or one item; an empty piece, from a leading or trailing "…", is dropped.
+- **Nearest match:** when a quote is not found, the program reports the stretch of his messages, of the quote's length, with the highest `difflib.SequenceMatcher` ratio.
+- **Hook:** a UserPromptSubmit hook, proposed name `scripts/user-quote-in-agent-reply-warning-hook.py`, which runs the program on the reply and is built like `scripts/bare-number-citation-in-markdown-and-agent-reply-warning-hook.py`, which already reads the agent's previous reply at that event. It prints item 6.3's message for each quote not found, with the nearest match when there is one. It stops the program after 5 seconds and says the check did not finish, so a slow search never holds up the user's message.
 - **Skill:** `/check-quote` runs the program with `--quote` and prints each place the quote is found, or the nearest match.
-- **When ruling-agent is built:** GHI [ruling-agent keeps user-rulings, checks approval-walk items against them](https://github.com/nedsnodes/nedsnodes/issues/2118) plans a store of his verbatim words and an index file that hooks read. Once that exists, the program searches the index file instead of the transcripts. Until then it searches the sources above.
+- **When ruling-agent is built:** GHI [ruling-agent keeps user-rulings, checks approval-walk items against them](https://github.com/nedsnodes/nedsnodes/issues/2118) plans a store of his verbatim words and an index file that hooks read. The program uses that index file when it exists, and the sources above when it does not, so no later change is needed.
 
 ## What it does not do
 
@@ -72,9 +74,11 @@ The test that reproduces the failure is the MD-skills case: a reply crediting th
 
 The program's own failure, such as an unreadable transcript, is reported in its output and lets the user's message go through.
 
+The near-match threshold, how close a stretch must be to be shown as the nearest match, is set by a test from the study's 13 near matches and 21 quotes that matched nothing: the test fails if the threshold stops separating them.
+
 ## Deferred-decisions
 
-- How many differing words still count as a near match in the hook's message, to be set from the study's 13 near matches.
+- Whether the hook runs at Stop instead, on the reply before the user reads it, so the agent corrects a misquote before he answers it. Item 6.3 approved a UserPromptSubmit hook, which warns only after he has read the reply.
 
 ## Next action
 
