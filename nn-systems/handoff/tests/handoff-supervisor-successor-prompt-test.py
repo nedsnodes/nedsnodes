@@ -1092,6 +1092,72 @@ def run_launch_time_git_sync_cases(workspace: Path):
     run_launch_time_git_sync_git_failure_cases(root, remote, seed)
 
 
+def run_launch_time_git_sync_real_reports_into_successor_prompt_cases(workspace: Path):
+    """Each outcome that holds all of main, after a fetch that succeeds and after one that fails
+    against a cached origin/main, as a real sync returns it and both prompt builders carry it."""
+    root = workspace / "launch-time-git-sync-real-reports-into-successor-prompt"
+    root.mkdir()
+    remote = root / "remote.git"
+    git_in(["init", "--quiet", "--bare", "--initial-branch=main", str(remote)], root)
+    seed = root / "seed"
+    git_in(["clone", "--quiet", str(remote), str(seed)], root)
+    git_in(["config", "user.name", "fixture"], seed)
+    git_in(["config", "user.email", "fixture@nedschorus.invalid"], seed)
+    for line in ("first", "second"):
+        (seed / "README.md").write_text(f"{line}\n", encoding="utf-8")
+        git_in(["add", "-A"], seed)
+        git_in(["commit", "--quiet", "-m", line], seed)
+    git_in(["push", "--quiet", "origin", "main"], seed)
+
+    def checkout_for(case: str, fetch_fails: bool) -> Path:
+        home = root / f"{case}-fetch-{'fails' if fetch_fails else 'succeeds'}"
+        git_in(["clone", "--quiet", str(remote), str(home)], root)
+        git_in(["config", "user.name", "agent"], home)
+        git_in(["config", "user.email", "agent@nedschorus.invalid"], home)
+        if case == "current":
+            git_in(["checkout", "--quiet", "-b", "agent-branch"], home)
+        elif case == "ahead":
+            git_in(["checkout", "--quiet", "-b", "agent-branch"], home)
+            (home / "agent-note.txt").write_text("the agent's own work\n", encoding="utf-8")
+            git_in(["add", "-A"], home)
+            git_in(["commit", "--quiet", "-m", "the agent's own work"], home)
+        else:
+            git_in(["checkout", "--quiet", "-b", "agent-branch", "HEAD~1"], home)
+        if fetch_fails:
+            # origin/main stays cached from the clone; only the fetch can no longer reach origin.
+            git_in(["remote", "set-url", "origin", str(root / "no-such-remote.git")], home)
+        return home
+
+    expected_text = {
+        "current": "launch-time-git-sync: agent-branch is current with main",
+        "ahead": ("launch-time-git-sync: agent-branch is 1 commit(s) ahead of main and has all "
+                  "of it — nothing to pull"),
+        "fast-forward": "launch-time-git-sync: agent-branch fast-forwarded to main (",
+    }
+    fetch_failed_note = " (fetch failed, comparing against what is on disk)"
+    for case in ("current", "ahead", "fast-forward"):
+        for fetch_fails in (False, True):
+            report = supervisor.launch_time_git_sync(checkout_for(case, fetch_fails))
+            fetch = "a failed fetch" if fetch_fails else "a fetch"
+            check(f"a real sync's {case} report after {fetch} is that outcome's report",
+                  report.startswith(expected_text[case])
+                  and report.endswith(fetch_failed_note) == fetch_fails, report)
+            dialog_prompt = supervisor.build_ignition_prompt(
+                Path("/tmp/dialog-0002.md"),
+                {"written-at": "2026-11-22T09:00:00Z", "next-step": "finish the supervisor"},
+                launch_time_git_sync_report=report)
+            boot_recovery_prompt = supervisor.IgnitionPlanWithoutConversationTail(
+                "finish the supervisor").compose(report)
+            for builder, prompt in (("dialog", dialog_prompt), ("boot-recovery", boot_recovery_prompt)):
+                if fetch_fails:
+                    check(f"the {builder} prompt keeps a real sync's {case} report after a failed "
+                          f"fetch, since the checkout was compared against a cached origin/main",
+                          report in prompt, prompt)
+                else:
+                    check(f"the {builder} prompt leaves out a real sync's {case} report after a fetch",
+                          "launch-time-git-sync" not in prompt, prompt)
+
+
 def run_launch_time_git_sync_git_failure_cases(root: Path, remote: Path, seed: Path):
     """Each git call the launch-time-git-sync reads an answer from, failing with exit 128,
     is reported with git's error, never read as one of the answers."""
@@ -3577,6 +3643,7 @@ def run_retiring_session_id_from_the_handoff_cases(workspace: Path, recent: str)
 with fixture.handoff_supervisor_suite_workspace() as workspace:
     recent_timestamp = run_offline_cases(workspace)
     run_launch_time_git_sync_cases(workspace)
+    run_launch_time_git_sync_real_reports_into_successor_prompt_cases(workspace)
     run_supervisor_names_replaced_unknown_name_cases()
     with gh_answering_no_open_pull_requests_first_on_path(
             workspace / "gh-answering-no-open-pull-requests"):
