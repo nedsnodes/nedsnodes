@@ -1234,10 +1234,9 @@ def failing_suites_in_scratch_worktree(commit, command_for_checkout):
                      "SendMessage what it printed, and do not push.")
 
 
-def suites_the_round_broke_and_suites_failing_at_frozen_head_too(frozen_head, commit):
+def suites_the_round_broke_and_suites_failing_at_frozen_head_too(frozen_head, commit, merge_base):
     """Run the suites at commit, and those that fail there at frozen_head too; return
     (failing at commit only, failing at both)."""
-    merge_base = git(["merge-base", "refs/remotes/origin/main", commit]).strip()
     at_commit = failing_suites_in_scratch_worktree(
         commit, lambda checkout: ready_command.selective_test_run_command(checkout, merge_base))
     at_frozen_head = [suite for suite in at_commit if file_exists_at(frozen_head, suite)]
@@ -1261,11 +1260,11 @@ def suites_failing_at_frozen_head_too_recorded_for(commit):
     return record["suites"] if record["commit"] == commit else []
 
 
-def refuse_fix_round_commit_whose_architecture_overviews_the_review_plan_would_refuse(number, commit, report_directory):
+def refuse_fix_round_commit_whose_architecture_overviews_the_review_plan_would_refuse(number, commit, merge_base,
+                                                                                    report_directory):
     """Runs pull-request-review-plan.py's nn-architecture-overview checks on the round's last commit, before the
     push, since a refusal there after the push costs a second push under review."""
     repository = Path(worktree_root())
-    merge_base = git(["merge-base", "refs/remotes/origin/main", commit]).strip()
     try:
         changed_files = [{"status": status, "path": path} for status, path in
                          review_plan.changed_file_statuses_and_paths(repository, merge_base, commit)]
@@ -1401,11 +1400,12 @@ def check_round(number, reviewer_login, answers_path, commit_name,
     if head == frozen_head and commit != frozen_head:
         if not confirm_dispatching_agent_checked_new_shared_names:
             refuse_new_shared_names_the_dispatching_agent_has_not_checked(number, frozen_head, commit)
+        merge_base = git(["merge-base", "refs/remotes/origin/main", commit]).strip()
         refuse_fix_round_commit_whose_architecture_overviews_the_review_plan_would_refuse(
-            number, commit, overview_claim_check_report_directory
+            number, commit, merge_base, overview_claim_check_report_directory
             or review_plan.overview_claim_check.OVERVIEW_WRITE_ARCHITECTURE_OVERVIEW_CLAIM_CHECK_REPORT_DIRECTORY)
         broken, failing_at_frozen_head_too = suites_the_round_broke_and_suites_failing_at_frozen_head_too(
-            frozen_head, commit)
+            frozen_head, commit, merge_base)
         if broken:
             too = (f" These fail at the frozen-head too, so they are not the round's doing: "
                    f"{', '.join(failing_at_frozen_head_too)}." if failing_at_frozen_head_too else "")
@@ -1568,7 +1568,8 @@ def move_finish(number, title, body_file):
         raise Refused(f"{new_branch} holds no change beside origin/main, so there is nothing to move.\n"
                       "Bring the moved change onto it, by hand or by naming whole files to "
                       "--move-change-to-own-pull-request-cut-new-topic-branch, and run this again.")
-    test_command = ready_command.selective_test_run_command(root, git(["merge-base", "origin/main", "HEAD"]).strip())
+    # The guard above leaves HEAD an ancestor of origin/main, so HEAD is the merge base.
+    test_command = ready_command.selective_test_run_command(root, git(["rev-parse", "HEAD"]).strip())
     tests = subprocess.run(test_command, cwd=root, stdin=subprocess.DEVNULL)
     if tests.returncode:
         raise Refused(f"The test command exited {tests.returncode} on {new_branch}: {shlex.join(test_command)}\n"

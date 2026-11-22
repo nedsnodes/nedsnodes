@@ -2428,7 +2428,8 @@ def architecture_overview_check_cannot_read_case(_root, repository, _base, froze
     original_directory = os.getcwd()
     os.chdir(repository)
     try:
-        program.refuse_fix_round_commit_whose_architecture_overviews_the_review_plan_would_refuse(NUMBER, frozen_head, repository)
+        program.refuse_fix_round_commit_whose_architecture_overviews_the_review_plan_would_refuse(
+            NUMBER, frozen_head, frozen_head, repository)
         raised = None
     except Exception as error:
         raised = error
