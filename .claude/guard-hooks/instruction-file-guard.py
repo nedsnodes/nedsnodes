@@ -33,14 +33,19 @@ with _crash_notice.guard_hook_crash_fail_open_with_notice_context_manager(
         Path(__file__).resolve().parent / "guard-approval-marker-common.py")
     _guard_approval_marker_common = importlib.util.module_from_spec(_marker_spec)
     _marker_spec.loader.exec_module(_guard_approval_marker_common)
+    _draft_place_spec = importlib.util.spec_from_file_location(
+        "draft_place_directory_check_common",
+        Path(__file__).resolve().parents[2] / "nn-systems" / "general-tools"
+        / "draft-place-directory-check-common.py")
+    _draft_place = importlib.util.module_from_spec(_draft_place_spec)
+    _draft_place_spec.loader.exec_module(_draft_place)
 consume_approval_marker = _guard_approval_marker_common.consume_approval_marker
 read_marker_approval = _guard_approval_marker_common.read_marker_approval
 
 PROTECTED_BASENAMES = ("CLAUDE.md", "CLAUDE.local.md")
 PROTECTED_DIRECTORY = ".claude"
 REUSABLE_PROMPT_SUFFIXES = ("-prompt.md", "-instructions.md")
-PROMPT_DRAFT_DIRECTORY_NAMES = ("queue",)
-PROMPT_EXEMPT_DIRECTORY_PREFIXES = (("docs", "drafts"), (".claude", "jobs"), (".claude", "handoffs"))
+PROMPT_SCRATCH_DIRECTORY_PREFIXES = ((".claude", "jobs"), (".claude", "handoffs"))
 REVIEWED_DOCUMENT_SUFFIX = ".md"
 REVIEWED_HOME_DIRECTORY_PREFIXES = (("docs", "agents"), ("docs", "nedsnodes-wiki"), ("nn-systems", "skills"))
 REVIEWED_DESIGN_SUFFIX = ".design.md"
@@ -244,10 +249,10 @@ def checkout_directory_parts(path: Path):
 
 
 def is_in_draft_or_working_place(directory_parts) -> bool:
-    if any(part in PROMPT_DRAFT_DIRECTORY_NAMES for part in directory_parts):
+    if _draft_place.directory_is_a_draft_place(directory_parts):
         return True
     return any(directory_parts[:len(prefix)] == prefix
-               for prefix in PROMPT_EXEMPT_DIRECTORY_PREFIXES)
+               for prefix in PROMPT_SCRATCH_DIRECTORY_PREFIXES)
 
 
 def is_in_review_record_directory(path: Path) -> bool:
