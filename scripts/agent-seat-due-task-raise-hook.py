@@ -670,9 +670,18 @@ def gh_failure_line(kind: str, number: int, cause: str) -> str:
             f"the user to run `gh auth login` on this machine.")
 
 
-def budget_skipped_task_lines(tasks: dict, skipped_conditions) -> list:
-    """One line per open task that names a condition the checker skipped for lack of budget,
-    then the instructions, or nothing when no open task names one."""
+def prerequisites_raised_as_met(record: dict, prerequisites_value) -> bool:
+    """Whether the task's record shows its current prerequisites raised as met. A raised
+    `pr_merged` pull request stays merged, so none of them can have closed without merging; a
+    raised `issue_closed` GHI that is reopened later still counts as met."""
+    return record.get(PREREQUISITES_KEY) == canonical_prerequisites(prerequisites_value)
+
+
+def budget_skipped_task_lines(tasks: dict, skipped_conditions, raised: dict) -> list:
+    """One line per open task the skip left unraised, that is, one that names a condition the
+    checker skipped for lack of budget and that `raised`, the state file's record as this run
+    leaves it, neither shows raised as met nor shows told to re-plan for a pull request closed
+    without merging; then the instructions, or nothing when there is no such task."""
     skipped = set(skipped_conditions)
     lines = []
     for task_id in sorted(tasks, key=lambda text: (len(text), text)):
@@ -683,6 +692,12 @@ def budget_skipped_task_lines(tasks: dict, skipped_conditions) -> list:
         try:
             conditions = parse_prerequisites(metadata.get(PREREQUISITES_KEY))
         except UnreadablePrerequisites:
+            continue
+        record = raised.get(task_id) if isinstance(raised.get(task_id), dict) else {}
+        closed_without_merging = record.get(CLOSED_WITHOUT_MERGING_RECORD_KEY) or []
+        if (prerequisites_raised_as_met(record, metadata.get(PREREQUISITES_KEY))
+                or any(kind == PULL_REQUEST_KIND and number in closed_without_merging
+                       for kind, number in conditions)):
             continue
         names = list(dict.fromkeys(f"{CONDITION_KINDS[kind][2]} {number}"
                                    for kind, number in conditions
@@ -758,8 +773,7 @@ def due_task_lines(tasks: dict, directory: Path, state: dict,
             conditions_still_named.update(condition_key(k, n) for k, n in conditions
                                           if k in CONDITION_KINDS)
 
-        if (conditions is not None
-                and record.get(PREREQUISITES_KEY) != canonical_prerequisites(prerequisites_value)):
+        if conditions is not None and not prerequisites_raised_as_met(record, prerequisites_value):
             newly_closed = pull_requests_closed_without_merging(
                 pull_request_conditions_not_raised_as_closed(conditions, record), checker)
             if newly_closed:
@@ -924,7 +938,11 @@ def unheld_and_held_tasks(tasks: dict, directory: Path, checker,
                           raised: dict) -> "tuple[list, int]":
     """The ids of open tasks nothing recorded holds back, or that wait on a pull request closed
     without merging that `raised`, the state file's record, does not show raised yet, oldest
-    first, and the count of the rest."""
+    first, and the count of the rest.
+
+    A task whose record shows its prerequisites raised as met is not asked about again, so in a
+    Stop run every gh question for a task no blockedBy holds is one `due_task_lines` asked first,
+    before its held tasks spent the budget, and is answered from the cache."""
     unheld = []
     held = 0
     held_by_blockers = {task_id for task_id, task in tasks.items()
@@ -944,14 +962,16 @@ def unheld_and_held_tasks(tasks: dict, directory: Path, checker,
             except UnreadablePrerequisites:
                 pass  # due_task_lines names it to the agent
         record = raised.get(task_id) if isinstance(raised.get(task_id), dict) else {}
-        if conditions and pull_requests_closed_without_merging(
+        raised_as_met = (conditions is not None
+                         and prerequisites_raised_as_met(record, prerequisites_value))
+        if conditions and not raised_as_met and pull_requests_closed_without_merging(
                 pull_request_conditions_not_raised_as_closed(conditions, record), checker):
             unheld.append(task_id)  # its agent must re-plan it, whatever else holds it
             continue
         if task_id in held_by_blockers:
             held += 1
             continue
-        if prerequisites_value is not None:
+        if prerequisites_value is not None and not raised_as_met:
             if conditions is None or not all(
                     condition_answer(kind, number, checker).get("met") is True
                     for kind, number in conditions):
@@ -1079,7 +1099,8 @@ def run(stdin_text: str, environment, home: Path, now: datetime) -> "str | None"
     state_changed = state_changed or checker.changed
     gh_failure_lines = [gh_failure_line(kind, number, cause)
                         for kind, number, cause in dict.fromkeys(checker.gh_failures)]
-    gh_failure_lines += budget_skipped_task_lines(tasks, checker.conditions_skipped_for_budget)
+    gh_failure_lines += budget_skipped_task_lines(tasks, checker.conditions_skipped_for_budget,
+                                                  state["raised"])
     if state_changed:
         try:
             write_state_atomically(state_path, state)
