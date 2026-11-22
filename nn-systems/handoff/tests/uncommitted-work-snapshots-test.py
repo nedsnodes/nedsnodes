@@ -1038,7 +1038,7 @@ def test_restore_a_subset():
               and ref in task.get("description", "") and str(target) in task.get("description", ""),
               f"restore opens the restored branch's task, naming its restore commit, {where}", task)
         holding = first_prompt_list.tasks_holding("seat-five", restore_task_list())
-        check(holding.holders(branch) and holding.holders(target)
+        check(holding.holds(branch) and holding.holds(target)
               and not holding.unreadable,
               f"the first prompt's list reads the task restore opens as holding its branch and "
               f"worktree, so it does not list them, {where}", task)

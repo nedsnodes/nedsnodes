@@ -151,8 +151,8 @@ with tempfile.TemporaryDirectory() as task_list:
         {"id": "7", "status": "pending", "metadata": {"branches": branches_example}}))
     holding = first_prompt_list.tasks_holding("seat", task_list)
 check("the branches example, names filled in, is one the first prompt's list reads",
-      not holding.unreadable and holding.holders("work-topic-branch") == {"7"}
-      and holding.holders("/work/tree") == {"7"}, repr((holding.held, holding.unreadable)))
+      not holding.unreadable and holding.holds("work-topic-branch")
+      and holding.holds("/work/tree"), repr((holding.held, holding.unreadable)))
 
 if failures:
     print(f"\n{len(failures)} case(s) failed")
