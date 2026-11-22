@@ -295,10 +295,29 @@ _ghi_guide_agent_ask = TOOL.module_from_spec(_ghi_guide_agent_ask_spec)
 _ghi_guide_agent_ask_spec.loader.exec_module(_ghi_guide_agent_ask)
 
 
-def ruling_stderr(sentence, leading=""):
-    """What ghi-guide-agent-ask.py prints for ghi-guide-agent's reply `sentence`."""
-    return leading + _ghi_guide_agent_ask.caller_message_for_passthrough_reply(
-        "ask-user-about-ruling: " + sentence)[0] + "\n"
+def ask_answer(exit_code=0, **fields):
+    """What ghi-guide-agent-ask.py --print-answer-json --request-form
+    draft-verdict prints for an answer with these fields, checked against
+    that request form's schema, so a field or kind renamed or disallowed there
+    fails here rather than passing on stale words."""
+    answer, problem = (_ghi_guide_agent_ask
+                       .ghi_guide_agent_answer_extract_and_schema_check_from_claude_result(
+                           {"structured_output": fields},
+                           _ghi_guide_agent_ask.GHI_GUIDE_AGENT_ANSWER_KINDS_EACH_REQUEST_FORM_ALLOWS[
+                               _ghi_guide_agent_ask.GHI_GUIDE_AGENT_REQUEST_FORM_VALUE_ASKING_FOR_VERDICT_ON_DRAFT_ISSUE]))
+    assert answer is not None, problem
+    return Completed(json.dumps(answer) + "\n", returncode=exit_code)
+
+
+def verdict_answer(verdict, *issues):
+    return ask_answer(kind=_ghi_guide_agent_ask.GHI_GUIDE_AGENT_ANSWER_KIND_VERDICT,
+                      verdict=verdict, issues=list(issues))
+
+
+def ruling_answer(ruling_issue, sentence):
+    return ask_answer(_ghi_guide_agent_ask.EXIT_RULING_QUESTION,
+                      kind=_ghi_guide_agent_ask.GHI_GUIDE_AGENT_ANSWER_KIND_ASK_USER_ABOUT_RULING,
+                      ruling_issue=ruling_issue, sentence=sentence)
 
 
 def comes_before(order, first, second):
@@ -1505,7 +1524,7 @@ def run_cases(scratch: Path):
     ask.parent.mkdir(exist_ok=True)
     ask.write_text("# stands in for the real one; never executed\n")
 
-    refusing = Recorder({ASK: Completed("verdict: too-similar #13\n")})
+    refusing = Recorder({ASK: verdict_answer("too-similar", 13)})
     try:
         tool.adjudicate(REPO, "t", FILE_TEXT, scratch, refusing, quiet)
         check("a too-similar verdict refuses the write", False, "it proceeded")
@@ -1518,41 +1537,63 @@ def run_cases(scratch: Path):
     for case_name, answers in [
             ("ghi-guide-agent answering nothing lets the write proceed",
              {ASK: Completed("", returncode=1)}),
-            ("a reply with no verdict line lets the write proceed",
-             {ASK: Completed("I could not tell.\n")}),
+            ("a reply that is not JSON lets the write proceed",
+             {ASK: Completed("verdict: too-similar #13\n")}),
+            ("a JSON reply that is not an object lets the write proceed",
+             {ASK: Completed("[13]\n")}),
             ("ghi-guide-agent raising lets the write proceed",
              {ASK: RuntimeError("box unreachable")})]:
+        lines = []
         try:
             tool.adjudicate(REPO, "t", FILE_TEXT, scratch, Recorder(answers),
-                            quiet)
-            check(case_name, True)
+                            lines.append)
+            check(case_name, lines and lines[0].startswith(
+                "adjudication skipped: ghi-guide-agent did not answer"), lines)
         except tool.Refused as refusal:
             check(case_name, False, f"refused: {refusal}")
 
-    # ghi-guide-agent-ask.py exits 2, message on stderr, when ghi-guide-agent replies
-    # not-about-issues instead of a list. The write fails open as for any
-    # missing verdict, and the report says what ghi-guide-agent said instead of
-    # "did not answer". Exit 3, the ruling question, has its own cases below.
-    for case_name, exit_code, first_line in [
-            ("a not-about-issues reply lets the write proceed and says so", 2,
-             "Not a question about GitHub issues: ghi-guide-agent reports which "
-             "issues relate to a subject.")]:
+    recorder = Recorder({ASK: verdict_answer("unrelated")})
+    tool.adjudicate(REPO, "t", FILE_TEXT, scratch, recorder, quiet)
+    ask_call = next((call for call in recorder.calls if ASK in " ".join(call)), [])
+    check("the ask is run with --print-answer-json and --request-form draft-verdict",
+          "--print-answer-json" in ask_call
+          and ask_call[ask_call.index("--request-form") + 1:][:1] == ["draft-verdict"],
+          ask_call)
+    check("the request form the writer names is one the ask program has",
+          "draft-verdict" in _ghi_guide_agent_ask.GHI_GUIDE_AGENT_ANSWER_KINDS_EACH_REQUEST_FORM_ALLOWS)
+
+    # The exit code is not read: an argument error exits 2 as
+    # not-about-issues does.
+    for case_name, completed, expected in [
+            ("an exit 2 with nothing on stdout is a failed ask, not an answer",
+             Completed("", returncode=2, stderr="usage: ghi-guide-agent-ask.py\n"),
+             "adjudication skipped: ghi-guide-agent did not answer: usage: "
+             "ghi-guide-agent-ask.py")]:
         lines = []
-        replied = Recorder({ASK: Completed(
-            "", returncode=exit_code,
-            stderr=first_line + "\nsecond line of the message\n")})
         try:
-            tool.adjudicate(REPO, "t", FILE_TEXT, scratch, replied,
-                            lines.append)
-            check(case_name,
-                  lines == [f"adjudication skipped: ghi-guide-agent gave no "
-                            f"verdict: {first_line}"], lines)
+            tool.adjudicate(REPO, "t", FILE_TEXT, scratch,
+                            Recorder({ASK: completed}), lines.append)
+            check(case_name, lines == [expected], lines)
         except tool.Refused as refusal:
             check(case_name, False, f"refused: {refusal}")
 
     # Any other failing exit carries the ask's last stderr line, which says
-    # why, and the bare report stands when the ask printed nothing.
+    # why, and the bare report stands when the ask printed nothing. An
+    # unusable answer's line is followed by an instruction for agents, so
+    # that line is carried instead of the last.
+    check("the not-usable opening this program looks for is the ask program's own",
+          tool.GHI_GUIDE_AGENT_ASK_ANSWER_NOT_USABLE_STDERR_LINE_OPENING_TO_MATCH
+          == _ghi_guide_agent_ask.GHI_GUIDE_AGENT_ANSWER_NOT_USABLE_MESSAGE_OPENING)
     for case_name, stderr, expected in [
+            ("an unusable answer's line is carried into the report, not the "
+             "instruction after it",
+             "ghi-guide-agent-ask: refreshed the seat checkout 1 commit(s) to origin/main\n"
+             + "ghi-guide-agent-ask: " + _ghi_guide_agent_ask
+             .GHI_GUIDE_AGENT_ANSWER_NOT_USABLE_MESSAGE_TEMPLATE.format(
+                 problem="the verdict answer lacks its verdict field: {}") + "\n",
+             "adjudication skipped: ghi-guide-agent did not answer: ghi-guide-agent-ask: "
+             "ghi-guide-agent's answer is not usable: the verdict answer lacks its "
+             "verdict field: {}"),
             ("a failing ask's last stderr line is carried into the report",
              "ghi-guide-agent-ask: a progress line\nghi-guide-agent-ask: ned-box cannot "
              "be reached\n",
@@ -1565,113 +1606,42 @@ def run_cases(scratch: Path):
             "", returncode=1, stderr=stderr)}), lines.append)
         check(case_name, lines == [expected], lines)
 
-    # On the locked path ghi-guide-agent-ask.py writes its seat-checkout refresh line
-    # or its reincarnation line to stderr before the message, and the Mac
-    # relay copies them through; the report still carries the message.
-    for leading_line in [
-            "ghi-guide-agent-ask: refreshed the seat checkout 1 commit(s) to "
-            "origin/main",
-            "ghi-guide-agent-ask: reincarnating the session — 40 closes since birth"]:
-        for exit_code, first_line in [
-                (2, "Not a question about GitHub issues: ghi-guide-agent reports "
-                    "which issues relate to a subject.")]:
-            case_name = (f"exit {exit_code} after the line "
-                         f"{leading_line[:40]!r} reports the message")
-            lines = []
-            replied = Recorder({ASK: Completed(
-                "", returncode=exit_code,
-                stderr=leading_line + "\n" + first_line +
-                "\nsecond line of the message\n")})
-            try:
-                tool.adjudicate(REPO, "t", FILE_TEXT, scratch, replied,
-                                lines.append)
-                check(case_name,
-                      lines == [f"adjudication skipped: ghi-guide-agent gave no "
-                                f"verdict: {first_line}"], lines)
-            except tool.Refused as refusal:
-                check(case_name, False, f"refused: {refusal}")
-
-    ask_spec = TOOL.spec_from_file_location(
-        "ghi_guide_agent_ask_for_exit_codes",
-        Path(__file__).resolve().with_name("ghi-guide-agent-ask.py"))
-    ask_module = TOOL.module_from_spec(ask_spec)
-    ask_spec.loader.exec_module(ask_module)
-    check("the tool's copy of ghi-guide-agent-ask.py's two no-list exit codes "
-          "matches that program's",
-          tool.GHI_GUIDE_AGENT_ASK_REPLIED_WITHOUT_A_LIST_EXIT_CODES
-          == (ask_module.EXIT_NOT_ABOUT_ISSUES,
-              ask_module.EXIT_RULING_QUESTION),
-          tool.GHI_GUIDE_AGENT_ASK_REPLIED_WITHOUT_A_LIST_EXIT_CODES)
-    check("the tool's copy of ghi-guide-agent-ask.py's two messages' openings "
-          "matches that program's",
-          tool.GHI_GUIDE_AGENT_ASK_NO_LIST_MESSAGE_OPENINGS
-          == (ask_module.NOT_ABOUT_ISSUES_MESSAGE.splitlines()[0].split(
-                  ":")[0] + ":",
-              ask_module.RULING_QUESTION_MESSAGE_TEMPLATE.split(
-                  "{sentence}")[0].rstrip()),
-          tool.GHI_GUIDE_AGENT_ASK_NO_LIST_MESSAGE_OPENINGS)
-
-    check("the tool's copy of the ruling question's exit code and of the "
-          "line after its sentence match ghi-guide-agent-ask.py's",
-          tool.GHI_GUIDE_AGENT_ASK_RULING_QUESTION_EXIT_CODE
-          == ask_module.EXIT_RULING_QUESTION
-          and ask_module.RULING_QUESTION_MESSAGE_TEMPLATE.split(
-              "{sentence}\n")[1].startswith(
-                  tool.GHI_GUIDE_AGENT_ASK_RULING_QUESTION_SENTENCE_END),
-          tool.GHI_GUIDE_AGENT_ASK_RULING_QUESTION_SENTENCE_END)
-    held_in_783 = tool.GHI_GUIDE_AGENT_ASK_RULING_QUESTION_RULING_GHI_NUMBER_SUFFIX_PATTERN.search(
-        "a sentence" + ask_module.RULING_QUESTION_RULING_GHI_NUMBER_SUFFIX_TEMPLATE.format(
-            number=783))
-    check("the tool's pattern for the issue number after the ruling "
-          "question's sentence reads ghi-guide-agent-ask.py's",
-          held_in_783 is not None and held_in_783.group(1) == "783"
-          and held_in_783.start() == len("a sentence"),
-          ask_module.RULING_QUESTION_RULING_GHI_NUMBER_SUFFIX_TEMPLATE)
+    for case_name, completed, expected in [
+            ("a related verdict is reported with its issues",
+             verdict_answer("related", 3, 4), "ghi-guide-agent: verdict: related #3,#4"),
+            ("an unrelated verdict is reported alone",
+             verdict_answer("unrelated"), "ghi-guide-agent: verdict: unrelated")]:
+        lines = []
+        tool.adjudicate(REPO, "t", FILE_TEXT, scratch, Recorder({ASK: completed}),
+                        lines.append)
+        check(case_name, lines == [expected], lines)
 
     # --- A ruling question: the write goes ahead and records it ----------
 
-    check("the request offers ghi-guide-agent the numbered ruling question",
-          "ask-user-about-ruling: #<issue>" in " ".join(
+    check("the request offers ghi-guide-agent the ruling question",
+          "kind `ask-user-about-ruling`" in " ".join(
               " ".join(call) for call in (lambda r: (tool.adjudicate(
                   REPO, "t", FILE_TEXT, scratch, r, quiet), r.calls)[1])(
-                      Recorder({ASK: Completed("verdict: unrelated\n")}))))
+                      Recorder({ASK: verdict_answer("unrelated")}))))
 
-    for case_name, stderr, expected_issue, expected_sentence in [
-            ("a numbered ruling question is returned, number and sentence "
-             "apart",
-             ruling_stderr("#46 the 2026-09-19 ruling may not hold"),
+    for case_name, completed, expected_issue, expected_sentence in [
+            ("a ruling question is returned, number and sentence apart",
+             ruling_answer(46, "the 2026-09-19 ruling may not hold"),
              46, "the 2026-09-19 ruling may not hold"),
-            ("after a refresh line, the question is still found",
-             ruling_stderr("#46 the ruling may not hold",
-                           "ghi-guide-agent-ask: refreshed the seat checkout 1 "
-                           "commit(s) to origin/main\n"),
-             46, "the ruling may not hold"),
-            ("a question naming no issue is returned with no number",
-             ruling_stderr("the ruling on frozen issues may not hold"),
-             None, "the ruling on frozen issues may not hold"),
             ("a sentence over two lines arrives whole",
-             ruling_stderr("#783 closed issues are frozen,\nbut this one "
+             ruling_answer(783, "closed issues are frozen,\nbut this one "
                            "was reopened"),
-             783, "closed issues are frozen, but this one was reopened")]:
+             783, "closed issues are frozen,\nbut this one was reopened")]:
         lines = []
         try:
             got = tool.adjudicate(REPO, "t", FILE_TEXT, scratch, Recorder(
-                {ASK: Completed("", returncode=3, stderr=stderr)}),
-                lines.append)
+                {ASK: completed}), lines.append)
             check(case_name,
                   got is not None and got.ruling_issue == expected_issue
                   and got.sentence == expected_sentence,
                   (got and (got.ruling_issue, got.sentence), lines))
         except tool.Refused as refusal:
             check(case_name, False, f"refused: {refusal}")
-
-    lost = Recorder({ASK: Completed("", returncode=3, stderr="")})
-    lost_lines = []
-    check("an exit 3 whose message is lost fails open and says so",
-          tool.adjudicate(REPO, "t", FILE_TEXT, scratch, lost,
-                          lost_lines.append) is None
-          and lost_lines == ["adjudication skipped: ghi-guide-agent gave no "
-                             "verdict: no detail"], lost_lines)
 
     original_date = tool.proposed_improvements_or_changes_file_date
     tool.proposed_improvements_or_changes_file_date = lambda: "2026-10-03"
@@ -1784,8 +1754,8 @@ def run_cases(scratch: Path):
         conflicting_source = written(draft_dir, name="frozen-issue-reopened.md",
                                      text=conflicting_text)
         failing_create = StagedReader({
-            ASK: Completed("", returncode=3, stderr=ruling_stderr(
-                "#46 closed issues are frozen")),
+            ASK: ruling_answer(
+                46, "closed issues are frozen"),
             "gh issue view 46": Completed("Closed issues are frozen\n"),
             "gh issue list": Completed("[]"),
             "gh issue create": Completed(
@@ -1867,8 +1837,8 @@ def run_cases(scratch: Path):
             design_dir, name="frozen-issue-reopened.tool.design.md",
             text=conflicting_text)
         design_create = StagedReader({
-            ASK: Completed("", returncode=3, stderr=ruling_stderr(
-                "#46 closed issues are frozen")),
+            ASK: ruling_answer(
+                46, "closed issues are frozen"),
             "gh issue view 46": Completed("Closed issues are frozen\n"),
             "gh issue list": Completed("[]"),
             "gh issue create": Completed(
@@ -1909,8 +1879,8 @@ def run_cases(scratch: Path):
         unfiled_source = written(unfiled_dir, name="frozen-issue-reopened.md",
                                  text=conflicting_text)
         unfiled_first = StagedReader({
-            ASK: Completed("", returncode=3, stderr=ruling_stderr(
-                "#46 closed issues are frozen")),
+            ASK: ruling_answer(
+                46, "closed issues are frozen"),
             "gh issue view 46": Completed("Closed issues are frozen\n"),
             "gh issue list": Completed("[]"),
             "gh issue create": Completed("", returncode=1,
@@ -1919,8 +1889,8 @@ def run_cases(scratch: Path):
             "git ls-tree": Completed(""),
         })
         unfiled_rerun = StagedReader({
-            ASK: Completed("", returncode=3, stderr=ruling_stderr(
-                "#46 closed issues are frozen")),
+            ASK: ruling_answer(
+                46, "closed issues are frozen"),
             "gh issue view 46": Completed("Closed issues are frozen\n"),
             "gh issue list": Completed("[]"),
             "gh issue create": Completed(
@@ -1965,8 +1935,8 @@ def run_cases(scratch: Path):
         clean_source = written(clean_dir, name="frozen-issue-reopened.md",
                                text=conflicting_text)
         clean_create = StagedReader({
-            ASK: Completed("", returncode=3, stderr=ruling_stderr(
-                "#46 closed issues are frozen")),
+            ASK: ruling_answer(
+                46, "closed issues are frozen"),
             "gh issue view 46": Completed("Closed issues are frozen\n"),
             "gh issue list": Completed("[]"),
             "gh issue create": Completed(
@@ -2030,8 +2000,8 @@ def run_cases(scratch: Path):
             settled_dir.mkdir()
             settled_lines = []
             settled_create = StagedReader({
-                ASK: Completed("", returncode=3, stderr=ruling_stderr(
-                    "#46 closed issues are frozen")),
+                ASK: ruling_answer(
+                46, "closed issues are frozen"),
                 "gh issue list": Completed("[]"),
                 "gh issue create": Completed(
                     "https://github.com/nedsnodes/nedsnodes/issues/575\n"),
@@ -2053,7 +2023,7 @@ def run_cases(scratch: Path):
 
         quiet_store = log_store_at(scratch / "quiet-store")
         quiet_create = StagedReader({
-            ASK: Completed("verdict: unrelated\n"),
+            ASK: verdict_answer("unrelated"),
             "gh issue list": Completed("[]"),
             "gh issue create": Completed(
                 "https://github.com/nedsnodes/nedsnodes/issues/574\n"),
@@ -2081,7 +2051,7 @@ def run_cases(scratch: Path):
 
     marker = scratch / tool.RECONSIDERED_MARKER_NAME
     marker.write_text("I checked #13 and it is a different matter.\n")
-    passed = Recorder({ASK: Completed("verdict: too-similar #13\n")})
+    passed = Recorder({ASK: verdict_answer("too-similar", 13)})
     tool.adjudicate(REPO, "t", FILE_TEXT, scratch, passed, quiet)
     check("the reconsidered marker passes one write",
           not passed.ran(ASK), str(passed.commands()))
@@ -2090,7 +2060,7 @@ def run_cases(scratch: Path):
 
     # --- The refusal that must not leave a half-made issue ----------------
 
-    nothing_written = Recorder({ASK: Completed("verdict: too-similar #13\n")})
+    nothing_written = Recorder({ASK: verdict_answer("too-similar", 13)})
     try:
         tool.create(written(scratch, "refused-create.md"), REPO, scratch,
                     nothing_written, quiet)
@@ -2585,7 +2555,7 @@ def run_old_ghi_guide_agent_files_on_main_cases(scratch: Path):
         f"git show {BASE_REVISION}:{EDIT_RELATIVE}": Completed("# Older\n"),
         "git ls-remote": Completed(""),
         "gh pr create": Completed("pr\n"),
-        ASK: Completed("verdict: unrelated\n"),
+        ASK: verdict_answer("unrelated"),
         "gh issue view": issue_json("Older", one_link),
         "git ls-tree": listing,
     }
@@ -2718,7 +2688,7 @@ def run_old_ghi_guide_agent_files_on_main_cases(scratch: Path):
         "git merge-base": Completed(BASE_REVISION + "\n"),
         "git ls-remote": Completed(""),
         "gh pr create": Completed("pr\n"),
-        ASK: Completed("verdict: unrelated\n"),
+        ASK: verdict_answer("unrelated"),
         "gh issue view": issue_json(EDIT_TITLE, one_link),
         # Before the catch-all listing: the Recorder answers the first key
         # found in the command, so these two tell the directories apart.
@@ -3158,8 +3128,8 @@ def run_edit_cases(scratch: Path):
     proposed_in_store = edit_store / proposed_name
     try:
         conflicting_edit_answers = {
-            ASK: Completed("", returncode=3, stderr=ruling_stderr(
-                "#46 closed issues are frozen")),
+            ASK: ruling_answer(
+                46, "closed issues are frozen"),
             "gh issue view 46": Completed("Closed issues are frozen\n"),
             f"git show {MAIN_COMMIT}:{EDIT_RELATIVE}": Completed("# Older\n"),
             "git merge-base": Completed(BASE_REVISION + "\n"),
@@ -3251,7 +3221,7 @@ def run_edit_cases(scratch: Path):
         quiet_store = log_store_at(scratch / "edit-quiet-store")
         quiet_rerun = StagedReader({
             **conflicting_edit_answers,
-            ASK: Completed("verdict: unrelated\n"),
+            ASK: verdict_answer("unrelated"),
         })
         quiet_rerun_lines = []
         tool.edit(source, REPO, scratch, quiet_rerun, quiet_rerun_lines.append)
@@ -3621,8 +3591,8 @@ def run_edit_cases(scratch: Path):
         rejected_with_question = Recorder({
             **extra,
             **conflicted.answers,
-            ASK: Completed("", returncode=3, stderr=ruling_stderr(
-                "#46 closed issues are frozen")),
+            ASK: ruling_answer(
+                46, "closed issues are frozen"),
             "gh issue view 46": Completed("Closed issues are frozen\n"),
         })
         rejected_store = log_store_at(scratch / f"rejected-store-{len(case)}")
@@ -3959,7 +3929,7 @@ def run_edit_cases(scratch: Path):
             '"url": "https://github.com/x/y/pull/11"}]'),
         "gh issue view": issue_json("Older", one_link),
         "git ls-tree": Completed(EDIT_RELATIVE + "\0"),
-        ASK: Completed("verdict: too-similar #13\n"),
+        ASK: verdict_answer("too-similar", 13),
     })
     still_waiting, waiting_refusal = False, None
     try:
@@ -3998,7 +3968,7 @@ def run_edit_cases(scratch: Path):
         # Standing over that state, the verdict that refused the first run.
         # The question is the same draft with the same exclusion, so this is
         # the answer every rerun gets.
-        ASK: Completed("verdict: too-similar #13\n"),
+        ASK: verdict_answer("too-similar", 13),
     })
     stranded_refusal = None
     try:
@@ -4105,7 +4075,7 @@ def run_edit_cases(scratch: Path):
         "gh pr create": Completed("pr\n"),
         "gh issue view": issue_json("Older", one_link),
         "git ls-tree": Completed(EDIT_RELATIVE + "\0"),
-        ASK: Completed("verdict: too-similar #13\n"),
+        ASK: verdict_answer("too-similar", 13),
     })
     try:
         tool.edit(source, REPO, scratch, new_to_land, quiet)
@@ -4135,7 +4105,7 @@ def run_edit_cases(scratch: Path):
         "git ls-remote": Completed(""),
         "gh issue view": issue_json(EDIT_TITLE, one_link),
         "git ls-tree": Completed(EDIT_RELATIVE + "\0"),
-        ASK: Completed("verdict: too-similar #13\n"),
+        ASK: verdict_answer("too-similar", 13),
     })
     try:
         tool.edit(filed_ghi_md(scratch, directory="nn-systems/statusline"),
@@ -4416,7 +4386,7 @@ def run_edit_cases(scratch: Path):
 
     # --- Adjudication, in the shape the design gives for an edit ---------
 
-    refusing = Recorder({ASK: Completed("verdict: too-similar #13\n")})
+    refusing = Recorder({ASK: verdict_answer("too-similar", 13)})
     try:
         tool.adjudicate(REPO, "t", FILE_TEXT, scratch, refusing, quiet,
                         exclude_issue=570)
@@ -4431,7 +4401,7 @@ def run_edit_cases(scratch: Path):
               "#570, the issue you were editing" in str(refusal)
               and "Superseded-by: #13" in str(refusal), str(refusal))
 
-    creating = Recorder({ASK: Completed("verdict: too-similar #13\n")})
+    creating = Recorder({ASK: verdict_answer("too-similar", 13)})
     try:
         tool.adjudicate(REPO, "t", FILE_TEXT, scratch, creating, quiet)
         check("a create's refusal carries no such paragraph", False,
@@ -5202,7 +5172,7 @@ def run_edit_landing_real_git_cases(scratch: Path):
             git("commit", "-q", "-am", "other seat's line", cwd=other)
             git("push", "-q", "origin", "HEAD:main", cwd=other)
             git("fetch", "-q", "origin", cwd=author)
-            return Completed("verdict: unrelated\n")
+            return verdict_answer("unrelated")
         if arguments[0] == "gh":
             if "issue view" in joined:
                 return issue_json(EDIT_TITLE,
@@ -5454,8 +5424,8 @@ def run_whole_file_set_cases(scratch: Path):
         draft_dir.mkdir()
         source = written(draft_dir, name="frozen.md", text=text)
         first = StagedReader({
-            ASK: Completed("", returncode=3, stderr=ruling_stderr(
-                "#46 closed issues are frozen")),
+            ASK: ruling_answer(
+                46, "closed issues are frozen"),
             "gh issue view 46": Completed("Closed issues are frozen\n"),
             "gh issue list": Completed("[]"),
             "gh issue create": Completed(
@@ -5532,7 +5502,8 @@ def run_adjudication_question_file_cases(scratch: Path):
         "arguments = sys.argv[1:]\n"
         "path = arguments[arguments.index('--question-file') + 1]\n"
         f"Path({str(received)!r}).write_text(Path(path).read_text())\n"
-        "print('verdict: unrelated')\n", encoding="utf-8")
+        "print('{\"kind\": \"verdict\", \"verdict\": \"unrelated\", \"issues\": []}')\n",
+        encoding="utf-8")
     oversized_text = f"# {EDIT_TITLE}\n\n" + "A long line of the GHI-MD.\n" * 6000
     oversized_lines = []
     tool.adjudicate(REPO, EDIT_TITLE, oversized_text, oversized_root,
@@ -5553,7 +5524,7 @@ def run_adjudication_question_file_cases(scratch: Path):
         raise OSError(28, "No space left on device")
 
     tool.tempfile.mkstemp = failing_mkstemp
-    unwritable = Recorder({ASK: Completed("verdict: too-similar #13\n")})
+    unwritable = Recorder({ASK: verdict_answer("too-similar", 13)})
     unwritable_lines = []
     try:
         unwritable_result = tool.adjudicate(
