@@ -554,12 +554,17 @@ def record_follow_up_request_sent_under_lock(state_file):
     try:
         state = read_state(state_file)
     except StateUnreadable as error:
-        print(f"{PROGRAM}: not recorded — {error}.\nThe next run of this program that "
-              f"records a passed, failed or stopped run replaces the file; a run that exits "
-              f"without recording one, such as a run that finds a no-sandbox suite running, "
-              f"leaves it. Until a run replaces the file, there is no run to record a "
-              f"follow-up for.\nIf you have not yet sent reboot-test the follow-up request "
-              f"the merge gate's notice asks for, send it; nothing more is needed.",
+        # StateUnreadable's text starts with the state file's full path.
+        print(f"{PROGRAM}: the follow-up request was not recorded, because the state file "
+              f"cannot be read: {error}. A state file that cannot be read holds no test run "
+              f"to record the follow-up against; the next invocation of this program that "
+              f"records a passed, failed or stopped test run replaces the state file.\n"
+              f"If you have not yet sent agent-seat reboot-test a follow-up request quoting "
+              f"this message's first line, send it with Claude Code's SendMessage tool; "
+              f"reboot-test owns this program.\n"
+              f"Do not run python3 scripts/{PROGRAM}.py --record-follow-up-request-sent "
+              f"again for this refusal: it would refuse again, and once reboot-test has the "
+              f"request, nothing more is needed.",
               file=sys.stderr)
         return EXIT_REFUSED
     last = state.get("last_run")
