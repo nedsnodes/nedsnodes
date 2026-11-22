@@ -9,9 +9,9 @@ but a rider, then read, ignoring case, as the first of these forms it matches,
 in every form allowing a hyphen, with or without spaces around it, between the
 letters of AO, O2 and O3 (`A-O`, `a - o`, `O-2`):
 
-  SINGLE      one answer: A, AO, Aa, D, Z, R, E, O, O2 or O3, or a word approve,
-              approved, approve as obvious, disapprove, disapproved, defer,
-              later or repeat.
+  SINGLE      one answer: A, AO, Aa, D, Z, R, E, O, O2, O3 or M, or a word
+              approve, approved, approve as obvious, disapprove, disapproved,
+              defer, later, repeat or more responses.
   ALL         `all a`, `a to all`, `all ao`, `ao to all`.
   NUMBERED    one or more pairs of a number and A, AO, D, Z or R:
               `8a`, `6 - a`, `1 a 2 d`, `5 d, 6 z`, `item 3 ao`, `37.4 r`; or a
@@ -40,7 +40,8 @@ alternative is done. An answer that makes a change sends the agent to
 CHECK_PROGRAM's check step, with --obvious for AO and --after-advisor for Aa.
 O asks the agent to show the item again with an "Option 2" and an "Option 3"
 paragraph; O2 and O3 approve one of them, through the check step with
---option.
+--option. M asks the agent to show MORE_RESPONSES_TEXT, the responses the
+closing line leaves out, and records nothing.
 
 THE OPEN APPROVAL-WALK is found with WALK_FINDER_FILE, the module the
 walk-me-through Stop hook uses too, loaded by path: the one
@@ -239,11 +240,11 @@ EXPLAIN_SKILL = CHECKOUT / ".claude" / "skills" / "explain" / "SKILL.md"
 
 # Longer forms first, so `ao` is not read as `a` and `approve as obvious` not as `approve`.
 WORDS = {"approve as obvious": "AO", "approved": "A", "approve": "A", "disapproved": "D",
-         "disapprove": "D", "defer": "Z", "later": "Z", "repeat": "R"}
+         "disapprove": "D", "defer": "Z", "later": "Z", "repeat": "R", "more responses": "M"}
 NUMBER = r"\d+(?:\.\d+)*"
 JOINER = r"(?:\s*-\s*)?"
 AO = rf"a{JOINER}o"
-LETTER = rf"aa|{AO}|o{JOINER}[23]|[adzreo]"
+LETTER = rf"aa|{AO}|o{JOINER}[23]|[adzreom]"
 SINGLE_LETTER = re.compile(rf"^(?:{LETTER})$", re.I)
 WORD = "|".join(word.replace(" ", r"\s+") for word in WORDS)
 ANSWER = rf"(?P<answer>{WORD}|{LETTER})"
@@ -262,9 +263,17 @@ WORD_RIDER = re.compile(rf"^(?P<answer>{WORD})\b[\s,;:.\-]+{NOT_AN_ITEM_NUMBER}(
 PART_START = re.compile(r"^Part (\d+)\.(?=\s|$)")
 MOST_PARTS = 5
 HEADING_POINT = re.compile(r"^[#\s*]*items?\s[^:]*:\s*(.*?)[\s*]*$", re.I)
+# Each response the user can give an item, with its label, in the order the walk shows them.
+RESPONSE_LABELS = (("A", "approve"), ("AO", "approve as obvious"), ("Aa", "approve after an advisor check"),
+                   ("D", "disapprove"), ("Z", "defer"), ("E", "explain"), ("O", "other options"),
+                   ("M", "more responses"))
+CLOSING_LINE_RESPONSES = ("A", "D", "M")
 # The walk-me-through skill's closing line after its link, word for word; the hook's test checks SKILL.md holds it.
-ANSWER_LETTERS_TEXT = ("A approve · AO approve as obvious · Aa approve after an advisor check · D disapprove · "
-                       "Z defer · E explain · O other options")
+ANSWER_LETTERS_TEXT = " · ".join(f"{code} {label}" for code, label in RESPONSE_LABELS
+                                 if code in CLOSING_LINE_RESPONSES)
+# What M shows: every response the closing line leaves out.
+MORE_RESPONSES_TEXT = " · ".join(f"{code} {label}" for code, label in RESPONSE_LABELS
+                                 if code not in CLOSING_LINE_RESPONSES)
 NO_RECOMMENDATION_PROBLEM = "no line starting \"Recommendation:\""
 PARTS_NOT_TOLD_APART_PROBLEM = (
     "it is one of the items under the walk-document's heading `{heading}`, which holds more than one line "
@@ -381,6 +390,14 @@ MEANINGS = {
            "and wait for his answer.",)),
     "E": (("E means explain: run the explain skill, {explain_skill}, on {item}.",),
           ("E means explain: run the explain skill, {explain_skill}, on your last message.",)),
+    "M": (("{word} asks for more responses: the user is not answering {item} yet, and wants to see the responses "
+           "its closing line leaves out.",
+           "Reply with only this line, word for word, then, on a line of its own, {item}'s closing line, and wait "
+           "for his answer; record nothing in the minutes: " + MORE_RESPONSES_TEXT),
+          ("{word} asks for more responses: the user wants to see every response he can give your last question "
+           "or proposal.",
+           "Reply with only this line, word for word, and wait for his answer: "
+           + " · ".join(f"{code} {label}" for code, label in RESPONSE_LABELS if code != "M"))),
 }
 # O2 and O3 approve an option the agent showed after an O, instead of the recommendation.
 OPTION_TAKEN_LINES = (
@@ -672,7 +689,7 @@ def load_walk_finder():
 
 
 def answer_code(answer):
-    """The answer's code, A, AO, AA for Aa, D, Z, R, E, O, O2 or O3, from a letter or a word in any case and
+    """The answer's code, A, AO, AA for Aa, D, Z, R, E, O, O2, O3 or M, from a letter or a word in any case and
     spacing, with any hyphen between the letters dropped."""
     lowered = " ".join(answer.lower().split())
     return WORDS.get(lowered) or re.sub(r"[\s-]", "", lowered).upper()

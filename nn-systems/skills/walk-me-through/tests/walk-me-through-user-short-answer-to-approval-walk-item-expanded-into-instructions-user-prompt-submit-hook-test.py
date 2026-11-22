@@ -108,6 +108,8 @@ NO_WALK_MEANINGS = {
     "later": "Z means defer: postpone your last question or proposal and record it as a task.",
     "R": "R asks to see your last question or proposal again: show it in full",
     "E": "E means explain: run the explain skill, ",
+    "M": "M asks for more responses: the user wants to see every response he can give your last question",
+    "more responses": "More responses asks for more responses: the user wants to see every response",
     "approved": "Approved means approve: the user agrees with your last recommendation or proposal.",
     "approve": "Approve means approve: the user agrees with your last recommendation or proposal.",
     "approve as obvious": "AO means approve as obvious: the user agrees with your last recommendation",
@@ -413,6 +415,30 @@ def test_o_with_a_condition_or_more_text():
               and any(line.startswith("O asks for other options") for line in lines), f"lines {lines!r}")
 
 
+MORE_RESPONSES = "AO approve as obvious · Aa approve after an advisor check · Z defer · E explain · O other options"
+
+
+def test_m_shows_the_responses_the_closing_line_leaves_out_and_records_nothing():
+    case = Case(next_to_present="item 4 of 9")
+    for prompt in ("m", "M.", "more responses"):
+        lines = case.lines(prompt)
+        check(f"{prompt!r} on an open walk hands the agent the responses the closing line leaves out",
+              lines is not None
+              and lines[1].endswith("asks for more responses: the user is not answering item 4 of 9 yet, and wants "
+                                    "to see the responses its closing line leaves out.")
+              and lines[2].endswith(": " + MORE_RESPONSES)
+              and not any(" check" in line and "--" in line for line in lines[:3]), f"lines {lines!r}")
+    lines = Case().lines("m")
+    check("M with no approval-walk shows every response but M, A and D included, since no closing line shows them",
+          lines is not None and lines[-1].endswith(": A approve · AO approve as obvious · Aa approve after an advisor "
+                                                   "check · D disapprove · Z defer · E explain · O other options"),
+          f"lines {lines!r}")
+    check("every response is on the closing line or in M's list, once",
+          sorted((LETTERS_AFTER_LINK + " · " + MORE_RESPONSES).split(" · "))
+          == sorted(["A approve", "AO approve as obvious", "Aa approve after an advisor check", "D disapprove",
+                     "Z defer", "E explain", "O other options", "M more responses"]))
+
+
 def test_o2_and_o3_approve_an_option_through_the_check_step():
     case = Case(next_to_present="item 4 of 9")
     for prompt, option in (("o2", "2"), ("O3.", "3")):
@@ -656,8 +682,7 @@ def test_r_on_an_open_walk_goes_to_the_agent_and_does_not_block():
 
 PAGE_1 = "https://claude.ai/artifact/PageOfItem4Old"
 PAGE_2 = "https://claude.ai/artifact/PageOfItem4New"
-LETTERS_AFTER_LINK = ("A approve · AO approve as obvious · Aa approve after an advisor check · D disapprove · "
-                      "Z defer · E explain · O other options")
+LETTERS_AFTER_LINK = "A approve · D disapprove · M more responses"
 
 
 def page_line(answer, item, closing_line):
@@ -1844,8 +1869,8 @@ The alternative: every hook also writes a log line with the rule ID, agent-seat 
 
 Recommendation: ask the agent-seat reboot-test, which owns the Bash guards, to add rule IDs to every hook's messages, other agent-seats' hooks included, and to build the weekly count as a GHI 1058 job, in one pull request.
 
-[Item 47.2 of 68, The change](https://claude.ai/artifact/SXzwJaGtf7sXGpYVsH1eDr) · A approve · AO approve as obvious · Aa approve after an advisor check · D disapprove · Z defer · E explain · O other options"""
-ITEM_47_2_CLOSING_LINE = """[Item 47.2 of 68, The change](https://claude.ai/artifact/SXzwJaGtf7sXGpYVsH1eDr) · A approve · AO approve as obvious · Aa approve after an advisor check · D disapprove · Z defer · E explain · O other options"""
+[Item 47.2 of 68, The change](https://claude.ai/artifact/SXzwJaGtf7sXGpYVsH1eDr) · A approve · D disapprove · M more responses"""
+ITEM_47_2_CLOSING_LINE = """[Item 47.2 of 68, The change](https://claude.ai/artifact/SXzwJaGtf7sXGpYVsH1eDr) · A approve · D disapprove · M more responses"""
 
 
 def item_47_2_lines(prompt, shown_item):
