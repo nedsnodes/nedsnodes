@@ -30,12 +30,17 @@ recommendation. R, E and O decide nothing, so the program takes no flag for
 them. --part-answer, given once for each part of an item that holds parts, as
 in `--part-answer 1=A --part-answer 2=D`, gives that part its own answer, A, AO
 or D. Z is not taken for a part, and a part number given twice is refused,
-writing nothing. Three flags record an item the user is not shown, so that no
+writing nothing. Three flags record an item the user does not answer, so that no
 agent writes a deciding line by hand: --already-decided for an item an earlier
 user-ruling decides as the item recommends, USER_RULING citing that ruling,
 which adds the `#new` texts as A does; --now-over-later-already-decided, the
 same with the now-over-later ruling as its citation; and --moved-on for an item the walk
-leaves with no decision, REASON saying why, which changes nothing.
+leaves with no decision, REASON saying why, which changes nothing. When the
+walk-minutes hold an `#item_page` line for the item, a link or a failed
+publish, the user was shown it, so --moved-on writes its answer line opening
+`shown to the user,` in place of `settled without asking the user,`, and CLOSE
+says the item was shown in place of telling the agent to list it as settled
+without being shown.
 --bump ITEM, for the user's "bump" and the item he names, records no answer: it
 makes ITEM, an item not yet shown named by its heading's title, the next item
 shown, numbering it and moving it to stand right before the waiting item in the
@@ -59,7 +64,7 @@ does have one once a `<!--` inside an HTML tag opens no comment, as when the
 from the short-answer hook's reading.
 
 Every answer but --not-asked, --already-decided, --now-over-later-already-decided
-and --moved-on, which record an item the user is not shown, needs --user-reply-as-typed, the user's reply
+and --moved-on, which record an item the user did not answer, needs --user-reply-as-typed, the user's reply
 exactly as he typed it; check writes it, its whitespace runs squeezed to single
 spaces, into the answer line right after the time of the answer, which check
 writes in UTC marked Z, in the form `(YYYY-MM-DD HH:MMZ)`, as in ``in his words "`a
@@ -547,7 +552,8 @@ QUOTE_PAIRS = (('"', '"'), ("“", "”"), ("'", "'"))
 FENCE_DELIMITER = re.compile(r"^\s*(?:>\s?)*\s*(?:`{3,}|~{3,})")
 QUOTATION_LINE = re.compile(r"^\s*>")
 QUOTATION_MARKERS = re.compile(r"^\s*(?:>\s?)*")
-ANSWER_LINE = re.compile(r"^(?P<item>items? .+?): (?:the user answered|settled without asking the user,) "
+ANSWER_LINE = re.compile(r"^(?P<item>items? .+?): (?P<settled>the user answered|settled without asking the user,|"
+                         r"shown to the user,) "
                          r"(?P<answered>.+?)(?: #approved_(?:obvious|after_advisor))?(?: #case_against_[a-z_]+)? "
                          r"\([^)]*\)(?: in his words \".*\")?, which makes (?:its change\. Fast reads:|no change\.)$",
                          re.I)
@@ -678,6 +684,9 @@ CHECK_DEFERRED_MINUTES = ("{item}: the user answered {answered}{rating} ({date_a
 USER_WORDS = ' in his words "{words}"'
 CHECK_MOVED_ON_MINUTES = ("{item}: settled without asking the user, {answered}{rating} ({date_and_time}), which makes "
                           "no change.")
+CHECK_MOVED_ON_SHOWN_PREFIX = "shown to the user,"
+CHECK_MOVED_ON_SHOWN_MINUTES = ("{item}: " + CHECK_MOVED_ON_SHOWN_PREFIX + " {answered}{rating} ({date_and_time}), "
+                                "which makes no change.")
 CLOSE_TOOK_EFFECT_MINUTES = "{item}: {answered}; every text the change adds has had a fast read. {outcome}"
 CLOSE_PARTS_TOOK_EFFECT_MINUTES = "{item}: {parts}; every text the change adds has had a fast read."
 CLOSE_DEFERRED_MINUTES = "{item}: deferred; it moves to just before the summary item. <open>"
@@ -733,6 +742,9 @@ CLOSE_DEFERRED_LINES = (
 )
 CLOSE_MOVED_ON_LINES = (
     "{item} asked for no decision, and the minutes record that the user moved on from it.",
+)
+CLOSE_MOVED_ON_SHOWN_LINES = (
+    "{item} was shown to the user, and the minutes record that the walk moved on from it with no decision.",
 )
 CLOSE_DEFERRED_OUT_OF_THE_WALK_LINES = (
     "Add it to your task list if it is not already a task.",
@@ -2075,7 +2087,8 @@ def check(arguments):
             item=item, document=document, recommendation=hidden, program=program, quoted_words=shlex.quote(words)))
     if arguments.deferred or arguments.moved_on_no_decision or arguments.moved_on is not None:
         now = datetime.datetime.now().astimezone()
-        no_change = CHECK_MOVED_ON_MINUTES if arguments.moved_on is not None else CHECK_DEFERRED_MINUTES
+        no_change = ((CHECK_MOVED_ON_SHOWN_MINUTES if items_shown_to_user(walk_finder, minutes, numbers, parser)
+                      else CHECK_MOVED_ON_MINUTES) if arguments.moved_on is not None else CHECK_DEFERRED_MINUTES)
         append_to_minutes(minutes, [no_change.format(item=item, answered=answered_word(arguments, walk_finder),
                                                      rating=rated,
                                                      words=in_his_words, date_and_time=minutes_time(now))])
@@ -2702,9 +2715,16 @@ def waiting_item_read(arguments, sub_step_of=None):
     return 1 if withheld else 0
 
 
+def items_shown_to_user(walk_finder, minutes, numbers, parser):
+    """Whether the walk-minutes hold an `#item_page` line, with a link or a failed publish, for any of numbers: the
+    skill writes one before any message shows the item."""
+    pages = walk_finder.newest_item_page_link_per_item_from_walk_minutes(minutes.read_text(encoding="utf-8"), parser)
+    return any(number in pages for number in numbers)
+
+
 def last_answer(walk_finder, minutes, parser):
-    """Return (item, answered, status lines) of the walk-minutes' last answer line, or raise Failure when
-    there is none or a close already recorded it."""
+    """Return (item, answered, status lines, how the line opens after the item, as in `shown to the user,`) of the
+    walk-minutes' last answer line, or raise Failure when there is none or a close already recorded it."""
     lines = walk_finder.prose_lines(minutes.read_text(encoding="utf-8"), parser)
     for index in range(len(lines) - 1, -1, -1):
         match = ANSWER_LINE.match(lines[index])
@@ -2719,7 +2739,7 @@ def last_answer(walk_finder, minutes, parser):
             if any(line.startswith(match["item"] + ": ") for line in lines[index + 1:]):
                 raise Failure(CLOSE_ALREADY_RECORDED.format(minutes=minutes, item=match["item"],
                                                             program=Path(__file__).resolve()))
-            return match["item"], match["answered"], statuses
+            return match["item"], match["answered"], statuses, match["settled"]
     raise Failure(f"{minutes} has no line recording the user's answer; run "
                   f"`python3 {Path(__file__).resolve()} check` first, with the flag for the user's answer as "
                   f"`--help` lists it.")
@@ -3471,7 +3491,7 @@ def bump(arguments):
 def close(arguments):
     walk_finder = load_walk_finder()
     top, minutes, value, parser = the_open_walk(walk_finder, arguments.cwd)
-    item, answered, statuses = last_answer(walk_finder, minutes, parser)
+    item, answered, statuses, settled = last_answer(walk_finder, minutes, parser)
     waiting, waiting_numbers, total = waiting_items(walk_finder, value, minutes)
     try:
         answered_numbers, _ = walk_finder.parse_items(item)
@@ -3521,7 +3541,9 @@ def close(arguments):
     elif answered.startswith(MOVED_ON_PREFIX):
         recorded = CLOSE_MOVED_ON_MINUTES.format(item=item, reason=answered[len(MOVED_ON_PREFIX):])
         word = RULING_GIVEN_MOVED_ON
-        output = [line.format(item=item) for line in CLOSE_NOT_SHOWN_LINES]
+        output = [line.format(item=item) for line in (CLOSE_MOVED_ON_SHOWN_LINES
+                                                      if settled == CHECK_MOVED_ON_SHOWN_PREFIX
+                                                      else CLOSE_NOT_SHOWN_LINES)]
     elif answered.startswith(ALREADY_DECIDED_PREFIX):
         held_outcome = OUTCOMES[APPROVED]
         recorded = CLOSE_ALREADY_DECIDED_MINUTES.format(item=item, ruling=answered[len(ALREADY_DECIDED_PREFIX):],
@@ -3626,7 +3648,8 @@ def main(argv=None):
                              "now versus later, I'm always for now.\"; refused for an item with parts, Option "
                              "paragraphs or `#new_if_d` texts")
     answer.add_argument("--moved-on", metavar="REASON",
-                        help="check: not shown, and the walk moves on from the item with no decision, for REASON")
+                        help="check: the walk moves on from the item with no decision, for REASON; recorded as "
+                             "shown to the user when the minutes hold an `#item_page` line for it, else as not shown")
     answer.add_argument("--part-answer", type=part_answer, action="append", metavar="N=ANSWER",
                         help="check: part N of the item was answered ANSWER, A, AO or D; give it once for each part")
     answer.add_argument("--bump", metavar="ITEM",
