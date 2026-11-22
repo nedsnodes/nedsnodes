@@ -25,6 +25,7 @@ the store makes it, and the directory is never written.
 Run: python3 scripts/run-all-test-suites-recordings-saved-apart-then-adopted-when-they-match-the-merge-commit-test.py   (exit 0 = all passed)
 """
 
+import argparse
 import importlib.util
 import json
 import os
@@ -69,6 +70,18 @@ def check(name, condition, detail=""):
 
 # Runs the runner with its save failing and, right after the run reads a recording, another
 # run's save replacing that file.
+STRACE_UNUSABLE_DRIVER = r'''
+import importlib.util, sys
+program_path, *arguments = sys.argv[1:]
+spec = importlib.util.spec_from_file_location("run_all_test_suites", program_path)
+program = importlib.util.module_from_spec(spec)
+sys.argv = [program_path, *arguments]
+spec.loader.exec_module(program)
+# As on the Mac, or on Linux without a working strace.
+program.strace_usable = lambda: None
+sys.exit(program.main())
+'''
+
 SAVE_FAILS_AFTER_ANOTHER_RUN_SAVES_DRIVER = r'''
 import importlib.util, os, sys
 program_path, *arguments = sys.argv[1:]
@@ -371,8 +384,60 @@ def head_test_runs_while_the_after_merge_test_run_runs():
               selection_line(store_matches))
 
 
+
+def read_only_directory_overlap_is_judged_by_the_directory_and_by_what_this_run_writes():
+    """The overlap check compares directories, not their spellings, and counts the strace
+    lists only when this run writes them."""
+    scratch = Scratch()
+    m1 = commit(scratch.repo, {"first.txt": "1\n"}, "M1")
+    a_checkout, _ = scratch.worktree("pr-a", m1, {"unread.txt": "a\n"})
+    for name, extra, driver in (
+            ("--record-inputs-with-strace is not given", (), None),
+            ("strace cannot be used", ("--record-inputs-with-strace",), STRACE_UNUSABLE_DRIVER)):
+        result = scratch.run(a_checkout, since=m1, save_to="pr-a-recordings",
+                             read_only="strace-lists", extra=extra, driver=driver)
+        check(f"a run whose read-only directory is its strace-lists directory is not refused "
+              f"when {name}",
+              result.returncode != 2 and "would also write to" not in result.stderr,
+              (result.returncode, result.stderr[-800:]))
+
+    arguments = argparse.Namespace(leave_records_unchanged=False,
+                                   save_recorded_inputs_to_directory=None,
+                                   record_inputs_with_strace=False)
+    store = scratch.root / "spelled" / "abc"
+    store.mkdir(parents=True)
+    (scratch.root / "link-to-spelled").symlink_to(scratch.root / "spelled")
+    elsewhere = scratch.root / "elsewhere"
+    for name, read_only, saved in (
+            ("through a symlink", scratch.root / "link-to-spelled" / "abc", store),
+            ("not yet made, through ..", scratch.root / "new" / "x" / ".." / "abc",
+             scratch.root / "new" / "abc")):
+        try:
+            runner.refuse_read_only_recordings_directory_this_run_writes(
+                read_only, saved, elsewhere, arguments, None)
+            refused = False
+        except runner.CouldNotRun:
+            refused = True
+        check(f"one directory named by two spellings, {name}, is refused", refused, name)
+
+    # Injected: ned-box's volumes are case-sensitive, so a case-insensitive one, as on the Mac,
+    # is stood for by samefile() reporting what that volume would.
+    real_samefile = pathlib.Path.samefile
+    pathlib.Path.samefile = lambda self, other: str(self).lower() == str(other).lower()
+    try:
+        runner.refuse_read_only_recordings_directory_this_run_writes(
+            scratch.root / "Recordings", scratch.root / "recordings", elsewhere, arguments, None)
+        refused = False
+    except runner.CouldNotRun:
+        refused = True
+    finally:
+        pathlib.Path.samefile = real_samefile
+    check("on a case-insensitive volume, two spellings of one directory are refused", refused)
+
+
 def main():
     head_test_runs_while_the_after_merge_test_run_runs()
+    read_only_directory_overlap_is_judged_by_the_directory_and_by_what_this_run_writes()
 
     result, scratch, _ = x_merges_then_z_and_a_are_tested(save_apart=False)
     check("reproduced: when every head test run saves into the store, a pull request built "

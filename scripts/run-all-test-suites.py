@@ -4223,9 +4223,21 @@ def recordings_directory_for(given, top):
     return Path(given).expanduser() / min(roots.stdout.split())[:16]
 
 
+def same_directory(first, second):
+    """Whether two paths name one directory, as a case-insensitive volume or a symlink may hide."""
+    try:
+        return first.samefile(second)
+    except OSError:
+        # A path that does not exist yet is compared as spelled once resolved.
+        return first.resolve() == second.resolve()
+
+
 def refuse_read_only_recordings_directory_this_run_writes(read_only_dir, saved_recordings_dir,
-                                                         files_only_strace_saw_dir, arguments):
-    """Raise CouldNotRun when the directory this run only reads is one it writes to."""
+                                                         files_only_strace_saw_dir, arguments,
+                                                         strace):
+    """Raise CouldNotRun when the directory this run only reads is one it writes to.
+
+    strace is strace_usable()'s answer for this run: without it no strace list is written."""
     if read_only_dir is None or arguments.leave_records_unchanged:
         return
     save_given = arguments.save_recorded_inputs_to_directory is not None
@@ -4235,14 +4247,14 @@ def refuse_read_only_recordings_directory_this_run_writes(read_only_dir, saved_r
                    "--recorded-inputs-directory, given or by default, names it and "
                    "--save-recorded-inputs-to-directory is not given"),
                 "--save-recorded-inputs-to-directory", save_given)]
-    if arguments.record_inputs_with_strace:
+    if strace is not None:
         written.append((files_only_strace_saw_dir,
                         ("it saves the lists of files only strace saw there, because "
                          "--suite-files-only-strace-saw-lists-directory names it and "
                          "--record-inputs-with-strace is given"),
                         "--suite-files-only-strace-saw-lists-directory", True))
     overlaps = [(how, flag, given) for directory, how, flag, given in written
-                if directory.resolve() == read_only_dir.resolve()]
+                if same_directory(directory, read_only_dir)]
     if overlaps:
         flags = " and ".join(f"{flag} <directory> {'changed' if given else 'added'}"
                              for _, flag, given in overlaps)
@@ -5203,9 +5215,11 @@ def main(argv=None, platform=None):
             read_only_recordings_dir = (
                 recordings_directory_for(arguments.read_only_recorded_inputs_directory, top)
                 if arguments.read_only_recorded_inputs_directory is not None else None)
+            strace = (strace_usable() if arguments.record_inputs_with_strace
+                      and not arguments.leave_records_unchanged else None)
             refuse_read_only_recordings_directory_this_run_writes(
                 read_only_recordings_dir, saved_recordings_dir, files_only_strace_saw_dir,
-                arguments)
+                arguments, strace)
         except CouldNotRun as refusal:
             print(refusal, file=sys.stderr)
             return EXIT_COULD_NOT_RUN
@@ -5256,7 +5270,6 @@ def main(argv=None, platform=None):
         if arguments.leave_records_unchanged:
             strace = recorder = None
         else:
-            strace = strace_usable() if arguments.record_inputs_with_strace else None
             recording_dir = log_dir / "recorded-inputs"
             recording_dir.mkdir(parents=True, exist_ok=True)
             recorder = (install_python_input_recorder(log_dir), recording_dir, strace)
