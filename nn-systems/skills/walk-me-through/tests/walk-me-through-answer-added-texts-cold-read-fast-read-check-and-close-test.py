@@ -4298,11 +4298,16 @@ def test_kind_6_is_refused_unless_markdown_prose_outside_a_glossary_gets_a_liste
                    "rates the case against medium"))
 
 
-def kind_7_case(touches, files=None, evidence=""):
+def kind_7_case(touches, files=None, evidence="", untracked=()):
     """Item 4 of the fixture made a kind 7 item: its rename line replaced by the evidence given, touching the files
-    named; the fixture's docs/poems-glossary.md stands for a system glossary."""
+    named; the fixture's docs/poems-glossary.md stands for a system glossary. Every glossary file is added to git's
+    index, since kind 7 accepts only glossaries git tracks, except those named in untracked."""
     files = {"docs/nedsnodes-wiki/nedsnodes-glossary.md": "- **poem** — a poem.\n", **(files or {})}
-    return kind_6_case(evidence, files, touches)
+    case = kind_6_case(evidence, files, touches)
+    tracked = [path.relative_to(case.checkout).as_posix() for path in case.checkout.rglob("*-glossary.md")]
+    subprocess.run(["git", "-C", str(case.checkout), "add", "--", *(path for path in tracked if path not in untracked)],
+                   check=True)
+    return case
 
 
 def test_a_system_glossary_entry_added_or_changed_settles_as_kind_7_and_close_records_it():
@@ -4333,6 +4338,53 @@ def test_kind_7_is_refused_unless_every_touched_file_is_a_system_glossary():
     check("kind 7 is refused when its case against is rated above weak",
           *refused(kind_7_case("docs/poems-glossary.md", evidence="#case_against medium: misread meaning."), 7,
                    "rates the case against medium"))
+
+
+def test_kind_7_reads_each_touched_path_from_the_checkout_top_whatever_its_spelling():
+    for spelling in ("./docs/nedsnodes-wiki/nedsnodes-glossary.md", "docs/poems/../nedsnodes-wiki/nedsnodes-glossary.md"):
+        check(f"kind 7 is refused when it touches the project glossary spelled {spelling}",
+              *refused(kind_7_case(spelling), 7, f"`#not_asked_touches` names {spelling}, which is not a system glossary"))
+    case = kind_7_case("CHECKOUT/docs/nedsnodes-wiki/nedsnodes-glossary.md")
+    walk_document_spelling_touches(case, "CHECKOUT", str(case.checkout))
+    check("kind 7 is refused when it touches the project glossary spelled as an absolute path",
+          *refused(case, 7, "/docs/nedsnodes-wiki/nedsnodes-glossary.md, which is not a system glossary"))
+    check("kind 7 is refused when it touches a glossary file git does not track",
+          *refused(kind_7_case("docs/draft-glossary.md", {"docs/draft-glossary.md": "- **draft** — a draft.\n"},
+                               untracked=("docs/draft-glossary.md",)), 7,
+                   "`#not_asked_touches` names docs/draft-glossary.md, which is not a system glossary"))
+    case = kind_7_case("ELSEWHERE")
+    elsewhere = case.root / "another-worktree" / "docs" / "poems-glossary.md"
+    elsewhere.parent.mkdir(parents=True)
+    elsewhere.write_text("- **poem-index** — the page that lists every poem.\n")
+    walk_document_spelling_touches(case, "ELSEWHERE", str(elsewhere))
+    check("kind 7 is refused when it touches a system glossary of another checkout, by its absolute path",
+          *refused(case, 7, f"`#not_asked_touches` names {elsewhere}, which is not a system glossary"))
+    case = kind_7_case("./docs/poems-glossary.md CHECKOUT/docs/poems-glossary.md")
+    walk_document_spelling_touches(case, "CHECKOUT", str(case.checkout))
+    result = case.run("check", "--not-asked", "7")
+    check("kind 7 settles a tracked system glossary spelled with `./` and as an absolute path in the checkout",
+          result.returncode == 0 and "settled without asking the user, not asked, kind 7 " in case.minutes.read_text(),
+          described(result))
+
+
+def walk_document_spelling_touches(case, placeholder, replacement):
+    document = case.checkout / "docs" / "walk" / f"{WALK_NAME}.md"
+    document.write_text(document.read_text().replace(placeholder, replacement))
+
+
+def test_kind_7_reports_a_git_ls_files_that_fails_and_writes_nothing():
+    case = kind_7_case("docs/poems-glossary.md")
+    stub = case.root / "stub-bin"
+    stub.mkdir()
+    real_git = shutil.which("git")
+    (stub / "git").write_text(f"#!/bin/sh\nfor argument in \"$@\"; do [ \"$argument\" = ls-files ] && "
+                              f"{{ echo 'fatal: stub ls-files failure' >&2; exit 128; }}; done\nexec {real_git} \"$@\"\n")
+    (stub / "git").chmod(0o755)
+    before = case.minutes.read_text()
+    result = case.run("check", "--not-asked", "7", environment=dict(os.environ, PATH=f"{stub}:{os.environ['PATH']}"))
+    check("kind 7 fails the check when `git ls-files` fails, naming git's error, writing nothing",
+          result.returncode == 1 and "fatal: stub ls-files failure" in result.stdout + result.stderr
+          and case.minutes.read_text() == before, described(result))
 
 
 def test_a_git_grep_that_fails_is_reported_and_writes_nothing():

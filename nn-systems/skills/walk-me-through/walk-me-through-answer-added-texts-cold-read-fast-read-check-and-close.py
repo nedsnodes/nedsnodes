@@ -129,7 +129,8 @@ in no file but Markdown, in any letter case, either whole or as a part of it
 that ends just before a `-` or ends with a `_` followed by no letter or digit,
 so that no program reads it, by name or by a pattern such as
 `#case_against_[a-z_]+`; kind 7, a system glossary's entry added or changed,
-needs touches, every touched file a `*-glossary.md` file other than the
+needs touches, every touched file, read from the checkout's top whatever its
+spelling, a `*-glossary.md` file git tracks in the checkout other than the
 project glossary, docs/nedsnodes-wiki/nedsnodes-glossary.md; kind 8, a
 simplification or deletion, needs touches; for kinds 1 to 4 and 6 to 8 every
 touched file but a kind 2 test must exist. An unused or old name is searched for as written and,
@@ -592,6 +593,7 @@ NOT_ASKED_GROUNDS = {"weak-cost-only": NOT_ASKED_COST_GROUND,
                      "weak-alters-earlier-approved-text-only": NOT_ASKED_EARLIER_APPROVAL_GROUND}
 NOT_ASKED_EITHER_GROUND = f"one of these two alone: {NOT_ASKED_COST_GROUND}, or {NOT_ASKED_EARLIER_APPROVAL_GROUND}"
 INSTRUCTION_FILE_GUARD_FILE = REPOSITORY_TOP / ".claude" / "guard-hooks" / "instruction-file-guard.py"
+SYSTEM_GLOSSARIES_LISTED_FILE = REPOSITORY_TOP / "scripts" / "system-glossaries-listed-on-the-project-glossary-test.py"
 OPTION_NUMBERS = (2, 3)
 EVIDENCE_LINE = re.compile(r"^\s*(?:(?:[-*+]|\d+[.)]|>)\s+)*[*_`]*(#not_asked_(?:touches|test|source|unused|rename|glossary_term|hashtag_marker))"
                            rf"{MARKER_END}[*_`]*[:\s]*(.*)$")
@@ -600,7 +602,6 @@ TOUCHES, TEST, SOURCE, UNUSED, RENAME, GLOSSARY_TERM, ADDED_HASHTAG_MARKER = (
 HASHTAG_MARKER = re.compile(r"#[A-Za-z0-9_-]+")
 NOT_MARKDOWN_FILES = ":(exclude)*.md"
 GLOSSARY_FILES = "*-glossary.md"
-PROJECT_GLOSSARY = "docs/nedsnodes-wiki/nedsnodes-glossary.md"
 STATUS_LINE_PREFIX = "- "
 OBVIOUS_HASHTAG = " #approved_obvious"
 AFTER_ADVISOR_HASHTAG = " #approved_after_advisor"
@@ -1054,8 +1055,9 @@ NOT_ASKED_GLOSSARY_OR_NOT_MARKDOWN_PROBLEM = (
     "- `{touches}` names {path}, which is not Markdown prose outside a glossary; kind 6 changes no code and no "
     "glossary, because a glossary entry decides what a term means.")
 NOT_ASKED_NOT_SYSTEM_GLOSSARY_PROBLEM = (
-    "- `{touches}` names {path}, which is not a system glossary, a " + GLOSSARY_FILES + " file other than the "
-    "project glossary " + PROJECT_GLOSSARY + "; kind 7 changes only entries of system glossaries.")
+    "- `{touches}` names {path}, which is not a system glossary, a " + GLOSSARY_FILES + " file git tracks in the "
+    "checkout {top} other than the project glossary {project_glossary}; kind 7 changes only entries of system "
+    "glossaries.")
 NOT_ASKED_TERM_NOT_IN_GLOSSARY_PROBLEM = ("- the term `{term}` is the term of no entry, a line opening `- **{term}**` "
                                           "or `- **{term} (aka ...)**`, in a glossary file ({pattern}) in the "
                                           "checkout.")
@@ -1083,6 +1085,10 @@ NOT_ASKED_ADDS_NOTHING_UNCHECKED = "whether the item's recommendation adds and c
 NOT_ASKED_WEAK_JUDGEMENT_LINE = (
     "{item} is of " + NOT_ASKED_KINDS_NAMED + " and its case against is rated weak: if its change "
     "widens an agent's permissions, as a settings change can, or turns off a guard, do not run close: present {item} to the user.")
+GIT_LS_FILES_GLOSSARIES_FAILED = (
+    "{error}\nThe system glossaries git tracks could not be listed while checking {item}'s evidence.\n"
+    "Run `python3 {program} check --not-asked 7` again once; if it fails the same way, present {item} to the user "
+    "and run check with the flag for his answer, as `--help` lists it.")
 GIT_GREP_FAILED = ("`git grep` failed with exit {code} in {top} while checking {item}'s evidence: {error}\n"
                    "Run `python3 {program} check --not-asked {kind}` again once; if it fails the same way, "
                    "present {item} to the user and run check with the flag for his answer, as `--help` lists it.")
@@ -2001,8 +2007,30 @@ def not_asked_problems(kind, rating, lines, marks, top, item):
     if kind == 6:
         problems += glossary_term_or_marker_problems(found, touched, top, item)
     if kind == 7:
-        problems += [NOT_ASKED_NOT_SYSTEM_GLOSSARY_PROBLEM.format(touches=TOUCHES, path=path) for path in touched
-                     if path == PROJECT_GLOSSARY or not fnmatch.fnmatch(Path(path).name, GLOSSARY_FILES)]
+        problems += not_system_glossary_problems(touched, top, item)
+    return problems
+
+
+def not_system_glossary_problems(touched, top, item):
+    """Return a problem for each touched path that is not a system glossary git tracks in the checkout at top."""
+    glossaries_listed = load_module("system_glossaries_listed_on_the_project_glossary_test",
+                                    SYSTEM_GLOSSARIES_LISTED_FILE)
+    project_glossary = glossaries_listed.PROJECT_GLOSSARY_RELATIVE_PATH
+    try:
+        tracked = set(glossaries_listed.glossary_paths_git_tracks(top)) - {project_glossary}
+    except glossaries_listed.CouldNotListGlossaries as error:
+        raise Failure(GIT_LS_FILES_GLOSSARIES_FAILED.format(error=error, item=item,
+                                                            program=Path(__file__).resolve()))
+    root = Path(top).resolve()
+    problems = []
+    for path in touched:
+        try:
+            relative = (root / path).resolve().relative_to(root).as_posix()
+        except ValueError:
+            relative = None
+        if relative not in tracked:
+            problems.append(NOT_ASKED_NOT_SYSTEM_GLOSSARY_PROBLEM.format(touches=TOUCHES, path=path, top=top,
+                                                                         project_glossary=project_glossary))
     return problems
 
 
