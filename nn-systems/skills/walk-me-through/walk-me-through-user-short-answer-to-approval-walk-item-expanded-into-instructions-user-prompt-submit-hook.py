@@ -613,6 +613,8 @@ LEAD_INS_BEFORE_A_LINE_SHOWN_WITHOUT_ITS_MARK = {"`#new` line": "If you approve,
                                                  "`#case_against` line": "Case against"}
 # A `The new text:` just after a `#new` or `#new_if_d` mark labels the text that follows; it is not part of it.
 NEW_TEXT_LABEL = re.compile(r"^the\s+new\s+text:\s*", re.I)
+# The list and quotation marks that can open a Markdown source line.
+LINE_MARKS = re.compile(r"^\s*(?:(?:[-+*>]|\d+[.)])\s+)+")
 # Words in a message paragraph that show it carries the same kind of line, for pairing a line the message changed.
 PAIRING_HINTS = {"`Recommendation:` line": r"recommend", "`The alternative:` line": r"alternative",
                  "`#case_against` line": r"case\W+against"}
@@ -1128,11 +1130,11 @@ def marked_text(mark):
     return NEW_TEXT_LABEL.sub("", mark[2]) if mark[1].lower() in BARE_MARKS_INTRODUCING_A_BLOCK else mark[2]
 
 
-def new_text_line_as_shown(line):
-    """A `#new` or `#new_if_d` line as an agent shows it to the user: its mark replaced by the lead-in
-    LEAD_INS_BEFORE_A_LINE_SHOWN_WITHOUT_ITS_MARK gives its kind, and its text as marked_text gives it; None for any
-    other line."""
-    mark = DECISION_MARK.match(line.strip())
+def new_text_as_shown(line):
+    """A `#new` or `#new_if_d` source line, after any LINE_MARKS, as an agent shows it to the user: its mark replaced
+    by the lead-in LEAD_INS_BEFORE_A_LINE_SHOWN_WITHOUT_ITS_MARK gives its kind, and its text as marked_text gives
+    it; None for any other line."""
+    mark = DECISION_MARK.match(LINE_MARKS.sub("", line.strip()))
     if not mark or mark[1].lower() not in BARE_MARKS_INTRODUCING_A_BLOCK:
         return None
     return f"{LEAD_INS_BEFORE_A_LINE_SHOWN_WITHOUT_ITS_MARK[f'`{mark[1].lower()}` line']} {marked_text(mark)}"
