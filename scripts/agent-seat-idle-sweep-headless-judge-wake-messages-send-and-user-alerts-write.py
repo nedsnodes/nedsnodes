@@ -23,8 +23,7 @@ Each invocation, under a lock that keeps two from overlapping:
    rule 2 has unbacked promises and announced actions judged and named to it; rule 3 sends the
    handoff text; rule 4 ends a wait no rule 2 message was sent on; rule 5 has the judge
    decide whether to message it, and write the message. The judge is not told of a background
-   command whose command line starts with coreutils `timeout` that has not yet ended it, since
-   such work ends by itself, nor of a background command, subagent or workflow a rule 5 message
+   command whose verdict gives a `timeout_ends_at` not yet reached, since such work ends by itself, nor of a background command, subagent or workflow a rule 5 message
    has already named, since the sweep asks once about each; when something runs and all of it is
    such work, the judge is not asked. A wait whose rule 2 messages named only
    promises to act after an event and hold sentences ends when the agent-seat has recorded, after each
