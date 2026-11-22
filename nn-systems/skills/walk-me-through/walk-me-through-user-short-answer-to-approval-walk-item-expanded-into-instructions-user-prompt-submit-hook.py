@@ -157,7 +157,11 @@ message dropped a `#new` mark or put "If you approve, the new text:" before
 the text; any other words before them, such as "Do not", send the line to
 the model. A unit is a paragraph, a visible
 HTML block, or a whole list or quotation, since a bare `#new` can introduce
-one. Lines passing that second way must be units in the item's order, each
+one; a unit inside the block right below a paragraph ending in a colon has
+that paragraph's words before its own, since a lead-in on its own line, such
+as "If you disapprove, the new text:", says what the block below it means.
+A `The new text:` just after a `#new` or `#new_if_d` mark is not part of the
+line's text, so the line passes shown as the question Stop hook shows it. Lines passing that second way must be units in the item's order, each
 unit below the last, so that a `#new` and a `#new_if_d` text swapped in a
 message that dropped both marks do not pass. Words found elsewhere in the
 message do not count, because a recommendation and an alternative swapped
@@ -607,6 +611,10 @@ UNMARKED_LINE_NAMES_NEEDING_THE_MODEL = ("`Recommendation:` line", "`The alterna
 LEAD_INS_BEFORE_A_LINE_SHOWN_WITHOUT_ITS_MARK = {"`#new` line": "If you approve, the new text:",
                                                  "`#new_if_d` line": "If you disapprove, the new text:",
                                                  "`#case_against` line": "Case against"}
+# A `The new text:` just after a `#new` or `#new_if_d` mark labels the text that follows; it is not part of it.
+NEW_TEXT_LABEL = re.compile(r"^the\s+new\s+text:\s*", re.I)
+# The list and quotation marks that can open a Markdown source line.
+LINE_MARKS = re.compile(r"^\s*(?:(?:[-+*>]|\d+[.)])\s+)+")
 # Words in a message paragraph that show it carries the same kind of line, for pairing a line the message changed.
 PAIRING_HINTS = {"`Recommendation:` line": r"recommend", "`The alternative:` line": r"alternative",
                  "`#case_against` line": r"case\W+against"}
@@ -1035,7 +1043,7 @@ CONTAINER_BLOCK_TYPES = ("blockquote_open", "bullet_list_open", "ordered_list_op
 # lines: the block's rendered lines, as text_as_shown_squeezed gives each; following: the words of the block that
 # follows a paragraph at its own level, such as a `>` quote, a list or the next paragraph, as shown_words gives them,
 # or "" when none follows or the block is HTML; span: its first line and the line after its last.
-RenderedBlock = collections.namedtuple("RenderedBlock", "lines following span")
+RenderedBlock = collections.namedtuple("RenderedBlock", "lines following span following_span")
 
 
 def text_as_shown_squeezed(text):
@@ -1075,7 +1083,7 @@ def rendered_blocks(markdown, parser, env):
             visible = re.sub(r"<[^>]*>", " ", re.sub(r"<!--.*?(?:-->|$)", " ", token.content, flags=re.S))
             lines = [text_as_shown_squeezed(line) for line in visible.split("\n") if line.strip()]
             if lines:
-                blocks.append(RenderedBlock(lines, "", token.map))
+                blocks.append(RenderedBlock(lines, "", token.map, None))
             continue
         if token.type != "inline" or tokens[index - 1].type != "paragraph_open":
             continue
@@ -1085,27 +1093,51 @@ def rendered_blocks(markdown, parser, env):
                 lines.append([])
             elif child.type in RENDERED_CHILD_TYPES:
                 lines[-1].append(child.content)
-        following = ""
+        following, following_span = "", None
         block_start = index + 2  # past the inline token and its paragraph_close
         if block_start < len(tokens) and tokens[block_start].nesting >= 0 and tokens[block_start].map:
-            start, end = tokens[block_start].map
-            following = shown_words("\n".join(source_lines[start:end]), parser, env)
+            following_span = tuple(tokens[block_start].map)
+            following = shown_words("\n".join(source_lines[slice(*following_span)]), parser, env)
         blocks.append(RenderedBlock([text_as_shown_squeezed("".join(line)) for line in lines], following,
-                                    tokens[index - 1].map))
+                                    tokens[index - 1].map, following_span))
     return blocks
 
 
 def shown_units(markdown, parser, env):
     """[(first line, line after the last, words)] for each unit of markdown a decision-bearing line can be compared
     with, in order of first line: each of rendered_blocks' blocks, its lines joined, and each list and quotation
-    whole, as shown_words gives it, since a bare `#new` mark's text can be a whole list or quotation. A unit holding
-    ANSWER_LETTERS_TEXT, a closing line, or no words is left out."""
+    whole, as shown_words gives it, since a bare `#new` mark's text can be a whole list or quotation. A unit inside
+    the block right below a paragraph ending in a colon starts at that paragraph and has its words first, outermost
+    first, since such a paragraph, as "If you disapprove, the new text:" or "Do not adopt any of the following:",
+    can reverse what the block says. A unit holding ANSWER_LETTERS_TEXT, a closing line, or no words is left out."""
     text = load_walk_finder().approval_walk_text_with_approval_walk_item_hashtag_lines_removed(markdown)
     source_lines = text.split("\n")
-    units = [(*block.span, " ".join(block.lines)) for block in rendered_blocks(markdown, parser, env)]
+    blocks = rendered_blocks(markdown, parser, env)
+    units = [(*block.span, " ".join(block.lines)) for block in blocks]
     units += [(*token.map, shown_words("\n".join(source_lines[slice(*token.map)]), parser, env))
               for token in parser.parse(text, env) if token.map and token.type in CONTAINER_BLOCK_TYPES]
+    lead_ins = sorted((block.following_span, block.span[0], " ".join(block.lines)) for block in blocks
+                      if block.following_span and block.lines and block.lines[-1].endswith(":"))
+    for (start, end), lead_in_start, lead_in in reversed(lead_ins):  # innermost first, so the outermost ends first
+        units = [(min(first, lead_in_start), last, f"{lead_in} {words}") if start <= first and last <= end
+                 else (first, last, words) for first, last, words in units]
     return sorted(unit for unit in units if ANSWER_LETTERS_TEXT not in unit[2] and comparable_words(unit[2]))
+
+
+def marked_text(mark):
+    """The text of a line DECISION_MARK matched as mark, without a `The new text:` just after a `#new` or `#new_if_d`
+    mark."""
+    return NEW_TEXT_LABEL.sub("", mark[2]) if mark[1].lower() in BARE_MARKS_INTRODUCING_A_BLOCK else mark[2]
+
+
+def new_text_as_shown(line):
+    """A `#new` or `#new_if_d` source line, after any LINE_MARKS, as an agent shows it to the user: its mark replaced
+    by the lead-in LEAD_INS_BEFORE_A_LINE_SHOWN_WITHOUT_ITS_MARK gives its kind, and its text as marked_text gives
+    it; None for any other line."""
+    mark = DECISION_MARK.match(LINE_MARKS.sub("", line.strip()))
+    if not mark or mark[1].lower() not in BARE_MARKS_INTRODUCING_A_BLOCK:
+        return None
+    return f"{LEAD_INS_BEFORE_A_LINE_SHOWN_WITHOUT_ITS_MARK[f'`{mark[1].lower()}` line']} {marked_text(mark)}"
 
 
 def decision_bearing_lines(body, parser, env, has_parts):
@@ -1118,8 +1150,9 @@ def decision_bearing_lines(body, parser, env, has_parts):
         for index, line in enumerate(block.lines):
             line = re.sub(r"\[advisor\]", " ", line, flags=re.I).strip()
             mark = DECISION_MARK.match(line)
+            mark_text = marked_text(mark) if mark else None
             part = DECISION_PART.match(line) if has_parts else None
-            if mark and not comparable_words(mark[2]) and mark[1].lower() in BARE_MARKS_INTRODUCING_A_BLOCK:
+            if mark and not comparable_words(mark_text) and mark[1].lower() in BARE_MARKS_INTRODUCING_A_BLOCK:
                 # A bare mark's text is what it introduces: the rest of its paragraph, or else the block below it.
                 rest = " ".join(block.lines[index + 1:])
                 text = rest if comparable_words(rest) else block.following
@@ -1127,7 +1160,7 @@ def decision_bearing_lines(body, parser, env, has_parts):
                 break
             if mark:
                 # A mark typed `#NEW` is the same kind of line as `#new`.
-                found.append((f"`{mark[1].lower()}` line", mark[2], unit))
+                found.append((f"`{mark[1].lower()}` line", mark_text, unit))
             elif part:
                 found.append((f"`{part[1]}.` line", part[2], unit))
             else:
