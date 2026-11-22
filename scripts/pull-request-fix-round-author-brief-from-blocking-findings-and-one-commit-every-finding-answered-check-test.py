@@ -880,15 +880,21 @@ def stopped_round_cases(root, repository, made, frozen_head, dated_routes, submi
           "the round with --check, and leaves the answers file as it was",
           code == 1 and out == ""
           and f"is at the frozen-head {frozen_head[:12]} with no fix-round commit, and its answers file {answers} "
-          "answers every finding of this round, so a fix-round subagent wrote every answer and made no commit.\n"
+          "answers every finding of this round, so a fix-round subagent wrote every answer.\n"
           "If that subagent is still working there, wait for it to finish.\n"
-          "If the answers describe fixes, their commit was reset away, or if you mean to start the round again: "
-          f"delete {answers} and run this again.\n" + finish in err
+          "If the answers describe fixes, which means the fix-round commit was reset away, or if you mean to start the "
+          f"round again: delete {answers}, then run cd {made} && python3 scripts/{PROGRAM.name} {NUMBER}.\n"
+          + finish in err
           and answers.read_text() == GOOD_ANSWERS, err + out)
     code, check_out, check_err = run(root, made, dated_routes, "--check")
     check("stopped round: with no fix-round commit, the --check command that refusal names prints the message for "
           "merge-lane-2",
           code == 0 and "Send merge-lane-2 this message with SendMessage" in check_out, check_out + check_err)
+    answers.unlink()
+    code, out, err = run(root, made, dated_routes)
+    check("stopped round: with no fix-round commit, deleting the answers file and running the command that refusal "
+          "names, where its cd goes, prints the brief",
+          code == 0 and answers.read_text() == "1. \n2. \n", err + out)
     write_answers(GOOD_ANSWERS, -60)
     code, out, err = run(root, repository, dated_routes)
     check("stopped round: with no fix-round commit, an answers file written before the review is replaced by the brief",

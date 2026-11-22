@@ -842,11 +842,11 @@ def topic_worktree_at_frozen_head(number, branch, frozen_head, finding_count, re
         if answers_file_answers_every_finding_of_round(answers, finding_count, review_submitted_at):
             raise Refused(f"Pull request {number}'s topic-worktree {worktree} is at the frozen-head "
                           f"{frozen_head[:12]} with no fix-round commit, and its answers file {answers} answers "
-                          "every finding of this round, so a fix-round subagent wrote every answer and made no "
-                          "commit.\n"
+                          "every finding of this round, so a fix-round subagent wrote every answer.\n"
                           "If that subagent is still working there, wait for it to finish.\n"
-                          "If the answers describe fixes, their commit was reset away, or if you mean to start the "
-                          f"round again: delete {answers} and run this again.\n"
+                          "If the answers describe fixes, which means the fix-round commit was reset away, or if you "
+                          f"mean to start the round again: delete {answers}, then run cd {quoted} && python3 "
+                          f"{PROGRAM} {number}.\n"
                           f"Otherwise finish the round: run cd {quoted} && python3 {PROGRAM} {number} --check, and do "
                           "what it says.")
         return worktree
