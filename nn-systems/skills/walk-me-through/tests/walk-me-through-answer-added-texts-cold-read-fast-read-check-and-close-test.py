@@ -1980,6 +1980,17 @@ def test_a_waiting_item_under_a_heading_shared_with_another_reads_only_its_own_l
           and "\nitem 7 of 9: the user answered approved #case_against_none (" in case.minutes.read_text(), described(result))
 
 
+def test_a_waiting_item_reads_a_new_line_of_its_shared_setext_heading_that_its_shown_copy_holds():
+    document = ("# A walk\n\nItems 1 and 2 of 2: two rows\n#new \"Hide the old rows.\"\n----------------------------\n\n"
+                "**Item 1:** the first row.\n\n#case_against none.\n\nRecommendation: approve.\n\n"
+                "**Item 2:** the second row.\n\n#case_against none.\n\nRecommendation: approve.\n")
+    case = Case(next_to_present="item 2 of 2", document=document)
+    result = case.run("check")
+    check("check for item 2 fast-reads the #new line its shared setext heading holds above the underline, which the "
+          "copy the user is shown of item 2 holds",
+          result.returncode == 0 and case.calls.read_text() == "Hide the old rows.\n", described(result))
+
+
 def test_a_withdrawn_version_below_the_item_adds_no_text():
     document = WALK_DOCUMENT.replace(
         "## Item 4 of 9: no proposal here\n",

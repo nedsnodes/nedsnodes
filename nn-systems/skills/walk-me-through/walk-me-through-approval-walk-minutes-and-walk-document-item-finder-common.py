@@ -782,34 +782,49 @@ def own_lines_of_unit(text, parser, lines, unit, openings, own=None, keep_setext
     message that leaves that line out is not caught. Nor, with keep_setext_underline, is a further line such as
     `#new Hide rows.`: it stays heading text, and the short-answer hook, which skips headings, does not check that
     the message showed it."""
+    heading_end, ranges = approval_walk_unit_heading_end_and_item_line_ranges_below_heading_line(
+        text, parser, lines, unit, openings, own)
+    if heading_end > unit[3] + 1 and not keep_setext_underline:
+        # Read as the heading's own body, a further line such as `#new_if_d Show every row.` would sit above the
+        # underline and make a second heading; and the blank line keeps an indented code block below the
+        # underline a code block rather than that paragraph's last line.
+        lines = [*lines[:heading_end - 1], "", *lines[heading_end:]]
+    body = []
+    for start, stop in ranges:
+        # Lines that go on straight from the heading's own lines stay one run with them, as in the walk-document.
+        body += [*([] if body and start == heading_end else [""]), *lines[start:stop]]
+    return body
+
+
+def approval_walk_unit_heading_end_and_item_line_ranges_below_heading_line(text, parser, lines, unit, openings,
+                                                                          own=None):
+    """Return (the line after unit's heading, the (start, stop) line ranges below unit's heading line that belong to
+    the item numbers own of the item numbers unit names, in order and not overlapping), as own_lines_of_unit's
+    docstring says, for the walk-document text split into lines: the item copy the user is shown and the walk check
+    program's marks both read these ranges, so that a `#new` line the user is shown is a line the check reads.
+    Below a setext heading, the heading's further lines, up to its underline, come first, whatever own is."""
     numbers, total, _, first, end = unit
     opening = parser.parse("\n".join(lines[first:end]))
     heading_end = first + 1
     if (opening and opening[0].type == "heading_open"
             and opening[0].markup in ("=", "-") and opening[0].map[0] == 0):
         heading_end = first + opening[0].map[1]
-        if not keep_setext_underline:
-            # Read as the heading's own body, a further line such as `#new_if_d Show every row.` would sit above the
-            # underline and make a second heading; and the blank line keeps an indented code block below the
-            # underline a code block rather than that paragraph's last line.
-            lines = [*lines[:heading_end - 1], "", *lines[heading_end:]]
     if own is None:
-        ranges = [(first, end)]
+        own_ranges = [(first, end)]
     else:
         if not openings:
             openings.append(item_opening_lines(text, parser))
-        ranges = [approval_walk_item_line_range_within_heading_shared_by_several_items(
+        own_ranges = [approval_walk_item_line_range_within_heading_shared_by_several_items(
             openings[0], first, end, each, numbers, total) for each in own]
         # A number with no opening of its own would bring in the unit's lines above the first number's own opening.
-        ranges = ranges[:1] + [(start, stop) for start, stop in ranges[1:] if start != first]
+        own_ranges = own_ranges[:1] + [(start, stop) for start, stop in own_ranges[1:] if start != first]
     # A number with no opening of its own has a range that already holds the later numbers' ranges.
-    body, covered = (["", *lines[first + 1:heading_end]] if heading_end > first + 1 else []), heading_end
-    for start, stop in sorted(ranges):
+    ranges, covered = ([(first + 1, heading_end)] if heading_end > first + 1 else []), heading_end
+    for start, stop in sorted(own_ranges):
         if max(start, covered) < stop:
-            # Lines that go on straight from the heading's own lines stay one run with them, as in the walk-document.
-            body += [*([] if body and max(start, covered) == heading_end else [""]), *lines[max(start, covered):stop]]
+            ranges.append((max(start, covered), stop))
         covered = max(covered, stop)
-    return body
+    return heading_end, ranges
 
 
 def approval_walk_text_with_approval_walk_item_hashtag_lines_removed(text):

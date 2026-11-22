@@ -1376,12 +1376,16 @@ def item_line_ranges(walk_finder, minutes, value, numbers, total, parser, named_
     text = document.read_text(encoding="utf-8")
     tokens = parser.parse(text)
     openings = walk_finder.item_opening_lines(text, parser, tokens)
+    lines = text.split("\n")
     ranges = []
-    for unit_numbers, unit_total, _, first, end in spans:
-        if len(numbers) == 1:
-            first, end = walk_finder.approval_walk_item_line_range_within_heading_shared_by_several_items(
-                openings, first, end, numbers[0], unit_numbers, unit_total)
-        ranges.append((first, end))
+    for unit in spans:
+        if len(numbers) == 1 and len(unit[0]) > 1:
+            # The item copy the user is shown reads these same ranges, a shared setext heading's further lines
+            # included.
+            ranges += walk_finder.approval_walk_unit_heading_end_and_item_line_ranges_below_heading_line(
+                text, parser, lines, unit, [openings], [numbers[0]])[1]
+        else:
+            ranges.append(unit[3:])
     return document, text, tokens, ranges, spans
 
 
