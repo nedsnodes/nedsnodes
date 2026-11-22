@@ -56,7 +56,7 @@ print(stopped_line(...)) does. Test files are those ending in
 expected message is not handed to an agent. F-string
 placeholders survive in the listing. Beside each listed string is its
 cold-read-fast-read command, whose target file holds the string's new text as
-the agent reads it, with each placeholder shown as <its source>, or as its value
+the agent reads it, with each placeholder shown as <filled in: its source>, or as its value
 when it names a module-level string constant, as the collector's
 text_as_agent_reads_it_with_placeholder_stand_ins says; --json gives that text
 as new_text_as_agent_reads_it_with_placeholder_stand_ins. The
