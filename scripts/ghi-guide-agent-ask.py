@@ -19,7 +19,8 @@ scripts/ghi-issue-write.py that reads its fields; a failed ask prints nothing
 on stdout.
 
 Exit codes:
-  0  the reading list ghi-guide-agent returns, printed to stdout; without
+  0  the reading list ghi-guide-agent returns, or under --request-form
+     draft-verdict its `verdict:` line, printed to stdout; without
      --include-closed, OPEN_ISSUES_ONLY_INCLUDE_CLOSED_HINT_MESSAGE follows on
      stderr, so the caller learns the flag when the answer omits closed issues
   1  a failed ask — gh unreachable, the box unreachable, ghi-guide-agent's own run
@@ -31,7 +32,7 @@ Exit codes:
   2  ghi-guide-agent answered with kind `not-about-issues`: the question was not
      about issues. NOT_ABOUT_ISSUES_MESSAGE on stderr, nothing on stdout.
   3  ghi-guide-agent answered with kind `ask-user-about-ruling`: it found a ruling
-     of the user's it may not judge. RULING_QUESTION_MESSAGE, carrying its
+     of the user's it may not judge. RULING_QUESTION_MESSAGE_TEMPLATE, carrying its
      sentence, on stderr, nothing on stdout.
 
 Why 2 and 3 are not passed through (user-ruled 2026-09-29, walk

@@ -1814,8 +1814,8 @@ def run_cases(scratch: Path):
             design_dir, name="frozen-issue-reopened.tool.design.md",
             text=conflicting_text)
         design_create = StagedReader({
-            ASK: Completed("", returncode=3, stderr=ruling_stderr(
-                "#46 closed issues are frozen")),
+            ASK: ruling_answer(
+                46, "closed issues are frozen"),
             "gh issue view 46": Completed("Closed issues are frozen\n"),
             "gh issue list": Completed("[]"),
             "gh issue create": Completed(
