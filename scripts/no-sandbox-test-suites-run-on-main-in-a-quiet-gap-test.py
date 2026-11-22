@@ -383,7 +383,12 @@ with tempfile.TemporaryDirectory() as directory:
     code, printed, _ = s.run("pass", "--record-follow-up-request-sent")
     check("--record-follow-up-request-sent refuses an unreadable state file",
           code == program.EXIT_REFUSED and "not JSON" in printed
-          and "that records a passed, failed or stopped run replaces the file" in printed, (code, printed))
+          and "the follow-up request was not recorded, because the state file cannot be read: "
+          f"{s.state_file} is not JSON" in printed
+          and "If you have not yet sent agent-seat reboot-test a follow-up request quoting "
+          "this message's first line" in printed
+          and "Do not run python3 scripts/no-sandbox-test-suites-run-on-main-in-a-quiet-gap.py "
+          "--record-follow-up-request-sent again for this refusal" in printed, (code, printed))
     s.run()
     code, printed, _ = s.run("pass", "--record-follow-up-request-sent")
     check("--record-follow-up-request-sent refuses when the last run passed",
