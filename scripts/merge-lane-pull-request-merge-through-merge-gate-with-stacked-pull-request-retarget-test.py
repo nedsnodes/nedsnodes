@@ -177,8 +177,10 @@ answer = json.load(open(os.path.join(directory, "go-ahead-answer.json")))
 sys.stdout.write(answer[0])
 sys.exit(answer[1])
 '''
-GO_AHEAD_COUNT_ONLY = ("12 open pull requests, not drafts, have no review from ned-review-merge "
-                       "on their head commit; fake go-ahead\n", 1)
+GO_AHEAD_COUNT_ONLY = ("12 open pull requests that are not drafts wait for merge-lane-2 to review "
+                       "or merge them. ... The count is over 10, the most at which merge-lane-2's "
+                       "queue is quiet, so no agent-seat holding mutant-test tasks is released; "
+                       "fake go-ahead\n", 1)
 RUNNER_PASSED_SUMMARY ="SUMMARY: 1 passed, 0 failed, 1 total; fake runner"
 RUNNER_FAILED = ("PASS scripts/some-test.py (1s)\n"
                  "FAIL scripts/broken-test.py exit 1 (2s)\n"
@@ -546,6 +548,10 @@ def blob_of(directory, suite):
 
 
 def main():
+    # Every other case runs a fake go-ahead program in its place.
+    check("the go-ahead program the merge script runs after a merge is a file",
+          program.SURVIVING_MUTANT_TEST_PRS_GO_AHEAD_PROGRAM.is_file(),
+          str(program.SURVIVING_MUTANT_TEST_PRS_GO_AHEAD_PROGRAM))
     # Resolved, because macOS's mkdtemp path is a symlink and the program resolves its paths.
     scratch = Path(tempfile.mkdtemp(prefix="merge-lane-merge-test-")).resolve()
     try:

@@ -52,12 +52,21 @@ def check(name, condition, detail=""):
 
 
 def pull_request(number, draft=False, reviews=()):
-    """reviews: (state, on) pairs, oldest first; on is "head", "older" or "deleted-commit"."""
+    """reviews: (state, on) or (state, on, body), oldest first; on is "head", "older" or
+    "deleted-commit"."""
     head = f"{number:040x}"
     commits = {"head": {"oid": head}, "older": {"oid": "f" * 40}, "deleted-commit": None}
     return {"number": number, "isDraft": draft, "headRefOid": head,
-            "reviews": {"nodes": [{"state": state, "commit": commits[on]}
-                                  for state, on in reviews]}}
+            "reviews": {"nodes": [{"state": state, "commit": commits[on],
+                                   "body": rest[0] if rest else ""}
+                                  for state, on, *rest in reviews]}}
+
+
+# As the review-posting program posts merge-lane-2's verdict on a pull request
+# ned-review-merge opened: a COMMENT review whose body opens with the verdict line.
+SENT_BACK_AS_COMMENT = "REQUEST_CHANGES\n\n**Blocking: 1**\n\nmerge-lane-2 review of round 1."
+APPROVED_AS_COMMENT = "APPROVE\n\nmerge-lane-2 review of round 2."
+NO_VERDICT_COMMENT = "merge-lane-2 review of fix-round 2. No findings."
 
 
 def pages(*page_nodes):
@@ -225,7 +234,21 @@ def cases(root):
              True),
             ("approved-then-sent-back",
              pull_request(11, reviews=[("APPROVED", "head"), ("CHANGES_REQUESTED", "head")]),
-             False)):
+             False),
+            ("own-sent-back-as-comment",
+             pull_request(11, reviews=[("COMMENTED", "head", SENT_BACK_AS_COMMENT)]), False),
+            ("own-sent-back-then-approved-as-comments",
+             pull_request(11, reviews=[("COMMENTED", "head", SENT_BACK_AS_COMMENT),
+                                       ("COMMENTED", "head", APPROVED_AS_COMMENT)]), True),
+            ("own-sent-back-then-comment-without-verdict",
+             pull_request(11, reviews=[("COMMENTED", "head", SENT_BACK_AS_COMMENT),
+                                       ("COMMENTED", "head", NO_VERDICT_COMMENT)]), False),
+            ("own-sent-back-on-an-older-commit",
+             pull_request(11, reviews=[("COMMENTED", "older", SENT_BACK_AS_COMMENT),
+                                       ("COMMENTED", "head", NO_VERDICT_COMMENT)]), True),
+            ("approved-then-comment-opening-with-REQUEST_CHANGES",
+             pull_request(11, reviews=[("APPROVED", "head"),
+                                       ("COMMENTED", "head", SENT_BACK_AS_COMMENT)]), True)):
         case = Case(root, name)
         case.gh_answer(pages(ten_counted + [eleventh]))
         case.sender_answers(("sent", "reboot-test"))
