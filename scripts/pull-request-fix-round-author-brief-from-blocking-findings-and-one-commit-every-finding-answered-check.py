@@ -64,8 +64,11 @@ scripts/agent-seat-worktree-create-with-owner-file.py, so it has an owner file f
 of that program is a failure here, its message passed on. Refuse when the topic-worktree has uncommitted
 changes or untracked files, ignored files apart, or its HEAD is not the frozen-head; when HEAD is one
 commit on top of the frozen-head and the answers file, written after the round's review was submitted,
-has an entry for every finding, the refusal says to finish the round with --check. Then write the answers
-file with a line "<n>. " per finding, replacing any file there, and print the brief:
+has an entry for every finding, the refusal says to finish the round with --check. Refuse too when HEAD is
+the frozen-head and that answers file has an entry for every finding: the refusal says to finish the round
+with --check, or, when the answers describe fixes, whose commit was reset away, to delete the answers file
+and run this again; this program cannot tell the two apart. Otherwise write the answers file with a line
+"<n>. " per finding, replacing any file there, and print the brief:
 the frozen-head, ADVISOR_FIX_ROUND_INSTRUCTION when the round's number is ADVISOR_FIX_ROUND_NUMBER and on
 no other, each blocking finding word for word, then each nit word for word, numbered on from the blocking
 findings, to fix in the same round, how to dispatch the fix-round subagent, a fork without Claude Code's
@@ -839,18 +842,19 @@ def topic_worktree_at_frozen_head(number, branch, frozen_head, finding_count, re
         if answers_file_answers_every_finding_of_round(answers, finding_count, review_submitted_at):
             raise Refused(f"Pull request {number}'s topic-worktree {worktree} is at the frozen-head "
                           f"{frozen_head[:12]} with no fix-round commit, and its answers file {answers} answers "
-                          "every finding of this round, so a fix-round subagent that found nothing to fix stopped "
-                          "after step 5.\n"
+                          "every finding of this round, so a fix-round subagent wrote every answer and made no "
+                          "commit.\n"
                           "If that subagent is still working there, wait for it to finish.\n"
+                          "If the answers describe fixes, their commit was reset away, or if you mean to start the "
+                          f"round again: delete {answers} and run this again.\n"
                           f"Otherwise finish the round: run cd {quoted} && python3 {PROGRAM} {number} --check, and do "
-                          "what it says.\n"
-                          f"If you mean to start the round again instead, delete {answers} and run this again.")
+                          "what it says.")
         return worktree
     if (git([*in_worktree, "rev-list", "--parents", "-n", "1", head]).split()[1:] == [frozen_head]
             and answers_file_answers_every_finding_of_round(answers, finding_count, review_submitted_at)):
         raise Refused(f"Pull request {number}'s topic-worktree {worktree} holds the unpushed commit {head[:12]} on "
                       f"top of the frozen-head {frozen_head[:12]}, and its answers file {answers} answers every "
-                      "finding of this round, so a fix-round subagent stopped after step 5.\n"
+                      "finding of this round, so a fix-round subagent wrote every answer and its commit.\n"
                       "If that subagent is still working there, wait for it to finish.\n"
                       f"Otherwise finish the round: run cd {quoted} && python3 {PROGRAM} {number} --check, and do "
                       "what it says.")
