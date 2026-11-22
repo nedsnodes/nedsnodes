@@ -246,8 +246,6 @@ LINE_MARKS = re.compile(r"^\s*(?:(?:[-+*>]|\d+[.)])\s+)+")
 HASHTAG_MARKER = re.compile(r"^#\w+\s+")
 EMPHASIS_AND_SPACING = re.compile(r"[\s*_#>`]+")
 ANSWER_LINE_START = "answer a to approve"
-NEW_TEXT_LINE = re.compile(r"^(#new(?:_if_d)?)[:\s]+(?i:the\s+new\s+text:\s*)?(.*)$")
-NEW_TEXT_SHOWN_AS = {"#new": "If you approve, the new text: ", "#new_if_d": "If you disapprove, the new text: "}
 
 AGENT_REPLY_LINE_MODEL_LABEL_ONLY_ABOUT_WAITING_ITEM_DECISION = "concerns_only_a_waiting_item_decision"
 AGENT_REPLY_LINE_MODEL_LABEL_ASKS_USER_SOMETHING_ELSE = "asks_something_else"
@@ -460,8 +458,7 @@ def interruption_item_texts(document_text, units, waiting_numbers, parser):
 
 def new_text_as_shown(line):
     """The `#new` or `#new_if_d` line as the agent shows it to the user, or None for any other line."""
-    new_text = NEW_TEXT_LINE.match(LINE_MARKS.sub("", line.strip()))
-    return NEW_TEXT_SHOWN_AS[new_text[1]] + new_text[2] if new_text else None
+    return answer_hook.new_text_line_as_shown(LINE_MARKS.sub("", line.strip()))
 
 
 def shown_item_lines(reply_lines, document_lines, units, openings):
