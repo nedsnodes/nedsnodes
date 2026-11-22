@@ -426,7 +426,7 @@ def main() -> int:
     # Pruned on every run, so a branch deleted and later recreated under the same name starts fresh.
     record_merge_prune_and_write_telling_failures(set())
     # A shell command that changed no file and left the worktree on the same branch has nothing new to list.
-    if tool_name == SHELL_TOOL_NAME and not messages and fingerprint == state.get("worktree_fingerprint"):
+    if tool_name == SHELL_TOOL_NAME and not messages and fingerprint == state.get("worktree_fingerprint"):  # pragma: no mutate, only Bash and the file-writing tools, all sorting after Bash, reach here, so <= gives what == gives
         return 0
     state["worktree_fingerprint"] = fingerprint
 
