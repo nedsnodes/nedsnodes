@@ -304,8 +304,14 @@ STRAY_WRITE_UNDO_TRACKED = (
     "Ask the user about it if you did not make it and are unsure.")
 STRAY_WRITE_NO_UNDO_ALREADY_CHANGED = (
     "It already had uncommitted changes before the cells launched, so no undo command is given: "
-    "one would also undo those. Read `git -C {repository} diff HEAD -- {path}` against the edits you know "
-    "are your own, and ask the user about any change you did not make.")
+    "one would also undo those. Read {what_to_read} against the edits you know are your own, and ask "
+    "the user about any change you did not make.")
+# Two diffs, not `diff HEAD`: a cell that writes the HEAD text back over a staged-and-edited
+# file leaves the working tree equal to HEAD, so only the working tree against the index shows it.
+STRAY_WRITE_ALREADY_CHANGED_TRACKED_READ = (
+    "both `git -C {repository} diff --cached -- {path}`, its staged changes, and "
+    "`git -C {repository} diff -- {path}`, its unstaged ones,")
+STRAY_WRITE_ALREADY_CHANGED_UNTRACKED_READ = "{path} itself, which git does not track,"
 # A cell can move an already-edited file without git pairing the move as a rename (a plain
 # `mv`, or a `git mv` of a much-edited file), can re-create the old name afterwards, and can
 # move a file git tracks only as new or untracked out of git status altogether, so no path can
@@ -1010,9 +1016,12 @@ def stopped_cells_write_check_lines(stopped_report_paths: list, baseline,
                 else STRAY_WRITE_NO_UNDO_GONE_WHILE_CHANGES_MAY_HAVE_MOVED if touched
                 else STRAY_WRITE_UNDO_UNTRACKED if name in untracked
                 else STRAY_WRITE_UNDO_TRACKED)
+        what_to_read = (STRAY_WRITE_ALREADY_CHANGED_UNTRACKED_READ if name in untracked
+                        else STRAY_WRITE_ALREADY_CHANGED_TRACKED_READ).format(
+            path=shlex.quote(name), repository=repository)
         lines.append(STOPPED_CELLS_STRAY_WRITE_LINE.format(
             path=name, cells=cells, undo=undo.format(
-                path=shlex.quote(name), repository=repository,
+                path=shlex.quote(name), repository=repository, what_to_read=what_to_read,
                 absolute_path=shlex.quote(str(cell_common.REPO_ROOT / name)),
                 touched=", ".join(shlex.quote(name) for name in touched))))
     return lines
