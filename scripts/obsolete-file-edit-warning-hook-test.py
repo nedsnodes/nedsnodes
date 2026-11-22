@@ -522,6 +522,9 @@ with tempfile.TemporaryDirectory() as temporary_directory:
           and "`git pull --rebase origin a-pushed-topic-branch`" in warning
           and "This branch is pushed, so its review may be running" not in warning
           and "\n" not in warning, warning)
+    repeated = run_hook(hook_payload(pushed_checkout, edited_on_main))
+    check("behind its remote: the same warning is not given twice, because the advice "
+          "reports no git failure", silent(repeated), repr(repeated.stdout))
     commit_file(pushed_checkout, "scripts/local-work.py", "local\n", "new work made here")
     warning = agent_text(run_hook(hook_payload(pushed_checkout, edited_on_main)))
     check("diverged from its remote: told not to push, how to see both sides, and what "

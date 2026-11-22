@@ -525,7 +525,7 @@ def main_lost_file_line(freshness, checkout: Path, merge_base: str,
             text = (removing.stderr or "").strip() or "git show exited %d" % removing.returncode
             return MAIN_LOST_FILE_UNKNOWN_LINE.format(path=repository_path, text=text), True
         for entry in freshness.git_output.name_status_entries(removing.stdout):
-            if entry.status[:1] == "R" and entry.origin_path == repository_path and entry.path:
+            if entry.status[:1] == "R" and entry.origin_path == repository_path and entry.path:  # pragma: no mutate, only an R or C entry has an origin_path, and C sorts before R, so >= "R" picks the same entries
                 moved = (MAIN_MOVED_AND_REWRITTEN_FILE_PUSHED_LINE if pushed
                          else MAIN_MOVED_AND_REWRITTEN_FILE_LINE)
                 return moved.format(path=repository_path, new_path=entry.path), False
