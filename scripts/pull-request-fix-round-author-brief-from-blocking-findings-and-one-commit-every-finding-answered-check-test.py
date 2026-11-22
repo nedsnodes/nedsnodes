@@ -12,6 +12,7 @@ Run: python3 scripts/pull-request-fix-round-author-brief-from-blocking-findings-
 """
 
 import datetime
+import fcntl
 import importlib.util
 import json
 import os
@@ -20,6 +21,7 @@ import shutil
 import subprocess
 import sys
 import tempfile
+import threading
 from pathlib import Path
 
 _git_environment_fixture_spec = importlib.util.spec_from_file_location(
@@ -93,14 +95,29 @@ exec REAL_GIT "$@"
 # --only-suites-named narrows them. FAKE_RUNNER_EXIT makes it stop without a verdict. FAKE_RUNNER_NOT_RUN names
 # the suites printed NOT RUN, space-separated, and FAKE_RUNNER_STOPPED prints the runner's "not run to the end" line, opening
 # with FAKE_RUNNER_OPENER when set, as a runner from before the file-path opener does; the exit code stays the real
-# runner's, 1 when a suite failed.
-FAKE_SUITE_RUNNER = r'''import json, os, sys
+# runner's, 1 when a suite failed. FAKE_RUNNER_LOCK_FILE names a file the fake flocks as the real runner flocks
+# its machine lock where suites run outside nn-test-sandboxes: held by another process, it exits 3 at once, or waits
+# up to --wait-for-lock-seconds.
+FAKE_SUITE_RUNNER = r'''import fcntl, json, os, sys, time
 from pathlib import Path
 checkout = Path(__file__).resolve().parents[1]
 arguments = sys.argv[1:]
 if os.environ.get("FAKE_RUNNER_CALLS"):
     with open(os.environ["FAKE_RUNNER_CALLS"], "a") as calls:
         calls.write(json.dumps({"checkout": str(checkout), "arguments": arguments}) + "\n")
+if os.environ.get("FAKE_RUNNER_LOCK_FILE"):
+    lock = open(os.environ["FAKE_RUNNER_LOCK_FILE"], "a")
+    wait = float(arguments[arguments.index("--wait-for-lock-seconds") + 1]) if "--wait-for-lock-seconds" in arguments else 0
+    deadline = time.monotonic() + wait
+    while True:
+        try:
+            fcntl.flock(lock.fileno(), fcntl.LOCK_EX | fcntl.LOCK_NB)
+            break
+        except BlockingIOError:
+            if time.monotonic() >= deadline:
+                print("run-all-test-suites: not run \u2014 another run holds the lock", file=sys.stderr)
+                sys.exit(3)
+            time.sleep(0.05)
 if os.environ.get("FAKE_RUNNER_EXIT"):
     print("scripts/run-all-test-suites.py: could not run")
     sys.exit(int(os.environ["FAKE_RUNNER_EXIT"]))
@@ -2245,9 +2262,9 @@ def suite_cases(root, repository, _base, _frozen_head):
     check("suites: the round's commit runs the suites the ready command runs, and the frozen-head only its "
           "failing suites the frozen-head has, recording nothing, each in a scratch worktree",
           [call["arguments"] for call in calls] == [
-              ["--only-suites-whose-recorded-inputs-changed-since", "origin/main"],
-              ["--leave-recorded-inputs-and-failure-history-unchanged", "--only-suites-named", "a-test.py",
-               "b-test.py"]]
+              ["--only-suites-whose-recorded-inputs-changed-since", "origin/main", "--wait-for-lock-seconds", "3600"],
+              ["--leave-recorded-inputs-and-failure-history-unchanged", "--wait-for-lock-seconds", "3600",
+               "--only-suites-named", "a-test.py", "b-test.py"]]
           and all(call["checkout"] != str(repository) for call in calls)
           and "FAIL b-test.py exit 1" in out, json.dumps(calls) + out)
     check("suites: the scratch worktrees are removed", len(git(repository, "worktree", "list").splitlines()) == 1,
@@ -2261,6 +2278,17 @@ def suite_cases(root, repository, _base, _frozen_head):
     check("suites: a suite failing at the frozen-head too passes the check, which names it before the push",
           code == 0 and "Not pushed yet" in out and "at the frozen-head too, so not because of this round; the "
           "message for merge-lane-2 will name them: a-test.py" in out and len(runner_calls(root)) == 2, out + err)
+    lock_file = root / "machine-test-lock"
+    with open(lock_file, "a") as held:
+        fcntl.flock(held.fileno(), fcntl.LOCK_EX)
+        releaser = threading.Timer(1.0, fcntl.flock, (held.fileno(), fcntl.LOCK_UN))
+        releaser.start()
+        code, out, err = check_with_head(frozen_head, {"FAKE_RUNNER_LOCK_FILE": str(lock_file)})
+        releaser.join()
+    check("suites: while another process holds the machine's test lock, the check's suite runs wait for it "
+          "instead of exiting 3, and the check passes once it is released",
+          code == 0 and "Not pushed yet" in out and "another run holds the lock" not in out + err
+          and len(runner_calls(root)) == 2, out + err)
     code, out, err = check_with_head(frozen_head, {"FAKE_RUNNER_NOT_RUN": "b-test.py c-test.py"})
     check("suites: suites NOT RUN beside a failure the frozen-head shares fail the check with exit 2, "
           "before any push, and the refusal quotes every NOT RUN line",

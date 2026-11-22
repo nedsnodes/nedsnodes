@@ -150,10 +150,11 @@ def main():
           and "merge-lane-2" not in output + errors,
           (status, runner.calls, output, errors))
     check("the test suites run with the checkout's own runner, selecting the suites whose recorded "
-          "inputs changed since origin/main",
+          "inputs changed since origin/main, and waiting for the machine's test lock",
           program.selective_test_run_command(CHECKOUT) == [
               "python3", CHECKOUT + "/scripts/run-all-test-suites.py",
-              "--only-suites-whose-recorded-inputs-changed-since", "origin/main"]
+              "--only-suites-whose-recorded-inputs-changed-since", "origin/main",
+              "--wait-for-lock-seconds", "3600"]
           and f"running {CHECKOUT}/scripts/run-all-test-suites.py" in output,
           repr(program.selective_test_run_command(CHECKOUT)))
 

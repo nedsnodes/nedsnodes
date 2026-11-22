@@ -14,7 +14,8 @@ Run it from the pull request's own checkout, with its nn-head-commit checked out
    #no_defect_fixed), read by the same reader scripts/merge-gate.sh uses; a placeholder
    description has none;
 4. runs this checkout's test suites whose recorded inputs changed since origin/main, with this
-   checkout's own scripts/run-all-test-suites.py, and refuses when any fails;
+   checkout's own scripts/run-all-test-suites.py, waiting for the machine's test lock where the
+   runner takes one, and refuses when any fails;
 5. marks the pull request ready for review with gh pr ready.
 
 It does not check what scripts/merge-gate.sh checks again before merging, such as a not-fixed
@@ -39,6 +40,10 @@ _defect_line_reader_spec = importlib.util.spec_from_file_location(
     SCRIPTS_DIRECTORY / "pull-request-description-defect-line-root-cause-status-and-follow-up-link-reader.py")
 defect_line_reader = importlib.util.module_from_spec(_defect_line_reader_spec)
 _defect_line_reader_spec.loader.exec_module(defect_line_reader)
+_test_suite_runner_spec = importlib.util.spec_from_file_location(
+    "run_all_test_suites", SCRIPTS_DIRECTORY / "run-all-test-suites.py")
+test_suite_runner = importlib.util.module_from_spec(_test_suite_runner_spec)
+_test_suite_runner_spec.loader.exec_module(test_suite_runner)
 
 EXIT_MARKED_READY = 0
 EXIT_MARK_READY_REFUSED_OR_FAILED = 1
@@ -66,9 +71,15 @@ class StepFailed(Exception):
 def selective_test_run_command(checkout):
     """The run of the suites whose recorded inputs changed since origin/main, with checkout's own
     runner, which tests the checkout it sits in; the runner beside this program may sit in another
-    checkout."""
+    checkout. Without the lock wait, a run on a machine where another run holds the test lock, such
+    as the Mac, exits 3 at once."""
     return ["python3", str(Path(checkout) / "scripts" / "run-all-test-suites.py"),
-            "--only-suites-whose-recorded-inputs-changed-since", "origin/main"]
+            "--only-suites-whose-recorded-inputs-changed-since", "origin/main",
+            *test_suite_runner_machine_lock_wait_command_line_arguments_build()]
+
+
+def test_suite_runner_machine_lock_wait_command_line_arguments_build():
+    return ["--wait-for-lock-seconds", f"{test_suite_runner.MACHINE_LOCK_WAIT_SECONDS_SUGGESTED:g}"]
 
 
 def first_stderr_line(completed):

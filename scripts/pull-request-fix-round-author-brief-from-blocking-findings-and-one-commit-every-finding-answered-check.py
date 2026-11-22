@@ -1238,7 +1238,9 @@ def suites_the_round_broke_and_suites_failing_at_frozen_head_too(frozen_head, co
     if at_frozen_head:
         failing_there = failing_suites_in_scratch_worktree(frozen_head, lambda checkout: [
             "python3", str(checkout / "scripts" / "run-all-test-suites.py"),
-            "--leave-recorded-inputs-and-failure-history-unchanged", "--only-suites-named", *at_frozen_head])
+            "--leave-recorded-inputs-and-failure-history-unchanged",
+            *ready_command.test_suite_runner_machine_lock_wait_command_line_arguments_build(),
+            "--only-suites-named", *at_frozen_head])
         at_frozen_head = [suite for suite in at_frozen_head if suite in failing_there]
     return [suite for suite in at_commit if suite not in at_frozen_head], at_frozen_head
 
