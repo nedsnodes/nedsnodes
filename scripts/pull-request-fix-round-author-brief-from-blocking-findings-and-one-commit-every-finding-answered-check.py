@@ -414,13 +414,17 @@ def verdict_line(review):
     return (review.get("body") or "").split("\n", 1)[0]
 
 
-def merge_lane_one_review_verdict_from_review_state_or_comment_review_first_line(
+def merge_lane_review_verdict_from_review_state_or_comment_review_first_line(
         review, pull_request_author_login, reviewer_login):
     """APPROVE, REQUEST_CHANGES, or None for a review by reviewer_login, merge-lane-2's account, that carries no
     verdict. GitHub refuses an approving or changes-requesting review from a pull request's author, so on a pull
     request that account opened the posting program posts the verdict as a COMMENT review opening with the
-    verdict line, and on any other pull request as the review's own state; the author alone decides which is read."""
+    verdict line, and on any other pull request as the review's own state; the author alone decides which is read.
+    Raises StepFailed for a review GitHub returned without a state, whose verdict cannot be known."""
     state = review.get("state")
+    if not state:
+        raise StepFailed(f"GitHub returned a review by {reviewer_login} without a state, so its verdict cannot be "
+                         f"read: {json.dumps(review)[:300]}")
     if state == "APPROVED":
         return "APPROVE"
     if state == "CHANGES_REQUESTED":
@@ -432,7 +436,7 @@ def merge_lane_one_review_verdict_from_review_state_or_comment_review_first_line
 
 
 def does_merge_lane_review_ask_for_fix_round(review, pull_request_author_login, reviewer_login):
-    return merge_lane_one_review_verdict_from_review_state_or_comment_review_first_line(
+    return merge_lane_review_verdict_from_review_state_or_comment_review_first_line(
         review, pull_request_author_login, reviewer_login) == "REQUEST_CHANGES"
 
 
@@ -456,7 +460,7 @@ def round_reviews(number, pull_request_author_login, reviewer_login):
         frozen_head = anchor.get("commit_id")
         # A later approval posted as a COMMENT review closes the round, as an APPROVED one does.
         if all(review.get("state") == "COMMENTED" and review.get("commit_id") == frozen_head
-               and merge_lane_one_review_verdict_from_review_state_or_comment_review_first_line(
+               and merge_lane_review_verdict_from_review_state_or_comment_review_first_line(
                    review, pull_request_author_login, reviewer_login) != "APPROVE"
                for _, review in own[requested[-1] + 1:]):
             on_head = [review_ids for head, review_ids in records if head == frozen_head]

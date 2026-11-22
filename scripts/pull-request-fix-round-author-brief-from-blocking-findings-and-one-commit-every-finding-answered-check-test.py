@@ -631,6 +631,14 @@ def brief_cases(root, repository, base, frozen_head):
           "request another account opened, exit 1",
           code == 1 and "is COMMENTED on commit" in err, err)
 
+    without_state = review(commit_id=frozen_head, review_id=12)
+    del without_state["state"]
+    code, out, err = run(root, repository, routes_for(frozen_head, [review(commit_id=frozen_head), without_state]))
+    check("brief: a merge-lane-2 review without a state, whose verdict cannot be read, fails with exit 2 and "
+          "briefs no round",
+          code == 2 and out == "" and err.startswith("FAILED: GitHub returned a review by ned-review-merge without a "
+                                                     "state, so its verdict cannot be read: "), err + out)
+
     code, out, err = run(root, repository, routes_for(base, [review(commit_id=frozen_head)]))
     check("brief: a head that moved past the reviewed commit refuses with exit 1, and with the topic-worktree "
           "elsewhere names no --check command",

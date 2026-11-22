@@ -1601,6 +1601,14 @@ def test_print_block():
     check(f"{PRINT_BLOCK} reports a review without its expected fields as FAILED with exit 2",
           code == 2 and err.startswith(f"FAILED: GitHub's reviews of pull request {NUMBER} were not in the "
                                        "expected shape: KeyError"), err)
+    without_state = merge_lane_review(2)
+    del without_state["state"]
+    code, out, err = print_block([merge_lane_review(1), without_state],
+                                 [merge_lane_comment(10, 1, "**fix-next** Rename it.")])
+    check(f"{PRINT_BLOCK} prints nothing and fails with exit 2 when a merge-lane-2 review has no state, whose "
+          "verdict cannot be read",
+          code == 2 and out == "" and err.startswith("FAILED: GitHub returned a review by ned-review-merge without a "
+                                                     "state, so its verdict cannot be read: "), out + err)
     code, out, err = print_block([merge_lane_review(1)], [merge_lane_comment(10, 1, "**fix-next** Rename it.")],
                                  read_back=lambda text: [])
     check(f"{PRINT_BLOCK} prints nothing and fails with exit 2 when its block does not read back as itself",

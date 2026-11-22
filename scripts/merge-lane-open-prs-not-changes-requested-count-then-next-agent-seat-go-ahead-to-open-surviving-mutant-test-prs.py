@@ -149,7 +149,7 @@ def parse_arguments(argv):
 
 def sent_back_on_head_commit(pull_request):
     author = (pull_request["author"] or {}).get("login")
-    verdicts = [fix_round.merge_lane_one_review_verdict_from_review_state_or_comment_review_first_line(
+    verdicts = [fix_round.merge_lane_review_verdict_from_review_state_or_comment_review_first_line(
                     review, author, MERGE_LANE_ACCOUNT)
                 for review in pull_request["reviews"]["nodes"]
                 if (review["commit"] or {}).get("oid") == pull_request["headRefOid"]]
@@ -178,7 +178,7 @@ def open_pull_requests_not_sent_back_count():
                          for node in page["data"]["repository"]["pullRequests"]["nodes"]]
         return sum(1 for node in pull_requests
                    if not node["isDraft"] and not sent_back_on_head_commit(node))
-    except (ValueError, KeyError, TypeError) as error:
+    except (ValueError, KeyError, TypeError, fix_round.StepFailed) as error:
         raise CouldNotTell(f"gh api graphql exited 0 but printed output not in the shape this "
                            f"program reads ({type(error).__name__}: {error}); its first 300 "
                            f"characters: {gh.stdout[:300]!r}\n"
