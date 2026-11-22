@@ -798,10 +798,10 @@ def _slug_cut_within(joined: str, limit: int) -> str:
     return head.rsplit("-", 1)[0] if "-" in head else joined[:limit]
 
 
-def placeholder_body(key: str) -> str:
+def placeholder_body(key: str, repo: str) -> str:
     return (f"Filing in progress, pairing key {key}. This body becomes the "
             "links to this issue's files once they land on main. If it still "
-            "reads this way, rerun `scripts/ghi-issue-write.py create` on the "
+            f"reads this way, rerun `{create_rerun_command(repo)}` on the "
             "file and it will continue from where it stopped. If that file is "
             f"gone, rerun it on this issue's file under {GHI_MD_DIRECTORY}/.")
 
@@ -1609,7 +1609,7 @@ def file_issue(repo: str, title: str, key: str, runner, report) -> int:
     only thing a rerun has to find this issue by."""
     completed = runner(
         ["gh", "issue", "create", "--repo", repo, "--title", title,
-         "--body", placeholder_body(key)])
+         "--body", placeholder_body(key, repo)])
     report((completed.stdout or "").strip())
     match = re.search(r"/issues/(\d+)", completed.stdout or "")
     if not match:
@@ -1938,11 +1938,13 @@ def land_file(repo: str, number: int, title: str, source: Path,
     return destination
 
 
-def create_rerun_command(repo: str, source) -> str:
+def create_rerun_command(repo: str, source=None) -> str:
     """The create command a stopped filing tells the agent to rerun, quoted
     for the shell and carrying the run's --repo, so the rerun files into the
-    same repository."""
-    arguments = ["scripts/ghi-issue-write.py", "create", str(source)]
+    same repository. Without a source, the text around it names the file."""
+    arguments = ["scripts/ghi-issue-write.py", "create"]
+    if source is not None:
+        arguments.append(str(source))
     if repo != DEFAULT_REPO:
         arguments += ["--repo", repo]
     return shlex.join(arguments)
