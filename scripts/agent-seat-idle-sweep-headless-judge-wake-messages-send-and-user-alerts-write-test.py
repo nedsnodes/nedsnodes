@@ -900,16 +900,26 @@ def promise_sent_on_rule_five_wait(promise_sender):
 PROMISE_SEND_FAILS = {"sends": [send_to("alpha", is_error=True)],
                       "answer": {"sent": False, "reason": "r"}}
 machine = promise_sent_on_rule_five_wait(PROMISE_SEND_FAILS)
-check("rule 2: a promise message on an open wait whose send failed logs neither a promise step nor "
-      "a promise_message event",
-      [event["step"] for event in machine.events("wait_step")] == ["nudge"]
+check("rule 2: a promise message on an open wait whose send failed logs the promise step but no "
+      "promise_message event",
+      [event["step"] for event in machine.events("wait_step")] == ["nudge", "promise"]
       and not machine.events("promise_message") and len(machine.events("headless_failed")) == 1,
       machine.events())
 machine.script()
 machine.run(8)
-check("rule 2: after a promise message on an open wait failed to send, nothing to do ends the wait, "
-      "as it ends a wait no promise message reached",
-      [event["why"] for event in machine.events("wait_ended")] == ["nothing to do"], machine.events())
+check("rule 2: after a promise message on an open wait failed to send, nothing to do does not end "
+      "the wait, so the dropped promise is not lost unreported",
+      not machine.events("wait_ended"), machine.events())
+machine.script(sent_ok())
+machine.run(16)
+machine.script()
+machine.run(32)
+check("rule 2: after a promise message on an open wait failed to send, the wait goes on to the "
+      "escalation and the user-alert",
+      [event["step"] for event in machine.events("wait_step")]
+      == ["nudge", "promise", "escalate", "tell_user"]
+      and any("after a nudge and an escalation" in alert["title"] for alert in machine.alerts()),
+      (machine.events("wait_step"), machine.alerts()))
 
 # The sender runs on after its SendMessage, and the agent-seat records the task before it ends.
 machine = promise_sent_on_rule_five_wait(dict(sent_ok(), sleep=2.5))
