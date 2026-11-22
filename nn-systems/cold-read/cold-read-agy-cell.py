@@ -90,7 +90,7 @@ the threshold with no file written fails, as on the other legs.
 
 AGY RUNS INSIDE THE OPERATING SYSTEM'S SANDBOX, because nothing inside agy
 keeps a reviewer from reading a credential file (user-ruled 2026-09-28; the
-rule and why are beside CREDENTIAL_DIRECTORIES in
+lists of credential files are CREDENTIAL_FILES_ON_NED_BOX and its neighbours in
 nn-systems/cold-read/cold-read-cell-common.py). Measured 2026-09-28 with
 canary files: unguarded, agy read all three canaries, on the Mac and on
 ned-box; its own `--sandbox` switch still let it read all three; inside the
@@ -99,11 +99,8 @@ both machines.
   - macOS: `sandbox-exec` with a profile that denies reading or writing the
     credential directories and any path whose name matches a credential
     file name.
-  - Linux: `bwrap` over the whole filesystem, with an empty tmpfs mounted
-    over each credential directory that exists. bwrap takes exact paths, not
-    patterns, so a file named like a credential outside those directories is
-    not covered on Linux; the directory list names every place such files
-    are known to sit.
+  - Linux: `bwrap` over the whole filesystem, with /dev/null mounted over
+    each of ned-box's credential files that exists, except agy's own login.
 Neither sandbox cuts the network, so agy's own web tool still fetches the
 pages a document links to, which the reviewer reads (user-ruled 2026-09-29,
 items 3 and 5 of the walk what-a-cold-read-reviewer-may-read-2026-09-28;
@@ -260,10 +257,7 @@ def credential_sandbox_prefix(platform: str = sys.platform, *,
             prefix += ["--bind", str(path), str(path)]
     if not network:
         prefix += ["--unshare-net"]
-    for directory in common.credential_directories_present():
-        prefix += ["--tmpfs", directory]
-    for path in common.reviewer_program_login_files(except_program="agy",
-                                                    only_present=True):
+    for path in common.ned_box_credential_and_login_files_present(except_program="agy"):
         prefix += ["--ro-bind", "/dev/null", path]
     return prefix
 

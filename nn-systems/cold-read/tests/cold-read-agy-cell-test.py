@@ -48,15 +48,14 @@ WHAT IS PINNED HERE.
   - No credential file can be read from inside the cell (user-ruled
     2026-09-28). The stub is run by the launcher inside the machine's real
     sandbox -- sandbox-exec on macOS, bwrap on Linux -- and tries to read
-    canaries in a scratch home and the repository: one in each credential
-    directory, `.config/nedsnodes/`, `gh`'s login directory `.config/gh/`,
-    `.ssh/`, `.steam/` and `nedsmessenger/secrets/`, none named like a
-    credential, so only the rule for the directory covers them; `.token` and
-    `.env` files outside them; and an ordinary file. The directory canaries
-    come back without their content everywhere, the `.token` and `.env`
-    files only on macOS, whose sandbox takes a name pattern, and the
-    ordinary file with it. The same stub run directly reads every canary,
-    which is what shows the check can fail.
+    canaries in a scratch home and the repository: files at paths ned-box's
+    list of credential files names, each inside a folder the Mac denies;
+    files in those folders that the list does not name; `.token` and `.env`
+    files outside them; and an ordinary file. The listed files come back
+    without their content everywhere; the unlisted ones and the `.token` and
+    `.env` files only on macOS, whose sandbox takes folders and name
+    patterns; and the ordinary file with its content. The same stub run
+    directly reads every canary, which is what shows the check can fail.
     Claude's and Codex's login files in the scratch home are kept out too,
     and agy's own is still read, since masking it would log agy out
     (user-ruled 2026-09-29). These cases need the real sandbox program,
@@ -444,17 +443,18 @@ def credential_files_unreadable_inside_the_real_sandbox_cases(scratch, stubs):
     REAL_SANDBOX_CASES_ONLY_FLAG."""
     # --- No credential file is readable from inside the cell -------------
     # The canaries sit in the scratch home the launcher is given as HOME.
-    # Those in the credential directories carry no credential suffix, so
-    # only the directory rule -- bwrap's --tmpfs, sandbox-exec's subpath --
-    # keeps them out. The .token and .env files outside those directories
-    # are kept out by sandbox-exec's name pattern on macOS; bwrap takes no
-    # pattern, so on Linux they stay readable.
+    # On Linux bwrap masks only the files CREDENTIAL_FILES_ON_NED_BOX names;
+    # on macOS sandbox-exec denies the credential directories and name
+    # patterns, which also hold every listed canary here.
     repository = build_scratch_repository(scratch)
     report = report_path_for(repository, "credential-files")
     scratch_home = scratch_home_for(stubs)
     canary_text = "CANARY-NOT-A-SECRET-cold-read-agy-cell-test\n"
+    listed_canaries = tuple(scratch_home / relative for relative in (
+        ".config/nedsnodes/ubuntu-claude.token", ".config/gh/hosts.yml",
+        ".ssh/id_ed25519_mac_side_action", "nedsmessenger/.env",
+        "nedsmessenger/secrets/claude-oauth-token"))
     nedschorus_canary = scratch_home / ".config" / "nedsnodes" / "probe-canary"
-    gh_canary = scratch_home / ".config" / "gh" / "hosts.yml"
     ssh_canary = scratch_home / ".ssh" / "id_canary"
     steam_canary = scratch_home / ".steam" / "probe-canary"
     nedsmessenger_canary = scratch_home / "nedsmessenger" / "secrets" / "probe-canary"
@@ -469,13 +469,12 @@ def credential_files_unreadable_inside_the_real_sandbox_cases(scratch, stubs):
     claude_login_canary = scratch_home / ".claude" / ".credentials.json"
     codex_login_canary = scratch_home / ".codex" / "auth.json"
     agy_login_canary = scratch_home / ".gemini" / "antigravity-cli" / "antigravity-oauth-token"
-    credential_canaries = (nedschorus_canary, gh_canary, ssh_canary,
-                           steam_canary, nedsmessenger_canary,
-                           token_canary, env_canary,
-                           repository_token_canary, repository_env_canary,
+    mac_only_canaries = (nedschorus_canary, ssh_canary,
+                         steam_canary, nedsmessenger_canary,
+                         token_canary, env_canary,
+                         repository_token_canary, repository_env_canary)
+    credential_canaries = (*listed_canaries, *mac_only_canaries,
                            claude_login_canary, codex_login_canary)
-    name_pattern_canaries = (token_canary, env_canary,
-                             repository_token_canary, repository_env_canary)
     for canary in (*credential_canaries, ordinary_file, agy_login_canary):
         canary.parent.mkdir(parents=True, exist_ok=True)
         canary.write_text(canary_text, encoding="utf-8")
@@ -495,7 +494,7 @@ def credential_files_unreadable_inside_the_real_sandbox_cases(scratch, stubs):
                    capture_output=True, text=True, check=False)
     direct_reads = (json.loads(direct_reads_dump.read_text(encoding="utf-8"))
                     if direct_reads_dump.is_file() else {})
-    check("the control: the stub run directly reads all eleven credential canaries",
+    check("the control: the stub run directly reads every credential canary",
           all(direct_reads.get(str(path)) == canary_text
               for path in credential_canaries),
           repr(direct_reads))
@@ -508,20 +507,21 @@ def credential_files_unreadable_inside_the_real_sandbox_cases(scratch, stubs):
                   if cell_reads_dump.is_file() else {})
     check("a cell whose agy tries the canaries still exits 0",
           result.returncode == 0, f"exit {result.returncode}; stderr={result.stderr!r}")
-    for label, canary in (("a file in .config/nedsnodes/", nedschorus_canary),
-                          ("a file in gh's login directory .config/gh/", gh_canary),
-                          ("a file in .ssh/", ssh_canary),
+    for label, canary in (*((f"the listed credential file {canary.relative_to(scratch_home)}", canary)
+                            for canary in listed_canaries),
+                          ("an unlisted file in .config/nedsnodes/", nedschorus_canary),
+                          ("an unlisted file in .ssh/", ssh_canary),
                           ("a file in .steam/", steam_canary),
-                          ("a file in nedsmessenger/secrets/", nedsmessenger_canary),
+                          ("an unlisted file in nedsmessenger/secrets/", nedsmessenger_canary),
                           ("a .token file", token_canary),
                           ("a .env file", env_canary),
                           ("a .token file in the repository", repository_token_canary),
                           ("a .env file in the repository", repository_env_canary),
                           ("Claude's login file", claude_login_canary),
                           ("Codex's login file", codex_login_canary)):
-        if canary in name_pattern_canaries and sys.platform.startswith("linux"):
-            check(f"inside the cell on Linux, {label} outside the credential directories "
-                  "is read, since bwrap denies no name pattern",
+        if canary in mac_only_canaries and sys.platform.startswith("linux"):
+            check(f"inside the cell on Linux, {label} is read, since bwrap masks only "
+                  "the listed credential files",
                   cell_reads.get(str(canary)) == canary_text, repr(cell_reads))
             continue
         check(f"inside the cell, {label} cannot be read",
