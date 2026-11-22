@@ -1000,11 +1000,14 @@ class Sweep:
                              "sentences": promise_sentences})
                 self.send(seat, verdict, promise_text, NUDGE)
             else:
-                # Logged only once sent, since no later message quotes it.
+                # The promise step is logged whether or not the send succeeds: its sentences are
+                # already logged as checked, so only the wait's escalation and user-alert can
+                # still report the promise. The promise_message is logged only once sent, since
+                # no later message quotes it.
+                if PROMISE not in wait:
+                    self.record({"event": "wait_step", "agent_seat": seat, "step": PROMISE})
                 sent = self.send(seat, verdict, promise_text, NUDGE)
                 if sent:
-                    if PROMISE not in wait:
-                        self.record({"event": "wait_step", "agent_seat": seat, "step": PROMISE})
                     self.record({"event": PROMISE_MESSAGE, "agent_seat": seat,
                                  "kinds": promise_kinds, "sentences": promise_sentences,
                                  "send_started_at": sent["send_started_at"]})
