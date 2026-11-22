@@ -825,7 +825,8 @@ def stopped_round_cases(root, repository, made, frozen_head, dated_routes, submi
           "exit 1, saying to finish the round with --check, and leaves the answers file as it was",
           code == 1 and out == ""
           and f"holds the unpushed commit {fix[:12]} on top of the frozen-head {frozen_head[:12]}, and its answers "
-          f"file {answers} answers every finding of this round, so a fix-round subagent stopped after step 5.\n"
+          f"file {answers} answers every finding of this round, so a fix-round subagent wrote every answer and its "
+          "commit.\n"
           "If that subagent is still working there, wait for it to finish.\n" + finish in err
           and "keep those commits on a branch" not in err and answers.read_text() == GOOD_ANSWERS, err + out)
     code, check_out, check_err = run(root, made, dated_routes, "--check")
@@ -840,7 +841,7 @@ def stopped_round_cases(root, repository, made, frozen_head, dated_routes, submi
         write_answers(text, seconds_after_review)
         code, out, err = run(root, repository, routes)
         check(f"stopped round: an unpushed commit with {why} keeps the refusal that names both ways on",
-              code == 1 and "holds commits that the frozen-head" in err and "stopped after step 5" not in err
+              code == 1 and "holds commits that the frozen-head" in err and "wrote every answer" not in err
               and answers.read_text() == text, err + out)
 
     answers.write_bytes(b"1. \xff\n")
@@ -879,8 +880,10 @@ def stopped_round_cases(root, repository, made, frozen_head, dated_routes, submi
           "the round with --check, and leaves the answers file as it was",
           code == 1 and out == ""
           and f"is at the frozen-head {frozen_head[:12]} with no fix-round commit, and its answers file {answers} "
-          "answers every finding of this round, so a fix-round subagent that found nothing to fix stopped after "
-          "step 5.\nIf that subagent is still working there, wait for it to finish.\n" + finish in err
+          "answers every finding of this round, so a fix-round subagent wrote every answer and made no commit.\n"
+          "If that subagent is still working there, wait for it to finish.\n"
+          "If the answers describe fixes, their commit was reset away, or if you mean to start the round again: "
+          f"delete {answers} and run this again.\n" + finish in err
           and answers.read_text() == GOOD_ANSWERS, err + out)
     code, check_out, check_err = run(root, made, dated_routes, "--check")
     check("stopped round: with no fix-round commit, the --check command that refusal names prints the message for "
