@@ -205,6 +205,10 @@ def run_walk_minutes_cases(workspace):
     backup_first = lines_for(root, f"Compare docs/walk/fixture-older-walk-minutes.md.bak, then continue approval-walk {WALK}.")
     check("two open walks, the next step naming a backup of one's walk-minutes before the other walk: the other",
           backup_first == expected, repr(backup_first))
+    editor_backup_first = lines_for(
+        root, f"Compare docs/walk/fixture-older-walk-minutes.md~, then continue approval-walk {WALK}.")
+    check("two open walks, the next step naming an editor backup of one's walk-minutes before the other walk: the other",
+          editor_backup_first == expected, repr(editor_backup_first))
     sentence_end = lines_for(root, "Read docs/walk/fixture-older-walk-minutes.md.")
     check("two open walks, the next step ending a sentence with one's walk-minutes path: that one",
           sentence_end == older_line, repr(sentence_end))
@@ -243,6 +247,17 @@ def run_walk_minutes_cases(workspace):
     first_named = lines_for(root)
     check("several waiting items, the first-named one's heading later in the walk-document: its own point",
           first_named == (approved_line(WALK, "3 of 4, Named first,", LINK, "3 of 4"),), repr(first_named))
+
+    root = workspace / "several-items-later-named-one-without-heading"
+    walk_in(root, "#next_to_present items 3 and 2 of 4\n" f"#item_page item 3 of 4 {LINK}\n",
+            document="# Fixture\n\n## Item 1 of 4: First\n\nRecommendation: one.\n\n"
+                     "## Item 3 of 4: Named first\n\nRecommendation: three.\n")
+    with contextlib.redirect_stdout(io.StringIO()):
+        one_missing = lines_for(root)
+    check("several waiting items, a later-named one with no heading: the line, without the point, then the error",
+          len(one_missing) == 1 and one_missing[0].startswith(approved_line(WALK, "3 of 4", LINK, "3 of 4"))
+          and "could not read the item's text" in one_missing[0] and "`Item 2`" in one_missing[0],
+          repr(one_missing))
 
     root = workspace / "open-and-paused"
     paused = walk_in(root, "#next_to_present item 1 of 3\n#approval_walk_paused away\n", name="fixture-paused-walk")
