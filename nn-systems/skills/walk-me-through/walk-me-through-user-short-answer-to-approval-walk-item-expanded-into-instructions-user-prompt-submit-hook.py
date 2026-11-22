@@ -208,6 +208,17 @@ closing line, so a decision-bearing line the agent wrote of its own
 between the item's text and its closing line is read as one the item
 dropped, and goes to the model.
 
+Not handled either, in how lead_ins reads a colon lead-in: a heading inside a
+quotation or list ends a top-level heading's section as a peer heading does,
+and a quoted colon heading reaches past its quotation; an HTML comment
+between a lead-in and what it introduces, or at the end of the lead-in's own
+line, hides the lead-in; and the text after `The new text:` loses emphasis
+characters that open it, as `_reset` read as `reset`. Each can pass a
+reversed line with no model call or send an unchanged one to the model,
+which only asks the user to answer again. Both texts under one colon heading,
+one as `#new Keep rows.` and one as `If you approve, the new text: Keep
+rows.`, go to the model, since the heading's words come before the label.
+
 WHEN READING THE WALK STATE FAILS, such as a minutes file that is not UTF-8,
 the first line says so and why, and the text gives the answer's lines both for
 an open approval-walk and for none. When an A, AO, Aa or D answer reaches an item
@@ -1176,19 +1187,18 @@ def rendered_blocks(markdown, parser, env):
     return blocks
 
 
-def shown_units(markdown, parser, env):
+def shown_units(markdown, parser, env, blocks, found):
     """[(first line, line after the last, words)] for each unit of markdown a decision-bearing line can be compared
-    with, in order of first line: each of rendered_blocks' blocks, its lines joined, and each list and quotation
-    whole, as shown_words gives it, since a bare `#new` mark's text can be a whole list or quotation. A unit has the
-    words of each of lead_ins' lead-ins introducing it first, and keeps its own first line, so that each unit below
-    one lead-in is below the one before it. A unit holding ANSWER_LETTERS_TEXT, a closing line, or no words is left
-    out."""
+    with, in order of first line: each of blocks, rendered_blocks' blocks of markdown, its lines joined, and each list
+    and quotation whole, as shown_words gives it, since a bare `#new` mark's text can be a whole list or quotation. A
+    unit has the words of each of found, lead_ins' lead-ins of markdown, introducing it first, and keeps its own first
+    line, so that each unit below one lead-in is below the one before it. A unit holding ANSWER_LETTERS_TEXT, a closing
+    line, or no words is left out."""
     text = load_walk_finder().approval_walk_text_with_approval_walk_item_hashtag_lines_removed(markdown)
     source_lines = text.split("\n")
-    units = [(*block.span, " ".join(block.lines)) for block in rendered_blocks(markdown, parser, env)]
+    units = [(*block.span, " ".join(block.lines)) for block in blocks]
     units += [(*token.map, shown_words("\n".join(source_lines[slice(*token.map)]), parser, env))
               for token in parser.parse(text, env) if token.map and token.type in CONTAINER_BLOCK_TYPES]
-    found = lead_ins(markdown, parser, env)
     units = [(first, last, with_lead_ins(first, last, found, words)) for first, last, words in units]
     return sorted(unit for unit in units if ANSWER_LETTERS_TEXT not in unit[2] and comparable_words(unit[2]))
 
@@ -1209,15 +1219,15 @@ def new_text_as_shown(line):
     return f"{LEAD_INS_BEFORE_A_LINE_SHOWN_WITHOUT_ITS_MARK[f'`{mark[1].lower()}` line']} {marked_text(mark)}"
 
 
-def decision_bearing_lines(body, parser, env, has_parts):
+def decision_bearing_lines(blocks, blocks_lead_ins, has_parts):
     """[(the line's name, as a refusal names it; its decision-bearing text; the words of the unit, of shown_units'
-    units, that holds it, which a refusal quotes as the user saw it)] for the item body's Markdown, as the module
-    docstring's AN ANSWER TO A VERSION THE USER MAY NOT HAVE SEEN says, read line by line as rendered. A text and its
-    unit have the words of each of lead_ins' lead-ins introducing the line's block first, so that `> #new X` shown
-    below "If you disapprove, the new text:" is not the same line as the item's `#new X`."""
+    units, that holds it, which a refusal quotes as the user saw it)] for an item body's Markdown, given as blocks,
+    its rendered_blocks, and blocks_lead_ins, its lead_ins, as the module docstring's AN ANSWER TO A VERSION THE USER
+    MAY NOT HAVE SEEN says, read line by line as rendered. A text and its unit have the words of each lead-in
+    introducing the line's block first, so that `> #new X` shown below "If you disapprove, the new text:" is not the
+    same line as the item's `#new X`."""
     found = []
-    blocks_lead_ins = lead_ins(body, parser, env)
-    for block in rendered_blocks(body, parser, env):
+    for block in blocks:
         def led_in(text, block=block):
             return with_lead_ins(*block.span, blocks_lead_ins, text)
         unit = led_in(" ".join(block.lines))
@@ -1546,9 +1556,13 @@ def unseen_item_lines(answer, walk, transcript_path):
         # The message's copy is read as holding parts on its own count, so a part the item dropped is still read.
         has_parts = number in walk.parts or bool(part_numbers(part_starts(parser.parse(copy, {})), 0,
                                                               copy.count("\n") + 1))
-        checks = decision_line_checks(decision_bearing_lines(body, parser, env, has_parts),
-                                      decision_bearing_lines(copy, parser, message_env, has_parts),
-                                      shown_units(copy, parser, message_env), shown_units(body, parser, env))
+        # Each text is parsed for its blocks and lead-ins once, as this runs on every prompt.
+        body_reading = (rendered_blocks(body, parser, env), lead_ins(body, parser, env))
+        copy_reading = (rendered_blocks(copy, parser, message_env), lead_ins(copy, parser, message_env))
+        checks = decision_line_checks(decision_bearing_lines(*body_reading, has_parts),
+                                      decision_bearing_lines(*copy_reading, has_parts),
+                                      shown_units(copy, parser, message_env, *copy_reading),
+                                      shown_units(body, parser, env, *body_reading))
         if checks:
             misses[number] = (timestamp, checks)
     pairs = [check for _, checks in misses.values() for check in checks if None not in check]
