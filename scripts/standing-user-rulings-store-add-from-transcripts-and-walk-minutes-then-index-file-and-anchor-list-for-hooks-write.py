@@ -299,7 +299,7 @@ SOURCE_PATH_MOVE_FAILED_INSTRUCTIONS = (
     OWNER_REPORT_INSTRUCTION,
 )
 NOT_THE_USERS_WORDS_CHECK_FAILED_INSTRUCTIONS = (
-    "No entry's status was changed; the next run checks every user-words entry again.",
+    "No entry's status was changed; the next run checks every stored message of the user's again.",
     OWNER_REPORT_INSTRUCTION,
 )
 OUTPUT_FAILED_INSTRUCTIONS = (
@@ -803,7 +803,7 @@ def run(log_store, agents_directory, repository_checkout):
             set_count, cleared_count = user_words_entries_not_the_users_words_status_set_and_clear(connection)
     except sqlite3.Error as error:
         failures_with_instructions.append((FAILED_LINE.format(
-            what="checking again which user-words entries are a program's prompt", error=error),
+            what="checking again which stored messages of the user's are a program's prompt", error=error),
             NOT_THE_USERS_WORDS_CHECK_FAILED_INSTRUCTIONS))
     minutes_paths = (sorted(agents_directory.glob(f"*/docs/walk/{WALK_MINUTES_GLOB}"))
                      + sorted((log_store / SHIPPED_WALK_DIRECTORY_NAME).glob(WALK_MINUTES_GLOB)))

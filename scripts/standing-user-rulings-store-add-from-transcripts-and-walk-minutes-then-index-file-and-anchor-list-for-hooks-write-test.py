@@ -161,6 +161,14 @@ class Case:
         return (self.store_directory / program.ANCHOR_LIST_FILE_NAME).read_text().splitlines()
 
 
+OWNER_REPORT_TEXT = ("If it fails the same way at the next run, send prime-intellect, the agent-seat that owns "
+                     "this program, the FAILED line above with SendMessage.")
+SOURCE_FAILED_TEXT = ("The other transcripts and walk-minutes were read, and what they held was added; each file "
+                      "a FAILED line above names is read again from where it stopped at the next run.")
+MOVE_FAILED_TEXT = "No stored source path was changed; the next run tries the move again."
+CHECK_FAILED_TEXT = "No entry's status was changed; the next run checks every stored message of the user's again."
+
+
 def described(result):
     return f"exit {result.returncode}; stdout {result.stdout!r}; stderr {result.stderr!r}"
 
@@ -487,7 +495,7 @@ with tempfile.TemporaryDirectory() as directory:
           result.returncode == 1 and f"FAILED: transcript {blocked}:" in result.stderr
           and "read again from where it stopped at the next run" in result.stderr
           and "send prime-intellect" in result.stderr
-          and program.SOURCE_PATH_MOVE_FAILED_INSTRUCTIONS[0] not in result.stderr
+          and MOVE_FAILED_TEXT not in result.stderr
           and [entry[1] for entry in case.entries()] == ["readable"]
           and f"transcript {blocked}" in case.query("SELECT failures FROM index_program_runs")[0][0],
           described(result))
@@ -506,7 +514,7 @@ with tempfile.TemporaryDirectory() as directory:
     blocked.chmod(0o644)
     check("a walk-minutes file that cannot be read is reported FAILED, exit 1, and the others are still added",
           result.returncode == 1 and f"FAILED: walk-minutes {blocked}:" in result.stderr
-          and program.SOURCE_FAILED_INSTRUCTIONS[0] in result.stderr
+          and SOURCE_FAILED_TEXT + "\n" + OWNER_REPORT_TEXT + "\n" in result.stderr
           and [entry[1] for entry in case.entries()] == ["Open (user-ruled 2026-10-17)."], described(result))
 with tempfile.TemporaryDirectory() as directory:
     case = Case(directory)
@@ -872,10 +880,8 @@ with tempfile.TemporaryDirectory() as directory:
         program.user_words_entries_not_the_users_words_status_set_and_clear = real_check
     check("a check that fails is reported FAILED, exit 1, and rolls back, leaving every entry's state as it was",
           exit_code == 1
-          and "FAILED: checking again which user-words entries are a program's prompt: disk I/O error"
-              in stderr.getvalue()
-          and "\n".join(program.NOT_THE_USERS_WORDS_CHECK_FAILED_INSTRUCTIONS) in stderr.getvalue()
-          and program.SOURCE_FAILED_INSTRUCTIONS[0] not in stderr.getvalue()
+          and stderr.getvalue() == "FAILED: checking again which stored messages of the user's are a program's "
+                                   "prompt: disk I/O error\n" + CHECK_FAILED_TEXT + "\n" + OWNER_REPORT_TEXT + "\n"
           and states(case) == [("kept words", "standing"), (prompt, "standing")],
           f"exit {exit_code}: {stderr.getvalue()} {states(case)}")
 
@@ -1021,8 +1027,35 @@ with tempfile.TemporaryDirectory() as directory:
     check("when moving stored source paths fails, the FAILED line is followed by the move's own follow-up text, "
           "which says the stored paths are unchanged, and by no unreadable file's text",
           stderr.getvalue() == "FAILED: moving stored source paths to the names the project rename gave them: "
-                               "database is locked\n" + "\n".join(program.SOURCE_PATH_MOVE_FAILED_INSTRUCTIONS) + "\n",
+                               "database is locked\n" + MOVE_FAILED_TEXT + "\n" + OWNER_REPORT_TEXT + "\n",
           stderr.getvalue())
+
+# Failures from two groups in one run: each group's FAILED lines come once, right before that group's own text.
+with tempfile.TemporaryDirectory() as directory:
+    case = Case(directory)
+    blocked = case.transcript("mac", [human("unreadable", "2026-10-22T00:00:00Z")], name="blocked.jsonl")
+    blocked.chmod(0)
+    real_update = program.source_paths_moved_by_project_rename_update
+
+    def failing_update(connection):
+        raise sqlite3.OperationalError("database is locked")
+
+    program.source_paths_moved_by_project_rename_update = failing_update
+    stdout, stderr = io.StringIO(), io.StringIO()
+    try:
+        with contextlib.redirect_stdout(stdout), contextlib.redirect_stderr(stderr):
+            exit_code = program.run(case.log_store, case.agents, case.checkout)
+    finally:
+        program.source_paths_moved_by_project_rename_update = real_update
+        blocked.chmod(0o644)
+    check("a run with a move failure and an unreadable transcript prints each FAILED line once, followed by its own "
+          "follow-up text and no other",
+          exit_code == program.EXIT_SOURCE_OR_OUTPUT_FAILED
+          and stderr.getvalue() == "FAILED: moving stored source paths to the names the project rename gave them: "
+                                   "database is locked\n" + MOVE_FAILED_TEXT + "\n" + OWNER_REPORT_TEXT + "\n"
+                                   + f"FAILED: transcript {blocked}: [Errno 13] Permission denied: '{blocked}'\n"
+                                   + SOURCE_FAILED_TEXT + "\n" + OWNER_REPORT_TEXT + "\n",
+          f"exit {exit_code}: {stderr.getvalue()!r}")
 
 old_issue = program.GHI_REFERENCE.search(f"see https://github.com/{program.repository_names.OLD_REPOSITORY}/issues/12 now")
 old_pull = program.PULL_REQUEST_REFERENCE.search(f"see https://github.com/{program.repository_names.OLD_REPOSITORY}/pull/34 now")
