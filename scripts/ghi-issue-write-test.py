@@ -2961,6 +2961,23 @@ def run_edit_cases(scratch: Path):
                            directory="nn-systems/statusline"),
               scratch)[2] == 570)
 
+    # nn-systems/general-tools/reusable-prompt-file-recognized-by-name-ending-
+    # and-not-ghi-md-common.py takes a GHI-MD by issue_number_in_file_name, so
+    # validate_edit must ask the same function or the two can disagree.
+    original_rule = tool.issue_number_in_file_name
+    tool.issue_number_in_file_name = lambda path: 572
+    try:
+        followed = tool.validate_edit(
+            filed_ghi_md(scratch, name="v2-follows-the-shared-rule.md"),
+            scratch)[2] == 572
+    except tool.Refused:
+        followed = False
+    finally:
+        tool.issue_number_in_file_name = original_rule
+    check("validate_edit takes a file's issue number from "
+          "issue_number_in_file_name, the rule the reusable-prompt rule asks",
+          followed)
+
     for case_name, target in [
             ("a file not named for an issue is refused",
              filed_ghi_md(scratch, name="notes.md")),
