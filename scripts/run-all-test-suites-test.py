@@ -4792,12 +4792,13 @@ with tempfile.TemporaryDirectory() as scratch:
 
 # A checkout committed before runs read a list from it: the nightly mutation pass tests such
 # checkouts with main's module.
-own_runner_source = PROGRAM.read_text(encoding="utf-8")
-
-
-def own_list_assignment(name):
-    return re.search(rf"^{name} = \{{\}}\n|^{name} = \{{\n.*?^\}}\n", own_runner_source,
-                     re.MULTILINE | re.DOTALL).group(0)
+def checkout_runner_source(declarations):
+    """A checkout's scripts/run-all-test-suites.py holding each list the runner reads: the
+    declaration given for a name, none for a name given None, else the runner's own list."""
+    return "".join(
+        declarations[name] or "" if name in declarations
+        else f"{name} = {module.SUITE_SANDBOX_LISTS_OF_THIS_PROGRAM[name]!r}\n"
+        for name in module.SUITE_SANDBOX_LIST_NAMES_READ_FROM_CHECKOUT_UNDER_TEST)
 
 
 def lists_read_from_checkout_whose_runner_is(source):
@@ -4816,10 +4817,9 @@ own_real_claude_list = module.SUITE_SANDBOX_LISTS_OF_THIS_PROGRAM[REAL_CLAUDE]
 own_real_claude_suite = "nn-systems/general-tools/tests/agent-seat-worktree-create-with-owner-file-claude-code-worktree-create-hook-real-claude-code-test.py"
 older_checkout_sources = (
     ("assigns the real-claude list the set it was before it became a dict",
-     own_runner_source.replace(
-         own_list_assignment(REAL_CLAUDE),
-         "SUITES_THAT_RUN_THE_REAL_CLAUDE_CLI = {\n    \"scripts/an-older-real-claude-test.py\",\n}\n")),
-    *((f"has no {name} list", own_runner_source.replace(own_list_assignment(name), ""))
+     checkout_runner_source({REAL_CLAUDE: "SUITES_THAT_RUN_THE_REAL_CLAUDE_CLI = {\n    "
+                                           "\"scripts/an-older-real-claude-test.py\",\n}\n"})),
+    *((f"has no {name} list", checkout_runner_source({name: None}))
       for name in module.SUITE_SANDBOX_LIST_NAMES_READ_FROM_CHECKOUT_UNDER_TEST),
 )
 check("the runner's own real-claude list names the trial against the installed Claude Code, "
@@ -4844,9 +4844,9 @@ for how, source in older_checkout_sources:
 
 # A current checkout's list that this program cannot read is refused, not taken for an older
 # checkout's missing list.
-annotated = lists_read_from_checkout_whose_runner_is(own_runner_source.replace(
-    own_list_assignment(REAL_CLAUDE),
-    'SUITES_THAT_RUN_THE_REAL_CLAUDE_CLI: dict = {"scripts/the-checkouts-own-test.py": "its reason"}\n'))
+annotated = lists_read_from_checkout_whose_runner_is(checkout_runner_source({
+    REAL_CLAUDE:
+        'SUITES_THAT_RUN_THE_REAL_CLAUDE_CLI: dict = {"scripts/the-checkouts-own-test.py": "its reason"}\n'}))
 check("a checkout that assigns the real-claude list with a type annotation gets its own list",
       isinstance(annotated, dict)
       and annotated[REAL_CLAUDE] == {"scripts/the-checkouts-own-test.py": "its reason"}, annotated)
@@ -4854,7 +4854,7 @@ for how, replacement in (
         ("binds the real-claude list by unpacking", "SUITES_THAT_RUN_THE_REAL_CLAUDE_CLI, _ = {}, {}\n"),
         ("assigns the real-claude list something not literal", "SUITES_THAT_RUN_THE_REAL_CLAUDE_CLI = dict()\n")):
     refused = lists_read_from_checkout_whose_runner_is(
-        own_runner_source.replace(own_list_assignment(REAL_CLAUDE), replacement))
+        checkout_runner_source({REAL_CLAUDE: replacement}))
     check(f"a checkout that {how} is refused, naming the list, rather than given the runner's "
           f"own list",
           isinstance(refused, module.CouldNotRun) and REAL_CLAUDE in str(refused), refused)

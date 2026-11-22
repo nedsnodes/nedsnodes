@@ -439,7 +439,8 @@ if linux_only_cases_run_here("the report's sandbox lines"):
             ("is not UTF-8", b"\xff\n", "is not UTF-8 text (UnicodeDecodeError"),
             ("is not valid Python", "SUITES_RUN_WITHOUT_ANY_SANDBOX = {\n",
              "is not valid Python"),
-            ("lacks one list", "SUITES_RUN_WITHOUT_ANY_SANDBOX = {}\n"
+            ("binds a list by unpacking", "SUITES_RUN_WITHOUT_ANY_SANDBOX = {}\n"
+             "SUITES_GIVEN_A_COPY_ON_WRITE_OVERLAY_OF_THE_REPOSITORY_GIT_DIRECTORY, _ = {}, 0\n"
              "SUITES_THAT_RUN_THE_REAL_CLAUDE_CLI = {}\n"
              "SUITES_WHOSE_TEST_SANDBOX_SHARES_THE_MACHINE_NETWORK = {}\n",
              "does not assign "
@@ -508,6 +509,28 @@ if linux_only_cases_run_here("the report's sandbox lines"):
                           "stop and tell the user" in completed.stderr
                       and "chmod" not in completed.stderr and "mv " not in completed.stderr,
                       completed.stderr[-1200:])
+
+        # An older checkout's runner lacks a list a later runner reads; the run gets this
+        # runner's own list for it and runs the suites.
+        lacking = scratch / "lacks one list"
+        lacking.mkdir()
+        repository = scratch_checkout(lacking, ["a-test.py"])
+        (repository / "scripts").mkdir(exist_ok=True)
+        (repository / "scripts" / "run-all-test-suites.py").write_text(
+            "SUITES_RUN_WITHOUT_ANY_SANDBOX = {}\n"
+            "SUITES_THAT_RUN_THE_REAL_CLAUDE_CLI = {}\n"
+            "SUITES_WHOSE_TEST_SANDBOX_SHARES_THE_MACHINE_NETWORK = {}\n")
+        subprocess.run(["git", "-C", str(repository), "add", "-A"], check=True)
+        subprocess.run(["git", "-C", str(repository), "-c", "user.name=t", "-c",
+                        "user.email=t@t", "commit", "-qm", "lacks one list"], check=True)
+        completed, report = run_runner(
+            lacking, repository, f"{fake_bin}{os.pathsep}{os.environ.get('PATH', '')}")
+        check("when the checkout's scripts/run-all-test-suites.py lacks one list, the run takes "
+              "this runner's own list for it and runs the suites, exit 0",
+              completed.returncode == 0
+              and "does not assign" not in completed.stderr
+              and (lacking / "logs" / "a-test.py.log").exists(),
+              (completed.returncode, completed.stderr[-600:], report[-600:]))
 
         try:
             runner.checkout_top_directory(str(repository / "scripts"))
