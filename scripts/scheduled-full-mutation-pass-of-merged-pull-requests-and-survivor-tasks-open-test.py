@@ -1204,6 +1204,9 @@ def run_first_pass_and_second_pass_cases():
 
         for case_name, schedule_file_text in [
                 ("names no such job", json.dumps({"jobs": []})),
+                ("names the job twice", json.dumps({"jobs": [
+                    {"name": job.PROGRAM, "on": {"ned-box": {"schedule": "5 13 * * *"}}},
+                    {"name": job.PROGRAM, "on": {"ned-box": {"schedule": "30 0 * * *"}}}]})),
                 ("is not JSON", "not JSON"),
                 ("gives a schedule that is not daily", json.dumps({"jobs": [{
                     "name": job.PROGRAM, "on": {"ned-box": {"schedule": "30 0 * * 1"}}}]})),
@@ -1276,14 +1279,6 @@ def run_first_pass_and_second_pass_cases():
         due = job.unix_time_cron_next_starts_this_program_on_ned_box(
             scheduled_jobs_file_with_schedule(fixture, "5 13 * * *"), local(11, 11, 12, 0))
         check("cron's next start of the job reads the hour and the minute from the schedule",
-              due == local(11, 11, 13, 5), (due, local(11, 11, 13, 5)))
-        named_twice = fixture.root / "scheduled-jobs-naming-the-job-twice.json"
-        named_twice.write_text(json.dumps({"jobs": [
-            {"name": job.PROGRAM, "on": {"ned-box": {"schedule": "5 13 * * *"}}},
-            {"name": job.PROGRAM, "on": {"ned-box": {"schedule": "30 0 * * *"}}}]}))
-        due = job.unix_time_cron_next_starts_this_program_on_ned_box(
-            named_twice, local(11, 11, 12, 0))
-        check("cron's next start of the job reads the first job of that name in the file",
               due == local(11, 11, 13, 5), (due, local(11, 11, 13, 5)))
         # The zone is set here so that the case does not depend on the zone the suites run in.
         zone_before = os.environ.get("TZ")

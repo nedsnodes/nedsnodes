@@ -1349,11 +1349,10 @@ def test_one_merge(arguments, state, state_file, merge, record, record_citation,
 def unix_time_cron_next_starts_this_program_on_ned_box(scheduled_jobs_file, now):
     """The first time after `now`, in ned-box's local time as cron reads the schedule, at which
     cron starts this program. Raises StepFailed when the scheduled jobs file cannot be read or
-    does not give this program a schedule of the form `<minute> <hour> * * *`."""
+    does not give this program exactly one schedule, of the form `<minute> <hour> * * *`."""
     try:
         jobs = json.loads(Path(scheduled_jobs_file).read_text(encoding="utf-8"))["jobs"]
-        schedule = [job["on"]["ned-box"]["schedule"] for job in jobs
-                    if job["name"] == PROGRAM][0]
+        schedule, = [job["on"]["ned-box"]["schedule"] for job in jobs if job["name"] == PROGRAM]
         minute, hour, *every_day = schedule.split()
         if every_day != ["*", "*", "*"]:
             raise ValueError(f"the schedule {schedule!r} is not `<minute> <hour> * * *`")
@@ -1370,7 +1369,8 @@ def unix_time_cron_next_starts_this_program_on_ned_box(scheduled_jobs_file, now)
     today = time.localtime(now)
     for day in (today.tm_mday, today.tm_mday + 1):
         # mktime reads a day past the month's end as a day of the next month.
-        due = time.mktime((today.tm_year, today.tm_mon, day, hour, minute, 0, 0, 0, -1))  # pragma: no mutate, mktime ignores the weekday and the day of the year and reads any negative is-DST flag as unknown; the test's summer time case fails a flag of 0
+        due = time.mktime((today.tm_year, today.tm_mon, day, hour, minute, 0,
+                           0, 0, -1))  # pragma: no mutate, mktime ignores the weekday and the day of the year and reads any negative is-DST flag as unknown; the test's summer time case fails a flag of 0
         if due > now:
             break
     return due
