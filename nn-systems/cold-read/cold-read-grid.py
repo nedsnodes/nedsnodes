@@ -5,17 +5,17 @@ One invocation = one review: eight cold-read-cells launched in parallel, seven
 for the two passes and the eighth for Question 4 (see below) -- the
 defect-hunt pass in five ({deep, second-strongest-model} x {claude, codex}, where
 second-strongest-model is the agent-binary's second-strongest model, and Gemini
-Argon at high on agy) and the terminology pass in two (deep x {claude, codex})
+Carbon at high on agy) and the terminology pass in two (deep x {claude, codex})
 -- every report saved into a cold-read-record named
 `cold-read-records/<file stem>-<YYYY-MM-DD>/`, or `SKILL-<skill name>-<YYYY-MM-DD>/` for a skill
 (a -2, -3 suffix for a second read of the document that day, the first
 free both in this checkout and in the log-store), progress and next-step
 instructions printed for the reviewing agent as reviews land. A report of the
 two passes is named `<runtime>-<hunt|terminology>-<cold-read-tier>.md`, or for a cell the grid
-gives a model, `<runtime>-<hunt|terminology>-<model>.md`. The Argon cell runs on
+gives a model, `<runtime>-<hunt|terminology>-<model>.md`. The Carbon cell runs on
 agy's one cold-read-tier, `fast`, with the model the grid gives it,
-`gemini-4-argon-high`, and the effort `high`, so its report is
-`agy-hunt-gemini-4-argon-high.md`; its stamp says tier=fast beside
+`gemini-4-carbon-high`, and the effort `high`, so its report is
+`agy-hunt-gemini-4-carbon-high.md`; its stamp says tier=fast beside
 the model and effort it ran with.
 
 Usage:
@@ -258,14 +258,14 @@ class GridCell(typing.NamedTuple):
     effort: typing.Optional[str]
 
 
-# agy serves only the fast tier, so Argon runs on it with the model and effort given here.
-GEMINI_ARGON_DEFECT_HUNT_CELL = GridCell(
-    "agy", "defect-hunt", "fast", "gemini-4-argon-high", "high")
+# agy serves only the fast tier, so Carbon runs on it with the model and effort given here.
+GEMINI_CARBON_DEFECT_HUNT_CELL = GridCell(
+    "agy", "defect-hunt", "fast", "gemini-4-carbon-high", "high")
 GRID_CELLS = tuple(
     GridCell(runtime, cell_pass, tier, None, effort)
     for runtime in ("claude", "codex")
     for cell_pass, tier, effort in GRID_CELL_ROSTER
-) + (GEMINI_ARGON_DEFECT_HUNT_CELL,)
+) + (GEMINI_CARBON_DEFECT_HUNT_CELL,)
 
 # Logs, reports and captures record observations; cold reads must not revise that evidence.
 UNREVIEWABLE_TARGET_GENRE_SUFFIXES = ("-log", "-report", "-capture")
