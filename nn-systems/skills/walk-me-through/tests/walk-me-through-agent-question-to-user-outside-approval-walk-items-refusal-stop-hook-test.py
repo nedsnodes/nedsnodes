@@ -841,6 +841,15 @@ def test_the_shown_item_and_quotes_from_it_are_not_checked():
                  numbered.run(model="yes"))
 
 
+def test_a_one_item_units_lines_after_its_answer_line_are_not_the_shown_item():
+    after_answer = "Should the page also link the glossary?"
+    case = Case(document=WALK_DOCUMENT.replace(f"{ANSWER_LINE}\n\n## Item 3",
+                                               f"{ANSWER_LINE}\n\n{after_answer}\n\n## Item 3"))
+    case.reply(f"{ITEM_2_SHOWN}\n\n{after_answer}")
+    check_blocked("a line after a one-item unit's answer line is not shown by the reply that shows the item",
+                  case.run(model="yes"), f'"{after_answer}"')
+
+
 def test_a_withdrawn_versions_lines_under_a_shared_heading_are_not_the_shown_items():
     document = (f"# The poem page: approval-walk\n\n## Items 2 and 3 of 10: the poem page\n\n"
                 f"**Item 2: where it lives.** Should I keep the poem page in the wiki?\n\n"
@@ -904,6 +913,21 @@ def test_an_item_under_a_shared_heading_is_shown_by_its_own_opening_or_item_n_of
     case.reply(f"## Item 3 of 10: its name\n\n{lead_in}\n\n{closing}")
     check_blocked("an item shown under its own heading does not show its unit's lines before the first item's opening",
                   case.run(model="yes"), f'"{lead_in}"')
+    earlier_withdrawn_version = (f"## Item 1 of 10: the page's name\n\nShould I use the name?\n\n{ANSWER_LINE}\n\n"
+                                 f"#### Withdrawn version 1 of item 1\n\nShould I drop the name?\n\n")
+    case = Case(minutes="#next_to_present item 3 of 10",
+                document=document.replace("## Items 2 and", earlier_withdrawn_version + "## Items 2 and", 1)
+                .replace("the poem page?\n\n", f"the poem page?\n\n{lead_in}\n\n", 1))
+    case.reply(f"## Items 2 and 3 of 10: the poem page?\n\n{lead_in}\n\n{item_3_opening}\n\n{closing}")
+    check_silent("a Withdrawn version above a shared unit does not end the unit's lines before its first item's opening",
+                 case.run(model="yes"))
+    other_item_label = "**Item 1: the page's name.** Its name holds for both items."
+    case = Case(minutes="#next_to_present item 3 of 10",
+                document=document.replace("the poem page?\n\n",
+                                          f"the poem page?\n\n{other_item_label}\n\n{lead_in}\n\n", 1))
+    case.reply(f"## Items 2 and 3 of 10: the poem page?\n\n{lead_in}\n\n{item_3_opening}\n\n{closing}")
+    check_silent("an opening of an item outside a shared unit, before its first item's opening, does not end the unit's "
+                 "lines before it", case.run(model="yes"))
     case = Case(minutes="#next_to_present item 3 of 10", document=document)
     case.reply(f"## Items 2 and 3 of 10: the poem page?\n\n{item_3_question}\n\n{closing}")
     check_silent("the shared heading alone shows each item of its unit, with no opening or own heading shown",
