@@ -130,6 +130,12 @@ def run_unit_cases(scratch):
     check("a sub-step's page holds the sub-step alone, its ### heading as the <h1>",
           result.returncode == 0 and "<h1>Item 4.1 of 9: the filter's default</h1>" in page
           and "Off by default." in page and "A filter would hide" not in page, page)
+    setext_sub_step = ("# A walk\n\n# Item 4 of 9: a filter\n\nA filter would hide old rows.\n\n"
+                       "Item 4.1 of 9: Recommendation: keep rows\n---\n\nOff by default.\n")
+    result, page = built(scratch, "4", document=setext_sub_step)
+    check("an item's page keeps a setext sub-step's heading a heading, not a paragraph a hook reads as a decision line",
+          result.returncode == 0 and "<h2>Item 4.1 of 9: Recommendation: keep rows</h2>" in page
+          and "Off by default." in page, page)
     result, page = built(scratch, "6")
     check("an item that shares a heading keeps its own lines under that heading",
           result.returncode == 0 and "<h1>Items 5 and 6 of 9: two small corrections</h1>" in page
