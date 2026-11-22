@@ -443,7 +443,9 @@ RECONSIDERED_MARKER_NAME = ".ghi-issue-write-reconsidered"
 GH_NO_SUCH_ISSUE_STDERR_FRAGMENT = "could not resolve to an issue"
 # A file name may be 255 bytes. The longest name built on a slug is the
 # log-store's `<number>-<slug>-proposed-improvements-or-changes-ghi-guide-agent-
-# <YYYY-MM-DD>-<n>.md`, whose other parts take up to 73 characters.
+# <YYYY-MM-DD>-<n>.md`, whose other parts take up to 73 characters. A design's
+# `<slug>.<kind>.design` stands where `<slug>` does, so its slug is cut shorter
+# by the ending's length.
 GHI_MD_FILE_NAME_SLUG_CHARACTER_LIMIT = 180
 GH_TIMEOUT_SECONDS = 120
 # Beyond the pre-push conflict check's own limit: the hook's other checks and
@@ -781,11 +783,16 @@ def slug(title: str) -> str:
     text = re.sub(r"['\u2019]s\b", "", text)
     text = re.sub(r"['\u2019]", "", text)
     joined = "-".join(re.sub(r"[^a-z0-9]+", " ", text).split())
-    if len(joined) > GHI_MD_FILE_NAME_SLUG_CHARACTER_LIMIT:
-        head = joined[:GHI_MD_FILE_NAME_SLUG_CHARACTER_LIMIT + 1]  # pragma: no mutate, the limit is even, so ^ 1 gives + 1
-        joined = (head.rsplit("-", 1)[0] if "-" in head
-                  else joined[:GHI_MD_FILE_NAME_SLUG_CHARACTER_LIMIT])
-    return joined or "issue"
+    return _slug_cut_within(joined, GHI_MD_FILE_NAME_SLUG_CHARACTER_LIMIT) or "issue"
+
+
+def _slug_cut_within(joined: str, limit: int) -> str:
+    """`joined` cut at the last hyphen within `limit` characters, or at
+    `limit` when no hyphen is there."""
+    if len(joined) <= limit:
+        return joined
+    head = joined[:limit + 1]  # pragma: no mutate, 180 less the naming page's .tool.design or .system.design ending is even, so ^ 1 gives + 1
+    return head.rsplit("-", 1)[0] if "-" in head else joined[:limit]
 
 
 def placeholder_body(key: str) -> str:
@@ -1805,9 +1812,11 @@ DESIGN_KIND_ENDING = re.compile(r"(\.[a-z]+\.design)\.md$")
 def _landed_name_without_number(title: str, source_name: str) -> str:
     """The landed file's stem after `<number>-`: the name a ruling question
     raised before the issue has a number is saved under, so the lookup by the
-    landed name finds it."""
+    landed name finds it. A design's slug and ending together stay within
+    GHI_MD_FILE_NAME_SLUG_CHARACTER_LIMIT."""
     kind_ending = DESIGN_KIND_ENDING.search(source_name)
-    return f"{slug(title)}{kind_ending.group(1) if kind_ending else ''}"
+    ending = kind_ending.group(1) if kind_ending else ""
+    return _slug_cut_within(slug(title), GHI_MD_FILE_NAME_SLUG_CHARACTER_LIMIT - len(ending)) + ending
 
 
 def create_ghi_landing_path_for_ghi_md(number, title: str, source_name: str) -> str:

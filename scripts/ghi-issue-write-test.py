@@ -1223,7 +1223,43 @@ def run_cases(scratch: Path):
           == "docs/issues/9001-widget-tool-design.system.design.md"
           and tool.create_ghi_landing_path_for_ghi_md(570, land_title, "statusline-drops-branch.md") == land_destination,
           (design_returned, design_lines))
+
+    printed = io.StringIO()
+    with contextlib.redirect_stdout(printed):
+        code = tool.main(["create", str(design_source), "--dry-run", "--repo", REPO])
+    land_line = [line for line in printed.getvalue().splitlines()
+                 if line.startswith("would land at: ")]
+    check("create --dry-run of a design names the landed path with its .tool.design.md ending",
+          code == 0 and len(land_line) == 1
+          and land_line[0].startswith("would land at: docs/issues/<number>-")
+          and land_line[0].endswith(".tool.design.md"),
+          (code, printed.getvalue()))
     design_source.unlink()
+
+    # The longest name built on a slug is a ruling question's log-store file,
+    # named after the GHI-MD's landed name, which for a design carries its ending.
+    budget_store = log_store_at(scratch / "design-name-budget-store")
+    longest_title = " ".join(["word"] * 60)
+    for ending in (".tool.design", ".system.design"):
+        stem = tool._landed_name_without_number(longest_title, f"widget{ending}.md")
+        landed_name = Path(tool.create_ghi_landing_path_for_ghi_md(99999, longest_title,
+                                                                   f"widget{ending}.md")).name
+        edit_prefix = tool.ghi_guide_agent_prefixes(landed_name, 99999)[0]
+        longest_log_store_name = (f"{tool.ghi_guide_agent_file_name_head(edit_prefix)}"
+                                  "2026-11-02-99.md")
+        try:
+            written_name = tool.write_ghi_guide_agent_file_to_log_store(
+                edit_prefix, "question\n", "2026-11-02", Recorder({}))
+            write_failure = None
+        except OSError as failure:
+            written_name, write_failure = None, failure
+        check(f"a design's longest ruling-question log-store name fits a file name, for {ending}",
+              stem.endswith(ending)
+              and len(stem) <= tool.GHI_MD_FILE_NAME_SLUG_CHARACTER_LIMIT
+              and longest_title.replace(" ", "-").startswith(stem[:-len(ending)] + "-")
+              and len(longest_log_store_name.encode("utf-8")) <= 255
+              and write_failure is None and (budget_store / written_name).is_file(),
+              (len(stem), len(longest_log_store_name), write_failure))
 
     # The comparison is computed under the number the PATH carries. The same
     # content landed under a different issue is a different file, and must
