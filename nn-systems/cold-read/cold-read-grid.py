@@ -318,8 +318,10 @@ STRAY_WRITE_NO_UNDO_MAY_HOLD_MOVED_CHANGES = (
 STRAY_WRITE_NO_UNDO_GONE_WHILE_CHANGES_MAY_HAVE_MOVED = (
     "No undo command is given for any path, because a file with uncommitted changes from before "
     "the cells launched has changed or gone since: {touched}, and a stopped cell may have moved "
-    "those changes. {path} is gone; `git -C {repository} diff HEAD -- {path}` shows what it held. Ask the "
-    "user before you restore it, and about any change you did not make.")
+    "those changes. {path} is gone; `git -C {repository} diff HEAD -- {path}` shows what it held. "
+    "The index may still hold the moved changes under {path}, and an undo would discard them; "
+    "`git -C {repository} diff --cached -- {path}` shows any copy the index holds. Ask the user before you "
+    "restore {path}, and about any change you did not make.")
 STOPPED_CELL_LINE = "{report}: stopped before it finished{deleted}."
 WORKING_TREE_SNAPSHOT_NOT_TAKEN_REASON = "its snapshot of the working tree before the cells launched failed ({error})"
 WORKING_TREE_CHECK_FAILED_REASON = "git status failed when it checked ({error})"
