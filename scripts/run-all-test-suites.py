@@ -8,6 +8,7 @@ Usage:
                                  [--only-suites-whose-recorded-inputs-changed-since COMMIT]
                                  [--recorded-inputs-directory DIR]
                                  [--save-recorded-inputs-to-directory DIR]
+                                 [--also-leave-out-suites-whose-recorded-inputs-in-read-only-directory-match-checkout DIR]
                                  [--record-inputs-with-strace]
                                  [--suite-files-only-strace-saw-lists-directory DIR]
                                  [--leave-recorded-inputs-and-failure-history-unchanged]
@@ -58,6 +59,20 @@ Usage:
                 tree that never reaches main cannot replace the recordings
                 every other head run selects by; see RECORDINGS ADOPTED
                 AFTER A MERGE below
+  --also-leave-out-suites-whose-recorded-inputs-in-read-only-directory-match-checkout DIR
+                with --only-suites-whose-recorded-inputs-changed-since, a
+                second directory of recordings that this run reads and never
+                writes: a suite selected because its recording in
+                --recorded-inputs-directory is missing or stale is left out
+                when its recording in DIR would leave it out by the same
+                rules; one whose recording there shows an input the change
+                differs in stays selected. DIR never selects a suite. A DIR
+                that is missing or cannot be read holds no recording.
+                merge-lane-2's head
+                test runs give as DIR the default --recorded-inputs-directory,
+                where the after-merge test run saves each suite's recording
+                as the suite passes, before the merge program adopts them
+                into the head test runs' store when the after-merge test run ends
   --record-inputs-with-strace
                 on Linux, record with strace as well as the audit hook; see
                 RECORDED INPUTS below. scripts/scheduled-full-test-run-of-main.py
@@ -552,8 +567,8 @@ suite depends on. Two recorders, whose findings are added together:
   files only strace saw it read: those a git command or a shell script
   read. A run that records with the audit hook alone replaces the
   recording, and a run given its own --recorded-inputs-directory, such as
-  merge-lane-2's head runs, never sees the scheduled run's recordings, so
-  selection reads these lists from
+  merge-lane-2's head runs, selects by recordings the scheduled run did not
+  make, so selection reads these lists from
   --suite-files-only-strace-saw-lists-directory, whose default is where the
   scheduled full run keeps its recordings: a suite also runs when a file on its
   list differs. A run with the audit hook alone records the files on the
@@ -830,6 +845,7 @@ import codecs
 import collections
 import concurrent.futures
 import contextlib
+import copy
 import datetime
 import fcntl
 import fnmatch
@@ -4482,12 +4498,22 @@ class CheckoutComparedWithCommit:
         self.entries_then = directory_entries(self.files_then)
         self.entries_now = directory_entries(self.files_now)
         self.fingerprint_now = file_list_fingerprint(self.files_now)
+        self.hashes_now = self.blob_hashes_of_files_read(recordings)
+
+    def blob_hashes_of_files_read(self, recordings):
         read = set()
         for recording in recordings:
             if isinstance(recording, dict) and recording.get("format") == \
                     RECORDED_INPUTS_FORMAT_VERSION:
                 read.update(recording["reads"])
-        self.hashes_now = blob_hashes(top, sorted(read & self.files_now))
+        return blob_hashes(self.top, sorted(read & self.files_now))
+
+    def compared_by_hashes_of(self, recordings):
+        """A copy whose hashes are only those of the files recordings read: git hashes a batch
+        of paths all or none, so a path one set cannot hash leaves the other set's known."""
+        other = copy.copy(self)
+        other.hashes_now = self.blob_hashes_of_files_read(recordings)
+        return other
 
     def files_git_ls_files_lists_then_and_now(self, directory, pathspecs):
         """(files at COMMIT the call lists, files in the checkout it lists, None), or
@@ -4532,10 +4558,88 @@ def git_ls_files_call_as_run(call):
     return command if call["directory"] == "." else f"{command} from {call['directory']}/"
 
 
+def recorded_git_commands_tied_and_ls_files_calls(recording):
+    """(the git commands on the checkout any added or deleted file can change, the git ls-files
+    calls only a file their pathspecs match can change)."""
+    git_commands = recording["git_commands_on_the_checkout"]
+    # A recording saved before this key existed ties every git command it ran on the checkout.
+    tied = recording.get("git_commands_tied_to_the_file_list", git_commands)
+    # A recording saved before these keys existed ties its git ls-files calls to the whole list.
+    through_pathspecs = recording.get(
+        RECORDED_GIT_LS_FILES_CALLS_CHANGED_ONLY_BY_A_FILE_THEIR_PATHSPECS_MATCH_KEY)
+    if isinstance(recording.get(RECORDED_GIT_COMMANDS_CHANGED_BY_ANY_FILE_KEY), list) \
+            and isinstance(through_pathspecs, list) \
+            and all(isinstance(call, dict) and isinstance(call.get("directory"), str)
+                    and isinstance(call.get("pathspecs"), list) and call["pathspecs"]
+                    and all(isinstance(pathspec, str) for pathspec in call["pathspecs"])
+                    and isinstance(call.get("files_fingerprint"), str)
+                    for call in through_pathspecs):
+        tied = recording[RECORDED_GIT_COMMANDS_CHANGED_BY_ANY_FILE_KEY]
+    else:
+        through_pathspecs = []
+    return tied, through_pathspecs
+
+
+def changed_input_reason_or_none(suite, recording, checkout, files_only_strace_saw):
+    """Why the suite's recording, a passing one of this format, shows an input the change
+    differs in; None when it shows none, which leaves it to the rest of selection_reason."""
+    differ = checkout.differ
+    if suite in differ:
+        return "the suite itself differs"
+    reads, looked_for = recording["reads"], recording["looked_for"]
+    lists, git_commands = recording["lists"], recording["git_commands_on_the_checkout"]
+    tied, through_pathspecs = recorded_git_commands_tied_and_ls_files_calls(recording)
+
+    changed_reads = [path for path in reads if path in differ]
+    if changed_reads:
+        return f"it reads {changed_reads[0]}, which differs{and_how_many_more(changed_reads)}"
+    if files_only_strace_saw is not None:
+        changed = [path for path in files_only_strace_saw["files_only_strace_saw"]
+                   if path in differ]
+        if changed:
+            return (f"it reads {changed[0]}, which differs{and_how_many_more(changed)}, "
+                    f"as only the strace run of {files_only_strace_saw['recorded_at']} saw")
+    for path in looked_for:
+        if checkout.there_then(path) != checkout.there_now(path):
+            verb = "added" if checkout.there_now(path) else "deleted"
+            return f"it looks for {path}, which was {verb}"
+    for directory in lists:
+        before = checkout.entries_then.get(directory, set())
+        after = checkout.entries_now.get(directory, set())
+        if before != after:
+            name, verb = added_or_deleted_name(before, after)
+            path = f"{directory}/{name}" if directory else name
+            return f"it lists {directory or '.'}/, where {path} was {verb}"
+    added_or_deleted = sorted(path for path, status in differ.items() if status in "AD")
+    if tied and added_or_deleted:
+        path = added_or_deleted[0]
+        verb = "added" if differ[path] == "A" else "deleted"
+        return (f"it runs git {', '.join(tied)} on the checkout, "
+                f"and {path} was {verb}")
+    for call in through_pathspecs:
+        then, now, why = checkout.files_git_ls_files_lists_then_and_now(
+            call["directory"], call["pathspecs"])
+        named = git_ls_files_call_as_run(call)
+        if why is not None:
+            return (f"it runs {named} on the checkout, and git could not say which "
+                    f"files that lists: {why}")
+        listed = sorted(path for path in added_or_deleted
+                        if path in (now if differ[path] == "A" else then))
+        if listed:
+            verb = "added" if differ[listed[0]] == "A" else "deleted"
+            return (f"it runs {named} on the checkout, which lists {listed[0]}, "
+                    f"and {listed[0]} was {verb}")
+    reading = sorted(set(git_commands) - GIT_COMMANDS_THAT_ONLY_LIST)
+    if reading and differ:
+        return (f"it runs git {', '.join(reading)} on the checkout, which reads "
+                f"files no recorder here saw, and {sorted(differ)[0]} differs")
+    return None
+
+
 def selection_reason(suite, recording, checkout, commit, files_only_strace_saw=None):
     """Return (selected, reason) for one suite."""
     # Recordings are shared across branches; compare both against COMMIT and the recording.
-    short, differ = commit[:12], checkout.differ
+    short = commit[:12]
     if recording is None:
         return True, "no recording of its inputs on this machine yet"
     if not isinstance(recording, dict) \
@@ -4560,69 +4664,12 @@ def selection_reason(suite, recording, checkout, commit, files_only_strace_saw=N
                          f"{SKIPPED_CASE_THIS_MACHINE_CANNOT_RUN_MARKER}" if counted
                          else "an unrecorded number of cases")
                       + ", so it recorded only what the cases that ran read")
-    if suite in differ:
-        return True, "the suite itself differs"
+    changed = changed_input_reason_or_none(suite, recording, checkout, files_only_strace_saw)
+    if changed is not None:
+        return True, changed
     reads, looked_for = recording["reads"], recording["looked_for"]
     lists, git_commands = recording["lists"], recording["git_commands_on_the_checkout"]
-    # A recording saved before this key existed ties every git command it ran on the checkout.
-    tied = recording.get("git_commands_tied_to_the_file_list", git_commands)
-    # A recording saved before these keys existed ties its git ls-files calls to the whole list.
-    through_pathspecs = recording.get(
-        RECORDED_GIT_LS_FILES_CALLS_CHANGED_ONLY_BY_A_FILE_THEIR_PATHSPECS_MATCH_KEY)
-    if isinstance(recording.get(RECORDED_GIT_COMMANDS_CHANGED_BY_ANY_FILE_KEY), list) \
-            and isinstance(through_pathspecs, list) \
-            and all(isinstance(call, dict) and isinstance(call.get("directory"), str)
-                    and isinstance(call.get("pathspecs"), list) and call["pathspecs"]
-                    and all(isinstance(pathspec, str) for pathspec in call["pathspecs"])
-                    and isinstance(call.get("files_fingerprint"), str)
-                    for call in through_pathspecs):
-        tied = recording[RECORDED_GIT_COMMANDS_CHANGED_BY_ANY_FILE_KEY]
-    else:
-        through_pathspecs = []
-
-    changed_reads = [path for path in reads if path in differ]
-    if changed_reads:
-        return True, f"it reads {changed_reads[0]}, which differs{and_how_many_more(changed_reads)}"
-    if files_only_strace_saw is not None:
-        changed = [path for path in files_only_strace_saw["files_only_strace_saw"]
-                   if path in differ]
-        if changed:
-            return True, (f"it reads {changed[0]}, which differs{and_how_many_more(changed)}, "
-                          f"as only the strace run of {files_only_strace_saw['recorded_at']} saw")
-    for path in looked_for:
-        if checkout.there_then(path) != checkout.there_now(path):
-            verb = "added" if checkout.there_now(path) else "deleted"
-            return True, f"it looks for {path}, which was {verb}"
-    for directory in lists:
-        before = checkout.entries_then.get(directory, set())
-        after = checkout.entries_now.get(directory, set())
-        if before != after:
-            name, verb = added_or_deleted_name(before, after)
-            path = f"{directory}/{name}" if directory else name
-            return True, f"it lists {directory or '.'}/, where {path} was {verb}"
-    added_or_deleted = sorted(path for path, status in differ.items() if status in "AD")
-    if tied and added_or_deleted:
-        path = added_or_deleted[0]
-        verb = "added" if differ[path] == "A" else "deleted"
-        return True, (f"it runs git {', '.join(tied)} on the checkout, "
-                      f"and {path} was {verb}")
-    for call in through_pathspecs:
-        then, now, why = checkout.files_git_ls_files_lists_then_and_now(
-            call["directory"], call["pathspecs"])
-        named = git_ls_files_call_as_run(call)
-        if why is not None:
-            return True, (f"it runs {named} on the checkout, and git could not say which "
-                          f"files that lists: {why}")
-        listed = sorted(path for path in added_or_deleted
-                        if path in (now if differ[path] == "A" else then))
-        if listed:
-            verb = "added" if differ[listed[0]] == "A" else "deleted"
-            return True, (f"it runs {named} on the checkout, which lists {listed[0]}, "
-                          f"and {listed[0]} was {verb}")
-    reading = sorted(set(git_commands) - GIT_COMMANDS_THAT_ONLY_LIST)
-    if reading and differ:
-        return True, (f"it runs git {', '.join(reading)} on the checkout, which reads "
-                      f"files no recorder here saw, and {sorted(differ)[0]} differs")
+    tied, through_pathspecs = recorded_git_commands_tied_and_ls_files_calls(recording)
 
     stale = [path for path, blob in reads.items()
              if checkout.hashes_now.get(path, "not in the checkout") != blob]
@@ -4712,19 +4759,44 @@ def adopt_passing_recordings_that_match_the_checkout(top, into_given, from_given
     return adopted
 
 
-def suites_selected_since(top, suites, recordings, commit, differ, files_only_strace_saw_by_suite):
-    """[(suite, selected, why)] for every suite, in order; differ is files_that_differ_since's."""
+def suites_selected_since(top, suites, recordings, commit, differ, files_only_strace_saw_by_suite,
+                          read_only_recordings, read_only_directory):
+    """[(suite, selected, why)] for every suite, in order; differ is files_that_differ_since's.
+
+    A suite selected because its recording in recordings is missing or stale is left out
+    when its recording in read_only_recordings, read from read_only_directory, would leave it
+    out; one whose recording there shows an input the change differs in stays selected, and
+    read_only_recordings never select a suite."""
     everything = [path for path in sorted(differ)
                   if any(path == prefix or (prefix.endswith("/") and path.startswith(prefix))
                          for prefix in EVERY_SUITE_RUNS_WHEN_THESE_CHANGE)]
     if everything:
         return [(suite, True, f"{everything[0]} differs, and every suite runs under it")
                 for suite in suites]
-    recorded = [recordings.get(suite) for suite in suites]
-    checkout = CheckoutComparedWithCommit(top, commit, differ, recorded)
-    return [(suite, *selection_reason(suite, recordings.get(suite), checkout, commit,
-                                      files_only_strace_saw_by_suite.get(suite)))
-            for suite in suites]
+    checkout = CheckoutComparedWithCommit(top, commit, differ,
+                                          [recordings.get(suite) for suite in suites])
+    read_only_checkout = checkout.compared_by_hashes_of(
+        [read_only_recordings.get(suite) for suite in suites]) if read_only_recordings else None
+    selection = []
+    for suite in suites:
+        recording = recordings.get(suite)
+        files_only_strace_saw = files_only_strace_saw_by_suite.get(suite)
+        selected, why = selection_reason(suite, recording, checkout, commit,
+                                         files_only_strace_saw)
+        shows_a_changed_input = (
+            isinstance(recording, dict)
+            and recording.get("format") == RECORDED_INPUTS_FORMAT_VERSION
+            and changed_input_reason_or_none(suite, recording, checkout,
+                                             files_only_strace_saw) is not None)
+        if selected and read_only_checkout is not None and not shows_a_changed_input:
+            selected_by_read_only, why_read_only = selection_reason(
+                suite, read_only_recordings.get(suite), read_only_checkout, commit,
+                files_only_strace_saw)
+            if not selected_by_read_only:
+                selected, why = False, (f"its recording in {read_only_directory}, which "
+                                        f"this run only reads, leaves it out: {why_read_only}")
+        selection.append((suite, selected, why))
+    return selection
 
 
 def no_sandbox_suite_file_it_read_that_differs_or_none(suite, recording, files_only_strace_saw,
@@ -4938,6 +5010,8 @@ def parse_arguments(argv):
     parser.add_argument("--recorded-inputs-directory",
                         default=str(DEFAULT_RECORDED_INPUTS_DIRECTORY))
     parser.add_argument("--save-recorded-inputs-to-directory")
+    parser.add_argument("--also-leave-out-suites-whose-recorded-inputs-in-read-only-directory-match-checkout",
+                        dest="read_only_recorded_inputs_directory", metavar="DIR")
     parser.add_argument("--record-inputs-with-strace", action="store_true")
     parser.add_argument("--suite-files-only-strace-saw-lists-directory",
                         default=str(DEFAULT_RECORDED_INPUTS_DIRECTORY))
@@ -5067,12 +5141,16 @@ def main(argv=None, platform=None):
                 if arguments.save_recorded_inputs_to_directory is not None else recordings_dir)
             files_only_strace_saw_dir = recordings_directory_for(
                 arguments.suite_files_only_strace_saw_lists_directory, top)
+            read_only_recordings_dir = (
+                recordings_directory_for(arguments.read_only_recorded_inputs_directory, top)
+                if arguments.read_only_recorded_inputs_directory is not None else None)
         except CouldNotRun as refusal:
             print(refusal, file=sys.stderr)
             return EXIT_COULD_NOT_RUN
         # Each recording is read once, so selection and starting order see the same one
         # even while runs in other checkouts save it.
         recordings, identities_read, files_only_strace_saw_by_suite = {}, {}, {}
+        read_only_recordings = {}
         for suite in suites:
             recordings[suite], identities_read[suite] = load_recording_and_identity(
                 recordings_dir, suite)
@@ -5082,13 +5160,17 @@ def main(argv=None, platform=None):
                     saved_recordings_dir, suite)[1]
             files_only_strace_saw_by_suite[suite] = load_files_only_strace_saw(
                 files_only_strace_saw_dir, suite)
+            if read_only_recordings_dir is not None:
+                # A directory that is missing or cannot be read gives None, as no recording does.
+                read_only_recordings[suite] = load_recording(read_only_recordings_dir, suite)
         try:
             files = checkout_files(top)
             differ = None
             if changed_since is not None:
                 differ = files_that_differ_since(top, changed_since)
                 selection = suites_selected_since(top, suites, recordings, changed_since, differ,
-                                                  files_only_strace_saw_by_suite)
+                                                  files_only_strace_saw_by_suite,
+                                                  read_only_recordings, read_only_recordings_dir)
             else:
                 selection = [(suite, True, "every suite runs without "
                               "--only-suites-whose-recorded-inputs-changed-since")

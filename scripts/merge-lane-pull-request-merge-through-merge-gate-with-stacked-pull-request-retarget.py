@@ -525,8 +525,10 @@ def after_merge_test_run(arguments, merge_commit):
     runner = common.run_all_test_suites
     store = common.merge_lane_head_test_run_recorded_inputs_store_directory(arguments)
     stale_in_the_store = (f"Until a later merge adopts recordings that match main, merge-lane "
-                          f"head test runs select the suites whose recordings in {store} are "
-                          f"stale, and so run more suites than they need.")
+                          f"head test runs select each suite whose recording in {store} is "
+                          f"stale, unless its recording in "
+                          f"{runner.DEFAULT_RECORDED_INPUTS_DIRECTORY} matches main, and so may run "
+                          f"more suites than they need.")
     # Before the test run, so head test runs on the new main find the merged pull request's
     # recordings for the minutes the run takes.
     saved_apart = common.pull_request_head_test_run_saved_recorded_inputs_directory(
