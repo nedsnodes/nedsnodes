@@ -1421,7 +1421,7 @@ def approval_walk_item_word_counted_line_ranges(walk_finder, text, tokens, parse
     for number in numbers:
         unit = next(unit for unit in spans if number in unit[0])
         ranges.append(own_range(unit, number))
-        if len(numbers) > 1:
+        if numbers[1:]:
             ranges += shared_heading_text(unit)
         for each in walk_finder.approval_walk_item_sub_step_units_below_item_in_walk_document(all_units, unit, [number]):
             parts =[part for part in each[0] if part.startswith(number + ".") and part not in numbers]
