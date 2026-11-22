@@ -341,7 +341,8 @@ def run_missing_launcher_case(workspace: Path):
     # resupervise-seat.py reads tmux's absent-session answers with the shared
     # pattern module; the Stop hooks the supervisor loads from scripts/ load
     # from here the shared rule that Stop hooks stay silent while the agent
-    # answers a Stop hook.
+    # answers a Stop hook; and checkout-freshness-catch-up.py loads from here the
+    # rule for which changed files are reusable-prompts.
     for general_tools_module in (
             "git-machine-readable-output-runner-and-parser-common.py",
             "agent-seat-task-list-new-pending-task-write-common.py",
@@ -351,7 +352,8 @@ def run_missing_launcher_case(workspace: Path):
             "ned-box-home-directory-and-its-mac-mount-point-path-constants-common.py",
             "mac-reference-checkout-launcher-scripts-directory-path-constant-common.py",
             "failed-command-tool-message-to-agent-rerun-once-then-stop-and-report-lines-common.py",
-            "pull-request-conflict-with-main-rebase-or-replace-answer-common.py"):
+            "pull-request-conflict-with-main-rebase-or-replace-answer-common.py",
+            "reusable-prompt-file-recognized-by-name-ending-and-not-ghi-md-common.py"):
         (general_tools_home / general_tools_module).write_text(
             (SUPERVISOR_SCRIPT.parents[1] / "general-tools" / general_tools_module)
             .read_text(encoding="utf-8"), encoding="utf-8")

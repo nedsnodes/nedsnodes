@@ -60,7 +60,8 @@ Wired as a Stop hook, so it runs at every turn boundary. Each run:
      only when main changed a standing instruction the agent may hold in its
      context: a CLAUDE.md, whose changed lines the note carries; a skill's
      SKILL.md, whose skill the agent is told to invoke again; or an
-     -instructions.md or -prompt.md file. Claude Code reloads skills' list,
+     -instructions.md or -prompt.md file that is not a numbered GHI-MD, whose
+     name comes from its issue's title. Claude Code reloads skills' list,
      hooks and subagent definitions by itself, and reads CLAUDE.md only at an
      agent-session's start and after a compaction, so nothing else needs
      telling. A diff git cannot produce is told as such, never read as
@@ -159,6 +160,13 @@ _rebase_or_replace_spec = importlib.util.spec_from_file_location(
     / "pull-request-conflict-with-main-rebase-or-replace-answer-common.py")
 rebase_or_replace = importlib.util.module_from_spec(_rebase_or_replace_spec)
 _rebase_or_replace_spec.loader.exec_module(rebase_or_replace)
+
+_reusable_prompt_rule_spec = importlib.util.spec_from_file_location(
+    "reusable_prompt_file_recognized_by_name_ending_and_not_ghi_md_common",
+    Path(__file__).resolve().parents[1] / "nn-systems" / "general-tools"
+    / "reusable-prompt-file-recognized-by-name-ending-and-not-ghi-md-common.py")
+reusable_prompt_rule = importlib.util.module_from_spec(_reusable_prompt_rule_spec)
+_reusable_prompt_rule_spec.loader.exec_module(reusable_prompt_rule)
 
 STAMP_FILE_NAME = "checkout-freshness-stamp.json"
 
@@ -458,14 +466,10 @@ def skill_of(path: str):
     return None
 
 
-def is_instruction_file(path: str) -> bool:
-    name = path.rsplit("/", 1)[-1]
-    return name.endswith("-instructions.md") or name.endswith("-prompt.md")
-
-
 def standing_instruction_paths(paths):
     return [path for path in paths
-            if is_claude_md(path) or skill_of(path) or is_instruction_file(path)]
+            if is_claude_md(path) or skill_of(path)
+            or reusable_prompt_rule.has_reusable_prompt_file_name_and_is_not_ghi_md(path)]
 
 
 # A CLAUDE.md diff longer than this is named by its changed lines instead of
