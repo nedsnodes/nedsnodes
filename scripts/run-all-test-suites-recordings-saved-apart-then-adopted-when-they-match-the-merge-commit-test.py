@@ -134,7 +134,7 @@ class Scratch:
         return path, git(path, "rev-parse", "HEAD")
 
     def run(self, checkout, since=None, store="store", save_to=None, driver=None,
-            read_only=None):
+            read_only=None, extra=()):
         self.runs += 1
         command = [sys.executable, *(["-c", driver] if driver else []), str(PROGRAM),
                    "--checkout", str(checkout),
@@ -150,6 +150,7 @@ class Scratch:
             command += [
                 "--also-leave-out-suites-whose-recorded-inputs-in-read-only-directory-match-checkout",
                 str(self.root / read_only)]
+        command += list(extra)
         return subprocess.run(command, capture_output=True, text=True, check=False,
                               stdin=subprocess.DEVNULL)
 
@@ -253,6 +254,82 @@ def head_test_runs_while_the_after_merge_test_run_runs():
           "would leave it out",
           selection_line(primary_shows_it) == f"SELECTED {SUITE}: it reads unread.txt, which "
           f"differs", selection_line(primary_shows_it))
+
+    for name, changes in (("of a run that failed", {"exit": 1}),
+                          ("of a run that skipped a case without the mark", {"skipped_cases": 1}),
+                          ("of an older format",
+                           {"format": runner.RECORDED_INPUTS_FORMAT_VERSION - 1})):
+        unsettled_store = runner.recordings_directory_for(scratch.root / "unsettled-store",
+                                                          scratch.repo)
+        unsettled_store.mkdir(parents=True, exist_ok=True)
+        runner.recording_file_for(unsettled_store, SUITE).write_text(
+            json.dumps({**matching, **changes}))
+        result = scratch.run(a_checkout, since=m1, store="unsettled-store",
+                             save_to="pr-a-recordings", read_only="after-merge")
+        check(f"a suite whose store recording is {name} is left out by its matching recording "
+              f"in the read-only directory, as the --help text says",
+              selection_line(result).startswith(
+                  f"NOT SELECTED {SUITE}: its recording in {where}, which this run only reads, "
+                  f"leaves it out: none of the"), selection_line(result))
+
+    store_recordings = runner.recordings_directory_for(scratch.root / "store", scratch.repo)
+    store_recordings.mkdir(parents=True, exist_ok=True)
+    real_subprocess_run = runner.subprocess.run
+    hash_batches = []
+
+    def run_failing_the_second_hash_batch(command, *arguments, **options):
+        # The first batch hashes the store recordings' inputs, the second the read-only ones'.
+        if "--stdin-paths" in command:
+            hash_batches.append(command)
+            if len(hash_batches) == 2:
+                return subprocess.CompletedProcess(command, 128, "", "fatal: injected failure")
+        return real_subprocess_run(command, *arguments, **options)
+
+    runner.subprocess.run = run_failing_the_second_hash_batch
+    try:
+        selection = runner.suites_selected_since(
+            a_checkout, [SUITE], {SUITE: runner.load_recording(store_recordings, SUITE)}, m1,
+            runner.files_that_differ_since(a_checkout, m1), {},
+            {SUITE: runner.load_recording(where, SUITE)}, where)
+    finally:
+        runner.subprocess.run = real_subprocess_run
+    check("when git cannot hash the read-only recordings' inputs, the suite stays selected "
+          "for the store's reason",
+          len(hash_batches) == 2 and selection == [(SUITE, True, store_reason[len(
+              f"SELECTED {SUITE}: "):])], (hash_batches, selection))
+
+    for name, read_only, save_to, extra in (
+            ("where it saves recordings", "store", None, ()),
+            ("where it saves the lists of files only strace saw", "strace-lists",
+             "pr-a-recordings", ("--record-inputs-with-strace",))):
+        written_to = runner.recordings_directory_for(scratch.root / read_only, scratch.repo)
+        written_to.mkdir(parents=True, exist_ok=True)
+        before_refusal = directory_contents(scratch.root / read_only)
+        refused = scratch.run(a_checkout, since=m1, save_to=save_to, read_only=read_only,
+                              extra=extra)
+        check(f"a run given as its read-only directory the directory {name} refuses, exit 2, "
+              f"says so and how to run again, and writes nothing there",
+              refused.returncode == 2
+              and f"{scratch.root / read_only}, but as given it would also write to that "
+                  f"directory" in refused.stderr
+              and "run the same command again with --" in refused.stderr
+              and directory_contents(scratch.root / read_only) == before_refusal,
+              (refused.returncode, refused.stderr))
+    both = scratch.run(a_checkout, since=m1, read_only="store", extra=(
+        "--record-inputs-with-strace",
+        "--suite-files-only-strace-saw-lists-directory", str(scratch.root / "store")))
+    check("a run that would write both its recordings and its strace lists to its read-only "
+          "directory names both, and both flags to add, in one refusal",
+          both.returncode == 2
+          and "with --save-recorded-inputs-to-directory <directory> added and "
+              "--suite-files-only-strace-saw-lists-directory <directory> changed"
+              in both.stderr,
+          both.stderr)
+    unchanged = scratch.run(a_checkout, since=m1, read_only="store",
+                            extra=("--leave-recorded-inputs-and-failure-history-unchanged",))
+    check("a run that writes no recordings may read the directory it selects by as its "
+          "read-only directory",
+          unchanged.returncode == 0, unchanged.stdout[-500:] + unchanged.stderr)
 
     not_matching = runner.recordings_directory_for(scratch.root / "not-matching", scratch.repo)
     not_matching.mkdir(parents=True)

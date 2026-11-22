@@ -62,12 +62,18 @@ Usage:
   --also-leave-out-suites-whose-recorded-inputs-in-read-only-directory-match-checkout DIR
                 with --only-suites-whose-recorded-inputs-changed-since, a
                 second directory of recordings that this run reads and never
-                writes: a suite selected because its recording in
-                --recorded-inputs-directory is missing or stale is left out
-                when its recording in DIR would leave it out by the same
-                rules; one whose recording there shows an input the change
-                differs in stays selected. DIR never selects a suite. A DIR
-                that is missing or cannot be read holds no recording.
+                writes: a suite selected by its recording in
+                --recorded-inputs-directory is left out when its recording
+                in DIR would leave it out by the same rules, unless the
+                first recording shows an input the change differs in. So a
+                recording there that is missing, of an older format, of a
+                run that failed or skipped cases, or of other copies of the
+                files is settled by DIR. DIR never selects a suite. A DIR
+                that is missing or cannot be read holds no recording. The
+                run refuses, exit 2, when DIR is where it saves recordings,
+                or, with --record-inputs-with-strace, where it saves the
+                lists of files only strace saw, unless given
+                --leave-recorded-inputs-and-failure-history-unchanged.
                 merge-lane-2's head
                 test runs give as DIR the default --recorded-inputs-directory,
                 where the after-merge test run saves each suite's recording
@@ -4206,6 +4212,49 @@ def recordings_directory_for(given, top):
     return Path(given).expanduser() / min(roots.stdout.split())[:16]
 
 
+def refuse_read_only_recordings_directory_this_run_writes(read_only_dir, saved_recordings_dir,
+                                                         files_only_strace_saw_dir, arguments):
+    """Raise CouldNotRun when the directory this run only reads is one it writes to."""
+    if read_only_dir is None or arguments.leave_records_unchanged:
+        return
+    save_given = arguments.save_recorded_inputs_to_directory is not None
+    written = [(saved_recordings_dir,
+                "it saves the recordings of the suites it runs there, because "
+                + ("--save-recorded-inputs-to-directory names it" if save_given else
+                   "--recorded-inputs-directory, given or by default, names it and "
+                   "--save-recorded-inputs-to-directory is not given"),
+                "--save-recorded-inputs-to-directory", save_given)]
+    if arguments.record_inputs_with_strace:
+        written.append((files_only_strace_saw_dir,
+                        ("it saves the lists of files only strace saw there, because "
+                         "--suite-files-only-strace-saw-lists-directory names it and "
+                         "--record-inputs-with-strace is given"),
+                        "--suite-files-only-strace-saw-lists-directory", True))
+    overlaps = [(how, flag, given) for directory, how, flag, given in written
+                if directory.resolve() == read_only_dir.resolve()]
+    if overlaps:
+        flags = " and ".join(f"{flag} <directory> {'changed' if given else 'added'}"
+                             for _, flag, given in overlaps)
+        raise CouldNotRun(
+            f"{PROGRAM}: not run — this run must only read the recordings in the directory "
+            f"given to --also-leave-out-suites-whose-recorded-inputs-in-read-only-directory-"
+            f"match-checkout, {read_only_dir.parent}, but as given it would also write to "
+            f"that directory: "
+            f"{'; and '.join(how for how, _, _ in overlaps)}. The recordings there must stay "
+            f"as the run that saved them left them, because the runs that select by them "
+            f"rely on that.\n"
+            f"If this run is to record the inputs of the suites it runs: run the same command "
+            f"again with {flags}, where <directory> is one no other run saves to or selects "
+            f"by.\n"
+            f"If this run is to record nothing, and add nothing to the test-case failure "
+            f"history: run the same command again with "
+            f"--leave-recorded-inputs-and-failure-history-unchanged added.\n"
+            f"If {read_only_dir.parent} was given to "
+            f"--also-leave-out-suites-whose-recorded-inputs-in-read-only-directory-match-"
+            f"checkout by mistake: run the same command again with the directory you meant "
+            f"given to that flag, or without that flag.")
+
+
 def recording_file_for(recordings_dir, suite):
     return recordings_dir / (suite.replace("/", "__") + ".json")
 
@@ -4763,10 +4812,10 @@ def suites_selected_since(top, suites, recordings, commit, differ, files_only_st
                           read_only_recordings, read_only_directory):
     """[(suite, selected, why)] for every suite, in order; differ is files_that_differ_since's.
 
-    A suite selected because its recording in recordings is missing or stale is left out
-    when its recording in read_only_recordings, read from read_only_directory, would leave it
-    out; one whose recording there shows an input the change differs in stays selected, and
-    read_only_recordings never select a suite."""
+    A suite its recording in recordings selects is left out when its recording in
+    read_only_recordings, read from read_only_directory, would leave it out, unless its
+    recording in recordings shows an input the change differs in; read_only_recordings never
+    select a suite."""
     everything = [path for path in sorted(differ)
                   if any(path == prefix or (prefix.endswith("/") and path.startswith(prefix))
                          for prefix in EVERY_SUITE_RUNS_WHEN_THESE_CHANGE)]
@@ -4783,12 +4832,11 @@ def suites_selected_since(top, suites, recordings, commit, differ, files_only_st
         files_only_strace_saw = files_only_strace_saw_by_suite.get(suite)
         selected, why = selection_reason(suite, recording, checkout, commit,
                                          files_only_strace_saw)
-        shows_a_changed_input = (
-            isinstance(recording, dict)
-            and recording.get("format") == RECORDED_INPUTS_FORMAT_VERSION
-            and changed_input_reason_or_none(suite, recording, checkout,
-                                             files_only_strace_saw) is not None)
-        if selected and read_only_checkout is not None and not shows_a_changed_input:
+        if selected and read_only_checkout is not None and not (
+                isinstance(recording, dict)
+                and recording.get("format") == RECORDED_INPUTS_FORMAT_VERSION
+                and changed_input_reason_or_none(suite, recording, checkout,
+                                                 files_only_strace_saw) is not None):
             selected_by_read_only, why_read_only = selection_reason(
                 suite, read_only_recordings.get(suite), read_only_checkout, commit,
                 files_only_strace_saw)
@@ -5144,6 +5192,9 @@ def main(argv=None, platform=None):
             read_only_recordings_dir = (
                 recordings_directory_for(arguments.read_only_recorded_inputs_directory, top)
                 if arguments.read_only_recorded_inputs_directory is not None else None)
+            refuse_read_only_recordings_directory_this_run_writes(
+                read_only_recordings_dir, saved_recordings_dir, files_only_strace_saw_dir,
+                arguments)
         except CouldNotRun as refusal:
             print(refusal, file=sys.stderr)
             return EXIT_COULD_NOT_RUN
