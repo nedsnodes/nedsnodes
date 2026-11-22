@@ -1004,10 +1004,9 @@ def print_follow_up_request_block_from_merge_lane_2_reviews(number):
     posting = load_script_beside_this_one(POSTING_PROGRAM_FILE_NAME)
     account = posting.MERGE_LANE_ACCOUNT
     reviews, comments = merge_lane_2_reviews_and_their_comments(number, posting, account)
-    as_comments = posting.fix_round.are_merge_lane_verdicts_on_pull_request_comment_reviews(reviews)
-    if not any(review.get("state") == "APPROVED"
-               or as_comments and review.get("state") == "COMMENTED"
-               and posting.fix_round.verdict_line(review) == "APPROVE"
+    author = gh(["pr", "view", str(number), "--repo", REPOSITORY, "--json", "author", "--jq", ".author.login"]).strip()
+    if not any(posting.fix_round.merge_lane_one_review_verdict_from_review_state_or_comment_review_first_line(
+                   review, author, account) == "APPROVE"
                for review in reviews):
         raise Refused(f"{account}, merge-lane-2's GitHub account, has no approving review of pull request {number}: "
                       f"merge-lane-2's review of pull request {number} is still running, or merge-lane-2 requested "
