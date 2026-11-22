@@ -2031,6 +2031,8 @@ with tempfile.TemporaryDirectory() as notes_scratch:
     commit_file(origin_repo, "nn-systems/cold-read/cold-read-fast-clarify-prompt.md", "p\n", "a prompt")
     commit_file(origin_repo, ".claude/skills/walk-me-through/reference.md", "r\n", "not a SKILL.md")
     commit_file(origin_repo, "scripts/tool.py", "t\n", "a script")
+    commit_file(origin_repo, "docs/issues/4080-fix-the-arbitrator-agent-instructions.md", "i\n",
+                "a GHI-MD whose title ends in instructions")
     stop_only(notes_seat)
     told = delivered_text(deliver(notes_seat))
     check("a changed SKILL.md tells the agent to invoke the skill again",
@@ -2043,6 +2045,8 @@ with tempfile.TemporaryDirectory() as notes_scratch:
           in told, told)
     check("a skill's other files and scripts are not told",
           "reference.md" not in told and "scripts/tool.py" not in told, told)
+    check("a GHI-MD whose name ends in -instructions.md is not told",
+          "docs/issues/4080-" not in told, told)
 
     origin_repo, notes_seat = notes_fixture({"CLAUDE.md": "- one rule\n"})
     commit_file(origin_repo, "CLAUDE.md", "".join(f"- new rule {n:04d} {'x' * 60}\n"

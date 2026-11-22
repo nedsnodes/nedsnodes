@@ -160,6 +160,13 @@ _rebase_or_replace_spec = importlib.util.spec_from_file_location(
 rebase_or_replace = importlib.util.module_from_spec(_rebase_or_replace_spec)
 _rebase_or_replace_spec.loader.exec_module(rebase_or_replace)
 
+_reusable_prompt_rule_spec = importlib.util.spec_from_file_location(
+    "reusable_prompt_file_recognized_by_name_ending_and_not_ghi_md_common",
+    Path(__file__).resolve().parents[1] / "nn-systems" / "general-tools"
+    / "reusable-prompt-file-recognized-by-name-ending-and-not-ghi-md-common.py")
+reusable_prompt_rule = importlib.util.module_from_spec(_reusable_prompt_rule_spec)
+_reusable_prompt_rule_spec.loader.exec_module(reusable_prompt_rule)
+
 STAMP_FILE_NAME = "checkout-freshness-stamp.json"
 
 # A git that never ran reports a code git itself cannot return, so "no answer"
@@ -458,14 +465,10 @@ def skill_of(path: str):
     return None
 
 
-def is_instruction_file(path: str) -> bool:
-    name = path.rsplit("/", 1)[-1]
-    return name.endswith("-instructions.md") or name.endswith("-prompt.md")
-
-
 def standing_instruction_paths(paths):
     return [path for path in paths
-            if is_claude_md(path) or skill_of(path) or is_instruction_file(path)]
+            if is_claude_md(path) or skill_of(path)
+            or reusable_prompt_rule.has_reusable_prompt_file_name_and_is_not_ghi_md(path)]
 
 
 # A CLAUDE.md diff longer than this is named by its changed lines instead of
