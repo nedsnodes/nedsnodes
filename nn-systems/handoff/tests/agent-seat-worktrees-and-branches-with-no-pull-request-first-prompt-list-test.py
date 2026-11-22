@@ -802,6 +802,14 @@ def test_everything_held():
     text, failed = listing.list_text_and_failure(main, "seat-u")
     check(not failed and text == "",
           "when open tasks hold every entry, the list prints nothing", text)
+    directory = task_list("seat-u", {"7": ("pending", {"branches": ["seat-u-only"]}),
+                                     "8": "{not json"})
+    text, failed = listing.list_text_and_failure(main, "seat-u")
+    check(not failed and text == listing.unreadable_task_list_line(
+              listing.TasksHolding(unreadable=[str(directory / "8.json")]))
+          and text == listing.first_prompt_text(main, "seat-u"),
+          "when open tasks hold every entry and another task file cannot be read, the list "
+          "and the first prompt print only that the task list could not be read", text)
 
 
 def test_unreadable_task_list_hides_nothing():
