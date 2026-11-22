@@ -1751,6 +1751,25 @@ machine = Machine()
 machine.seat("alpha", [user("go"), assistant(PROMISE), turn_end()])
 machine.script(sent_ok())
 machine.run(0)
+machine.append("alpha", cross_session("You promised", at(0.5)), assistant(ANNOUNCED, at(9)),
+               turn_end(at(9)))
+machine.script({"answer": {"sentences": [{"index": 0, "backed": True, "reason": "a test runs"}]}},
+               usage_limit_exit_with_transcript(RESET_IN_AN_HOUR))
+machine.run(16)
+calls_before_reset = machine.claude_calls()
+machine.script()
+code, _ = machine.run(90)
+check("every sentence judged backed, then an escalation sender at a usage limit: the sentences and "
+      "the check are logged, so no second judge is started after the reset",
+      code == 0 and ANNOUNCED in [event["sentence"] for event in machine.events("sentence_checked")]
+      and len(machine.events("headless_usage_limit_pause")) == 1 and len(calls_before_reset) == 2
+      and not machine.claude_calls(),
+      (code, machine.events("sentence_checked"), calls_before_reset, machine.claude_calls()))
+
+machine = Machine()
+machine.seat("alpha", [user("go"), assistant(PROMISE), turn_end()])
+machine.script(sent_ok())
+machine.run(0)
 machine.seat("beta", DONE_TURN)
 machine.task("beta", "1")
 machine.script(usage_limit_exit_with_transcript(RESET_IN_AN_HOUR))
