@@ -186,6 +186,14 @@ check("S1 reads a command ssh runs, in the directory it cds into there",
 check("S1 reads ssh's destination past an option that takes a value",
       judge("ssh -p 22 nedlern@ned-box 'cd ~/.claude/projects && grep -l x */*.jsonl'",
             machines=remote).signals == [GLOB_DASH_NAME])
+check("ssh's destination is the word after the value of an option that takes one",
+      check_module.ssh_destination(["-p", "22", "nedlern@ned-box", "ls"]) == "nedlern@ned-box",
+      check_module.ssh_destination(["-p", "22", "nedlern@ned-box", "ls"]))
+wrapped_cd = check_module.split_into_simple_commands_with_the_machine_and_directory_each_runs_in(
+    "command cd docs && grep -l x */*.md", "/work")
+check("a cd run through a wrapper changes into its argument",
+      [placed.directory for placed in wrapped_cd] == ["/work/docs"],
+      [placed.directory for placed in wrapped_cd])
 
 
 # ------------------------------------------------------- near misses, cause S2
@@ -235,7 +243,9 @@ for redirect, sent_away in (("2>/dev/null", True), ("2>>log", True), ("&>/dev/nu
                             ("2>/dev/stdout", False), ("2>/dev/null >&2", True),
                             (">/dev/null 2>&1-", True), ("2>&1-", False), ("3>&2-", True),
                             ("&>/dev/stdout", False), (">&/dev/stdout", False),
-                            ("&>/dev/stderr", False), ("2<in", True)):
+                            ("&>/dev/stderr", False), ("2<in", True),
+                            (">/dev/null 2>/dev/stderr", False), ("2>/dev/fd/1", False),
+                            ("&>/dev/null 2>&1", True), ("&>/dev/stdout 2>/dev/null", True)):
     command = check_module.split_into_simple_commands_with_the_machine_and_directory_each_runs_in(
         f"grep needle notes.md {redirect}", "/work")[0]
     check(f"`{redirect}` sends stderr away: {sent_away}",
@@ -273,6 +283,9 @@ check("S2 keeps in the probe an option, or an option's value, that holds an unqu
       probes_of("grep -rn --include=*.md --include -foo* --regexp=foo.*bar -efoo.*bar docs")
       == [["-rn", "--include=*.md", "--include", "-foo*", "--regexp=foo.*bar", "-efoo.*bar"]],
       probes_of("grep -rn --include=*.md --include -foo* --regexp=foo.*bar -efoo.*bar docs"))
+check("S2 leaves an environment assignment before grep, and grep itself, out of the probe",
+      probes_of("A=1 grep -c foo.*bar notes.md") == [["-c", "foo.*bar"]],
+      probes_of("A=1 grep -c foo.*bar notes.md"))
 check("S2 keeps in the probe an unquoted pattern that does not begin with -",
       probes_of("grep -c foo.*bar notes.md") == [["-c", "foo.*bar"]],
       probes_of("grep -c foo.*bar notes.md"))
@@ -329,6 +342,11 @@ check("a -- that is -e's value does not end the options: the probe asks whether 
       double_dash_value_probes == [["-e", "--"]]
       and ("entries", None, "/work") in double_dash_value_machines.asked,
       f"{double_dash_value_probes} asked {double_dash_value_machines.asked}")
+for program_glob in ("*/bin/grep -l needle notes.md", "A=1 */bin/grep -l needle notes.md"):
+    check(f"S1 does not read the program word, a glob the shell runs, as an argument: "
+          f"{program_glob}",
+          not judge(program_glob, machines=MachinesWhoseDirectoryHoldsDashX()).fires,
+          judge(program_glob, machines=MachinesWhoseDirectoryHoldsDashX()).signals)
 check("S1 reads a dash-led glob after a -- that is -e's value",
       judge("grep -e -- -x*", machines=MachinesWhoseDirectoryHoldsDashX()).signals
       == [GLOB_DASH_NAME])
@@ -338,7 +356,8 @@ for arguments, expected in ((["-e", "--", "-x*"], (3, {1})),
                             (["--regexp", "--", "--", "-x*"], (2, {1})),
                             (["-A2", "--", "-x*"], (1, set())), (["-A", "--", "-x*"], (3, {1})),
                             (["--include=--", "--", "-x*"], (1, set())), (["-", "--"], (1, set())),
-                            (["needle", "file"], (2, set())), (["-e"], (1, set())),
+                            (["needle", "file"], (2, set())), (["xe", "file"], (2, set())),
+                            (["-e"], (1, set())),
                             (["-e", "--", "-e", "-x*", "notes.md"], (5, {1, 3}))):
     found = check_module.grep_arguments_options_end_and_option_value_positions(arguments)
     check(f"grep's options end, and its option values sit, at {expected} in {arguments}",
@@ -428,6 +447,8 @@ check("a result that is not empty is not judged",
       not judge(f"cd {PROJECTS} && grep -l x */*.jsonl", output="a.jsonl\n").applicable)
 check("a command with no search is not judged",
       not judge(f"cd {PROJECTS} && ls */*.jsonl").applicable)
+check("a git command is a search only when grep follows git, not when it comes before",
+      not judge("sudo -u grep git log").applicable)
 check("a failed command's diagnostics alone are an empty result",
       judge(f"cd {PROJECTS} && grep -l x */*.jsonl", exit_code=2,
             output="grep: invalid option -- 'U'\n").signals == [GLOB_DASH_NAME])
@@ -603,6 +624,9 @@ check("a PostToolUseFailure payload is read from its Exit code line",
 for case, payload in (
         ("a payload that is not JSON", "{"),
         ("a tool that is not Bash", {"tool_name": "Read", "tool_input": {}}),
+        ("a tool that is not Bash, whose input holds a command that would fire",
+         {"tool_name": "Read", "cwd": "/work", "tool_input": {"command": firing_command},
+          "tool_response": {"stdout": ""}}),
         ("an interrupted command", {"tool_name": "Bash", "cwd": "/work",
                                     "tool_input": {"command": firing_command},
                                     "tool_response": {"stdout": "", "interrupted": True}}),
