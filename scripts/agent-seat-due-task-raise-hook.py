@@ -684,8 +684,9 @@ def budget_skipped_task_lines(tasks: dict, skipped_conditions, raised: dict) -> 
     without merging; then the instructions, or nothing when there is no such task.
 
     Not handled: a pull request with an old closed-without-merging record that was reopened and
-    merged since. Its task is left out here even when the budget skipped it, so this run neither
-    raises it nor names it; the next run that asks GitHub raises it."""
+    merged since. Its task gets no line here even when the budget skipped the pull request; a
+    later run that asks GitHub sees the merge, and raises the task once its other prerequisites
+    and blockers allow."""
     skipped = set(skipped_conditions)
     lines = []
     for task_id in sorted(tasks, key=lambda text: (len(text), text)):
@@ -947,8 +948,9 @@ def unheld_and_held_tasks(tasks: dict, directory: Path, checker,
     A task whose record shows its prerequisites raised as met is not asked about again, so in a
     Stop run every gh question for a task no blockedBy holds is one `due_task_lines` asked first,
     before its held tasks spent the budget, and is answered from the cache, except one the budget
-    skipped there: that one is not cached, and with the budget spent it is skipped again here and
-    its task counted as held.
+    skipped there: that one is not cached, and with the budget spent its task is counted as held,
+    whether evaluation stops at an earlier unmet prerequisite or reaches that question and skips
+    it again.
 
     Not handled: a task raised as met stays listed as unheld when what its prerequisites name
     changes afterwards, such as the walk-document of an `approval_walk_item_decided` being
