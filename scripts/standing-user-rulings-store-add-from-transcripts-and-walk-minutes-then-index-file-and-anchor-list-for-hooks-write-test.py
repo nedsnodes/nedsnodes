@@ -62,7 +62,10 @@ REPOSITORY_FILES = ("CLAUDE.md", "scripts/tool-one.py", "nn-systems/cold-read/co
                     "nn-systems/handoff/handoff-supervisor.py", ".claude/skills/find-info/SKILL.md",
                     "docs/issues/2118-ruling-agent-keeps-user-rulings.md", "SKILL.md", "CLAUDE",
                     "nn-systems/nn-shared-database/nn-shared-database-service.py",
-                    "docs/cross-project/nedsnodes-ai-native-software-development-notes.md")
+                    "docs/cross-project/nedsnodes-ai-native-software-development-notes.md",
+                    "scripts/merge-gate-test-captured-github-responses/nedschorus-nedschorus-1154-issue-view-open-issue.json")
+# A file the project rename kept under its old name; it is on origin/main under this name.
+KEPT_FILE = REPOSITORY_FILES[-1]
 
 
 def human(text, stamp, cwd=SEAT_DIRECTORY, **fields):
@@ -335,6 +338,28 @@ with tempfile.TemporaryDirectory() as directory:
           "/nn-systems/handoff/" in case.anchors()
           and not any(SYSTEMS_DIRECTORY_BEFORE_PROJECT_RENAME in anchor for anchor in case.anchors()),
           case.anchors())
+    index_tags = [line["tags"] for line in case.index()[1] if line["text"] == old_record]
+    check("a system tag stored under its old name is written to the index file's tags under its new name",
+          index_tags == [["nn-systems/handoff/", "nn-systems/handoff/handoff-supervisor.py"]], index_tags)
+
+with tempfile.TemporaryDirectory() as directory:
+    case = Case(directory)
+    old_record = f"see {SYSTEMS_DIRECTORY_BEFORE_PROJECT_RENAME}/handoff/ for it"
+    case.transcript("ned-box", [human(old_record, "2026-10-24T00:00:00Z")])
+    case.run()
+    check("a system named in an old record by its old directory alone, with no file, is tagged under its new name",
+          case.tags(old_record) == {"nn-systems/handoff/"}, case.tags(old_record))
+
+# A file the rename kept under its old name is tagged, indexed and anchored under that name, which origin/main holds.
+with tempfile.TemporaryDirectory() as directory:
+    case = Case(directory)
+    record = f"see {KEPT_FILE}"
+    case.transcript("ned-box", [human(record, "2026-10-24T00:00:00Z")])
+    case.run()
+    index_tags = [line["tags"] for line in case.index()[1] if line["text"] == record]
+    check("a file the rename kept under its old name is tagged, written to the index file and anchored as it is named",
+          case.tags(record) == {KEPT_FILE} and index_tags == [[KEPT_FILE]] and case.anchors() == ["/" + KEPT_FILE],
+          (case.tags(record), index_tags, case.anchors()))
 
 # The shared database's system and a file outside the wiki whose name had the old prefix, named by their old names in an old record.
 # The old paths are made from the rename's one list, so no line here cites a path the rename removed.

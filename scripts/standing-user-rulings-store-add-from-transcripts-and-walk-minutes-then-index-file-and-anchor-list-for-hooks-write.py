@@ -389,13 +389,20 @@ class Repository:
         self.top_level_file = (re.compile(r"(?<![\w/.-])(" + "|".join(re.escape(p) for p in top_level)
                                           + r")(?![\w-])") if top_level else None)
 
+    def path_now(self, path):
+        """The path a path written before the project rename has on origin/main: as written when origin/main holds
+        it, as a file the rename kept under its old name; otherwise under the names the rename gave."""
+        if path in self.files:
+            return path
+        return convert_file_path_before_project_rename_to_path_after(path)
+
     def files_named(self, text):
         """The repository files a text names, each as its path on origin/main."""
         found = set()
         for token in PATH_TOKEN.findall(text):
-            parts = [part for part in convert_file_path_before_project_rename_to_path_after(token.strip("/")).split("/") if part]
+            parts = [part for part in token.strip("/").split("/") if part]
             for start in range(len(parts)):
-                candidate = "/".join(parts[start:])
+                candidate = self.path_now("/".join(parts[start:]))
                 if candidate in self.files:
                     found.add(candidate)
                     break
@@ -464,7 +471,6 @@ def tags_named_in(text, repository, default_seat, known_seats, files_are_tags):
 def anchors_of(tags, repository):
     anchors = set()
     for tag in tags:
-        tag = convert_file_path_before_project_rename_to_path_after(tag)
         if tag.startswith("GHI "):
             anchors.update("/" + path for path in repository.ghi_md_paths.get(int(tag.split(" ")[1]), ()))
         elif tag.startswith(("PR ", "task ")):
@@ -729,7 +735,7 @@ def index_lines(connection, repository, built_at):
     for entry_id, tag in connection.execute(
             "SELECT entry_tags.entry_id, tag FROM entry_tags JOIN entries USING (entry_id) WHERE state = ?",
             (STATE_STANDING,)):
-        tags_by_entry.setdefault(entry_id, set()).add(convert_file_path_before_project_rename_to_path_after(tag))
+        tags_by_entry.setdefault(entry_id, set()).add(repository.path_now(tag))
     rows = connection.execute(
         "SELECT entry_id, kind, said_at_utc, text, source_path, source_line FROM entries WHERE state = ? "
         "ORDER BY said_at_utc DESC, entry_id DESC", (STATE_STANDING,)).fetchall()
