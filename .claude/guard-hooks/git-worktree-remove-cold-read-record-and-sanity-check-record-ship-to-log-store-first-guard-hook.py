@@ -272,6 +272,8 @@ DIRECTORY_CHANGING_PROGRAMS = ("cd", "pushd", "popd")
 # The wrapper options that run the program in another directory, as in `env -C /a git ...`.
 DIRECTORY_CHANGING_WRAPPER_OPTIONS = {"env": ("-C", "--chdir"), "sudo": ("-D", "--chdir")}
 WORKTREE_REMOVE_FORCE_OPTIONS = {"-f", "--force"}
+# The `git worktree add` options whose value is the next word.
+WORKTREE_ADD_VALUE_OPTIONS = {"-b", "-B", "--reason"}
 
 SHIP_RECORDS_YOURSELF_NEXT_STEP_LINES = (
     "Before you remove another worktree, ship its records yourself with this command, which runs the "
@@ -304,15 +306,20 @@ PARSER_UNAVAILABLE_NEXT_STEP_LINES = (
     + SHIP_RECORDS_YOURSELF_NEXT_STEP_LINES)
 
 
-def is_git_worktree_remove(words):
-    """True for `git [global options] worktree remove ...`, after wrappers such as env and timeout."""
+def is_git_worktree(words, action):
+    """True for `git [global options] worktree <action> ...`, after wrappers such as env and timeout."""
     index, _ = shell_reader.simple_command_program_index_skipping_wrappers(words)
     if index is None or not is_program(words[index], "git"):
         return False
     index += 1
     while index < len(words) and words[index].startswith("-"):
         index += 2 if words[index] in GIT_GLOBAL_VALUE_FLAGS else 1
-    return list(words[index:index + 2]) == ["worktree", "remove"]
+    return list(words[index:index + 2]) == ["worktree", action]
+
+
+def is_git_worktree_remove(words):
+    """True for `git [global options] worktree remove ...`, after wrappers such as env and timeout."""
+    return is_git_worktree(words, "remove")
 
 
 def command_runs_git_worktree_remove(command):
@@ -393,11 +400,10 @@ def worktree_named_by_real_path(path, worktrees):
     return next((worktree for worktree in worktrees if os.path.realpath(worktree) == named), None)
 
 
-def removal_path_argument_and_path_or_unresolved_reason(words, index):
-    """For the `git ... worktree remove ...` whose git is words[index]: (the path argument, that
-    path joined to each -C before it, None), or (None, None, why the hook cannot tell). A removal
-    naming no path in the command text, as through xargs, gets its path only when it runs, so the
-    hook cannot tell. The joined path is relative when it depends on the cwd."""
+def git_directory_and_subcommand_index_or_unresolved_reason(words, index):
+    """For the git at words[index]: (the directory git runs in, as its -C options join it, the index of
+    git's subcommand, None), or (None, None, why the hook cannot tell). The directory is "" when no -C
+    gives one, and relative when it depends on the cwd."""
     directories = []
     index += 1
     while index < len(words) and words[index].startswith("-"):
@@ -406,6 +412,39 @@ def removal_path_argument_and_path_or_unresolved_reason(words, index):
                 return None, None, f"the -C directory {words[index + 1]} holds a variable, a glob or a substitution"
             directories.append(shell_reader.shell_word_tilde_prefix_expand_as_bash_would(words[index + 1]))
         index += 2 if words[index] in GIT_GLOBAL_VALUE_FLAGS else 1
+    return os.path.join("", *directories), index, None
+
+
+def worktree_added_path(words, index):
+    """For the `git ... worktree add ...` whose git is words[index]: the path it adds a worktree at, joined to
+    its -C directory and relative when it depends on the cwd, or None when the hook cannot read it."""
+    directory, index, reason = git_directory_and_subcommand_index_or_unresolved_reason(words, index)
+    if reason is not None:
+        return None
+    arguments = iter(words[index + 2:])
+    for word in arguments:
+        if word == "--":
+            word = next(arguments, None)
+        elif word in WORKTREE_ADD_VALUE_OPTIONS:
+            next(arguments, None)
+            continue
+        elif word.startswith("-"):
+            continue
+        if word is None or UNEXPANDED_WORD_PATTERN.search(word):
+            return None
+        return os.path.join(directory, shell_reader.shell_word_tilde_prefix_expand_as_bash_would(word))
+    return None
+
+
+def removal_path_argument_path_and_directory_or_unresolved_reason(words, index):
+    """For the `git ... worktree remove ...` whose git is words[index]: (the path argument, that
+    path joined to the directory git runs in, that directory, None), or (None, None, None, why the hook
+    cannot tell). A removal naming no path in the command text, as through xargs, gets its path only
+    when it runs, so the hook cannot tell. The joined path and the directory are relative when they
+    depend on the cwd, and the directory is "" when no -C gives one."""
+    directory, index, reason = git_directory_and_subcommand_index_or_unresolved_reason(words, index)
+    if reason is not None:
+        return None, None, None, reason
     paths = []
     options_ended = False
     for word in words[index + 2:]:
@@ -414,18 +453,18 @@ def removal_path_argument_and_path_or_unresolved_reason(words, index):
         elif not options_ended and word in WORKTREE_REMOVE_FORCE_OPTIONS:
             continue
         elif not options_ended and word.startswith("-"):
-            return None, None, f"`worktree remove` is given the option {word}"
+            return None, None, None, f"`worktree remove` is given the option {word}"
         else:
             paths.append(word)
     if len(paths) > 1:
-        return None, None, f"`worktree remove` is given {len(paths)} paths"
+        return None, None, None, f"`worktree remove` is given {len(paths)} paths"
     if not paths:
-        return None, None, ("`worktree remove` names no path in the command text, so the path "
-                            "reaches git only when the command runs, as through xargs")
+        return None, None, None, ("`worktree remove` names no path in the command text, so the path "
+                                  "reaches git only when the command runs, as through xargs")
     if UNEXPANDED_WORD_PATTERN.search(paths[0]):
-        return None, None, f"the path {paths[0]} holds a variable, a glob or a substitution"
+        return None, None, None, f"the path {paths[0]} holds a variable, a glob or a substitution"
     argument = shell_reader.shell_word_tilde_prefix_expand_as_bash_would(paths[0])
-    return argument, os.path.join(*directories, argument), None
+    return argument, os.path.join(directory, argument), directory, None
 
 
 def simple_command_changes_directory(words):
@@ -444,19 +483,25 @@ def simple_command_changes_directory(words):
     return False
 
 
-def worktrees_removed_or_unresolved_reason(command, cwd, worktrees, outer_command_changes_directory=False):
+def worktrees_removed_or_unresolved_reason(command, cwd, worktrees_of, outer_command_changes_directory=False,
+                                           added=None):
     """Return ({worktree the command removes: whether a removal of it gives -f or --force}, None),
-    or (None, why the hook cannot tell).
+    or (None, why the hook cannot tell). worktrees_of(directory) returns ([worktree], None) for the
+    repository that git run in that directory acts on, or (None, why git could not list them).
 
-    A path that depends on the cwd is unresolved in a command that changes directory anywhere,
-    because the hook does not follow the directory changes; a bash -c string inherits that
+    A path or -C directory that depends on the cwd is unresolved in a command that changes directory
+    anywhere, because the hook does not follow the directory changes; a bash -c string inherits that
     from the command that runs it. A removal the hook cannot place, including one whose path
     names no worktree it can find, is unresolved, never a removal of no worktree, so that the
-    caller ships every worktree's records rather than none.
+    caller ships every worktree's records rather than none. The exception is a path that names no
+    worktree because a `git worktree add` earlier in the command adds one there: that removal
+    removes no worktree that exists now, so it is left out.
     """
     commands = list(shell_reader.simple_commands(command))
     changes_directory = outer_command_changes_directory or any(
         simple_command_changes_directory(words) for words in commands)
+    # Shared with the bash -c strings inside the command, so an add in one counts for a removal in another.
+    added = set() if added is None else added
     removed = {}
     for words in commands:
         index, _ = shell_reader.simple_command_program_index_skipping_wrappers(words)
@@ -467,23 +512,36 @@ def worktrees_removed_or_unresolved_reason(command, cwd, worktrees, outer_comman
             if inner is None:
                 continue
             inner_removed, reason = worktrees_removed_or_unresolved_reason(
-                inner, cwd, worktrees, changes_directory)
+                inner, cwd, worktrees_of, changes_directory, added)
             if reason is not None:
                 return None, reason
             for worktree, force in inner_removed.items():
                 removed[worktree] = removed.get(worktree, False) or force
             continue
+        if is_git_worktree(words, "add"):
+            path = worktree_added_path(words, index)
+            if path is not None and (os.path.isabs(path) or not changes_directory):
+                added.add(os.path.realpath(os.path.join(cwd, path)))
+            continue
         if not is_git_worktree_remove(words):
             continue
-        argument, path, reason = removal_path_argument_and_path_or_unresolved_reason(words, index)
+        argument, path, directory, reason = removal_path_argument_path_and_directory_or_unresolved_reason(
+            words, index)
         if reason is not None:
             return None, reason
+        if directory and changes_directory and not os.path.isabs(directory):
+            return None, f"the command changes directory, and the -C directory {directory} is relative"
+        worktrees, reason = worktrees_of(os.path.join(cwd, directory))
+        if worktrees is None:
+            return None, f"git could not list the worktrees of the repository the removal runs in: {reason}"
         worktree = worktree_named_by_path_suffix(argument, worktrees)
         if worktree is None:
             if changes_directory and not os.path.isabs(path):
                 return None, f"the command changes directory, and the path {argument} is relative"
             worktree = worktree_named_by_real_path(os.path.join(cwd, path), worktrees)
         if worktree is None:
+            if os.path.realpath(os.path.join(cwd, path)) in added:
+                continue
             return None, PATH_NAMES_NO_WORKTREE_REASON_TEMPLATE.format(argument=argument)
         removed[worktree] = removed.get(worktree, False) or worktree_remove_force_given(words, index)
     return removed, None
@@ -721,12 +779,21 @@ def main(stdin=sys.stdin, runner=subprocess.run, clock=time.monotonic, start_wai
     # The same deadline in real seconds, for the worker: an injected clock cannot bound a stalled call.
     wall_deadline = time.monotonic() + SHIPPING_BUDGET_SECONDS
     cwd = payload.get("cwd") or os.getcwd()
-    worktrees, reason = worktrees_listed_or_failure_reason(cwd, runner)
-    if worktrees is None:
-        note_unchecked(WORKTREE_LISTING_FAILED_NOTICE.format(reason=reason))
-        return 0
-    removed, unresolved = worktrees_removed_or_unresolved_reason(command, cwd, worktrees)
-    shipped_worktrees = worktrees if unresolved is not None else list(removed)
+    listings = {}
+
+    def worktrees_of(directory):
+        if directory not in listings:
+            listings[directory] = worktrees_listed_or_failure_reason(directory, runner)
+        return listings[directory]
+
+    removed, unresolved = worktrees_removed_or_unresolved_reason(command, cwd, worktrees_of)
+    if unresolved is None:
+        shipped_worktrees = list(removed)
+    else:
+        shipped_worktrees, reason = worktrees_of(cwd)
+        if shipped_worktrees is None:
+            note_unchecked(WORKTREE_LISTING_FAILED_NOTICE.format(reason=reason))
+            return 0
     if not shipped_worktrees:
         return 0
     progress = {"shipped": set(), "lines": {}, "being_written": []}
@@ -765,9 +832,11 @@ def main(stdin=sys.stdin, runner=subprocess.run, clock=time.monotonic, start_wai
         else:
             failures = []
             for worktree in dict.fromkeys(worktree for worktree, _ in being_written):
+                # git lists a repository's main worktree first.
+                main_worktree = next(listed[0] for listed, _ in listings.values() if listed and worktree in listed)
                 error = start_waiter(worktree, removed[worktree],
                                      [record for held_in, record in being_written if held_in == worktree],  # pragma: no mutate, this branch runs only for one removed worktree, so every held_in equals it
-                                     worktrees[0])
+                                     main_worktree)
                 if error is not None:
                     failures.append(REMOVAL_NOT_DEFERRED_FAILURE_TEMPLATE.format(worktree=worktree, error=error))
             ending = (REMOVAL_NOT_DEFERRED_ENDING_TEMPLATE.format(failures="; ".join(failures)) if failures
