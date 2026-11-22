@@ -208,7 +208,7 @@ Fixed by: regular maintenance, in the overview.
 Goes wrong when: a reader takes the assertion as exact.
 The claim check's evidence:
 > - The setter, the threshold-hook read and the removal hold: ghi-guide-agent-ask.py:575; handoff-context-threshold-hook.py:513-514 `if os.environ.get(REINCARNATION_OWNED_BY_CALLER_VARIABLE): return 0`; handoff-supervisor.py:325.
-> - It silences more hooks than the threshold hook: agent-seat-due-task-raise-hook.py:754 `if environment.get(REINCARNATION_OWNED_BY_CALLER_VARIABLE):`, absence-claim-locator-reminder-hook.py:460, cold-read-fast-read-due-for-linked-document-reminder-hook.py:509, ned-box-path-in-agent-reply-unclickable-on-mac-warning-hook.py:268, and nn-systems/general-tools/shell-command-tree-sitter-bash-reader-common.py:474.
+> - It silences more hooks than the threshold hook: agent-seat-due-task-raise-hook.py:754 `if environment.get(REINCARNATION_OWNED_BY_CALLER_VARIABLE):`, absence-claim-locator-reminder-hook.py:460, cold-read-fast-read-due-for-linked-document-reminder-hook.py:509, ned-box-path-in-agent-reply-unclickable-on-mac-warning-hook.py:268, and nn-systems/general-tools/shell_command_tree_sitter_bash_reader_common.py:474.
 > - An agent renaming or changing the variable from this entry alone would miss them.
 State: open
 
@@ -348,7 +348,7 @@ The claim check's evidence:
 > - scripts/agent-seat-idle-sweep-verdicts-print.py:68-70 `deferred_marker_files = _load("handoff_deferred_marker_and_refused_commands_files_common", ...)`
 > - scripts/agent-seat-idle-sweep-verdicts-print.py:533 `marker = deferred_marker_files.handoff_deferred_marker_path(`
 > - A grep for `handoff-deferred` or `DEFERRED` in that file finds no suffix spelled there. It takes the suffix from the shared module, like the other readers.
-> - The rest of the bullet is supported: agent-seat-due-task-raise-hook.py:711-712 reads both markers; the guard hook :47; the writer :463; post-compaction :109-110; handoff-deferred-marker-and-refused-commands-files-common.py:35 `"-handoff-deferred-fired"`; threshold hook :744.
+> - The rest of the bullet is supported: agent-seat-due-task-raise-hook.py:711-712 reads both markers; the guard hook :47; the writer :463; post-compaction :109-110; handoff_deferred_marker_and_refused_commands_files_common.py:35 `"-handoff-deferred-fired"`; threshold hook :744.
 State: open
 
 ## E33 — possible problem: an assertion of the overview is contradicted
@@ -600,7 +600,7 @@ State: open
 
 ## E52 — possible problem: an assertion of the overview is contradicted
 
-Claim: `nn-systems/handoff/session-handoff-field-names-common.py` holds the session-handoff's field names, so renaming a field is one edit there.
+Claim: `nn-systems/handoff/session_handoff_field_names_common.py` holds the session-handoff's field names, so renaming a field is one edit there.
 Found by: the overview claim check of 2026-11-12 against commit 1b6fb19aeab73778f234b7552b2f7dfec1ef2cef; its report is /home/nedlern/nedsnodes-logs/overview-write-architecture-overview-claim-check-reports/nedsnodes-handoff-architecture-overview/c6db3c481b478830a1784c634a6acd8cd1b1e318-2026-11-12T06-25-19-226589Z.md.
 Fixed by: regular maintenance, in the overview.
 Goes wrong when: a reader takes the assertion as exact.
@@ -892,12 +892,12 @@ State: open
 
 ## E76 — possible problem: an assertion of the overview is contradicted
 
-Claim: The name `<session>-handoff-deferred` is spelled only in `handoff-deferred-marker-and-refused-commands-files-common.py`, which each reader loads.
+Claim: The name `<session>-handoff-deferred` is spelled only in `handoff_deferred_marker_and_refused_commands_files_common.py`, which each reader loads.
 Found by: the overview claim check of 2026-11-15 against commit bc19cd32d263123a0dd057b1b97c5508db5650e6; its report is /home/nedlern/nedsnodes-logs/overview-write-architecture-overview-claim-check-reports/nedsnodes-handoff-architecture-overview/e70fbebefd630555cf9348a1bf6fd2bda21c0ea6-2026-11-15T19-52-50-377663Z.md.
 Fixed by: regular maintenance, in the overview.
 Goes wrong when: a reader takes the assertion as exact.
 The claim check's evidence:
-> - The code constant is only in the common module (`handoff-deferred-marker-and-refused-commands-files-common.py:34 HANDOFF_DEFERRED_MARKER_SUFFIX = "-handoff-deferred"`), but the threshold hook's docstring spells it too: scripts/handoff-context-threshold-hook.py:7 `<session>-handoff-deferred in ~/.claude/handoffs/, while Claude Code's background_tasks list`, and :13 `while <session>-handoff-deferred`.
+> - The code constant is only in the common module (`handoff_deferred_marker_and_refused_commands_files_common.py:34 HANDOFF_DEFERRED_MARKER_SUFFIX = "-handoff-deferred"`), but the threshold hook's docstring spells it too: scripts/handoff-context-threshold-hook.py:7 `<session>-handoff-deferred in ~/.claude/handoffs/, while Claude Code's background_tasks list`, and :13 `while <session>-handoff-deferred`.
 > - "Defined only in" would be accurate. A rename would leave that docstring stale, but no program would break.
 State: open
 

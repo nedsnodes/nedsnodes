@@ -75,7 +75,7 @@ This page sets no upper limit: some studies favour names of two to four words, a
 
 ### Generic words are fine inside a longer name
 
-Generic words, such as `manager`, `handler`, `helper`, `common`, `data`, `info`, `record` or `check`, say almost nothing alone. As one word of a longer name whose other words say which one, they are fine: `nn-systems/cold-read/cold-read-cell-common.py` says it holds the code the cold-read-cells share. What fails is the bare word, or a name such as `seat-manager`, which leaves the reader asking what it does to which agent-seat.
+Generic words, such as `manager`, `handler`, `helper`, `common`, `data`, `info`, `record` or `check`, say almost nothing alone. As one word of a longer name whose other words say which one, they are fine: `nn-systems/cold-read/cold_read_cell_common.py` says it holds the code the cold-read-cells share. What fails is the bare word, or a name such as `seat-manager`, which leaves the reader asking what it does to which agent-seat.
 
 ### Name a test file after what it tests
 
@@ -106,7 +106,7 @@ Do not abbreviate, except with abbreviations the glossary lists, such as GHI and
 
 ## Step 5: use the same words everywhere, and coin new terms with the user
 
-A name keeps the same words in the same order in prose, in file names and in code; only the separator and the capitals change, as each language's naming convention requires. The project-term `agent-seat` is written in kebab-case `agent-seat` in prose and in file names, snake_case `agent_seat` for a Python variable or function, `AGENT_SEAT` for a Python constant, and CapWords `AgentSeat` for a Python class. Other languages and formats follow their own convention: `AGENT_SEAT` for a shell environment variable, `--agent-seat` for a command line flag. Search with a pattern that matches every form, as Step 3 says.
+A name keeps the same words in the same order in prose, in file names and in code; only the separator and the capitals change, as each language's naming convention requires. A Python module that other programs import is the exception for file names: its file name is its import name, so it is snake_case, such as `cold_read_cell_common.py`. The project-term `agent-seat` is written in kebab-case `agent-seat` in prose and in file names, snake_case `agent_seat` for a Python variable or function, `AGENT_SEAT` for a Python constant, and CapWords `AgentSeat` for a Python class. Other languages and formats follow their own convention: `AGENT_SEAT` for a shell environment variable, `--agent-seat` for a command line flag. Search with a pattern that matches every form, as Step 3 says.
 
 A fixed name is written whole in the code, so a search finds it. Do not assemble a fixed name from fragments, as in `"agent" + "-seat"`. A name with a variable part, such as `<seat>-handoff.md` or a dated record directory, is built at run time from a template whose fixed words are written whole, such as `f"{seat_name}-handoff.md"`, so a search for `-handoff.md` finds the template.
 

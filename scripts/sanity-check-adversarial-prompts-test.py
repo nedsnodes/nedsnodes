@@ -1097,7 +1097,7 @@ def main():
     # not available, so it should fall back to opus in that case"), so the cell
     # tries Fable 5.2 and falls back to Opus 5.5. The three ways an attempt can
     # produce no review are the house chain's (run_model_chain in
-    # nn-systems/cold-read/cold-read-cell-common.py). No model is called: the
+    # nn-systems/cold-read/cold_read_cell_common.py). No model is called: the
     # launch is replaced for the length of these cases and answers per model.
     runner_chain = load_runner()
     fable, opus = runner_chain.CLAUDE_MODEL_CHAIN

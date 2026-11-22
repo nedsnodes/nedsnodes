@@ -85,9 +85,9 @@ REPO_ROOT = Path(__file__).resolve().parent.parent
 RUNNER_PATH = "scripts/run-all-test-suites.py"
 FIXTURE_PATH = "scripts/git-redirecting-environment-removal-test-fixture.py"
 # The runner and the fixture both read the list from this module.
-REMOVAL_MODULE_PATH = "nn-systems/general-tools/git-redirecting-environment-variables-removal-common.py"
+REMOVAL_MODULE_PATH = "nn-systems/general-tools/git_redirecting_environment_variables_removal_common.py"
 # The runner reads the attendance variable names from this module.
-ATTENDANCE_CHECK_MODULE_PATH = "nn-systems/general-tools/agent-session-unattended-by-user-check-common.py"
+ATTENDANCE_CHECK_MODULE_PATH = "nn-systems/general-tools/agent_session_unattended_by_user_check_common.py"
 REMOVAL_CALL = "remove_git_redirecting_environment_variables_from_this_process()"
 
 # A git `init` argument as the suites write it, in a list or as a helper's
@@ -127,18 +127,18 @@ SUITES_RUN_WITH_GIT_DIR = {
     "scripts/dangling-path-citation-check-test.py": (
         "scripts/dangling-path-citation-check.py", "scripts/md-drift-lint.py",
         "scripts/branch-leaves-no-citations-of-removed-paths-test.py",
-        "scripts/architecture-overview-path-template-and-checked-against-commit-reader-common.py",
-        "nn-systems/general-tools/git-machine-readable-output-runner-and-parser-common.py",
-        "nn-systems/general-tools/failed-command-tool-message-to-agent-rerun-once-then-stop-and-report-lines-common.py"),
+        "scripts/architecture_overview_path_template_and_checked_against_commit_reader_common.py",
+        "nn-systems/general-tools/git_machine_readable_output_runner_and_parser_common.py",
+        "nn-systems/general-tools/failed_command_tool_message_to_agent_rerun_once_then_stop_and_report_lines_common.py"),
 }
 SUITE_RUN_WITH_EVERY_VARIABLE = "scripts/code-review-codex-cell-test.py"
 FILES_THE_SUITE_RUN_WITH_EVERY_VARIABLE_READS = (
     "scripts/code-review-codex-cell.py",
     "docs/agents/pr-reviewer-instructions.md",
-    "nn-systems/cold-read/cold-read-cell-common.py",
-    "nn-systems/cold-read/cold-read-record-names-common.py",
-    "nn-systems/general-tools/ned-box-home-directory-and-its-mac-mount-point-path-constants-common.py",
-    "nn-systems/general-tools/git-machine-readable-output-runner-and-parser-common.py",
+    "nn-systems/cold-read/cold_read_cell_common.py",
+    "nn-systems/cold-read/cold_read_record_names_common.py",
+    "nn-systems/general-tools/ned_box_home_directory_and_its_mac_mount_point_path_constants_common.py",
+    "nn-systems/general-tools/git_machine_readable_output_runner_and_parser_common.py",
 )
 
 # Where each variable points, relative to the named repository's top

@@ -172,11 +172,11 @@ def module_loaded_by_path(name, path):
 git_redirecting_environment = module_loaded_by_path(
     "git_redirecting_environment_variables_removal_common",
     REPOSITORY_ROOT / "nn-systems" / "general-tools"
-    / "git-redirecting-environment-variables-removal-common.py")
+    / "git_redirecting_environment_variables_removal_common.py")
 git_output = module_loaded_by_path(
     "git_machine_readable_output_runner_and_parser_common",
     REPOSITORY_ROOT / "nn-systems" / "general-tools"
-    / "git-machine-readable-output-runner-and-parser-common.py")
+    / "git_machine_readable_output_runner_and_parser_common.py")
 
 
 def runner_module():

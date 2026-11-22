@@ -89,7 +89,7 @@ _transcript_mirror = importlib.util.module_from_spec(_transcript_mirror_spec)
 _transcript_mirror_spec.loader.exec_module(_transcript_mirror)
 _claude_code_session_transcript_lookup_and_text_search_common_spec = importlib.util.spec_from_file_location(
     "claude_code_session_transcript_lookup_and_text_search_common",
-    Path(__file__).resolve().parents[2] / "scripts" / "claude-code-session-transcript-lookup-and-text-search-common.py")
+    Path(__file__).resolve().parents[2] / "scripts" / "claude_code_session_transcript_lookup_and_text_search_common.py")
 _claude_code_session_transcript_lookup_and_text_search_common = importlib.util.module_from_spec(_claude_code_session_transcript_lookup_and_text_search_common_spec)
 _claude_code_session_transcript_lookup_and_text_search_common_spec.loader.exec_module(_claude_code_session_transcript_lookup_and_text_search_common)
 _, _AGENT_SESSION_FILES = _transcript_mirror.split_destination(
@@ -215,12 +215,12 @@ NEW_GUARD_REFUSES_AND_VERDICT_CHANGED_ENDING = (
 # another repository, and the attendance variables change the guards' messages.
 _git_redirecting_removal_spec = importlib.util.spec_from_file_location(
     "git_redirecting_environment_variables_removal_common",
-    Path(__file__).resolve().with_name("git-redirecting-environment-variables-removal-common.py"))
+    Path(__file__).resolve().with_name("git_redirecting_environment_variables_removal_common.py"))
 _git_redirecting_removal = importlib.util.module_from_spec(_git_redirecting_removal_spec)
 _git_redirecting_removal_spec.loader.exec_module(_git_redirecting_removal)
 _attendance_check_spec = importlib.util.spec_from_file_location(
     "agent_session_unattended_by_user_check_common",
-    Path(__file__).resolve().with_name("agent-session-unattended-by-user-check-common.py"))
+    Path(__file__).resolve().with_name("agent_session_unattended_by_user_check_common.py"))
 _attendance_check = importlib.util.module_from_spec(_attendance_check_spec)
 _attendance_check_spec.loader.exec_module(_attendance_check)
 ENVIRONMENT_VARIABLES_REMOVED = (_git_redirecting_removal.GIT_REDIRECTING_ENVIRONMENT_VARIABLES

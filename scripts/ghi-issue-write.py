@@ -386,28 +386,28 @@ from pathlib import Path
 _git_output_spec = importlib.util.spec_from_file_location(
     "git_machine_readable_output_runner_and_parser_common",
     Path(__file__).resolve().parents[1] / "nn-systems" / "general-tools"
-    / "git-machine-readable-output-runner-and-parser-common.py")
+    / "git_machine_readable_output_runner_and_parser_common.py")
 git_output = importlib.util.module_from_spec(_git_output_spec)
 _git_output_spec.loader.exec_module(git_output)
 
 _next_step_lines_spec = importlib.util.spec_from_file_location(
     "failed_command_tool_message_to_agent_rerun_once_then_stop_and_report_lines_common",
     Path(__file__).resolve().parents[1] / "nn-systems" / "general-tools"
-    / "failed-command-tool-message-to-agent-rerun-once-then-stop-and-report-lines-common.py")
+    / "failed_command_tool_message_to_agent_rerun_once_then_stop_and_report_lines_common.py")
 next_step_lines = importlib.util.module_from_spec(_next_step_lines_spec)
 _next_step_lines_spec.loader.exec_module(next_step_lines)
 
 _stop_signals_spec = importlib.util.spec_from_file_location(
     "stop_signal_sigterm_or_sighup_raises_system_exit_so_cleanup_runs_common",
     Path(__file__).resolve().parents[1] / "nn-systems" / "general-tools"
-    / "stop-signal-sigterm-or-sighup-raises-system-exit-so-cleanup-runs-common.py")
+    / "stop_signal_sigterm_or_sighup_raises_system_exit_so_cleanup_runs_common.py")
 stop_signals = importlib.util.module_from_spec(_stop_signals_spec)
 _stop_signals_spec.loader.exec_module(stop_signals)
 
 _repository_names_spec = importlib.util.spec_from_file_location(
     "github_repository_name_and_name_before_project_rename_common",
     Path(__file__).resolve().parents[1] / "nn-systems" / "general-tools"
-    / "github-repository-name-and-name-before-project-rename-common.py")
+    / "github_repository_name_and_name_before_project_rename_common.py")
 repository_names = importlib.util.module_from_spec(_repository_names_spec)
 _repository_names_spec.loader.exec_module(repository_names)
 

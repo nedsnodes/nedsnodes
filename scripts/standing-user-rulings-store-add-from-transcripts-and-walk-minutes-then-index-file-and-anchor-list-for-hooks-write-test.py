@@ -339,7 +339,7 @@ with tempfile.TemporaryDirectory() as directory:
 # The shared database's system and a file outside the wiki whose name had the old prefix, named by their old names in an old record.
 # The old paths are made from the rename's one list, so no line here cites a path the rename removed.
 path_names = load("project_rename_path_names_before_and_after_common",
-                  Path(__file__).resolve().with_name("project-rename-path-names-before-and-after-common.py"))
+                  Path(__file__).resolve().with_name("project_rename_path_names_before_and_after_common.py"))
 SHARED_DATABASE_FILE_BEFORE_PROJECT_RENAME = path_names.convert_file_path_after_project_rename_to_path_before(
     "nn-systems/nn-shared-database/nn-shared-database-service.py")
 NOTES_FILE_BEFORE_PROJECT_RENAME = path_names.convert_file_path_after_project_rename_to_path_before(

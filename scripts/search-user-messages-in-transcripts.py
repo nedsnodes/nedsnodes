@@ -31,7 +31,7 @@ from pathlib import Path
 
 _claude_code_session_transcript_lookup_and_text_search_common_spec = importlib.util.spec_from_file_location(
     "claude_code_session_transcript_lookup_and_text_search_common",
-    Path(__file__).resolve().parent / "claude-code-session-transcript-lookup-and-text-search-common.py")
+    Path(__file__).resolve().parent / "claude_code_session_transcript_lookup_and_text_search_common.py")
 claude_code_session_transcript_lookup_and_text_search_common = importlib.util.module_from_spec(_claude_code_session_transcript_lookup_and_text_search_common_spec)
 _claude_code_session_transcript_lookup_and_text_search_common_spec.loader.exec_module(claude_code_session_transcript_lookup_and_text_search_common)
 

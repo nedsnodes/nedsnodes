@@ -6,7 +6,7 @@ the rules not seen since their IDs were added.
 
 The rules are those whose `[rule <id>]` the hooks .claude/settings.json registers write in their
 source, in this program's own checkout, as
-nn-systems/general-tools/claude-code-registered-hook-rule-id-pattern-hook-files-list-and-source-scan-common.py
+nn-systems/general-tools/claude_code_registered_hook_rule_id_pattern_hook_files_list_and_source_scan_common.py
 finds them. Each is counted in the transcripts under each --transcript-directory, by default the two
 copies scripts/transcript-mirror-to-log-store.py keeps in the log-store on ned-box:
 /home/nedlern/nedsnodes-logs/agent-session-files-by-machine/mac/projects, the Mac's, and
@@ -138,7 +138,7 @@ def _load(name, path):
 
 rule_ids = _load("claude_code_registered_hook_rule_id_pattern_hook_files_list_and_source_scan_common",
                  REPOSITORY / "nn-systems" / "general-tools"
-                 / "claude-code-registered-hook-rule-id-pattern-hook-files-list-and-source-scan-common.py")
+                 / "claude_code_registered_hook_rule_id_pattern_hook_files_list_and_source_scan_common.py")
 RULE_ID_OPENING_A_LINE_PATTERN = re.compile(r"^[ \t]*" + rule_ids.RULE_ID_PATTERN.pattern, re.MULTILINE)
 
 

@@ -134,14 +134,14 @@ from pathlib import Path, PurePosixPath
 _git_output_spec = importlib.util.spec_from_file_location(
     "git_machine_readable_output_runner_and_parser_common",
     Path(__file__).resolve().parents[1] / "nn-systems" / "general-tools"
-    / "git-machine-readable-output-runner-and-parser-common.py")
+    / "git_machine_readable_output_runner_and_parser_common.py")
 git_output = importlib.util.module_from_spec(_git_output_spec)
 _git_output_spec.loader.exec_module(git_output)
 
 _next_step_lines_spec = importlib.util.spec_from_file_location(
     "failed_command_tool_message_to_agent_rerun_once_then_stop_and_report_lines_common",
     Path(__file__).resolve().parents[1] / "nn-systems" / "general-tools"
-    / "failed-command-tool-message-to-agent-rerun-once-then-stop-and-report-lines-common.py")
+    / "failed_command_tool_message_to_agent_rerun_once_then_stop_and_report_lines_common.py")
 next_step_lines = importlib.util.module_from_spec(_next_step_lines_spec)
 _next_step_lines_spec.loader.exec_module(next_step_lines)
 
@@ -149,14 +149,14 @@ _next_step_lines_spec.loader.exec_module(next_step_lines)
 _stop_hooks_stay_silent_rule_specification = importlib.util.spec_from_file_location(
     "claude_code_stop_hooks_stay_silent_while_agent_answers_a_stop_hook_rule_common",
     Path(__file__).resolve().parents[1] / "nn-systems" / "general-tools"
-    / "claude-code-stop-hooks-stay-silent-while-agent-answers-a-stop-hook-rule-common.py")
+    / "claude_code_stop_hooks_stay_silent_while_agent_answers_a_stop_hook_rule_common.py")
 stop_hooks_stay_silent_rule = importlib.util.module_from_spec(_stop_hooks_stay_silent_rule_specification)
 _stop_hooks_stay_silent_rule_specification.loader.exec_module(stop_hooks_stay_silent_rule)
 
 _rebase_or_replace_spec = importlib.util.spec_from_file_location(
     "pull_request_conflict_with_main_rebase_or_replace_answer_common",
     Path(__file__).resolve().parents[1] / "nn-systems" / "general-tools"
-    / "pull-request-conflict-with-main-rebase-or-replace-answer-common.py")
+    / "pull_request_conflict_with_main_rebase_or_replace_answer_common.py")
 rebase_or_replace = importlib.util.module_from_spec(_rebase_or_replace_spec)
 _rebase_or_replace_spec.loader.exec_module(rebase_or_replace)
 

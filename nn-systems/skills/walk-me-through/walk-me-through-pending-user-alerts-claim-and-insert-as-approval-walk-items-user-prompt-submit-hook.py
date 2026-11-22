@@ -9,7 +9,7 @@ ONLY A PROMPT THE USER TYPED claims, so only an agent-session he can see claims.
 agent-session claims nothing: Claude Code sets CLAUDE_CODE_SESSION_ATTENDED to "0" for its hooks, even when it
 inherited "1" from the agent-seat that started it, and a caller's headless child may also carry
 NEDSNODES_SESSION_REINCARNATION_OWNED_BY_CALLER; either silences the hook, as
-nn-systems/general-tools/agent-session-unattended-by-user-check-common.py decides. A missing CLAUDE_CODE_SESSION_ATTENDED does not. The transcript cannot
+nn-systems/general-tools/agent_session_unattended_by_user_check_common.py decides. A missing CLAUDE_CODE_SESSION_ATTENDED does not. The transcript cannot
 tell: on a session's first prompt Claude Code may not have written the prompt's record when this hook runs.
 In an attended agent-session Claude Code also starts this hook for a background-task notice and for another
 agent-session's message. The transcript's newest record carrying `turnOrigin` decides, `human` for his own, when
@@ -48,16 +48,16 @@ from pathlib import Path
 
 HERE = Path(__file__).resolve().parent
 CHECKOUT = HERE.parents[2]
-WALK_FINDER_FILE = HERE / "walk-me-through-approval-walk-minutes-and-walk-document-item-finder-common.py"
+WALK_FINDER_FILE = HERE / "walk_me_through_approval_walk_minutes_and_walk_document_item_finder_common.py"
 INSERT_PROGRAM = HERE / "walk-me-through-user-alert-insert-as-unnumbered-item-after-waiting-item-and-record-in-walk-minutes.py"
 ALERTS_MODULE_FILE = (CHECKOUT / "nn-systems" / "general-tools"
-                      / "user-alerts-pending-and-claimed-files-write-claim-release-and-delete-common.py")
-TRANSCRIPT_READER_FILE = CHECKOUT / "scripts" / "claude-code-session-transcript-records-read-backward-common.py"
+                      / "user_alerts_pending_and_claimed_files_write_claim_release_and_delete_common.py")
+TRANSCRIPT_READER_FILE = CHECKOUT / "scripts" / "claude_code_session_transcript_records_read_backward_common.py"
 # At most half this hook's timeout in .claude/settings.json, so a stalled insert is reported, not killed with
 # the hook after the alerts are claimed; a test checks.
 INSERT_TIMEOUT_SECONDS = 5
 USER_TURN_ORIGIN = "human"
-ATTENDANCE_CHECK_FILE = CHECKOUT / "nn-systems" / "general-tools" / "agent-session-unattended-by-user-check-common.py"
+ATTENDANCE_CHECK_FILE = CHECKOUT / "nn-systems" / "general-tools" / "agent_session_unattended_by_user_check_common.py"
 # How Claude Code opens a background-task notice, another agent-session's message and a subagent's hand-back.
 NOT_TYPED_PROMPT_OPENINGS = ("<task-notification>", "<cross-session-message", "<agent-message",
                              "Another Claude session sent a message", "A peer session sent a message")

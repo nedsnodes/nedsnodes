@@ -23,7 +23,7 @@ from pathlib import Path
 PROGRAM = Path(__file__).with_name("log-store-past-discussions-regex-search-newest-first.py")
 PREFIX = "LOG_STORE_PAST_DISCUSSIONS_SEARCH_"
 _refresh_common_specification = importlib.util.spec_from_file_location(
-    "log_store_session_dialogs_refresh_common", Path(__file__).with_name("log-store-session-dialogs-refresh-common.py"))
+    "log_store_session_dialogs_refresh_common", Path(__file__).with_name("log_store_session_dialogs_refresh_common.py"))
 refresh_common = importlib.util.module_from_spec(_refresh_common_specification)
 _refresh_common_specification.loader.exec_module(refresh_common)
 EXTRACTOR_SHA256 = refresh_common.load_extractor()[1]

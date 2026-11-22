@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Sections 3.1 and 3.2 of the design-to-main state-machine design, read
 from the design file in the checkout this test runs in, paired with
-STATE_TABLE and TRANSITION_TABLE in design-to-main-state-tables-common.py.
+STATE_TABLE and TRANSITION_TABLE in design_to_main_state_tables_common.py.
 
 User-ruled 2026-09-16, the eleventh design walk
 (design-state-tables-source-of-truth-and-checker), item 2.2: both copies
@@ -46,19 +46,19 @@ MACHINE_DIRECTORY = pathlib.Path(__file__).resolve().parent.parent
 REPOSITORY_ROOT = MACHINE_DIRECTORY.parent.parent
 DESIGN_RELATIVE_PATH = "docs/design-to-main/design-to-main-state-machine.system.design.md"
 DESIGN_PATH = REPOSITORY_ROOT / DESIGN_RELATIVE_PATH
-STATE_TABLES_RELATIVE_PATH = "scripts/design-to-main/design-to-main-state-tables-common.py"
+STATE_TABLES_RELATIVE_PATH = "scripts/design-to-main/design_to_main_state_tables_common.py"
 
 _rule_failure_lines_spec = importlib.util.spec_from_file_location(
     "rule_enforcing_nc_test_suite_failure_message_closing_lines_text_common",
     REPOSITORY_ROOT / "nn-systems" / "general-tools"
-    / "rule-enforcing-nc-test-suite-failure-message-closing-lines-text-common.py")
+    / "rule_enforcing_nc_test_suite_failure_message_closing_lines_text_common.py")
 RULE_FAILURE_LINES = importlib.util.module_from_spec(_rule_failure_lines_spec)
 _rule_failure_lines_spec.loader.exec_module(RULE_FAILURE_LINES)
 
 
 def load_state_tables_module():
     spec = importlib.util.spec_from_file_location(
-        "design_to_main_state_tables", MACHINE_DIRECTORY / "design-to-main-state-tables-common.py")
+        "design_to_main_state_tables", MACHINE_DIRECTORY / "design_to_main_state_tables_common.py")
     module = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(module)
     return module
@@ -614,7 +614,7 @@ class EachFailureMessageNamesTheRuleAndOneFixPerCause(unittest.TestCase):
         self.assertIn("row 24", message)
         self.assertTrue(message.rstrip().endswith("\n".join([
             "section 3.2 of docs/design-to-main/design-to-main-state-machine.system.design.md and "
-            "TRANSITION_TABLE in scripts/design-to-main/design-to-main-state-tables-common.py "
+            "TRANSITION_TABLE in scripts/design-to-main/design_to_main_state_tables_common.py "
             "disagree on the rows listed above; both copies are edited by hand, section 3.2 "
             "deciding what a transition is and the code what it does.",
             "If your change edited one copy by mistake, undo that edit.",
@@ -636,7 +636,7 @@ class EachFailureMessageNamesTheRuleAndOneFixPerCause(unittest.TestCase):
         self.assertIn("state ended: in STATE_TABLE, not in section 3.1", message)
         self.assertTrue(message.rstrip().endswith("\n".join([
             "section 3.1 of docs/design-to-main/design-to-main-state-machine.system.design.md and "
-            "STATE_TABLE in scripts/design-to-main/design-to-main-state-tables-common.py disagree "
+            "STATE_TABLE in scripts/design-to-main/design_to_main_state_tables_common.py disagree "
             "on the states listed above; both copies of the states and their sub-states are edited "
             "by hand and must list the same."] + SECTION_3_1_FIX_LINES)), message)
 
@@ -648,7 +648,7 @@ class EachFailureMessageNamesTheRuleAndOneFixPerCause(unittest.TestCase):
         self.assertTrue(message.rstrip().endswith("\n".join([
             "section 3.1's package column in docs/design-to-main/design-to-main-state-machine.system.design.md "
             "and STATE_TABLE's package_beyond_standard in "
-            "scripts/design-to-main/design-to-main-state-tables-common.py disagree on the states "
+            "scripts/design-to-main/design_to_main_state_tables_common.py disagree on the states "
             "listed above; the code's text is what a launched agent receives, so the design's "
             "column must say the same."] + SECTION_3_1_FIX_LINES)), message)
 

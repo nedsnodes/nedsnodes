@@ -3,7 +3,7 @@
 
 One invocation = one cold-read-cell — the twin of the Claude cold-read-cell
 launcher (nn-systems/cold-read/cold-read-claude-cell.py). Everything the two do apart
-from invoking their model lives in nn-systems/cold-read/cold-read-cell-common.py and is
+from invoking their model lives in nn-systems/cold-read/cold_read_cell_common.py and is
 imported by both, so the legs cannot drift. Read that file for the report
 contract, the write-detection rule, and why the reviewer writes a file rather
 than answering in chat.
@@ -64,7 +64,7 @@ while "this file holds something else now" says the reviewer wrote it
 
 WHY A PERMISSION PROFILE, NOT `--sandbox workspace-write`. No reviewer opens
 a credential file (user-ruled 2026-09-28; the rule and why are beside
-CREDENTIAL_DIRECTORIES in nn-systems/cold-read/cold-read-cell-common.py).
+CREDENTIAL_DIRECTORIES in nn-systems/cold-read/cold_read_cell_common.py).
 `--sandbox workspace-write` lets a reviewer read anything, so the cell runs
 under a named permission profile instead: it extends Codex's `:workspace`
 profile, which writes where workspace-write did, and denies the credential
@@ -136,7 +136,7 @@ WHAT THE CODEX CLI TELLS US ABOUT COST, and where it goes (user-ruled
 12,345" on stderr, and it is the only place a cold-read-cell's token cost is
 stated by anyone. The shared module captures stderr, parses that line, and
 stamps `tokens=` into the report's provenance line -- see `parse_tokens_used`
-in nn-systems/cold-read/cold-read-cell-common.py, which is where the pattern lives so
+in nn-systems/cold-read/cold_read_cell_common.py, which is where the pattern lives so
 this launcher keeps its single job of building an invocation. If a future
 CLI version reworks or drops that line, the field simply goes absent from
 the stamps: an absent field reads as "not reported", which is the truth, and
@@ -148,7 +148,7 @@ import pathlib
 import sys
 
 _common_spec = importlib.util.spec_from_file_location(
-    "cold_read_cell_common", pathlib.Path(__file__).with_name("cold-read-cell-common.py")
+    "cold_read_cell_common", pathlib.Path(__file__).with_name("cold_read_cell_common.py")
 )
 common = importlib.util.module_from_spec(_common_spec)
 _common_spec.loader.exec_module(common)

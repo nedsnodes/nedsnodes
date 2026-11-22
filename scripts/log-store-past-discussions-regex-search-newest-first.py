@@ -27,7 +27,7 @@ refresher, scripts/log-store-session-dialogs-refresh-hack.py, does every 10
 minutes, so a dialog is as current as the transcript the mirror last copied,
 about a minute behind the session. It writes them only with the dialog
 extractor, scripts/handoff-extract-conversation.py, subagent tracker and
-scripts/log-store-session-dialogs-refresh-common.py the refresher last wrote
+scripts/log_store_session_dialogs_refresh_common.py the refresher last wrote
 every dialog with, as the digest it records in
 session-dialogs/.dialogs-written-by-extractor-sha256 shows. When this
 checkout's differ, or no digest is recorded, it says so on stderr and
@@ -182,7 +182,7 @@ def load_handoff_extractor():
 
 
 refresh_common = load_sibling_module("log_store_session_dialogs_refresh_common",
-                                     "log-store-session-dialogs-refresh-common.py")
+                                     "log_store_session_dialogs_refresh_common.py")
 SESSION_DIALOG_FILE_NAME_SUFFIX = refresh_common.SESSION_DIALOG_FILE_NAME_SUFFIX
 
 PROGRAM_FILE_NAME = "log-store-past-discussions-regex-search-newest-first.py"
@@ -257,7 +257,7 @@ NOT_READ_NOTE = "session's last activity: the dialog could not be read to tell t
 OTHER_EXTRACTOR_RECORDED_NOTE = (
     "NOTE: the session dialogs were searched as they are, without writing again those whose transcripts changed, "
     "so they may lack their sessions' latest turns: the digest of handoff-extract-conversation.py, its subagent "
-    "tracker's files and log-store-session-dialogs-refresh-common.py in {scripts} is not the one {recorded} "
+    "tracker's files and log_store_session_dialogs_refresh_common.py in {scripts} is not the one {recorded} "
     "records, or none is recorded.\n"
     "If main changed one of those files and this checkout has the change, wait: the dialogs refresher, "
     "scripts/log-store-session-dialogs-refresh-hack.py, which runs from ned-box's main checkout every 10 minutes, "
@@ -269,7 +269,7 @@ OTHER_EXTRACTOR_RECORDED_NOTE = (
 
 _claude_code_session_transcript_lookup_and_text_search_common_spec = importlib.util.spec_from_file_location(
     "claude_code_session_transcript_lookup_and_text_search_common",
-    Path(__file__).resolve().parent / "claude-code-session-transcript-lookup-and-text-search-common.py")
+    Path(__file__).resolve().parent / "claude_code_session_transcript_lookup_and_text_search_common.py")
 claude_code_session_transcript_lookup_and_text_search_common = importlib.util.module_from_spec(_claude_code_session_transcript_lookup_and_text_search_common_spec)
 _claude_code_session_transcript_lookup_and_text_search_common_spec.loader.exec_module(claude_code_session_transcript_lookup_and_text_search_common)
 

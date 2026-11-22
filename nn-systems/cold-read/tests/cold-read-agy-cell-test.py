@@ -76,7 +76,7 @@ WHAT IS PINNED HERE.
     of this suite masks the real home's credential files.
 
 Each case builds a throwaway git repository holding a copy of the cell
-scripts, as nn-systems/cold-read/tests/cold-read-cell-common-test.py does, and runs the launcher
+scripts, as nn-systems/cold-read/tests/cold_read_cell_common-test.py does, and runs the launcher
 inside it with the stub first on PATH. The stub is driven by
 COLD_READ_AGY_CELL_TEST_STUB_PLAN, a JSON map from model id to what that
 attempt should do.
@@ -113,7 +113,7 @@ _scratch_repository_fixture_spec.loader.exec_module(scratch_repository_fixture)
 
 # The shared cell module, whose own suite pins its wording; the cases here take that wording from it.
 _cell_common_spec = importlib.util.spec_from_file_location(
-    "cold_read_cell_common", SYSTEM_DIRECTORY / "cold-read-cell-common.py")
+    "cold_read_cell_common", SYSTEM_DIRECTORY / "cold_read_cell_common.py")
 cell_common = importlib.util.module_from_spec(_cell_common_spec)
 _cell_common_spec.loader.exec_module(cell_common)
 

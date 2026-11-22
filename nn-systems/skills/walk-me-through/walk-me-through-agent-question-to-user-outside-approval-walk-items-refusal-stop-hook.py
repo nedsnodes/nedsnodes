@@ -9,7 +9,7 @@ CHECKOUT says.
 Wired as a Stop hook in .claude/settings.json, beside the current-item Stop
 hook, walk-me-through-agent-reply-to-user-not-ending-with-waiting-item-closing-line-refusal-stop-hook.py,
 whose turn and transcript readers this hook loads, and the approval-walk
-finder, walk-me-through-approval-walk-minutes-and-walk-document-item-finder-common.py,
+finder, walk_me_through_approval_walk_minutes_and_walk_document_item_finder_common.py,
 which finds the open walk, its waiting items and its walk-document's items. It
 also loads the answer hook,
 walk-me-through-user-short-answer-to-approval-walk-item-expanded-into-instructions-user-prompt-submit-hook.py,
@@ -175,7 +175,7 @@ docs/nedsnodes-wiki/nedsnodes-how-to-write-a-tool-message-to-agent-such-as-a-hoo
 DURING AN EMERGENCY STOP, while the emergency-stop file is in force or cannot
 be read, this hook is silent: an agent-seat shows no approval-walk item then,
 and every reply goes through. The stop is read by
-nn-systems/skills/emergency-stop/emergency-stop-file-in-force-read-common.py."""
+nn-systems/skills/emergency-stop/emergency_stop_file_in_force_read_common.py."""
 import datetime
 import functools
 import importlib.util
@@ -189,23 +189,23 @@ from pathlib import Path
 
 HERE = Path(__file__).resolve().parent
 CURRENT_ITEM_HOOK_FILE = HERE / "walk-me-through-agent-reply-to-user-not-ending-with-waiting-item-closing-line-refusal-stop-hook.py"
-WALK_FINDER_FILE = HERE / "walk-me-through-approval-walk-minutes-and-walk-document-item-finder-common.py"
+WALK_FINDER_FILE = HERE / "walk_me_through_approval_walk_minutes_and_walk_document_item_finder_common.py"
 WALK_CHECK_PROGRAM = HERE / "walk-me-through-answer-added-texts-cold-read-fast-read-check-and-close.py"
 ANSWER_HOOK_FILE = (HERE / "walk-me-through-user-short-answer-to-approval-walk-item-expanded-into-instructions-"
                     "user-prompt-submit-hook.py")
 REPOSITORY_TOP = HERE.parents[2]
 EMERGENCY_STOP_READER_FILE = (Path(__file__).resolve().parent.parent / "emergency-stop"
-                              / "emergency-stop-file-in-force-read-common.py")
+                              / "emergency_stop_file_in_force_read_common.py")
 STOP_HOOKS_STAY_SILENT_RULE_FILE = (
     REPOSITORY_TOP / "nn-systems" / "general-tools"
-    / "claude-code-stop-hooks-stay-silent-while-agent-answers-a-stop-hook-rule-common.py")
+    / "claude_code_stop_hooks_stay_silent_while_agent_answers_a_stop_hook_rule_common.py")
 ATTENDANCE_CHECK_FILE = (REPOSITORY_TOP / "nn-systems" / "general-tools"
-                         / "agent-session-unattended-by-user-check-common.py")
+                         / "agent_session_unattended_by_user_check_common.py")
 PATH_CONSTANTS_FILE = (REPOSITORY_TOP / "nn-systems" / "general-tools"
-                       / "ned-box-home-directory-and-its-mac-mount-point-path-constants-common.py")
+                       / "ned_box_home_directory_and_its_mac_mount_point_path_constants_common.py")
 CLAUDE_CODE_COMMAND_LINE_PREFIX_FILE = (
     REPOSITORY_TOP / "nn-systems" / "general-tools"
-    / "claude-code-headless-run-command-line-prefix-with-no-connectors-and-explicit-permission-mode-common.py")
+    / "claude_code_headless_run_command_line_prefix_with_no_connectors_and_explicit_permission_mode_common.py")
 
 MODEL = "claude-haiku-5-5"
 MODEL_TIMEOUT_SECONDS = 25

@@ -108,14 +108,14 @@ verdicts_print = _load("agent_seat_idle_sweep_verdicts_print",
 fields = verdicts_print.fields
 user_alerts = _load("user_alerts_pending_and_claimed_files_write_claim_release_and_delete_common",
                     _SCRIPTS.parent / "nn-systems" / "general-tools"
-                    / "user-alerts-pending-and-claimed-files-write-claim-release-and-delete-common.py")
+                    / "user_alerts_pending_and_claimed_files_write_claim_release_and_delete_common.py")
 agent_seat_task_list = _load(
     "agent_seat_task_list_new_pending_task_write_common",
-    _SCRIPTS.parent / "nn-systems" / "general-tools" / "agent-seat-task-list-new-pending-task-write-common.py")
+    _SCRIPTS.parent / "nn-systems" / "general-tools" / "agent_seat_task_list_new_pending_task_write_common.py")
 headless_command_line = _load(
     "claude_code_headless_run_command_line_prefix_with_no_connectors_and_explicit_permission_mode_common",
     _SCRIPTS.parent / "nn-systems" / "general-tools"
-    / "claude-code-headless-run-command-line-prefix-with-no-connectors-and-explicit-permission-mode-common.py")
+    / "claude_code_headless_run_command_line_prefix_with_no_connectors_and_explicit_permission_mode_common.py")
 
 LOG_FILE = (Path.home() / "nedsnodes-logs" / "agent-seat-idle-sweep"
             / "agent-seat-idle-sweep-messages-sent-and-verdicts.jsonl")

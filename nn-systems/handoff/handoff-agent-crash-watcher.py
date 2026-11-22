@@ -53,7 +53,7 @@ attempt's own brief run is part of the death it was handling.
 
 A failure an agent can fix becomes a task on an agent-seat's task list,
 ~/.claude/tasks/nedsnodes-<seat>-tasks/, written with
-nn-systems/general-tools/agent-seat-task-list-new-pending-task-write-common.py;
+nn-systems/general-tools/agent_seat_task_list_new_pending_task_write_common.py;
 the task's subject names the failure's kind and what to fix, and its
 description tells the agent-seat to find the cause and fix it, telling the
 user only when the fix needs a guarded-file changed or the cause cannot be
@@ -136,23 +136,23 @@ MAC_WINDOW_OPENER_PROGRAM = REPOSITORY / "scripts" / "open-mac-window-from-ned-b
 MAC_BROWSER_PAGE_OPENER_PROGRAM = REPOSITORY / "scripts" / "open-html-page-in-mac-browser-from-ned-box.py"
 _ned_box_home_specification = importlib.util.spec_from_file_location(
     "ned_box_home_directory_and_its_mac_mount_point_path_constants_common",
-    REPOSITORY / "nn-systems" / "general-tools" / "ned-box-home-directory-and-its-mac-mount-point-path-constants-common.py")
+    REPOSITORY / "nn-systems" / "general-tools" / "ned_box_home_directory_and_its_mac_mount_point_path_constants_common.py")
 ned_box_home_path_constants = importlib.util.module_from_spec(_ned_box_home_specification)
 _ned_box_home_specification.loader.exec_module(ned_box_home_path_constants)
 _mac_reference_checkout_path_constant_specification = importlib.util.spec_from_file_location(
     "mac_reference_checkout_launcher_scripts_directory_path_constant_common",
     REPOSITORY / "nn-systems" / "general-tools"
-    / "mac-reference-checkout-launcher-scripts-directory-path-constant-common.py")
+    / "mac_reference_checkout_launcher_scripts_directory_path_constant_common.py")
 mac_reference_checkout_path_constant = importlib.util.module_from_spec(_mac_reference_checkout_path_constant_specification)
 _mac_reference_checkout_path_constant_specification.loader.exec_module(mac_reference_checkout_path_constant)
 _user_alerts_specification = importlib.util.spec_from_file_location(
     "user_alerts_pending_and_claimed_files_write_claim_release_and_delete_common",
-    REPOSITORY / "nn-systems" / "general-tools" / "user-alerts-pending-and-claimed-files-write-claim-release-and-delete-common.py")
+    REPOSITORY / "nn-systems" / "general-tools" / "user_alerts_pending_and_claimed_files_write_claim_release_and_delete_common.py")
 user_alerts = importlib.util.module_from_spec(_user_alerts_specification)
 _user_alerts_specification.loader.exec_module(user_alerts)
 _agent_seat_task_list_specification = importlib.util.spec_from_file_location(
     "agent_seat_task_list_new_pending_task_write_common",
-    REPOSITORY / "nn-systems" / "general-tools" / "agent-seat-task-list-new-pending-task-write-common.py")
+    REPOSITORY / "nn-systems" / "general-tools" / "agent_seat_task_list_new_pending_task_write_common.py")
 agent_seat_task_list = importlib.util.module_from_spec(_agent_seat_task_list_specification)
 _agent_seat_task_list_specification.loader.exec_module(agent_seat_task_list)
 

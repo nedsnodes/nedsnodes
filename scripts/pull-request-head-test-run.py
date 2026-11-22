@@ -77,7 +77,7 @@ try:
     git_output = module_loaded_by_path(
         "git_machine_readable_output_runner_and_parser_common",
         REPOSITORY_ROOT / "nn-systems" / "general-tools"
-        / "git-machine-readable-output-runner-and-parser-common.py")
+        / "git_machine_readable_output_runner_and_parser_common.py")
 except Exception:
     if __name__ != "__main__":
         raise

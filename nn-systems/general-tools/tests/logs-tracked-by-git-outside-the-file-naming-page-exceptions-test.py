@@ -3,7 +3,7 @@
 
 docs/nedsnodes-wiki/nedsnodes-file-naming-and-location-standards.md, section
 "Filename suffixes": a log, as
-nn-systems/general-tools/log-suffix-and-extension-file-classify-common.py
+nn-systems/general-tools/log_suffix_and_extension_file_classify_common.py
 classifies one, is kept in the log-store and never in git, with two
 exceptions, which this test allows:
 
@@ -42,9 +42,9 @@ def load(module_name, file_name):
 
 
 classify = load("log_suffix_and_extension_file_classify_common",
-                "log-suffix-and-extension-file-classify-common.py")
+                "log_suffix_and_extension_file_classify_common.py")
 git_environment = load("git_redirecting_environment_variables_removal_common",
-                       "git-redirecting-environment-variables-removal-common.py")
+                       "git_redirecting_environment_variables_removal_common.py")
 
 GHI_MD_NAME = re.compile(r"[0-9]+-[^/]*\.md")
 

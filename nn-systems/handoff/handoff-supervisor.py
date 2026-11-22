@@ -129,7 +129,7 @@ account.
 Terminal capture: at every start, a restart onto main's code at a session-handoff included,
 once it holds its lock, the supervisor runs `tmux pipe-pane` on its own tmux pane, so the pane's
 output from then on is appended to a new file in the agent-seat terminal captures directory
-(agent-seat-terminal-captures-common.py beside this file says where, and how the file is named),
+(agent_seat_terminal_captures_common.py beside this file says where, and how the file is named),
 and prints one line saying where, or why the terminal is not captured. A failed start of the
 terminal capture never stops the agent-seat.
 """
@@ -160,7 +160,7 @@ SCRIPTS_DIRECTORY = REPOSITORY_ROOT / "scripts"
 _mac_reference_checkout_path_constant_specification = importlib.util.spec_from_file_location(
     "mac_reference_checkout_launcher_scripts_directory_path_constant_common",
     REPOSITORY_ROOT / "nn-systems" / "general-tools"
-    / "mac-reference-checkout-launcher-scripts-directory-path-constant-common.py")
+    / "mac_reference_checkout_launcher_scripts_directory_path_constant_common.py")
 mac_reference_checkout_path_constant = importlib.util.module_from_spec(_mac_reference_checkout_path_constant_specification)
 _mac_reference_checkout_path_constant_specification.loader.exec_module(mac_reference_checkout_path_constant)
 mac_launcher_command = (
@@ -179,25 +179,25 @@ def mac_launcher_command_for_agent_seat_on_this_machine(agent_seat: str) -> str:
 _next_step_lines_spec = importlib.util.spec_from_file_location(
     "failed_command_tool_message_to_agent_rerun_once_then_stop_and_report_lines_common",
     REPOSITORY_ROOT / "nn-systems" / "general-tools"
-    / "failed-command-tool-message-to-agent-rerun-once-then-stop-and-report-lines-common.py")
+    / "failed_command_tool_message_to_agent_rerun_once_then_stop_and_report_lines_common.py")
 next_step_lines = importlib.util.module_from_spec(_next_step_lines_spec)
 _next_step_lines_spec.loader.exec_module(next_step_lines)
 
 _session_handoff_field_names_spec = importlib.util.spec_from_file_location(
-    "session_handoff_field_names", Path(__file__).with_name("session-handoff-field-names-common.py"))
+    "session_handoff_field_names", Path(__file__).with_name("session_handoff_field_names_common.py"))
 session_handoff_field_names = importlib.util.module_from_spec(_session_handoff_field_names_spec)
 _session_handoff_field_names_spec.loader.exec_module(session_handoff_field_names)
 
 _worth_resuming_spec = importlib.util.spec_from_file_location(
     "seat_transcript_worth_resuming",
-    SCRIPTS_DIRECTORY / "agent-seat-transcript-worth-resuming-common.py")
+    SCRIPTS_DIRECTORY / "agent_seat_transcript_worth_resuming_common.py")
 worth_resuming = importlib.util.module_from_spec(_worth_resuming_spec)
 _worth_resuming_spec.loader.exec_module(worth_resuming)
 
 _git_redirecting_removal_spec = importlib.util.spec_from_file_location(
     "git_redirecting_environment_variables_removal_common",
     REPOSITORY_ROOT / "nn-systems" / "general-tools"
-    / "git-redirecting-environment-variables-removal-common.py")
+    / "git_redirecting_environment_variables_removal_common.py")
 git_redirecting_removal = importlib.util.module_from_spec(_git_redirecting_removal_spec)
 _git_redirecting_removal_spec.loader.exec_module(git_redirecting_removal)
 
@@ -216,7 +216,7 @@ _claude_json_presets_spec.loader.exec_module(claude_json_presets)
 
 _architecture_overview_path_template_and_checked_against_commit_reader_spec = importlib.util.spec_from_file_location(
     "architecture_overview_path_template_and_checked_against_commit_reader",
-    SCRIPTS_DIRECTORY / "architecture-overview-path-template-and-checked-against-commit-reader-common.py")
+    SCRIPTS_DIRECTORY / "architecture_overview_path_template_and_checked_against_commit_reader_common.py")
 architecture_overview_path_template_and_checked_against_commit_reader = importlib.util.module_from_spec(
     _architecture_overview_path_template_and_checked_against_commit_reader_spec)
 _architecture_overview_path_template_and_checked_against_commit_reader_spec.loader.exec_module(architecture_overview_path_template_and_checked_against_commit_reader)
@@ -249,7 +249,7 @@ _checkout_freshness_catch_up_spec.loader.exec_module(checkout_freshness_catch_up
 _reference_checkout_steps_spec = importlib.util.spec_from_file_location(
     "handoff_reference_checkout_fetch_and_fast_forward_to_origin_main_check_common",
     REPOSITORY_ROOT / "nn-systems" / "handoff"
-    / "handoff-reference-checkout-fetch-and-fast-forward-to-origin-main-check-common.py")
+    / "handoff_reference_checkout_fetch_and_fast_forward_to_origin_main_check_common.py")
 reference_checkout_steps = importlib.util.module_from_spec(_reference_checkout_steps_spec)
 _reference_checkout_steps_spec.loader.exec_module(reference_checkout_steps)
 
@@ -282,7 +282,7 @@ _agent_seat_worktrees_and_branches_list_spec.loader.exec_module(
 
 _agent_seat_terminal_captures_spec = importlib.util.spec_from_file_location(
     "agent_seat_terminal_captures_common",
-    Path(__file__).resolve().with_name("agent-seat-terminal-captures-common.py"))
+    Path(__file__).resolve().with_name("agent_seat_terminal_captures_common.py"))
 agent_seat_terminal_captures = importlib.util.module_from_spec(_agent_seat_terminal_captures_spec)
 _agent_seat_terminal_captures_spec.loader.exec_module(agent_seat_terminal_captures)
 
@@ -325,7 +325,7 @@ PROJECTS_ROOT = Path.home() / ".claude" / "projects"
 
 WALK_ME_THROUGH_DIRECTORY = REPOSITORY_ROOT / "nn-systems" / "skills" / "walk-me-through"
 WALK_FINDER_PATH = (WALK_ME_THROUGH_DIRECTORY
-                    / "walk-me-through-approval-walk-minutes-and-walk-document-item-finder-common.py")
+                    / "walk_me_through_approval_walk_minutes_and_walk_document_item_finder_common.py")
 # Loaded for heading_points alone, so the point is read as the closing line the hooks check reads it.
 WALK_SHORT_ANSWER_HOOK_PATH = (
     WALK_ME_THROUGH_DIRECTORY
@@ -335,7 +335,7 @@ APPROVAL_WALK_DIRECTORY = Path("docs") / "walk"
 
 _claude_code_session_transcript_lookup_and_text_search_common_spec = importlib.util.spec_from_file_location(
     "claude_code_session_transcript_lookup_and_text_search_common",
-    SCRIPTS_DIRECTORY / "claude-code-session-transcript-lookup-and-text-search-common.py")
+    SCRIPTS_DIRECTORY / "claude_code_session_transcript_lookup_and_text_search_common.py")
 claude_code_session_transcript_lookup_and_text_search_common = importlib.util.module_from_spec(_claude_code_session_transcript_lookup_and_text_search_common_spec)
 _claude_code_session_transcript_lookup_and_text_search_common_spec.loader.exec_module(claude_code_session_transcript_lookup_and_text_search_common)
 # Live supervisors resolve this path at import; moving the extractor would break those processes.

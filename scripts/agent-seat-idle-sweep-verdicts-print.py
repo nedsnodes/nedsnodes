@@ -77,17 +77,17 @@ supervisor = _load("handoff_supervisor",
                    _SCRIPTS.parent / "nn-systems" / "handoff" / "handoff-supervisor.py")
 deferred_marker_files = _load(
     "handoff_deferred_marker_and_refused_commands_files_common",
-    _SCRIPTS.parent / "nn-systems" / "handoff" / "handoff-deferred-marker-and-refused-commands-files-common.py")
+    _SCRIPTS.parent / "nn-systems" / "handoff" / "handoff_deferred_marker_and_refused_commands_files_common.py")
 due_task_hook = _load("agent_seat_due_task_raise_hook", _SCRIPTS / "agent-seat-due-task-raise-hook.py")
 walk_finder = _load("walk_me_through_approval_walk_minutes_and_walk_document_item_finder_common",
                     _SCRIPTS.parent / "nn-systems" / "skills" / "walk-me-through"
-                    / "walk-me-through-approval-walk-minutes-and-walk-document-item-finder-common.py")
+                    / "walk_me_through_approval_walk_minutes_and_walk_document_item_finder_common.py")
 fields = _load("agent_seat_idle_sweep_verdict_fields_common",
-               _SCRIPTS / "agent-seat-idle-sweep-verdict-fields-common.py")
+               _SCRIPTS / "agent_seat_idle_sweep_verdict_fields_common.py")
 interim_recognizer = threshold_hook.interim_recognizer
 TASK_NOTIFICATION_TASK_ID_PATTERN = threshold_hook.TASK_NOTIFICATION_TASK_ID_PATTERN
 transcript_lookup = _load("claude_code_session_transcript_lookup_and_text_search_common",
-                          _SCRIPTS / "claude-code-session-transcript-lookup-and-text-search-common.py")
+                          _SCRIPTS / "claude_code_session_transcript_lookup_and_text_search_common.py")
 
 IDLE_AFTER_SECONDS = 5 * 60
 LAUNCHED_SESSION_ID_KEY = "launched_session_id"

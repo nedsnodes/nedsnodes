@@ -127,17 +127,17 @@ def _load(module_name, relative_path):
 
 overview_path_reader = _load(
     "architecture_overview_path_template_and_checked_against_commit_reader_common",
-    "scripts/architecture-overview-path-template-and-checked-against-commit-reader-common.py")
+    "scripts/architecture_overview_path_template_and_checked_against_commit_reader_common.py")
 git_redirecting_removal = _load(
     "git_redirecting_environment_variables_removal_common",
-    "nn-systems/general-tools/git-redirecting-environment-variables-removal-common.py")
+    "nn-systems/general-tools/git_redirecting_environment_variables_removal_common.py")
 ned_box_home_path_constants = _load(
     "ned_box_home_directory_and_its_mac_mount_point_path_constants_common",
-    "nn-systems/general-tools/ned-box-home-directory-and-its-mac-mount-point-path-constants-common.py")
+    "nn-systems/general-tools/ned_box_home_directory_and_its_mac_mount_point_path_constants_common.py")
 cold_read_claude_cell = _load("cold_read_claude_cell", "nn-systems/cold-read/cold-read-claude-cell.py")
 command_line_prefix = _load(
     "claude_code_headless_run_command_line_prefix_with_no_connectors_and_explicit_permission_mode_common",
-    "nn-systems/general-tools/claude-code-headless-run-command-line-prefix-with-no-connectors-and-explicit-permission-mode-common.py")
+    "nn-systems/general-tools/claude_code_headless_run_command_line_prefix_with_no_connectors_and_explicit_permission_mode_common.py")
 
 LOG_STORE_DIRECTORY = Path(ned_box_home_path_constants.NED_BOX_HOME) / "nedsnodes-logs"
 OVERVIEW_WRITE_ARCHITECTURE_OVERVIEW_CLAIM_CHECK_REPORT_DIRECTORY = LOG_STORE_DIRECTORY / "overview-write-architecture-overview-claim-check-reports"

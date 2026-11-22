@@ -3,7 +3,7 @@
 
 One invocation = one cold-read-cell — the twin of the Codex cold-read-cell
 launcher (nn-systems/cold-read/cold-read-codex-cell.py). Everything the two do apart
-from invoking their model lives in nn-systems/cold-read/cold-read-cell-common.py and is
+from invoking their model lives in nn-systems/cold-read/cold_read_cell_common.py and is
 imported by both, so the legs cannot drift. Read that file for the report
 contract, the write-detection rule, and why the reviewer writes a file rather
 than answering in chat.
@@ -25,7 +25,7 @@ to stderr and nothing to stdout.
 Exit codes: 0 a model produced a report; 1 every model in the cold-read-tier's
 chain failed to produce one; 64 this program refused the invocation and never
 launched a model, naming its own fix. 64 rather than the conventional 2 for the
-reason written beside EXIT_BAD_INVOCATION in nn-systems/cold-read/cold-read-cell-common.py,
+reason written beside EXIT_BAD_INVOCATION in nn-systems/cold-read/cold_read_cell_common.py,
 which both cold-read-cells share.
 
 WHY A CLAUDE COLD-READ-CELL'S STAMP CARRIES NO `tokens=` FIELD. Every stamp
@@ -34,7 +34,7 @@ record `tokens=` because the Codex CLI prints a total. The Claude CLI prints
 no equivalent, so there is no figure to record and the field is omitted rather
 than filled with a zero -- an omitted field reads as "not reported", a zero
 would read as "this cold-read-cell cost nothing". If the CLI starts printing a
-"tokens used" line, the shared parser in nn-systems/cold-read/cold-read-cell-common.py picks
+"tokens used" line, the shared parser in nn-systems/cold-read/cold_read_cell_common.py picks
 it up with no change here.
 """
 
@@ -44,14 +44,14 @@ import re
 import sys
 
 _common_spec = importlib.util.spec_from_file_location(
-    "cold_read_cell_common", pathlib.Path(__file__).with_name("cold-read-cell-common.py")
+    "cold_read_cell_common", pathlib.Path(__file__).with_name("cold_read_cell_common.py")
 )
 common = importlib.util.module_from_spec(_common_spec)
 _common_spec.loader.exec_module(common)
 _command_line_prefix_spec = importlib.util.spec_from_file_location(
     "claude_code_headless_run_command_line_prefix_with_no_connectors_and_explicit_permission_mode_common",
     pathlib.Path(__file__).resolve().parent.parent / "general-tools"
-    / "claude-code-headless-run-command-line-prefix-with-no-connectors-and-explicit-permission-mode-common.py")
+    / "claude_code_headless_run_command_line_prefix_with_no_connectors_and_explicit_permission_mode_common.py")
 command_line_prefix = importlib.util.module_from_spec(_command_line_prefix_spec)
 _command_line_prefix_spec.loader.exec_module(command_line_prefix)
 

@@ -618,7 +618,7 @@ def _load_edited_file_path_within_checkout_root_and_git_check_ignore():
     specification = importlib.util.spec_from_file_location(
         "edited_file_path_within_checkout_root_and_git_check_ignore_common",
         Path(__file__).resolve().parents[1] / "nn-systems" / "general-tools"
-        / "edited-file-path-within-checkout-root-and-git-check-ignore-common.py")
+        / "edited_file_path_within_checkout_root_and_git_check_ignore_common.py")
     module = importlib.util.module_from_spec(specification)
     specification.loader.exec_module(module)
     return module
@@ -629,7 +629,7 @@ def _load_agent_session_unattended_by_user_check():
     specification = importlib.util.spec_from_file_location(
         "agent_session_unattended_by_user_check_common",
         Path(__file__).resolve().parents[1] / "nn-systems" / "general-tools"
-        / "agent-session-unattended-by-user-check-common.py")
+        / "agent_session_unattended_by_user_check_common.py")
     module = importlib.util.module_from_spec(specification)
     specification.loader.exec_module(module)
     return module
@@ -692,7 +692,7 @@ COMPACT_BOUNDARY_SUBTYPE = "compact_boundary"
 def _load_claude_code_session_transcript_records_read_backward_common():
     specification = importlib.util.spec_from_file_location(
         "claude_code_session_transcript_records_read_backward_common",
-        Path(__file__).resolve().with_name("claude-code-session-transcript-records-read-backward-common.py"))
+        Path(__file__).resolve().with_name("claude_code_session_transcript_records_read_backward_common.py"))
     module = importlib.util.module_from_spec(specification)
     specification.loader.exec_module(module)
     return module
@@ -843,7 +843,7 @@ def _load_failed_command_next_step_lines():
     specification = importlib.util.spec_from_file_location(
         "failed_command_tool_message_to_agent_rerun_once_then_stop_and_report_lines_common",
         Path(__file__).resolve().parents[1] / "nn-systems" / "general-tools"
-        / "failed-command-tool-message-to-agent-rerun-once-then-stop-and-report-lines-common.py")
+        / "failed_command_tool_message_to_agent_rerun_once_then_stop_and_report_lines_common.py")
     module = importlib.util.module_from_spec(specification)
     specification.loader.exec_module(module)
     return module

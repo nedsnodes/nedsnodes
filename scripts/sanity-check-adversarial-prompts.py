@@ -223,7 +223,7 @@ Running a sanity-check, and reading its output:
   therefore launches once more itself, except where the cause is known to
   outlast a relaunch: the classes only the user can clear
   (USER_CLEARABLE_CAUSE_CLASSES in
-  nn-systems/cold-read/cold-read-cell-common.py), which also reach the user by
+  nn-systems/cold-read/cold_read_cell_common.py), which also reach the user by
   the printed instruction, and a timeout. The classification is read from the
   CLI's own output, matched only at the start of a line and only on a launch
   that failed; a launch whose text misleads it is told to the user, who can
@@ -305,7 +305,7 @@ RECORD_SHIPPER = REPO_ROOT / "scripts" / "sanity-check-record-ship.py"
 # log-store; REFUSED and FAILED both leave it on disk alone.
 RECORD_SHIPPED_LINE_PREFIX = "shipped:"
 _common_spec = importlib.util.spec_from_file_location(
-    "cold_read_cell_common", REPO_ROOT / "nn-systems" / "cold-read" / "cold-read-cell-common.py")
+    "cold_read_cell_common", REPO_ROOT / "nn-systems" / "cold-read" / "cold_read_cell_common.py")
 common = importlib.util.module_from_spec(_common_spec)
 _common_spec.loader.exec_module(common)
 _record_ship_spec = importlib.util.spec_from_file_location(
@@ -315,20 +315,20 @@ _record_ship_spec.loader.exec_module(record_ship)
 _git_output_spec = importlib.util.spec_from_file_location(
     "git_machine_readable_output_runner_and_parser_common",
     REPO_ROOT / "nn-systems" / "general-tools"
-    / "git-machine-readable-output-runner-and-parser-common.py")
+    / "git_machine_readable_output_runner_and_parser_common.py")
 git_output = importlib.util.module_from_spec(_git_output_spec)
 _git_output_spec.loader.exec_module(git_output)
 
 _next_step_lines_spec = importlib.util.spec_from_file_location(
     "failed_command_tool_message_to_agent_rerun_once_then_stop_and_report_lines_common",
     REPO_ROOT / "nn-systems" / "general-tools"
-    / "failed-command-tool-message-to-agent-rerun-once-then-stop-and-report-lines-common.py")
+    / "failed_command_tool_message_to_agent_rerun_once_then_stop_and_report_lines_common.py")
 next_step_lines = importlib.util.module_from_spec(_next_step_lines_spec)
 _next_step_lines_spec.loader.exec_module(next_step_lines)
 _command_line_prefix_spec = importlib.util.spec_from_file_location(
     "claude_code_headless_run_command_line_prefix_with_no_connectors_and_explicit_permission_mode_common",
     REPO_ROOT / "nn-systems" / "general-tools"
-    / "claude-code-headless-run-command-line-prefix-with-no-connectors-and-explicit-permission-mode-common.py")
+    / "claude_code_headless_run_command_line_prefix_with_no_connectors_and_explicit_permission_mode_common.py")
 command_line_prefix = importlib.util.module_from_spec(_command_line_prefix_spec)
 _command_line_prefix_spec.loader.exec_module(command_line_prefix)
 # The Codex cells' permission profile, as it appears in their sessions.
@@ -495,7 +495,7 @@ IGNORED_PATH_STATUS_CODE = "!!"
 # stands behind it and ends the chain.
 #
 # WHAT COUNTS AS A FAILURE WORTH FALLING BACK FROM follows the house chain,
-# run_model_chain in nn-systems/cold-read/cold-read-cell-common.py: a model that exits
+# run_model_chain in nn-systems/cold-read/cold_read_cell_common.py: a model that exits
 # non-zero, cannot be launched at all, or exits 0 having written nothing are
 # one event — no review was produced — so the chain advances on all three.
 # That module is not imported here: it is built around the cold-read cell's
@@ -676,7 +676,7 @@ def run_claude(prompt: str, checkout: pathlib.Path = None) -> tuple:
             continue
         # The agent-binary's own words survive every ending, the house chain's rule
         # (BOTH STREAMS ARE CAPTURED, in run_model_chain,
-        # nn-systems/cold-read/cold-read-cell-common.py). A CLI that is logged out or out of
+        # nn-systems/cold-read/cold_read_cell_common.py). A CLI that is logged out or out of
         # credits explains itself on one of these streams and nowhere else, so
         # discarding them leaves "WARNING: <model> failed (exit 1)" as the whole
         # account of why. It is worse here than it
@@ -783,7 +783,7 @@ def run_codex(prompt: str, checkout: pathlib.Path = None) -> tuple:
     # the house doctrine. Both come from a permission profile extending
     # `:workspace` with network on, which also denies every credential file:
     # the builder the cold-read Codex cell uses, in
-    # nn-systems/cold-read/cold-read-cell-common.py.
+    # nn-systems/cold-read/cold_read_cell_common.py.
     last_message_path = pathlib.Path(tempfile.mkstemp(suffix=".md", prefix="adversarial-prompt-cell-")[1])
     command = [
         "codex", "exec",
@@ -1044,7 +1044,7 @@ def provenance_line(runtime: str, model: str, adversarial_prompt: str, target: s
     `fallback_from=` appears only when an earlier model in a chain produced
     no review, so a degraded cell is visible in the record and not only in
     the run's output. Both follow the cold-read cells' stamp
-    (stamp_provenance in nn-systems/cold-read/cold-read-cell-common.py), and so does the
+    (stamp_provenance in nn-systems/cold-read/cold_read_cell_common.py), and so does the
     order of the line's first four fields: `runtime=`, `model=`,
     `fallback_from=` when present, `effort=`. After those the two stamps
     differ: `cli=`, `adversarial_prompt=` and `isolation=` are this runner's own;

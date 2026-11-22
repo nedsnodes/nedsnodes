@@ -8,7 +8,7 @@ docs/nedsnodes-wiki/nedsnodes-how-a-program-reports-success-failure-and-findings
 says a hook never turns its own failure into a silent 0, and says what it does instead.
 
 The hooks read are the Python files .claude/settings.json registers, found as
-nn-systems/general-tools/claude-code-registered-hook-rule-id-pattern-hook-files-list-and-source-scan-common.py
+nn-systems/general-tools/claude_code_registered_hook_rule_id_pattern_hook_files_list_and_source_scan_common.py
 finds them; a file settings.json does not register is never run as a hook.
 
 Each hook's syntax tree is read, not run. A `try` is checked when its body reads stdin, as
@@ -41,14 +41,14 @@ EXIT_CODE_PAGE = (
 _rule_ids_spec = importlib.util.spec_from_file_location(
     "claude_code_registered_hook_rule_id_pattern_hook_files_list_and_source_scan_common",
     REPOSITORY / "nn-systems" / "general-tools"
-    / "claude-code-registered-hook-rule-id-pattern-hook-files-list-and-source-scan-common.py")
+    / "claude_code_registered_hook_rule_id_pattern_hook_files_list_and_source_scan_common.py")
 rule_ids = importlib.util.module_from_spec(_rule_ids_spec)
 _rule_ids_spec.loader.exec_module(rule_ids)
 
 _rule_failure_lines_spec = importlib.util.spec_from_file_location(
     "rule_enforcing_nc_test_suite_failure_message_closing_lines_text_common",
     REPOSITORY / "nn-systems" / "general-tools"
-    / "rule-enforcing-nc-test-suite-failure-message-closing-lines-text-common.py")
+    / "rule_enforcing_nc_test_suite_failure_message_closing_lines_text_common.py")
 RULE_FAILURE_LINES = importlib.util.module_from_spec(_rule_failure_lines_spec)
 _rule_failure_lines_spec.loader.exec_module(RULE_FAILURE_LINES)
 

@@ -1095,7 +1095,7 @@ check("a Write whose git cannot be found is reported on stderr, no note, exit 1"
       (result.returncode, result.stdout, result.stderr))
 
 # The hook without the shared module it loads its git helpers from.
-SHARED_MODULE_NAME = "edited-file-path-within-checkout-root-and-git-check-ignore-common.py"
+SHARED_MODULE_NAME = "edited_file_path_within_checkout_root_and_git_check_ignore_common.py"
 hook_without_shared_module = SCRATCH / "hook-without-its-git-helpers" / "scripts" / HOOK_PATH.name
 hook_without_shared_module.parent.mkdir(parents=True)
 shutil.copy(str(HOOK_PATH), str(hook_without_shared_module))

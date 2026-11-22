@@ -553,7 +553,7 @@ def run_page_link_cases(scratch):
 
 
 def run_item_page_line_reader_cases():
-    finder_file = HERE / "walk-me-through-approval-walk-minutes-and-walk-document-item-finder-common.py"
+    finder_file = HERE / "walk_me_through_approval_walk_minutes_and_walk_document_item_finder_common.py"
     specification = importlib.util.spec_from_file_location("walk_finder", finder_file)
     walk_finder = importlib.util.module_from_spec(specification)
     specification.loader.exec_module(walk_finder)

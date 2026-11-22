@@ -42,10 +42,10 @@ from pathlib import Path
 HERE = Path(__file__).resolve().parent
 CHECKOUT = HERE.parents[2]
 PROGRAM = Path(__file__).stem
-WALK_FINDER_FILE = HERE / "walk-me-through-approval-walk-minutes-and-walk-document-item-finder-common.py"
+WALK_FINDER_FILE = HERE / "walk_me_through_approval_walk_minutes_and_walk_document_item_finder_common.py"
 WALK_CHECK_PROGRAM = HERE / "walk-me-through-answer-added-texts-cold-read-fast-read-check-and-close.py"
 ALERTS_MODULE_FILE = (CHECKOUT / "nn-systems" / "general-tools"
-                      / "user-alerts-pending-and-claimed-files-write-claim-release-and-delete-common.py")
+                      / "user_alerts_pending_and_claimed_files_write_claim_release_and_delete_common.py")
 
 NO_WALK_MESSAGE = (
     "no approval-walk is open in {walk_directory}, so the alerts were not added. Open an approval-walk whose "

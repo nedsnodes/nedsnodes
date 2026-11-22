@@ -50,7 +50,7 @@ _cold_read_scratch_fixture_spec.loader.exec_module(cold_read_scratch_fixture)
 _scratch_directory_common_spec = importlib.util.spec_from_file_location(
     "test_scratch_directory_whose_earlier_killed_runs_leftovers_are_removed_first_common",
     Path(__file__).resolve().parents[3] / "general-tools"
-    / "test-scratch-directory-whose-earlier-killed-runs-leftovers-are-removed-first-common.py")
+    / "test_scratch_directory_whose_earlier_killed_runs_leftovers_are_removed_first_common.py")
 _scratch_directory_common = importlib.util.module_from_spec(_scratch_directory_common_spec)
 _scratch_directory_common_spec.loader.exec_module(_scratch_directory_common)
 SUITE_ROOT = _scratch_directory_common.make_test_scratch_directory_after_removing_killed_runs_leftovers(
@@ -6414,7 +6414,7 @@ def test_bump_refuses_while_the_last_answer_has_no_close_line_writing_nothing():
 _finding_outcomes_spec = importlib.util.spec_from_file_location(
     "cold_read_fast_read_report_findings_parse_and_finding_outcomes_check_common",
     Path(__file__).resolve().parents[3] / "cold-read"
-    / "cold-read-fast-read-report-findings-parse-and-finding-outcomes-check-common.py")
+    / "cold_read_fast_read_report_findings_parse_and_finding_outcomes_check_common.py")
 finding_outcomes = importlib.util.module_from_spec(_finding_outcomes_spec)
 _finding_outcomes_spec.loader.exec_module(finding_outcomes)
 FINDINGS_MODE = "with-findings"

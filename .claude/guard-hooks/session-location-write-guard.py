@@ -13,7 +13,7 @@ from pathlib import Path
 
 _crash_notice_spec = importlib.util.spec_from_file_location(
     "guard_hook_crash_fail_open_with_notice_common",
-    Path(__file__).resolve().parent / "guard-hook-crash-fail-open-with-notice-common.py")
+    Path(__file__).resolve().parent / "guard_hook_crash_fail_open_with_notice_common.py")
 _crash_notice = importlib.util.module_from_spec(_crash_notice_spec)
 _crash_notice_spec.loader.exec_module(_crash_notice)
 
@@ -21,7 +21,7 @@ with _crash_notice.guard_hook_crash_fail_open_with_notice_context_manager(
         __file__, __name__ == "__main__"):
     _marker_spec = importlib.util.spec_from_file_location(
         "guard_approval_marker_common",
-        Path(__file__).resolve().parent / "guard-approval-marker-common.py")
+        Path(__file__).resolve().parent / "guard_approval_marker_common.py")
     _guard_approval_marker_common = importlib.util.module_from_spec(_marker_spec)
     _marker_spec.loader.exec_module(_guard_approval_marker_common)
 consume_approval_marker = _guard_approval_marker_common.consume_approval_marker

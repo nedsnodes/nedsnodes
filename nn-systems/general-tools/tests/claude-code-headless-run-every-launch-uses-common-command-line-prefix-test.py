@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """Every headless `claude -p` launch in the repository begins its command line
-with nn-systems/general-tools/claude-code-headless-run-command-line-prefix-with-no-connectors-and-explicit-permission-mode-common.py,
+with nn-systems/general-tools/claude_code_headless_run_command_line_prefix_with_no_connectors_and_explicit_permission_mode_common.py,
 and this test keeps it that way.
 
 A `claude -p` command line written out by hand can leave out
@@ -43,12 +43,12 @@ REPOSITORY_ROOT = Path(__file__).resolve().parents[3]
 _spec = importlib.util.spec_from_file_location(
     "git_redirecting_environment_variables_removal_common",
     REPOSITORY_ROOT / "nn-systems" / "general-tools"
-    / "git-redirecting-environment-variables-removal-common.py")
+    / "git_redirecting_environment_variables_removal_common.py")
 git_redirecting_removal = importlib.util.module_from_spec(_spec)
 _spec.loader.exec_module(git_redirecting_removal)
 
 COMMAND_LINE_PREFIX_MODULE_PATH = ("nn-systems/general-tools/"
-                             "claude-code-headless-run-command-line-prefix-with-no-connectors-and-explicit-permission-mode-common.py")
+                             "claude_code_headless_run_command_line_prefix_with_no_connectors_and_explicit_permission_mode_common.py")
 PRINT_MODE_FLAGS = {"-p", "--print"}
 CLAUDE_ONLY_FLAGS = {
     "--allowedTools", "--allowed-tools", "--disallowedTools", "--disallowed-tools",

@@ -117,7 +117,7 @@ MAC_PROCESS_LISTING_COMMAND = ["ps", "-axww", "-o", "pid=,ppid=,etime=,args="]
 PROCESS_LISTING_TIMEOUT_SECONDS = 30
 _claude_code_session_transcript_lookup_and_text_search_common_specification = importlib.util.spec_from_file_location(
     "claude_code_session_transcript_lookup_and_text_search_common",
-    REPOSITORY / "scripts" / "claude-code-session-transcript-lookup-and-text-search-common.py")
+    REPOSITORY / "scripts" / "claude_code_session_transcript_lookup_and_text_search_common.py")
 claude_code_session_transcript_lookup_and_text_search_common = importlib.util.module_from_spec(_claude_code_session_transcript_lookup_and_text_search_common_specification)
 _claude_code_session_transcript_lookup_and_text_search_common_specification.loader.exec_module(claude_code_session_transcript_lookup_and_text_search_common)
 

@@ -30,7 +30,7 @@ Demonstrated live, 2026-09-11: the user asked the cold-read-research seat to rep
 
 ### Half one, buildable now and needing no rule
 
-A Stop-hook delta report that **reports and never judges**, reusing the proven code in `scripts/cold-read-cell-common.py`: `working_tree_state()` (git status --porcelain --untracked-files=all, around line 414), `stray_writes_since()` (the delta, subtracting the run's expected output), and `report_stray_writes()` (never raises, and says loudly when the check could not run, because a failure to look is not a clean result). That module has run on every cold-read cell since August. It exists because on 2026-08-21 a reviewer agent wrote a 25,170-byte file into the worktree root and the only notice anyone got was the agent confessing in its own report.
+A Stop-hook delta report that **reports and never judges**, reusing the proven code in `nn-systems/cold-read/cold_read_cell_common.py`: `working_tree_state()` (git status --porcelain --untracked-files=all, around line 414), `stray_writes_since()` (the delta, subtracting the run's expected output), and `report_stray_writes()` (never raises, and says loudly when the check could not run, because a failure to look is not a clean result). That module has run on every cold-read cell since August. It exists because on 2026-08-21 a reviewer agent wrote a 25,170-byte file into the worktree root and the only notice anyone got was the agent confessing in its own report.
 
 Known limit to state in the code rather than discover later: git cannot see gitignored paths, which that module's docstring records at lines 38-39. A file misplaced into `docs/walk/` stays invisible.
 

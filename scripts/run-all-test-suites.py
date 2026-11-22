@@ -293,7 +293,7 @@ itself: a suite or fixture that runs `git init` first takes the variables
 listed above out of its own process, through
 scripts/git-redirecting-environment-removal-test-fixture.py, which reads
 GIT_REDIRECTING_ENVIRONMENT_VARIABLES from the module this file reads it
-from, nn-systems/general-tools/git-redirecting-environment-variables-removal-common.py, and
+from, nn-systems/general-tools/git_redirecting_environment_variables_removal_common.py, and
 scripts/test-suites-run-directly-ignore-git-redirecting-environment-test.py
 checks that each one does. That is nedschorus#639's "Next action" item 2.
 
@@ -869,7 +869,7 @@ SKIPPED_CASE_LINE_THIS_MACHINE_CANNOT_RUN = re.compile(
 _git_redirecting_removal_spec = importlib.util.spec_from_file_location(
     "git_redirecting_environment_variables_removal_common",
     Path(__file__).resolve().parents[1] / "nn-systems" / "general-tools"
-    / "git-redirecting-environment-variables-removal-common.py")
+    / "git_redirecting_environment_variables_removal_common.py")
 git_redirecting_removal = importlib.util.module_from_spec(_git_redirecting_removal_spec)
 _git_redirecting_removal_spec.loader.exec_module(git_redirecting_removal)
 GIT_REDIRECTING_ENVIRONMENT_VARIABLES = git_redirecting_removal.GIT_REDIRECTING_ENVIRONMENT_VARIABLES
@@ -877,7 +877,7 @@ GIT_REDIRECTING_ENVIRONMENT_VARIABLES = git_redirecting_removal.GIT_REDIRECTING_
 _next_step_lines_spec = importlib.util.spec_from_file_location(
     "failed_command_tool_message_to_agent_rerun_once_then_stop_and_report_lines_common",
     Path(__file__).resolve().parents[1] / "nn-systems" / "general-tools"
-    / "failed-command-tool-message-to-agent-rerun-once-then-stop-and-report-lines-common.py")
+    / "failed_command_tool_message_to_agent_rerun_once_then_stop_and_report_lines_common.py")
 next_step_lines = importlib.util.module_from_spec(_next_step_lines_spec)
 _next_step_lines_spec.loader.exec_module(next_step_lines)
 
@@ -886,7 +886,7 @@ _next_step_lines_spec.loader.exec_module(next_step_lines)
 _attendance_check_spec = importlib.util.spec_from_file_location(
     "agent_session_unattended_by_user_check_common",
     Path(__file__).resolve().parents[1] / "nn-systems" / "general-tools"
-    / "agent-session-unattended-by-user-check-common.py")
+    / "agent_session_unattended_by_user_check_common.py")
 _attendance_check = importlib.util.module_from_spec(_attendance_check_spec)
 _attendance_check_spec.loader.exec_module(_attendance_check)
 AGENT_SESSION_ATTENDANCE_ENVIRONMENT_VARIABLES = _attendance_check.AGENT_SESSION_ATTENDANCE_ENVIRONMENT_VARIABLES
@@ -922,7 +922,7 @@ TEST_SANDBOX_HOME_PATHS_SHOWN_READ_ONLY = {
                        "looks for here",
     ".gitconfig": "git's settings for this account, which suites that run git read",
     ".claude/projects": "Claude Code's session transcripts, against the five largest of which "
-                        "scripts/claude-code-session-transcript-records-read-backward-common-test.py "
+                        "scripts/claude_code_session_transcript_records_read_backward_common-test.py "
                         "checks the transcript reader; a transcript can hold a secret the user pasted",
     "nedsnodes-logs/seats/ned-box-helper/absence-claim-trigger-phrases-2026-10-05/out/"
     "precision/labels.csv": "the labelled replies scripts/absence-claim-locator-reminder-"

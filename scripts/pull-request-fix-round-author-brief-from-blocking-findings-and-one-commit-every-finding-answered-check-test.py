@@ -1053,7 +1053,7 @@ def commissioned_reviewer_cases(root, repository, base, frozen_head):
         pull_request_2213_comment(4428029719, "scripts/search-user-messages-in-transcripts.py",
                                   "**Blocks.** (Codex [P2]) The prefilter intersects the selected transcripts."),
         pull_request_2213_comment(4428029724,
-                                  "scripts/claude-code-session-transcript-lookup-and-text-search-common.py",
+                                  "scripts/claude_code_session_transcript_lookup_and_text_search_common.py",
                                   "**Blocks.** (Codex [P2]) The grep fallback replaces `\\d` with `[0-9]`."),
         pull_request_2213_comment(4428029732, "scripts/search-user-messages-in-transcripts.py",
                                   "**Blocks.** (merge-lane-2's fast-read hold) Reword the summary clause."),
@@ -1090,7 +1090,7 @@ def commissioned_reviewer_cases(root, repository, base, frozen_head):
         PR_VIEW: {"stdout": json.dumps({"url": URL, "headRefOid": fix, "headRefName": BRANCH})},
         REVIEWS: {"stdout": lines([reviewer_round_0, merge_lane_round_0, reviewer_round_1])},
         **comments_route(5718557027, [pull_request_2213_comment(
-            4428404941, "scripts/claude-code-session-transcript-lookup-and-text-search-common.py",
+            4428404941, "scripts/claude_code_session_transcript_lookup_and_text_search_common.py",
             "**Blocks.** `\\w` is passed to ripgrep unchanged.")])})
     four_answers = answers_file(root, GOOD_ANSWERS + "3. Fixed.\n4. Reworded.\n")
     code, out, err = run(root, repository, after_push, "--check", "--answers", four_answers)

@@ -30,10 +30,10 @@ Its output, with the script saved as `repro.py` and run as `python3 repro.py <wo
 ```
 Python suites: 250
 no list: nn-systems/cold-read/tests/cold-read-agy-cell-test.py
-no list: nn-systems/general-tools/tests/agent-seat-task-list-task-file-rewrite-common-test.py
+no list: nn-systems/general-tools/tests/agent_seat_task_list_task_file_rewrite_common-test.py
 no list: nn-systems/general-tools/tests/install-scheduled-jobs-on-this-machine-after-reference-checkout-merge-and-report-install-failure-as-task-for-installer-owner-agent-seat-test.py
 no list: nn-systems/handoff/tests/handoff-write-and-check-supervisor-test.py
-no list: scripts/claude-code-session-transcript-records-read-backward-common-test.py
+no list: scripts/claude_code_session_transcript_records_read_backward_common-test.py
 no list: scripts/design-ghi-md-approval-walk-minutes-and-cold-read-records-user-turns-with-file-and-line-extract-test.py
 scripts/run-all-test-suites.py: 6 of 250 suites have no list of the files only strace saw them read from the last 36 hours in /home/nedlern/.cache/nedsnodes-test-suite-recorded-inputs/c8652c93ef1c27e3, so this selective run does not select such a suite when the change edits a file the suite reads only through git or a shell script. scripts/scheduled-full-test-run-of-main.py makes those lists once a day on ned-box, so it has not recorded every suite at all. The verdicts of the suites this run ran stand; carry on with your work.
 If you have not yet told the user in this agent-session that the scheduled full test run's lists are stale: tell him "The scheduled full test run on ned-box has not recorded every suite at all, so selective test runs there can miss a suite whose git or shell reads changed. The scheduled run's records are in nedlern@ned-box:/home/nedlern/nedsnodes-logs/scheduled-full-test-runs-of-main/ned-box/." A subagent passes that sentence to the agent that dispatched it instead.
@@ -46,7 +46,7 @@ The other three were in that run, and each skipped a case with a reason that doe
 ```
 nn-systems/cold-read/tests/cold-read-agy-cell-test.py: SKIP  the credential-file cases: they need the real sandbox program, which cannot start in the nc-test-sandbox; nn-systems/cold-read/tests/cold-read-agy-cell-real-sandbox-test.py runs them
 nn-systems/handoff/tests/handoff-write-and-check-supervisor-test.py: SKIP  a running Claude Code session sets CLAUDE_CODE_SESSION_ID: this run is not inside a Claude Code session
-scripts/claude-code-session-transcript-records-read-backward-common-test.py: SKIP  no real transcripts under ~/.claude/projects/ to compare
+scripts/claude_code_session_transcript_records_read_backward_common-test.py: SKIP  no real transcripts under ~/.claude/projects/ to compare
 ```
 
 ## Why the notice fires on every selective test run
@@ -63,7 +63,7 @@ The notice has become noise. Reviewers relayed it on pull requests 3792, 3793 an
 
 From reading `selection_reason` in `scripts/run-all-test-suites.py` and the recordings on ned-box on 2026-11-16, the answer differs between the three suites:
 
-- `selection_reason` selects a suite whenever its own recording, the one the last run on that recorded-inputs directory saved, skipped an unmarked case. The recordings of `nn-systems/cold-read/tests/cold-read-agy-cell-test.py` and `scripts/claude-code-session-transcript-records-read-backward-common-test.py`, in both `~/.cache/nedsnodes-test-suite-recorded-inputs/c8652c93ef1c27e3/` and merge-lane-2's head test run directory `/home/nedlern/nedsnodes-logs/seats/merge-lane-2/merge-helpers/hr/store/c8652c93ef1c27e3/`, each record one skipped case and no marked one, so every selective test run selects them, and the missing list costs nothing for them today.
+- `selection_reason` selects a suite whenever its own recording, the one the last run on that recorded-inputs directory saved, skipped an unmarked case. The recordings of `nn-systems/cold-read/tests/cold-read-agy-cell-test.py` and `scripts/claude_code_session_transcript_records_read_backward_common-test.py`, in both `~/.cache/nedsnodes-test-suite-recorded-inputs/c8652c93ef1c27e3/` and merge-lane-2's head test run directory `/home/nedlern/nedsnodes-logs/seats/merge-lane-2/merge-helpers/hr/store/c8652c93ef1c27e3/`, each record one skipped case and no marked one, so every selective test run selects them, and the missing list costs nothing for them today.
 - `nn-systems/handoff/tests/handoff-write-and-check-supervisor-test.py` skips its case only outside a Claude Code session. Its recordings in both directories were made inside one and record no skipped case, so a selective test run can leave it unselected, and with no list it is not selected when a file it reads only through git or a shell script changes. For this suite the notice reports a real gap (unverified whether the suite reads any file only that way).
 
 ## What to do

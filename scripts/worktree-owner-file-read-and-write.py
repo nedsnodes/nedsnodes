@@ -376,7 +376,7 @@ def agent_seats_whose_claude_code_transcripts_name_subagent(agent_id, agents_roo
     seats = recover_crashed_seats_module()
     transcripts = load_module(
         "claude_code_session_transcript_lookup_and_text_search_common",
-        REPO_ROOT / "scripts" / "claude-code-session-transcript-lookup-and-text-search-common.py")
+        REPO_ROOT / "scripts" / "claude_code_session_transcript_lookup_and_text_search_common.py")
     agents_root = agents_root or seats.default_agents_root()
     projects_root = projects_root or Path.home() / ".claude" / "projects"
     found = []

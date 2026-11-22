@@ -2816,7 +2816,7 @@ def test_items_headings_with_words_group_and_amendment_headings_stay_in_their_it
 
 
 def load_walk_finder_for_test():
-    path = HOOK_SCRIPT.parent / "walk-me-through-approval-walk-minutes-and-walk-document-item-finder-common.py"
+    path = HOOK_SCRIPT.parent / "walk_me_through_approval_walk_minutes_and_walk_document_item_finder_common.py"
     spec = importlib.util.spec_from_file_location("walk_finder_for_short_answer_hook_test", path)
     module = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(module)
@@ -2894,7 +2894,7 @@ MENTIONS_OF_ANOTHER_ITEM = {
     "a bold label in a nested list": "- Context.\n  - **Item 6: nested.** Recommendation: nested.",
 }
 FINDER_MODULE_FILE = (HOOK_SCRIPT.parent
-                      / "walk-me-through-approval-walk-minutes-and-walk-document-item-finder-common.py")
+                      / "walk_me_through_approval_walk_minutes_and_walk_document_item_finder_common.py")
 
 
 def test_no_mention_of_another_item_is_read_as_an_opening_in_any_place_an_opening_is_read():

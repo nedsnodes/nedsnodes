@@ -55,11 +55,11 @@ recover_crashed_seats = load_module("recover_crashed_seats", REPO_ROOT / "script
 headless = load_module(
     "claude_code_headless_run_command_line_prefix_with_no_connectors_and_explicit_permission_mode_common",
     REPO_ROOT / "nn-systems" / "general-tools"
-    / "claude-code-headless-run-command-line-prefix-with-no-connectors-and-explicit-permission-mode-common.py")
+    / "claude_code_headless_run_command_line_prefix_with_no_connectors_and_explicit_permission_mode_common.py")
 test_suite_runner = load_module("run_all_test_suites", REPO_ROOT / "scripts" / "run-all-test-suites.py")
 claude_cell = load_module("cold_read_claude_cell", REPO_ROOT / "nn-systems" / "cold-read" / "cold-read-claude-cell.py")
 transcripts = load_module("claude_code_session_transcript_lookup_and_text_search_common",
-                          REPO_ROOT / "scripts" / "claude-code-session-transcript-lookup-and-text-search-common.py")
+                          REPO_ROOT / "scripts" / "claude_code_session_transcript_lookup_and_text_search_common.py")
 
 failures = []
 stopped_by_an_outside_cause = []

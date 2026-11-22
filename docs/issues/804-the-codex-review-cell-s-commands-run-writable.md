@@ -10,7 +10,7 @@ Agent-filed by merge-lane-2 on 2026-09-30, from a reproduced finding. The reprod
 
 Measured on ned-box with codex-cli 0.156.0, on main at `805c0936`, on 2026-09-30.
 
-`scripts/code-review-codex-cell.py` runs `codex exec` with the permission profile `code-review-no-credentials`. That profile extends `:read-only` and denies every credential path. It is built by `codex_credential_denying_permission_profile_arguments` in `nn-systems/cold-read/cold-read-cell-common.py`. Then it runs `review`. Each command the reviewing model runs goes through a `codex-linux-sandbox` child, whose `--permission-profile` argument is the policy that command actually gets.
+`scripts/code-review-codex-cell.py` runs `codex exec` with the permission profile `code-review-no-credentials`. That profile extends `:read-only` and denies every credential path. It is built by `codex_credential_denying_permission_profile_arguments` in `nn-systems/cold-read/cold_read_cell_common.py`. Then it runs `review`. Each command the reviewing model runs goes through a `codex-linux-sandbox` child, whose `--permission-profile` argument is the policy that command actually gets.
 
 1. **The review's commands get a different profile.** While the cell ran over PR [Every git the locator runs ignores a caller's GIT_COMMON_DIR](https://github.com/nedschorus/nedschorus/pull/802) at its head, at 2026-09-30T01:37:28Z:
    - The parent `codex exec` carried `default_permissions="code-review-no-credentials"`, `extends=":read-only"`, and a filesystem table of seven `"deny"` entries, read from `/proc/<pid>/cmdline`.
@@ -71,7 +71,7 @@ Fixed on 2026-09-30 by PR [The Codex review cell's commands run under its creden
   - workspace-write on the Mac, from its config's `sandbox_mode`.
 
   The same profile, passed as the builder's `-c` configuration overrides but placed after `review`, does reach the child. `review`'s own parser rejects `--sandbox`, and `-p`, the config-profile flag of `codex exec`.
-- **Fix.** `scripts/code-review-codex-cell.py` now places the builder's profile overrides after `review`. The shared builder in `nn-systems/cold-read/cold-read-cell-common.py` is unchanged. The cell's docstring says where the profile goes and how to re-check it after a Codex upgrade.
+- **Fix.** `scripts/code-review-codex-cell.py` now places the builder's profile overrides after `review`. The shared builder in `nn-systems/cold-read/cold_read_cell_common.py` is unchanged. The cell's docstring says where the profile goes and how to re-check it after a Codex upgrade.
 - **Measured, both machines, codex-cli 0.156.0.** Each run had a scratch HOME holding canary credentials. With the profile before `review`, the reviewer read both canaries and wrote under `/tmp` and in the checkout. With it after `review`:
   - both reads and both writes were refused;
   - no `/tmp/.git` appeared;

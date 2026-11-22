@@ -5,14 +5,14 @@
 
 On Linux the sandboxes of the Codex and agy cold-read-cells deny a reviewer program only the folders
 CREDENTIAL_DIRECTORIES lists and the login files REVIEWER_PROGRAM_LOGIN_FILES lists, both in
-nn-systems/cold-read/cold-read-cell-common.py. The Codex cell's sandbox denies Codex's own login file too,
+nn-systems/cold-read/cold_read_cell_common.py. The Codex cell's sandbox denies Codex's own login file too,
 while the agy cell's sandbox leaves agy's own login files readable. They do not deny by the two name patterns of
 CREDENTIAL_FILE_NAME_PATTERNS, `*.token` and `.env`; only the macOS sandboxes and the Claude cell's
 Read(//**/<pattern>) rule do. A file with such a name anywhere else under the home directory is therefore
 readable to the Codex and agy reviewer programs. This program walks the home directory, read from HOME,
 skipping the folders CREDENTIAL_DIRECTORIES lists and the log-store (~/nedsnodes-logs, whose test leftovers match the patterns but
 hold no credential), and when it finds such a file writes one user-alert naming every one found, through
-nn-systems/general-tools/user-alerts-pending-and-claimed-files-write-claim-release-and-delete-common.py.
+nn-systems/general-tools/user_alerts_pending_and_claimed_files_write_claim_release_and_delete_common.py.
 It keeps no state, so the alert comes again each day until the file is moved into a folder
 CREDENTIAL_DIRECTORIES lists or deleted, or its folder is added to CREDENTIAL_DIRECTORIES; a file directly
 in the home folder can only be moved or deleted.
@@ -47,17 +47,17 @@ def _load(name, path):
     return module
 
 
-cell_common = _load("cold_read_cell_common", REPOSITORY / "nn-systems" / "cold-read" / "cold-read-cell-common.py")
+cell_common = _load("cold_read_cell_common", REPOSITORY / "nn-systems" / "cold-read" / "cold_read_cell_common.py")
 user_alerts = _load(
     "user_alerts_pending_and_claimed_files_write_claim_release_and_delete_common",
     REPOSITORY / "nn-systems" / "general-tools"
-    / "user-alerts-pending-and-claimed-files-write-claim-release-and-delete-common.py")
+    / "user_alerts_pending_and_claimed_files_write_claim_release_and_delete_common.py")
 
 THIS_PROGRAM = "nn-systems/cold-read/cold-read-cell-credential-files-outside-denied-directories-daily-check-user-alert-write.py"
 FOUND_TITLE = "A credential file on ned-box is readable to the cold-read-cells' reviewer programs"
 FOUND_ACTION = (
     "An agent on ned-box can, after asking the user which: add the file's folder to CREDENTIAL_DIRECTORIES in "
-    "nn-systems/cold-read/cold-read-cell-common.py in a pull request, if the file holds a credential that must stay "
+    "nn-systems/cold-read/cold_read_cell_common.py in a pull request, if the file holds a credential that must stay "
     "there; or move the file into a folder already listed. A file directly in the home folder can only be moved. "
     "Only the user can say whether the file holds a credential.")
 NAME_PATTERNS = " or ".join(cell_common.CREDENTIAL_FILE_NAME_PATTERNS)
@@ -105,10 +105,10 @@ def main(argv=None):
         return 1
     if not found:
         print(f"The search found no file named {NAME_PATTERNS} under {home} outside the folders CREDENTIAL_DIRECTORIES "
-              f"lists in nn-systems/cold-read/cold-read-cell-common.py and outside the log-store {home / 'nedsnodes-logs'}.")
+              f"lists in nn-systems/cold-read/cold_read_cell_common.py and outside the log-store {home / 'nedsnodes-logs'}.")
         return 0
     text = (f"Each file below is named {NAME_PATTERNS} and lies in no folder that CREDENTIAL_DIRECTORIES lists in "
-            "nn-systems/cold-read/cold-read-cell-common.py, so on Linux the Codex and agy programs that the "
+            "nn-systems/cold-read/cold_read_cell_common.py, so on Linux the Codex and agy programs that the "
             "cold-read-cells start can read it:\n"
             + "\n".join(str(path) for path in found))
     print(text)

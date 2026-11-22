@@ -28,7 +28,7 @@ PACIFIC_TIME_ZONE_NAME = "America/Los_Angeles"
 
 _ned_box_home_specification = importlib.util.spec_from_file_location(
     "ned_box_home_directory_and_its_mac_mount_point_path_constants_common",
-    Path(__file__).resolve().parents[1] / "general-tools" / "ned-box-home-directory-and-its-mac-mount-point-path-constants-common.py")
+    Path(__file__).resolve().parents[1] / "general-tools" / "ned_box_home_directory_and_its_mac_mount_point_path_constants_common.py")
 ned_box_home_path_constants = importlib.util.module_from_spec(_ned_box_home_specification)
 _ned_box_home_specification.loader.exec_module(ned_box_home_path_constants)
 

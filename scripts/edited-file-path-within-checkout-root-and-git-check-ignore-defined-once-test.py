@@ -2,7 +2,7 @@
 """The checkout and git-tracking helpers the Markdown-edit hooks share are defined
 in one module, and this test keeps it that way.
 
-nn-systems/general-tools/edited-file-path-within-checkout-root-and-git-check-ignore-common.py
+nn-systems/general-tools/edited_file_path_within_checkout_root_and_git_check_ignore_common.py
 holds them. A copy defined in another program drifts from the module: one copy
 reports a git failure, another reads the failure as "not tracked" and stays
 silent. The test fails when any production script, in scripts/ or in an
@@ -20,7 +20,7 @@ from pathlib import Path
 
 REPO_ROOT = Path(__file__).resolve().parent.parent
 SHARED_MODULE = (REPO_ROOT / "nn-systems" / "general-tools"
-                 / "edited-file-path-within-checkout-root-and-git-check-ignore-common.py")
+                 / "edited_file_path_within_checkout_root_and_git_check_ignore_common.py")
 SHARED_NAMES = ("enclosing_checkout_root", "checkout_relative_path", "git_would_track",
                 "file_lines_at_head_unless_git_ignores_file")
 

@@ -94,7 +94,7 @@ FAILURES_INSTRUCTION = (
 
 _test_scratch_specification = importlib.util.spec_from_file_location(
     "test_scratch_directory_whose_earlier_killed_runs_leftovers_are_removed_first_common",
-    GENERAL_TOOLS / "test-scratch-directory-whose-earlier-killed-runs-leftovers-are-removed-first-common.py")
+    GENERAL_TOOLS / "test_scratch_directory_whose_earlier_killed_runs_leftovers_are_removed_first_common.py")
 test_scratch = importlib.util.module_from_spec(_test_scratch_specification)
 _test_scratch_specification.loader.exec_module(test_scratch)
 

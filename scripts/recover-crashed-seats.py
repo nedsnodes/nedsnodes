@@ -199,7 +199,7 @@ _records_reader_spec.loader.exec_module(records_reader)
 
 _claude_code_session_transcript_lookup_and_text_search_common_spec = importlib.util.spec_from_file_location(
     "claude_code_session_transcript_lookup_and_text_search_common",
-    Path(__file__).with_name("claude-code-session-transcript-lookup-and-text-search-common.py")
+    Path(__file__).with_name("claude_code_session_transcript_lookup_and_text_search_common.py")
 )
 claude_code_session_transcript_lookup_and_text_search_common = importlib.util.module_from_spec(_claude_code_session_transcript_lookup_and_text_search_common_spec)
 _claude_code_session_transcript_lookup_and_text_search_common_spec.loader.exec_module(claude_code_session_transcript_lookup_and_text_search_common)
@@ -221,7 +221,7 @@ _claude_json_presets_spec.loader.exec_module(claude_json_presets)
 # Re-export the names for callers that reach them through this module.
 _worth_resuming_spec = importlib.util.spec_from_file_location(
     "seat_transcript_worth_resuming",
-    Path(__file__).with_name("agent-seat-transcript-worth-resuming-common.py"))
+    Path(__file__).with_name("agent_seat_transcript_worth_resuming_common.py"))
 worth_resuming = importlib.util.module_from_spec(_worth_resuming_spec)
 _worth_resuming_spec.loader.exec_module(worth_resuming)
 FIRST_PROMPT_AFTER_RECORDED_EXIT_MARKER = worth_resuming.FIRST_PROMPT_AFTER_RECORDED_EXIT_MARKER
@@ -661,7 +661,7 @@ WINDOW_SENDER_PATH = Path(__file__).resolve().with_name(
 _mac_reference_checkout_path_constant_specification = importlib.util.spec_from_file_location(
     "mac_reference_checkout_launcher_scripts_directory_path_constant_common",
     Path(__file__).resolve().parents[1] / "nn-systems" / "general-tools"
-    / "mac-reference-checkout-launcher-scripts-directory-path-constant-common.py")
+    / "mac_reference_checkout_launcher_scripts_directory_path_constant_common.py")
 mac_reference_checkout_path_constant = importlib.util.module_from_spec(_mac_reference_checkout_path_constant_specification)
 _mac_reference_checkout_path_constant_specification.loader.exec_module(mac_reference_checkout_path_constant)
 mac_launcher_command = (
