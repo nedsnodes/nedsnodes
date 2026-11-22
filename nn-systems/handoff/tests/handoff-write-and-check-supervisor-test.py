@@ -2351,10 +2351,10 @@ def run_background_task_past_wait_limit_cases(workspace: Path):
           in lost.stdout and "run this script again" in lost.stdout, lost.stdout)
 
     with mock.patch.dict(os.environ, {"CLAUDE_CODE_SESSION_ID": ""}):
-        no_session_lines, no_session_task_ids, no_session_status = writer.background_task_past_wait_limit_fields_for_this_session(
-            handoffs, workspace)
+        no_session_lines, no_session_task_ids, no_session_status, no_session_error = \
+            writer.background_task_past_wait_limit_fields_for_this_session(handoffs, workspace)
     check("with no session id, nothing is listed and the status says to name the tasks in the next step",
-          no_session_lines == [] and no_session_task_ids == frozenset()
+          no_session_lines == [] and no_session_task_ids == frozenset() and no_session_error is None
           and "CLAUDE_CODE_SESSION_ID is unset" in no_session_status
           and "Find in your own conversation each background task" in no_session_status, no_session_status)
 
@@ -2413,6 +2413,53 @@ def run_background_task_past_wait_limit_listed_once_cases(workspace: Path):
           restart_sentence in prompt, prompt[:1500])
     check("the successor reads the past-wait-limit sentence before the sentence about the other tasks",
           0 <= past_sentence_at < prompt.find(restart_sentence), prompt[:1500])
+
+
+
+def run_past_wait_limit_listing_error_with_running_tasks_listed_cases(workspace: Path):
+    """When only the past-wait-limit listing fails, every running task is already in a
+    background-task-N field, so the writer asks for no rerun, which would list a task twice."""
+    from datetime import datetime, timedelta, timezone
+    home = workspace / "listing-error-home"
+    projects = home / ".claude" / "projects" / "-fixture-project"
+    projects.mkdir(parents=True, exist_ok=True)
+    handoffs = workspace / "listing-error-handoffs"
+    handoffs.mkdir(parents=True, exist_ok=True)
+    session_id = "00000000-0000-4000-8000-0000000a1e44"
+    launched = (datetime.now(timezone.utc) - timedelta(minutes=97)).strftime("%Y-%m-%dT%H:%M:%S.000Z")
+    (projects / f"{session_id}.jsonl").write_text("".join(
+        json.dumps(record) + "\n" for record in background_bash_launch_records(
+            "bpastlimit", "Test suites", "python3 scripts/run-all-test-suites.py", launched)), encoding="utf-8")
+    next_step_path = handoffs / "next-step.txt"
+    next_step_path.write_text("carry on\n", encoding="utf-8")
+    # The error is injected in a child process, because the writer runs there as the agent runs it.
+    injected_program = (
+        "import importlib.util, sys\n"
+        f"spec = importlib.util.spec_from_file_location('writer_under_test', {str(SCRIPT_PATH)!r})\n"
+        "writer = importlib.util.module_from_spec(spec)\n"
+        "spec.loader.exec_module(writer)\n"
+        "def fails(*arguments, **keywords):\n"
+        "    raise ValueError('injected listing failure')\n"
+        "writer.background_tasks_past_wait_limit_still_running = fails\n"
+        "sys.exit(writer.main(sys.argv[1:]))\n")
+    environment = {key: value for key, value in os.environ.items()
+                   if key not in ("CLAUDE_CODE_SESSION_ID", "CLAUDE_PID",
+                                  *HANDOFF_SUPERVISOR_SEAT_ENVIRONMENT_VARIABLES)}
+    environment.update({"HANDOFF_SKIP_PROTECTION_AUDIT": "1", "HOME": str(home),
+                        "CLAUDE_CODE_SESSION_ID": session_id})
+    written = subprocess.run(
+        [sys.executable, "-c", injected_program, "--agent", "listingerrorcase",
+         "--next-step-file", str(next_step_path), "--handoff-dir", str(handoffs)],
+        capture_output=True, text=True, check=False, env=environment)
+    fields = writer.supervisor.parse_handoff_file(handoffs / "listingerrorcase-handoff.md")
+    check("when only the past-wait-limit listing fails, the task is in its background-task field",
+          fields.get("background-task-1", "").startswith("bpastlimit ")
+          and "background-task-past-wait-limit-1" not in fields, written.stdout + written.stderr)
+    check("when only the past-wait-limit listing fails, the status line says every running task is "
+          "listed and asks for no rerun",
+          "background tasks past their wait-limit: not listed (ValueError: injected listing failure); "
+          "every running task, if any, is in a background-task-N field" in written.stdout
+          and "run this script again" not in written.stdout, written.stdout + written.stderr)
 
 
 THRESHOLD_HOOK_SCRIPT = SYSTEM_DIRECTORY.parent.parent / "scripts" / "handoff-context-threshold-hook.py"
@@ -2622,6 +2669,7 @@ with tempfile.TemporaryDirectory() as temporary_directory_name:
     run_handoff_deferral_fields_cases(temporary_directory)
     run_background_task_past_wait_limit_cases(temporary_directory)
     run_background_task_past_wait_limit_listed_once_cases(temporary_directory)
+    run_past_wait_limit_listing_error_with_running_tasks_listed_cases(temporary_directory)
     run_background_task_fields_cases(temporary_directory)
 
 print()
