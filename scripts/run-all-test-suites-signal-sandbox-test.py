@@ -440,15 +440,18 @@ if linux_only_cases_run_here("the report's sandbox lines"):
             ("is not valid Python", "SUITES_RUN_WITHOUT_ANY_SANDBOX = {\n",
              "is not valid Python"),
             ("lacks one list", "SUITES_RUN_WITHOUT_ANY_SANDBOX = {}\n"
+             "SUITES_THAT_RUN_THE_REAL_CLAUDE_CLI = {}\n"
              "SUITES_WHOSE_TEST_SANDBOX_SHARES_THE_MACHINE_NETWORK = {}\n",
              "does not assign "
              "SUITES_GIVEN_A_COPY_ON_WRITE_OVERLAY_OF_THE_REPOSITORY_GIT_DIRECTORY a literal"),
             ("builds a list by a call", "SUITES_RUN_WITHOUT_ANY_SANDBOX = dict(a='b')\n"
              "SUITES_GIVEN_A_COPY_ON_WRITE_OVERLAY_OF_THE_REPOSITORY_GIT_DIRECTORY = {}\n"
+             "SUITES_THAT_RUN_THE_REAL_CLAUDE_CLI = {}\n"
              "SUITES_WHOSE_TEST_SANDBOX_SHARES_THE_MACHINE_NETWORK = {}\n",
              "does not assign SUITES_RUN_WITHOUT_ANY_SANDBOX a literal"),
             ("assigns a list that is not a dict", "SUITES_RUN_WITHOUT_ANY_SANDBOX = ['a-test.py']\n"
              "SUITES_GIVEN_A_COPY_ON_WRITE_OVERLAY_OF_THE_REPOSITORY_GIT_DIRECTORY = {}\n"
+             "SUITES_THAT_RUN_THE_REAL_CLAUDE_CLI = {}\n"
              "SUITES_WHOSE_TEST_SANDBOX_SHARES_THE_MACHINE_NETWORK = {}\n",
              "does not assign SUITES_RUN_WITHOUT_ANY_SANDBOX a literal"),
         )

@@ -1325,6 +1325,7 @@ with tempfile.TemporaryDirectory() as scratch_name:
         (left_out_repository / "scripts" / "run-all-test-suites.py").write_text(
             'SUITES_RUN_WITHOUT_ANY_SANDBOX = {"outside-test.py": "it starts bwrap itself"}\n'
             "SUITES_GIVEN_A_COPY_ON_WRITE_OVERLAY_OF_THE_REPOSITORY_GIT_DIRECTORY = {}\n"
+            "SUITES_THAT_RUN_THE_REAL_CLAUDE_CLI = {}\n"
             "SUITES_WHOSE_TEST_SANDBOX_SHARES_THE_MACHINE_NETWORK = {}\n")
         subprocess.run(["git", "add", "."], cwd=left_out_repository, check=True)
         subprocess.run(["git", "-c", "user.name=t", "-c", "user.email=t@t", "commit", "-q",
@@ -1452,10 +1453,20 @@ with tempfile.TemporaryDirectory() as scratch_name:
                 scratch / f"main-left-out-{label}" / "recorded", left_out_repository),
                 "outside-test.py").exists()
 
-        real_claude = {"SUITES_THAT_RUN_THE_REAL_CLAUDE_CLI": {"outside-test.py"}}
+        # The list comes from the checkout under test, as in a pull request head test run, whose
+        # runner is main's but whose checkout may have renamed the suite.
+        lists_file = left_out_repository / "scripts" / "run-all-test-suites.py"
+        lists_file.write_text(lists_file.read_text().replace(
+            "SUITES_THAT_RUN_THE_REAL_CLAUDE_CLI = {}",
+            'SUITES_THAT_RUN_THE_REAL_CLAUDE_CLI = {"outside-test.py": "it runs the real claude"}'))
+        subprocess.run(["git", "-c", "user.name=t", "-c", "user.email=t@t", "commit", "-q", "-m",
+                        "list the real-claude suite", "--", "scripts/run-all-test-suites.py"],
+                       cwd=left_out_repository, check=True)
+        check("this runner's own list does not name the suite the checkout lists as running the "
+              "real claude", "outside-test.py" not in runner.SUITES_THAT_RUN_THE_REAL_CLAUDE_CLI)
         selective = ("--only-suites-whose-recorded-inputs-changed-since", "HEAD")
         code, printed = left_out_run("real-claude-run", *selective,
-                                     run_one_suite=note_and_fail_the_claude_suite, **real_claude)
+                                     run_one_suite=note_and_fail_the_claude_suite)
         check("without --leave-out-suites-that-run-the-real-claude-cli, a selective run runs a suite "
               "that runs the real claude when the change edits its file, and it fails where "
               "claude exits 1",
@@ -1466,7 +1477,7 @@ with tempfile.TemporaryDirectory() as scratch_name:
               (code, suites_started, printed[-1500:]))
         for label, extra in (("real-claude-left-out-selective", selective), ("real-claude-left-out-full", ())):
             code, printed = left_out_run(label, *extra, "--leave-out-suites-that-run-the-real-claude-cli",
-                                         run_one_suite=note_and_fail_the_claude_suite, **real_claude)
+                                         run_one_suite=note_and_fail_the_claude_suite)
             left_out_lines = [line for line in printed.splitlines() if line.startswith(
                 runner.SUITE_THAT_RUNS_THE_REAL_CLAUDE_CLI_LEFT_OUT_OF_TEST_RUN_LINE_PREFIX)]
             check(f"{label}: --leave-out-suites-that-run-the-real-claude-cli leaves out the suite that "
