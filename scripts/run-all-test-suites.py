@@ -1943,8 +1943,10 @@ def suite_sandbox_lists_read_from_checkout_under_test(top):
     # set it was then, as the nightly mutation pass's checkouts do. It gets this program's own
     # list, with each suite also under the path it had before the project rename, since such a
     # checkout may predate the rename.
+    supplied_by_this_program = []
     for name in SUITE_SANDBOX_LIST_NAMES_READ_FROM_CHECKOUT_UNDER_TEST:
         if name not in found or isinstance(found[name], set):
+            supplied_by_this_program.append(name)
             own = SUITE_SANDBOX_LISTS_OF_THIS_PROGRAM[name]
             found[name] = {**{convert_file_path_after_project_rename_to_path_before(suite): reason
                               for suite, reason in own.items()}, **own}
@@ -1957,6 +1959,10 @@ def suite_sandbox_lists_read_from_checkout_under_test(top):
             f"level, so which sandbox each suite runs in is unknown.\n"
             f"In {source_file}, assign each of {', '.join(unreadable)} once, at the top level, "
             f"a dict written out literally, then rerun the command you ran.")
+    if supplied_by_this_program:
+        return found, (f"{source_file}, and in {Path(__file__).resolve()} for "
+                       f"{', '.join(supplied_by_this_program)}, which the checkout lacks or "
+                       f"assigns a set")
     return found, str(source_file)
 
 
