@@ -1246,6 +1246,22 @@ with tempfile.TemporaryDirectory() as workspace:
     check("a subagent's own transcript, read with the ids the session transcript ended, shows no "
           "background command the parent stopped",
           own_flight.background_task_ids == [], str(own_flight.background_task_ids))
+    # A command both transcripts end must stay ended: an exclusive-or of the two sets of ended ids
+    # would drop it from both and count it as running.
+    command_ended_in_both_own = transcript_of(command_stopped_own.parent,
+                                              "command-ended-in-both-transcripts.jsonl", [
+        background_task_launch_record("b9otyo6lx"),
+        *notification_records(
+            "<task-notification>\n<task-id>b9otyo6lx</task-id>\n<status>stopped</status>\n"
+            "<summary>Task \"Wait for both close-suite runs to finish\" was stopped by main "
+            "session</summary>\n</task-notification>"),
+    ])
+    own_flight = hook.work_in_flight(str(command_ended_in_both_own), float("inf"),
+                                     now=grid_at_13_minutes,
+                                     task_ids_ended_in_session_transcript=flight.ended_task_ids)
+    check("a subagent's own transcript shows no background command that both it and the session "
+          "transcript ended",
+          own_flight.background_task_ids == [], str(own_flight.background_task_ids))
 
     # An interim notification queued before the TaskStop can be delivered after it; the stop holds.
     interim_copy_after_stop = transcript_of(workspace, "subagent-stopped-interim-copy-after.jsonl", [
@@ -1631,9 +1647,9 @@ with tempfile.TemporaryDirectory() as workspace:
               "(subagent a2573a7737ae643dc)" in result.stderr, result.stderr[:600])
         check("the instruction on new work says the handoff writer, not the agent, adds stopped work to the session-handoff",
               "When you run the handoff writer script, nn-systems/handoff/handoff-write-and-check-supervisor.py,"
-              " before this agent-session ends, it names in your session-handoff each subagent still working,"
-              " whenever it started, and each background Bash task that started since this handoff-deferral"
-              " began and is still running, so you need not add that work to your task list"
+              " before this agent-session ends, it names in your session-handoff each subagent still working"
+              " and each background Bash task still running, whenever it started, so you need not add that"
+              " work to your task list"
               in hook.NEW_WORK_DURING_HANDOFF_DEFERRAL_INSTRUCTION,
               hook.NEW_WORK_DURING_HANDOFF_DEFERRAL_INSTRUCTION)
         check("the instruction on new work limits the subagent, background or detached rule to work left running at the turn's end",
@@ -1642,12 +1658,6 @@ with tempfile.TemporaryDirectory() as workspace:
               " its result to a file; name that file in your next-step file, since the handoff writer script"
               " cannot name that process. A command or an edit that finishes within your turn needs none of"
               " these." in hook.NEW_WORK_DURING_HANDOFF_DEFERRAL_INSTRUCTION,
-              hook.NEW_WORK_DURING_HANDOFF_DEFERRAL_INSTRUCTION)
-        check("the instruction on new work says what to do with a background Bash task started before the deferral",
-              "A background Bash task started before the deferral and still running is named, with its"
-              " command, in the next-step file when the successor must run it again; otherwise it is"
-              " stopped at the session-handoff."
-              in hook.NEW_WORK_DURING_HANDOFF_DEFERRAL_INSTRUCTION,
               hook.NEW_WORK_DURING_HANDOFF_DEFERRAL_INSTRUCTION)
         writer_script = "nn-systems/handoff/handoff-write-and-check-supervisor.py"
         check("the instruction on new work says unlisted work means running the writer again with a new next-step file",

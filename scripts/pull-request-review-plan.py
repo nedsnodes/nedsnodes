@@ -3,7 +3,8 @@
 
 Rule 1: tiers follow content. Tests, fenced Markdown code, and Python changes
 limited to docstrings, comments and tool-message-to-agent strings get codex-review-and-head-tests-tier.
-A tool-message-to-agent string is one that tool_message_to_agent_string_nodes_in_source finds;
+A tool-message-to-agent string is one that tool_message_to_agent_string_nodes_in_source,
+in nn-systems/general-tools/python-source-tool-message-to-agent-string-collector-common.py, finds;
 any other string, such as a regular expression, a command's argument or a path,
 carries behaviour, so a change to it is a behaviour change.
 Python behaviour changes and other code get claude-and-codex-review-and-head-tests-tier. Prose gets
@@ -476,10 +477,16 @@ def passes_its_text_up(child, parent):
             or (isinstance(parent, ast.IfExp) and child is not parent.test))
 
 
+STR_METHODS_THAT_RETURN_THE_TEXT = frozenset({
+    "format", "strip", "lstrip", "rstrip", "upper", "lower", "casefold", "title", "capitalize",
+    "replace", "center", "ljust", "rjust", "removeprefix", "removesuffix"})
+
+
 def nearest_call_prints_its_argument(node, parents, helper_printers):
     """True when node's text reaches, unchanged, a statement or the argument of a printing call or
-    helper printer, or the exception a raise statement builds. A method called on the text, as
-    .format is, passes its result on up. The collector also counts a string inside any call nested
+    helper printer, or the exception a raise statement builds. A str method that returns the text,
+    as .format does, passes its result on up; one such as .startswith or .count turns the text into
+    a value it steers, as a comparison does. The collector also counts a string inside any call nested
     in a printed argument, such as the pattern in print(re.sub("a", "b", text)), but such a string
     steers the call, not the text; and one inside a comparison, as in print(x == "yes") or
     print(x == "yes".upper()), which prints only a Boolean."""
@@ -490,6 +497,7 @@ def nearest_call_prints_its_argument(node, parents, helper_printers):
             child, parent = parent, parents.get(parent)
         call = parents.get(parent)
         if not (isinstance(parent, ast.Attribute) and parent.value is child
+                and parent.attr in STR_METHODS_THAT_RETURN_THE_TEXT
                 and isinstance(call, ast.Call) and call.func is parent):
             break
         child, parent = call, parents.get(call)
