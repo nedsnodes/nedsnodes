@@ -191,8 +191,8 @@ def directory_contents(directory):
 def head_test_runs_while_the_after_merge_test_run_runs():
     """Main moves from M0 to M1, which changes a file the suite reads; the store still holds
     the recording made on M0, and the after-merge test run on M1 has saved its passing
-    recording in its own directory, as on 2026-11-21. Pull request A, on M1, changes a file
-    the suite does not read."""
+    recording in its own directory. Pull request A, on M1, changes a file the suite does not
+    read."""
     scratch = Scratch()
     main_checkout, _ = scratch.worktree("main-at-m0", scratch.m0)
     scratch.run(main_checkout)
@@ -241,6 +241,18 @@ def head_test_runs_while_the_after_merge_test_run_runs():
           selection_line(no_store_recording).startswith(
               f"NOT SELECTED {SUITE}: its recording in {where}, which this run only reads, "
               f"leaves it out: none of the"), selection_line(no_store_recording))
+
+    strace_store = runner.recordings_directory_for(scratch.root / "strace-store", scratch.repo)
+    strace_store.mkdir(parents=True)
+    runner.recording_file_for(strace_store, SUITE).write_text(json.dumps(
+        {**matching, "reads": {**matching["reads"], "unread.txt": "0" * 40}}))
+    primary_shows_it = scratch.run(a_checkout, since=m1, store="strace-store",
+                                   save_to="pr-a-recordings", read_only="after-merge")
+    check("a suite whose store recording reads a file the pull request changes stays "
+          "selected, though its recording in the read-only directory lacks that file and "
+          "would leave it out",
+          selection_line(primary_shows_it) == f"SELECTED {SUITE}: it reads unread.txt, which "
+          f"differs", selection_line(primary_shows_it))
 
     not_matching = runner.recordings_directory_for(scratch.root / "not-matching", scratch.repo)
     not_matching.mkdir(parents=True)
