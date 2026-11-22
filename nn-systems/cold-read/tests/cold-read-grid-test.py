@@ -147,6 +147,7 @@ import importlib.util
 import inspect
 import io
 import json
+import re
 import os
 import shlex
 import shutil
@@ -1822,7 +1823,7 @@ try:
     check("while an already-changed file has changed, a path that is gone is named as gone, with the "
           "diff that shows what it held, and is not to be read",
           len(gone_lines) == 1 and "has changed or gone since: agent-draft.md," in gone_lines[0]
-          and "clean.md is gone; `git -C " in gone_lines[0] and "diff -- clean.md`" in gone_lines[0]
+          and "clean.md is gone; `git -C " in gone_lines[0] and "diff HEAD -- clean.md`" in gone_lines[0]
           and "Read clean.md" not in gone_lines[0]
           and "rm -r" not in gone_lines[0] and "restore --staged" not in gone_lines[0],
           repr(clean_move_lines))
@@ -1833,6 +1834,26 @@ try:
           and "Read moved-by-a-reviewer.md against" in moved_to_lines[0]
           and "rm -r" not in moved_to_lines[0] and "restore" not in moved_to_lines[0],
           repr(clean_move_lines))
+    # A stopped cell that removes a path with `git mv` or `git rm` stages the removal, so a diff
+    # of the working tree against the index shows nothing; the message's diff must still show it.
+    for case, remove in (("git mv", lambda: clean_move_git("mv", "clean.md", "staged-move-by-a-reviewer.md")),
+                         ("git rm", lambda: clean_move_git("rm", "--quiet", "clean.md"))):
+        clean_move_git("reset", "--quiet", "--hard")
+        clean_move_git("clean", "--quiet", "-f")
+        (clean_move_repository / "agent-draft.md").write_text("The agent's own edit.\n", encoding="utf-8")
+        with mock.patch.object(grid_module.cell_common, "REPO_ROOT", clean_move_repository):
+            staged_baseline = grid_module.cell_common.working_tree_state()
+            (clean_move_repository / "agent-draft.md").write_text("A reviewer's rewrite.\n", encoding="utf-8")
+            remove()
+            staged_lines = grid_module.stopped_cells_write_check_lines(
+                [scratch / "claude-hunt-deep.md"], staged_baseline, None, set())
+        staged_gone_lines = [line for line in staged_lines if line.startswith("STRAY WRITE: clean.md ")]
+        diff_commands = re.findall(r"`(git -C [^`]* diff [^`]*)`", staged_gone_lines[0]) if staged_gone_lines else []
+        shown = (subprocess.run(shlex.split(diff_commands[0]), check=True, capture_output=True, text=True).stdout
+                 if len(diff_commands) == 1 else "")
+        check(f"{case}: a path a stopped cell removed with a staged change is named as gone, and the diff "
+              "the line gives shows what it held",
+              len(staged_gone_lines) == 1 and "-Clean." in shown, repr(staged_lines) + "\n" + shown)
     attempt = grid_module.start_attempt(
         [sys.executable, "-c", "import time; time.sleep(120)"],
         scratch / "report.md", 1, scratch / "cell.stderr.log")

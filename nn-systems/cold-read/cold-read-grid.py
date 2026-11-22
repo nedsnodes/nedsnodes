@@ -304,7 +304,7 @@ STRAY_WRITE_UNDO_TRACKED = (
     "Ask the user about it if you did not make it and are unsure.")
 STRAY_WRITE_NO_UNDO_ALREADY_CHANGED = (
     "It already had uncommitted changes before the cells launched, so no undo command is given: "
-    "one would also undo those. Read `git -C {repository} diff -- {path}` against the edits you know "
+    "one would also undo those. Read `git -C {repository} diff HEAD -- {path}` against the edits you know "
     "are your own, and ask the user about any change you did not make.")
 # A cell can move an already-edited file without git pairing the move as a rename (a plain
 # `mv`, or a `git mv` of a much-edited file), can re-create the old name afterwards, and can
@@ -318,7 +318,7 @@ STRAY_WRITE_NO_UNDO_MAY_HOLD_MOVED_CHANGES = (
 STRAY_WRITE_NO_UNDO_GONE_WHILE_CHANGES_MAY_HAVE_MOVED = (
     "No undo command is given for any path, because a file with uncommitted changes from before "
     "the cells launched has changed or gone since: {touched}, and a stopped cell may have moved "
-    "those changes. {path} is gone; `git -C {repository} diff -- {path}` shows what it held. Ask the "
+    "those changes. {path} is gone; `git -C {repository} diff HEAD -- {path}` shows what it held. Ask the "
     "user before you restore it, and about any change you did not make.")
 STOPPED_CELL_LINE = "{report}: stopped before it finished{deleted}."
 WORKING_TREE_SNAPSHOT_NOT_TAKEN_REASON = "its snapshot of the working tree before the cells launched failed ({error})"
