@@ -1,41 +1,64 @@
 #!/usr/bin/env python3
-"""Ask ghi-guide-agent, the project's knowledge agent over its GitHub-issue corpus
-(nedschorus#46, design doc docs/issues/46-ghi-guide-agent.system.design.md § The
-ask path). Run by any agent — and by the ghi-write skill's step 1 — before
-filing or editing an issue, to learn what already covers the ground.
+"""Ask ghi-guide-agent; exit 0 when it replied, 1 when the ask failed, 2 when called wrongly, crashed, or unable to tell whether it replied.
+
+ghi-guide-agent is the project's knowledge agent over its GitHub-issue corpus
+(nedschorus#46, design doc docs/issues/46-ghi-guide-agent.system.design.md §
+The ask path). Run by any agent — and by the ghi-write skill's step 1 —
+before filing or editing an issue, to learn what already covers the ground.
 
 Usage:
   ghi-guide-agent-ask.py "<question>" [--include-closed]
   ghi-guide-agent-ask.py --question-file <path> [--include-closed]
 
-Exit codes:
-  0  the reading list ghi-guide-agent returns, printed to stdout; without
-     --include-closed, OPEN_ISSUES_ONLY_INCLUDE_CLOSED_HINT_MESSAGE follows on
-     stderr, so the caller learns the flag when the answer omits closed issues
-  1  a failed ask — gh unreachable, the box unreachable, ghi-guide-agent's own run
-     erroring or timing out: one line on stderr. A failed ask never blocks a
-     write (design's own words): the caller's job is to fall down the
-     ghi-write skill's fallback ladder, not to treat exit 1 as fatal.
-  2  ghi-guide-agent replied `not-about-issues`: the question was not about issues.
-     NOT_ABOUT_ISSUES_MESSAGE on stderr, nothing on stdout.
-  3  ghi-guide-agent replied `ask-user-about-ruling: <sentence>`: it found a ruling
-     of the user's it may not judge. RULING_QUESTION_MESSAGE, carrying that
-     sentence, on stderr, nothing on stdout.
+Output: the last line on stdout is always a verdict line naming the outcome,
+whatever the exit code (only --help prints none). A caller decides from the
+exit code and stdout alone; stderr carries causes and messages for a person
+or an agent to read, never anything a caller parses.
 
-Why 2 and 3 are not passed through (user-ruled 2026-09-29, walk
-SKILL-ghi-write-2026-09-29-4, item 1 revised, "y"). Until then the two
-replies went to stdout verbatim with exit 0, as if they were answers. The
-user, reading the /ghi-write sentences proposed to explain them: "Not great.
-Out-of-scope is not helpful response. I think better wording would be "Not a
-query re GHIs") It should respond with a error like - "GHI-info reports
-which issues relate to a querry" or something like tha. Also escalate or
-whatever the other response is makes no sense either." And, on a first
-wording of the ruling message: "this doesn't make sense - that a newer one
-may override". The two messages are the approved text, word for word, and
-replace the /ghi-write sentences that would have explained the bare replies.
-Exit codes of their own, rather than 1, because 1 sends a caller down the
-fallback ladder, which is wrong for both: one wants the question reworded,
-the other wants the user.
+Exit codes and verdict lines:
+  0  ghi-guide-agent replied. Any reply counts; the verdict line names its kind:
+       VERDICT: READING-LIST-REPLY
+         the reply names at least one issue and carries no draft verdict; the
+         reply is printed above the line.
+         Without --include-closed, OPEN_ISSUES_ONLY_INCLUDE_CLOSED_HINT_MESSAGE
+         follows on stderr.
+       VERDICT: DRAFT-ISSUE-VS-OPEN-ISSUES-ADJUDICATION-REPLY
+         the reply carries ghi-guide-agent's own `verdict: too-similar #n`, `verdict: related #n,#m` or
+         `verdict: unrelated` line, its judgment of a draft; the reply is
+         printed above the line, and a caller reads that `verdict:` line from
+         the lines above the verdict line, never from the verdict line.
+       VERDICT: NOT-ABOUT-ISSUES     ghi-guide-agent replied
+         `not-about-issues`: the question was not about issues.
+         NOT_ABOUT_ISSUES_MESSAGE on stderr.
+       VERDICT: ASK-USER-ABOUT-RULING   ghi-guide-agent replied
+         `ask-user-about-ruling: <sentence>`: it found a ruling of the user's
+         it may not judge. Above the verdict line,
+         `RULING-QUESTION-ISSUE-NUMBER: <n>` when it named the issue holding
+         the ruling, then
+         `RULING-QUESTION: <sentence>` on one line. RULING_QUESTION_MESSAGE,
+         carrying that sentence, on stderr.
+       VERDICT: OFF-PROTOCOL-REPLY   the reply names no issue, carries no
+         draft verdict, and is neither boundary reply: a prose "nothing covers
+         this", or a reply to something other than the question, such as a
+         Stop hook. The reply is printed above the line for the caller to
+         judge; OFF_PROTOCOL_REPLY_MESSAGE on stderr.
+  1  the ask failed, and this program knows it did: ssh could not be started
+     on this machine, so no ask was sent; or, on ned-box, the agent-home is
+     missing, the mirror refresh failed, or claude errored or was killed on
+     its timeout. VERDICT: ASK-FAILED; the cause on stderr. A failed ask never blocks a
+     write: the caller falls down the ghi-write skill's fallback ladder.
+  2  this program could not answer:
+       VERDICT: CALLED-THE-WRONG-WAY   bad arguments or an unreadable
+         --question-file; no ask was made.
+       VERDICT: ASK-OUTCOME-UNKNOWN    this program cannot tell whether
+         ghi-guide-agent replied: the ssh call to ned-box timed out or could
+         not connect (ssh's own 255 is reported as 2), the run on ned-box ended
+         without a verdict line, or this program crashed.
+     The cause on stderr.
+
+The two boundary replies are not passed through to stdout as answers: they
+are not reading lists. The two stderr messages are the user's approved text,
+word for word.
 
 ghi-guide-agent itself still replies with bare words: they are the protocol
 between its prompt and this script (COLD_START_PROMPT_TEMPLATE). What
@@ -46,7 +69,7 @@ whatever the other response is makes no sense"): `out-of-scope` became
 words are still read for a while; see RETIRED_BOUNDARY_REPLY_WORDS.
 
 A draft that conflicts with a ruling the user made gets the ruling question,
-not a verdict line. too-similar is a soft block an agent may pass on its own
+not a `verdict:` line. too-similar is a soft block an agent may pass on its own
 judgment, and a ruling is the user's to settle; the GHI write tool writes the
 issue and records the question in a proposed-improvements-or-changes-file
 in the log-store on ned-box. Every ruling question opens with the number of the issue
@@ -111,12 +134,12 @@ a transcript").
 Two guards against a reply that is not the answer (measured 2026-09-17).
 This script returns the run's LAST message, and on that day ghi-guide-agent answered
 the question at 20:16:59Z and then answered the checkout-freshness Stop hook
-13 seconds later; the caller got "No action needed on my part ..." with exit
-0, so its fallback ladder never fired. So the run no longer loads this
-project's settings (--setting-sources user, the flag PR #417 gave the
-cold-read cells for the same leak), and a reply that names no issue, has no
-`verdict: unrelated` line, and is neither of the two boundary replies fails
-the ask instead of being passed back.
+13 seconds later; the caller got "No action needed on my part ..." as an
+answer. So the run no longer loads this project's settings (--setting-sources
+user, the flag PR #417 gave the cold-read cells for the same leak), and a
+reply that names no issue, has no draft verdict line, and is neither of the
+two boundary replies reaches the caller under VERDICT: OFF-PROTOCOL-REPLY,
+not as an answer.
 
 Post-check (design step 4): every pointer ghi-guide-agent returns is checked
 against the just-refreshed mirror by this script, never taken on the
@@ -239,10 +262,11 @@ TRANSCRIPT_SIZE_THRESHOLD_BYTES = 5_000_000
 CONTEXT_USED_PERCENTAGE_THRESHOLD = 40.0
 
 POINTER_PATTERN = re.compile(r"#(\d+)")
-# The one verdict that names no issue. A line of its own, as the draft-body
-# request asks, so prose that only mentions the verdict does not pass.
-VERDICT_UNRELATED_LINE_PATTERN = re.compile(
-    r"^[ \t]*verdict:[ \t]*unrelated[ \t]*$", re.IGNORECASE | re.MULTILINE)
+# ghi-guide-agent's own reply to a draft-body request, as COLD_START_PROMPT_TEMPLATE
+# words it. A line of its own, so prose that only mentions a verdict does not count.
+DRAFT_VERDICT_LINE_PATTERN = re.compile(
+    r"^[ \t]*verdict:[ \t]*(?:too-similar[ \t]+#\d+|related[ \t]+#\d+|unrelated[ \t]*$)",
+    re.IGNORECASE | re.MULTILINE)
 
 COLD_START_PROMPT_TEMPLATE = """You are ghi-guide-agent: this project's knowledge agent over its GitHub-issue corpus. Other agents send you one request at a time; you answer it from the corpus you hold in context and stop. You are the judgment layer — every mechanical fact (fetching, counting, verifying) is script work done for you before a request reaches you.
 
@@ -341,12 +365,29 @@ def is_passthrough_reply(text: str) -> bool:
             or stripped.startswith(ASK_USER_ABOUT_RULING_REPLY_PREFIXES))
 
 
-# What main() hands the caller in place of the two bare replies, and the exit
-# code each carries. The text is the user's approved wording (module docstring,
-# "Why 2 and 3 are not passed through"); change it only by his walk.
+# The verdict lines, one of which is the last line on stdout on every outcome
+# but --help; the module docstring says what each names. scripts/ghi-issue-write.py
+# copies those it reads.
+READING_LIST_REPLY_VERDICT_LINE = "VERDICT: READING-LIST-REPLY"
+DRAFT_ISSUE_VS_OPEN_ISSUES_ADJUDICATION_REPLY_VERDICT_LINE = "VERDICT: DRAFT-ISSUE-VS-OPEN-ISSUES-ADJUDICATION-REPLY"
+NOT_ABOUT_ISSUES_VERDICT_LINE = "VERDICT: NOT-ABOUT-ISSUES"
+ASK_USER_ABOUT_RULING_VERDICT_LINE = "VERDICT: ASK-USER-ABOUT-RULING"
+OFF_PROTOCOL_REPLY_VERDICT_LINE = "VERDICT: OFF-PROTOCOL-REPLY"
+ASK_FAILED_VERDICT_LINE = "VERDICT: ASK-FAILED"
+CALLED_THE_WRONG_WAY_VERDICT_LINE = "VERDICT: CALLED-THE-WRONG-WAY"
+ASK_OUTCOME_UNKNOWN_VERDICT_LINE = "VERDICT: ASK-OUTCOME-UNKNOWN"
+VERDICT_LINES = (
+    READING_LIST_REPLY_VERDICT_LINE, DRAFT_ISSUE_VS_OPEN_ISSUES_ADJUDICATION_REPLY_VERDICT_LINE,
+    NOT_ABOUT_ISSUES_VERDICT_LINE, ASK_USER_ABOUT_RULING_VERDICT_LINE,
+    OFF_PROTOCOL_REPLY_VERDICT_LINE, ASK_FAILED_VERDICT_LINE,
+    CALLED_THE_WRONG_WAY_VERDICT_LINE, ASK_OUTCOME_UNKNOWN_VERDICT_LINE)
+# The ruling question's data, on stdout above ASK_USER_ABOUT_RULING_VERDICT_LINE.
+# scripts/ghi-issue-write.py copies both.
+RULING_QUESTION_ISSUE_NUMBER_LINE_PREFIX = "RULING-QUESTION-ISSUE-NUMBER: "
+RULING_QUESTION_LINE_PREFIX = "RULING-QUESTION: "
+# What main() prints on stderr in place of the two bare replies. The messages
+# are the user's approved wording; change them only by his walk.
 # `<your subject>` and `<terms>` are placeholders the caller fills in.
-EXIT_NOT_ABOUT_ISSUES = 2
-EXIT_RULING_QUESTION = 3
 NOT_ABOUT_ISSUES_MESSAGE = (
     "Not a question about GitHub issues: ghi-guide-agent reports which issues relate to a subject.\n"
     'Ask again as: scripts/ghi-guide-agent-ask.py "Which issues cover <your subject>?"\n'
@@ -356,8 +397,8 @@ RULING_QUESTION_MESSAGE_TEMPLATE = (
     "ghi-guide-agent found a ruling of the user's that it cannot tell still applies: {sentence}\n"
     "If you are filing or editing a GHI, go on with scripts/ghi-issue-write.py as planned: it records this question in the log-store on ned-box and tells you to dispatch a subagent to settle it.\n"
     "If you are not filing or editing a GHI, ask the user whether that ruling still applies, and put the question on your task list.")
-# What follows the sentence when it opened with the number of the issue
-# holding the ruling; scripts/ghi-issue-write.py reads the number back from it.
+# What follows the sentence on stderr when it opened with the number of the
+# issue holding the ruling.
 RULING_QUESTION_RULING_GHI_NUMBER_SUFFIX_TEMPLATE = " (held in GHI {number})"
 # Printed on stderr after an answer asked without --include-closed. stderr,
 # because stdout is the answer that callers such as ghi-issue-write.py parse.
@@ -369,49 +410,74 @@ OPEN_ISSUES_ONLY_INCLUDE_CLOSED_HINT_MESSAGE = (
     "ghi-guide-agent-ask: this answer covers open issues only.\n"
     "To search closed issues as well, such as for precedent or before saying no issue "
     "covers a subject, rerun the same command with --include-closed added.")
+# Printed on stderr with OFF_PROTOCOL_REPLY_VERDICT_LINE. Tool-message-to-agent:
+# docs/nedsnodes-wiki/nedsnodes-how-to-write-a-tool-message-to-agent-such-as-a-hook-refusal-or-script-error.md
+OFF_PROTOCOL_REPLY_MESSAGE = (
+    "ghi-guide-agent-ask: ghi-guide-agent replied, but its reply, printed on stdout above the "
+    "verdict line, names no issue, has no `verdict:` line, and is neither `not-about-issues` "
+    "nor `ask-user-about-ruling:`, so this program cannot tell what kind of answer it is. "
+    "It may say that no issue covers your subject, or it may answer something other than "
+    "your question, such as a hook's message.\n"
+    "If the reply answers your question, use it as the answer.\n"
+    "If it does not, run the same command again once; if the second reply does not answer "
+    "your question either, treat the ask as failed: when filing or editing a GHI, go on down "
+    "the ask's fallback ladder in .claude/skills/ghi-write/SKILL.md; for any other ask, go on "
+    "without ghi-guide-agent's answer.")
+# What to do after an ask whose outcome this program cannot tell, or that failed.
+FAILED_ASK_NEXT_STEP_SENTENCE = (
+    "Run the same command again once; if it fails the same way: when filing or editing a "
+    "GHI, go on down the ask's fallback ladder in .claude/skills/ghi-write/SKILL.md; for any "
+    "other ask, go on without ghi-guide-agent's answer, and tell the user what failed.")
 
 
 def caller_message_for_passthrough_reply(text: str):
-    """(message, exit code) for a not-about-issues or ask-user-about-ruling:
-    reply, or None for any other reply. The ruling sentence is carried over
-    as ghi-guide-agent wrote it, with the prefix and surrounding whitespace removed;
-    a leading `#<n>` is moved to the end as RULING_QUESTION_RULING_GHI_NUMBER_SUFFIX_TEMPLATE."""
+    """(stderr message, stdout lines ending with the verdict line) for a
+    not-about-issues or ask-user-about-ruling: reply, or None for any other
+    reply. On stderr the ruling sentence is carried over as ghi-guide-agent
+    wrote it, with the prefix and surrounding whitespace removed, and a
+    leading `#<n>` is moved to the end as
+    RULING_QUESTION_RULING_GHI_NUMBER_SUFFIX_TEMPLATE; on stdout the number
+    and the sentence each get a line of their own, the sentence joined onto
+    one line so a caller reads it whole."""
     stripped = text.strip()
     if stripped.lower() in NOT_ABOUT_ISSUES_REPLY_WORDS:
-        return NOT_ABOUT_ISSUES_MESSAGE, EXIT_NOT_ABOUT_ISSUES
+        return NOT_ABOUT_ISSUES_MESSAGE, [NOT_ABOUT_ISSUES_VERDICT_LINE]
     for prefix in ASK_USER_ABOUT_RULING_REPLY_PREFIXES:
         if stripped.lower().startswith(prefix):
             sentence = stripped[len(prefix):].strip()
+            stdout_lines = []
             numbered = re.match(r"#(\d+)\s*(.*)", sentence, re.DOTALL)
             if numbered:
+                stdout_lines.append(RULING_QUESTION_ISSUE_NUMBER_LINE_PREFIX
+                                    + numbered.group(1))
+                stdout_lines.append(RULING_QUESTION_LINE_PREFIX
+                                    + " ".join(numbered.group(2).split()))
                 sentence = (numbered.group(2).strip()
                             + RULING_QUESTION_RULING_GHI_NUMBER_SUFFIX_TEMPLATE.format(
                                 number=numbered.group(1)))
+            else:
+                stdout_lines.append(RULING_QUESTION_LINE_PREFIX
+                                    + " ".join(sentence.split()))
+            stdout_lines.append(ASK_USER_ABOUT_RULING_VERDICT_LINE)
             return (RULING_QUESTION_MESSAGE_TEMPLATE.format(sentence=sentence),
-                    EXIT_RULING_QUESTION)
+                    stdout_lines)
     return None
 
 
-def reply_answers_the_question(text: str) -> bool:
-    """Whether a reply is an answer at all, rather than something else the
-    session said.
+def reply_kind_verdict_line(text: str) -> str:
+    """The verdict line naming a reply's kind, for a reply that is not one of
+    the two boundary replies.
 
-    A reading list names issues, the two passthrough replies are fixed
-    strings, and a draft-body request's "nothing covers this" is a
-    `verdict: unrelated` line; anything with none of these is not an answer
-    this caller can use. The
-    case that earned this check (2026-09-17): the run's last message was
-    "No action needed on my part -- this session hasn't touched any scripts
-    or tests", a reply to a Stop hook, and the ask returned it with exit 0,
-    so the caller's fallback ladder never fired.
-
-    A true answer to a question that names no issue -- "nothing covers this"
-    in those words -- is refused by this check too, and that costs one trip down the
-    fallback ladder, which never blocks a write. Silently passing a
-    non-answer costs a write made against no knowledge at all.
+    A reply with no `verdict:` line and no issue named is off protocol. Code
+    cannot tell a prose "nothing covers this" from a reply to a Stop hook,
+    such as "No action needed on my part", so both get
+    OFF_PROTOCOL_REPLY_VERDICT_LINE and the reader of the reply judges it.
     """
-    return (bool(POINTER_PATTERN.search(text)) or is_passthrough_reply(text)
-            or bool(VERDICT_UNRELATED_LINE_PATTERN.search(text)))
+    if DRAFT_VERDICT_LINE_PATTERN.search(text):
+        return DRAFT_ISSUE_VS_OPEN_ISSUES_ADJUDICATION_REPLY_VERDICT_LINE
+    if POINTER_PATTERN.search(text):
+        return READING_LIST_REPLY_VERDICT_LINE
+    return OFF_PROTOCOL_REPLY_VERDICT_LINE
 
 
 def find_unexpected_closed_pointers(reply_text: str, cache: dict, include_closed: bool):
@@ -870,13 +936,6 @@ def _ask_within_lock(question, include_closed, seat_dir, repo, projects_root,
         state["recent_matches"] = recent[-STALE_MATCH_WINDOW:]
         save_state(state_path, state)
 
-    if not reply_answers_the_question(reply_text):
-        return None, ("ghi-guide-agent's reply names no issue, has no `verdict: "
-                      "unrelated` line, and is not a not-about-issues or "
-                      "ask-user-about-ruling: reply, so "
-                      "it is not an answer to this question. The reply began: "
-                      f"{reply_text[:200]!r}")
-
     return reply_text, None
 
 
@@ -918,6 +977,7 @@ def build_remote_command(question: str, include_closed: bool, repo: str,
         'cd "$seat" || {',
         '  echo "ghi-guide-agent-ask: could not enter the ghi-guide-agent seat at $seat on this box'
         ' — bootstrap it (a checkout of this repository at that path), then retry" >&2',
+        f'  echo {shlex.quote(ASK_FAILED_VERDICT_LINE)}',
         '  exit 1',
         '}',
         invocation,
@@ -928,9 +988,50 @@ def running_on_ned_box() -> bool:
     return socket.gethostname().split(".")[0] == NED_BOX_HOSTNAME
 
 
+class ArgumentParserPrintingVerdictLineOnError(argparse.ArgumentParser):
+    """argparse's wrong-call exit 2, with the verdict line on stdout first."""
+
+    def error(self, message):
+        self.print_usage(sys.stderr)
+        print(f"{self.prog}: error: {message}", file=sys.stderr)
+        print(CALLED_THE_WRONG_WAY_VERDICT_LINE)
+        sys.exit(2)
+
+
+def relay_run_on_ned_box(completed) -> int:
+    """Hands on the box-side run's output and exit code. A run that did not
+    end with one of this program's verdict lines and a code of 0, 1 or 2 is
+    ssh's own failure (255) or a box-side run that never reached main(), so
+    this program cannot tell whether ghi-guide-agent replied."""
+    sys.stderr.write(completed.stderr)
+    relayed_lines = completed.stdout.splitlines()
+    last_line = relayed_lines[-1].strip() if relayed_lines else ""
+    if completed.returncode in (0, 1, 2) and last_line in VERDICT_LINES:
+        sys.stdout.write(completed.stdout)
+        return completed.returncode
+    if completed.stdout:
+        sys.stdout.write(completed.stdout if completed.stdout.endswith("\n")
+                         else completed.stdout + "\n")
+    if completed.returncode == 255:
+        cause = (f"ssh to {AGENT_BOX} exited 255: it could not connect, or the connection "
+                 f"dropped, so this program cannot tell whether ghi-guide-agent replied. "
+                 f"ssh's own message, if any, is above.")
+    else:
+        cause = (f"the run on {AGENT_BOX} exited {completed.returncode} without printing a "
+                 f"verdict line as its last line on stdout, so this program cannot tell "
+                 f"whether ghi-guide-agent replied. That run's stderr, if any, is above.")
+    print(f"ghi-guide-agent-ask: {cause} {FAILED_ASK_NEXT_STEP_SENTENCE}", file=sys.stderr)
+    print(ASK_OUTCOME_UNKNOWN_VERDICT_LINE)
+    return 2
+
+
 def main(argv=None) -> int:
-    parser = argparse.ArgumentParser(
-        description="Ask ghi-guide-agent a reading-list question.",
+    parser = ArgumentParserPrintingVerdictLineOnError(
+        description="Ask ghi-guide-agent a question about GitHub issues. Exits 0 when it "
+                    "replied, whatever the reply; 1 when the ask failed; 2 when called the "
+                    "wrong way, when it crashed, or when it cannot tell whether "
+                    "ghi-guide-agent replied. Prints a verdict line naming the outcome as "
+                    "the last line on stdout.",
         formatter_class=argparse.RawDescriptionHelpFormatter, epilog=__doc__,
     )
     parser.add_argument("question", nargs="?",
@@ -955,7 +1056,8 @@ def main(argv=None) -> int:
         except (OSError, UnicodeDecodeError) as error:
             print(f"ghi-guide-agent-ask: could not read the question file: {error}",
                   file=sys.stderr)
-            return 1
+            print(CALLED_THE_WRONG_WAY_VERDICT_LINE)
+            return 2
 
     if arguments.seat_dir is not None:
         seat_dir = Path(arguments.seat_dir).expanduser()
@@ -976,15 +1078,18 @@ def main(argv=None) -> int:
             except subprocess.TimeoutExpired:
                 print(f"ghi-guide-agent-ask: the ssh call to {AGENT_BOX} did not finish "
                       f"within {SSH_TIMEOUT_SECONDS}s, so this script stopped it; "
-                      f"that alone does not show {AGENT_BOX} is down.", file=sys.stderr)
-                return 1
+                      f"that alone does not show {AGENT_BOX} is down, and this program "
+                      f"cannot tell whether ghi-guide-agent replied. "
+                      f"{FAILED_ASK_NEXT_STEP_SENTENCE}", file=sys.stderr)
+                print(ASK_OUTCOME_UNKNOWN_VERDICT_LINE)
+                return 2
             except OSError as error:
-                print(f"ghi-guide-agent-ask: could not start ssh to {AGENT_BOX}: {error}",
+                print(f"ghi-guide-agent-ask: could not start ssh to {AGENT_BOX}, so no "
+                      f"ask was sent: {error}. {FAILED_ASK_NEXT_STEP_SENTENCE}",
                       file=sys.stderr)
+                print(ASK_FAILED_VERDICT_LINE)
                 return 1
-            sys.stdout.write(completed.stdout)
-            sys.stderr.write(completed.stderr)
-            return completed.returncode
+            return relay_run_on_ned_box(completed)
 
     if not seat_dir.is_dir():
         # One line, because scripts/ghi-issue-write.py reports only the last stderr line.
@@ -1000,23 +1105,46 @@ def main(argv=None) -> int:
               f"for any other ask, go on without ghi-guide-agent's answer, and tell the user that "
               f"ghi-guide-agent cannot answer until its agent-home exists on ned-box.",
               file=sys.stderr)
+        print(ASK_FAILED_VERDICT_LINE)
         return 1
 
     answer, error = ask(question, arguments.include_closed, seat_dir,
                         arguments.repo)
     if answer is None:
         print(f"ghi-guide-agent-ask: {error}", file=sys.stderr)
+        print(ASK_FAILED_VERDICT_LINE)
         return 1
     passthrough = caller_message_for_passthrough_reply(answer)
     if passthrough is not None:
-        message, exit_code = passthrough
+        message, stdout_lines = passthrough
         print(message, file=sys.stderr)
-        return exit_code
-    print(answer)
-    if not arguments.include_closed:
+        print("\n".join(stdout_lines))
+        return 0
+    verdict_line = reply_kind_verdict_line(answer)
+    if answer:
+        print(answer)
+    if verdict_line == OFF_PROTOCOL_REPLY_VERDICT_LINE:
+        print(OFF_PROTOCOL_REPLY_MESSAGE, file=sys.stderr)
+    elif not arguments.include_closed:
         print(OPEN_ISSUES_ONLY_INCLUDE_CLOSED_HINT_MESSAGE, file=sys.stderr)
+    print(verdict_line)
     return 0
 
 
+def main_reporting_a_crash_as_exit_2(argv=None) -> int:
+    """main(), with an exception nothing caught reported as exit 2: Python's
+    own exit 1 for it would read as a failed ask."""
+    try:
+        return main(argv)
+    except Exception as error:                      # noqa: BLE001
+        print(f"ghi-guide-agent-ask: crashed, so it cannot say whether "
+              f"ghi-guide-agent replied: {type(error).__name__}: {error}. Treat "
+              f"it as a failed ask: when filing or editing a GHI, go on down the "
+              f"ask's fallback ladder in .claude/skills/ghi-write/SKILL.md.",
+              file=sys.stderr)
+        print(ASK_OUTCOME_UNKNOWN_VERDICT_LINE)
+        return 2
+
+
 if __name__ == "__main__":
-    sys.exit(main())
+    sys.exit(main_reporting_a_crash_as_exit_2())
