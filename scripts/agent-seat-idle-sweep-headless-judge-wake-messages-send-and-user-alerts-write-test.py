@@ -1724,6 +1724,52 @@ check("a pause holds over a stuck wait: the user is still told, and no headless 
       and not machine.claude_calls(),
       (machine.events("wait_step"), machine.alerts(), machine.claude_calls()))
 
+machine = Machine()
+machine.seat("alpha", [user("go"), assistant(PROMISE), turn_end()])
+machine.script(sent_ok())
+machine.run(0)
+machine.append("alpha", cross_session("You promised", at(0.5)), assistant(SECOND_PROMISE, at(9)),
+               turn_end(at(9)))
+machine.script(usage_limit_exit_with_transcript(RESET_IN_AN_HOUR), sent_ok())
+code, _ = machine.run(16)
+check("an escalation sender at a usage limit with a reset time ahead: a pause, no task, and the "
+      "promise message due in the same step is not sent",
+      len(machine.events("headless_usage_limit_pause")) == 1
+      and USAGE_LIMIT_TASK_SUBJECT not in machine.owner_task_subjects()
+      and len(machine.claude_calls()) == 1
+      and [event["step"] for event in machine.events("message_sent")] == ["nudge"],
+      (code, machine.events("headless_usage_limit_pause"), machine.owner_tasks(),
+       machine.claude_calls()))
+machine.script(sent_ok())
+code, _ = machine.run(90)
+check("after the reset, the promise message the escalation's pause held back is sent",
+      code == 0 and [event["step"] for event in machine.events("message_sent")] == ["nudge", "nudge"]
+      and "after lunch" in machine.events("message_sent")[-1]["text"],
+      (code, machine.events("message_sent"), machine.claude_calls()))
+
+machine = Machine()
+machine.seat("alpha", [user("go"), assistant(PROMISE), turn_end()])
+machine.script(sent_ok())
+machine.run(0)
+machine.seat("beta", DONE_TURN)
+machine.task("beta", "1")
+machine.script(usage_limit_exit_with_transcript(RESET_IN_AN_HOUR))
+machine.run(5)
+machine.script()
+code, _ = machine.run(16)
+check("a pause another agent-seat's judge started holds when a wait's escalation falls due: no "
+      "escalation is logged or sent",
+      code == 0 and [event["step"] for event in machine.events("wait_step")] == ["nudge"]
+      and not machine.claude_calls() and len(machine.events("headless_usage_limit_pause")) == 1,
+      (code, machine.events("wait_step"), machine.claude_calls()))
+
+machine = account_changed_machine()
+machine.script(usage_limit_exit_with_transcript(RESET_IN_AN_HOUR))
+code, _ = machine.run(1)
+check("the sender of the account-change notice at a usage limit with a reset time ahead: a pause, "
+      "no task", len(machine.events("headless_usage_limit_pause")) == 1 and not machine.owner_tasks(),
+      (code, machine.events("headless_usage_limit_pause"), machine.owner_tasks()))
+
 for case, resets_at in (("carries no reset time", None),
                         ("carries a reset time already passed", int(START.timestamp()) - 60)):
     machine = two_seats_with_open_tasks()
