@@ -560,7 +560,7 @@ def unanswered_started_findings(record, branch=None):
                   if finding not in answers and branch in (None, started))
 
 
-def open_pull_request(number, findings, confirm_dispatching_agent_checked_new_shared_names=False):
+def open_pull_request(number, findings, confirm_dispatching_agent_checked_new_shared_names):
     states = state_directory()
     request = saved_follow_up_request(states, number)
     answers_file = state_file(states, FINDING_ANSWERS_FILE_NAME_FORMAT, number)
