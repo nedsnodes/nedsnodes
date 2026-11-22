@@ -102,7 +102,7 @@ answer but those five, writing nothing. A
 `#case_against` line that opens with no rating is refused for every answer,
 those five included.
 
-`--not-asked KIND` settles the item without the user, as kind KIND, 1 to 6, of
+`--not-asked KIND` settles the item without the user, as kind KIND, 1 to 7, of
 the walk-me-through skill's list of items that need no answer, after checking
 what code can from the item's evidence lines, each opening with its marker:
 `#not_asked_touches` lists the files the change edits or deletes;
@@ -128,8 +128,10 @@ as for kind 4, and each marker, `#` then letters, digits, `_` or `-`, found
 in no file but Markdown, in any letter case, either whole or as a part of it
 that ends just before a `-` or ends with a `_` followed by no letter or digit,
 so that no program reads it, by name or by a pattern such as
-`#case_against_[a-z_]+`; for kinds 1 to 4
-and 6 every touched file but a kind 2 test must exist. An unused or old name is searched for as written and,
+`#case_against_[a-z_]+`; kind 7, a system glossary's entry added or changed,
+needs touches, every touched file a `*-glossary.md` file other than the
+project glossary, docs/nedsnodes-wiki/nedsnodes-glossary.md; for kinds 1 to 4,
+6 and 7 every touched file but a kind 2 test must exist. An unused or old name is searched for as written and,
 when it has two or more words, with its words joined by hyphens, by underscores
 and by nothing, a run of digits both kept with the letters before it and
 split off as a word of its own; every
@@ -562,7 +564,7 @@ CASE_AGAINST_LINE = re.compile(rf"^\s*(?:(?:[-*+]|\d+[.)]|>)\s+)*[*_`]*#case_aga
 CASE_AGAINST_RATING = re.compile(r"(very strong|none|weak|medium|strong)\b", re.I)
 CASE_AGAINST_HASHTAG = " #case_against_{rating}"
 NOT_ASKED_RATINGS = ("none", "weak")
-NOT_ASKED_KINDS = (1, 2, 3, 4, 5, 6)
+NOT_ASKED_KINDS = (1, 2, 3, 4, 5, 6, 7)
 NOT_ASKED_WEAK_CASE_AGAINST_THAT_SETTLES = ("weak with a case against that names only cost, or only that the change "
                                             "alters text the user approved word for word on an earlier date")
 NOT_ASKED_RATED_NONE = "none"
@@ -589,6 +591,7 @@ TOUCHES, TEST, SOURCE, UNUSED, RENAME, GLOSSARY_TERM, ADDED_HASHTAG_MARKER = (
 HASHTAG_MARKER = re.compile(r"#[A-Za-z0-9_-]+")
 NOT_MARKDOWN_FILES = ":(exclude)*.md"
 GLOSSARY_FILES = "*-glossary.md"
+PROJECT_GLOSSARY = "docs/nedsnodes-wiki/nedsnodes-glossary.md"
 STATUS_LINE_PREFIX = "- "
 OBVIOUS_HASHTAG = " #approved_obvious"
 AFTER_ADVISOR_HASHTAG = " #approved_after_advisor"
@@ -1011,7 +1014,7 @@ NOT_ASKED_WEAK_GROUND_FOR_RATED_NONE = (
 NOT_ASKED_RATING_PROBLEM = ("- its `#case_against` line rates the case against {rating}; only an item rated none, "
                             "or " + NOT_ASKED_WEAK_CASE_AGAINST_THAT_SETTLES + ", settles without the user.")
 NOT_ASKED_NO_LINE_PROBLEM = "- it has no `{marker}` line; {why}"
-NOT_ASKED_KINDS_NAMED = "none of the kinds 1 to 6 that `--help` lists under `--not-asked`"
+NOT_ASKED_KINDS_NAMED = "none of the kinds 1 to 7 that `--help` lists under `--not-asked`"
 NOT_ASKED_NOT_RATED_NONE_PROBLEM = ("- its `#case_against` line rates the case against {rating}; an item of "
                                     + NOT_ASKED_KINDS_NAMED + " settles without the user only when its case "
                                     "against is rated none, or " + NOT_ASKED_WEAK_CASE_AGAINST_THAT_SETTLES + ".")
@@ -1040,6 +1043,9 @@ NOT_ASKED_NO_TERM_OR_MARKER_PROBLEM = ("- it has neither a `{term}` line nor a `
 NOT_ASKED_GLOSSARY_OR_NOT_MARKDOWN_PROBLEM = (
     "- `{touches}` names {path}, which is not Markdown prose outside a glossary; kind 6 changes no code and no "
     "glossary, because a glossary entry decides what a term means.")
+NOT_ASKED_NOT_SYSTEM_GLOSSARY_PROBLEM = (
+    "- `{touches}` names {path}, which is not a system glossary, a " + GLOSSARY_FILES + " file other than the "
+    "project glossary " + PROJECT_GLOSSARY + "; kind 7 changes only entries of system glossaries.")
 NOT_ASKED_TERM_NOT_IN_GLOSSARY_PROBLEM = ("- the term `{term}` is the term of no entry, a line opening `- **{term}**` "
                                           "or `- **{term} (aka ...)**`, in a glossary file ({pattern}) in the "
                                           "checkout.")
@@ -1722,7 +1728,7 @@ def part_answer(value):
 
 
 def not_asked_kind(value):
-    """Return the --not-asked value: a kind, 1 to 6, or, for an item of no kind, `none` when its case against is
+    """Return the --not-asked value: a kind, 1 to 7, or, for an item of no kind, `none` when its case against is
     rated none, or `weak-cost-only` or `weak-alters-earlier-approved-text-only` when it is rated weak."""
     if value.strip().lower() in NOT_ASKED_NO_KIND_VALUES:
         return value.strip().lower()
@@ -1934,7 +1940,7 @@ def not_asked_problems(kind, rating, lines, marks, top, item):
     if rating not in NOT_ASKED_RATINGS:
         problems.append(NOT_ASKED_RATING_PROBLEM.format(rating=rating))
     needed = {1: (TOUCHES, SOURCE), 2: (TOUCHES, TEST), 3: (TOUCHES,), 4: (TOUCHES, RENAME), 5: (SOURCE,),
-              6: (TOUCHES,)}[kind]
+              6: (TOUCHES,), 7: (TOUCHES,)}[kind]
     for marker in needed:
         if not words(found[marker]):
             problems.append(NOT_ASKED_NO_LINE_PROBLEM.format(marker=marker, why=NOT_ASKED_WHY[marker]))
@@ -1979,6 +1985,9 @@ def not_asked_problems(kind, rating, lines, marks, top, item):
                                                                    touches=TOUCHES))
     if kind == 6:
         problems += glossary_term_or_marker_problems(found, touched, top, item)
+    if kind == 7:
+        problems += [NOT_ASKED_NOT_SYSTEM_GLOSSARY_PROBLEM.format(touches=TOUCHES, path=path) for path in touched
+                     if path == PROJECT_GLOSSARY or not fnmatch.fnmatch(Path(path).name, GLOSSARY_FILES)]
     return problems
 
 
@@ -3656,7 +3665,7 @@ def main(argv=None):
                         help="check: the user said bump and named ITEM, an item not yet shown, by its heading's title; "
                              "show it next, before the waiting item")
     answer.add_argument("--not-asked", type=not_asked_kind, metavar="KIND",
-                        help="check: the user is not asked; settle the item as kind KIND, 1 to 6, of the "
+                        help="check: the user is not asked; settle the item as kind KIND, 1 to 7, of the "
                              "walk-me-through skill's list of items that need no answer, if its evidence lines pass, "
                              "or settle an item of no kind: as `none` when its case against is rated none; as "
                              "`weak-cost-only` when it is rated weak and names only cost; as "
