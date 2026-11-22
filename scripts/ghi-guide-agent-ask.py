@@ -478,8 +478,13 @@ def ghi_guide_agent_answer_extract_and_schema_check_from_claude_result(result: d
             field_type = int if properties[field]["type"] == "integer" else str
             if not isinstance(value, field_type) or isinstance(value, bool):
                 return None, f"the answer's {field} is not of the schema's type {properties[field]['type']}: {shown}"
-    if kind == GHI_GUIDE_AGENT_ANSWER_KIND_READING_LIST and not answer["issues"] and not answer.get("notes"):
+    # The schema cannot say that a list may be empty only for some answers,
+    # and an empty one would render as nothing, which a caller reads as an answer.
+    if (kind == GHI_GUIDE_AGENT_ANSWER_KIND_READING_LIST and not answer["issues"]
+            and not any(note.strip() for note in answer.get("notes", []))):
         return None, f"the reading-list answer names no issue and gives no note: {shown}"
+    if kind == GHI_GUIDE_AGENT_ANSWER_KIND_VERDICT and answer["verdict"] == "too-similar" and not answer["issues"]:
+        return None, f"the too-similar verdict names no issue it is too similar to: {shown}"
     return answer, None
 
 

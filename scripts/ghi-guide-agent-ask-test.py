@@ -1153,7 +1153,12 @@ with tempfile.TemporaryDirectory() as temporary:
              {"kind": "ask-user-about-ruling", "ruling_issue": "#3", "sentence": "s"},
              "ruling_issue is not of the schema's type integer"),
             ("a reading list with no issue and no note fails the ask",
-             reading_list(), "names no issue and gives no note")]:
+             reading_list(), "names no issue and gives no note"),
+            ("a reading list with no issue and only blank notes fails the ask",
+             reading_list(notes=[" ", ""]), "names no issue and gives no note"),
+            ("a too-similar verdict that names no issue fails the ask",
+             {"kind": "verdict", "verdict": "too-similar", "issues": []},
+             "names no issue it is too similar to", "draft-verdict")]:
         answer, closed_on, error = ask_with_one_reply(
             "seat-" + case_name.replace(" ", "-")[:60],
             {"session_id": "sess-U", "structured_output": structured_output},
