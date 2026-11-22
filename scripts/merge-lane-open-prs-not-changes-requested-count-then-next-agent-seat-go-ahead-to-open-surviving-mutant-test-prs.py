@@ -147,24 +147,14 @@ def parse_arguments(argv):
     return parser.parse_args(argv)
 
 
-def merge_lane_verdict(review, as_comments):
-    """APPROVED, CHANGES_REQUESTED, or None for a review that carries no verdict. as_comments is
-    whether the pull request's author is the merge account."""
-    if review["state"] in ("APPROVED", "CHANGES_REQUESTED"):
-        return review["state"]
-    if as_comments and review["state"] == "COMMENTED":
-        return {"APPROVE": "APPROVED", "REQUEST_CHANGES": "CHANGES_REQUESTED"}.get(
-            fix_round.verdict_line(review))
-    return None
-
-
 def sent_back_on_head_commit(pull_request):
-    reviews = pull_request["reviews"]["nodes"]
-    as_comments = (pull_request["author"] or {}).get("login") == MERGE_LANE_ACCOUNT
-    verdicts = [merge_lane_verdict(review, as_comments) for review in reviews
+    author = (pull_request["author"] or {}).get("login")
+    verdicts = [fix_round.merge_lane_review_verdict_from_review_state_or_comment_review_first_line(
+                    review, author, MERGE_LANE_ACCOUNT)
+                for review in pull_request["reviews"]["nodes"]
                 if (review["commit"] or {}).get("oid") == pull_request["headRefOid"]]
     verdicts = [verdict for verdict in verdicts if verdict]
-    return bool(verdicts) and verdicts[-1] == "CHANGES_REQUESTED"
+    return bool(verdicts) and verdicts[-1] == "REQUEST_CHANGES"
 
 
 def open_pull_requests_not_sent_back_count():
@@ -188,7 +178,7 @@ def open_pull_requests_not_sent_back_count():
                          for node in page["data"]["repository"]["pullRequests"]["nodes"]]
         return sum(1 for node in pull_requests
                    if not node["isDraft"] and not sent_back_on_head_commit(node))
-    except (ValueError, KeyError, TypeError) as error:
+    except (ValueError, KeyError, TypeError, fix_round.StepFailed) as error:
         raise CouldNotTell(f"gh api graphql exited 0 but printed output not in the shape this "
                            f"program reads ({type(error).__name__}: {error}); its first 300 "
                            f"characters: {gh.stdout[:300]!r}\n"

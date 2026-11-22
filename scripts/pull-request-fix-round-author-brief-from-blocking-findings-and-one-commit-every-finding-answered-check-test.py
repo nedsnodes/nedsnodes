@@ -35,7 +35,7 @@ NUMBER = 7
 REVIEWS = f"api --paginate repos/{{owner}}/{{repo}}/pulls/{NUMBER}/reviews --jq .[]"
 ISSUE_COMMENTS = f"api --paginate repos/{{owner}}/{{repo}}/issues/{NUMBER}/comments --jq .[]"
 ROUND_RECORD_POST = f"api repos/{{owner}}/{{repo}}/issues/{NUMBER}/comments -f body="
-PR_VIEW = f"pr view {NUMBER} --json url,headRefOid,headRefName,body"
+PR_VIEW = f"pr view {NUMBER} --json url,headRefOid,headRefName,body,author"
 BRANCH = "topic-branch-of-the-pull-request"
 URL = f"https://github.com/o/r/pull/{NUMBER}"
 ADVISOR_SENTENCE = ("This is the pull request's third fix-round, its last before merge-lane-2 brings it to "
@@ -259,9 +259,14 @@ def lines(objects):
     return "".join(json.dumps(item) + "\n" for item in objects)
 
 
-def routes_for(head, reviews, comments=BLOCKING_COMMENTS, review_id=11):
+def routes_for(head, reviews, comments=BLOCKING_COMMENTS, review_id=11, author=None):
+    """author is the pull request's author as gh pr view prints it, such as {"login": "ned-review-merge"}; None
+    leaves the field out."""
+    view = {"url": URL, "headRefOid": head, "headRefName": BRANCH}
+    if author is not None:
+        view["author"] = author
     return {
-        PR_VIEW: {"stdout": json.dumps({"url": URL, "headRefOid": head, "headRefName": BRANCH})},
+        PR_VIEW: {"stdout": json.dumps(view)},
         REVIEWS: {"stdout": lines(reviews)},
         ISSUE_COMMENTS: {"stdout": ""},
         ROUND_RECORD_POST + "*": {"stdout": "{}"},
@@ -597,25 +602,42 @@ def brief_cases(root, repository, base, frozen_head):
           code == 1 and "is COMMENTED on commit" in err, err)
 
     # On a pull request ned-review-merge opened, GitHub takes its verdicts only as COMMENT reviews.
+    merge_account_author = {"login": "ned-review-merge"}
     code, out, err = run(root, repository, routes_for(
-        frozen_head, [review(state="COMMENTED", commit_id=frozen_head)]))
-    check("brief: merge-lane-2's COMMENT review opening with REQUEST_CHANGES, with no verdict review of its "
-          "own on the pull request, briefs a fix-round from its blocking findings",
+        frozen_head, [review(state="COMMENTED", commit_id=frozen_head)], author=merge_account_author))
+    check("brief: merge-lane-2's COMMENT review opening with REQUEST_CHANGES, on a pull request ned-review-merge "
+          "opened, briefs a fix-round from its blocking findings",
           code == 0 and "hook.py swallows the error" in out and "no case for the timeout" in out, err + out)
+
+    for author, whose in (({"login": "another-seat-account"}, "another account opened"),
+                          (None, "whose author GitHub does not name, as for a deleted account")):
+        code, out, err = run(root, repository, routes_for(
+            frozen_head, [review(state="COMMENTED", commit_id=frozen_head)], author=author))
+        check(f"brief: merge-lane-2's only review, a COMMENT review opening with REQUEST_CHANGES, on a pull request "
+              f"{whose}, is no round, exit 1",
+              code == 1 and "is COMMENTED on commit" in err and "not CHANGES_REQUESTED" in err, err + out)
 
     code, out, err = run(root, repository, routes_for(
         frozen_head, [review(state="COMMENTED", commit_id=frozen_head),
                       review(state="COMMENTED", commit_id=frozen_head, review_id=12,
-                             body="APPROVE\n\nThe fix holds.")]))
+                             body="APPROVE\n\nThe fix holds.")], author=merge_account_author))
     check("brief: a later COMMENT review opening with APPROVE closes that round, exit 1",
           code == 1 and "is COMMENTED on commit" in err, err)
 
     code, out, err = run(root, repository, routes_for(
         frozen_head, [review(state="APPROVED", commit_id=base, review_id=9, body="APPROVE\n\nFine."),
                       review(state="COMMENTED", commit_id=frozen_head)]))
-    check("brief: a COMMENT review opening with REQUEST_CHANGES is no round where merge-lane-2 has posted a "
-          "verdict review, exit 1",
+    check("brief: a COMMENT review opening with REQUEST_CHANGES, after an APPROVED review, is no round on a pull "
+          "request another account opened, exit 1",
           code == 1 and "is COMMENTED on commit" in err, err)
+
+    without_state = review(commit_id=frozen_head, review_id=12)
+    del without_state["state"]
+    code, out, err = run(root, repository, routes_for(frozen_head, [review(commit_id=frozen_head), without_state]))
+    check("brief: a merge-lane-2 review without a state, whose verdict cannot be read, fails with exit 2 and "
+          "briefs no round",
+          code == 2 and out == "" and err.startswith("FAILED: GitHub returned a review by ned-review-merge without a "
+                                                     "state, so its verdict cannot be read: "), err + out)
 
     code, out, err = run(root, repository, routes_for(base, [review(commit_id=frozen_head)]))
     check("brief: a head that moved past the reviewed commit refuses with exit 1, and with the topic-worktree "
@@ -2630,13 +2652,17 @@ REPLACED_SECOND_HEAD = "2" * 40
 
 
 def replaced_routes(head, replaced_head, replaced_reviews, replaced_comments=(), replaced_records=(),
-                    description=f"Text.\n#replaces {REPLACED_URL}\n"):
-    """Routes for pull request NUMBER, whose description replaces pull request REPLACED_NUMBER."""
+                    description=f"Text.\n#replaces {REPLACED_URL}\n", replaced_author=None):
+    """Routes for pull request NUMBER, whose description replaces pull request REPLACED_NUMBER, opened by
+    replaced_author, such as {"login": "ned-review-merge"}, or with no author field when it is None."""
     routes = routes_for(head, [review(commit_id=head)])
     routes[PR_VIEW] = {"stdout": json.dumps({"url": URL, "headRefOid": head, "headRefName": BRANCH,
                                              "body": description})}
-    routes[f"pr view {REPLACED_NUMBER} --json url,headRefOid,headRefName,body"] = {"stdout": json.dumps(
-        {"url": REPLACED_URL, "headRefOid": replaced_head, "headRefName": "old-branch", "body": "Old."})}
+    replaced_view = {"url": REPLACED_URL, "headRefOid": replaced_head, "headRefName": "old-branch", "body": "Old."}
+    if replaced_author is not None:
+        replaced_view["author"] = replaced_author
+    routes[f"pr view {REPLACED_NUMBER} --json url,headRefOid,headRefName,body,author"] = {"stdout": json.dumps(
+        replaced_view)}
     routes[f"api --paginate repos/{{owner}}/{{repo}}/pulls/{REPLACED_NUMBER}/reviews --jq .[]"] = {
         "stdout": lines(replaced_reviews)}
     routes[f"api --paginate repos/{{owner}}/{{repo}}/issues/{REPLACED_NUMBER}/comments --jq .[]"] = {
@@ -2680,10 +2706,17 @@ def replaces_cases(root, repository, base, frozen_head):
     comment_rounds = [replaced_review(51, REPLACED_FIRST_HEAD, state="COMMENTED"),
                       replaced_review(52, REPLACED_SECOND_HEAD, state="COMMENTED")]
     code, out, err = run(root, repository, replaced_routes(
-        frozen_head, REPLACED_SECOND_HEAD, comment_rounds, REPLACED_COMMENTS))
+        frozen_head, REPLACED_SECOND_HEAD, comment_rounds, REPLACED_COMMENTS,
+        replaced_author={"login": "ned-review-merge"}))
     check("replaces: a replaced pull request merge-lane-2 opened, whose two rounds are COMMENT reviews that open "
           "with REQUEST_CHANGES, makes this first round the third, which asks for the advisor",
           code == 0 and out.count(ADVISOR_SENTENCE) == 1, err + out)
+    code, out, err = run(root, repository, replaced_routes(
+        frozen_head, REPLACED_SECOND_HEAD, comment_rounds, REPLACED_COMMENTS,
+        replaced_author={"login": "another-seat-account"}))
+    check("replaces: COMMENT reviews opening with REQUEST_CHANGES on a replaced pull request another account "
+          "opened are no rounds, so this first round does not ask for the advisor",
+          code == 0 and ADVISOR_SENTENCE not in out and "Blocking findings (2)" in out, err + out)
 
     code, out, err = run(root, repository, replaced_routes(
         frozen_head, REPLACED_SECOND_HEAD, REPLACED_TWO_ROUNDS, REPLACED_COMMENTS),
@@ -2755,7 +2788,7 @@ def replaces_cases(root, repository, base, frozen_head):
         """Pull request NUMBER replaces 5, which replaces 4; 4's last round is open, with old.py's finding."""
         routes = replaced_routes(frozen_head, middle_head, middle_reviews, middle_comments,
                                  replaced_records=middle_records)
-        routes[f"pr view {REPLACED_NUMBER} --json url,headRefOid,headRefName,body"] = {"stdout": json.dumps(
+        routes[f"pr view {REPLACED_NUMBER} --json url,headRefOid,headRefName,body,author"] = {"stdout": json.dumps(
             {"url": REPLACED_URL, "headRefOid": middle_head, "headRefName": "old-branch",
              "body": "#replaces https://github.com/o/r/pull/4\n"})}
         oldest = {key.replace(f"/{REPLACED_NUMBER}/", "/4/").replace(f"pr view {REPLACED_NUMBER} ", "pr view 4 "):
@@ -2795,13 +2828,13 @@ def replaces_cases(root, repository, base, frozen_head):
                  .replace(f"pr view {REPLACED_NUMBER} ", f"pr view {number} "): value
                  for key, value in routes.items()
                  if f"/{REPLACED_NUMBER}/" in key or key.startswith(f"pr view {REPLACED_NUMBER} ")}
-        view = f"pr view {number} --json url,headRefOid,headRefName,body"
+        view = f"pr view {number} --json url,headRefOid,headRefName,body,author"
         moved[view] = {"stdout": json.dumps({**json.loads(moved[view]["stdout"]), "body": body})}
         return moved
 
     routes = replaced_routes(frozen_head, middle_head, [replaced_review(53, middle_head)],
                              replaced_records=[round_record(middle_head, [53])])
-    routes[f"pr view {REPLACED_NUMBER} --json url,headRefOid,headRefName,body"] = {"stdout": json.dumps(
+    routes[f"pr view {REPLACED_NUMBER} --json url,headRefOid,headRefName,body,author"] = {"stdout": json.dumps(
         {"url": REPLACED_URL, "headRefOid": middle_head, "headRefName": "old-branch",
          "body": "#replaces https://github.com/o/r/pull/4\n"})}
     never_reviewed = as_pull_request(4, replaced_routes(frozen_head, REPLACED_SECOND_HEAD, []),

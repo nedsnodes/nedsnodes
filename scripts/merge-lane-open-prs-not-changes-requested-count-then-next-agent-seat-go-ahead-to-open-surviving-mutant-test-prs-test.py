@@ -317,6 +317,18 @@ def cases(root):
           code == 2 and "not in the shape this program reads" in output,
           f"exit {code}\n{output}")
 
+    without_state = [pull_request(number) for number in range(1, 11)]
+    without_state[0]["reviews"]["nodes"].append({"commit": {"oid": without_state[0]["headRefOid"]},
+                                                 "body": ""})
+    case = Case(root, "review-without-state")
+    case.gh_answer(pages(without_state))
+    case.sender_answers(("sent", "reboot-test"))
+    code, output = case.run()
+    check("a review on the head commit without a state exits 2, the count being unknown, and "
+          "releases no agent-seat",
+          code == 2 and "not in the shape this program reads" in output and "RELEASED" not in output
+          and case.released() == [] and not case.prompts, f"exit {code}\n{output}")
+
     case = Case(root, "no-seats-file", seats=None)
     case.gh_answer(pages(ten_counted))
     code, output = case.run()
