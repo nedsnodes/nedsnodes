@@ -145,6 +145,7 @@ NO_SANDBOX_SUITES_PROGRAM = Path(__file__).with_name("no-sandbox-test-suites-run
 VERDICT_REVIEW_POSTING_PROGRAM_MARKS_CHECK_PROGRAM_PATH = Path(__file__).resolve().with_name("merge-gate-approval-or-changes-request-review-has-review-posting-program-marks-check.py")
 GIT_REDIRECTING_ENVIRONMENT_COMMON = Path("nn-systems/general-tools/git-redirecting-environment-variables-removal-common.py")
 GIT_MACHINE_READABLE_OUTPUT_COMMON = Path("nn-systems/general-tools/git-machine-readable-output-runner-and-parser-common.py")
+REPOSITORY_NAMES_COMMON = Path("nn-systems/general-tools/github-repository-name-and-name-before-project-rename-common.py")
 FIXTURES = Path(__file__).with_name("merge-gate-test-captured-github-responses")
 BASH = shutil.which("bash")
 TEST_TOKEN = "merge-gate-test-token-not-a-credential"
@@ -368,7 +369,7 @@ def gate_copy(text):
     shutil.copyfile(DESCRIPTION_DEFECT_LINE_READER, directory / DESCRIPTION_DEFECT_LINE_READER.name)
     shutil.copyfile(NO_SANDBOX_SUITES_PROGRAM, directory / NO_SANDBOX_SUITES_PROGRAM.name)
     (top / GIT_REDIRECTING_ENVIRONMENT_COMMON).parent.mkdir(parents=True)
-    for common in (GIT_REDIRECTING_ENVIRONMENT_COMMON, GIT_MACHINE_READABLE_OUTPUT_COMMON):
+    for common in (GIT_REDIRECTING_ENVIRONMENT_COMMON, GIT_MACHINE_READABLE_OUTPUT_COMMON, REPOSITORY_NAMES_COMMON):
         shutil.copyfile(Path(__file__).resolve().parent.parent / common, top / common)
     # A link, not a copy: the check loads the posting program and its modules from its own resolved directory.
     (directory / VERDICT_REVIEW_POSTING_PROGRAM_MARKS_CHECK_PROGRAM_PATH.name).symlink_to(VERDICT_REVIEW_POSTING_PROGRAM_MARKS_CHECK_PROGRAM_PATH)
@@ -1472,6 +1473,49 @@ def case_follow_up_open_issue_in_another_repository_not_printed(gate):
         link_route("open issue", "repos/cli/cli/issues/1154"))
 
 
+def gate_copy_with_repository_names_module(gate, module_text):
+    copy = gate_copy(gate.read_text())
+    (copy.parent.parent / REPOSITORY_NAMES_COMMON).write_text(module_text)
+    return copy
+
+
+def case_repository_names_come_from_the_shared_module(gate):
+    # Names the gate's own text does not hold, so only a gate that reads the module counts both as this repository.
+    copy = gate_copy_with_repository_names_module(
+        gate, 'REPOSITORY = "renamed-owner/renamed-repository"\nOLD_REPOSITORY = "earlier-owner/earlier-repository"\n')
+    current_link = "https://github.com/renamed-owner/renamed-repository/issues/2078"
+    old_link = "https://github.com/earlier-owner/earlier-repository/issues/1154"
+    current = f"#root_cause_not_fixed a second cause stays. #follow_up {current_link}"
+    old = f"#root_cause_not_fixed the harness drops the variable. #follow_up {old_link}"
+    run = description_with_lines_run(
+        copy, [current, old],
+        [link_route("open issue", "repos/renamed-owner/renamed-repository/issues/2078"),
+         link_route("open issue", "repos/earlier-owner/earlier-repository/issues/1154")])
+    return (passed_pinned_to(run, BASE_PR, BASE_APPROVAL["commit_id"])
+            and "--repo renamed-owner/renamed-repository --merge" in run.stdout
+            and run.stdout.endswith(f"\n  {current_link} from the line `{current}`\n"
+                                    f"  {old_link} from the line `{old}`\n")), run.summary()
+
+
+def case_repository_names_module_failing_stops_the_gate(gate):
+    copy = gate_copy_with_repository_names_module(gate, "raise SystemExit(3)\n")
+    run = run_gate(copy, BASE_PR, BASE_HEAD, BASE_APPROVAL["submitted_at"], base_routes())
+    return could_not_run_before_gh(
+        run, "GATE COULD NOT RUN: could not read the repository's names, REPOSITORY and OLD_REPOSITORY, from ",
+        "github-repository-name-and-name-before-project-rename-common.py; python3's error is just above this line.\n"
+        "Fix the module or restore it from main, then run the gate again.\n"), run.summary()
+
+
+def case_repository_names_module_printing_one_name_stops_the_gate(gate):
+    copy = gate_copy_with_repository_names_module(
+        gate, 'REPOSITORY = "nedsnodes/nedsnodes"\nOLD_REPOSITORY = ""\n')
+    run = run_gate(copy, BASE_PR, BASE_HEAD, BASE_APPROVAL["submitted_at"], base_routes())
+    return could_not_run_before_gh(
+        run, "github-repository-name-and-name-before-project-rename-common.py: it printed "
+        "`nedsnodes/nedsnodes `, not two names separated by a space.\n"
+        "Fix the module or restore it from main, then run the gate again.\n"), run.summary()
+
+
 def case_follow_up_issue_closed_as_not_planned(gate):
     return abandoned_link_refused(
         gate, NOT_FIXED_WITH_FOLLOW_UP, FOLLOW_UP_LINK, link_route("issue closed as not planned"),
@@ -1986,6 +2030,12 @@ CASES = [
      case_follow_up_two_open_issues_printed_in_order_owner_in_capitals),
     ("H8 a #follow_up link to an open issue in another repository passes and is not printed",
      case_follow_up_open_issue_in_another_repository_not_printed),
+    ("NAMES links under both names the repository-names module holds count as this repository, and the merge command names the current one",
+     case_repository_names_come_from_the_shared_module),
+    ("NAMES a repository-names module that fails could not run, exit 2, no gh call",
+     case_repository_names_module_failing_stops_the_gate),
+    ("NAMES a repository-names module that prints one name could not run, exit 2, no gh call",
+     case_repository_names_module_printing_one_name_stops_the_gate),
     ("H2 captured PR 1360's not-fixed line without #follow_up refuses",
      case_follow_up_captured_not_fixed_line_without_it),
     ("H2 captured PR 1298's not-fixed line without #follow_up refuses beside its root-cause line",
@@ -2054,6 +2104,16 @@ TOKEN_BLOCK = (
 SINCE_REAL_TIME_CHECK = """jq -n --arg since "$SINCE" '$since | fromdateiso8601' >/dev/null 2>&1 || cannot"""
 
 MUTATIONS = [
+    ("the repository's names written into the gate instead of read from the module",
+     [('read -r REPO OLD_REPOSITORY extra_name <<<"$repository_names"',
+       'REPO=nedsnodes/nedsnodes OLD_REPOSITORY=nedschorus/nedschorus extra_name=')],
+     [case_repository_names_come_from_the_shared_module]),
+    ("a failing repository-names module not stopping the gate",
+     [('  || cannot "$REPOSITORY_NAMES_UNREADABLE; python3', '  || : "$REPOSITORY_NAMES_UNREADABLE; python3')],
+     [case_repository_names_module_failing_stops_the_gate]),
+    ("one name from the repository-names module accepted",
+     [('[ -n "$OLD_REPOSITORY" ] && [ -z "$extra_name" ]', 'true')],
+     [case_repository_names_module_printing_one_name_stops_the_gate]),
     ("the new-activity count mode counting from the start of the pull request, not the bound",
      [("  SINCE=$bound_at\n", "  SINCE=1970-01-01T00:00:00Z\n")],
      [case_new_activity_count_matches_the_gates_refusal]),
