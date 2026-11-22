@@ -173,7 +173,7 @@ CURLY_QUOTED_NAME_PATTERN = re.compile(r"\u201c[^\u201d\n]+\u201d")
 LINK_TEXT_AND_TARGET_PATTERN = re.compile(
     r"\[(?P<text>(?:[^\[\]\n]|\[[^\[\]\n]*\])*)\]\((?P<target>(?:[^()\s]|\([^()\s]*\))*)")
 REPOSITORY_ITEM_URL_PATTERN = re.compile(
-    r"^<?https://github\.com/(?:" + GITHUB_REPOSITORY_OWNER + "/" + GITHUB_REPOSITORY_NAME + "|" + re.escape(repository_names.OLD_REPOSITORY) + ")"
+    r"^<?https://github\.com/" + repository_names.REPOSITORY_NAME_OR_NAME_BEFORE_PROJECT_RENAME_PATTERN
     + r"/(?:pull|issues)/(?P<number>\d+)"
     # A link to a comment or a review, a review comment on the files tab
     # (#r<id>) included, cites that comment, not the item's title.
