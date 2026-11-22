@@ -590,6 +590,18 @@ def test_new_shared_names_wait_for_the_dispatching_agent():
               and "rename-topic-branch" not in err
               and "topic-one" not in git(case.origin, "branch", "--list") and case.gh_pr_create_calls() == []
               and description.exists(), err)
+        try:
+            with case.in_process(worktree):
+                program.open_pull_request(NUMBER, None)
+        except program.Refused as error:
+            check("open_pull_request called without the confirmation argument refuses an unchecked file, and pushes "
+                  "and opens nothing",
+                  "  new-tool.txt (file-path)\n" in str(error)
+                  and "topic-one" not in git(case.origin, "branch", "--list") and case.gh_pr_create_calls() == [],
+                  str(error))
+        else:
+            check("open_pull_request called without the confirmation argument refuses an unchecked file, and pushes "
+                  "and opens nothing", False)
         code, out, err = case.run(worktree, "rename-topic-branch", "topic-renamed")
         check("there is no rename-topic-branch subcommand", code == 2 and "invalid choice" in err, err)
         git(worktree, "update-ref", "-d", "refs/remotes/origin/main")
