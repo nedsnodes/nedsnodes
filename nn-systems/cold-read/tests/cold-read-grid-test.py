@@ -1828,6 +1828,10 @@ try:
           len(gone_lines) == 1 and "has changed or gone since: agent-draft.md," in gone_lines[0]
           and "clean.md is gone; `git -C " in gone_lines[0] and "diff HEAD -- clean.md`" in gone_lines[0]
           and "Read clean.md" not in gone_lines[0]
+          and "The index may still hold the moved changes under clean.md, and an undo would discard them; "
+              "`git -C " in gone_lines[0]
+          and "diff --cached -- clean.md` shows any copy the index holds. Ask the user before you restore "
+              "clean.md," in gone_lines[0]
           and "rm -r" not in gone_lines[0] and "restore --staged" not in gone_lines[0],
           repr(clean_move_lines))
     check("while an already-changed file has changed, a path that exists is named as where the "
@@ -1839,8 +1843,13 @@ try:
           repr(clean_move_lines))
     # A stopped cell that removes a path with `git mv` or `git rm` stages the removal, so a diff
     # of the working tree against the index shows nothing; the message's diff must still show it.
+    # A cell can also stage the edited file's text under a path and then delete the path, which
+    # leaves the moved changes only in the index, where an undo of the gone path would discard them.
     for case, remove in (("git mv", lambda: clean_move_git("mv", "clean.md", "staged-move-by-a-reviewer.md")),
-                         ("git rm", lambda: clean_move_git("rm", "--quiet", "clean.md"))):
+                         ("git rm", lambda: clean_move_git("rm", "--quiet", "clean.md")),
+                         ("staged copy of the edited file", lambda: (
+                             (clean_move_repository / "clean.md").write_text("The agent's own edit.\n", encoding="utf-8"),
+                             clean_move_git("add", "clean.md"), (clean_move_repository / "clean.md").unlink()))):
         clean_move_git("reset", "--quiet", "--hard")
         clean_move_git("clean", "--quiet", "-f")
         (clean_move_repository / "agent-draft.md").write_text("The agent's own edit.\n", encoding="utf-8")
@@ -1852,11 +1861,16 @@ try:
                 [scratch / "claude-hunt-deep.md"], staged_baseline, None, set())
         staged_gone_lines = [line for line in staged_lines if line.startswith("STRAY WRITE: clean.md ")]
         diff_commands = re.findall(r"`(git -C [^`]* diff [^`]*)`", staged_gone_lines[0]) if staged_gone_lines else []
-        shown = (subprocess.run(shlex.split(diff_commands[0]), check=True, capture_output=True, text=True).stdout
-                 if len(diff_commands) == 1 else "")
+        shown_by = [subprocess.run(shlex.split(command), check=True, capture_output=True, text=True).stdout
+                    for command in diff_commands]
+        shown = shown_by[0] if len(diff_commands) == 2 and " diff HEAD -- " in diff_commands[0] else ""
+        index_copy_shown = shown_by[1] if len(diff_commands) == 2 and " diff --cached -- " in diff_commands[1] else ""
         check(f"{case}: a path a stopped cell removed with a staged change is named as gone, and the diff "
               "the line gives shows what it held",
-              len(staged_gone_lines) == 1 and "-Clean." in shown, repr(staged_lines) + "\n" + shown)
+              len(staged_gone_lines) == 1 and "-Clean." in shown
+              and "an undo would discard them" in staged_gone_lines[0]
+              and ("+The agent's own edit." in index_copy_shown) == (case == "staged copy of the edited file"),
+              repr(staged_lines) + "\n" + shown + "\n" + index_copy_shown)
     # A tracked file the agent had already changed: the diffs the line gives must together show a
     # cell's edit that is staged, and a cell's write of the HEAD text over a staged-and-edited file,
     # which leaves the working tree equal to HEAD.

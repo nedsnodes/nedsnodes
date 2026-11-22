@@ -824,7 +824,7 @@ def checkout_files(checkout: Path, decisions: dict):
     and rewritten by Claude Code itself.
 
     decisions caches the guard's answer for each listed path between runs, since deciding takes
-    most of a run's time; it is dropped when instruction-file-guard.py changes."""
+    most of a run's time; it is dropped when a file the guard decides from changes."""
     listed = git_text(checkout, "ls-files", "-z", "--cached", "--others", "--exclude-standard")
     # An ignored file can be an instruction only as CLAUDE.local.md or .claude/settings.local.json
     # (usually ignored); listing all ignored files under .claude/ would catch Claude Code's runtime
@@ -832,7 +832,9 @@ def checkout_files(checkout: Path, decisions: dict):
     ignored = git_text(checkout, "ls-files", "-z", "--others", "--ignored", "--exclude-standard",
                        "--", ":(glob)**/CLAUDE.local.md",
                        ":(glob)**/.claude/settings.local.json")
-    guard_version = str(stat_data(str(GUARD_HOOKS_DIRECTORY / "instruction-file-guard.py")))
+    guard_version = str([stat_data(str(GUARD_HOOKS_DIRECTORY / name))
+                         for name in ("instruction-file-guard.py",
+                                      "draft-document-place-directories-definition-and-membership-common.py")])
     if decisions.get("") != guard_version:
         decisions.clear()
         decisions[""] = guard_version
