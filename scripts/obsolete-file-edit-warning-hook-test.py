@@ -811,6 +811,8 @@ with tempfile.TemporaryDirectory() as temporary_directory:
     shared_lines = [f"line {number}\n" for number in range(1, 11)]
     commit_file(detached_origin, "lib/shared.py", "".join(shared_lines), "shared file")
     commit_file(detached_origin, "lib/gone.py", "main will delete this\n", "a file main deletes")
+    commit_file(detached_origin, "lib/bystander.py", "".join(shared_lines),
+                "a file main moves in the commit that deletes gone.py")
     latin1_lines = [f"ligne {number} \xe9t\xe9\n".encode("latin-1") for number in range(1, 11)]
     (detached_origin / "lib" / "latin1.txt").write_bytes(b"".join(latin1_lines))
     git(["add", "lib/latin1.txt"], detached_origin)
@@ -832,8 +834,10 @@ with tempfile.TemporaryDirectory() as temporary_directory:
     (detached_origin / "lib" / "latin1.txt").write_bytes(b"".join(latin1_on_main))
     git(["add", "lib/latin1.txt"], detached_origin)
     git(["commit", "-q", "-m", "main rewrites line 2 of the file that is not UTF-8"], detached_origin)
+    # The deleting commit also moves another file, so its one rename is not gone.py's.
     git(["rm", "-q", "lib/gone.py"], detached_origin)
-    git(["commit", "-q", "-m", "main deletes gone.py"], detached_origin)
+    git(["mv", "lib/bystander.py", "lib/bystander-moved.py"], detached_origin)
+    git(["commit", "-q", "-m", "main deletes gone.py and moves bystander.py"], detached_origin)
     git(["mv", "lib/moved.py", "lib/renamed.py"], detached_origin)
     git(["commit", "-q", "-m", "main moves moved.py"], detached_origin)
     # Moved, then rewritten: the merge-base-to-main diff no longer pairs the two
