@@ -150,8 +150,8 @@ date, from another weak one, or a fix that matches its design from one that does
 the agent judges those.
 
 `--not-asked adds-nothing` settles an item whose recommendation adds and changes
-nothing, whatever its case against is rated: it checks no evidence line and no
-rating, and the minutes write the answer as `not asked, adds nothing`. The agent judges that the
+nothing, whatever its case against is rated: it checks no evidence line and
+accepts any valid rating, and the minutes write the answer as `not asked, adds nothing`. The agent judges that the
 recommendation adds and changes nothing.
 
 `--not-asked none`, `--not-asked weak-cost-only` and

@@ -139,7 +139,9 @@ the rest of its paragraph or else the block below it, such as a `>` quote;
 the text after a `#case_against` mark, its
 rating included, the text after each `The alternative:` and `Recommendation:`
 up to the next of those labels or the line's end, and, in an item that holds
-parts, the text after each `Part N.` opening a line; the message's copy is
+parts, the text after each `Part N.` opening a line, a `#new` or `#new_if_d`
+mark just after it making it a line of the kind `Part N. #new` or
+`Part N. #new_if_d`, as check reads that mark; the message's copy is
 read as holding parts when it numbers parts of its own, so a part the item
 has since dropped is still read. The message's copy of the item is its text
 after the heading's line and before any top-level heading or closing line
@@ -1129,7 +1131,12 @@ def decision_bearing_lines(body, parser, env, has_parts):
                 # A mark typed `#NEW` is the same kind of line as `#new`.
                 found.append((f"`{mark[1].lower()}` line", mark[2], unit))
             elif part:
-                found.append((f"`{part[1]}.` line", part[2], unit))
+                # A part's `#new` or `#new_if_d` mark names the line's kind, as check reads the mark, so a part
+                # shown with the other mark is no line of the same kind and its words alone do not pass.
+                part_mark = DECISION_MARK.match(part[2])
+                marked = (f" {part_mark[1].lower()}" if part_mark
+                          and part_mark[1].lower() in BARE_MARKS_INTRODUCING_A_BLOCK else "")
+                found.append((f"`{part[1]}.{marked}` line", part[2], unit))
             else:
                 labels = list(DECISION_LABEL.finditer(line))
                 for label, next_label in zip(labels, [*labels[1:], None]):

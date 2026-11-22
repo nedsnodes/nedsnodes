@@ -2123,6 +2123,21 @@ def test_new_and_new_if_d_texts_swapped_in_a_message_that_dropped_both_marks_go_
           len(case.model_calls()) == 1 and lines is not None and not counted(lines), f"lines {lines!r}")
 
 
+def test_a_part_shown_with_the_other_new_mark_goes_to_the_model():
+    parts_item = DECISION_ITEM.replace("#new Hide rows older than a year.",
+                                       "Part 1. #new_if_d Hide rows older than a year.\n\nPart 2. Hide empty rows.")
+    shown = parts_item.replace("Part 1. #new_if_d Hide", "Part 1. #new Hide")
+    case = Case(next_to_present="item 4 of 9", document="# A walk\n\n" + parts_item + "\n", model="changed")
+    lines = case.lines("a", case.transcript(f"{shown}\n\n{ITEM_4_CLOSING_LINE}"))
+    check("an answer goes to the model and is refused when a part's `#new_if_d` text was shown under `#new`, its "
+          "words unchanged", len(case.model_calls()) == 1 and lines is not None and not counted(lines),
+          f"lines {lines!r}")
+    case = Case(next_to_present="item 4 of 9", document="# A walk\n\n" + parts_item + "\n", model="changed")
+    lines = case.lines("a", case.transcript(f"{parts_item}\n\n{ITEM_4_CLOSING_LINE}"))
+    check("an answer counts with no model call when a part was shown with its own `#new_if_d` mark",
+          counted(lines) and not case.model_calls(), f"lines {lines!r}")
+
+
 def test_only_the_messages_copy_of_the_item_is_compared_not_another_items_lines_or_the_agents_own():
     document = ("# A walk\n\n## Items 4 and 5 of 9: two filters\n\nItem 4 of 9 hides old rows. Recommendation: leave "
                 "the filter out.\n\nItem 5 of 9 hides empty rows. Recommendation: add the filter.\n")
