@@ -1999,6 +1999,23 @@ def cases(scratch):
           message == "" and "" in json.loads(state.read_text())["guarded"],
           (message, state.read_text()))
 
+    # -- cached decisions are dropped when the draft-place module the guard decides from changes,
+    # though the guard file itself does not
+    hook = load_hook_in_this_process()
+    copied_guard_hooks = Path(scratch) / "decision-cache-guard-hooks"
+    shutil.copytree(hook.GUARD_HOOKS_DIRECTORY, copied_guard_hooks)
+    hook.GUARD_HOOKS_DIRECTORY = copied_guard_hooks
+    world = fresh(scratch, "decision-cache-draft-place-module-changed")
+    decisions = {}
+    hook.checkout_files(world.repo, decisions)
+    decisions["made-up-cached-path"] = True
+    with open(copied_guard_hooks / "draft-document-place-directories-definition-and-membership-common.py",
+              "a") as module:
+        module.write("\n")
+    hook.checkout_files(world.repo, decisions)
+    check("a change to the guard's draft-place module drops the cached guard decisions",
+          "made-up-cached-path" not in decisions, decisions)
+
     # -- git's own work after a first run made while a merge was stopped, in a checkout with no
     # guarded file yet, is not asked about
     world = World(Path(scratch) / "first-run-no-guarded-file-merge-stopped")

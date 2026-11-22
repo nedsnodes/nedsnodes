@@ -34,9 +34,8 @@ with _crash_notice.guard_hook_crash_fail_open_with_notice_context_manager(
     _guard_approval_marker_common = importlib.util.module_from_spec(_marker_spec)
     _marker_spec.loader.exec_module(_guard_approval_marker_common)
     _draft_place_spec = importlib.util.spec_from_file_location(
-        "draft_document_place_directory_check_common",
-        Path(__file__).resolve().parents[2] / "nn-systems" / "general-tools"
-        / "draft-document-place-directory-check-common.py")
+        "draft_document_place_directories_definition_and_membership_common",
+        Path(__file__).resolve().parent / "draft-document-place-directories-definition-and-membership-common.py")
     _draft_place = importlib.util.module_from_spec(_draft_place_spec)
     _draft_place_spec.loader.exec_module(_draft_place)
 consume_approval_marker = _guard_approval_marker_common.consume_approval_marker

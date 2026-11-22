@@ -1,7 +1,7 @@
 """The draft places of docs/nedsnodes-wiki/nedsnodes-file-naming-and-location-standards.md.
 
-The instruction-file guard lets a reusable prompt be written there without approval, and the
-log audit test lets a `-draft` or `-candidate` log be tracked by git there; both read this one
+The instruction-file guard skips its reusable-prompt check there, though a file under .claude/
+still needs approval, and the log audit test lets a `-draft` or `-candidate` log be tracked by git there; both read this one
 definition, so the two cannot drift apart."""
 
 DRAFT_DOCUMENT_PLACE_DIRECTORY_NAMES = ("queue",)
