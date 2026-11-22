@@ -1380,8 +1380,12 @@ def item_line_ranges(walk_finder, minutes, value, numbers, total, parser, named_
     ranges = []
     for unit in spans:
         if len(numbers) == 1 and len(unit[0]) > 1:
-            # The item copy the user is shown reads these same ranges, a shared setext heading's further lines
-            # included.
+            own_first, _ = walk_finder.approval_walk_item_line_range_within_heading_shared_by_several_items(
+                openings, unit[3], unit[4], numbers[0], unit[0], unit[1])
+            # An item with no opening of its own starts at the shared opener, whose line can hold its recommendation;
+            # the ranges below it are the ones the item copy the user is shown reads, a setext heading's further
+            # lines included.
+            ranges += [(unit[3], unit[3] + 1)] if own_first == unit[3] else []
             ranges += walk_finder.approval_walk_unit_heading_end_and_item_line_ranges_below_heading_line(
                 text, parser, lines, unit, [openings], [numbers[0]])[1]
         else:
@@ -1561,6 +1565,9 @@ def new_marks(text, tokens, ranges, shown):
             code.update((number, token.map[1]) for number in range(*token.map))
         elif token.type == "paragraph_open":
             paragraphs.append(token.map)
+        elif token.type == "heading_open" and token.markup in ("=", "-"):
+            # A setext heading's lines above its underline read as one paragraph, which the item copy shows them as.
+            paragraphs.append([token.map[0], token.map[1] - 1])
     marks = []
     for first, end in ranges:
         for number in range(first, end):
