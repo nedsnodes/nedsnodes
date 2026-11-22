@@ -218,9 +218,11 @@ if they are not loaded). Write only to the one entry that is shown as interactiv
 pane is in the tmux session named after the agent-seat, as in \
 "{seat} [9cbc4b] · interactive · tmux {seat}:@0.%0". Its name may differ from the agent-seat's, \
 because the user can rename an agent-session, as in "Cpc [537f8b] · interactive · tmux {seat}:@0.%0"; \
-the tmux session is what names the agent-seat. Never write to a Remote Control entry, or to \
-any other entry. In SendMessage's "to", give the name and the ref as ListAgents lists them, as in \
-"{seat} [9cbc4b]". If there is no such entry, or more than one, send nothing."""
+the tmux session is what names the agent-seat. When that tmux session holds more than one \
+interactive entry, the agent-seat's own is the one started earliest, because every other one was \
+started from inside it, as a reviewer is. Never write to a Remote Control entry, or to any other \
+entry. In SendMessage's "to", give the name and the ref as ListAgents lists them, as in \
+"{seat} [9cbc4b]". If there is no such entry, or no one entry was started earliest, send nothing."""
 
 SENDER_PROMPT = """\
 You deliver one message for the idle sweep, a program on ned-box that wakes idle agent-seats. You \
@@ -509,6 +511,8 @@ class HeadlessOutcome:
 # One ListAgents line, as "  Cpc [537f8b]  ·  interactive  ·  idle  ·  tmux MD-skills:@0.%0  ·  ...".
 LISTED_ENTRY = re.compile(r"^\s*(?P<name>\S.*?) \[(?P<ref>[0-9a-f]+)\]\s+·(?P<rest>.*)$")
 LISTED_TMUX_SESSION = re.compile(r"·\s*tmux (?P<session>[^:\s]+):")
+LISTED_STARTED = re.compile(r"·\s*started (?P<count>\d+)(?P<unit>[smhd]) ago")
+SECONDS_PER_STARTED_UNIT = {"s": 1, "m": 60, "h": 3600, "d": 86400}
 
 def claude_binary():
     # Cron's PATH does not hold ~/.local/bin, where claude is installed.
@@ -598,20 +602,44 @@ def tool_result_text(content):
 def entry_seat(to, listings):
     """The agent-seat a SendMessage "to" reaches: the tmux session of the interactive entry it
     names, by name and, when it gives one, ref, in the sender's ListAgents results; None when no
-    one such entry was listed. The tmux session keeps the agent-seat's name when the user
-    renames the agent-session, so "Cpc [537f8b]", listed in tmux session MD-skills, reaches
-    MD-skills."""
+    one such entry was listed, or when it is not the agent-seat's own entry. The tmux session
+    keeps the agent-seat's name when the user renames the agent-session, so "Cpc [537f8b]",
+    listed in tmux session MD-skills, reaches MD-skills.
+
+    A session started inside an agent-seat's tmux pane, such as one of merge-lane-2's reviewers,
+    is listed in that agent-seat's tmux session too. It was started from inside the agent-seat's
+    own session, so when a tmux session holds several interactive entries, the agent-seat's own
+    is the one whose "started ... ago" is the longest; when that is not one entry, or an entry
+    gives no start, none is.
+
+    Not handled: a display name holding " [", as "Cpc [WIP]", which is split at its first
+    bracket, and a display name holding "· tmux <name>:", which is read as the tmux session."""
     name, _, ref = to.strip().partition(" [")
     name, ref = name.strip(), ref.rstrip("]").strip()
-    sessions = set()
+    entries_by_session = {}
+    named = []
     for line in "\n".join(listings).splitlines():
         entry = LISTED_ENTRY.match(line)
         tmux = LISTED_TMUX_SESSION.search(line)
         if not entry or not tmux or "interactive" not in entry["rest"]:
             continue
+        started = LISTED_STARTED.search(line)
+        age = (int(started["count"]) * SECONDS_PER_STARTED_UNIT[started["unit"]]
+               if started else None)
+        listed = (entry["name"], entry["ref"], tmux["session"], age)
+        entries_by_session.setdefault(tmux["session"], []).append(listed)
         if entry["name"] == name and (not ref or entry["ref"] == ref):
-            sessions.add(tmux["session"])
-    return sessions.pop() if len(sessions) == 1 else None
+            named.append(listed)
+    if len({listed[2] for listed in named}) != 1 or len(named) != 1:
+        return None
+    session = named[0][2]
+    entries = entries_by_session[session]
+    if len(entries) == 1:
+        return session
+    ages = [listed[3] for listed in entries]
+    if None in ages or ages.count(max(ages)) != 1 or named[0][3] != max(ages):
+        return None
+    return session
 
 
 def send_problems(outcome, seats):

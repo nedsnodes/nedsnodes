@@ -44,12 +44,16 @@ def emit(event):
     print(json.dumps(event), flush=True)
 text = prompt.split("----------\n", 1)[-1].rsplit("\n----------", 1)[0]
 # The ListAgents result a sender reads before it sends: an answer's own "listing", or else one
-# interactive entry for each send, named as the send names it and in the tmux session of that name.
+# interactive entry for each name the sends give, named as the send names it and in the tmux session of
+# that name.
 listing = answer.get("listing")
 if listing is None and answer.get("sends"):
-    lines = []
+    lines, names = [], set()
     for number, send in enumerate(answer["sends"]):
         name, _, ref = send["to"].partition(" [")
+        if name in names:
+            continue
+        names.add(name)
         ref = ref.rstrip("]") or "a{{:05x}}".format(number)
         lines.append("  {{}} [{{}}]  \u00b7  interactive  \u00b7  idle  \u00b7  tmux {{}}:@0.%0".format(
             name, ref, name))
@@ -1390,6 +1394,52 @@ machine.run(0)
 check("an entry named after the agent-seat but in another tmux session is not the agent-seat",
       any("no SendMessage to alpha succeeded" in event["problem"]
           for event in machine.events("headless_failed")), machine.events("headless_failed"))
+
+# A session started inside an agent-seat's tmux pane, as a merge-lane-2 reviewer is, is listed in that
+# agent-seat's tmux session too; the agent-seat's own entry is the one started earliest.
+SHARED_PANE_LISTING = (
+    "  alpha [19bb19]  ·  interactive  ·  busy  ·  tmux alpha:@0.%0  ·  started 1h ago\n"
+    "  pr4175-head-c3 [093a18]  ·  interactive  ·  busy  ·  tmux alpha:@0.%0  ·  started 18m ago")
+for to, counts, case in (
+        ("pr4175-head-c3 [093a18]", False, "a reviewer started inside the agent-seat's pane is not the "
+                                           "agent-seat"),
+        ("alpha [19bb19]", True, "the entry started earliest in the agent-seat's tmux session is the "
+                                 "agent-seat")):
+    machine = Machine()
+    machine.seat("alpha", DONE_TURN)
+    machine.handoff_put_off()
+    machine.script({"listing": SHARED_PANE_LISTING,
+                    "sends": [{"to": to, "message": "@prompt-text"}],
+                    "answer": {"sent": True, "reason": "sent"}})
+    machine.run(0)
+    reached = not machine.events("headless_failed") and bool(machine.events("message_sent"))
+    check(case, reached == counts, machine.events())
+
+for listing, case in (
+        ("  alpha [19bb19]  ·  interactive  ·  busy  ·  tmux alpha:@0.%0  ·  started 1h ago\n"
+         "  other [093a18]  ·  interactive  ·  busy  ·  tmux alpha:@0.%0  ·  started 1h ago",
+         "two entries in the agent-seat's tmux session started equally early: neither is the agent-seat"),
+        ("  alpha [19bb19]  ·  interactive  ·  busy  ·  tmux alpha:@0.%0\n"
+         "  other [093a18]  ·  interactive  ·  busy  ·  tmux alpha:@0.%0  ·  started 18m ago",
+         "an entry in a shared tmux session that gives no start is not taken as the agent-seat")):
+    machine = Machine()
+    machine.seat("alpha", DONE_TURN)
+    machine.handoff_put_off()
+    machine.script({"listing": listing,
+                    "sends": [{"to": "alpha [19bb19]", "message": "@prompt-text"}],
+                    "answer": {"sent": True, "reason": "sent"}})
+    machine.run(0)
+    check(case, any("no SendMessage to alpha succeeded" in event["problem"]
+                    for event in machine.events("headless_failed")), machine.events())
+
+machine = Machine()
+machine.seat("alpha", DONE_TURN)
+machine.handoff_put_off()
+machine.script(sent_ok())
+machine.run(0)
+check("the sender is told the agent-seat's own entry is the one started earliest in its tmux session",
+      "the one started earliest" in machine.claude_calls()[0]["prompt"].replace("\n", " "),
+      machine.claude_calls())
 
 # --- headless agent-sessions that fail --------------------------------------------------------------
 FAILURES = (
