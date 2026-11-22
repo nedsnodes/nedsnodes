@@ -2169,6 +2169,21 @@ def run_cases(scratch: Path):
           and not nothing_filed.ran("gh issue edit"),
           str(nothing_filed.commands()))
 
+    # The rerun line is read back as the shell would split it, so a path
+    # with a space and a --repo other than the default both survive it.
+    for repo, expected_tail in ((REPO, []),
+                                ("someone/fork", ["--repo", "someone/fork"])):
+        told = []
+        tool.link_body(repo, 570, scratch,
+                       Recorder({"git ls-tree": Completed("")}),
+                       told.append, "docs/issues/570 my widget.md")
+        rerun = told[-1].split("rerun: ", 1)[1]
+        check(f"step 5's rerun line, run against {repo}, is a command the "
+              "shell splits into create, the path whole, and that --repo",
+              shlex.split(rerun) == ["scripts/ghi-issue-write.py", "create",
+                                     "docs/issues/570 my widget.md"]
+              + expected_tail, rerun)
+
     # --- Where the checkout is looked for ---------------------------------
     # Through the shared `run`, so that function's docstring is true of this
     # call too, and with check off, so a path outside a checkout keeps this
@@ -5400,6 +5415,21 @@ def run_pushed_filing_branch_rerun_line_real_git_cases(scratch: Path):
           and "Then leave this filing until the user answers." in told
           and "\nIf you are a subagent, pass those two facts to the agent "
           "that dispatched you instead." in told, told)
+
+    spaced = scratch / "my widget.tool.design.md"
+    spaced.write_text(source.read_text(encoding="utf-8"), encoding="utf-8")
+    try:
+        tool.land_file("someone/fork", 4101, "Gadget", spaced, author, runner,
+                       quiet)
+        forked = ""
+    except tool.Refused as refused:
+        forked = str(refused)
+    printed = forked.split("`")[1] if forked.count("`") >= 2 else forked
+    check("the refusal's rerun command, read as the shell splits it, keeps "
+          "a source path with a space whole and the run's --repo",
+          shlex.split(printed) == ["scripts/ghi-issue-write.py", "create",
+                                   str(spaced), "--repo", "someone/fork"],
+          printed)
 
     # Followed as the refusal says: once the branch holds one file for the
     # issue, the same rerun names it.
