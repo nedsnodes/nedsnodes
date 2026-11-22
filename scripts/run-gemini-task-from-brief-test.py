@@ -313,6 +313,32 @@ class GeminiTaskTests(unittest.TestCase):
                     self.assertRaisesRegex(OSError, "every numbered folder from 3 to 102"):
                 create(self.brief)
 
+    def test_two_runs_of_one_brief_without_dash_o_keep_both_reports_in_their_numbered_folders(self):
+        self.shared_folder.parent.mkdir()
+        self.env["CLAUDE_CODE_TASK_LIST_ID"] = "nedsnodes-test-seat-tasks"
+        self.args = self.args[:4]
+        brief_folder = self.shared_folder / "test-seat" / "brief"
+        for number in ("1", "2"):
+            report = brief_folder / number / "report.md"
+            self.env["FAKE_REPORT"] = str(report)
+            result = self.run_cli()
+            self.assertEqual(result.returncode, 0, result.stderr)
+            self.assertEqual(result.stdout, f"report: {report}\n")
+            report.write_text(f"run {number}'s report\n")
+            args = json.loads(self.calls.read_text().splitlines()[-1])[1]
+            self.assertIn(f"Write the task's report to this exact file: {report}\n", args[-1])
+        for number in ("1", "2"):
+            run_folder = brief_folder / number
+            self.assertEqual((run_folder / "report.md").read_text(), f"run {number}'s report\n")
+            self.assertIn("agy stdout", (run_folder / "report.md.run.log").read_text())
+
+    def test_run_without_dash_o_where_the_log_store_is_absent_is_refused(self):
+        self.args = self.args[:4]
+        result = self.run_cli()
+        self.assertEqual(result.returncode, 2)
+        self.assertIn("-o is required on this machine", result.stderr)
+        self.assertFalse(self.calls.exists())
+
     def test_shared_writable_subfolder_that_cannot_be_created_stops_the_run(self):
         self.shared_folder.parent.mkdir()
         self.shared_folder.write_text("a file where the shared folder belongs")

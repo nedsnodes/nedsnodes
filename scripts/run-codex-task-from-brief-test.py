@@ -184,8 +184,10 @@ try:
 
     def run(mode, *extra, stdin=None, timeout=60,
             start_line_timeout=600, gh_mode="data", extra_environment=None,
-            checkout_folder=checkout):
+            checkout_folder=checkout, with_dash_o=True):
         """Run the program; return (completed, report, seconds since it said it is running Codex).
+
+        Without with_dash_o, the program gets no -o, and report is None.
 
         timeout counts from that stderr line, which the program prints after building
         Codex's command line, so preparing the command line counts against no limit.
@@ -201,10 +203,10 @@ try:
                            FAKE_CODEX_PID_FILE=str(codex_pid_file),
                            FAKE_GH_MODE=gh_mode, FAKE_GH_LOG=str(gh_log),
                            **(extra_environment or {}))
-        report = scratch / f"report-{mode}.md"
+        report = scratch / f"report-{mode}.md" if with_dash_o else None
         codex_pid_file.unlink(missing_ok=True)
         command = [sys.executable, str(PROGRAM), "-C", str(checkout_folder), "--brief",
-                   str(brief), "-o", str(report), *extra]
+                   str(brief), *(["-o", str(report)] if with_dash_o else []), *extra]
         process = subprocess.Popen(command, env=environment, stdin=stdin, cwd=elsewhere,
                                    stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True,
                                    start_new_session=True)
@@ -956,6 +958,14 @@ try:
           and not any("shared-writable-folder" in argument for argument in arguments),
           repr(arguments))
 
+    arguments_file.unlink()
+    completed, _, _ = run("report", with_dash_o=False)
+    check("without a log-store on the machine, a run without -o exits 2, says -o is required, "
+          "and Codex is not started",
+          completed.returncode == 2 and "-o is required on this machine" in completed.stderr
+          and not arguments_file.exists(),
+          f"exit {completed.returncode}, stderr {completed.stderr!r}")
+
     log_store = scratch_home / "nedsnodes-logs"
     log_store.mkdir()
     shared_folder = log_store / "codex-and-gemini-sandboxed-task-runs-shared-writable-folder"
@@ -982,6 +992,25 @@ try:
 
     brief_folder = shared_folder / "test-seat" / "brief"
     shutil.rmtree(brief_folder)
+    seat_environment = {"CLAUDE_CODE_TASK_LIST_ID": "nedsnodes-test-seat-tasks"}
+    first, _, _ = run("report", extra_environment=seat_environment, with_dash_o=False)
+    second, _, _ = run("report-file-then-final-message", with_dash_o=False,
+                       extra_environment={**seat_environment, "FAKE_CODEX_REPORT_FILE": str(
+                           brief_folder / "2" / "report.md")})
+    reports = [brief_folder / number / "report.md" for number in ("1", "2")]
+    check("two runs of one brief without -o keep both reports, each in its own numbered "
+          "folder with its run log beside it, and a report Codex wrote there itself is kept",
+          first.returncode == 0 and second.returncode == 0
+          and first.stdout == f"report: {reports[0]}\n"
+          and second.stdout == f"report: {reports[1]}\n"
+          and reports[0].read_text() == "the report\n"
+          and reports[1].read_text() == "the full report Codex wrote\n"
+          and reports[1].with_name("report.md.last-message").read_text()
+          == "a short final message\n"
+          and all(report.with_name("report.md.run.log").is_file() for report in reports),
+          f"exits {first.returncode} and {second.returncode}, stdout {first.stdout!r} and "
+          f"{second.stdout!r}, stderr {second.stderr!r}")
+    shutil.rmtree(brief_folder, ignore_errors=True)
     (brief_folder / "1").mkdir(parents=True)
     (brief_folder / "notes").mkdir()
     completed, report, _ = run(

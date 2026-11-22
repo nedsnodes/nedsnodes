@@ -1,10 +1,15 @@
 #!/usr/bin/env python3
 """Run a Gemini task from a UTF-8 brief file inside agy's credential sandbox.
 
-Usage: run-gemini-task-from-brief.py -C CHECKOUT --brief FILE -o REPORT
+Usage: run-gemini-task-from-brief.py -C CHECKOUT --brief FILE [-o REPORT]
        [--sandbox read-only|workspace-write] [-m MODEL] [--effort EFFORT]
        [--writable-root FOLDER]... [--deadline-minutes N]
        [--run-log FILE]
+
+-o may be left out only where the log-store is on this machine, as on ned-box:
+REPORT is then report.md in the run's own numbered folder, described below,
+with its run log beside it, where no later run writes. Elsewhere, as on the
+Mac, -o is required, and a run without it is refused.
 
 Reads use the cold-read agy sandbox: the filesystem, including log-store
 paths, is readable except for credential paths. No --readable-root is
@@ -118,7 +123,9 @@ def _parser():
                                      formatter_class=argparse.RawDescriptionHelpFormatter)
     parser.add_argument("-C", dest="checkout", required=True)
     parser.add_argument("--brief", required=True)
-    parser.add_argument("-o", dest="report", required=True)
+    parser.add_argument("-o", dest="report",
+                        help="required unless the log-store is on this machine, where the "
+                             "default is report.md in the run's numbered folder")
     parser.add_argument("--sandbox", choices=("read-only", "workspace-write"), default="read-only")
     parser.add_argument("-m", dest="model", default="gemini-4-argon-high")
     parser.add_argument("--effort")
@@ -189,12 +196,21 @@ def main(argv=None):
                      "gemini-pro-orchestrator, or leave out --effort")
     checkout = pathlib.Path(args.checkout).resolve()
     brief = pathlib.Path(args.brief).resolve()
-    report = pathlib.Path(args.report).resolve()
-    log_path = (pathlib.Path(args.run_log).resolve() if args.run_log
-                else report.with_name(report.name + ".run.log"))
     roots = [pathlib.Path(root).resolve() for root in args.writable_root]
     if not checkout.is_dir() or any(not root.is_dir() for root in roots):
         parser.error("-C and every --writable-root must name existing directories")
+    try:
+        shared_subfolder = (
+            codex_task.codex_or_gemini_task_run_subfolder_in_shared_writable_folder_create(brief))
+    except OSError as error:
+        print(f"{PROGRAM}: failed while creating the run's folder in the shared writable "
+              f"folder: {error}", file=sys.stderr)
+        return 1
+    report = (pathlib.Path(args.report).resolve() if args.report is not None
+              else codex_task.codex_or_gemini_task_report_path_in_run_numbered_folder_when_dash_o_omitted(
+                  parser, shared_subfolder))
+    log_path = (pathlib.Path(args.run_log).resolve() if args.run_log
+                else report.with_name(report.name + ".run.log"))
     if len({brief, report, log_path}) != 3:
         parser.error("--brief, -o and --run-log must name different files")
     sandbox = agy_cell.credential_sandbox_program()
@@ -211,9 +227,6 @@ def main(argv=None):
         environment, token_note = (
             agy_cell.common.process_environment_copy_with_agent_seat_github_tokens_replaced_by_read_only_github_token(
                 agy_cell.agy_environment_copy_without_gemini_api_key_or_github_token(os.environ)))
-        stage = "creating the run's folder in the shared writable folder"
-        shared_subfolder = (
-            codex_task.codex_or_gemini_task_run_subfolder_in_shared_writable_folder_create(brief))
         if shared_subfolder:
             print(f"{PROGRAM}: this run's folder is {shared_subfolder}", file=sys.stderr)
             prompt = codex_task.brief_with_shared_writable_subfolder(prompt, shared_subfolder)

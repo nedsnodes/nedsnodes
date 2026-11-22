@@ -2,11 +2,16 @@
 """Run one Codex task from a brief file and wait for its report.
 
 Usage:
-  scripts/run-codex-task-from-brief.py -C <checkout> --brief <file> -o <report>
+  scripts/run-codex-task-from-brief.py -C <checkout> --brief <file> [-o <report>]
       [--sandbox read-only|workspace-write] [-m <model>] [--effort <effort>]
       [--no-network] [--writable-root <folder>]... [--outside-git-checkout]
       [--deadline-minutes <minutes>] [--run-log <file>]
       [--prefetch-github '<gh arguments>']... [--resume <session-id>]
+
+-o may be left out only where the log-store is on this machine, as on ned-box:
+the report and its companion files then go in the run's own numbered folder,
+described below, as <that folder>/report.md, where no later run writes.
+Elsewhere, as on the Mac, -o is required, and a run without it is refused.
 
 The program an agent uses to hand Codex a task. It always:
   - reads the prompt from the brief file, never from the command line;
@@ -160,6 +165,7 @@ CODEX_OR_GEMINI_COMMIT_MESSAGE_FILE_NAME = "commit-message.txt"
 CODEX_OR_GEMINI_TASK_RUN_NUMBERED_FOLDER_NAME_PATTERN = re.compile(r"[1-9][0-9]*")
 # Each attempt fails only when another run took that number in the same instant.
 CODEX_OR_GEMINI_TASK_RUN_NUMBERED_FOLDER_CREATE_ATTEMPTS = 100
+CODEX_OR_GEMINI_TASK_REPORT_FILE_NAME_IN_RUN_NUMBERED_FOLDER = "report.md"
 _seat_shared_file_ship_spec = importlib.util.spec_from_file_location(
     "seat_shared_file_ship",
     pathlib.Path(__file__).resolve().parent / "seat-shared-file-ship.py")
@@ -180,9 +186,11 @@ def build_argument_parser() -> argparse.ArgumentParser:
                         help="the checkout Codex works in")
     parser.add_argument("--brief", required=True,
                         help="file holding the whole prompt")
-    parser.add_argument("-o", dest="report", required=True,
+    parser.add_argument("-o", dest="report",
                         help="file the report ends up in: Codex's final message, or a file Codex "
-                             "itself wrote at this path, which is then kept")
+                             "itself wrote at this path, which is then kept; required unless the "
+                             "log-store is on this machine, where the default is report.md in "
+                             "the run's numbered folder")
     parser.add_argument("--resume", metavar="SESSION_ID",
                         help="send the brief as a follow-up to this Codex session")
     parser.add_argument("--sandbox", choices=tuple(SANDBOX_TO_PROFILE_BASE),
@@ -327,6 +335,19 @@ def codex_or_gemini_task_run_subfolder_in_shared_writable_folder_create(brief: p
         f"in {brief_folder} was taken by another run as this one tried to create it.\n"
         f"Start the run again; if this happens again, look in {brief_folder} for what "
         f"is creating folders there.")
+
+
+def codex_or_gemini_task_report_path_in_run_numbered_folder_when_dash_o_omitted(
+        parser: argparse.ArgumentParser, shared_subfolder):
+    """Return the report's path in the run's numbered folder; with no numbered folder, refuse
+    the run through parser.error, which exits 2."""
+    if shared_subfolder is None:
+        parser.error(
+            f"-o is required on this machine: the log-store "
+            f"{CODEX_AND_GEMINI_SHARED_WRITABLE_FOLDER.parent} is not here, so the run has no "
+            f"numbered folder to keep its report in.\n"
+            f"Give -o with the file the report is to be written to.")
+    return shared_subfolder / CODEX_OR_GEMINI_TASK_REPORT_FILE_NAME_IN_RUN_NUMBERED_FOLDER
 
 
 def brief_with_shared_writable_subfolder(prompt: str, subfolder: pathlib.Path) -> str:
@@ -580,9 +601,6 @@ def main(argv=None) -> int:
                 f"these options: {PREFETCH_API_ACCEPTED_OPTIONS_TEXT}.")
     checkout = pathlib.Path(args.checkout).resolve()
     brief = pathlib.Path(args.brief).resolve()
-    report = pathlib.Path(args.report).resolve()
-    run_log = pathlib.Path(args.run_log).resolve() if args.run_log else report.with_name(
-        report.name + ".run.log")
     if not checkout.is_dir():
         return fail(f"the checkout {checkout} is not a directory.")
     try:
@@ -591,6 +609,16 @@ def main(argv=None) -> int:
         return fail(f"could not read the brief {brief}: {error}")
     if not prompt.strip():
         return fail(f"the brief {brief} is empty.")
+    try:
+        shared_subfolder = codex_or_gemini_task_run_subfolder_in_shared_writable_folder_create(brief)
+    except OSError as error:
+        return fail(f"could not create the run's folder in "
+                    f"{CODEX_AND_GEMINI_SHARED_WRITABLE_FOLDER}: {error}")
+    report = (pathlib.Path(args.report).resolve() if args.report is not None
+              else codex_or_gemini_task_report_path_in_run_numbered_folder_when_dash_o_omitted(
+                  parser, shared_subfolder))
+    run_log = pathlib.Path(args.run_log).resolve() if args.run_log else report.with_name(
+        report.name + ".run.log")
     # A report left by an earlier run must not pass for this run's.
     report.unlink(missing_ok=True)
     last_message = report.with_name(report.name + ".last-message")
@@ -612,11 +640,6 @@ def main(argv=None) -> int:
                         f"The deadline covers every --prefetch-github command and Codex "
                         f"together. If the run needs longer, run it again with a larger "
                         f"--deadline-minutes.")
-    try:
-        shared_subfolder = codex_or_gemini_task_run_subfolder_in_shared_writable_folder_create(brief)
-    except OSError as error:
-        return fail(f"could not create the run's folder in "
-                    f"{CODEX_AND_GEMINI_SHARED_WRITABLE_FOLDER}: {error}")
     if shared_subfolder:
         print(f"{PROGRAM}: this run's folder is {shared_subfolder}", file=sys.stderr)
         prompt = brief_with_shared_writable_subfolder(prompt, shared_subfolder)

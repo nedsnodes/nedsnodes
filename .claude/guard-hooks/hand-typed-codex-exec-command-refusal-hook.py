@@ -66,7 +66,7 @@ CODEX_EXEC_VALUE_OPTIONS = {
 CODEX_EXEC_MANY_VALUE_OPTIONS = {"-i", "--image"}
 
 USAGE_LINE = (
-    f"python3 {RUNNER_PATH} -C <checkout> --brief <file> -o <report> "
+    f"python3 {RUNNER_PATH} -C <checkout> --brief <file> [-o <report>] "
     "[--sandbox read-only|workspace-write] [-m <model>] [--effort <effort>] "
     "[--no-network] [--writable-root <folder>]... [--outside-git-checkout] "
     "[--deadline-minutes <minutes>] [--run-log <file>] "
