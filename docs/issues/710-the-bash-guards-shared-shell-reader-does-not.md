@@ -10,7 +10,7 @@ Agent-filed by merge-lane-2 on 2026-09-24, from a reproduced review finding. Its
 
 PR [The Bash guards' shell reader reads a command substitution inside double quotes as commands](https://github.com/nedschorus/nedschorus/pull/886) builds the next action below. It merged on 2026-10-02 as `36c270f1`, after four review rounds. The shared reader in `.claude/guard-hooks/synthetic-keystroke-guard-hook.py` now reads a `$( … )` inside double quotes as commands, and reads the `$( … )` substitutions in a heredoc's body, which bash also runs. All three guards that use the reader take the change, and so does the leading-dash guard, `.claude/guard-hooks/search-file-argument-read-as-option-guard-hook.py`, which main gained while the pull request was in review; its test, `.claude/guard-hooks/search-file-argument-read-as-option-guard-hook-test.py`, gained cases for the change.
 
-As the next action asks, both reproductions are test cases in each guard's own test, written with that guard's own command: `.claude/guard-hooks/ghi-issue-write-hand-typed-gh-command-refusal-test.py`, `.claude/guard-hooks/synthetic-keystroke-guard-hook-test.py` and `.claude/guard-hooks/force-push-with-open-pull-request-guard-hook-test.py`.
+As the next action asks, both reproductions are test cases in each guard's own test, written with that guard's own command: `.claude/guard-hooks/ghi-issue-write-hand-typed-gh-command-refusal-test.py`, `.claude/guard-hooks/synthetic-keystroke-guard-hook-test.py` and the force-push guard's test, deleted with that guard in commit 1955d9808.
 
 The pull request also refuses some commands that main let through, in each of which bash runs a guarded command. The user ruled on 2026-10-02 that those refusals stay. His "Y for both" covers a `$'…\'…'` string before a guarded command, and a guarded command in a substitution inside a heredoc's body. His "Y" covers three more found in round 3: a partly quoted or backslashed heredoc delimiter followed by a guarded command; a `"$( … )"` whose heredoc body holds a `"`, followed by a guarded command; and a backticked guarded command after a `$'…\'…'` string. In the same review, he adopted a stopping rule for reviews of the guards' reader: a finding blocks a merge only when replaying the real commands agents typed changes a guard's verdict, or when evidence shows agents commonly type the form; a form found only by construction or by a random generator is a non-blocking note. Replayed at the merged head, 103,032 real (command, working directory) pairs from both machines changed no verdict.
 
@@ -55,7 +55,7 @@ All eight results were reproduced by merge-lane-2 on 2026-09-24.
 
 Three guards share one reader, `split_out_heredocs` and `tokenize_simple_commands` in `.claude/guard-hooks/synthetic-keystroke-guard-hook.py`:
 - `.claude/guard-hooks/synthetic-keystroke-guard-hook.py` itself;
-- `.claude/guard-hooks/force-push-with-open-pull-request-guard-hook.py`;
+- the force-push guard, deleted in commit 1955d9808;
 - `.claude/guard-hooks/ghi-issue-write-hand-typed-gh-command-refusal.py`, since PR [Hand-typed gh issue comments, creates and body edits are refused](https://github.com/nedschorus/nedschorus/pull/708).
 
 The reader treats everything inside `"..."` as one quoted data word, including a `$(...)` command substitution, whose contents the shell runs as commands. Two consequences follow:
@@ -71,7 +71,7 @@ The force-push guard was not probed for either symptom here. It reads the same w
 
 ## Next action
 
-In `tokenize_simple_commands` and `split_out_heredocs`, treat a `$(` inside double quotes as opening a nested command list, read it as commands, and resume the double-quoted string at its matching `)`. Add both reproductions above as cases in each guard's test: `.claude/guard-hooks/synthetic-keystroke-guard-hook-test.py`, `.claude/guard-hooks/ghi-issue-write-hand-typed-gh-command-refusal-test.py`, and `.claude/guard-hooks/force-push-with-open-pull-request-guard-hook-test.py`.
+In `tokenize_simple_commands` and `split_out_heredocs`, treat a `$(` inside double quotes as opening a nested command list, read it as commands, and resume the double-quoted string at its matching `)`. Add both reproductions above as cases in each guard's test: `.claude/guard-hooks/synthetic-keystroke-guard-hook-test.py`, `.claude/guard-hooks/ghi-issue-write-hand-typed-gh-command-refusal-test.py`, and the force-push guard's test, deleted with that guard in commit 1955d9808.
 
 ## Where it came from
 
