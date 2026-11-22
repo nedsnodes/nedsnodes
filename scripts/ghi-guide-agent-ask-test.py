@@ -181,11 +181,50 @@ with tempfile.TemporaryDirectory() as temporary:
     for is_resume in (False, True):
         for include_closed in (False, True):
             composed = ghi_ask.compose_resume_ask_prompt(
-                "what covers Q?", include_closed, [9], is_resume)
+                "what covers Q?", include_closed, [9], is_resume,
+                request_form="reading-list")
             check(f"the ask prompt (resume={is_resume}, include_closed="
                   f"{include_closed}) carries the plan-reuse sentence right "
                   "after the question",
                   "what covers Q?\n\n" + reuse in composed, composed)
+
+    # --- each request form's ask opens with its own sentence from the design ---
+    # docs/issues/46-ghi-guide-agent.system.design.md: § Resume ask prompt for a
+    # reading list, § Adjudication request for a draft verdict.
+    reading_list_opening = "You are asked for a reading list."
+    draft_verdict_opening = ("You are shown a draft issue — its title and its "
+                             "GHI-MD — and asked whether the corpus already "
+                             "covers it.")
+    for request_form, structured_output, opening, other_opening in (
+            ("reading-list", reading_list(5), reading_list_opening, draft_verdict_opening),
+            ("draft-verdict", {"kind": "verdict", "verdict": "unrelated", "issues": []},
+             draft_verdict_opening, reading_list_opening)):
+        for is_resume in (False, True):
+            seat_opening = root / f"seat-opening-{request_form}-resume-{is_resume}"
+            seat_opening.mkdir()
+            if is_resume:
+                ghi_ask.save_state(seat_opening / ghi_ask.STATE_FILE_NAME,
+                                   {ghi_ask.GHI_GUIDE_AGENT_SESSION_ID_STATE_KEY: "sess-O",
+                                    "closes_since_birth": 0, "recent_matches": []})
+                fake_refresh_queue([([5], {"5": issue(5)}, None)])
+                opening_calls = fake_claude_queue([
+                    ({"session_id": "sess-O", "structured_output": structured_output}, None)])
+            else:
+                fake_refresh_queue([([], {}, None)])
+                opening_calls = fake_claude_queue([
+                    ({"session_id": "sess-O", "result": "(ack)"}, None),
+                    ({"session_id": "sess-O", "structured_output": structured_output}, None)])
+            answer, closed_on, error = ghi_ask.ask("the asker's question", False, seat_opening,
+                                                   "x/y", request_form=request_form)
+            ask_prompt = opening_calls[-1][0]
+            check(f"a {request_form} ask (resume={is_resume}) opens with its own "
+                  "sentence from the design, the asker's question right after it, "
+                  "and not the other form's",
+                  error is None
+                  and opening + " the asker's question" in ask_prompt
+                  and other_opening not in ask_prompt
+                  and (ask_prompt.startswith(opening) or "\n\n" + opening in ask_prompt),
+                  (error, ask_prompt))
 
     # --- reincarnation: closes-since-birth over threshold forces a cold start ----
     seat3 = root / "seat3"
