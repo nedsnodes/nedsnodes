@@ -574,7 +574,23 @@ def run_cases(scratch: Path):
           tool.pairing_key(FILE_TEXT) == tool.pairing_key(FILE_TEXT)
           and tool.pairing_key(FILE_TEXT) != tool.pairing_key(FILE_TEXT + "x"))
     check("the placeholder body carries the key, so a rerun can find it",
-          tool.pairing_key(FILE_TEXT) in tool.placeholder_body(tool.pairing_key(FILE_TEXT)))
+          tool.pairing_key(FILE_TEXT) in tool.placeholder_body(tool.pairing_key(FILE_TEXT), REPO))
+    # The body's rerun command is read back as the shell would split it, so a
+    # filing run with --repo tells its rerun to file into the same repository.
+    for repo, expected_tail in ((REPO, []),
+                                ("someone/fork", ["--repo", "someone/fork"])):
+        body = tool.placeholder_body(tool.pairing_key(FILE_TEXT), repo)
+        command = body.split("`")[1] if body.count("`") >= 2 else body
+        check(f"the placeholder body of a filing run against {repo} tells "
+              "the rerun that --repo",
+              shlex.split(command) == ["scripts/ghi-issue-write.py", "create"]
+              + expected_tail, command)
+    forked = Recorder({"gh issue create": Completed(
+        "https://github.com/someone/fork/issues/7\n")})
+    tool.file_issue("someone/fork", "Widget", "ghipairabc", forked, quiet)
+    check("and step 3 gives the placeholder body the --repo the run used",
+          forked.ran("create --repo someone/fork` on the file"),
+          forked.calls)
     check("the body is links and nothing else, in filename order",
           tool.links_body(REPO, ["docs/issues/9-b.md", "docs/issues/9-a.md"])
           == ("- [9-a.md](https://github.com/nedsnodes/nedsnodes/blob/main/docs/issues/9-a.md)\n"
@@ -2836,7 +2852,7 @@ def run_saved_question_on_resume_cases(scratch: Path):
     created_saved.write_text(ghi_guide_agent_file("may the filing go ahead?"))
     numbered = Recorder({
         "gh issue view 570": Completed(json.dumps(
-            {"body": tool.placeholder_body(tool.pairing_key(FILE_TEXT))})),
+            {"body": tool.placeholder_body(tool.pairing_key(FILE_TEXT), REPO)})),
         "git ls-tree": Completed(EDIT_RELATIVE + "\0"),
     })
     lines = []
@@ -3025,7 +3041,7 @@ def run_edit_cases(scratch: Path):
 
     check("a link list is a body the tool wrote", tool.is_derived_body(one_link))
     check("so is the placeholder create leaves between its steps",
-          tool.is_derived_body(tool.placeholder_body(tool.pairing_key(FILE_TEXT))))
+          tool.is_derived_body(tool.placeholder_body(tool.pairing_key(FILE_TEXT), REPO)))
     check("an empty body is not prose to protect", tool.is_derived_body(""))
     check("prose is not a body the tool wrote",
           not tool.is_derived_body("This issue is about the statusline.\n"))
@@ -5420,7 +5436,9 @@ def run_pushed_filing_branch_rerun_line_real_git_cases(scratch: Path):
           refusal is not None and refusal.code == 1
           and "ghi-4101-gadget" in str(refusal)
           and f"at commit {gadget_commit}," in str(refusal)
-          and f"`scripts/ghi-issue-write.py create {source}`" in str(refusal),
+          and str(refusal).count("`") >= 2
+          and shlex.split(str(refusal).split("`")[1])
+          == ["scripts/ghi-issue-write.py", "create", str(source)],
           str(refusal))
     told = str(refusal)
     check("and tells the agent to leave the branch to the user, tell the "
@@ -5535,7 +5553,7 @@ def run_resumed_create_after_older_name_merged_real_git_cases(scratch: Path):
             if "issue list" in gh_calls[-1]:
                 return Completed(json.dumps([{
                     "number": number, "title": title,
-                    "body": tool.placeholder_body(tool.pairing_key(text))}]))
+                    "body": tool.placeholder_body(tool.pairing_key(text), REPO)}]))
             if "pr list" in gh_calls[-1]:
                 return Completed("[]")
             if "pr create" in gh_calls[-1]:
