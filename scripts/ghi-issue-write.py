@@ -87,7 +87,9 @@ The branch test that remains answers a different question — is a pull
 request open on it — and it asks GitHub rather than assuming: a run whose
 push succeeded and whose `gh pr create` then failed leaves a branch with no
 pull request, and every rerun after that would otherwise report one waiting
-forever. Finding none, the rerun opens it.
+forever. Finding none, the rerun opens it. Either way the rerun reads the
+file the branch holds, which step 5's rerun line names
+(`ghi_md_path_on_pushed_filing_branch`).
 
 WHAT ELSE STOPS A SECOND ISSUE, the pairing key having limits. The key is a
 hash of the source's content, so it finds a filing only while that filing's
@@ -448,30 +450,11 @@ GH_TIMEOUT_SECONDS = 120
 # git sending the branch.
 PUSH_TIME_MARGIN_SECONDS = 120
 ADJUDICATION_TIMEOUT_SECONDS = 420
-# scripts/ghi-guide-agent-ask.py's EXIT_NOT_ABOUT_ISSUES and EXIT_RULING_QUESTION:
-# ghi-guide-agent answered, but with a `not-about-issues` or
-# `ask-user-about-ruling:` reply rather than a verdict. Copied rather than
-# imported, because this program runs that one as a subprocess and loads
-# nothing from it; ghi-issue-write-test.py checks the two stay equal.
-GHI_GUIDE_AGENT_ASK_REPLIED_WITHOUT_A_LIST_EXIT_CODES = (2, 3)
-# How each of those two exits' messages opens: NOT_ABOUT_ISSUES_MESSAGE's first
-# line, and RULING_QUESTION_MESSAGE_TEMPLATE up to its {sentence}. The message
-# is not the first line on stderr whenever the ask refreshed the seat checkout
-# or reincarnated the session first, so adjudicate finds it by these openings.
-# Copied for the same reason as the exit codes, and checked the same way.
-GHI_GUIDE_AGENT_ASK_NO_LIST_MESSAGE_OPENINGS = (
-    "Not a question about GitHub issues:",
-    "ghi-guide-agent found a ruling of the user's that it cannot tell still applies:")
-GHI_GUIDE_AGENT_ASK_RULING_QUESTION_EXIT_CODE = 3
-# Where the ruling question's sentence ends: the opening of the line that
-# follows {sentence} in ghi-guide-agent-ask.py's RULING_QUESTION_MESSAGE_TEMPLATE.
-# A sentence can run over several lines. Copied and checked like the above.
-GHI_GUIDE_AGENT_ASK_RULING_QUESTION_SENTENCE_END = "If you are filing or editing a GHI"
-# How the sentence ends when ghi-guide-agent named the issue holding the ruling:
-# ghi-guide-agent-ask.py's RULING_QUESTION_RULING_GHI_NUMBER_SUFFIX_TEMPLATE, as a pattern whose group
-# is the number. Copied and checked like the above.
-GHI_GUIDE_AGENT_ASK_RULING_QUESTION_RULING_GHI_NUMBER_SUFFIX_PATTERN = re.compile(
-    r"\s*\(held in GHI (\d+)\)$")
+# scripts/ghi-guide-agent-ask.py's GHI_GUIDE_AGENT_ANSWER_NOT_USABLE_MESSAGE_OPENING.
+# Copied rather than imported, because this program runs that one as a
+# subprocess and loads nothing from it; ghi-issue-write-test.py checks the two
+# stay equal.
+GHI_GUIDE_AGENT_ASK_ANSWER_NOT_USABLE_STDERR_LINE_OPENING_TO_MATCH = "ghi-guide-agent's answer is not usable:"
 # ghi-guide-agent's ruling questions are kept in the log-store on ned-box, never on
 # main: one proposed-improvements-or-changes-file each (the glossary's entry),
 # named `<GHI-MD name>-proposed-improvements-or-changes-ghi-guide-agent-<YYYY-MM-DD>[-<n>].md`.
@@ -509,30 +492,6 @@ class RulingConflict:
     def __init__(self, ruling_issue, sentence: str):
         self.ruling_issue = ruling_issue
         self.sentence = sentence
-
-
-def ruling_conflict_from_stderr(stderr: str):
-    """The RulingConflict in an exit-3 message, or None when the message's
-    opening is not there. The ask can write progress lines first, so the
-    opening is looked for on any line."""
-    lines = (stderr or "").splitlines()
-    opening = GHI_GUIDE_AGENT_ASK_NO_LIST_MESSAGE_OPENINGS[1]
-    for index, line in enumerate(lines):
-        if not line.strip().startswith(opening):
-            continue
-        parts = [line.strip()[len(opening):].strip()]
-        for following in lines[index + 1:]:
-            if following.strip().startswith(
-                    GHI_GUIDE_AGENT_ASK_RULING_QUESTION_SENTENCE_END):
-                break
-            parts.append(following.strip())
-        sentence = " ".join(part for part in parts if part)
-        held_in = GHI_GUIDE_AGENT_ASK_RULING_QUESTION_RULING_GHI_NUMBER_SUFFIX_PATTERN.search(sentence)
-        if held_in:
-            return RulingConflict(int(held_in.group(1)),
-                                  sentence[:held_in.start()].strip())
-        return RulingConflict(None, sentence)
-    return None
 
 
 class Refused(Exception):
@@ -1153,12 +1112,9 @@ def adjudicate(repo: str, title: str, text: str, repository_root: Path,
         excluded = (f"This draft is an edit of issue #{exclude_issue}: leave "
                     "that issue out of the comparison.\n\n")
     question = (
-        "Does an open issue already cover this ground? Reply with exactly "
-        "one line: `verdict: too-similar #n`, `verdict: related #n,#m`, or "
-        "`verdict: unrelated`; or, when the draft conflicts with a ruling "
-        "the user made, `ask-user-about-ruling: #<issue> <one sentence "
-        "naming the ruling and the doubt>`, where #<issue> is the issue "
-        "that holds the ruling.\n\n" + excluded +
+        "Does an open issue already cover this ground? Answer with kind "
+        "`verdict`; or, when the draft conflicts with a ruling the user "
+        "made, with kind `ask-user-about-ruling`.\n\n" + excluded +
         f"Draft title: {title}\n\nDraft GHI-MD, verbatim:\n\n{text}")
     # Sent in a file: one argument may not exceed 128 KiB on Linux, and a
     # large GHI-MD is longer.
@@ -1169,7 +1125,8 @@ def adjudicate(repo: str, title: str, text: str, repository_root: Path,
         with os.fdopen(descriptor, "w", encoding="utf-8") as question_file:
             question_file.write(question)
         completed = runner([sys.executable, str(ask), "--question-file",
-                            question_path],
+                            question_path, "--print-answer-json",
+                            "--request-form", "draft-verdict"],
                            timeout=ADJUDICATION_TIMEOUT_SECONDS, check=False)
     except Exception as failure:                      # noqa: BLE001
         report(f"adjudication skipped: ghi-guide-agent did not answer ({failure})")
@@ -1177,45 +1134,39 @@ def adjudicate(repo: str, title: str, text: str, repository_root: Path,
     finally:
         if question_path is not None:
             Path(question_path).unlink(missing_ok=True)
-    if completed.returncode == GHI_GUIDE_AGENT_ASK_RULING_QUESTION_EXIT_CODE:
-        conflict = ruling_conflict_from_stderr(completed.stderr)
-        if conflict is not None:
-            report("ghi-guide-agent raised a question about a ruling of the "
-                   "user's; the write goes ahead and records it in a "
-                   "proposed-improvements-or-changes-file in the log-store")
-            return conflict
-    stderr_lines = [line.strip() for line in
-                    (completed.stderr or "").splitlines() if line.strip()]
-    if completed.returncode in GHI_GUIDE_AGENT_ASK_REPLIED_WITHOUT_A_LIST_EXIT_CODES:
-        # ghi-guide-agent answered, but with no verdict: the question was not about
-        # issues, or it found a ruling it may not judge. Fail-open like any
-        # other missing verdict, and say which, rather than "did not answer".
-        # The ask's own progress lines can come first, so the message is found
-        # by its opening, falling back on the last line, where main() puts it.
-        said = next((line for line in stderr_lines if line.startswith(
-            GHI_GUIDE_AGENT_ASK_NO_LIST_MESSAGE_OPENINGS)),
-            stderr_lines[-1] if stderr_lines else "no detail")
-        report(f"adjudication skipped: ghi-guide-agent gave no verdict: {said}")
-        return None
-    if completed.returncode != 0:
+    # The answer's kind, not the exit code, says what ghi-guide-agent
+    # answered: an argument error exits 2 too.
+    try:
+        answer = json.loads(completed.stdout or "")
+    except json.JSONDecodeError:
+        answer = None
+    if not isinstance(answer, dict):
         # The ask prints why it failed, such as ned-box being unreachable,
-        # as its last stderr line.
+        # as its last stderr line, except that an unusable answer's line is
+        # followed by what to do, which is for an agent and not this program.
+        stderr_lines = [line.strip() for line in
+                        (completed.stderr or "").splitlines() if line.strip()]
+        why = next((line for line in stderr_lines if
+                    GHI_GUIDE_AGENT_ASK_ANSWER_NOT_USABLE_STDERR_LINE_OPENING_TO_MATCH in line),
+                   stderr_lines[-1] if stderr_lines else None)
         report("adjudication skipped: ghi-guide-agent did not answer" +
-               (f": {stderr_lines[-1]}" if stderr_lines else ""))
+               (f": {why}" if why else ""))
         return None
-    verdict = ""
-    for line in (completed.stdout or "").splitlines():
-        if line.strip().lower().startswith("verdict:"):
-            verdict = line.strip()
-    if not verdict:
-        report("adjudication skipped: ghi-guide-agent's reply had no verdict line")
-        return None
-    if "too-similar" in verdict.lower():
+    # The ask's --request-form draft-verdict allows only a verdict or a ruling question.
+    if answer.get("kind") == "ask-user-about-ruling":
+        report("ghi-guide-agent raised a question about a ruling of the "
+               "user's; the write goes ahead and records it in a "
+               "proposed-improvements-or-changes-file in the log-store")
+        return RulingConflict(answer.get("ruling_issue"),
+                              str(answer.get("sentence", "")).strip())
+    issues = answer.get("issues") or []
+    verdict = f"verdict: {answer.get('verdict')}" + (
+        " " + ",".join(f"#{number}" for number in issues) if issues else "")
+    if answer.get("verdict") == "too-similar":
         # The design's § Prompts gives this refusal verbatim, including the
         # paragraph that appears only for an edit; the slots are filled from
-        # the verdict line and the issue being edited.
-        cited = re.search(r"#(\d+)", verdict)
-        covering = f"#{cited.group(1)}" if cited else "that issue"
+        # the verdict and the issue being edited.
+        covering = f"#{issues[0]}" if issues else "that issue"
         paragraphs = [
             f"Refused: {covering} already covers this ground. Read "
             f"{covering}, then merge this content into it by editing it — "
@@ -1870,7 +1821,9 @@ def land_file(repo: str, number: int, title: str, source: Path,
               repository_root: Path, runner, report):
     """Step 4, in a throwaway worktree cut from a just-fetched origin/main,
     so the commit is never made against stale or dirty disk. Returns the
-    destination.
+    path the issue's file will have on main once step 4's pull request
+    merges: the destination, or, when the branch was already pushed, the
+    file that branch holds (`ghi_md_path_on_pushed_filing_branch`).
 
     Safe to run twice through main's copy of the destination, compared with
     what this run would land before any branch is looked at: see the module
@@ -1891,18 +1844,21 @@ def land_file(repo: str, number: int, title: str, source: Path,
         ["git", "ls-remote", "--heads", "origin", branch],
         cwd=str(repository_root))
     if (on_remote.stdout or "").strip():
+        pushed = ghi_md_path_on_pushed_filing_branch(
+            number, branch, on_remote.stdout.split()[0], repository_root,
+            runner)
         waiting = existing_pull_request_for_branch(repo, branch, runner)
         if waiting:
             report(f"step 4 already done: pull request "
                    f"[{waiting.get('title')}]({waiting.get('url')}) is "
                    "waiting for merge-lane")
-            return destination
+            return pushed
         report(f"branch {branch} is on the remote with no pull request "
                "open on it, so an earlier run stopped between its push "
                "and its pull request")
         create_pull_request_for_branch(repo, branch, number, title,
                                        repository_root, runner, report)
-        return destination
+        return pushed
 
     worktree_parent = Path(tempfile.mkdtemp(prefix="ghi-issue-write-"))
     worktree = worktree_parent / "worktree"
@@ -1946,6 +1902,30 @@ def land_file(repo: str, number: int, title: str, source: Path,
         else:
             shutil.rmtree(worktree_parent, ignore_errors=True)
     return destination
+
+
+def ghi_md_path_on_pushed_filing_branch(number: int, branch: str,
+                                        commit: str, repository_root: Path,
+                                        runner) -> str:
+    """The issue's file on a filing branch already on the remote, read from
+    the branch rather than recomputed: the branch may hold a name the naming
+    rule of the run that pushed it gave, and step 5's rerun line must name
+    the file the merge puts on main. `commit` is the branch's head as
+    `git ls-remote` printed it, read by its hash because the next
+    `git fetch origin main` overwrites FETCH_HEAD."""
+    runner(["git", "fetch", "origin", branch], cwd=str(repository_root))
+    paths = ghi_md_paths_for_issue(number, repository_root, runner,
+                                   revision=commit)
+    if len(paths) != 1:
+        raise Refused(
+            f"branch {branch} on the remote should hold one file for issue "
+            f"{number}, and holds {len(paths)}: {', '.join(paths) or 'none'}. "
+            "This run cannot tell which file step 5's rerun needs, and "
+            "stopped before step 5.\n"
+            f"Read the branch with `git fetch origin {branch}` and "
+            f"`git show --stat {commit}`, and tell the user what it holds: "
+            "a filing branch holds the one file step 4 pushed.", 1)
+    return paths[0]
 
 
 def source_path_on_main(source: Path, repository_root: Path, runner):
@@ -2067,7 +2047,9 @@ def link_body(repo: str, number: int, repository_root: Path, runner, report,
     `rerun_on` is the path the rerun must be given, which is not always the
     path this run was given: filing moves a source that was already tracked
     on main, so after the merge that source is gone and its landed copy is
-    the file that exists.
+    the file that exists. It is the path `land_file` returned, which is the
+    file the pushed branch holds, so it names a file that exists after the
+    merge even when the naming rule has changed since that branch was pushed.
 
     The fetch raises rather than being ignored. A fetch that failed leaves
     the list below empty exactly as a main with nothing filed does, and the

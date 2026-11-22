@@ -26,8 +26,7 @@ WHAT ONE RUN DOES, in order:
   1. Takes its own lock, the --state-file path with .lock added, without
      waiting; when another run holds it, exits 0.
   2. Reads the state file. A file that is missing or cannot be read counts as
-     having no passing commit and no last run; a run that exits at step 5
-     leaves the file as it is.
+     having no passing commit and no last run.
   3. Runs `git fetch origin` in --clone and resolves refs/remotes/origin/main;
      when either fails, the run stops, recorded with commit null.
   4. Exits 0 when no run is due. A run is due when there is no last run, the
@@ -63,7 +62,8 @@ WHAT ONE RUN DOES, in order:
      limit, or else the first line of the runner's stderr, or else "no detail".
 
 THE STATE FILE, a JSON object written whole to a temporary file renamed into
-place, with these keys:
+place, with these keys; a run that exits at step 1, 4 or 5 writes nothing to
+it, so the file, readable or not, stays as it is:
   passing_commit           the last commit whose run passed, or null; a run that
                            fails or stops keeps it
   last_run.commit          the commit tested, or null when step 3 stopped the run

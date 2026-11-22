@@ -93,7 +93,7 @@ class OpeningAnInvestigationDiscardsThePausedAgentsWork(unittest.TestCase):
     (section 9), and the resume diff therefore sees the user's edits and
     only those."""
 
-    TEST_DESIGN = fixture.COMPONENT_DIRECTORY + "/widget-counter-test-design.md"
+    TEST_DESIGN = fixture.COMPONENT_DIRECTORY + "/widget-counter.tool.test-design.md"
     IMPLEMENTATION = fixture.COMPONENT_DIRECTORY + "/widget_counter.py"
 
     def setUp(self):

@@ -26,7 +26,8 @@ It prints one JSON object per agent-seat, one per line. Each holds what the late
 without reading anything again: the session id, the transcript path, the last time a token was
 spent and the file that showed it, what is running and since when, Workflow-tool runs included, each
 background command with the description of the Bash call that started it and, when its command line
-starts with coreutils `timeout <duration>`, the time that timeout stops it (a subagent that reported and
+starts with coreutils `timeout <duration>` and runs nothing after the timed command except through a
+pipe, the time that timeout stops it (a subagent that reported and
 stopped while background commands it launched still run gets the time of its report under
 `stopped_at` and a list of those commands under `own_running_background_commands`), the matched sentences with the code's reading of each, the agent-seat's last message, the tool calls a judge of the sentences
 looks through, the rule that applies and its decision.
@@ -412,12 +413,46 @@ class BackgroundCommandCalls:
 
 
 def timeout_seconds_of_command_line(command):
-    """The duration of the coreutils `timeout` a command line starts with, in seconds; None when it
-    starts with none, and 0 for a duration of 0, which disables the timeout."""
+    """The duration of the coreutils `timeout` a command line starts with, in seconds, when that
+    timeout stops the whole line; 0 for a duration of 0, which disables the timeout. None when the
+    line starts with no timeout, or goes on past the timed command with a `;`, `&&`, `||`, `&` or
+    line break, since the shell runs what follows outside the timeout. A pipe is allowed: once the
+    timeout stops the first command, the rest of the pipeline reads the end of its input."""
     match = TIMEOUT_COMMAND_LINE_START_PATTERN.match(command)
-    if not match:
+    if not match or command_line_runs_another_command_after(command[match.end():]):
         return None
     return float(match["number"]) * SECONDS_BY_TIMEOUT_DURATION_UNIT[match["unit"]]
+
+
+def command_line_runs_another_command_after(text):
+    """Whether shell text holds a `;`, `&&`, `||`, `&` or line break outside quotes and parentheses.
+    The `&` of a redirection, as in `2>&1`, `&>` or `|&`, does not count."""
+    quote = None
+    depth = 0
+    index = 0
+    while index < len(text):
+        character = text[index]
+        if quote == "'":
+            quote = None if character == "'" else quote
+        elif quote == '"':
+            if character == "\\":
+                index += 1
+            elif character == '"':
+                quote = None
+        elif character == "\\":
+            index += 1
+        elif character in "'\"":
+            quote = character
+        elif character == "(":
+            depth += 1
+        elif character == ")":
+            depth -= 1
+        elif depth == 0 and (character in ";\n" or text[index:index + 2] == "||"
+                             or (character == "&" and (index == 0 or text[index - 1] not in "<>|")
+                                 and text[index + 1:index + 2] != ">")):
+            return True
+        index += 1
+    return False
 
 
 def task_notification_carrier_text(record):

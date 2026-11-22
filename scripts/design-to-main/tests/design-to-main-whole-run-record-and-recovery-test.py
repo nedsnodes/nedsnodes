@@ -592,30 +592,132 @@ class TheDesignIsItsIssuesGhiMd(unittest.TestCase):
     directory, as before."""
 
     def test_the_contract_is_named_like_the_design_beside_it(self):
-        self.assertEqual(T.contract_path_beside_design("docs/issues/413-grid-failure-design.md"),
-                         "docs/issues/413-grid-failure-contract.md")
-        self.assertEqual(T.contract_path_beside_design("docs/issues/39-memory-drain.md"),
-                         "docs/issues/39-memory-drain-contract.md")
+        self.assertEqual(T.contract_path_beside_design("docs/issues/413-grid-failure.tool.design.md"),
+                         "docs/issues/413-grid-failure.tool.contract.md")
+        self.assertEqual(T.contract_path_beside_design("docs/issues/39-memory-drain.system.design.md"),
+                         "docs/issues/39-memory-drain.system.contract.md")
+
+    def test_a_design_path_without_a_kind_and_design_ending_is_refused_with_both_new_names(self):
+        for design_path, stem in (("docs/issues/413-grid-failure-design.md", "docs/issues/413-grid-failure"),
+                                  ("docs/issues/39-memory-drain.md", "docs/issues/39-memory-drain"),
+                                  ("docs/issues/413-grid-failure.design.md", "docs/issues/413-grid-failure"),
+                                  ("docs/issues/.tool.design.md", "docs/issues/.tool"),
+                                  ("docs/issues/413-grid-failure.widget.design.md",
+                                   "docs/issues/413-grid-failure.widget")):
+            with self.subTest(design_path=design_path):
+                with self.assertRaises(ValueError) as refused:
+                    T.contract_path_beside_design(design_path)
+                message = str(refused.exception)
+                self.assertIn("design-to-main refuses the design path %r" % design_path, message)
+                self.assertIn("a design's name must end .tool.design.md or .system.design.md", message)
+                self.assertIn("Rename the design's file with `git mv`, to %s.tool.design.md when the design "
+                              "is of one program, or to %s.system.design.md when it is of a system"
+                              % (stem, stem), message)
+                self.assertIn("then open the rename's pull request with `python3 scripts/ghi-issue-write.py edit "
+                              "<new path>`", message)
+                self.assertIn("When that command says it left the old path on main, remove the old path in a "
+                              "pull request of your own.", message)
+                self.assertIn("Once the rename, and that removal if any, have merged, start design-to-main "
+                              "again with the new path.", message)
+
+    def test_the_record_refuses_a_design_path_without_a_kind_and_design_ending(self):
+        repository = fixture.ThrowawayRepository()
+        try:
+            with self.assertRaises(ValueError):
+                G.TopicBranchGitRecord(
+                    repository.checkout, fixture.COMPONENT, fixture.COMPONENT_DIRECTORY,
+                    "docs/issues/413-grid-failure-design.md")
+        finally:
+            repository.remove()
 
     def test_the_record_knows_the_design_and_its_contract_by_the_named_ghi_md(self):
         repository = fixture.ThrowawayRepository()
         try:
             record = G.TopicBranchGitRecord(
                 repository.checkout, fixture.COMPONENT, fixture.COMPONENT_DIRECTORY,
-                "docs/issues/413-grid-failure-design.md")
-            self.assertEqual(record.document_of_path("docs/issues/413-grid-failure-design.md"),
+                "docs/issues/413-grid-failure.system.design.md")
+            self.assertEqual(record.document_of_path("docs/issues/413-grid-failure.system.design.md"),
                              "design")
-            self.assertEqual(record.document_of_path("docs/issues/413-grid-failure-contract.md"),
+            self.assertEqual(record.document_of_path("docs/issues/413-grid-failure.system.contract.md"),
                              "design-contract")
             self.assertEqual(record.document_of_path(
-                "%s/%s-design.md" % (fixture.COMPONENT_DIRECTORY, fixture.COMPONENT)), "design")
+                "%s/%s.system.design.md" % (fixture.COMPONENT_DIRECTORY, fixture.COMPONENT)), "design")
             self.assertEqual(record.document_of_path(
-                "%s/%s-contract.md" % (fixture.COMPONENT_DIRECTORY, fixture.COMPONENT)),
+                "%s/%s.system.contract.md" % (fixture.COMPONENT_DIRECTORY, fixture.COMPONENT)),
                 "design-contract")
+            self.assertEqual(record.document_of_path(
+                "%s/%s.system.test-design.md" % (fixture.COMPONENT_DIRECTORY, fixture.COMPONENT)),
+                "test-design")
             self.assertNotEqual(record.document_of_path(
-                "docs/designs/queue/%s-design.md" % fixture.COMPONENT), "design")
+                "docs/designs/queue/%s.system.design.md" % fixture.COMPONENT), "design")
         finally:
             repository.remove()
+
+
+def load_module_from_repository_file(module_name, relative_path):
+    spec = importlib.util.spec_from_file_location(
+        module_name, fixture.MACHINE_DIR.parent.parent / relative_path)
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return module
+
+
+class TheDesignToMainNamesAreTheOnesTheGuardAndTheFastReadKnow(unittest.TestCase):
+    """The instruction-file guard protects a design, and the
+    cold-read-fast-read classes a design, a test-design and a
+    design-contract, only by the endings of their names; a name
+    design-to-main writes with another ending would go unguarded and
+    unclassed. These cases compare the names the record builds with the
+    endings those two programs hold, so that a change to either side fails
+    here."""
+
+    @classmethod
+    def setUpClass(cls):
+        cls.guard = load_module_from_repository_file(
+            "instruction_file_guard", ".claude/guard-hooks/instruction-file-guard.py")
+        cls.fast_read = load_module_from_repository_file(
+            "cold_read_fast_read", "nn-systems/cold-read/cold-read-fast-read.py")
+        cls.repository = fixture.ThrowawayRepository()
+        cls.record = fixture.git_record_module.TopicBranchGitRecord(
+            cls.repository.checkout, fixture.COMPONENT, fixture.COMPONENT_DIRECTORY, fixture.DESIGN_PATH)
+
+    @classmethod
+    def tearDownClass(cls):
+        cls.repository.remove()
+
+    def fast_read_class_of_name(self, name):
+        for suffix, class_name in self.fast_read.FULL_RUN_NAME_SUFFIXES:
+            if name.endswith(suffix) and len(name) > len(suffix):
+                return class_name
+        return None
+
+    def names_by_document(self):
+        return {
+            "design": (self.record.design_path, str(self.record.component_design_path)),
+            "test-design": (str(self.record.test_design_path),),
+            "design-contract": (T.contract_path_beside_design(self.record.design_path),
+                                str(self.record.component_design_contract_path)),
+        }
+
+    def test_the_guard_protects_each_design_and_leaves_each_test_design_and_contract_to_design_to_main(self):
+        for document, paths in self.names_by_document().items():
+            for path in paths:
+                with self.subTest(path=path):
+                    unreviewed = path.endswith(self.guard.UNREVIEWED_DOCUMENT_SUFFIXES)
+                    if document == "design":
+                        self.assertTrue(path.endswith(self.guard.REVIEWED_DESIGN_SUFFIX))
+                        self.assertFalse(unreviewed)
+                    else:
+                        self.assertTrue(unreviewed)
+
+    def test_the_fast_read_classes_each_name_as_the_document_it_is(self):
+        expected_class = {"design": "a design", "test-design": "a test design",
+                          "design-contract": "a design-contract"}
+        for document, paths in self.names_by_document().items():
+            for path in paths:
+                with self.subTest(path=path):
+                    self.assertEqual(self.fast_read_class_of_name(path.rsplit("/", 1)[-1]),
+                                     expected_class[document])
 
 
 class TheRecordsLayout(unittest.TestCase):
