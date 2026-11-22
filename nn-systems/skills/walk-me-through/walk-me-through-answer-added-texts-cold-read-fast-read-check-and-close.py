@@ -102,7 +102,7 @@ answer but those five, writing nothing. A
 `#case_against` line that opens with no rating is refused for every answer,
 those five included.
 
-`--not-asked KIND` settles the item without the user, as kind KIND, 1 to 7, of
+`--not-asked KIND` settles the item without the user, as kind KIND, 1 to 8, of
 the walk-me-through skill's list of items that need no answer, after checking
 what code can from the item's evidence lines, each opening with its marker:
 `#not_asked_touches` lists the files the change edits or deletes;
@@ -131,8 +131,10 @@ so that no program reads it, by name or by a pattern such as
 `#case_against_[a-z_]+`; kind 7, a system glossary's entry added or changed,
 needs touches, every touched file, read from the checkout's top whatever its
 spelling, a `*-glossary.md` file git tracks in the checkout other than the
-project glossary, docs/nedsnodes-wiki/nedsnodes-glossary.md; for kinds 1 to 4,
-6 and 7 every touched file but a kind 2 test must exist. An unused or old name is searched for as written and,
+project glossary, docs/nedsnodes-wiki/nedsnodes-glossary.md; kind 8, sentences
+removed from standing-agent-instructions because a hook, program, skill or an
+instruction in other standing-agent-instructions gives the same instruction
+when it applies, needs touches and a source, which names what gives it; for kinds 1 to 4, 6, 7 and 8 every touched file but a kind 2 test must exist. An unused or old name is searched for as written and,
 when it has two or more words, with its words joined by hyphens, by underscores
 and by nothing, a run of digits both kept with the letters before it and
 split off as a word of its own; every
@@ -565,7 +567,7 @@ CASE_AGAINST_LINE = re.compile(rf"^\s*(?:(?:[-*+]|\d+[.)]|>)\s+)*[*_`]*#case_aga
 CASE_AGAINST_RATING = re.compile(r"(very strong|none|weak|medium|strong)\b", re.I)
 CASE_AGAINST_HASHTAG = " #case_against_{rating}"
 NOT_ASKED_RATINGS = ("none", "weak")
-NOT_ASKED_KINDS = (1, 2, 3, 4, 5, 6, 7)
+NOT_ASKED_KINDS = (1, 2, 3, 4, 5, 6, 7, 8)
 NOT_ASKED_WEAK_CASE_AGAINST_THAT_SETTLES = ("weak with a case against that names only cost, or only that the change "
                                             "alters text the user approved word for word on an earlier date")
 NOT_ASKED_RATED_NONE = "none"
@@ -1015,7 +1017,7 @@ NOT_ASKED_WEAK_GROUND_FOR_RATED_NONE = (
 NOT_ASKED_RATING_PROBLEM = ("- its `#case_against` line rates the case against {rating}; only an item rated none, "
                             "or " + NOT_ASKED_WEAK_CASE_AGAINST_THAT_SETTLES + ", settles without the user.")
 NOT_ASKED_NO_LINE_PROBLEM = "- it has no `{marker}` line; {why}"
-NOT_ASKED_KINDS_NAMED = "none of the kinds 1 to 7 that `--help` lists under `--not-asked`"
+NOT_ASKED_KINDS_NAMED = "none of the kinds 1 to 8 that `--help` lists under `--not-asked`"
 NOT_ASKED_NOT_RATED_NONE_PROBLEM = ("- its `#case_against` line rates the case against {rating}; an item of "
                                     + NOT_ASKED_KINDS_NAMED + " settles without the user only when its case "
                                     "against is rated none, or " + NOT_ASKED_WEAK_CASE_AGAINST_THAT_SETTLES + ".")
@@ -1737,7 +1739,7 @@ def part_answer(value):
 
 
 def not_asked_kind(value):
-    """Return the --not-asked value: a kind, 1 to 7, or, for an item of no kind, `none` when its case against is
+    """Return the --not-asked value: a kind, 1 to 8, or, for an item of no kind, `none` when its case against is
     rated none, or `weak-cost-only` or `weak-alters-earlier-approved-text-only` when it is rated weak."""
     if value.strip().lower() in NOT_ASKED_NO_KIND_VALUES:
         return value.strip().lower()
@@ -1958,7 +1960,7 @@ def not_asked_problems(kind, rating, lines, marks, top, item):
     if rating not in NOT_ASKED_RATINGS:
         problems.append(NOT_ASKED_RATING_PROBLEM.format(rating=rating))
     needed = {1: (TOUCHES, SOURCE), 2: (TOUCHES, TEST), 3: (TOUCHES,), 4: (TOUCHES, RENAME), 5: (SOURCE,),
-              6: (TOUCHES,), 7: (TOUCHES,)}[kind]
+              6: (TOUCHES,), 7: (TOUCHES,), 8: (TOUCHES, SOURCE)}[kind]
     for marker in needed:
         if not words(found[marker]):
             problems.append(NOT_ASKED_NO_LINE_PROBLEM.format(marker=marker, why=NOT_ASKED_WHY[marker]))
@@ -3719,7 +3721,7 @@ def main(argv=None):
                         help="check: the user said bump and named ITEM, an item not yet shown, by its heading's title; "
                              "show it next, before the waiting item")
     answer.add_argument("--not-asked", type=not_asked_kind, metavar="KIND",
-                        help="check: the user is not asked; settle the item as kind KIND, 1 to 7, of the "
+                        help="check: the user is not asked; settle the item as kind KIND, 1 to 8, of the "
                              "walk-me-through skill's list of items that need no answer, if its evidence lines pass, "
                              "or settle an item of no kind: as `none` when its case against is rated none; as "
                              "`weak-cost-only` when it is rated weak and names only cost; as "

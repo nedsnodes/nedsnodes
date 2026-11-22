@@ -2266,6 +2266,8 @@ def test_only_a_line_the_program_writes_records_a_decision_or_a_deferral():
             ("item 3 of 9: not asked, kind 7; every text the change adds has had a fast read. <accepted>\n",
              ({"3"}, {}), "the line close writes for an item settled as kind 7 decides it"),
             ("item 3 of 9: not asked, kind 8; every text the change adds has had a fast read. <accepted>\n",
+             ({"3"}, {}), "the line close writes for an item settled as kind 8 decides it"),
+            ("item 3 of 9: not asked, kind 9; every text the change adds has had a fast read. <accepted>\n",
              (set(), {}), "close's took-effect form with a kind --not-asked never accepts records nothing"),
             ("item 3 of 9: part 1 approved <rejected>; every text the change adds has had a fast read.\n",
              (set(), {}), "close's parts form pairing a part's answer with the other answer's outcome records "
@@ -3818,7 +3820,7 @@ def refused_as_rated_none(case, *problems):
 def test_an_item_of_no_kind_is_refused_when_rated_above_weak_or_rated_none_and_touching_a_guarded_file():
     check("an item of no kind rated medium is refused",
           *refused_as_rated_none(rated_none_case(rating="medium: the option changes what users see."),
-                                 "rates the case against medium; an item of none of the kinds 1 to 7 that `--help` "
+                                 "rates the case against medium; an item of none of the kinds 1 to 8 that `--help` "
                                  "lists under `--not-asked` settles without the user only when its case against is "
                                  "rated none, or weak with a case against that names only cost, or only that the change "
                                  "alters text the user approved word for word on an earlier date"))
@@ -3837,7 +3839,7 @@ def test_an_item_of_no_kind_is_refused_when_rated_above_weak_or_rated_none_and_t
 
 WEAK_COST_ONLY = "weak: the option costs a few lines of code."
 WEAK_COST_ONLY_SETTLED = "item 1 of 3 is recorded as settled without asking the user, case against weak, cost only;"
-PERMISSIONS_JUDGEMENT = ("item 1 of 3 is of none of the kinds 1 to 7 that `--help` lists under `--not-asked` and "
+PERMISSIONS_JUDGEMENT = ("item 1 of 3 is of none of the kinds 1 to 8 that `--help` lists under `--not-asked` and "
                          "its case against is rated weak: if its change "
                          "widens an agent's permissions, as a settings change can, or turns off a guard, do not run "
                          "close: present item 1 of 3 to the user.")
@@ -3888,7 +3890,7 @@ def test_an_item_of_no_kind_rated_weak_settles_when_it_touches_guarded_code_but_
               result.returncode == 1
               and "cannot be settled without asking the user as case against weak, cost only, because:" in result.stderr
               and f"`#not_asked_touches` names {path}, a Markdown file the instruction-file guard protects; this item "
-                  "is of none of the kinds 1 to 7 that `--help` lists under `--not-asked` and rated weak, and it "
+                  "is of none of the kinds 1 to 8 that `--help` lists under `--not-asked` and rated weak, and it "
                   "changes such a file, so it is shown to the user."
                   in result.stderr
               and "which the instruction-file guard protects;" not in result.stderr
@@ -4025,12 +4027,12 @@ def test_walk_minutes_written_before_the_ground_was_named_are_still_read():
 
 
 def test_a_not_asked_value_other_than_a_kind_or_a_no_kind_value_is_refused_as_usage():
-    for value in ("8", "0", "weak"):
+    for value in ("9", "0", "weak"):
         case = rated_none_case()
         result = case.run("check", "--not-asked", value)
         check(f"`--not-asked {value}` is refused as usage, writing nothing",
               result.returncode == 2
-              and f"`{value}` is not a kind: give 1, 2, 3, 4, 5, 6, 7, or, for an item of no kind, none, "
+              and f"`{value}` is not a kind: give 1, 2, 3, 4, 5, 6, 7, 8, or, for an item of no kind, none, "
                   "weak-cost-only or weak-alters-earlier-approved-text-only" in result.stderr
               and case.minutes.read_text().rstrip().endswith("#next_to_present item 1 of 3"), described(result))
 
@@ -4070,6 +4072,18 @@ def test_each_kind_refuses_without_the_evidence_code_can_check():
     (case.checkout / "docs" / "walk" / f"{WALK_NAME}.md").write_text(document)
     check("kind 2 is refused when its named test is not a test file",
           *refused(case, 2, "`#not_asked_test` names tools/counter.py, which is not a test file"))
+
+
+def test_kind_8_settles_only_an_item_with_both_a_touches_and_a_source_line():
+    case = not_asked_case("item 1 of 7")
+    result = case.run("check", "--not-asked", "8")
+    check("kind 8 settles an item with a `#not_asked_touches` and a `#not_asked_source` line",
+          result.returncode == 0 and "settled without asking the user, not asked, kind 8 " in case.minutes.read_text(),
+          described(result))
+    check("kind 8 is refused, naming the missing line, when the item has no `#not_asked_source` line",
+          *refused(not_asked_case("item 4 of 7"), 8, "it has no `#not_asked_source` line"))
+    check("kind 8 is refused, naming the missing line, when the item has no `#not_asked_touches` line",
+          *refused(not_asked_case("item 5 of 7"), 8, "it has no `#not_asked_touches` line"))
 
 
 def test_a_removal_is_refused_while_an_untouched_file_still_names_what_it_removes():
