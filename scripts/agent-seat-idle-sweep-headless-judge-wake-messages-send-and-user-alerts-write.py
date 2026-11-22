@@ -957,12 +957,14 @@ class Sweep:
             self.end_wait(seat, "it spent tokens after the user was told")
             wait = None
         promise_text = None
-        if rule == 2 and self.headless_usage_limit_pause_holds():
+        judged_sentences = rule == 2
+        sentences_checked = []
+        if judged_sentences and self.headless_usage_limit_pause_holds():
             if wait:
                 self.due_step(seat, verdict, wait)
             return
-        if rule == 2:
-            outcome, promise = self.sentences(seat, verdict)
+        if judged_sentences:
+            outcome, promise, sentences_checked = self.sentences(seat, verdict)
             if outcome == "paused":
                 # The check is not logged, so that the next read after the reset still holds the
                 # sentences the judge could not judge.
@@ -973,7 +975,8 @@ class Sweep:
                 rule, text = fallback[fields.RULE], fallback.get(fields.TEXT)
             elif not promise_text:
                 rule = None
-        self.checked(seat, verdict, transcript_read_at, check_is_new)
+        if not judged_sentences:
+            self.checked(seat, verdict, transcript_read_at, check_is_new)
         # Nothing to do settles the open tasks a rule 3 or 5 message was about, but not a promise
         # a rule 2 message named, whatever message opened the wait it was sent on.
         if rule == 4 and wait and PROMISE not in wait:
@@ -981,6 +984,14 @@ class Sweep:
             wait = None
         if wait:
             self.due_step(seat, verdict, wait)
+        if judged_sentences:
+            if self.headless_usage_limit_pause_holds():
+                # An escalation stopped at a usage limit started the pause after the sentences were
+                # judged: neither they nor the check are logged, so that after the reset they are
+                # judged again and their promise message is sent.
+                return
+            self.sentences_checked(seat, sentences_checked)
+            self.checked(seat, verdict, transcript_read_at, check_is_new)
         if self.headless_usage_limit_pause_holds():
             return
         if promise_text:
@@ -1024,8 +1035,8 @@ class Sweep:
                            f"{seat} to see why it stopped, and message it with SendMessage; the "
                            "user may want to look at it himself.", failure=False)
             return
-        if (not self.headless_usage_limit_pause_holds()
-                and seconds_between(wait[NUDGE], self.now) >= WAIT_STEP_SECONDS):
+        if (seconds_between(wait[NUDGE], self.now) >= WAIT_STEP_SECONDS
+                and not self.headless_usage_limit_pause_holds()):
             text = ESCALATION_TEXT.format(
                 minutes=minutes, nudge_time=parse_time(wait[NUDGE]).strftime("%Y-%m-%d %H:%MZ"),
                 quoted_nudge="\n".join(f"> {line}" for line in wait["nudge_text"].split("\n")))
@@ -1132,9 +1143,10 @@ class Sweep:
     def sentences(self, seat, verdict):
         """Rule 2: judge what code could not settle, and word one message naming every unbacked
         sentence. Returns ("unbacked", (the message, the sorted kinds of the sentences it names,
-        those sentences)), ("failed", None), ("paused", None) or ("all backed", None). A judge
-        stopped by a headless usage-limit pause logs no sentence as checked, so that it is judged
-        after the reset."""
+        those sentences), the sentences checked), ("failed", None, []), ("paused", None, []) or
+        ("all backed", None, the sentences checked). The caller logs the sentences checked, so that
+        a pause a later launch starts leaves them to be judged after the reset; a judge stopped by
+        the pause logs none, and a failed judge logs them all."""
         checked = self.log.checked_sentences(seat)
         new_by_code_reading = fields.verdict_sentences_grouped_by_code_reading(
             item for item in verdict.get(fields.SENTENCES, [])
@@ -1143,7 +1155,7 @@ class Sweep:
         unbacked = new_by_code_reading.get(fields.UNBACKED, [])
         new = judged + unbacked
         if not new:
-            return "all backed", None
+            return "all backed", None, []
         backed = {}
         if judged:
             facts = dict(self.facts(seat, verdict),
@@ -1162,28 +1174,27 @@ class Sweep:
             if problem and self.headless_failed(seat, "judge whether its promises are backed",
                                                 problem, outcome.error_kind or JUDGE_ANSWER_UNUSABLE,
                                                 outcome):
-                return "paused", None
-            for item in new:
-                self.record({"event": "sentence_checked", "agent_seat": seat,
-                             "record_uuid": item["record_uuid"], "sentence": item["sentence"]})
+                return "paused", None, []
             if problem:
-                return "failed", None
+                self.sentences_checked(seat, new)
+                return "failed", None, []
             for answer in outcome.answer["sentences"]:
                 backed[answer["index"]] = answer["backed"]
             self.record({"event": "judge_answer", "agent_seat": seat, "rule": 2,
                          "answers": outcome.answer["sentences"]})
-        else:
-            for item in new:
-                self.record({"event": "sentence_checked", "agent_seat": seat,
-                             "record_uuid": item["record_uuid"], "sentence": item["sentence"]})
         unbacked += [item for index, item in enumerate(judged) if not backed[index]]
         if not unbacked:
-            return "all backed", None
+            return "all backed", None, new
         return "unbacked", ("\n".join(UNBACKED_SENTENCE_LINES[item["kind"]].format(
             sentence=item["sentence"],
             minutes=int(seconds_between(item["time"], self.now) // 60) if item["time"] else "some")
             for item in unbacked), sorted({item["kind"] for item in unbacked}),
-            [item["sentence"] for item in unbacked])
+            [item["sentence"] for item in unbacked]), new
+
+    def sentences_checked(self, seat, items):
+        for item in items:
+            self.record({"event": "sentence_checked", "agent_seat": seat,
+                         "record_uuid": item["record_uuid"], "sentence": item["sentence"]})
 
     def usage_limit(self, seat, verdict):
         limit = verdict[fields.USAGE_LIMIT]

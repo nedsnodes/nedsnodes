@@ -1638,6 +1638,28 @@ check("an escalation sender at a usage limit with a reset time ahead: a pause, n
       and [event["step"] for event in machine.events("message_sent")] == ["nudge"],
       (code, machine.events("headless_usage_limit_pause"), machine.owner_tasks(),
        machine.claude_calls()))
+machine.script(sent_ok())
+code, _ = machine.run(90)
+check("after the reset, the promise message the escalation's pause held back is sent",
+      code == 0 and [event["step"] for event in machine.events("message_sent")] == ["nudge", "nudge"]
+      and "after lunch" in machine.events("message_sent")[-1]["text"],
+      (code, machine.events("message_sent"), machine.claude_calls()))
+
+machine = Machine()
+machine.seat("alpha", [user("go"), assistant(PROMISE), turn_end()])
+machine.script(sent_ok())
+machine.run(0)
+machine.seat("beta", DONE_TURN)
+machine.task("beta", "1")
+machine.script(usage_limit_exit_with_transcript(RESET_IN_AN_HOUR))
+machine.run(5)
+machine.script()
+code, _ = machine.run(16)
+check("a pause another agent-seat's judge started holds when a wait's escalation falls due: no "
+      "escalation is logged or sent",
+      code == 0 and [event["step"] for event in machine.events("wait_step")] == ["nudge"]
+      and not machine.claude_calls() and len(machine.events("headless_usage_limit_pause")) == 1,
+      (code, machine.events("wait_step"), machine.claude_calls()))
 
 machine = account_changed_machine()
 machine.script(usage_limit_exit_with_transcript(RESET_IN_AN_HOUR))
