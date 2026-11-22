@@ -584,22 +584,53 @@ def run_launch_and_retention_cases(workspace: Path, recent: str):
         {"written-at": "2026-08-30T17:20:00Z", "next-step": "finish the supervisor"},
         launch_time_git_sync_report="launch-time-git-sync: fixture-branch is current with main",
         branch_state_instruction=supervisor.BRANCH_STATE_PUSHED_TO_ORIGIN_INSTRUCTION)
-    check("a pushed branch's prompt carries only the pushed instruction, after the sync result",
+    check("a pushed branch current with main gets the pushed instruction in place of the sync result",
           nothing_is_appended_to(
               pushed_prompt,
-              "launch-time-git-sync: fixture-branch is current with main — This branch is "
+              "to a background subagent or Codex. This branch is "
               "pushed: leave its head as it is, and start new work on a branch from origin/main.",
               expected_rest_after_the_branch_state_line)
+          and "launch-time-git-sync" not in pushed_prompt
           and "never been pushed" not in pushed_prompt, pushed_prompt)
     on_main_prompt = supervisor.build_ignition_prompt(
         Path("/tmp/dialog-0002.md"),
         {"written-at": "2026-08-30T17:20:00Z", "next-step": "finish the supervisor"},
         launch_time_git_sync_report="launch-time-git-sync: main is current with main")
-    check("a checkout on main gets the sync result and no branch-state instruction",
+    check("a checkout on main current with main gets neither the sync result nor a branch-state instruction",
           nothing_is_appended_to(
               on_main_prompt,
-              "to a background subagent or Codex. launch-time-git-sync: main is current with main",
-              expected_rest_after_the_branch_state_line), on_main_prompt)
+              "to a background subagent or Codex.",
+              expected_rest_after_the_branch_state_line)
+          and "launch-time-git-sync" not in on_main_prompt, on_main_prompt)
+    for report in ("launch-time-git-sync: main fast-forwarded to main (abc1234)",
+                   "launch-time-git-sync: seat-branch is 2 commit(s) ahead of main and has all of "
+                   "it — nothing to pull"):
+        successful_sync_prompt = supervisor.build_ignition_prompt(
+            Path("/tmp/dialog-0002.md"),
+            {"written-at": "2026-08-30T17:20:00Z", "next-step": "finish the supervisor"},
+            launch_time_git_sync_report=report)
+        check(f"a successful sync's report is left out of the prompt: {report}",
+              "launch-time-git-sync" not in successful_sync_prompt, successful_sync_prompt)
+    for report in ("launch-time-git-sync: main is current with main (fetch failed, comparing "
+                   "against what is on disk)",
+                   "launch-time-git-sync: main fast-forwarded to main (its new commit could not be "
+                   "read: x)\nnext steps"):
+        kept_prompt = supervisor.build_ignition_prompt(
+            Path("/tmp/dialog-0002.md"),
+            {"written-at": "2026-08-30T17:20:00Z", "next-step": "finish the supervisor"},
+            launch_time_git_sync_report=report)
+        check(f"a report after a failed fetch or with a failure's next steps stays in the prompt: {report!r}",
+              report.split("\n")[0] in kept_prompt, kept_prompt)
+    recovered_current_prompt = supervisor.IgnitionPlanWithoutConversationTail(
+        "finish the supervisor").compose(
+            "launch-time-git-sync: fixture-branch is current with main",
+            branch_state_instruction=supervisor.BRANCH_STATE_PUSHED_TO_ORIGIN_INSTRUCTION)
+    check("the boot-recovery prompt also puts the branch-state instruction in place of a successful sync's report",
+          "launch-time-git-sync" not in recovered_current_prompt
+          and (supervisor.ITEMS_NEEDING_THE_USER_IN_ONE_APPROVAL_WALK_INSTRUCTION + " "
+               + supervisor.BRANCH_STATE_PUSHED_TO_ORIGIN_INSTRUCTION
+               + supervisor.NEXT_STEP_HEADING) in recovered_current_prompt,
+          repr(recovered_current_prompt))
     # The supervisor's other ignition shape composes the same instruction at a
     # second call site (`IgnitionPlanWithoutConversationTail.compose`). The
     # whole prompt is pinned, so an append anywhere in it -- inside a constant

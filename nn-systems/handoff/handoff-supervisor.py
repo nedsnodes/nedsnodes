@@ -454,11 +454,26 @@ def branch_state_instruction_after(launch_time_git_sync_report: str, branch_stat
     return f" — {branch_state_instruction}"
 
 
+def launch_time_git_sync_report_says_checkout_has_main_after_a_fetch(launch_time_git_sync_report: str) -> bool:
+    """Whether the report says the fetch of origin succeeded and the checkout now holds all of
+    main: current with it, fast-forwarded to it, or ahead of it with nothing to pull."""
+    if "\n" in launch_time_git_sync_report or LAUNCH_TIME_GIT_SYNC_FETCH_FAILED_NOTE in launch_time_git_sync_report:
+        return False
+    return any(phrase in launch_time_git_sync_report for phrase in (
+        LAUNCH_TIME_GIT_SYNC_REPORT_PHRASE_CURRENT_WITH_MAIN,
+        LAUNCH_TIME_GIT_SYNC_REPORT_PHRASE_FAST_FORWARDED_TO_MAIN,
+        LAUNCH_TIME_GIT_SYNC_REPORT_PHRASE_AHEAD_WITH_NOTHING_TO_PULL))
+
+
 def launch_time_git_sync_report_in_prompt(launch_time_git_sync_report: str,
                                           branch_state_instruction: str = "") -> str:
     """The report as the prompt carries it: a report of several lines, such as a git
     failure's next steps, stands as its own paragraph instead of running on from the
-    sentence before it."""
+    sentence before it. A report that the checkout holds all of main after a fetch asks
+    the successor for nothing, so only the branch-state instruction, if any, stands in its
+    place; the console still prints the report."""
+    if launch_time_git_sync_report_says_checkout_has_main_after_a_fetch(launch_time_git_sync_report):
+        return branch_state_instruction
     text = launch_time_git_sync_report + branch_state_instruction_after(
         launch_time_git_sync_report, branch_state_instruction)
     return f"\n\n{text}\n\n" if "\n" in launch_time_git_sync_report else text
@@ -1326,9 +1341,11 @@ def build_ignition_prompt(extract_path: Path, handoff_fields: dict,
         ITEMS_NEEDING_THE_USER_IN_ONE_APPROVAL_WALK_INSTRUCTION,
         *waiting_approval_walk_item,
     ]
-    if launch_time_git_sync_report:
-        lines.append(launch_time_git_sync_report_in_prompt(launch_time_git_sync_report,
-                                                           branch_state_instruction))
+    git_sync_text = (launch_time_git_sync_report_in_prompt(launch_time_git_sync_report,
+                                                           branch_state_instruction)
+                     if launch_time_git_sync_report else "")
+    if git_sync_text:
+        lines.append(git_sync_text)
     lines.extend(overview_refresh_due)
     lines.extend(memory_review_due)
     roster = spawned_subagent_roster_from(handoff_fields)
@@ -1434,9 +1451,11 @@ class IgnitionPlanWithoutConversationTail:
                   + ITEMS_NEEDING_THE_USER_IN_ONE_APPROVAL_WALK_INSTRUCTION)
         for line in waiting_approval_walk_item:
             prompt += " " + line
-        if launch_time_git_sync_report:
-            prompt += " " + launch_time_git_sync_report_in_prompt(launch_time_git_sync_report,
-                                                                  branch_state_instruction)
+        git_sync_text = (launch_time_git_sync_report_in_prompt(launch_time_git_sync_report,
+                                                               branch_state_instruction)
+                         if launch_time_git_sync_report else "")
+        if git_sync_text:
+            prompt += " " + git_sync_text
         for line in overview_refresh_due:
             prompt += " " + line
         for line in memory_review_due:
@@ -1487,6 +1506,8 @@ def run_git_here(arguments: list, working_directory: Path, timeout: int = 60):
 # The handoff-supervisor restarts itself on main's code only after a report holding one of these.
 LAUNCH_TIME_GIT_SYNC_REPORT_PHRASE_CURRENT_WITH_MAIN = " is current with main"
 LAUNCH_TIME_GIT_SYNC_REPORT_PHRASE_FAST_FORWARDED_TO_MAIN = " fast-forwarded to main"
+LAUNCH_TIME_GIT_SYNC_REPORT_PHRASE_AHEAD_WITH_NOTHING_TO_PULL = " has all of it — nothing to pull"
+LAUNCH_TIME_GIT_SYNC_FETCH_FAILED_NOTE = " (fetch failed, comparing against what is on disk)"
 
 
 def launch_time_git_sync(working_directory: Path) -> str:
@@ -1507,7 +1528,7 @@ def launch_time_git_sync(working_directory: Path) -> str:
         return "launch-time-git-sync: not a git checkout, nothing to sync"
 
     fetched = run_git_here(["fetch", "--quiet", "origin"], working_directory)
-    fetch_note = "" if fetched.returncode == 0 else " (fetch failed, comparing against what is on disk)"
+    fetch_note = "" if fetched.returncode == 0 else LAUNCH_TIME_GIT_SYNC_FETCH_FAILED_NOTE
 
     def answer(arguments, timeout, accepted_exit_codes=(0,)):
         return git.run_git(working_directory, arguments, timeout_seconds=timeout,
@@ -1568,8 +1589,8 @@ def launch_time_git_sync(working_directory: Path) -> str:
             ahead = answer(["rev-list", "--count", "origin/main..HEAD"], 30)
             if ahead == "0":
                 return f"launch-time-git-sync: {branch}{LAUNCH_TIME_GIT_SYNC_REPORT_PHRASE_CURRENT_WITH_MAIN}{fetch_note}"
-            return (f"launch-time-git-sync: {branch} is {ahead} commit(s) ahead of main and has all of "
-                    f"it — nothing to pull{fetch_note}")
+            return (f"launch-time-git-sync: {branch} is {ahead} commit(s) ahead of main and"
+                    f"{LAUNCH_TIME_GIT_SYNC_REPORT_PHRASE_AHEAD_WITH_NOTHING_TO_PULL}{fetch_note}")
 
         if not is_ancestor("HEAD", "origin/main"):
             ahead = answer(["rev-list", "--count", "origin/main..HEAD"], 30)
