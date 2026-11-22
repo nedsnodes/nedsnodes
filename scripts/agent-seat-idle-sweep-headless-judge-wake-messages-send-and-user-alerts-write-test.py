@@ -593,8 +593,12 @@ check("rule 5: a stopped subagent whose only running command is inside that comm
       machine.claude_calls() == [], machine.events())
 
 
-def answered_with_a_tool_call_and_idle_again(machine, minutes):
-    """The agent-seat answers a nudge with a tool call, which ends the wait, and its turn ends."""
+def answered_with_a_tool_call_and_idle_again(machine, minutes, received=True):
+    """The agent-seat receives the last message sent, if any and unless received is False, answers
+    it with a tool call, which ends the wait, and its turn ends."""
+    sent = machine.events("message_sent")
+    if received and sent:
+        machine.append("alpha", cross_session(sent[-1]["text"], at(minutes - 0.5)))
     machine.append("alpha", assistant(tool=("Read", {"file_path": "x"}), when=at(minutes)),
                    assistant("Still waiting.", when=at(minutes)), turn_end(at(minutes)))
 
@@ -700,6 +704,37 @@ calls, judge_facts = rule_five_judge_facts(machine)
 check("rule 5: a command named in a message whose send failed is handed to the judge again",
       ids_handed_to_judge(judge_facts) == ["bk1"], calls)
 
+BK1_ASKED = ("Your background command \"A\" (bk1) started 30 minutes ago. Is it taking longer than "
+             "expected?")
+machine = Machine()
+machine.seat("alpha", [
+    user("go"),
+    *background_bash_launch("bk1", "python3 scripts/a.py", at(-30), "tb1", description="A"),
+    assistant("Waiting."), turn_end()])
+machine.script(judged(True, BK1_ASKED), {"exit": 1})
+machine.run(0)
+check("rule 5: a message whose sender exits nonzero asks about nothing",
+      [event["running_work_asked_about"] for event in machine.events("judge_answer")] == [[]]
+      and any("claude exited 1" in event["problem"] for event in machine.events("headless_failed")),
+      machine.events())
+
+# The send succeeded, but to a stale agent-session of the same name, so the transcript the delivery
+# check reads never holds the message.
+machine = Machine()
+machine.seat("alpha", [
+    user("go"),
+    *background_bash_launch("bk1", "python3 scripts/a.py", at(-30), "tb1", description="A"),
+    assistant("Waiting."), turn_end()])
+machine.script(judged(True, BK1_ASKED), sent_ok())
+machine.run(0)
+answered_with_a_tool_call_and_idle_again(machine, 1, received=False)
+machine.script(judged(False, reason="r"))
+machine.run(8)
+calls, judge_facts = rule_five_judge_facts(machine)
+check("rule 5: a command named in a message the delivery check did not find is handed to the judge "
+      "again", [event["found"] for event in machine.events("delivery_checked")] == [False]
+      and ids_handed_to_judge(judge_facts) == ["bk1"], (calls, machine.events()))
+
 machine = Machine()
 machine.seat("alpha", [
     user("go"),
@@ -708,7 +743,8 @@ machine.seat("alpha", [
 machine.script(judged(True, "Your background command \"A\" (bk1) started 30 minutes ago. Is it "
                             "taking longer than expected?"), sent_ok())
 machine.run(0)
-machine.append("alpha", *background_bash_launch("bk2", "timeout 1h python3 scripts/b.py", at(1),
+machine.append("alpha", cross_session(machine.events("message_sent")[-1]["text"], at(0.5)),
+               *background_bash_launch("bk2", "timeout 1h python3 scripts/b.py", at(1),
                                                 "tb2", description="B"),
                assistant("Waiting.", when=at(1)), turn_end(at(1)))
 machine.script(judged(True, "m"), sent_ok())
@@ -844,6 +880,72 @@ for opener in ("rule 5", "rule 3"):
           == ["nudge", "promise", "escalate", "tell_user"]
           and any("after a nudge and an escalation" in alert["title"] for alert in machine.alerts()),
           (machine.events("wait_step"), machine.alerts()))
+
+def promise_sent_on_rule_five_wait(promise_sender):
+    """A machine whose agent-seat answered a rule 5 message with a promise, and whose promise
+    message promise_sender sent at minute 7."""
+    machine = Machine()
+    machine.seat("alpha", DONE_TURN)
+    machine.task("alpha", "1")
+    machine.script(judged(True, "What's going on?", "nothing runs"), sent_ok())
+    machine.run(0)
+    (machine.tasks / "nedsnodes-alpha-tasks" / "1.json").unlink()
+    machine.append("alpha", cross_session(machine.events("message_sent")[-1]["text"], at(0.5)),
+                   assistant(PROMISE, at(1)), turn_end(at(1)))
+    machine.script(promise_sender)
+    machine.run(7)
+    return machine
+
+
+PROMISE_SEND_FAILS = {"sends": [send_to("alpha", is_error=True)],
+                      "answer": {"sent": False, "reason": "r"}}
+machine = promise_sent_on_rule_five_wait(PROMISE_SEND_FAILS)
+check("rule 2: a promise message on an open wait whose send failed logs neither a promise step nor "
+      "a promise_message event",
+      [event["step"] for event in machine.events("wait_step")] == ["nudge"]
+      and not machine.events("promise_message") and len(machine.events("headless_failed")) == 1,
+      machine.events())
+machine.script()
+machine.run(8)
+check("rule 2: after a promise message on an open wait failed to send, nothing to do ends the wait, "
+      "as it ends a wait no promise message reached",
+      [event["why"] for event in machine.events("wait_ended")] == ["nothing to do"], machine.events())
+
+# The sender runs on after its SendMessage, and the agent-seat records the task before it ends.
+machine = promise_sent_on_rule_five_wait(dict(sent_ok(), sleep=2.5))
+machine.append("alpha", cross_session(machine.events("message_sent")[-1]["text"], at(7.01)),
+               assistant(tool=("TaskCreate", {"subject": "report on PR 927", "metadata": {
+                   "prerequisites": [{"pr_merged": 927}]}}), when=at(7.025), tool_id="t-early"),
+               task_result("t-early", "Task #1 created successfully: report on PR 927", at(7.03)),
+               assistant("Recorded.", at(8)), turn_end(at(8)))
+machine.script()
+machine.run(14)
+check("rule 2: a task call made after a promise message's send started, but before its sender "
+      "ended, ends the wait",
+      machine.events("promise_message")[0]["at"] > at(7.025)
+      and [event["why"] for event in machine.events("wait_ended")]
+      == ["it recorded what a task waits on after the promise message"], machine.events())
+
+# A promise message that opens its wait reaches the agent-seat in the escalation, which quotes it,
+# when its own send fails.
+machine = Machine()
+machine.seat("alpha", [user("go"), assistant(PROMISE), turn_end()])
+machine.script(PROMISE_SEND_FAILS)
+machine.run(0)
+machine.script(sent_ok())
+machine.run(16)
+escalation = machine.events("message_sent")[-1]["text"]
+machine.append("alpha", cross_session(escalation, at(16.2)),
+               assistant(tool=("TaskCreate", {"subject": "report on PR 927", "metadata": {
+                   "prerequisites": [{"pr_merged": 927}]}}), when=at(16.5), tool_id="t-late"),
+               task_result("t-late", "Task #1 created successfully: report on PR 927", at(16.51)),
+               assistant("Recorded.", at(17)), turn_end(at(17)))
+machine.script()
+machine.run(23)
+check("rule 2: a promise message that opened its wait and failed to send is quoted in the "
+      "escalation, and a task call after the escalation ends the wait",
+      PROMISE in escalation and [event["why"] for event in machine.events("wait_ended")]
+      == ["it recorded what a task waits on after the promise message"], machine.events())
 
 ANNOUNCED = "I'm starting the PR 1633 work now."
 
