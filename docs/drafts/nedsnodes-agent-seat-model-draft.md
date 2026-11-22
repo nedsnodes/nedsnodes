@@ -1,35 +1,35 @@
 # The agent-seat model
 
-How work is divided among named agents, and why. Every agent reads its own brief; this page is the shared background behind all of them.
+How work is divided among agent-seats, and why. Each agent-seat's agent-sessions read its seat-brief; this page is the shared background behind every seat-brief.
 
 ## The words this model uses
 
-The project glossary, `docs/nedsnodes-wiki/nedsnodes-glossary.md`, defines the words this page uses. The handoff-system's nn-architecture-overview, `docs/nedsnodes-wiki/nedsnodes-handoff-architecture-overview.md`, describes the machinery that retires a spent session and starts its successor.
+The project glossary, `docs/nedsnodes-wiki/nedsnodes-glossary.md`, defines this page's hyphenated terms, such as agent-seat, seat-brief, session-handoff and conversation-tail. The handoff-system's nn-architecture-overview, `docs/nedsnodes-wiki/nedsnodes-handoff-architecture-overview.md`, describes reincarnate-seat: the machinery that replaces an agent-session with a successor that continues from its session-handoff.
 
 ## The grouping rule
 
-An agent-seat's work is the body of related work it owns: a subject area with shared context, not an ordered queue. The tasks in it are named by its brief, not enumerated as a list to work through in order.
+An agent-seat owns a subject area with shared context, which its seat-brief names. The tasks on its task list are work within that subject area, not a queue that defines the agent-seat.
 
-**Group tasks by shared context, not by workload.** The test for whether two tasks belong to one agent-seat: *does doing the first make the agent smarter about the second?* If yes, same agent-seat. If no, separate agent-seats — even when that leaves an agent-seat idle.
+**Group tasks by shared context, not by workload.** The test for whether a task belongs to an agent-seat: *would an agent that knows the agent-seat's subject area do the task better than one that does not, because the task needs the same files, code and decisions?* Judge a new task against the subject area as a whole, not against one task in it. If yes, the task goes to that agent-seat. If no, it goes to another agent-seat, even when that leaves an agent-seat with nothing to do.
 
 The user's reasoning, which this model serves:
 
 - An agent with focused context is smarter than one carrying unrelated history. Confusion is the expensive failure.
-- **An idle agent-seat costs almost nothing** — no tokens, no attention — so never merge two agent-seats' unrelated work to keep an agent-seat busy. It is not literally free: an unretired agent-seat holds an agent-home, and retiring it later takes the steps below. That cost is small and one-time.
-- The natural unit of work is a series of related tasks; at the end of a series, the agent writes a handoff and the session is replaced, so the next series starts on a clean context.
-- Agent-seats are resumed weeks later, so a name must say what the agent-seat is for without opening anything.
+- **An agent-seat with nothing to do costs almost nothing**: its agent-session spends no tokens while it waits for a prompt, and it needs none of the user's attention, so never give one agent-seat two unrelated subject areas to keep it busy. It is not literally free: a running agent-seat is restarted after a reboot or a crash, and each restart spends tokens; an unretired agent-seat holds an agent-home; and retiring it later takes the steps below. Those costs are small.
+- When an agent-session's context runs low, the agent writes a session-handoff and the handoff-supervisor replaces the agent-session with a successor that starts from the session-handoff and the conversation-tail, not from the whole dialog, so each successor carries the subject area forward without the rest of its predecessor's history.
+- The user comes back to an agent-seat weeks later, so its name must say what the agent-seat is for without opening anything.
 
 ## Which agent-seats exist
 
-The agent-seats that exist are the directories under `~/agents` on either machine, except a guide-agent's, such as `~/agents/ghi-guide-agent`; an agent-seat's seat-brief, the `CLAUDE.local.md` in its directory, says what it owns. The user chooses which of them run.
+An agent-seat on a machine is a directory `~/agents/<name>` there that is its agent-home and for which its handoff-supervisor has left a state file or a session-handoff in `~/.claude/handoffs/`; `scripts/recover-crashed-seats.py` finds the agent-seats of its machine this way. Other entries under `~/agents`, such as the `<name>-worktrees` directories, a guide-agent's directory such as `~/agents/ghi-guide-agent`, and loose files, are not agent-seats. An agent-seat's seat-brief, the `CLAUDE.local.md` in its agent-home, says what it owns. The user chooses which agent-seats run.
 
-An agent-seat name is one word. It is an address typed to reach an agent, not a search key, so the multi-part naming rule in `CLAUDE.md` does not apply to it.
+An agent-seat's name is a multi-part name, such as `merge-lane-2` or `fleet-restart-at-login`, made only of letters, digits, `-` and `_`, which is all the launchers accept. `CLAUDE.md`'s naming rule applies to it, as `/start-agent-seat` step 1 says, and the name must be unused on both machines, because it is also the agent-home's directory name, the agent-seat's tmux server name, the prefix of its files in `~/.claude/handoffs/`, and the Remote Control address other agent-sessions send messages to.
 
 ## Pausing and retiring an agent-seat
 
-They are different, and confusing them loses work.
+They are different.
 
-**Paused** — the agent-seat's current series is done and nobody is using it. Exit the session; the handoff-supervisor stops with it. The handoff and the worktree both stay exactly as they are. This is the ordinary way to leave an agent-seat, and it needs no cleanup.
+**Paused** — nobody is using the agent-seat for now. The user types `/exit` in its agent-session, because an agent cannot exit itself; the handoff-supervisor records the clean exit and stops. The agent-home, the agent-seat's topic-worktrees and their commits stay as they are. The agent-seat's session-handoff was already read when the exited agent-session started, so the next launch does not start from it, and what the exited agent-session had not written to a commit, its task list or another file since that session-handoff is lost. This is the ordinary way to leave an agent-seat, and it needs no cleanup. To start a paused agent-seat again, run its launcher, as "Launching an agent-seat" below says.
 
 **Retired** — the name is being freed or repurposed. Four steps, in order:
 
@@ -40,38 +40,24 @@ They are different, and confusing them loses work.
 
 ## Launching an agent-seat
 
-From the **Mac**, using the Mac's own clone of this repository:
+`/start-agent-seat` gives the command that launches a new agent-seat on ned-box, and `docs/nedsnodes-wiki/nedsnodes-mac-and-ned-box-machine-setup.md` gives the command, run on the Mac, that reaches an agent-seat on either machine. Both launchers, `scripts/launch-claude-ubuntu` and `scripts/launch-claude-mac`, are attach-or-create: running an agent-seat's name again attaches to its tmux session, or to the shell left behind when its handoff-supervisor stopped, rather than starting a second one, and a `--first-prompt-file` given then does nothing. That shell prints how to start the agent-seat again: exit the shell, then run the launcher again. To pause an agent-seat, the user types `/exit` in its agent-session; to leave it running, he detaches from tmux (`Ctrl-b d`).
 
-```
-~/Projects/nedsnodes/scripts/launch-claude-ubuntu <seat> \
-    --first-prompt-file /home/nedlern/Projects/nedsnodes/docs/agents/seat-first-prompt.md
-```
+A launch that starts a handoff-supervisor starts the agent-session from the first of these that applies:
 
-The script runs on the Mac and reaches the box over SSH. The `--first-prompt-file` path is a **box-side** path, because the handoff-supervisor reads that file on the box. One generic file serves every agent-seat: the agent learns its own name from its working directory, so nothing needs substituting.
+1. **A session-handoff not yet consumed.** When `~/.claude/handoffs/<seat>-handoff.md` holds a session-handoff whose `session-handoff-sequence-number` is above the last one the handoff-supervisor consumed, the agent-session starts from it. When that session-handoff carries `ask-user-before-restart`, the handoff-supervisor first asks "restart? y/n" and stops unless the answer is y.
+2. **A crashed agent-session's transcript.** When no session-handoff waits and the handoff-supervisor recorded no exit, it resumes the agent-seat's newest transcript and ignores any first prompt, unless the launch also gives `--first-prompt-file-wins-over-crashed-transcript`.
+3. **The first prompt.** Otherwise the agent-session starts from the `--first-prompt-file` given, or, without one, from the handoff-supervisor's own first prompt for an agent-seat with no session-handoff.
 
-**Both halves must actually exist where they are named**, and they are read on different machines: the script in the Mac's clone, the prompt file in the box's. A clone that has not pulled since these landed has neither. Check before launching an agent-seat for the first time:
+So an agent-session that crashes keeps what it was doing through its transcript, and one the user ends with `/exit` loses what it had not written down since its last session-handoff, as "Paused" above says.
 
-```
-ls ~/Projects/nedsnodes/scripts/launch-claude-ubuntu                        # on the Mac
-ssh nedlern@ned-box 'ls /home/nedlern/Projects/nedsnodes/docs/agents/seat-first-prompt.md'
-```
-
-If the box's copy is missing, `ssh nedlern@ned-box 'git -C ~/Projects/nedsnodes pull'` and try again.
-
-Three things about that command worth knowing before you rely on it:
-
-- **It is attach-or-create.** Running the name again attaches to the live tmux session, or to the shell left behind when its handoff-supervisor stopped, rather than starting a second one — and in that case `--first-prompt-file` does nothing, because there is no new session to seed. To stop an agent-seat, the user exits the session inside it (`/exit`); to leave it running, he detaches from tmux (`Ctrl-b d`).
-- **An unconsumed handoff outranks the first-prompt file.** If `~/.claude/handoffs/<seat>-handoff.md` holds a handoff the handoff-supervisor has not yet consumed, it boots from that; `--first-prompt-file` seeds every other launch. To seed an agent-seat from another agent-seat's context deliberately, copy that agent-seat's handoff to `~/.claude/handoffs/<seat>-handoff.md` before launching.
-- **A session that ends without writing a handoff leaves no thread behind.** The next launch of that name starts from the first-prompt file. The handoff — not the session — is the thing that carries an agent-seat's thread. Its companion is the conversation tail, `~/.claude/handoffs/<seat>-dialog-NNNN.md`, numbered by generation: the successor is told to read it first, and when the tail leaves earlier turns out, the whole dialog waits beside it in `<seat>-dialog-NNNN-complete.md` for when it needs more.
-
-The launcher creates the agent-seat's worktree, detached at `origin/main`, **before the session starts**, because project settings — the status line, the context-threshold handoff hook, the instruction-file guard — are wired through `.claude/settings.json` in the working directory, read at session start, and an agent started in a directory without it runs with none of them. When the worktree cannot be made, the launcher says so and starts the session anyway.
+Each launcher makes the agent-home before the agent-session starts, on a detached HEAD at `origin/main`, when `~/agents/<seat>` is not already a git checkout, because project settings — the status line, the context-threshold handoff hook, the instruction-file guard — are read from `.claude/settings.json` in the working directory when an agent-session starts, and an agent-session started in a directory without that file runs without them, with only the user's own settings in `~/.claude/`. When `~/agents/<seat>` is already a checkout, the launcher leaves it as it is. When the agent-home cannot be made, the launcher says so and starts the agent-session anyway.
 
 ## What separate branches do and do not protect
 
 An agent-seat's agent-home holds no branch: it rests on a detached HEAD at `origin/main`, and git refuses commits in it. Its work is on nn-topic-branches, each in a worktree of its own, and git refuses to check one branch out in two worktrees. That keeps two agent-seats off one branch and nothing more: it is a check rather than a guarantee, since `git worktree add --force` overrides it and a separate clone is invisible to it, and two agent-seats editing the same file on different branches meet at the merge.
 
-It protects nothing outside git. `~/.claude/handoffs/` and the tmux socket (`tmux -L <seat>`, one server per agent-seat since 2026-08-21, so one server crash takes down one agent-seat) are per-machine state keyed by the agent-seat's name. Two agent-seats using the same name would collide in that directory and in cross-session addressing, which is why one name means one agent-seat across both machines.
+It protects nothing outside git. `~/.claude/handoffs/` and the agent-seat's tmux server, `tmux -L <seat>`, are per-machine state keyed by the agent-seat's name, so two agent-seats with one name on the same machine would share them. Across machines nothing on disk collides, but the name is also the agent-seat's Remote Control address, which agent-sessions on both machines send messages to, which is why one name means one agent-seat across both machines.
 
-One class of file is guarded outside git: the agent-instructions, the files that tell agents how to behave. `CLAUDE.md`, an agent-seat's `CLAUDE.local.md`, the repository's `.claude/`, and the harness memory under `~/.claude/projects/` change only when approved-by-walk, enforced by `.claude/guard-hooks/instruction-file-guard.py`. An agent-seat's brief and the first-prompt file, `docs/agents/seat-first-prompt.md`, are in the guarded set too, as reusable prompts, and so is every other file the file-naming page lists under "Files the user reviews".
+Some files are guarded outside git: the guarded-files, which the glossary lists, among them `CLAUDE.md`, every seat-brief, everything under the repository's `.claude/` apart from its working space, every wiki page, and `docs/agents/seat-first-prompt.md`. The instruction-file guard, `.claude/guard-hooks/instruction-file-guard.py`, refuses an Edit, Write or NotebookEdit of a guarded-file until the change has the approval `docs/nedsnodes-wiki/nedsnodes-which-changes-need-the-users-approval.md` asks for, and `.claude/guard-hooks/guarded-file-unapproved-change-afterward-backup-and-ask-hook.py` notices a guarded-file changed any other way, such as by a shell command, keeps every version, and has the agent ask the user.
 
-**Nothing that matters is left only in a session.** Work belongs in commits and pushes; decisions belong in the wiki, the designs and the issues. The handoff is the one durable thing that is never pushed: it lives on the agent-seat's machine only, and an agent-seat exited without one keeps its committed work and loses its thread.
+**Keep nothing that matters only in an agent-session.** Work belongs in commits and pushes; decisions belong in the wiki, the designs and the GHIs. The session-handoff is never pushed: it lives on the agent-seat's machine only, as do the agent-seat's conversation-tails, task list and seat-brief, and an agent-seat paused with `/exit` keeps its committed work and loses what its agent-session had not written down since its last session-handoff.
