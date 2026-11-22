@@ -1008,28 +1008,34 @@ def main():
 
     # The credential lists are pointed at a scratch home for the call, so the
     # profile's denials name paths in it and the real home is not named in a
-    # failure line. The credential directories are re-rooted
-    # from the real list rather than listed here, so a directory dropped from
-    # CREDENTIAL_DIRECTORIES drops out of the profile.
+    # failure line. The credential directories and ned-box's credential files
+    # are re-rooted from the real lists rather than listed here, so a path
+    # dropped from either list drops out of the profile.
     credential_scratch = tempfile.TemporaryDirectory()
     scratch_home = pathlib.Path(credential_scratch.name)
     (scratch_home / ".config" / "nedsnodes").mkdir(parents=True)
     (scratch_home / ".config" / "gh").mkdir(parents=True)
     login_canary = scratch_home / ".codex" / "auth.json"
+    listed_canary = scratch_home / ".config" / "gh" / "hosts.yml"
     login_canary.parent.mkdir(parents=True)
-    login_canary.write_text("CANARY-NOT-A-SECRET-sanity-check-adversarial-prompts-test\n", encoding="utf-8")
+    for canary in (login_canary, listed_canary):
+        canary.write_text("CANARY-NOT-A-SECRET-sanity-check-adversarial-prompts-test\n", encoding="utf-8")
     shared = runner_memories.common
-    real_lists = (shared.CREDENTIAL_DIRECTORIES, shared.REVIEWER_PROGRAM_LOGIN_FILES)
+    real_lists = (shared.CREDENTIAL_DIRECTORIES, shared.CREDENTIAL_FILES_ON_NED_BOX,
+                  shared.REVIEWER_PROGRAM_LOGIN_FILES)
     try:
         runner_memories.run_agent_binary_unless_run_stopped = capture_command
         shared.CREDENTIAL_DIRECTORIES = tuple(
             scratch_home / directory.relative_to(pathlib.Path.home())
             for directory in real_lists[0])
+        shared.CREDENTIAL_FILES_ON_NED_BOX = tuple(
+            scratch_home / path.relative_to(pathlib.Path.home()) for path in real_lists[1])
         shared.REVIEWER_PROGRAM_LOGIN_FILES = {"codex": (login_canary,)}
         runner_memories.run_codex("a prompt no model ever sees")
     finally:
         runner_memories.run_agent_binary_unless_run_stopped = real_memories_launch
-        shared.CREDENTIAL_DIRECTORIES, shared.REVIEWER_PROGRAM_LOGIN_FILES = real_lists
+        (shared.CREDENTIAL_DIRECTORIES, shared.CREDENTIAL_FILES_ON_NED_BOX,
+         shared.REVIEWER_PROGRAM_LOGIN_FILES) = real_lists
     codex_command = captured.get("command", [])
     check("run_codex launches codex with memories disabled",
           ("--disable", "memories") in list(zip(codex_command, codex_command[1:])),
@@ -1050,9 +1056,10 @@ def main():
           and 'permissions.sanity-check-no-credentials.extends=":workspace"' in codex_overrides
           and "permissions.sanity-check-no-credentials.network.enabled=true" in codex_overrides,
           repr(codex_overrides))
-    check("run_codex's profile denies the credential directories and a reviewer program's login file",
-          f'"{scratch_home}/.config/nedsnodes"="deny"' in denied_table
-          and f'"{scratch_home}/.config/gh"="deny"' in denied_table
+    expected_denials = ([f'"{listed_canary}"="deny"'] if sys.platform.startswith("linux")
+                        else [f'"{scratch_home}/.config/nedsnodes"="deny"', f'"{scratch_home}/.config/gh"="deny"'])
+    check("run_codex's profile denies this machine's credential paths and a reviewer program's login file",
+          all(denial in denied_table for denial in expected_denials)
           and f'"{login_canary}"="deny"' in denied_table, denied_table)
     credential_scratch.cleanup()
 
