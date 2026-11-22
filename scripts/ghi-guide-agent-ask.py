@@ -972,7 +972,7 @@ def _ask_within_lock(question, include_closed, seat_dir, repo, projects_root,
         # stated location (PR #143 review, P3).
         cold_start_text = COLD_START_PROMPT_TEMPLATE.format(
             mirror_path=full_result["mirror_dir"],
-            question_files_path=ghi_issue_write.GHI_GUIDE_AGENT_LOG_STORE_DIRECTORY)
+            question_files_path=ghi_issue_write.ghi_guide_agent_log_store()[1])
         # The cold-start turn asks nothing, so its structured_output is not read.
         cold_reply, error = turn(cold_start_text, None)
         if cold_reply is None:
