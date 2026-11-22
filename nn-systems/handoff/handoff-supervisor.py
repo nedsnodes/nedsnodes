@@ -1094,6 +1094,14 @@ AGENT_SEAT_GITHUB_ACCOUNTS_OTHER_THAN_THE_MACHINE_DEFAULT = {
 }
 
 
+# Every other agent-seat's Remote Control entry is named after the agent-seat. Only --remote-control
+# and its prefix take this name: --name stays the agent-seat name, which same-machine peers and
+# the idle sweep address.
+AGENT_SEAT_NAME_TO_CLAUDE_CODE_REMOTE_CONTROL_NAME_WHERE_THEY_DIFFER = {
+    "helper2": "efficiency",
+}
+
+
 AGENT_SEAT_GITHUB_TOKEN_UNREADABLE_EXIT_STATUS = 5
 
 
@@ -2170,6 +2178,7 @@ NED_BOX_CLAUDE_CODE_TMPDIR = "/home/nedlern/.cache/claude-code-tmp"
 def launch_agent_session(agent_command: str, session_id: str, working_directory: Path,
                          prompt: str, resume: bool = False,
                          remote_control_name: str = "",
+                         session_name: str = "",
                          appended_system_prompt_file: str = "",
                          handoff_supervisor_agent_name: str = "",
                          update_timeout_seconds: int = 0):
@@ -2177,13 +2186,13 @@ def launch_agent_session(agent_command: str, session_id: str, working_directory:
     # --resume retains the transcript ID; --remote-control pins the address that otherwise drifts with conversation.
     # --remote-control names only the Remote Control entry: without --name, the name same-machine
     # peers address is derived from the working directory plus a code that changes every agent-session.
-    # The prefix keeps the agent-seat's name on an entry that /remote-control re-creates with a default name.
+    # The prefix keeps the Remote Control name on an entry that /remote-control re-creates with a default name.
     update_agent_binary(agent_command, update_timeout_seconds)
     flag = "--resume" if resume else "--session-id"
     command = [agent_command, flag, session_id]
     if remote_control_name:
         command += ["--remote-control", remote_control_name,
-                    "--name", remote_control_name,
+                    "--name", session_name or remote_control_name,
                     "--remote-control-session-name-prefix", remote_control_name]
     if appended_system_prompt_file:
         command += ["--append-system-prompt-file", appended_system_prompt_file]
@@ -2796,7 +2805,10 @@ def supervise_sessions(settings: SupervisorSettings) -> int:
             leftover_prompt_listing_counts_path(settings.handoff_directory, settings.agent))
         process = launch_agent_session(
             settings.agent_command, session_id, settings.working_directory, launch_prompt,
-            resume=next_launch_resumes_the_session, remote_control_name=settings.agent,
+            resume=next_launch_resumes_the_session,
+            remote_control_name=AGENT_SEAT_NAME_TO_CLAUDE_CODE_REMOTE_CONTROL_NAME_WHERE_THEY_DIFFER.get(
+                settings.agent, settings.agent),
+            session_name=settings.agent,
             appended_system_prompt_file=appended_system_prompt_file,
             handoff_supervisor_agent_name=settings.agent,
             update_timeout_seconds=settings.agent_update_timeout_seconds,

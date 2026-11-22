@@ -18,7 +18,8 @@ running agent-seat (a live `claude` process whose parent is
 /proc, the Mac's from `ps`, whose argument list is split at spaces, so a
 supervisor or claude path holding a space is not found), reads its session record
 ~/.claude/sessions/<pid>.json and its current transcript, and types
-`/remote-control <seat>` and Enter into the claude's own tmux pane (server
+`/remote-control <name>` and Enter, <name> being the claude's own `--remote-control`
+argument, into the claude's own tmux pane (server
 `-L <seat>`, the pane id the session record's "tmux" field ends with) when all
 of these hold:
 - the transcript's latest Remote Control line is that disconnect line, with no
@@ -181,7 +182,7 @@ RECORD_PROBLEM_NOTICE_TEMPLATE = (
     "If a Claude login on {machine} turns Remote Control off in {seat}, the watcher cannot turn it "
     "back on until this problem is fixed. The watcher sends another notice only if the problem changes.\n"
     "If {seat}'s Remote Control is off, turn it on by typing in {seat}'s window:\n"
-    "  /remote-control {seat}\n"
+    "  /remote-control {remote_control_name}\n"
     "To have the problem fixed, give this notice to an agent on {machine} and ask it to fix the problem.\n"
     "Record: {record}\n"
 )
@@ -191,7 +192,7 @@ TYPING_FAILED_NOTICE_TEMPLATE = (
     "back on: {problem}\n"
     "A Claude login on {machine} turned it off at {disconnected_at}.\n"
     "To turn it on, type in {seat}'s window:\n"
-    "  /remote-control {seat}\n"
+    "  /remote-control {remote_control_name}\n"
     "If the watcher keeps failing, give this notice to an agent on {machine} and ask it to find out why.\n"
     "Record: {record}\n"
 )
@@ -362,7 +363,9 @@ def mac_process_table():
 
 
 def running_agent_seats(table):
-    """Return [(seat, claude pid, seconds since the claude process started)], sorted by seat."""
+    """Return [(seat, claude pid, seconds since the claude process started, Remote Control name)],
+    sorted by seat. The Remote Control name is the claude's --remote-control argument, which the
+    handoff-supervisor may set apart from the agent-seat name, and else the agent-seat name."""
     supervisors = {}
     for pid, (_, words, _) in table.items():
         if (any(Path(word).name == SUPERVISOR_PROGRAM_NAME for word in words[:2])
@@ -371,7 +374,10 @@ def running_agent_seats(table):
     seats = []
     for pid, (parent, words, age) in table.items():
         if parent in supervisors and words and Path(words[0]).name == CLAUDE_PROGRAM_NAME:
-            seats.append((supervisors[parent], pid, age))
+            seat = supervisors[parent]
+            remote_control_name = (words[words.index("--remote-control") + 1]
+                                   if "--remote-control" in words[:-1] else seat)
+            seats.append((seat, pid, age, remote_control_name))
     return sorted(seats)
 
 
@@ -486,7 +492,8 @@ def prompt_line_is_empty(pane_text: str) -> bool:
     return False
 
 
-def check_seat(run: Run, seat, pid, age, session_records_directory: Path, projects_directory: Path):
+def check_seat(run: Run, seat, pid, age, remote_control_name, session_records_directory: Path,
+               projects_directory: Path):
     record_path = session_records_directory / f"{pid}.json"
     try:
         record = json.loads(record_path.read_text(encoding="utf-8"))
@@ -497,13 +504,14 @@ def check_seat(run: Run, seat, pid, age, session_records_directory: Path, projec
             return
         run.report(seat, "record-missing", RECORD_PROBLEM_NOTICE_TEMPLATE,
                    f"its claude process {pid} has no session record at {record_path}",
-                   key=f"{seat}:{pid}:record-missing")
+                   key=f"{seat}:{pid}:record-missing", remote_control_name=remote_control_name)
         return
     except (ValueError, KeyError) as error:
         run.report(seat, "record-unreadable", RECORD_PROBLEM_NOTICE_TEMPLATE,
                    f"its session record {record_path} could not be read as a record with "
                    f"sessionId, cwd and status: {type(error).__name__}: {error}",
-                   key=f"{seat}:{pid}:record-unreadable:{type(error).__name__}")
+                   key=f"{seat}:{pid}:record-unreadable:{type(error).__name__}",
+                   remote_control_name=remote_control_name)
         return
     transcript = (claude_code_session_transcript_lookup_and_text_search_common.project_directory_for_seat(
         Path(working_directory), projects_directory) / f"{session_id}.jsonl")
@@ -521,8 +529,8 @@ def check_seat(run: Run, seat, pid, age, session_records_directory: Path, projec
         if (datetime.now(timezone.utc) - last_typed_at).total_seconds() < REMOTE_CONTROL_RECONNECT_SECONDS_TO_WAIT_FOR_REMOTE_CONTROL_ACTIVE_BEFORE_TYPING_COMMAND_AGAIN:
             return
         if len(typings) >= REMOTE_CONTROL_RECONNECT_COMMAND_TMUX_TYPINGS_PER_DISCONNECT_AT_MOST:
-            report_typing_failure(run, seat, event, disconnect,
-                                  f"it typed /remote-control {seat} into its tmux pane {len(typings)} times, the "
+            report_typing_failure(run, seat, remote_control_name, event, disconnect,
+                                  f"it typed /remote-control {remote_control_name} into its tmux pane {len(typings)} times, the "
                                   f"last at {typings[-1]['at']}, and Claude Code has logged no line saying "
                                   "Remote Control is active since", kind="reconnect-typing-limit-reached-remote-control-still-off")
             return
@@ -532,12 +540,12 @@ def check_seat(run: Run, seat, pid, age, session_records_directory: Path, projec
     # The record's "tmux" field reads <session>:@<window>.%<pane>; the pane id names this claude's pane.
     pane = str(tmux_place).rpartition(".")[2]
     if not pane.startswith("%"):
-        report_typing_failure(run, seat, event, disconnect,
+        report_typing_failure(run, seat, remote_control_name, event, disconnect,
                               f"its session record names no tmux pane: its tmux field is {tmux_place!r}")
         return
     exit_code, mode = tmux(seat, "display-message", "-p", "-t", pane, "#{pane_in_mode}")
     if exit_code != 0:
-        report_typing_failure(run, seat, event, disconnect,
+        report_typing_failure(run, seat, remote_control_name, event, disconnect,
                               f"reading the mode of its tmux pane {pane} failed: tmux {outcome(exit_code)}: {mode}")
         return
     if mode == PANE_IN_MODE:
@@ -545,7 +553,7 @@ def check_seat(run: Run, seat, pid, age, session_records_directory: Path, projec
         return
     exit_code, pane_text = tmux(seat, "capture-pane", "-p", "-t", pane)
     if exit_code != 0:
-        report_typing_failure(run, seat, event, disconnect,
+        report_typing_failure(run, seat, remote_control_name, event, disconnect,
                               f"reading its tmux pane {pane} failed: tmux {outcome(exit_code)}: {pane_text}")
         return
     if not prompt_line_is_empty(pane_text):
@@ -554,15 +562,15 @@ def check_seat(run: Run, seat, pid, age, session_records_directory: Path, projec
     # Remote Control may have come back on by itself while this run read the pane.
     if latest_unanswered_disconnect(transcript, run.transcript_read_positions) is None:
         return
-    for number, arguments in enumerate((("-l", f"/remote-control {seat}"), ("Enter",))):
+    for number, arguments in enumerate((("-l", f"/remote-control {remote_control_name}"), ("Enter",))):
         if number:
             time.sleep(SECONDS_BETWEEN_TEXT_AND_ENTER)
         exit_code, output = tmux(seat, "send-keys", "-t", pane, *arguments)
         if exit_code != 0:
-            report_typing_failure(run, seat, event, disconnect,
+            report_typing_failure(run, seat, remote_control_name, event, disconnect,
                                   f"typing into its tmux pane {pane} failed: tmux {outcome(exit_code)}: {output}")
             return
-    run.log(seat, "typed", typed=f"/remote-control {seat}", **event)
+    run.log(seat, "typed", typed=f"/remote-control {remote_control_name}", **event)
 
 
 def skip(run: Run, seat, event, reason):
@@ -571,9 +579,11 @@ def skip(run: Run, seat, event, reason):
         run.log(seat, "skipped", reason=reason, **event)
 
 
-def report_typing_failure(run: Run, seat, event, disconnect, problem, kind="typing-failed"):
+def report_typing_failure(run: Run, seat, remote_control_name, event, disconnect, problem,
+                          kind="typing-failed"):
     run.report(seat, kind, TYPING_FAILED_NOTICE_TEMPLATE, problem,
                key=f"{seat}:{event['session_id']}:{event['disconnect']}:{kind}",
+               remote_control_name=remote_control_name,
                disconnected_at=disconnect.get("timestamp", "an unknown time"))
 
 
@@ -612,8 +622,9 @@ def run_once(environment) -> int:
             run = Run(log_directory)
             table = (mac_process_table() if sys.platform == "darwin"
                      else process_table(process_table_directory))
-            for seat, pid, age in running_agent_seats(table):
-                check_seat(run, seat, pid, age, session_records_directory, projects_directory)
+            for seat, pid, age, remote_control_name in running_agent_seats(table):
+                check_seat(run, seat, pid, age, remote_control_name, session_records_directory,
+                           projects_directory)
             if not transcript_read_positions_save(log_directory, run.transcript_read_positions):
                 run.failed = True
         except Exception as error:  # noqa: BLE001 - a failed run must reach the user, not only the scheduled job's log

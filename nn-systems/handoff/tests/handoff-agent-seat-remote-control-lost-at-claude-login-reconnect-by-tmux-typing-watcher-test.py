@@ -128,10 +128,11 @@ class Fixture:
         (directory / "cmdline").write_bytes(b"\0".join(word.encode() for word in words) + b"\0")
         (directory / "stat").write_text(stat_text(pid, parent, age_seconds), encoding="utf-8")
 
-    def add_seat_processes(self, claude_age_seconds=1000.0):
+    def add_seat_processes(self, claude_age_seconds=1000.0, claude_naming_words=()):
         self.add_process(SUPERVISOR_PID, 1, ["python3", "/x/nn-systems/handoff/handoff-supervisor.py",
                                              "--agent", self.seat, "--cd", str(self.seat_directory)])
-        self.add_process(CLAUDE_PID, SUPERVISOR_PID, ["claude", "--session-id", SESSION_ID],
+        self.add_process(CLAUDE_PID, SUPERVISOR_PID,
+                         ["claude", "--session-id", SESSION_ID, *claude_naming_words, "the prompt"],
                          claude_age_seconds)
 
     def write_record(self, status="idle", text=None):
@@ -287,7 +288,7 @@ def case_seat_finding(namespace):
         seats = watcher.running_agent_seats(watcher.process_table(fixture.processes))
         check("a claude whose parent is handoff-supervisor.py --agent <seat> is that seat's; "
               "a claude of no supervisor and a supervisor's other children are not",
-              [(seat, pid) for seat, pid, _ in seats] == [(fixture.seat, CLAUDE_PID)], seats)
+              [(seat, pid) for seat, pid, _, _ in seats] == [(fixture.seat, CLAUDE_PID)], seats)
         check("a process's age is read from its start time and the uptime",
               abs(seats[0][2] - 42.0) < 1.0, seats)
     finally:
@@ -315,6 +316,44 @@ def case_types_on_disconnect(namespace):
         exit_code, errors = fixture.run()
         check("a new disconnect line in the same session is typed for again",
               exit_code == 0 and fixture.decisions() == ["typed", "typed"], (exit_code, errors, fixture.entries()))
+    finally:
+        fixture.close()
+
+
+def case_types_the_remote_control_name_the_claude_was_launched_with(namespace):
+    # The handoff-supervisor may name an agent-seat's Remote Control entry apart from the agent-seat;
+    # typing the agent-seat name would rename the entry back.
+    naming_words = ["--remote-control", "efficiency", "--name", "ignored-display-name",
+                    "--remote-control-session-name-prefix", "efficiency"]
+    fixture = Fixture("own-remote-control-name", namespace)
+    try:
+        fixture.add_seat_processes(claude_naming_words=naming_words)
+        check("the Remote Control name is read from the claude's --remote-control argument",
+              [(seat, name) for seat, _, _, name in
+               watcher.running_agent_seats(watcher.process_table(fixture.processes))]
+              == [(fixture.seat, "efficiency")])
+        fixture.write_record()
+        fixture.write_transcript(reconnect_line(), disconnect_line())
+        fixture.start_pane()
+        exit_code, errors = fixture.run()
+        pane = fixture.typed()
+        check("a claude launched with its own Remote Control name: /remote-control <that name> is "
+              "typed into the agent-seat's own tmux server and logged under the agent-seat",
+              exit_code == 0 and "/remote-control efficiency\n" in pane + "\n"
+              and f"/remote-control {fixture.seat}" not in pane
+              and fixture.entries()[0]["seat"] == fixture.seat
+              and fixture.entries()[0]["typed"] == "/remote-control efficiency",
+              (exit_code, errors, pane, fixture.entries()))
+    finally:
+        fixture.close()
+    fixture = Fixture("own-remote-control-name-notice", namespace)
+    try:
+        fixture.add_seat_processes(claude_naming_words=naming_words)
+        exit_code, errors = fixture.run()
+        notices = fixture.notices()
+        notice = notices[0].read_text(encoding="utf-8") if notices else ""
+        check("a notice tells the user to type the claude's own Remote Control name",
+              exit_code == 1 and "  /remote-control efficiency\n" in notice, (exit_code, errors, notice))
     finally:
         fixture.close()
 
@@ -956,7 +995,7 @@ def case_process_ending_mid_read(namespace):
         Path.read_bytes = read_bytes_of_a_process_that_ends
         seats = watcher.running_agent_seats(watcher.process_table(fixture.processes))
         check("a process that ends after its file is opened is skipped, and the scan goes on",
-              [(seat, pid) for seat, pid, _ in seats] == [(fixture.seat, CLAUDE_PID)], seats)
+              [(seat, pid) for seat, pid, _, _ in seats] == [(fixture.seat, CLAUDE_PID)], seats)
     finally:
         Path.read_bytes = real_read_bytes
         fixture.close()
@@ -1064,7 +1103,7 @@ def case_ps_listing_reading():
           table == {SUPERVISOR_PID: (1, ["/opt/homebrew/bin/python3", "/x/handoff-supervisor.py", "--agent", "s1"], 3600),
                     CLAUDE_PID: (SUPERVISOR_PID, ["claude", "--session-id", SESSION_ID], 42)}, table)
     check("the seat is found in a ps listing as in /proc",
-          watcher.running_agent_seats(table) == [("s1", CLAUDE_PID, 42)], watcher.running_agent_seats(table))
+          watcher.running_agent_seats(table) == [("s1", CLAUDE_PID, 42, "s1")], watcher.running_agent_seats(table))
     real = subprocess.run(watcher.MAC_PROCESS_LISTING_COMMAND, capture_output=True, text=True, check=False)
     own = watcher.process_table_from_ps(real.stdout).get(os.getpid())
     check("this machine's real ps, run with the Mac's listing command, lists this test with its parent",
@@ -1243,6 +1282,7 @@ def main():
         case_prompt_line_reading()
         case_seat_finding(namespace)
         case_types_on_disconnect(namespace)
+        case_types_the_remote_control_name_the_claude_was_launched_with(namespace)
         case_typing_that_leaves_remote_control_off(namespace)
         case_typing_again_stops_once_reconnected(namespace)
         case_typing_logged_under_decisions_file_name_before_program_prefix(namespace)

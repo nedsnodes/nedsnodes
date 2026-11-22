@@ -353,6 +353,28 @@ def run_agent_exit_record_cases(workspace: Path):
           and not supervisor.agent_exit_record_is_a_stop_at_an_ask_user_before_restart_handoff(state),
           str(state))
 
+    # The run loop names the agent-session: Remote Control from the per-agent-seat table,
+    # falling back to the agent-seat name, and --name always the agent-seat name.
+    for case, table, wanted_remote_control_name in (
+            ("remotecontrolnamelisted", lambda agent: {agent: "efficiency"}, "efficiency"),
+            ("remotecontrolnameunlisted", lambda agent: {"some-other-seat": "efficiency"}, None)):
+        settings = settings_for(case)
+        naming_keywords = []
+
+        def launch_recording_names(agent_command, session_id, working_directory, prompt, **keywords):
+            naming_keywords.append((keywords.get("remote_control_name"), keywords.get("session_name")))
+            return StubLaunchedSession(9)
+        with supervisor_names_replaced(
+                launch_agent_session=launch_recording_names,
+                AGENT_SEAT_NAME_TO_CLAUDE_CODE_REMOTE_CONTROL_NAME_WHERE_THEY_DIFFER=table(settings.agent),
+                launch_time_git_sync=no_launch_time_git_sync, stdin_isatty=False), \
+                contextlib.redirect_stdout(io.StringIO()):
+            supervisor.supervise_sessions(settings)
+        check(f"REMOTE CONTROL NAME: {case}: the launch gets the Remote Control name "
+              f"{wanted_remote_control_name or 'of the agent-seat'} and --name the agent-seat name",
+              naming_keywords == [(wanted_remote_control_name or settings.agent, settings.agent)],
+              str(naming_keywords))
+
     # A handoff arrives with a terminal to ask on. The session is still running
     # when it is written, so the supervisor stops it itself (SIGTERM, -15).
     def launch_writing_a_handoff(settings, session, handoff_text):

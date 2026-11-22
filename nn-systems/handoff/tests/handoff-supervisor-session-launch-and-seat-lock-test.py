@@ -1368,6 +1368,24 @@ for resume in (False, True):
               str(arguments))
 
 with tempfile.TemporaryDirectory() as naming_workspace:
+    # Same-machine peers and the idle sweep address --name, so it keeps the agent-seat name
+    # when the Remote Control name differs.
+    agent = an_agent_recording_its_invocations(naming_workspace)
+    supervisor.launch_agent_session(
+        str(agent), "session-named-apart", Path(naming_workspace), "the prompt",
+        remote_control_name="efficiency", session_name="helper2",
+        update_timeout_seconds=0).wait()
+    arguments = (invocations_of(naming_workspace) or [""])[0].split(" ")
+    check("a launch whose Remote Control name differs from its agent-seat name gives Remote Control "
+          "and its prefix that name, and --name the agent-seat name",
+          arguments == ["--session-id", "session-named-apart",
+                        "--remote-control", "efficiency",
+                        "--name", "helper2",
+                        "--remote-control-session-name-prefix", "efficiency",
+                        "the", "prompt"],
+          str(arguments))
+
+with tempfile.TemporaryDirectory() as naming_workspace:
     agent = an_agent_recording_its_invocations(naming_workspace)
     supervisor.launch_agent_session(
         str(agent), "session-without-seat-name", Path(naming_workspace), "prompt",
