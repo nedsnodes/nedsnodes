@@ -1547,7 +1547,9 @@ def new_marks(text, tokens, ranges, shown):
     This is the one place that decides where a marked text ends, so that check reads the text
     unreadable_new_marks judged: at the end of its Markdown paragraph, or before the first line below it that
     this program reads on its own, such as the next `#new` or a `#case_against` line, even when Markdown keeps
-    that line in the same paragraph."""
+    that line in the same paragraph. A `The new text:` label just after the mark is not part of its text, as the
+    short-answer hook reads it, so a mark with only the label has no text on its line."""
+    new_text_label = load_module("walk_me_through_user_short_answer_hook", SHORT_ANSWER_HOOK_FILE).NEW_TEXT_LABEL
     lines = text.split("\n")
     code, paragraphs = {}, []
     for token in tokens:
@@ -1568,8 +1570,9 @@ def new_marks(text, tokens, ranges, shown):
                 marks.append(NewMark(match[1], number, True, False, [match[2]], below))
                 continue
             comment_cut = shown[number] != lines[number]
-            if not unquoted(match[2]):
-                marks.append(NewMark(match[1], number, False, comment_cut, [match[2]],
+            own_text = new_text_label.sub("", match[2])
+            if not unquoted(own_text):
+                marks.append(NewMark(match[1], number, False, comment_cut, [own_text],
                                      block_right_below(lines, number + 1, end)))
                 continue
             paragraph_end = max((paragraph[1] for paragraph in paragraphs if paragraph[0] <= number < paragraph[1]),  # pragma: no mutate, paragraphs never overlap, so a paragraph starting above the one holding the line also ends above it and max picks the same end, and with no paragraph holding the line both give no line below it
@@ -1578,7 +1581,7 @@ def new_marks(text, tokens, ranges, shown):
                              if any(marker.match(lines[below]) for marker in MARKER_LINES_READ_ON_THEIR_OWN)),
                             paragraph_end)
             marks.append(NewMark(match[1], number, False, comment_cut,
-                                 [match[2]] + unquoted_lines(lines[number + 1:min(text_end, end)]), []))
+                                 [own_text] + unquoted_lines(lines[number + 1:min(text_end, end)]), []))
     return marks
 
 
