@@ -946,12 +946,13 @@ seat.respond({f"pr:{MERGED_PR}": "fail"})
 seat.append(tool_use_record("toolu_after_raise"))
 result = seat.stop()
 text = context_of(result) or ""
-check("next-action: a raised task's expired prerequisite that GitHub cannot answer is "
-      "reported in the prompt",
+check("next-action: a task raised as met is listed without asking GitHub again, so GitHub "
+      "failing on its expired prerequisite is neither reported nor holds it",
       first_text.startswith("[rule due-task-raise-when-prerequisites-met] Act on task 9 ") and result.returncode == 0
       and text.startswith(NEXT_ACTION_FIRST_LINE)
-      and f"This hook could not ask GitHub whether PR {MERGED_PR} is merged" in text
-      and "1 more open task(s) are not listed" in text, (first_text, result))
+      and "could not ask GitHub" not in text
+      and '- task 9 "Raised already"' in text and "more open task(s)" not in text,
+      (first_text, result))
 
 seat = IdleSeat()
 seat.minutes("live-walk", "#next_to_present item 1 of 3\n")
@@ -1011,14 +1012,11 @@ check("next-action: a task list whose directory does not exist yet still gets th
       == {"session_id": "idle-session", "newest_tool_use_id": "toolu_first"}, result)
 
 # One GitHub budget bounds the whole run: tasks 1 and 2 spend it in the due-task pass, so the
-# next-action prompt's check of task 3's expired prerequisite must not get a budget of its own.
+# next-action prompt's check of task 3's prerequisite, skipped there, must not get a budget of its own.
 seat = IdleSeat()
 seat.task("1", metadata={"prerequisites": [{"pr_merged": 301}]})
 seat.task("2", metadata={"prerequisites": [{"pr_merged": 302}]})
 seat.task("3", metadata={"prerequisites": [{"pr_merged": 303}]})
-seat.state_path.parent.mkdir(parents=True)
-seat.state_path.write_text(json.dumps({"raised": {"3": {"prerequisites": hook.canonical_prerequisites(
-    [{"pr_merged": 303}])}}, "checks": {}}))
 gh_calls_made = []
 
 
@@ -1064,12 +1062,176 @@ check("one GitHub budget for the whole run: once the due-task pass spends it, th
       gh_calls_made == ["301", "302"], gh_calls_made)
 # A second budget would ask gh about task 3's prerequisite too, and report that failure as well.
 check("one GitHub budget for the whole run: each condition gh could not answer is reported "
-      "once, and the condition past the spent budget is not reported",
+      "once, and the condition past the spent budget is reported as skipped, not as failed",
       text.startswith(NEXT_ACTION_FIRST_LINE)
       and text.count("could not ask GitHub whether PR 301 is merged") == 1
       and text.count("could not ask GitHub whether PR 302 is merged") == 1
       and "could not ask GitHub whether PR 303 is merged" not in text
+      and text.count("before it asked about PR 303, so task 3 ") == 1
       and "3 more open task(s) are not listed" in text, text)
+
+
+# --- the GitHub budget goes to tasks no blockedBy holds, and a skip is reported ---------------
+# Each fake gh call moves the budget's clock by `seconds_per_call`; the budget is the real one.
+def run_with_fake_gh(seconds_per_call, merged, action, closed_without_merging=()):
+    """Run `action()` with gh answered in-process; returns (its result, the numbers gh was asked about)."""
+    clock_seconds = [0.0]
+    asked = []
+
+    def fake_ask_gh(kind, number, timeout_seconds):
+        asked.append(number)
+        clock_seconds[0] += seconds_per_call
+        return {"met": number in merged,
+                hook.CLOSED_WITHOUT_MERGING_ANSWER_KEY: number in closed_without_merging,
+                "title": f"T{number}", "url": f"https://x/{number}"}
+
+    real_ask_gh = hook.GitHubConditionChecker.__dict__["ask_gh"]
+    real_checker_clock = hook.GitHubConditionChecker.__dict__["clock"]
+    hook.GitHubConditionChecker.ask_gh = staticmethod(fake_ask_gh)
+    hook.GitHubConditionChecker.clock = staticmethod(lambda: clock_seconds[0])
+    try:
+        return action(), asked
+    finally:
+        hook.GitHubConditionChecker.ask_gh = real_ask_gh
+        hook.GitHubConditionChecker.clock = real_checker_clock
+
+
+seat = Seat()
+seat.task("1", subject="blocker, still open")
+seat.task("2", blocked_by=["1"],
+          metadata={"prerequisites": [{"pr_merged": 11}, {"pr_merged": 12}, {"pr_merged": 13}]})
+seat.task("3", metadata={"prerequisites": [{"pr_merged": 99}]}, subject="ready")
+state = {"raised": {}, "checks": {}}
+(lines, _, _, _), asked = run_with_fake_gh(7, {99}, lambda: hook.due_task_lines(
+    hook.read_tasks(seat.task_directory), seat.task_directory, state,
+    hook.GitHubConditionChecker(state["checks"], 0)))
+check("budget: a task blockedBy holds, whose slow gh calls would spend the budget, is checked "
+      "only after the ready task, which is raised",
+      asked[0] == 99 and len(lines) == 1 and lines[0].startswith(
+          '[rule due-task-raise-when-prerequisites-met] Act on task 3 "ready"'), (asked, lines))
+
+(unheld, held), asked = run_with_fake_gh(7, {99}, lambda: hook.unheld_and_held_tasks(
+    hook.read_tasks(seat.task_directory), seat.task_directory,
+    hook.GitHubConditionChecker({}, 0), {}))
+check("budget: the next-action list and the idle sweep also check the ready task first, and "
+      "list it, oldest first",
+      asked[0] == 99 and unheld == ["1", "3"] and held == 1, (asked, unheld, held))
+
+
+def hook_run_in_process(seat):
+    return hook.run(STOP_PAYLOAD, {**seat_session_environment(),
+                                   "CLAUDE_CODE_TASK_LIST_ID": TASK_LIST_ID},
+                    seat.home, hook.datetime.now(hook.timezone.utc))
+
+
+BUDGET_SKIP_INSTRUCTIONS = (
+    "If you have other work, nothing is needed for a task named above as not checked: the next "
+    "stop asks GitHub again and raises the task when what it waits on is done.\n"
+    "If you are about to end your turn with no other work, check each such pull request or GHI "
+    "yourself with `gh pr view <number> --repo nedsnodes/nedsnodes --json state` or `gh issue "
+    "view <number> --repo nedsnodes/nedsnodes --json state`, and act on the task now if every "
+    "prerequisite is done.")
+
+# The first call uses the whole budget, so the remaining budget is exactly 0 for the second.
+seat = Seat()
+seat.task("4", metadata={"prerequisites": [{"pr_merged": 401}]}, subject="first")
+seat.task("5", metadata={"prerequisites": [{"pr_merged": 402}, {"issue_closed": 403}]},
+          subject="second")
+output, asked = run_with_fake_gh(hook.GH_CALLS_TOTAL_BUDGET_SECONDS, {401, 402, 403},
+                                 lambda: hook_run_in_process(seat))
+text = json.loads(output)["hookSpecificOutput"]["additionalContext"] if output else ""
+check("budget spent, with a task raised: each task skipped is named after the raise, with "
+      "what was not asked and the instructions",
+      asked == [401] and text.startswith("[rule due-task-raise-when-prerequisites-met] Act on task 4 ")
+      and text.endswith(
+          "\nAt this stop this hook ran out of its 20-second budget for GitHub calls before it "
+          'asked about PR 402, GHI 403, so task 5 "second", which waits on them, was treated as '
+          "still waiting and not raised.\n" + BUDGET_SKIP_INSTRUCTIONS), (asked, text))
+
+seat = Seat()
+seat.task("6", metadata={"prerequisites": [{"pr_merged": 601}]})
+seat.task("7", metadata={"prerequisites": [{"pr_merged": 602}]}, subject="skipped")
+seat.task("8", metadata={})  # no prerequisites to read
+seat.task("9", status="completed", metadata={"prerequisites": [{"pr_merged": 602}]})
+try:
+    output, asked = run_with_fake_gh(hook.GH_CALLS_TOTAL_BUDGET_SECONDS, set(),
+                                     lambda: hook_run_in_process(seat))
+    fault = None
+except hook.HookFault as error:
+    output, fault = None, str(error)
+check("budget spent, with nothing else to say: the skip is a fault, so it does not keep the "
+      "agent from stopping",
+      fault is not None and fault.startswith(
+          "At this stop this hook ran out of its 20-second budget for GitHub calls before it "
+          'asked about PR 602, so task 7 "skipped", which waits on it, was treated as still '
+          "waiting and not raised.") and "task 6" not in fault and "task 8" not in fault
+      and "task 9" not in fault, (output, fault))
+
+seat = Seat()
+seat.task("4", metadata={"prerequisites": [{"pr_merged": 401}]})
+seat.task("5", metadata={"prerequisites": [{"pr_merged": 501}]}, subject="skipped")
+seat.task("6", metadata={"prerequisites": [{"pr_merged": 501}]}, subject="raised before")
+seat.state_path.parent.mkdir(parents=True)
+seat.state_path.write_text(json.dumps({"raised": {"6": {"prerequisites": hook.canonical_prerequisites(
+    [{"pr_merged": 501}])}}, "checks": {}}))
+try:
+    output, asked = run_with_fake_gh(hook.GH_CALLS_TOTAL_BUDGET_SECONDS, set(),
+                                     lambda: hook_run_in_process(seat))
+    fault = None
+except hook.HookFault as error:
+    output, fault = None, str(error)
+check("budget spent before a condition that an unraised task and an already-raised task share: "
+      "only the unraised task is named as not raised",
+      fault is not None and 'so task 5 "skipped"' in fault and "task 6" not in fault,
+      (output, fault))
+
+seat = Seat()
+seat.task("7", metadata={"prerequisites": [{"pr_merged": 701}, {"pr_merged": 702}]},
+          subject="re-plan")
+output, asked = run_with_fake_gh(hook.GH_CALLS_TOTAL_BUDGET_SECONDS, set(),
+                                 lambda: hook_run_in_process(seat), closed_without_merging={701})
+text = json.loads(output)["hookSpecificOutput"]["additionalContext"] if output else ""
+check("budget spent after one pull request of a task is found closed without merging: the task "
+      "is named to re-plan, not as not raised",
+      asked == [701] and '7 "re-plan"' in text and "ran out of its" not in text,
+      (asked, text))
+
+# Held task 2's closed-without-merging check spends the budget in the due-task pass; ready task 1,
+# raised before, must still be listed by the next-action prompt, which runs after that pass.
+seat = IdleSeat()
+seat.task("1", metadata={"prerequisites": [{"pr_merged": 101}]}, subject="ready")
+seat.task("2", blocked_by=["3"], metadata={"prerequisites": [{"pr_merged": 201}]})
+seat.task("3", subject="blocker")
+seat.state_path.parent.mkdir(parents=True)
+seat.state_path.write_text(json.dumps({"raised": {"1": {"prerequisites": hook.canonical_prerequisites(
+    [{"pr_merged": 101}])}}, "checks": {}}))
+real_home = os.environ.get("HOME")
+os.environ["HOME"] = str(seat.home)  # the handoff module finds its markers under Path.home()
+try:
+    output, asked = run_with_fake_gh(hook.GH_CALLS_TOTAL_BUDGET_SECONDS, {101}, lambda: hook.run(
+        json.dumps({"session_id": "idle-session", "transcript_path": str(seat.transcript),
+                    "cwd": str(seat.checkout), "hook_event_name": "Stop", "stop_hook_active": False}),
+        {**seat_session_environment(), "CLAUDE_CODE_TASK_LIST_ID": TASK_LIST_ID},
+        seat.home, hook.datetime.now(hook.timezone.utc)))
+finally:
+    if real_home is None:
+        os.environ.pop("HOME", None)
+    else:
+        os.environ["HOME"] = real_home
+text = json.loads(output)["hookSpecificOutput"]["additionalContext"] if output else ""
+check("budget spent by a held task in the due-task pass: the next-action prompt still lists the "
+      "ready task raised before, and names no task as not raised",
+      asked == [201] and text.startswith(NEXT_ACTION_FIRST_LINE)
+      and '- task 1 "ready"' in text and "ran out of its" not in text, (asked, text))
+
+CountingChecker.clock = staticmethod(lambda: 0.0)
+checker = CountingChecker({}, 0)
+CountingChecker.asked = []
+checker.started = 0.001 - hook.GH_CALLS_TOTAL_BUDGET_SECONDS
+checker.answer("pr_merged", 2)
+check("budget boundary: a call is made while any budget is left, and no skip is recorded",
+      CountingChecker.asked == [("pr_merged", 2)]
+      and checker.conditions_skipped_for_budget == [], CountingChecker.asked)
 
 
 seat = IdleSeat()
@@ -1303,6 +1465,132 @@ unheld, held = hook.unheld_and_held_tasks(hook.read_tasks(seat.task_directory),
                                           {})
 check("approval-walk item not decided: the next-action list counts the task held",
       unheld == ["79"] and held == 1, (unheld, held))
+
+# --- an approval record: a ready pending task is started by a forked subagent ----
+APPROVAL = "walk item 5, approved 2026-10-26"
+
+
+def approval_text(task_id, subject, approval=APPROVAL):
+    return (f'[rule due-task-approved-ready-task-forked-subagent-dispatch-reminder] Task {task_id} "{subject}" is '
+            f"ready and needs no decision from the user ({approval}). Set it in_progress with "
+            f"TaskUpdate, then dispatch a forked subagent for it now, with the Agent tool's "
+            f'isolation "worktree", and mark the task completed when the subagent reports it done.')
+
+
+seat = Seat()
+seat.task("100", metadata={"approval": APPROVAL}, subject="Fix the\nreport")
+result = seat.run()
+check("approval, nothing to wait on: exit 0", result.returncode == 0, result)
+check("approval, nothing to wait on: the exact text, raised at once",
+      context_of(result) == f'{approval_text("100", "Fix the report")}\n{DEFER_LINE}',
+      repr(context_of(result)))
+check("approval, nothing to wait on: gh never asked", seat.gh_calls() == [], seat.gh_calls())
+check("approval, nothing to wait on: raised once, the next stop is silent", silent(seat.run()))
+CHANGED_APPROVAL = "the user's words in session 9, 2026-10-27"
+seat.task("100", metadata={"approval": CHANGED_APPROVAL}, subject="Fix the report")
+text = context_of(seat.run()) or ""
+check("approval changed: raised again with the new record",
+      text == f'{approval_text("100", "Fix the report", CHANGED_APPROVAL)}\n{DEFER_LINE}',
+      repr(text))
+
+seat = Seat()
+seat.task("101", metadata={**MET, "approval": APPROVAL})
+text = context_of(seat.run()) or ""
+check("approval, prerequisites met: the approval text in place of Act on",
+      text == f'{approval_text("101", "Subject of task 101")}\n{DEFER_LINE}', repr(text))
+check("approval, prerequisites met: raised once", silent(seat.run()))
+
+seat = Seat()
+seat.task("102", metadata={"prerequisites": [{"pr_merged": 902}], "approval": APPROVAL})
+seat.respond({"pr:902": {"state": "OPEN", "title": "T", "url": "https://x/902"}})
+check("approval, prerequisites not met: silent", silent(seat.run()))
+
+seat = Seat()
+seat.task("103", metadata={"approval": APPROVAL}, blocked_by=["104"])
+seat.task("104", status="in_progress")
+check("approval, blocker incomplete: silent", silent(seat.run()))
+seat.task("104", status="completed")
+text = context_of(seat.run()) or ""
+check("approval, blocker completed: the approval text",
+      text == f'{approval_text("103", "Subject of task 103")}\n{DEFER_LINE}', repr(text))
+check("approval, blocker completed: raised once", silent(seat.run()))
+seat.task("103", metadata={"approval": APPROVAL}, blocked_by=["104", "114"])
+seat.task("114", status="completed")
+text = context_of(seat.run()) or ""
+check("approval raised, then a new blocker completes: the approval text again, not Act on",
+      text == f'{approval_text("103", "Subject of task 103")}\n{DEFER_LINE}', repr(text))
+
+seat = Seat()
+seat.task("105", metadata={"prerequisites": [{"no_such_kind": 1}], "approval": APPROVAL})
+text = context_of(seat.run()) or ""
+check("approval, unreadable prerequisites: the fault named, never the approval text",
+      text.startswith("[rule due-task-prerequisites-unusable-correct-them] Task 105 ")
+      and "is ready" not in text, repr(text))
+
+seat = Seat()
+seat.task("115", metadata={"prerequisites": [], "approval": APPROVAL})
+text = context_of(seat.run()) or ""
+check("approval, empty prerequisites list: the fault named, never the approval text",
+      "it is an empty list" in text and "is ready" not in text, repr(text))
+
+seat = Seat()
+for task_id, approval in (("106", 5), ("107", ""), ("108", "   "), ("109", None)):
+    seat.task(task_id, metadata={"approval": approval})
+check("approval not a non-empty string: no record, silent", silent(seat.run()))
+
+seat = Seat()
+seat.task("110", status="in_progress", metadata={"approval": APPROVAL})
+seat.task("111", status="in_progress", metadata={**MET, "approval": APPROVAL})
+text = context_of(seat.run()) or ""
+check("approval on an in_progress task: raised with Act on, never told to dispatch",
+      "task 110 " not in text and "Act on task 111 " in text and "is ready" not in text,
+      repr(text))
+
+seat = Seat()
+seat.task("112", metadata=MET)
+check("no approval: Act on",
+      (context_of(seat.run()) or "").startswith(
+          '[rule due-task-raise-when-prerequisites-met] Act on task 112 '))
+seat.task("112", metadata={**MET, "approval": APPROVAL})
+text = context_of(seat.run()) or ""
+check("approval added after an Act on raise: raised again with the approval text",
+      text == f'{approval_text("112", "Subject of task 112")}\n{DEFER_LINE}', repr(text))
+check("approval added after an Act on raise: then silent", silent(seat.run()))
+check("approval added after an Act on raise: gh asked once in all",
+      len(seat.gh_calls()) == 1, seat.gh_calls())
+
+seat = Seat()
+seat.task("113", metadata={"approval": "approved\nby the user"})
+check("approval spread over lines: cited on one line",
+      (context_of(seat.run()) or "").startswith(
+          '[rule due-task-approved-ready-task-forked-subagent-dispatch-reminder] Task 113 "Subject of task 113" '
+          "is ready and needs no decision from the user (approved by the user)."))
+
+seat = WalkSeat()
+seat.task("116", metadata={"approval": APPROVAL, "prerequisites": [{"approval_walk_item_decided": {
+    "approval_walk_minutes_file_path": str(seat.minutes), "approval_walk_item_heading": ITEM_1}}]})
+seat.minutes_say("item 1 of 3: deferred; it moves to just before the summary item. <open>")
+check("approval, approval-walk item not decided: silent", silent(seat.run()))
+seat.minutes_say("item 1 of 3: approved; every text the change adds has had a fast read. <accepted>")
+text = context_of(seat.run()) or ""
+check("approval, approval-walk item decided: the approval text",
+      text == f'{approval_text("116", "Subject of task 116")}\n{DEFER_LINE}', repr(text))
+
+seat = WalkSeat()
+seat.task("117", metadata={"approval": APPROVAL, "prerequisites": [{"approval_walk_item_decided": {
+    "approval_walk_minutes_file_path": str(seat.minutes), "approval_walk_item_heading": ITEM_1}}]})
+seat.minutes_say("item 1 of 3: approved; every text the change adds has had a fast read. <accepted>")
+seat.document.unlink()
+text = context_of(seat.run()) or ""
+check("approval, approval-walk item's walk-document missing: the fault named, never the approval text",
+      text.startswith("[rule due-task-prerequisites-unusable-correct-them] Task 117 ")
+      and "is ready" not in text, repr(text))
+
+seat = IdleSeat()
+seat.task("118", metadata={"approval": APPROVAL})
+text = context_of(seat.stop()) or ""
+check("approval raise at an idle stop: the approval text, and no next-action prompt",
+      text == f'{approval_text("118", "Subject of task 118")}\n{DEFER_LINE}', repr(text))
 
 shutil.rmtree(SUITE_ROOT, ignore_errors=True)
 print()

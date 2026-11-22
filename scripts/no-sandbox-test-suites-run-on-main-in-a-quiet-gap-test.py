@@ -100,6 +100,7 @@ print("SUMMARY: 2 passed, 0 failed, 2 total")
 RUNNER_LISTS = ('SUITES_RUN_WITHOUT_ANY_SANDBOX = {"outside-a-test.py": "x", '
                 '"outside-b-test.py": "y"}\n'
                 "SUITES_GIVEN_A_COPY_ON_WRITE_OVERLAY_OF_THE_REPOSITORY_GIT_DIRECTORY = {}\n"
+                "SUITES_THAT_RUN_THE_REAL_CLAUDE_CLI = {}\n"
                 "SUITES_WHOSE_TEST_SANDBOX_SHARES_THE_MACHINE_NETWORK = {}\n")
 
 
@@ -138,12 +139,14 @@ class Scratch:
         git(self.origin, "commit", "-q", "-m", message)
         return git(self.origin, "rev-parse", "HEAD")
 
-    def merge_on_origin(self, number):
+    def merge_on_origin(self, number, body=None):
         git(self.origin, "checkout", "-q", "-b", f"topic-{number}")
         self.commit_on_origin(f"topic {number}")
         git(self.origin, "checkout", "-q", "main")
-        git(self.origin, "merge", "-q", "--no-ff", "-m",
-            f"Merge pull request #{number} from nedschorus/topic-{number}", f"topic-{number}")
+        messages = ["-m", f"Merge pull request #{number} from nedschorus/topic-{number}"]
+        if body:
+            messages += ["-m", body]
+        git(self.origin, "merge", "-q", "--no-ff", *messages, f"topic-{number}")
         return git(self.origin, "rev-parse", "HEAD")
 
     def arguments(self, *extra):
@@ -234,7 +237,7 @@ with tempfile.TemporaryDirectory() as directory:
     first_commit = s.state()["passing_commit"]
 
     # --- main moves, and the run fails -------------------------------------------
-    merged = s.merge_on_origin(41)
+    merged = s.merge_on_origin(41, body="A title\nMerge pull request #9 is quoted on this line")
     code, printed, calls = s.run("fail")
     state = s.state()
     check("when main moves, the run compares with the passing commit",
@@ -254,6 +257,8 @@ with tempfile.TemporaryDirectory() as directory:
           "request merged in it, and how to record the follow-up",
           "outside-a-test.py" in notice and f"{first_commit[:12]}..{merged[:12]}" in notice
           and "#41" in notice and "--record-follow-up-request-sent" in notice, notice)
+    check("the notice lists a pull request from its merge commit's subject, not from a body "
+          "line that quotes another", "pull requests merged in it: #41\n" in notice, notice)
 
     code, printed, calls = s.run("fail")
     check("a failure is not tried again within the hour", calls == [] and code == 0,
@@ -377,7 +382,13 @@ with tempfile.TemporaryDirectory() as directory:
     s.state_file.write_text("{not json")
     code, printed, _ = s.run("pass", "--record-follow-up-request-sent")
     check("--record-follow-up-request-sent refuses an unreadable state file",
-          code == program.EXIT_REFUSED and "not JSON" in printed, (code, printed))
+          code == program.EXIT_REFUSED and "not JSON" in printed
+          and "the follow-up request was not recorded, because the state file cannot be read: "
+          f"{s.state_file} is not JSON" in printed
+          and "If you have not yet sent agent-seat reboot-test a follow-up request quoting "
+          "this message's first line" in printed
+          and "Do not run python3 scripts/no-sandbox-test-suites-run-on-main-in-a-quiet-gap.py "
+          "--record-follow-up-request-sent again for this refusal" in printed, (code, printed))
     s.run()
     code, printed, _ = s.run("pass", "--record-follow-up-request-sent")
     check("--record-follow-up-request-sent refuses when the last run passed",

@@ -1,16 +1,16 @@
 # Project Goals and Philosophy
 
-This page holds the project's goals and philosophy: the user's founding statement, what it asks of an agent on every task, and how agents work with the user. Where a principle meets a Standing decision of the objective page, the principle names the decision and does not restate it. A user-ruling on one task's content is not a principle here. The user's words behind each principle are quoted in the section Sources at the end, cited as S1, S2 and so on.
+This page holds the project's goals and philosophy: the user's founding statement, what it asks of an agent on every task, and how agents work with the user. A user-ruling on one task's content is not a principle here. The user's words behind each principle are quoted in the section Sources at the end, cited as S1, S2 and so on.
 
 ## The founding statement
 
-The user gave merge-lane-2 a statement of the project's philosophy on 2026-11-03 at about 21:20Z; S1 quotes it whole. Principles 1 to 5 state what it asks of an agent. The founding statement is the parent of the project's objective page, [nedsnodes-ai-native-software-development-objective.md](../nedsnodes-ai-native-software-development-objective.md), whose Standing decisions say what the system is built from.
+The user gave merge-lane-2 a statement of the project's philosophy on 2026-11-03 at about 21:20Z; S1 quotes it whole. Principles 1 to 5 state what it asks of an agent. The founding statement is the parent of the project's objective page, [nedsnodes-ai-native-software-development-objective.md](../nedsnodes-ai-native-software-development-objective.md).
 
 ## What the statement asks of an agent
 
 ### 1. Encode each repeatable rule wherever practical, and keep judgment for the steps that need it
 
-Wherever practical, an agent puts a rule that code, a schema, a state machine or a test can hold reliably into one of them, because agents debug and test code well and judge prose poorly; a guard still meets the two conditions of the bullet of `CLAUDE.md` that begins "Propose a guard". Each step that needs judgment gets clear questions, inputs and expected decisions, as S1 says. Standing decision 22, "Prose always precedes code", applies. Fresh-readers, not the writing agent, test whether prose is clear, and the user reviews the final prose that Standing decision 19 names; an obvious-error-fix stays an agent's to make. Sources: S1 to S5.
+Wherever practical, an agent puts a rule that code, a schema, a state machine or a test can hold reliably into one of them, because agents debug and test code well and judge prose poorly; a guard still meets the two conditions of the bullet of `CLAUDE.md` that begins "Propose a guard". Each step that needs judgment gets clear questions, inputs and expected decisions, as S1 says. Prose always precedes code: the design and the contract are prose, and the implementation comes from them; the test plan is prose, and the tests come from it. Fresh-readers, not the writing agent, test whether prose is clear, and the user reviews all final prose, after its cold read and before it lands: in the design-to-main pipeline the designs, the contracts and the test plans, and outside it the documents that govern the project, but not code changes or traffic between nodes; an obvious-error-fix stays an agent's to make. Sources: S1 to S5.
 
 ### 2. Put every finding in one of four categories
 
@@ -27,7 +27,7 @@ An agent fixes what must be fixed and leaves the rest to its category, because a
 
 ### 3. Keep a checked claim, and reopen it only for a reason
 
-An agent keeps a checked and supported claim with its evidence and the conditions under which it stays valid, and reopens it only when an input changes, an assumption fails, or contradictory evidence appears, because a repeated prose review gives inconsistent verdicts. Code is still tested on every change. Standing decision 5, "Creation alternates with independent review", applies. A finding on text the user has already decided is quoted with his user-ruling and not reported again, as Standing decision 25 says, unless a real defect needs that user-ruling changed, as /walk-me-through says. Source: S10.
+An agent keeps a checked and supported claim with its evidence and the conditions under which it stays valid, and reopens it only when an input changes, an assumption fails, or contradictory evidence appears, because a repeated prose review gives inconsistent verdicts. Code is still tested on every change. Creation alternates with independent review, and a changed output invalidates the old review. A finding on text the user has already decided is quoted with his user-ruling and not reported again, unless a real defect needs that user-ruling changed, as /walk-me-through says. Source: S10.
 
 ### 4. Give every review, test and approval a purpose, and fix the process behind a recurring failure
 
@@ -45,7 +45,7 @@ An agent does work the user trusts agents with without asking him or explaining 
 
 ### 7. Count more work as a win when the result works better
 
-More code, more steps, or simple changes such as renames count as a win when the result works better. The limit is real: a step that goes from a millisecond to a week is a cost. Standing decision 26, "Evidence first; cost is a bound", applies. Sources: S13 to S16.
+More code, more steps, or simple changes such as renames count as a win when the result works better. The limit is real: a step that goes from a millisecond to a week is a cost. Evidence comes first, and cost is a bound: an agent chooses the work that gives the strongest evidence that the code is good and maintainable, and CPU time, tokens and storage limit that choice and do not rank it. Sources: S13 to S16.
 
 ### 8. State the case against as it is, even when it is weak
 
@@ -57,11 +57,11 @@ An agent still states such a case, and the user reads it as no case. Sources: S1
 
 ### 10. Search for his earlier user-ruling before asking him
 
-Before an agent asks the user to decide something, it searches for his earlier user-ruling with the /find-info skill and builds on one that answers the same case; Standing decision 25 also applies. Source: S20.
+Before an agent asks the user to decide something, it searches for his earlier user-ruling with the /find-info skill and builds on one that answers the same case; a finding that touches text the user has already decided is quoted with his user-ruling and not reported again. Source: S20.
 
 ### 11. Bring him one decision at a time
 
-Anything that needs the user reaches him one decision at a time, as Standing decision 20 says, in an approval-walk when the trigger of /walk-me-through is met. Sources: S21, S22.
+Anything that needs the user reaches him one decision at a time, in an approval-walk when the trigger of /walk-me-through is met. Sources: S21, S22.
 
 ### 12. Give him the essence, and keep the details for agents
 
@@ -73,7 +73,7 @@ An agent consults the advisor, the stronger model Claude Code's advisor tool ask
 
 ### 14. Back each promise to him with a hook or a program
 
-When an agent tells the user that something will not happen again, a hook or a program makes sure of it, not a sentence in `CLAUDE.md` or a note in Claude Code's auto-memory. Standing decision 13 says which tier carries a rule. Sources: S27, S28.
+When an agent tells the user that something will not happen again, a hook or a program makes sure of it, not a sentence in `CLAUDE.md` or a note in Claude Code's auto-memory. A rule is put at the cheapest tier that can carry it: code, which is fast and reliable; an AI, which is slower and less reliable but still useful; or the user, who is slowest and scarce. Sources: S27, S28.
 
 ### 15. Say how you know a fix works
 

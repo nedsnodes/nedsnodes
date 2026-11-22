@@ -13,6 +13,7 @@ listed under "Exit codes" below. Whenever the sandbox program exits nonzero,
 this program adds one line of its own to stderr, after the messages of agy or
 the sandbox program. GEMINI_API_KEY is removed from agy's environment, because
 a key is billed per call and agy's own Google login, in ~/.gemini, is not.
+GH_TOKEN and GITHUB_TOKEN are removed too, so agy is given no GitHub access.
 
 The program's name describes the Linux sandbox; on macOS the home is not
 emptied, as the macOS paragraph below says.
@@ -130,7 +131,7 @@ def main() -> int:
             command = [*empty_home_sandbox_prefix(pathlib.Path.home(), agy_path),
                        AGY_PATH_INSIDE_SANDBOX, *agy_arguments]
         environment = {name: value for name, value in os.environ.items()
-                       if name != "GEMINI_API_KEY"}
+                       if name not in ("GEMINI_API_KEY", "GH_TOKEN", "GITHUB_TOKEN")}
         exit_code = subprocess.run(command, stdin=subprocess.DEVNULL, cwd=working_directory,
                                    env=environment).returncode
     if exit_code != 0:

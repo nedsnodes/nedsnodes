@@ -698,7 +698,21 @@ try:
         "timeout -s KILL 2d x": "2026-11-04T11:00:00Z",
         "timeout -k5 30s x": "2026-11-02T11:00:30Z",
         "timeout --preserve-status -v 3m x": "2026-11-02T11:03:00Z",
-        "cd a && timeout 5 x": None, "timeoutx 5 y": None, "timeout 5": None}
+        "cd a && timeout 5 x": None, "timeoutx 5 y": None, "timeout 5": None,
+        "timeout 5m prepare && run-tests": None, "timeout 5m a; b": None, "timeout 5m a || b": None,
+        "timeout 5m a\nb": None, "timeout 5m a & b": None,
+        "timeout 5m a 2>&1 | tail -5": "2026-11-02T11:05:00Z",
+        "timeout 5m bash -c 'a && b; c' &>log": "2026-11-02T11:05:00Z",
+        "timeout 5m grep \";\" f $(cd d && ls) \\\n -q": "2026-11-02T11:05:00Z",
+        "timeout 30m sleep 900;": "2026-11-02T11:30:00Z",
+        "timeout 30m sleep 900 ;\n": "2026-11-02T11:30:00Z",
+        "timeout 5m python3 - <<'EOF'\nimport x; x.run()\nEOF": "2026-11-02T11:05:00Z",
+        "timeout 5m python3 - <<-\"EOF\" 2>&1\n\tprint(1) && b\n\tEOF\n": "2026-11-02T11:05:00Z",
+        "timeout 5m python3 - <<EOF\nprint(1)\nEOF\nb": None,
+        "timeout 5m python3 - <<EOF\nnever closed; b": "2026-11-02T11:05:00Z",
+        "timeout 5m grep x <<< 'a\nb'; c": None,
+        "timeout 5m a $((1<<2))\nb": None,
+        "timeout 5m a <<-EOF\n\tx\n\tEOF\nb": None}
     machine = Machine()
     machine.seat("alpha", [user("go")] + [
         record for number, command in enumerate(TIMEOUT_END_BY_COMMAND_LINE)
@@ -709,7 +723,9 @@ try:
     found = {command: entry["timeout_ends_at"] for command, entry in zip(
         TIMEOUT_END_BY_COMMAND_LINE, verdicts["alpha"]["running"]["background_commands"])}
     check("the timeout end of a command line starting with coreutils `timeout`, after any options, "
-          "with each duration unit; none for a timeout later in the line or no duration",
+          "with each duration unit, piped or not; none for a timeout later in the line, no duration, "
+          "or a `;`, `&&`, `||`, `&` or line break outside quotes, which runs a command the timeout "
+          "does not stop",
           found == TIMEOUT_END_BY_COMMAND_LINE, found)
 
 
@@ -854,6 +870,22 @@ try:
           == [[{"id": "bk9617lvz", "started": "2026-11-02T09:05:00Z",
                 "description": "Check which recorded surviving mutants current main kills",
                 "timeout_ends_at": None}]], verdicts["alpha"])
+
+    # A record the subagent wrote within the last 5 minutes keeps the session transcript's read from
+    # reading the subagent's own transcript past its last line, so only the subagent's own read can
+    # find that line's bytes cut in two by Claude Code still writing it.
+    machine = Machine()
+    subagent_with_own_background_command(machine, last_spend_at="2026-11-02T09:19:59Z")
+    project, _ = machine.seat("alpha", None)
+    with (project / "s-1" / "subagents" / "agent-a1b2.jsonl").open("ab") as handle:
+        handle.write(json.dumps(user("test output", at="2026-11-02T11:58:00Z")).encode() + b"\n"
+                     + b'{"type": "assistant", "message": {"content": "caf\xc3')
+    code, verdicts, _ = machine.run()
+    check("a stopped subagent that wrote a record within the last 5 minutes, whose own transcript's "
+          "last line, still being written, ends in bytes that are not UTF-8: an error for that "
+          "agent-seat, exit 1",
+          code == 1 and verdicts["alpha"]["rule"] is None
+          and "still being written" in verdicts["alpha"]["errors"][0], verdicts["alpha"])
 
     # --- rule 4 against rule 5: open tasks and their prerequisites -------------------------------
     machine = Machine()
@@ -1184,6 +1216,19 @@ try:
           message is not None
           and message.startswith(f"the task list {unlistable_tasks} could not be listed")
           and "holds the agent-seat's work is unknown" in message, message)
+    # Only a direct call can start the shared checker with its GitHub budget already spent.
+    budget_tasks = Path(tempfile.mkdtemp(dir=str(SUITE_ROOT)))
+    (budget_tasks / "1.json").write_text(json.dumps(
+        {"id": "1", "subject": "task 1", "status": "pending", "blockedBy": [],
+         "metadata": {"prerequisites": [{"pr_merged": 50}]}}))
+    checker = program.due_task_hook.GitHubConditionChecker({}, 0)
+    checker.started -= program.due_task_hook.GH_CALLS_TOTAL_BUDGET_SECONDS
+    verdict = {"running": {}, "handoff_deferred_marker": False}
+    decision = program.rules_three_to_five(verdict, None, checker, budget_tasks, budget_tasks)
+    check("a prerequisite the GitHub budget left unasked: rule 5, not rule 4's no wake",
+          decision == {fields.RULE: 5, fields.DECISION: fields.JUDGE}
+          and set(checker.conditions_skipped_for_budget) == {("pr_merged", 50)},
+          (decision, checker.conditions_skipped_for_budget))
     machine = Machine()
     machine.seat("alpha", [user("go"), assistant("Done."), turn_end()])
     machine.seat("beta", [user("go"), assistant("Done."), turn_end()])

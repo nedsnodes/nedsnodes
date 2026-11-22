@@ -26,7 +26,7 @@ logins, recover reports from chat, retry models, or verify report content.
 
 agy runs on its own Google login, never on a Gemini API key: the launcher
 removes GEMINI_API_KEY from agy's environment, because a key is billed per
-call. When agy has no login, its "Authentication required." message is in
+call. It also removes GH_TOKEN and GITHUB_TOKEN, so agy is given no GitHub access. When agy has no login, its "Authentication required." message is in
 the log.
 
 Runs `agy models` inside the same sandbox before starting the task, refusing
@@ -122,7 +122,7 @@ def main(argv=None):
         if not prompt.strip():
             raise RuntimeError("the brief is empty")
         stage = "preparing the sandbox"
-        environment = agy_cell.agy_environment_copy_without_gemini_api_key(os.environ)
+        environment = agy_cell.agy_environment_copy_without_gemini_api_key_or_github_token(os.environ)
         writable_folders = [checkout, *roots] if args.sandbox == "workspace-write" else []
         prefix = agy_cell.credential_sandbox_prefix(
             writable_paths=[(report, False), *((folder, True) for folder in writable_folders)],

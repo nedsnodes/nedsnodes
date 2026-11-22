@@ -141,6 +141,34 @@ with tempfile.TemporaryDirectory() as scratch_name:
     finally:
         (unwritable_captures_directory / "MD-skills").chmod(0o700)
 
+    unsearchable_captures_directory = scratch / "unsearchable captures"
+    (unsearchable_captures_directory / "MD-skills").mkdir(parents=True)
+    (unsearchable_captures_directory / "MD-skills").chmod(0o600)
+
+    def path_exists_as_python_3_13_does(path, *args, **kwargs):
+        if not os.access(path.parent, os.X_OK):
+            raise PermissionError(13, "Permission denied", str(path))
+        return os.path.exists(path)
+
+    try:
+        # Python 3.14's Path.exists returns False here; the patch makes it raise, as 3.13's does.
+        with mock.patch.object(captures.socket, "gethostname", return_value="ned-box"), \
+                mock.patch.object(captures, "AGENT_SEAT_TERMINAL_CAPTURE_FILE_APPEAR_WAIT_SECONDS", 0.3), \
+                mock.patch.object(Path, "exists", path_exists_as_python_3_13_does):
+            try:
+                line = start_with(dict(in_pane_environment, **{OVERRIDE: str(unsearchable_captures_directory)},
+                                       PATH=f"{succeeding}{os.pathsep}{base_environment.get('PATH', '')}"))
+            except PermissionError as error:
+                line = f"raised {error!r}"
+        check("an agent-seat directory without search permission, where Path.exists raises as on Python "
+              "3.13: the start does not raise, and the line says the capture file did not appear",
+              line.startswith("this agent-seat's terminal output is not being captured to a file: "
+                              "tmux pipe-pane started, but the terminal capture file "
+                              f"{unsearchable_captures_directory}/MD-skills/")
+              and "did not appear within 0.3 seconds" in line, line)
+    finally:
+        (unsearchable_captures_directory / "MD-skills").chmod(0o700)
+
     for label, body, expected in (
             ("exits nonzero with an error", "sys.stderr.write('no such pane: %7\\n'); sys.exit(1)\n",
              "tmux pipe-pane exited 1: no such pane: %7."),

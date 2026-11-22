@@ -656,13 +656,14 @@ def test_supervisor_shows_no_leftovers_sentence_above_a_part_with_no_entry():
     counts = SCRATCH / "seat-t-leftovers-prompt-listing-counts.json"
     counts.write_text(json.dumps({"branch b1": 1}))
     prompt = f"Opening.{supervisor.NEXT_STEP_HEADING}Do the next thing."
-    held = listing.hidden_line([("worktree", {"378"}), ("branch", {"379"})])
-    only_held = supervisor.launch_prompt_with_leftovers_before_the_next_step(
-        prompt, ("", held), counts)
-    check(only_held == f"Opening.\n\n{held}{supervisor.NEXT_STEP_HEADING}Do the next thing."
+    unreadable = ("This agent-seat's task list could not be read in full (x), so an entry one "
+                  "of its tasks holds may be listed above.")
+    only_unreadable = supervisor.launch_prompt_with_leftovers_before_the_next_step(
+        prompt, ("", unreadable), counts)
+    check(only_unreadable == f"Opening.\n\n{unreadable}{supervisor.NEXT_STEP_HEADING}Do the next thing."
           and not counts.exists(),
-          "a part with no entry, such as the line on what open tasks hold, is shown without the "
-          "leftovers sentence, and the counts file is deleted", only_held)
+          "a part with no entry, such as the line saying the task list could not be read, is shown "
+          "without the leftovers sentence, and the counts file is deleted", only_unreadable)
     failure = ("Leftover work-snapshots could not be listed (OSError: x). Uncommitted work may be "
                "waiting; list it with: a command")
     branches = "This agent-seat's branches with no pull request: 1:\n- branch b1; main lacks the changes of its 1 commit(s)\nSteps."
@@ -755,10 +756,8 @@ def test_open_tasks_hold_entries():
         "41": ("pending", None),
     })
     text = listing.first_prompt_text(main, "seat-t")
-    check("This agent-seat also has 2 worktrees and 3 branches that open tasks hold "
-          "(tasks 9, 20, 135); they are not listed." in text,
-          "the entries open tasks hold are counted in one line naming the tasks in number order",
-          text)
+    check("open tasks hold" not in text and "they are not listed" not in text,
+          "no line stands for the entries open tasks hold", text)
     check(str(held_worktree) not in text and str(by_branch_worktree) not in text,
           "a worktree an open task names by its path or by its branch is left out", text)
     check("seat-t-held-1" not in text and "seat-t-held-2" not in text,
@@ -790,21 +789,9 @@ def test_open_task_names_a_worktree_by_a_path_written_differently():
         str(link / by_link.name),
     ]})})
     text = listing.first_prompt_text(main, "seat-w")
-    check(all(str(path) not in text for path in (by_dots, by_slash, by_link))
-          and "This agent-seat also has 3 worktrees" in text,
+    check(all(str(path) not in text for path in (by_dots, by_slash, by_link)),
           "a worktree an open task names by a path with .., a trailing slash or a symlink is left out",
           text)
-
-
-def test_hidden_line_counts():
-    check(listing.hidden_line([]) == "", "nothing hidden prints no line")
-    check(listing.hidden_line([("branch", {"5"})])
-          == "This agent-seat also has 1 branch that open tasks hold (task 5); they are not listed.",
-          "a category whose count is zero is left out, and one entry is singular")
-    check(listing.hidden_line([("worktree", {"3"}), ("worktree", {"3", "x"})])
-          == "This agent-seat also has 2 worktrees that open tasks hold (tasks 3, x); "
-             "they are not listed.",
-          "task ids are listed once each, numbers before other ids")
 
 
 def test_everything_held():
@@ -813,9 +800,8 @@ def test_everything_held():
     branch_with_commit(main, "seat-u-only", "seat-u")
     task_list("seat-u", {"7": ("pending", {"branches": ["seat-u-only"]})})
     text, failed = listing.list_text_and_failure(main, "seat-u")
-    check(not failed and text == "This agent-seat also has 1 branch that open tasks hold "
-          "(task 7); they are not listed.",
-          "when open tasks hold every entry, only their line is printed", text)
+    check(not failed and text == "",
+          "when open tasks hold every entry, the list prints nothing", text)
 
 
 def test_unreadable_task_list_hides_nothing():
@@ -828,7 +814,7 @@ def test_unreadable_task_list_hides_nothing():
     text, failed = listing.list_text_and_failure(main, "seat-v")
     check(not failed and "branch seat-v-held;" in text,
           "an entry no readable task holds is listed", text)
-    check("(task 3)" in text and "branch seat-v-other;" not in text,
+    check("branch seat-v-other;" not in text,
           "a readable task still holds its entry", text)
     check(text.count("could not be read in full") == 1 and str(directory / "1.json") in text
           and str(directory / "2.json") in text,
@@ -864,7 +850,7 @@ for case in (test_branches, test_pushed_text, test_worktrees, test_gh_failure,
              test_supervisor_puts_leftovers_before_the_next_step_without_a_conversation_tail,
              test_supervisor_appends_the_list, test_open_tasks_hold_entries,
              test_open_task_names_a_worktree_by_a_path_written_differently,
-             test_hidden_line_counts, test_everything_held,
+             test_everything_held,
              test_unreadable_task_list_hides_nothing):
     print(f"-- {case.__name__}")
     case()

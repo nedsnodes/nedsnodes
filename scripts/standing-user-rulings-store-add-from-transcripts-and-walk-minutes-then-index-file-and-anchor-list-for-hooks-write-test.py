@@ -58,11 +58,14 @@ def check(case_name, condition, detail=""):
 
 
 SEAT_DIRECTORY = "/home/nedlern/agents/alpha-seat"
+# A file the project rename kept under its old name; it is on origin/main under this name.
+KEPT_FILE = "scripts/merge-gate-test-captured-github-responses/nedschorus-nedschorus-1154-issue-view-open-issue.json"
 REPOSITORY_FILES = ("CLAUDE.md", "scripts/tool-one.py", "nn-systems/cold-read/cold-read-fast-read.py",
                     "nn-systems/handoff/handoff-supervisor.py", ".claude/skills/find-info/SKILL.md",
                     "docs/issues/2118-ruling-agent-keeps-user-rulings.md", "SKILL.md", "CLAUDE",
                     "nn-systems/nn-shared-database/nn-shared-database-service.py",
-                    "docs/cross-project/nedsnodes-ai-native-software-development-notes.md")
+                    "docs/cross-project/nedsnodes-ai-native-software-development-notes.md",
+                    KEPT_FILE)
 
 
 def human(text, stamp, cwd=SEAT_DIRECTORY, **fields):
@@ -159,6 +162,14 @@ class Case:
 
     def anchors(self):
         return (self.store_directory / program.ANCHOR_LIST_FILE_NAME).read_text().splitlines()
+
+
+OWNER_REPORT_TEXT = ("If it fails the same way at the next run, send prime-intellect, the agent-seat that owns "
+                     "this program, the FAILED line above with SendMessage.")
+SOURCE_FAILED_TEXT = ("The other transcripts and walk-minutes were read, and what they held was added; each file "
+                      "a FAILED line above names is read again from where it stopped at the next run.")
+MOVE_FAILED_TEXT = "No stored source path was changed; the next run tries the move again."
+CHECK_FAILED_TEXT = "No entry's status was changed; the next run checks every stored message of the user's again."
 
 
 def described(result):
@@ -335,6 +346,28 @@ with tempfile.TemporaryDirectory() as directory:
           "/nn-systems/handoff/" in case.anchors()
           and not any(SYSTEMS_DIRECTORY_BEFORE_PROJECT_RENAME in anchor for anchor in case.anchors()),
           case.anchors())
+    index_tags = [line["tags"] for line in case.index()[1] if line["text"] == old_record]
+    check("a system tag stored under its old name is written to the index file's tags under its new name",
+          index_tags == [["nn-systems/handoff/", "nn-systems/handoff/handoff-supervisor.py"]], index_tags)
+
+with tempfile.TemporaryDirectory() as directory:
+    case = Case(directory)
+    old_record = f"see {SYSTEMS_DIRECTORY_BEFORE_PROJECT_RENAME}/handoff/ for it"
+    case.transcript("ned-box", [human(old_record, "2026-10-24T00:00:00Z")])
+    case.run()
+    check("a system named in an old record by its old directory alone, with no file, is tagged under its new name",
+          case.tags(old_record) == {"nn-systems/handoff/"}, case.tags(old_record))
+
+# A file the rename kept under its old name is tagged, indexed and anchored under that name, which origin/main holds.
+with tempfile.TemporaryDirectory() as directory:
+    case = Case(directory)
+    record = f"see {KEPT_FILE}"
+    case.transcript("ned-box", [human(record, "2026-10-24T00:00:00Z")])
+    case.run()
+    index_tags = [line["tags"] for line in case.index()[1] if line["text"] == record]
+    check("a file the rename kept under its old name is tagged, written to the index file and anchored as it is named",
+          case.tags(record) == {KEPT_FILE} and index_tags == [[KEPT_FILE]] and case.anchors() == ["/" + KEPT_FILE],
+          (case.tags(record), index_tags, case.anchors()))
 
 # The shared database's system and a file outside the wiki whose name had the old prefix, named by their old names in an old record.
 # The old paths are made from the rename's one list, so no line here cites a path the rename removed.
@@ -487,6 +520,7 @@ with tempfile.TemporaryDirectory() as directory:
           result.returncode == 1 and f"FAILED: transcript {blocked}:" in result.stderr
           and "read again from where it stopped at the next run" in result.stderr
           and "send prime-intellect" in result.stderr
+          and MOVE_FAILED_TEXT not in result.stderr
           and [entry[1] for entry in case.entries()] == ["readable"]
           and f"transcript {blocked}" in case.query("SELECT failures FROM index_program_runs")[0][0],
           described(result))
@@ -505,6 +539,7 @@ with tempfile.TemporaryDirectory() as directory:
     blocked.chmod(0o644)
     check("a walk-minutes file that cannot be read is reported FAILED, exit 1, and the others are still added",
           result.returncode == 1 and f"FAILED: walk-minutes {blocked}:" in result.stderr
+          and SOURCE_FAILED_TEXT + "\n" + OWNER_REPORT_TEXT + "\n" in result.stderr
           and [entry[1] for entry in case.entries()] == ["Open (user-ruled 2026-10-17)."], described(result))
 with tempfile.TemporaryDirectory() as directory:
     case = Case(directory)
@@ -870,8 +905,8 @@ with tempfile.TemporaryDirectory() as directory:
         program.user_words_entries_not_the_users_words_status_set_and_clear = real_check
     check("a check that fails is reported FAILED, exit 1, and rolls back, leaving every entry's state as it was",
           exit_code == 1
-          and "FAILED: checking again which user-words entries are a program's prompt: disk I/O error"
-              in stderr.getvalue()
+          and stderr.getvalue() == "FAILED: checking again which stored messages of the user's are a program's "
+                                   "prompt: disk I/O error\n" + CHECK_FAILED_TEXT + "\n" + OWNER_REPORT_TEXT + "\n"
           and states(case) == [("kept words", "standing"), (prompt, "standing")],
           f"exit {exit_code}: {stderr.getvalue()} {states(case)}")
 
@@ -1014,6 +1049,38 @@ with tempfile.TemporaryDirectory() as directory:
           exit_code == program.EXIT_SOURCE_OR_OUTPUT_FAILED and len(case.entries()) == 1
           and "moving stored source paths to the names the project rename gave them" in stderr.getvalue()
           and "database is locked" in stderr.getvalue(), f"exit {exit_code}: {stderr.getvalue()}")
+    check("when moving stored source paths fails, the FAILED line is followed by the move's own follow-up text, "
+          "which says the stored paths are unchanged, and by no unreadable file's text",
+          stderr.getvalue() == "FAILED: moving stored source paths to the names the project rename gave them: "
+                               "database is locked\n" + MOVE_FAILED_TEXT + "\n" + OWNER_REPORT_TEXT + "\n",
+          stderr.getvalue())
+
+# Failures from two groups in one run: each group's FAILED lines come once, right before that group's own text.
+with tempfile.TemporaryDirectory() as directory:
+    case = Case(directory)
+    blocked = case.transcript("mac", [human("unreadable", "2026-10-22T00:00:00Z")], name="blocked.jsonl")
+    blocked.chmod(0)
+    real_update = program.source_paths_moved_by_project_rename_update
+
+    def failing_update(connection):
+        raise sqlite3.OperationalError("database is locked")
+
+    program.source_paths_moved_by_project_rename_update = failing_update
+    stdout, stderr = io.StringIO(), io.StringIO()
+    try:
+        with contextlib.redirect_stdout(stdout), contextlib.redirect_stderr(stderr):
+            exit_code = program.run(case.log_store, case.agents, case.checkout)
+    finally:
+        program.source_paths_moved_by_project_rename_update = real_update
+        blocked.chmod(0o644)
+    check("a run with a move failure and an unreadable transcript prints each FAILED line once, followed by its own "
+          "follow-up text and no other",
+          exit_code == program.EXIT_SOURCE_OR_OUTPUT_FAILED
+          and stderr.getvalue() == "FAILED: moving stored source paths to the names the project rename gave them: "
+                                   "database is locked\n" + MOVE_FAILED_TEXT + "\n" + OWNER_REPORT_TEXT + "\n"
+                                   + f"FAILED: transcript {blocked}: [Errno 13] Permission denied: '{blocked}'\n"
+                                   + SOURCE_FAILED_TEXT + "\n" + OWNER_REPORT_TEXT + "\n",
+          f"exit {exit_code}: {stderr.getvalue()!r}")
 
 old_issue = program.GHI_REFERENCE.search(f"see https://github.com/{program.repository_names.OLD_REPOSITORY}/issues/12 now")
 old_pull = program.PULL_REQUEST_REFERENCE.search(f"see https://github.com/{program.repository_names.OLD_REPOSITORY}/pull/34 now")

@@ -698,11 +698,11 @@ def run_agent_text_cases(fixture):
     check("changed print f-strings retain placeholders and old/new text", "{name}" in f_string_entry.get("old_text", "") and "{name}" in f_string_entry.get("new_text", "") and "Old message" in f_string_entry["old_text"] and "New message" in f_string_entry["new_text"], entries)
     f_string_command = f_string_entry.get("fast_read_command")
     f_string_target = Path(shlex.split(f_string_command)[-1]) if f_string_command else Path()
-    check("an f-string message's target holds the text the agent reads, each field a <source> stand-in, "
+    check("an f-string message's target holds the text the agent reads, each field a <filled in: source> stand-in, "
           "not the f-string's Python source",
           f_string_entry.get("new_text") == "f'New message for {name}'"
-          and f_string_entry.get("new_text_as_agent_reads_it_with_placeholder_stand_ins") == "New message for <name>"
-          and f_string_target.is_file() and f_string_target.read_text(encoding="utf-8") == "New message for <name>\n"
+          and f_string_entry.get("new_text_as_agent_reads_it_with_placeholder_stand_ins") == "New message for <filled in: name>"
+          and f_string_target.is_file() and f_string_target.read_text(encoding="utf-8") == "New message for <filled in: name>\n"
           and f_string_target.name == f_string_entry["fast_read_target_file_name"], f_string_entry)
     check("changed raise text is listed with context", any(entry["label"] == "raise in show_message()" and entry["old_text"] == "Old failure" and entry["new_text"] == "New failure" for entry in entries), entries)
     check("changed advice constants are listed", any(entry["label"] == "CHECK_ADVICE =" and entry["old_text"] == "Old advice ``` marker" and entry["new_text"] == "New advice ``` marker" for entry in entries), entries)
