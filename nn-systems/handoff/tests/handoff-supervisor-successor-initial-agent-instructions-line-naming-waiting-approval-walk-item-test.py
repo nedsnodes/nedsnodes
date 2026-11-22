@@ -199,6 +199,19 @@ def run_walk_minutes_cases(workspace):
     prefix_only = lines_for(root, "Continue approval-walk fixture-older-walk-2 at item 1.")
     check("two open walks, the next step naming only a longer name that begins with one walk's name: the latest",
           prefix_only == expected, repr(prefix_only))
+    by_minutes_path = lines_for(root, "Read docs/walk/fixture-older-walk-minutes.md and continue.")
+    check("two open walks, the next step naming the older one only by its walk-minutes path: that one",
+          by_minutes_path == older_line, repr(by_minutes_path))
+    first_action_older = lines_for(
+        root, "## First action\n- Continue approval-walk fixture-older-walk at item 1.\n\n"
+              f"## Facts not held elsewhere\n- {WALK} waits on the user's answer to item 2.\n")
+    check("two open walks, the first action naming the older one and a later line the newer: the older one",
+          first_action_older == older_line, repr(first_action_older))
+    first_action_newer = lines_for(
+        root, f"## First action\n- Continue approval-walk {WALK} at item 2.\n\n"
+              "## Facts not held elsewhere\n- fixture-older-walk is paused in all but name.\n")
+    check("two open walks, the first action naming the newer one and a later line the older: the newer one",
+          first_action_newer == expected, repr(first_action_newer))
 
     root = workspace / "reused-number"
     walk_in(root, "#next_to_present item 2 of 3\n" f"#item_page item 2 of 3 {LINK}\n",
@@ -206,6 +219,15 @@ def run_walk_minutes_cases(workspace):
     reused = lines_for(root)
     check("two headings for the waiting item, told apart by M: the point of the heading the walk-minutes' M picks",
           reused == expected, f"{reused!r}\nexpected {expected!r}")
+
+    root = workspace / "several-items-later-heading-naming-the-first"
+    walk_in(root, "#next_to_present items 2 and 3 of 4\n" f"#item_page item 2 of 4 {LINK}\n",
+            document="# Fixture\n\n## Item 1 of 4: First\n\nRecommendation: one.\n\n"
+                     "## Item 2 of 4: Current\n\nRecommendation: two.\n\n"
+                     "## Items 2 and 3 of 5: Other\n\nRecommendation: three.\n")
+    several = lines_for(root)
+    check("several waiting items, a later item's heading naming the first too: the first item's own point",
+          several == (approved_line(WALK, "2 of 4, Current,", LINK, "2 of 4"),), repr(several))
 
     root = workspace / "open-and-paused"
     paused = walk_in(root, "#next_to_present item 1 of 3\n#approval_walk_paused away\n", name="fixture-paused-walk")
@@ -346,6 +368,32 @@ def run_prompt_placement_cases(workspace):
         supervisor.supervise_sessions(settings)
     check("launch site: the successor's first prompt carries the line right after the approval-walk instruction",
           len(launched_prompts) == 1 and f"{instruction} {line} " in launched_prompts[0],
+          f"{launched_prompts!r}\n{console.getvalue()[-900:]}")
+
+    # Two open walks, the next step naming the one with the older walk-minutes: the launch site must pass the
+    # next step, or the line would name the newer walk.
+    older = walk_in(root, "#next_to_present item 1 of 3\n#item_page item 1 of 3 https://claude.ai/artifact/Old\n",
+                    name="fixture-older-walk")
+    os.utime(older, (1_000_000_000, 1_000_000_000))
+    os.utime(root / "docs" / "walk" / f"{WALK}-minutes.md", (2_000_000_000, 2_000_000_000))
+    settings.handoff_path.write_text(
+        "written-at: 2026-11-10T00:00:00Z\nnext-step: continue approval-walk fixture-older-walk\n"
+        "session-handoff-sequence-number: 6\n", encoding="utf-8")
+    supervisor.write_supervisor_state(settings.state_path, {"consumed_counter": 5, "generation": 5})
+    launched_prompts.clear()
+    older_line = approved_line("fixture-older-walk", "1 of 3, Keep the first thing,",
+                               "https://claude.ai/artifact/Old", "1 of 3")
+    console = io.StringIO()
+    with fixture.supervisor_names_replaced(
+            launch_agent_session=launch_recording,
+            launch_time_git_sync=lambda working_directory: report,
+            choose_branch_state_instruction_from_working_directory_push_state=lambda working_directory: "",
+            overview_refresh_due_lines=lambda working_directory: (),
+            memory_review_due_lines=lambda: (),
+            stdin_isatty=False), contextlib.redirect_stdout(console):
+        supervisor.supervise_sessions(settings)
+    check("launch site, two open walks, the next step naming the older: the prompt carries the older walk's line",
+          len(launched_prompts) == 1 and f"{instruction} {older_line} " in launched_prompts[0],
           f"{launched_prompts!r}\n{console.getvalue()[-900:]}")
 
 

@@ -1266,9 +1266,10 @@ def successor_initial_agent_instructions_line_naming_waiting_approval_walk_item(
     """Return the first prompt's line naming the open approval-walk's waiting item and its last page link, or no
     lines when no approval-walk is open or every one is paused; never block launch.
 
-    The walk is the open one in working_directory's docs/walk/ that next_step names, or else the one with the
-    latest walk-minutes, by modification time, as /walk-me-through chooses when several are open; when
-    next_step names more than one, the latest of those. When the walk-minutes'
+    The walk is the open one in working_directory's docs/walk/ that next_step names first, by its name or its
+    walk-minutes' file name, since the next step's first action comes first; when next_step names none, the one
+    with the latest walk-minutes, by modification time, as /walk-me-through chooses when several are open. When
+    the walk-minutes'
     `#next_to_present` line names several items, the line names the first, where the walk resumes. When the
     walk-document cannot be read, the line names the item from the walk-minutes alone, without its point, and
     says why; its count then lacks `of M` when the `#next_to_present` line gives none, so the `#item_page` line
@@ -1286,9 +1287,17 @@ def successor_initial_agent_instructions_line_naming_waiting_approval_walk_item(
                  if not walk[3]]
         if not walks:
             return ()
-        named_in_next_step = [walk for walk in walks if re.search(
-            rf"(?<![\w-]){re.escape(walk[0].name[:-len(walk_finder.MINUTES_SUFFIX)])}(?![\w-])", next_step)]
-        minutes, value, _, _ = max(named_in_next_step or walks, key=lambda walk: walk[0].stat().st_mtime)
+        named_in_next_step = []
+        for walk in walks:
+            # A name followed by -minutes.md is the walk's walk-minutes path; any other longer name is another walk.
+            mention = re.search(rf"(?<![\w-]){re.escape(walk[0].name[:-len(walk_finder.MINUTES_SUFFIX)])}"
+                                rf"(?!(?!{re.escape(walk_finder.MINUTES_SUFFIX)})[\w-])", next_step)
+            if mention:
+                named_in_next_step.append((mention.start(), walk))
+        if named_in_next_step:
+            minutes, value, _, _ = min(named_in_next_step, key=lambda named: named[0])[1]
+        else:
+            minutes, value, _, _ = max(walks, key=lambda walk: walk[0].stat().st_mtime)
         name = minutes.name[:-len(walk_finder.MINUTES_SUFFIX)]
         numbers, total = walk_finder.parse_items(value)
         number = numbers[0]
@@ -1307,7 +1316,8 @@ def successor_initial_agent_instructions_line_naming_waiting_approval_walk_item(
         text = document.read_text(encoding="utf-8")
         spans = walk_finder.item_unit_spans(text, parser)
         total, units = walk_finder.waiting_item_units(document, value, numbers, total, parser, spans)
-        point = walk_short_answer_hook.heading_points(text.split("\n"), units, parser).get(number)
+        # units[0] is the first waiting item's own heading; a later waiting item's heading may name it too.
+        point = walk_short_answer_hook.heading_points(text.split("\n"), units[:1], parser).get(number)
     except Exception as error:
         print(f"handoff-supervisor: waiting approval-walk item's walk-document unreadable: "
               f"{type(error).__name__}: {error}")
