@@ -244,6 +244,8 @@ with tempfile.TemporaryDirectory() as temporary_directory:
     check("a draft in docs/agents/queue/ passes", result.returncode == 0, result.stderr)
     result = run_hook(decoy, workspace, str(workspace / "docs" / "issues" / "queue" / "x-prompt.md"))
     check("a draft in docs/issues/queue/ passes", result.returncode == 0, result.stderr)
+    result = run_hook(decoy, workspace, str(workspace / "nn-queue" / "x-prompt.md"))
+    check("a prompt in nn-queue/, which is not a draft place, is blocked", result.returncode == 2, result.stderr)
     result = run_hook(decoy, workspace, str(workspace / "docs" / "drafts" / "x-instructions.md"))
     check("a draft in docs/drafts/ passes", result.returncode == 0, result.stderr)
     result = run_hook(decoy, workspace, str(workspace / ".claude" / "jobs" / "ab12" / "tmp" / "x-prompt.md"))

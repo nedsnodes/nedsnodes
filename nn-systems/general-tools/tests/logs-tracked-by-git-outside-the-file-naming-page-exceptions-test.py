@@ -8,9 +8,9 @@ classifies one, is kept in the log-store and never in git, with two
 exceptions, which this test allows:
 
   * a `-draft` or `-candidate` file in `docs/drafts/` or a queue directory,
-    which is any `queue/` directory or `nn-queue/`. Whether the file is still
-    pending approval, as the page also asks, is not something a file name
-    shows, so it is not checked;
+    which is any `queue/` directory. Whether the file is still pending
+    approval, as the page also asks, is not something a file name shows, so
+    it is not checked;
   * a GHI-MD, which is a file under `docs/issues/` whose name is the GHI's
     number, a hyphen, and the rest of its name ending `.md`, such as
     `docs/issues/142-draft-md-prompt-research-report.md`.
@@ -53,8 +53,7 @@ def log_is_allowed_in_git(path):
     """Return True when `path`, a log, falls under one of the page's two exceptions."""
     parts = PurePosixPath(path).parts
     stem = PurePosixPath(path).stem
-    in_drafts_or_queue = (parts[:2] == ("docs", "drafts") or parts[0] == "nn-queue"
-                          or "queue" in parts[:-1])
+    in_drafts_or_queue = parts[:2] == ("docs", "drafts") or "queue" in parts[:-1]
     if in_drafts_or_queue and stem.endswith(("-draft", "-candidate")):
         return True
     return parts[:2] == ("docs", "issues") and GHI_MD_NAME.fullmatch(parts[-1]) is not None
@@ -83,12 +82,12 @@ ALLOWED = (
     "docs/drafts/sub/plan-candidate.md",
     "docs/agents/queue/brief-draft.md",
     "docs/issues/queue/issue-candidate.txt",
-    "nn-queue/item-draft.md",
     "docs/issues/142-draft-md-prompt-research-report.md",
     "docs/issues/archived/43-step-2-inputs-log.md",
 )
 NOT_ALLOWED = (
     "docs/drafts/plan-report.md",
+    "nn-queue/item-draft.md",
     "docs/agents/queue/brief-log.md",
     "docs/plan-draft.md",
     "drafts/plan-draft.md",
