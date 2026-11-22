@@ -2013,8 +2013,29 @@ def cases(scratch):
               "a") as module:
         module.write("\n")
     hook.checkout_files(world.repo, decisions)
+    check("within the run that loaded the guard, a change to its draft-place module keeps the "
+          "decisions that run made, under the key of the module it loaded",
+          "made-up-cached-path" in decisions, decisions)
+    # The next run loads the guard afresh.
+    hook._loaded.clear()
+    hook.checkout_files(world.repo, decisions)
     check("a change to the guard's draft-place module drops the cached guard decisions",
           "made-up-cached-path" not in decisions, decisions)
+
+    # -- the decisions a run saves are keyed to the guard files as they were when it loaded the
+    # guard, so a fast-forward that changes one during the run makes the next run decide again
+    hook._loaded.clear()
+    decisions = {}
+    hook.guard()
+    with open(copied_guard_hooks / "draft-document-place-directories-definition-and-membership-common.py",
+              "a") as module:
+        module.write("\n")
+    hook.checkout_files(world.repo, decisions)
+    decisions["made-up-cached-path"] = True
+    hook._loaded.clear()
+    hook.checkout_files(world.repo, decisions)
+    check("decisions made while the draft-place module changed under a run are decided again by "
+          "the next run", "made-up-cached-path" not in decisions, decisions)
 
     # -- git's own work after a first run made while a merge was stopped, in a checkout with no
     # guarded file yet, is not asked about
