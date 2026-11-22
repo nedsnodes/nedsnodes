@@ -915,10 +915,9 @@ class Sweep:
     # --- One idle agent-seat ---
 
     def handle_seat(self, seat, verdict, transcript_read_at):
-        # Checked for each agent-seat: a judge earlier in this invocation may have started it.
-        # During it, only the steps that start no headless agent-session run; the others are not
-        # logged, so they run after it.
-        paused = self.headless_usage_limit_pause_holds()
+        # Checked before each step that starts a headless agent-session: a judge or send earlier in
+        # this invocation, for this agent-seat too, may have started the pause. During it, only the
+        # steps that start none run; the others are not logged, so they run after it.
         session = verdict[fields.SESSION_ID]
         stretch = (verdict.get(fields.LAST_ACTIVITY) or {}).get("time")
         wait = self.log.open_wait(seat)
@@ -930,7 +929,7 @@ class Sweep:
                             and check["last_activity"] == stretch)
         rule, text = verdict[fields.RULE], verdict.get(fields.TEXT)
         if rule == 1:
-            if paused:
+            if self.headless_usage_limit_pause_holds():
                 return
             self.checked(seat, verdict, transcript_read_at, check_is_new)
             if wait:
@@ -958,9 +957,9 @@ class Sweep:
             self.end_wait(seat, "it spent tokens after the user was told")
             wait = None
         promise_text = None
-        if rule == 2 and paused:
+        if rule == 2 and self.headless_usage_limit_pause_holds():
             if wait:
-                self.due_step(seat, verdict, wait, paused)
+                self.due_step(seat, verdict, wait)
             return
         if rule == 2:
             outcome, promise = self.sentences(seat, verdict)
@@ -981,8 +980,8 @@ class Sweep:
             self.end_wait(seat, "nothing to do")
             wait = None
         if wait:
-            self.due_step(seat, verdict, wait, paused)
-        if paused:
+            self.due_step(seat, verdict, wait)
+        if self.headless_usage_limit_pause_holds():
             return
         if promise_text:
             # A promise given in answer to a message goes on the open wait, so that repeated
@@ -1005,7 +1004,7 @@ class Sweep:
                      "session_id": verdict[fields.SESSION_ID], "first_idle_at": stretch,
                      "text": step_text})
 
-    def due_step(self, seat, verdict, wait, paused):
+    def due_step(self, seat, verdict, wait):
         """The step of an open wait that is due: the escalation 15 minutes after the nudge, then
         the user-alert 15 minutes after the escalation; after that, none. The escalation is a
         send, so a headless usage-limit pause holds it."""
@@ -1025,7 +1024,8 @@ class Sweep:
                            f"{seat} to see why it stopped, and message it with SendMessage; the "
                            "user may want to look at it himself.", failure=False)
             return
-        if not paused and seconds_between(wait[NUDGE], self.now) >= WAIT_STEP_SECONDS:
+        if (not self.headless_usage_limit_pause_holds()
+                and seconds_between(wait[NUDGE], self.now) >= WAIT_STEP_SECONDS):
             text = ESCALATION_TEXT.format(
                 minutes=minutes, nudge_time=parse_time(wait[NUDGE]).strftime("%Y-%m-%d %H:%MZ"),
                 quoted_nudge="\n".join(f"> {line}" for line in wait["nudge_text"].split("\n")))
