@@ -729,10 +729,13 @@ def run_claude(prompt: str, resume_session_id, seat_dir: Path, timeout_seconds: 
             message = f"claude exited {completed.returncode}: {detail}"
         if LOGGED_OUT_PATTERN.search(detail):
             message += LOGGED_OUT_REMEDY
-        return None, message
+        # On one line: ghi-issue-write.py reports one stderr line of a failed
+        # ask, and claude's error, such as its logged-out message, can span several.
+        return None, " ".join(line.strip() for line in message.splitlines() if line.strip())
     if result is None:
         return None, f"claude produced no parseable result: {completed.stdout[:500]!r}"
     return result, None
+
 
 
 def ask(question: str, include_closed: bool, seat_dir: Path, repo: str,
@@ -1011,13 +1014,8 @@ def _ask_within_lock(question, include_closed, seat_dir, repo, projects_root,
         save_state(state_path, state)
 
     if answer is None:
-        # On one line: ghi-issue-write.py reports only the line that opens
-        # with the not-usable opening, and a failed turn's detail, such as
-        # claude's logged-out message and its remedy, can span several.
-        one_line_problem = " ".join(
-            line.strip() for line in str(problem).splitlines() if line.strip())
         return None, None, GHI_GUIDE_AGENT_ANSWER_NOT_USABLE_MESSAGE_TEMPLATE.format(
-            problem=one_line_problem)
+            problem=problem)
     return answer, closed_issue_dates(answer_issue_numbers(answer), cache), None
 
 
