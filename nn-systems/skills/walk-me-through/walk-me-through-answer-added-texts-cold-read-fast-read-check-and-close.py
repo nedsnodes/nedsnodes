@@ -1421,7 +1421,7 @@ def approval_walk_item_word_counted_line_ranges(walk_finder, text, tokens, parse
     for number in numbers:
         unit = next(unit for unit in spans if number in unit[0])
         ranges.append(own_range(unit, number))
-        if len(numbers) > 1 and len(unit[0]) > 1:
+        if len(numbers) > 1 and len(unit[0]) > 1:  # pragma: no mutate, a unit holding number names at least one item, and for a unit naming one item own_range is the whole unit, so shared_heading_text gives nothing
             ranges += shared_heading_text(unit)
         for each in walk_finder.approval_walk_item_sub_step_units_below_item_in_walk_document(all_units, unit, [number]):
             parts =[part for part in each[0] if part.startswith(number + ".") and part not in numbers]
@@ -1438,7 +1438,7 @@ def approval_walk_item_text_over_word_limit_refused(walk_finder, minutes, value,
     text it falls in."""
     document, text, tokens, _, spans = item_line_ranges(walk_finder, minutes, value, numbers, total, parser)
     lines = text.split("\n")
-    sub_steps = {token.map[0] for token in tokens if token.type == "heading_open" and token.level == 0
+    sub_steps = {token.map[0] for token in tokens if token.type == "heading_open" and token.level == 0  # pragma: no mutate, the parser gives the markup ### only to heading_open and heading_close, which sorts below it
                  and token.map is not None and token.markup == APPROVAL_WALK_ITEM_SUB_STEP_HEADING_MARKUP}
     for first, end in approval_walk_item_word_counted_line_ranges(walk_finder, text, tokens, parser, spans, numbers):
         starts = sorted({first} | {line for line in sub_steps if first < line < end})
@@ -2488,7 +2488,7 @@ def approval_walk_item_first_numbered_sub_step_without_answer(walk_finder, minut
     same sub-step. When the walk-document has no heading for that sub-step, such as no 3.1 above 3.1.1, the
     shortest of the named sub-step's levels below the item that has one, such as 3.1.1 for 3.1.1.1. None when
     numbers names several items or next_item names none."""
-    if len(numbers) != 1:
+    if len(numbers) != 1:  # pragma: no mutate, waiting_items always returns at least one number, as VALUE_COUNT and expand_numbers read one
         return None
     document = minutes.with_name(minutes.name[:-len(walk_finder.MINUTES_SUFFIX)] + ".md")
     all_units = walk_finder.item_unit_spans(document.read_text(encoding="utf-8"), parser)
@@ -2500,7 +2500,7 @@ def approval_walk_item_first_numbered_sub_step_without_answer(walk_finder, minut
         return None
     # A walk-document may give sub-sub-steps 2.1.1 to 2.1.3 no heading for 2.1: step into the next level that has one.
     parts = named[0][len(numbers[0]) + 1:].split(".")
-    return next(level for level in (numbers[0] + "." + ".".join(parts[:depth]) for depth in range(1, len(parts) + 1))
+    return next(level for level in (numbers[0] + "." + ".".join(parts[:depth]) for depth in range(1, len(parts) + 1))  # pragma: no mutate, depth 0 gives a level ending in a dot, which no item number does, and a depth past len(parts) repeats the last level
                 if level in sub_steps)
 
 
