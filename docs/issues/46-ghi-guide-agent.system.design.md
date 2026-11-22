@@ -20,7 +20,7 @@ Issue [Build ghi-guide-agent — the GHI knowledge agent](https://github.com/ned
 - **The write tool:** `scripts/ghi-issue-write.py`, with its create and edit operations. It has no comment operation: the user ruled on 2026-09-24 that agents write no issue comments.
 - **The redirect hook:** `.claude/guard-hooks/ghi-issue-write-hand-typed-gh-command-refusal.py`. It refuses a hand-typed write rather than rewriting it into the tool as § The GHI write path describes; its docstring says why.
 - **The corpus migration:** done 2026-09-27, when every open issue's body became the links to its files (by a one-time migration program, deleted once the migration finished).
-- **Not built:** the maintenance sweep and fixer spawning (§ Maintenance and fixers); the decisions in § Decided and not yet built; the refresh's second feed and each entry's activity-relative freshness (§ The GHI mirror); the killed-ask message that tells the asker to ask with fewer tasks (§ The ask path); and the rule for reading a GHI-MD in the `ghi-write` skill (§ The GHI write path).
+- **Not built:** the maintenance sweep and fixer spawning (§ Maintenance and fixers); the decisions in § Decided and not yet built; the refresh's second feed and each entry's activity-relative freshness (§ The GHI mirror); the killed-ask message that tells the asker to ask with fewer tasks (§ The ask path); the tools a link repair needs ghi-guide-agent to use (§ Link-repair request); and the rule for reading a GHI-MD in the `ghi-write` skill (§ The GHI write path).
 
 ## Decided and not yet built
 
@@ -222,6 +222,8 @@ Sent by the write tool for every body-bearing create or edit, before the write. 
 ### Link-repair request (sweep → ghi-guide-agent)
 
 Sent by the sweep for each link-integrity finding — `ghi-guide-agent`'s one write class. Rides the same wrapper as the other requests, hence the same changed-entries preamble. The done/blocked reply contract mirrors the fixer briefs'.
+
+Not built yet, and to be built with the sweep, which is the only sender of a link-repair request: `scripts/ghi-guide-agent-ask.py` runs every ask in dontAsk mode with `--allowedTools Read,Grep,Glob`, so ghi-guide-agent can neither run the `gh issue edit` that the GHI side of a repair needs nor change a file and run `scripts/ghi-issue-write.py`, which the document side needs (form 4 of § Cold-start prompt), and a link-repair request would end blocked today. The ask program is to allow those tools on a link-repair request only, because § Cold-start prompt makes a link repair ghi-guide-agent's one use of gh and its one write.
 
 > \<only on resume, and only when the refresh changed entries:\> Since your last request, these mirror entries changed: #\<n\>, #\<m\>. Re-read them in the mirror before answering.
 >
