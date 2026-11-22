@@ -989,15 +989,15 @@ class Sweep:
             wait = None
         if wait:
             self.due_step(seat, verdict, wait)
-        if judged_sentences:
-            if self.headless_usage_limit_pause_holds():
-                # An escalation stopped at a usage limit started the pause after the sentences were
-                # judged: neither they nor the check are logged, so that after the reset they are
-                # judged again and their promise message is sent.
-                return
+        paused = self.headless_usage_limit_pause_holds()
+        # An escalation stopped at a usage limit can start the pause after the sentences were
+        # judged. When it holds back their promise message, neither they nor the check are logged,
+        # so that after the reset they are judged again and the message is sent; otherwise they are
+        # logged, so that a second judge cannot answer differently about the same sentences.
+        if judged_sentences and not (paused and promise_text):
             self.sentences_checked(seat, sentences_checked)
             self.checked(seat, verdict, transcript_read_at, check_is_new)
-        if self.headless_usage_limit_pause_holds():
+        if paused:
             return
         if promise_text:
             # A promise given in answer to a message goes on the open wait, so that repeated
