@@ -8,7 +8,7 @@ classifies one, is kept in the log-store and never in git, with two
 exceptions, which this test allows:
 
   * a `-draft` or `-candidate` file in a draft place, as
-    nn-systems/general-tools/draft-place-directory-check-common.py defines one
+    nn-systems/general-tools/draft-document-place-directory-check-common.py defines one
     for the instruction-file guard too. Whether the file is still pending
     approval, as the page also asks, is not something a file name shows, so
     it is not checked;
@@ -44,7 +44,7 @@ def load(module_name, file_name):
 
 classify = load("log_suffix_and_extension_file_classify_common",
                 "log-suffix-and-extension-file-classify-common.py")
-draft_place = load("draft_place_directory_check_common", "draft-place-directory-check-common.py")
+draft_place = load("draft_document_place_directory_check_common", "draft-document-place-directory-check-common.py")
 git_environment = load("git_redirecting_environment_variables_removal_common",
                        "git-redirecting-environment-variables-removal-common.py")
 
@@ -55,7 +55,7 @@ def log_is_allowed_in_git(path):
     """Return True when `path`, a log, falls under one of the page's two exceptions."""
     parts = PurePosixPath(path).parts
     stem = PurePosixPath(path).stem
-    if draft_place.directory_is_a_draft_place(parts[:-1]) and stem.endswith(("-draft", "-candidate")):
+    if draft_place.directory_is_a_draft_document_place(parts[:-1]) and stem.endswith(("-draft", "-candidate")):
         return True
     return parts[:2] == ("docs", "issues") and GHI_MD_NAME.fullmatch(parts[-1]) is not None
 
@@ -111,11 +111,11 @@ guard_spec.loader.exec_module(guard)
 check("the guard reads its draft places from the file this test reads",
       Path(guard._draft_place.__file__).resolve() == Path(draft_place.__file__).resolve(),
       guard._draft_place.__file__)
-guard._draft_place.DRAFT_PLACE_DIRECTORY_NAMES = ("queue", "made-up-draft-place")
+guard._draft_place.DRAFT_DOCUMENT_PLACE_DIRECTORY_NAMES = ("queue", "made-up-draft-place")
 check("a draft place added to the shared definition reaches the guard",
       guard.is_in_draft_or_working_place(("docs", "made-up-draft-place")))
 check("the guard's scratch places are not draft places for this audit",
-      not draft_place.directory_is_a_draft_place((".claude", "jobs"))
+      not draft_place.directory_is_a_draft_document_place((".claude", "jobs"))
       and guard.is_in_draft_or_working_place((".claude", "jobs")))
 
 check("only logs are reported",

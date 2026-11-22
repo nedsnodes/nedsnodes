@@ -34,9 +34,9 @@ with _crash_notice.guard_hook_crash_fail_open_with_notice_context_manager(
     _guard_approval_marker_common = importlib.util.module_from_spec(_marker_spec)
     _marker_spec.loader.exec_module(_guard_approval_marker_common)
     _draft_place_spec = importlib.util.spec_from_file_location(
-        "draft_place_directory_check_common",
+        "draft_document_place_directory_check_common",
         Path(__file__).resolve().parents[2] / "nn-systems" / "general-tools"
-        / "draft-place-directory-check-common.py")
+        / "draft-document-place-directory-check-common.py")
     _draft_place = importlib.util.module_from_spec(_draft_place_spec)
     _draft_place_spec.loader.exec_module(_draft_place)
 consume_approval_marker = _guard_approval_marker_common.consume_approval_marker
@@ -249,7 +249,7 @@ def checkout_directory_parts(path: Path):
 
 
 def is_in_draft_or_working_place(directory_parts) -> bool:
-    if _draft_place.directory_is_a_draft_place(directory_parts):
+    if _draft_place.directory_is_a_draft_document_place(directory_parts):
         return True
     return any(directory_parts[:len(prefix)] == prefix
                for prefix in PROMPT_SCRATCH_DIRECTORY_PREFIXES)
