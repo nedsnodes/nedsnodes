@@ -1631,7 +1631,10 @@ def run_cases(scratch: Path):
             ("a sentence over two lines arrives whole, on one line",
              ruling_answer(783, "closed issues are frozen,\nbut this one "
                            "was reopened"),
-             783, "closed issues are frozen, but this one was reopened")]:
+             783, "closed issues are frozen, but this one was reopened"),
+            ("two spaces in a row within a line are kept",
+             ruling_answer(783, "run printf 'a  b'\nto see it"),
+             783, "run printf 'a  b' to see it")]:
         lines = []
         try:
             got = tool.adjudicate(REPO, "t", FILE_TEXT, scratch, Recorder(
@@ -4410,21 +4413,36 @@ def run_edit_cases(scratch: Path):
               "#570, the issue you were editing" in str(refusal)
               and "Superseded-by: #13" in str(refusal), str(refusal))
 
-    for verdict, issues in [("too-similar", (570,)), ("too-similar", (570, 13)),
-                            ("related", (13, 570))]:
-        case_name = (f"a {verdict} verdict naming #{', #'.join(map(str, issues))}, "
-                     "which includes the issue being edited, is reported as "
-                     "adjudication skipped")
+    for verdict in ["too-similar", "related"]:
+        case_name = (f"a {verdict} verdict naming only #570, the issue being "
+                     "edited, is reported as adjudication skipped")
         lines = []
         try:
             tool.adjudicate(REPO, "t", FILE_TEXT, scratch, Recorder(
-                {ASK: verdict_answer(verdict, *issues)}), lines.append,
+                {ASK: verdict_answer(verdict, 570)}), lines.append,
                 exclude_issue=570)
             check(case_name, lines == [
-                "adjudication skipped: ghi-guide-agent's verdict names #570, the "
+                "adjudication skipped: ghi-guide-agent's verdict names only #570, the "
                 "issue being edited, which the question told it to leave out"], lines)
         except tool.Refused as refusal:
             check(case_name, False, f"refused: {refusal}")
+
+    try:
+        tool.adjudicate(REPO, "t", FILE_TEXT, scratch, Recorder(
+            {ASK: verdict_answer("too-similar", 570, 13)}), quiet, exclude_issue=570)
+        check("a too-similar verdict naming the issue being edited and #13 "
+              "still refuses, for #13", False, "it proceeded")
+    except tool.Refused as refusal:
+        check("a too-similar verdict naming the issue being edited and #13 "
+              "still refuses, for #13",
+              "#13 already covers this ground" in str(refusal), str(refusal)[:160])
+
+    lines = []
+    tool.adjudicate(REPO, "t", FILE_TEXT, scratch, Recorder(
+        {ASK: verdict_answer("related", 13, 570)}), lines.append, exclude_issue=570)
+    check("a related verdict naming #13 and the issue being edited is "
+          "reported with #13 alone",
+          lines == ["ghi-guide-agent: verdict: related #13"], lines)
 
     creating = Recorder({ASK: verdict_answer("too-similar", 13)})
     try:

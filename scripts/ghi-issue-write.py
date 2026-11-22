@@ -1159,11 +1159,15 @@ def adjudicate(repo: str, title: str, text: str, repository_root: Path,
                "proposed-improvements-or-changes-file in the log-store")
         # The saved file holds the question on one line, and
         # ruling_question_lines() reads back only that line.
-        return RulingConflict(answer.get("ruling_issue"),
-                              " ".join(str(answer.get("sentence", "")).split()))
-    issues = answer.get("issues") or []
-    if exclude_issue is not None and exclude_issue in issues:
-        report(f"adjudication skipped: ghi-guide-agent's verdict names #{exclude_issue}, "
+        # Only line breaks are replaced: the question may quote a command
+        # whose spaces matter, as in printf 'a  b'.
+        return RulingConflict(answer.get("ruling_issue"), " ".join(
+            line.strip() for line in str(answer.get("sentence", "")).splitlines()
+            if line.strip()))
+    named = answer.get("issues") or []
+    issues = [number for number in named if number != exclude_issue]
+    if exclude_issue is not None and exclude_issue in named and not issues:
+        report(f"adjudication skipped: ghi-guide-agent's verdict names only #{exclude_issue}, "
                "the issue being edited, which the question told it to leave out")
         return None
     verdict = f"verdict: {answer.get('verdict')}" + (
