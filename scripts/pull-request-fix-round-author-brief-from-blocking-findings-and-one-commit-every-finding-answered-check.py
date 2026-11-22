@@ -392,6 +392,23 @@ def round_count(requested_reviews, records):
     return len({round_key(review) for review in requested_reviews})
 
 
+def verdict_line(review):
+    return (review.get("body") or "").split("\n", 1)[0]
+
+
+def are_merge_lane_verdicts_on_pull_request_comment_reviews(own):
+    """Are merge-lane-2's verdicts on this pull request COMMENT reviews? On a pull request ned-review-merge
+    opened, GitHub takes that account's verdict only as a COMMENT review, which the posting program opens
+    with the verdict line; on any other, the posting program gives each verdict its own review state."""
+    return not any(review.get("state") in ("CHANGES_REQUESTED", "APPROVED") for review in own)
+
+
+def does_merge_lane_review_ask_for_fix_round(review, as_comments):
+    """Does this merge-lane-2 review ask for a fix-round? as_comments is are_merge_lane_verdicts_on_pull_request_comment_reviews()."""
+    return (review.get("state") == "CHANGES_REQUESTED"
+            or as_comments and review.get("state") == "COMMENTED" and verdict_line(review) == "REQUEST_CHANGES")
+
+
 def round_reviews(number, reviewer_login):
     """merge-lane-2's latest changes-requested review; the round's reviews, in the order GitHub
     returns them; whether a round record already names that review; and the round's number."""
@@ -405,11 +422,14 @@ def round_reviews(number, reviewer_login):
         raise Refused(f"Pull request {number} has no review by {reviewer_login}, merge-lane-2's "
                       "account, so there is no fix-round to brief.\n"
                       "Wait for merge-lane-2's review; run this again when it requests changes.")
-    requested = [index for index, (_, review) in enumerate(own) if review.get("state") == "CHANGES_REQUESTED"]
+    as_comments = are_merge_lane_verdicts_on_pull_request_comment_reviews([review for _, review in own])
+    requested = [index for index, (_, review) in enumerate(own) if does_merge_lane_review_ask_for_fix_round(review, as_comments)]
     if requested:
         _, anchor = own[requested[-1]]
         frozen_head = anchor.get("commit_id")
+        # A later approval posted as a COMMENT review closes the round, as an APPROVED one does.
         if all(review.get("state") == "COMMENTED" and review.get("commit_id") == frozen_head
+               and not (as_comments and verdict_line(review) == "APPROVE")
                for _, review in own[requested[-1] + 1:]):
             on_head = [review_ids for head, review_ids in records if head == frozen_head]
             recorded = any(anchor.get("id") in review_ids for review_ids in on_head)
@@ -432,9 +452,9 @@ def changes_requested_round_count(number, reviewer_login):
     """The round count round_reviews gives, read also for a pull request with no open round."""
     reviews = gh_json_lines(["api", "--paginate", f"repos/{{owner}}/{{repo}}/pulls/{number}/reviews",
                              "--jq", ".[]"])
-    return round_count([review for review in reviews
-                        if (review.get("user") or {}).get("login") == reviewer_login
-                        and review.get("state") == "CHANGES_REQUESTED"], round_records(number))
+    own = [review for review in reviews if (review.get("user") or {}).get("login") == reviewer_login]
+    as_comments = are_merge_lane_verdicts_on_pull_request_comment_reviews(own)
+    return round_count([review for review in own if does_merge_lane_review_ask_for_fix_round(review, as_comments)], round_records(number))
 
 
 def replaced_pull_requests(number, url, description):
@@ -1002,7 +1022,7 @@ def fix_commit_range(frozen_head, commits):
         return frozen_head, commits[0][0]
     # An overview in a pull request that changes the code it describes names a commit earlier than the overview
     # edit, which the round's own fix commit can only be when the edit is a commit of its own.
-    if (len(commits) == 2 and commits[0][1] == [frozen_head] and commits[1][1] == [commits[0][0]]
+    if (len(commits) == 2 and commits[0][1] == [frozen_head] and commits[1][1] == [commits[0][0]]  # pragma: no mutate, a one-commit round reaches this line only when commits[0][1] is not [frozen_head], so `<= 2` stops at that test as `== 2` does; and commits_since lists by --first-parent, so commits[1][1] starts with commits[0][0] and never sorts before [commits[0][0]], so `<=` there says what `==` says
             and commit_changes_only_architecture_overviews(commits[1][0])):
         return frozen_head, commits[1][0]
     described = ", ".join(f"{sha[:12]} ({len(parents)} parent{'' if len(parents) == 1 else 's'})"
@@ -1234,8 +1254,8 @@ def origin_branch_head(url, branch):
 
 
 def check_round(number, reviewer_login, answers_path, commit_name,
-                confirm_dispatching_agent_checked_new_shared_names=False,
-                overview_claim_check_report_directory=None):
+                confirm_dispatching_agent_checked_new_shared_names,
+                overview_claim_check_report_directory):
     (url, _github_head, branch, review_link, frozen_head, blocking, nits,
      _fix_round_number, unrecorded_review_ids, review_submitted_at) = round_facts(number, reviewer_login)
     findings = blocking + nits
@@ -1293,7 +1313,7 @@ def check_round(number, reviewer_login, answers_path, commit_name,
                   "for merge-lane-2."]
         print("\n".join(lines))
         return
-    pushed = (f"New head {commit}, the round's {len(round_commits)} commit{'' if len(round_commits) == 1 else 's'} "
+    pushed = (f"New head {commit}, the round's {len(round_commits)} commit{'' if len(round_commits) == 1 else 's'} "  # pragma: no mutate, this text is built only when commit is not the frozen-head, where the round has one or two commits, so `<= 1` says what `== 1` says
               f"on top of the frozen-head {frozen_head}."
               if commit != frozen_head else
               f"Nothing pushed; the head stays the frozen-head {frozen_head}.")

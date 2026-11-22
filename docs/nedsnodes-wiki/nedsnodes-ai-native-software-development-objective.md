@@ -19,7 +19,7 @@ A root-cause report says what was observed and with what evidence, the mechanism
 
 ## Project organization
 
-The existing Nedschorus placement rule remains useful: GitHub Issues carry walkable state, Markdown carries substantive reasoning, and queues hold material whose disposition is undecided.
+The existing NedsNodes placement rule remains useful: GitHub Issues carry walkable state, Markdown carries substantive reasoning, and queues hold material whose disposition is undecided.
 
 | Place | Holds |
 | --- | --- |

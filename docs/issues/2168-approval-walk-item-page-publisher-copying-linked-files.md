@@ -1,5 +1,5 @@
 ---
-issue: "[Approval-walk item page publisher copying linked files into the page as timestamped copies, so short repository and log-store paths open on the iPad](https://github.com/nedschorus/nedschorus/issues/2168)"
+issue: "[Approval-walk item page publisher copying linked files into the page as timestamped copies, so short repository and log-store paths open on the iPad](https://github.com/nedsnodes/nedsnodes/issues/2168)"
 ---
 
 # Approval-walk item page publisher copying linked files into the page as timestamped copies, so short repository and log-store paths open on the iPad
@@ -8,9 +8,9 @@ The user approved filing this GHI on 2026-10-28 as item 5.2.1.1 of ned-box-helpe
 
 ## Build order
 
-The user decided on 2026-11-03 to build the program's page builder first, without the copies, then GHI [Approval-walk items keep agent detail on marked lines that the user's view leaves out](https://github.com/nedschorus/nedschorus/issues/2390), whose part 2 needs the builder; the builder's own questions come to him with its design, and the questions about the copies once the builder works. He answered "A" to item 3 of ned-box-helper's approval-walk `ned-box-helper-speed-and-open-questions-2026-11-02` (walk-minutes `nedlern@ned-box:/home/nedlern/agents/ned-box-helper/docs/walk/ned-box-helper-speed-and-open-questions-2026-11-02-minutes.md`, line 94).
+The user decided on 2026-11-03 to build the program's page builder first, without the copies, then GHI [Approval-walk items keep agent detail on marked lines that the user's view leaves out](https://github.com/nedsnodes/nedsnodes/issues/2390), whose part 2 needs the builder; the builder's own questions come to him with its design, and the questions about the copies once the builder works. He answered "A" to item 3 of ned-box-helper's approval-walk `ned-box-helper-speed-and-open-questions-2026-11-02` (walk-minutes `nedlern@ned-box:/home/nedlern/agents/ned-box-helper/docs/walk/ned-box-helper-speed-and-open-questions-2026-11-02-minutes.md`, line 94).
 
-The builder without the copies is [PR 3131, Approval-walk item page builder, without copies of linked files](https://github.com/nedschorus/nedschorus/pull/3131): it renders one item of a walk-document as the page an agent publishes, and leaves each link as the walk-document writes it. The section "What the program does" below describes the whole program; of it, the short form, the refusal of a missing file, the copies and their timestamps are not yet built.
+The builder without the copies is [PR 3131, Approval-walk item page builder, without copies of linked files](https://github.com/nedsnodes/nedsnodes/pull/3131): it renders one item of a walk-document as the page an agent publishes, and leaves each link as the walk-document writes it. The section "What the program does" below describes the whole program; of it, the short form, the refusal of a missing file, the copies and their timestamps are not yet built.
 
 The next action: once PR 3131 merges, ned-box-helper puts the builder's questions to the user, from `nedlern@ned-box:/home/nedlern/nedsnodes-logs/seats/ned-box-helper/ghi-2168-item-page-builder-walk-items-2026-11-11.md`. Those items answer open questions 7 and the hook part of 8 below; question 3 is settled by the build, in which the program writes the page file and the agent publishes it with the Artifact tool. The other open questions are about the copies, and come to the user once the builder works.
 
@@ -18,7 +18,7 @@ Sources: the walk-document, `nedlern@ned-box:/home/nedlern/agents/ned-box-helper
 
 ## Why
 
-An agent publishes each approval-walk item as a private claude.ai Artifact page, as the walk-me-through skill says ([`.claude/skills/walk-me-through/SKILL.md` line 32](https://github.com/nedschorus/nedschorus/blob/5b53a6b9810db6156b0f6d2512ebae33071c8492/.claude/skills/walk-me-through/SKILL.md#L32)). Today the agent builds each item page itself. `~/.claude/CLAUDE.md` asks that a file linked for the user be written as a `file:///Volumes/nedhome/...` link, and such a link opens only on the Mac.
+An agent publishes each approval-walk item as a private claude.ai Artifact page, as the walk-me-through skill says ([`.claude/skills/walk-me-through/SKILL.md` line 32](https://github.com/nedsnodes/nedsnodes/blob/5b53a6b9810db6156b0f6d2512ebae33071c8492/.claude/skills/walk-me-through/SKILL.md#L32)). Today the agent builds each item page itself. `~/.claude/CLAUDE.md` asks that a file linked for the user be written as a `file:///Volumes/nedhome/...` link, and such a link opens only on the Mac.
 
 The user, 2026-10-28, on item 5.2.1: "I looked at 5.2.1. There are two links to other files on my iPad. When I click on the what looks like a blue hyperlink, nothing happens. I guess they could become artifact-like things that would be clickable. I do like clickable links, but I don't want to mess up. I don't want to mess up all the conventions and prompts and labels to make links clickable in a few places. And I think we've already tried to reduce that by giving most files unique names and making it so that files can be quoted by name and not by a full path. But now I'm thinking maybe we can even make it simpler by just changing the artifact creation of walk items to be a bit smarter. So maybe that's a new GHI."
 
@@ -31,7 +31,7 @@ The user, 2026-10-28, answering the first version of item 5.2.1.1: "I'm looking 
 As item 5.2.1.1 (version 2) proposed and the user approved:
 
 - It is one program that every agent runs to publish an approval-walk item. It is code alone: it needs no prompt.
-- In the walk-document, the agent writes a file in short form: its path in the repository or the log-store, such as `nn-systems/handoff/handoff-design.md`.
+- In the walk-document, the agent writes a file in short form: its path in the repository or the log-store, such as `nn-systems/handoff/handoff.system.design.md`.
 - The program finds each such file, refusing and naming any it cannot find.
 - It copies each file into the item page's artifact as a page of its own, and turns the short form into a link to that copy.
 - The walk-document and the walk-minutes keep the short form.
@@ -59,7 +59,7 @@ So this is his preference, which he has not finished looking into, and it settle
 Everything in this section is an agent's, not the user's; the items and the user's words above do not settle any of it. Questions 1 to 9 were added by ned-box-helper's subagent that filed this GHI; questions 10 to 12 were added on 2026-11-01 by agent-instructions-editor's subagent.
 
 1. **Which time the header shows.** The user's words name two times: "the time that the original file was created" and "when it was frozen". Should the header show the time the copy was made, the time the original file last changed, or both?
-2. **Which version of a repository file is copied.** The copy of `nn-systems/handoff/handoff-design.md` on item 5.2.1's page was taken from a branch, not main. Should the program copy a repository file from the publishing agent-seat's checkout, or from main?
+2. **Which version of a repository file is copied.** The copy of `nn-systems/handoff/handoff.system.design.md` on item 5.2.1's page was taken from a branch, not main. Should the program copy a repository file from the publishing agent-seat's checkout, or from main?
 3. **Who publishes the page.** Only an agent can call Claude Code's Artifact tool, so a program that is "code alone" cannot publish a claude.ai page by itself. Does the program build the page and its copied files, and the agent then publish them with the Artifact tool?
 4. **How the program recognises a short form.** The item gives a repository example only. How is a log-store path written in short form, and how does the program tell a file path from other text in backticks, such as a branch name or a command, so that it does not refuse on them?
 5. **Files that are not Markdown.** How is a copied Python script, JSON Lines transcript or other non-Markdown file shown as a page that reads well on an iPad?
