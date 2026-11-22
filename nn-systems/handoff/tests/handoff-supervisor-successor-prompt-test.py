@@ -582,24 +582,66 @@ def run_launch_and_retention_cases(workspace: Path, recent: str):
     pushed_prompt = supervisor.build_ignition_prompt(
         Path("/tmp/dialog-0002.md"),
         {"written-at": "2026-08-30T17:20:00Z", "next-step": "finish the supervisor"},
-        launch_time_git_sync_report="launch-time-git-sync: fixture-branch is current with main",
+        launch_time_git_sync_report=supervisor.LaunchTimeGitSyncReport(
+            "launch-time-git-sync: fixture-branch is current with main",
+            checkout_has_main_after_a_fetch=True),
         branch_state_instruction=supervisor.BRANCH_STATE_PUSHED_TO_ORIGIN_INSTRUCTION)
-    check("a pushed branch's prompt carries only the pushed instruction, after the sync result",
+    check("a pushed branch current with main gets the pushed instruction in place of the sync result",
           nothing_is_appended_to(
               pushed_prompt,
-              "launch-time-git-sync: fixture-branch is current with main — This branch is "
+              "to a background subagent or Codex. This branch is "
               "pushed: leave its head as it is, and start new work on a branch from origin/main.",
               expected_rest_after_the_branch_state_line)
+          and "launch-time-git-sync" not in pushed_prompt
           and "never been pushed" not in pushed_prompt, pushed_prompt)
     on_main_prompt = supervisor.build_ignition_prompt(
         Path("/tmp/dialog-0002.md"),
         {"written-at": "2026-08-30T17:20:00Z", "next-step": "finish the supervisor"},
-        launch_time_git_sync_report="launch-time-git-sync: main is current with main")
-    check("a checkout on main gets the sync result and no branch-state instruction",
+        launch_time_git_sync_report=supervisor.LaunchTimeGitSyncReport(
+            "launch-time-git-sync: main is current with main", checkout_has_main_after_a_fetch=True))
+    check("a checkout on main current with main gets neither the sync result nor a branch-state instruction",
           nothing_is_appended_to(
               on_main_prompt,
-              "to a background subagent or Codex. launch-time-git-sync: main is current with main",
-              expected_rest_after_the_branch_state_line), on_main_prompt)
+              "to a background subagent or Codex.",
+              expected_rest_after_the_branch_state_line)
+          and "launch-time-git-sync" not in on_main_prompt, on_main_prompt)
+    for report in ("launch-time-git-sync: main fast-forwarded to main (abc1234)",
+                   "launch-time-git-sync: seat-branch is 2 commit(s) ahead of main and has all of "
+                   "it — nothing to pull"):
+        successful_sync_prompt = supervisor.build_ignition_prompt(
+            Path("/tmp/dialog-0002.md"),
+            {"written-at": "2026-08-30T17:20:00Z", "next-step": "finish the supervisor"},
+            launch_time_git_sync_report=supervisor.LaunchTimeGitSyncReport(
+                report, checkout_has_main_after_a_fetch=True))
+        check(f"a successful sync's report is left out of the prompt: {report}",
+              "launch-time-git-sync" not in successful_sync_prompt, successful_sync_prompt)
+    for report in (supervisor.LaunchTimeGitSyncReport(
+                       "launch-time-git-sync: main is current with main (fetch failed, comparing "
+                       "against what is on disk)", checkout_has_main_after_a_fetch=False),
+                   "launch-time-git-sync: main fast-forwarded to main (its new commit could not be "
+                   "read: x)\nnext steps",
+                   "launch-time-git-sync: main left as is — error: The following untracked working "
+                   "tree files would be overwritten by merge:; notes is current with main.md; "
+                   "Aborting"):
+        kept_prompt = supervisor.build_ignition_prompt(
+            Path("/tmp/dialog-0002.md"),
+            {"written-at": "2026-08-30T17:20:00Z", "next-step": "finish the supervisor"},
+            launch_time_git_sync_report=report)
+        check(f"a report after a failed fetch, a failure's next steps or a refused fast-forward "
+              f"stays in the prompt, whatever phrase its text holds: {report!r}",
+              report.split("\n")[0] in kept_prompt, kept_prompt)
+    recovered_current_prompt = supervisor.IgnitionPlanWithoutConversationTail(
+        "finish the supervisor").compose(
+            supervisor.LaunchTimeGitSyncReport(
+                "launch-time-git-sync: fixture-branch is current with main",
+                checkout_has_main_after_a_fetch=True),
+            branch_state_instruction=supervisor.BRANCH_STATE_PUSHED_TO_ORIGIN_INSTRUCTION)
+    check("the boot-recovery prompt also puts the branch-state instruction in place of a successful sync's report",
+          "launch-time-git-sync" not in recovered_current_prompt
+          and (supervisor.ITEMS_NEEDING_THE_USER_IN_ONE_APPROVAL_WALK_INSTRUCTION + " "
+               + supervisor.BRANCH_STATE_PUSHED_TO_ORIGIN_INSTRUCTION
+               + supervisor.NEXT_STEP_HEADING) in recovered_current_prompt,
+          repr(recovered_current_prompt))
     # The supervisor's other ignition shape composes the same instruction at a
     # second call site (`IgnitionPlanWithoutConversationTail.compose`). The
     # whole prompt is pinned, so an append anywhere in it -- inside a constant
@@ -928,6 +970,26 @@ def run_launch_time_git_sync_cases(workspace: Path):
           report.startswith("launch-time-git-sync: HEAD left as is — ") and "seat-collision.md" in report
           and (detached_home / "seat-collision.md").read_text(encoding="utf-8") == "my copy\n",
           report)
+
+    # A refused fast-forward whose git error names a file called like a success report is still a
+    # failure the successor must hear of.
+    phrase_home = root / "phrase-named-file-home"
+    git_in(["clone", "--quiet", str(remote), str(phrase_home)], root)
+    phrase_named_file = "notes is current with main.md"
+    (seed / phrase_named_file).write_text("main's copy\n", encoding="utf-8")
+    git_in(["add", "-A"], seed)
+    git_in(["commit", "--quiet", "-m", "main adds a file named like a success report"], seed)
+    git_in(["push", "--quiet", "origin", "main"], seed)
+    (phrase_home / phrase_named_file).write_text("my copy\n", encoding="utf-8")
+    report = supervisor.launch_time_git_sync(phrase_home)
+    phrase_prompt = supervisor.build_ignition_prompt(
+        Path("/tmp/dialog-0002.md"),
+        {"written-at": "2026-11-22T09:00:00Z", "next-step": "finish the supervisor"},
+        launch_time_git_sync_report=report)
+    check("a refused fast-forward whose error holds a success phrase stays in the successor's prompt",
+          report.startswith("launch-time-git-sync: main left as is — ")
+          and supervisor.LAUNCH_TIME_GIT_SYNC_REPORT_PHRASE_CURRENT_WITH_MAIN in report
+          and report in phrase_prompt, phrase_prompt)
 
     # Bring the branch level, then put it one behind, for the diverged case.
     supervisor.launch_time_git_sync(home)
