@@ -1576,8 +1576,8 @@ def test_print_block():
     code, out, err = print_block([merge_lane_review(1, state="CHANGES_REQUESTED"),
                                   merge_lane_review(2, state="COMMENTED", body="APPROVE\n\nA comment.")],
                                  [merge_lane_comment(10, 1, "**fix-next** Rename it.")])
-    check(f"{PRINT_BLOCK} does not read a COMMENT review that opens with APPROVE as an approval where merge-lane-2 "
-          "gives its verdicts their own review states",
+    check(f"{PRINT_BLOCK} does not read a COMMENT review that opens with APPROVE, after a CHANGES_REQUESTED review, "
+          "as an approval on a pull request another account opened",
           code == 1 and out == "" and "has no approving review" in err, out + err)
     code, out, err = print_block([merge_lane_review(1)], [merge_lane_comment(10, 1, "Rename it.")])
     check(f"{PRINT_BLOCK} refuses a merge-lane-2 comment with no mark, naming it, and says how to write the block "

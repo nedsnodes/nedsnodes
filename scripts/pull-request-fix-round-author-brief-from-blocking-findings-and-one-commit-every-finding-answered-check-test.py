@@ -627,8 +627,8 @@ def brief_cases(root, repository, base, frozen_head):
     code, out, err = run(root, repository, routes_for(
         frozen_head, [review(state="APPROVED", commit_id=base, review_id=9, body="APPROVE\n\nFine."),
                       review(state="COMMENTED", commit_id=frozen_head)]))
-    check("brief: a COMMENT review opening with REQUEST_CHANGES is no round where merge-lane-2 has posted a "
-          "verdict review, exit 1",
+    check("brief: a COMMENT review opening with REQUEST_CHANGES, after an APPROVED review, is no round on a pull "
+          "request another account opened, exit 1",
           code == 1 and "is COMMENTED on commit" in err, err)
 
     code, out, err = run(root, repository, routes_for(base, [review(commit_id=frozen_head)]))
