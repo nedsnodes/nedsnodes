@@ -142,7 +142,7 @@ The existing NedsNodes placement rule remains useful: GitHub Issues carry walkab
 | `docs/nedsnodes-wiki/` | Current standing knowledge that is difficult to reconstruct from code alone |
 | `docs/issues/<n>-<slug>.md` | Substantive working material paired with a GitHub Issue, including its design, which is written here and refined in place until its code lands, then pinned to what landed; design-to-main adds the design-contract beside it, and both move into the component's directory when code starts |
 | `docs/cross-project/` | Designs written while the project was bootstrapped; no new design goes here, and the directory is to be retired |
-| `nn-queue/` | Human-requested notes awaiting their initial review |
+| `nn-queue/` | Notes the user requested in July and August 2026, all walked; takes no new notes |
 | `docs/nedsnodes-wiki/queue/` and `docs/issues/queue/` | Material with a known destination awaiting review |
 | GitHub Issues and pull requests | Work state, decisions, reviews, and check-in path |
 | Git | Code, current Markdown, history, hashes, and ordinary provenance |
