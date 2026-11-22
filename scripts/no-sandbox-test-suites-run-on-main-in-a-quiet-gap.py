@@ -63,7 +63,7 @@ WHAT ONE RUN DOES, in order:
 
 THE STATE FILE, a JSON object written whole to a temporary file renamed into
 place, with these keys; a run that exits at step 1, 4 or 5 writes nothing to
-it, so the file, readable or not, stays as it is:
+it:
   passing_commit           the last commit whose run passed, or null; a run that
                            fails or stops keeps it
   last_run.commit          the commit tested, or null when step 3 stopped the run
@@ -554,9 +554,12 @@ def record_follow_up_request_sent_under_lock(state_file):
     try:
         state = read_state(state_file)
     except StateUnreadable as error:
-        print(f"{PROGRAM}: not recorded — {error}.\nThe next run of this program replaces "
-              f"the file, unless a no-sandbox suite is running then; until a run replaces "
-              f"the file, there is no run to record a follow-up for.",
+        print(f"{PROGRAM}: not recorded — {error}.\nThe next run of this program that "
+              f"records a passed, failed or stopped run replaces the file; a run that exits "
+              f"without recording one, such as a run that finds a no-sandbox suite running, "
+              f"leaves it. Until a run replaces the file, there is no run to record a "
+              f"follow-up for.\nIf you have not yet sent reboot-test the follow-up request "
+              f"the merge gate's notice asks for, send it; nothing more is needed.",
               file=sys.stderr)
         return EXIT_REFUSED
     last = state.get("last_run")
@@ -576,15 +579,14 @@ MERGE_LINE = re.compile(r"^Merge pull request #(\d+)")
 
 
 def pull_requests_merged_between(clone, older, newer):
-    """['#N: subject'] from the first-parent merge commits in older..newer, or why not."""
-    listed = git(clone, "log", "--first-parent", "--merges", "--format=%s%x09%b",
+    """['#N'] from the first-parent merge commits in older..newer, or why not."""
+    listed = git(clone, "log", "--first-parent", "--merges", "--format=%s",
                  f"{older}..{newer}")
     if listed.returncode != 0:
         return ["the merged pull requests could not be read: "
                 f"{git_output.git_stderr_first_error_message_else_last_line(listed.stderr)}"]
     found = []
-    for entry in listed.stdout.split("\n"):
-        subject = entry.split("\t", 1)[0]
+    for subject in listed.stdout.split("\n"):
         matched = MERGE_LINE.match(subject)
         if matched:
             found.append(f"#{matched.group(1)}")

@@ -429,8 +429,11 @@ def timeout_seconds_of_command_line(command):
     timeout stops the first command, the rest of the pipeline reads the end of its input. Not
     handled, so each keeps a deadline although work runs outside the timeout: a command
     substitution the outer shell runs before the timeout starts, as in `timeout 1h echo "$(a)"`; a
-    comment holding a lone `'` or `)` before a line break; an ANSI-C string, as in `$'it\\'s'; b`;
-    and odd nesting, as in `"$(b ")")" ; c`."""
+    comment holding a lone `'` or `)` before a line break, or a `<<`; an ANSI-C string, as in
+    `$'it\\'s'; b`; odd nesting, as in `"$(b ")")" ; c`; a `$(...)` in an unquoted here-document's
+    body, which the outer shell runs before the timeout starts; a delimiter partly quoted, as in
+    `<<'END'OF`, whose body is read to a line `END`, not `ENDOF`; a `;` with a here-document body
+    or a comment after it and no command; and a delimiter line continued with a backslash."""
     match = TIMEOUT_COMMAND_LINE_START_PATTERN.match(command)
     if not match or command_line_runs_another_command_after(command[match.end():]):
         return None
@@ -452,7 +455,7 @@ def command_line_runs_another_command_after(text):
             here_document_delimiters = []
             continue
         here_document_operator = HERE_DOCUMENT_OPERATOR_PATTERN.match(text, index) \
-            if quote is None and text[index - 1:index] != "<" else None
+            if quote is None and depth == 0 and text[index - 1:index] != "<" else None
         if here_document_operator:
             here_document_delimiters.append((
                 re.sub(r"['\"\\]", "", here_document_operator["delimiter"]),
@@ -790,9 +793,12 @@ def rules_three_to_five(verdict, put_off_at, checker, task_directory,
         return {fields.RULE: 3, fields.DECISION: fields.WAKE_HANDOFF_PUT_OFF,
                 fields.TEXT: HANDOFF_PUT_OFF_TEXT.format(time=iso(put_off_at))}
     if not running and not verdict["handoff_deferred_marker"]:
+        # A condition the shared GitHub budget skipped may be met, so it leaves the verdict to rule 5.
+        skipped_before = len(checker.conditions_skipped_for_budget)
         verdict["open_tasks_nothing_holds"] = open_tasks_nothing_holds(
             task_directory, checker, due_task_raise_state_directory)
-        if not verdict["open_tasks_nothing_holds"]:
+        if (not verdict["open_tasks_nothing_holds"]
+                and len(checker.conditions_skipped_for_budget) == skipped_before):
             return {fields.RULE: 4, fields.DECISION: fields.NO_WAKE}
     return {fields.RULE: 5, fields.DECISION: fields.JUDGE}
 

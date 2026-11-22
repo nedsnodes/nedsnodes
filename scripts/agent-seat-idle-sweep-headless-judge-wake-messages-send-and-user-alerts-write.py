@@ -391,8 +391,9 @@ class SweepLog:
                 if (owed and owed_by != invocation) or "sentences" not in event:
                     wait[PROMISE_MESSAGES] = None
                 elif wait[PROMISE_MESSAGES] is not None:
-                    wait[PROMISE_MESSAGES].append({"at": event["at"], "kinds": set(event["kinds"]),
-                                                   "sentences": event["sentences"]})
+                    wait[PROMISE_MESSAGES].append({
+                        "at": event.get("send_started_at", event["at"]),
+                        "kinds": set(event["kinds"]), "sentences": event["sentences"]})
                 owed = False
             elif event["step"] == NUDGE or (wait is not None and event["step"] == PROMISE):
                 if event["step"] == NUDGE:
@@ -413,7 +414,12 @@ class SweepLog:
         return answers[-1] if answers else None
 
     def running_work_asked_about(self, seat):
+        """The running work rule 5 messages named, less what a message the delivery check did not
+        find in the agent-seat's transcript named."""
+        not_found = {event["message_id"] for event in self.of_seat(seat, "delivery_checked")
+                     if not event["found"]}
         return {work_id for event in self.of_seat(seat, "judge_answer") if event.get("rule") == 5
+                and event.get("message_id") not in not_found
                 for work_id in event.get(RUNNING_WORK_ASKED_ABOUT, [])}
 
     def checked_sentences(self, seat):
@@ -785,8 +791,8 @@ class Sweep:
         return text, outcome, started_at
 
     def send(self, seat, verdict, text, step):
-        """Send code's text to one agent-seat; log the send for the delivery check. Returns whether
-        the send succeeded."""
+        """Send code's text to one agent-seat; log the send for the delivery check. Returns the
+        message_sent event, or False when the send failed."""
         text, outcome, started_at = self.send_wake_message([seat], text)
         if outcome.error:
             self.headless_failed(seat, f"send its {step} message", outcome.error,
@@ -797,16 +803,15 @@ class Sweep:
         if problems:
             self.headless_failed(seat, f"send its {step} message", "; ".join(problems), SENDS_WRONG)
             return False
-        self.message_sent(seat, verdict, text_sent_to(outcome, seat, text), step, started_at)
-        return True
+        return self.message_sent(seat, verdict, text_sent_to(outcome, seat, text), step, started_at)
 
     def message_sent(self, seat, verdict, text, step, started_at):
         # The delivery check compares transcript times with the send's start: a sender may run on
         # for minutes after its SendMessage, and the record is written when it ends.
-        self.record({"event": "message_sent", "agent_seat": seat, "step": step, "text": text,
-                     "send_started_at": iso(started_at),
-                     "message_id": uuid.uuid4().hex, "session_id": verdict.get(fields.SESSION_ID),
-                     "transcript_path": verdict.get(fields.TRANSCRIPT_PATH)})
+        return self.record({"event": "message_sent", "agent_seat": seat, "step": step, "text": text,
+                            "send_started_at": iso(started_at), "message_id": uuid.uuid4().hex,
+                            "session_id": verdict.get(fields.SESSION_ID),
+                            "transcript_path": verdict.get(fields.TRANSCRIPT_PATH)})
 
     # --- The account ---
 
@@ -915,10 +920,9 @@ class Sweep:
     # --- One idle agent-seat ---
 
     def handle_seat(self, seat, verdict, transcript_read_at):
-        # Checked for each agent-seat: a judge earlier in this invocation may have started it.
-        # During it, only the steps that start no headless agent-session run; the others are not
-        # logged, so they run after it.
-        paused = self.headless_usage_limit_pause_holds()
+        # Checked before each step that starts a headless agent-session: a judge or send earlier in
+        # this invocation, for this agent-seat too, may have started the pause. During it, only the
+        # steps that start none run; the others are not logged, so they run after it.
         session = verdict[fields.SESSION_ID]
         stretch = (verdict.get(fields.LAST_ACTIVITY) or {}).get("time")
         wait = self.log.open_wait(seat)
@@ -930,7 +934,7 @@ class Sweep:
                             and check["last_activity"] == stretch)
         rule, text = verdict[fields.RULE], verdict.get(fields.TEXT)
         if rule == 1:
-            if paused:
+            if self.headless_usage_limit_pause_holds():
                 return
             self.checked(seat, verdict, transcript_read_at, check_is_new)
             if wait:
@@ -958,12 +962,14 @@ class Sweep:
             self.end_wait(seat, "it spent tokens after the user was told")
             wait = None
         promise_text = None
-        if rule == 2 and paused:
+        judged_sentences = rule == 2
+        sentences_checked = []
+        if judged_sentences and self.headless_usage_limit_pause_holds():
             if wait:
-                self.due_step(seat, verdict, wait, paused)
+                self.due_step(seat, verdict, wait)
             return
-        if rule == 2:
-            outcome, promise = self.sentences(seat, verdict)
+        if judged_sentences:
+            outcome, promise, sentences_checked = self.sentences(seat, verdict)
             if outcome == "paused":
                 # The check is not logged, so that the next read after the reset still holds the
                 # sentences the judge could not judge.
@@ -974,26 +980,44 @@ class Sweep:
                 rule, text = fallback[fields.RULE], fallback.get(fields.TEXT)
             elif not promise_text:
                 rule = None
-        self.checked(seat, verdict, transcript_read_at, check_is_new)
+        if not judged_sentences:
+            self.checked(seat, verdict, transcript_read_at, check_is_new)
         # Nothing to do settles the open tasks a rule 3 or 5 message was about, but not a promise
         # a rule 2 message named, whatever message opened the wait it was sent on.
         if rule == 4 and wait and PROMISE not in wait:
             self.end_wait(seat, "nothing to do")
             wait = None
         if wait:
-            self.due_step(seat, verdict, wait, paused)
-        if paused:
+            self.due_step(seat, verdict, wait)
+        if judged_sentences:
+            if self.headless_usage_limit_pause_holds():
+                # An escalation stopped at a usage limit started the pause after the sentences were
+                # judged: neither they nor the check are logged, so that after the reset they are
+                # judged again and their promise message is sent.
+                return
+            self.sentences_checked(seat, sentences_checked)
+            self.checked(seat, verdict, transcript_read_at, check_is_new)
+        if self.headless_usage_limit_pause_holds():
             return
         if promise_text:
             # A promise given in answer to a message goes on the open wait, so that repeated
             # promises cannot put off its escalation and the user-alert.
             if not wait:
+                # Logged before the send: the escalation quotes the nudge that opened the wait, so
+                # a promise message whose own send failed still reaches the agent-seat.
                 self.start_wait(seat, verdict, stretch, promise_text, 2)
-            elif PROMISE not in wait:
-                self.record({"event": "wait_step", "agent_seat": seat, "step": PROMISE})
-            self.record({"event": PROMISE_MESSAGE, "agent_seat": seat, "kinds": promise_kinds,
-                         "sentences": promise_sentences})
-            self.send(seat, verdict, promise_text, NUDGE)
+                self.record({"event": PROMISE_MESSAGE, "agent_seat": seat, "kinds": promise_kinds,
+                             "sentences": promise_sentences})
+                self.send(seat, verdict, promise_text, NUDGE)
+            else:
+                # Logged only once sent, since no later message quotes it.
+                sent = self.send(seat, verdict, promise_text, NUDGE)
+                if sent:
+                    if PROMISE not in wait:
+                        self.record({"event": "wait_step", "agent_seat": seat, "step": PROMISE})
+                    self.record({"event": PROMISE_MESSAGE, "agent_seat": seat,
+                                 "kinds": promise_kinds, "sentences": promise_sentences,
+                                 "send_started_at": sent["send_started_at"]})
         elif not wait:
             self.nudge(seat, verdict, rule, text, stretch)
 
@@ -1005,7 +1029,7 @@ class Sweep:
                      "session_id": verdict[fields.SESSION_ID], "first_idle_at": stretch,
                      "text": step_text})
 
-    def due_step(self, seat, verdict, wait, paused):
+    def due_step(self, seat, verdict, wait):
         """The step of an open wait that is due: the escalation 15 minutes after the nudge, then
         the user-alert 15 minutes after the escalation; after that, none. The escalation is a
         send, so a headless usage-limit pause holds it."""
@@ -1025,7 +1049,8 @@ class Sweep:
                            f"{seat} to see why it stopped, and message it with SendMessage; the "
                            "user may want to look at it himself.", failure=False)
             return
-        if not paused and seconds_between(wait[NUDGE], self.now) >= WAIT_STEP_SECONDS:
+        if (seconds_between(wait[NUDGE], self.now) >= WAIT_STEP_SECONDS
+                and not self.headless_usage_limit_pause_holds()):
             text = ESCALATION_TEXT.format(
                 minutes=minutes, nudge_time=parse_time(wait[NUDGE]).strftime("%Y-%m-%d %H:%MZ"),
                 quoted_nudge="\n".join(f"> {line}" for line in wait["nudge_text"].split("\n")))
@@ -1116,7 +1141,7 @@ class Sweep:
                      "session_id": verdict[fields.SESSION_ID], "last_activity": stretch,
                      "send": send, "reason": answer.get("reason"), "failed": bool(problem),
                      RUNNING_WORK_ASKED_ABOUT: running_work_named_in(facts, answer["message"])
-                     if sent else []})
+                     if sent else [], **({"message_id": sent["message_id"]} if sent else {})})
         if problem:
             self.headless_failed(seat, "judge whether it could act now", problem,
                                  outcome.error_kind or JUDGE_ANSWER_UNUSABLE, outcome)
@@ -1132,9 +1157,10 @@ class Sweep:
     def sentences(self, seat, verdict):
         """Rule 2: judge what code could not settle, and word one message naming every unbacked
         sentence. Returns ("unbacked", (the message, the sorted kinds of the sentences it names,
-        those sentences)), ("failed", None), ("paused", None) or ("all backed", None). A judge
-        stopped by a headless usage-limit pause logs no sentence as checked, so that it is judged
-        after the reset."""
+        those sentences), the sentences checked), ("failed", None, []), ("paused", None, []) or
+        ("all backed", None, the sentences checked). The caller logs the sentences checked, so that
+        a pause a later launch starts leaves them to be judged after the reset; a judge stopped by
+        the pause logs none, and a failed judge logs them all."""
         checked = self.log.checked_sentences(seat)
         new_by_code_reading = fields.verdict_sentences_grouped_by_code_reading(
             item for item in verdict.get(fields.SENTENCES, [])
@@ -1143,7 +1169,7 @@ class Sweep:
         unbacked = new_by_code_reading.get(fields.UNBACKED, [])
         new = judged + unbacked
         if not new:
-            return "all backed", None
+            return "all backed", None, []
         backed = {}
         if judged:
             facts = dict(self.facts(seat, verdict),
@@ -1162,28 +1188,27 @@ class Sweep:
             if problem and self.headless_failed(seat, "judge whether its promises are backed",
                                                 problem, outcome.error_kind or JUDGE_ANSWER_UNUSABLE,
                                                 outcome):
-                return "paused", None
-            for item in new:
-                self.record({"event": "sentence_checked", "agent_seat": seat,
-                             "record_uuid": item["record_uuid"], "sentence": item["sentence"]})
+                return "paused", None, []
             if problem:
-                return "failed", None
+                self.sentences_checked(seat, new)
+                return "failed", None, []
             for answer in outcome.answer["sentences"]:
                 backed[answer["index"]] = answer["backed"]
             self.record({"event": "judge_answer", "agent_seat": seat, "rule": 2,
                          "answers": outcome.answer["sentences"]})
-        else:
-            for item in new:
-                self.record({"event": "sentence_checked", "agent_seat": seat,
-                             "record_uuid": item["record_uuid"], "sentence": item["sentence"]})
         unbacked += [item for index, item in enumerate(judged) if not backed[index]]
         if not unbacked:
-            return "all backed", None
+            return "all backed", None, new
         return "unbacked", ("\n".join(UNBACKED_SENTENCE_LINES[item["kind"]].format(
             sentence=item["sentence"],
             minutes=int(seconds_between(item["time"], self.now) // 60) if item["time"] else "some")
             for item in unbacked), sorted({item["kind"] for item in unbacked}),
-            [item["sentence"] for item in unbacked])
+            [item["sentence"] for item in unbacked]), new
+
+    def sentences_checked(self, seat, items):
+        for item in items:
+            self.record({"event": "sentence_checked", "agent_seat": seat,
+                         "record_uuid": item["record_uuid"], "sentence": item["sentence"]})
 
     def usage_limit(self, seat, verdict):
         limit = verdict[fields.USAGE_LIMIT]

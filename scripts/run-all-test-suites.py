@@ -1047,7 +1047,8 @@ SUITES_RUN_WITHOUT_ANY_SANDBOX = {
 }
 
 SUITES_THAT_RUN_THE_REAL_CLAUDE_CLI = {
-    "nn-systems/general-tools/tests/agent-seat-worktree-create-with-owner-file-claude-code-worktree-create-hook-real-claude-code-test.py",
+    "nn-systems/general-tools/tests/agent-seat-worktree-create-with-owner-file-claude-code-worktree-create-hook-real-claude-code-test.py":
+        "it runs the installed Claude Code to check the worktree hook end to end",
 }
 
 # Suites that must write the git directory of the repository under test, such as with
@@ -1064,11 +1065,18 @@ SUITES_GIVEN_A_COPY_ON_WRITE_OVERLAY_OF_THE_REPOSITORY_GIT_DIRECTORY = {
 SUITES_WHOSE_TEST_SANDBOX_SHARES_THE_MACHINE_NETWORK = {}
 
 # A run uses the checkout under test's own copies of these lists, not the ones above,
-# whenever the checkout has a scripts/run-all-test-suites.py.
+# whenever the checkout has a scripts/run-all-test-suites.py: each names the checkout's suites
+# by path, so a pull request that renames a listed suite renames its entry too.
 SUITE_SANDBOX_LIST_NAMES_READ_FROM_CHECKOUT_UNDER_TEST = (
     "SUITES_RUN_WITHOUT_ANY_SANDBOX",
+    "SUITES_THAT_RUN_THE_REAL_CLAUDE_CLI",
     "SUITES_GIVEN_A_COPY_ON_WRITE_OVERLAY_OF_THE_REPOSITORY_GIT_DIRECTORY",
     "SUITES_WHOSE_TEST_SANDBOX_SHARES_THE_MACHINE_NETWORK")
+# A checkout committed before a run read this list from it lacks the list, or assigns it the
+# set it was then, as the nightly mutation pass's checkouts do; such a checkout gets this
+# program's own list.
+SUITE_SANDBOX_LIST_NAMES_OLDER_CHECKOUTS_LACK_OR_ASSIGN_A_SET = (
+    "SUITES_THAT_RUN_THE_REAL_CLAUDE_CLI",)
 SUITE_SANDBOX_LISTS_SOURCE_LINE_PREFIX = "which sandbox each suite runs in, from the lists in "
 SUITE_SANDBOX_LISTS_OF_THIS_PROGRAM = {
     name: dict(globals()[name]) for name in SUITE_SANDBOX_LIST_NAMES_READ_FROM_CHECKOUT_UNDER_TEST}
@@ -1910,7 +1918,10 @@ def suite_sandbox_lists_read_from_checkout_under_test(top):
                 found[node.targets[0].id] = ast.literal_eval(node.value)
             except (ValueError, TypeError, SyntaxError, RecursionError):
                 found[node.targets[0].id] = None
-    unreadable = [name for name in SUITE_SANDBOX_LIST_NAMES_READ_FROM_CHECKOUT_UNDER_TEST
+    for name in SUITE_SANDBOX_LIST_NAMES_OLDER_CHECKOUTS_LACK_OR_ASSIGN_A_SET:
+        if name not in found or isinstance(found[name], set):
+            found[name] = dict(SUITE_SANDBOX_LISTS_OF_THIS_PROGRAM[name])
+    unreadable =[name for name in SUITE_SANDBOX_LIST_NAMES_READ_FROM_CHECKOUT_UNDER_TEST
                   if not isinstance(found.get(name), dict)]
     if unreadable:
         raise CouldNotRun(

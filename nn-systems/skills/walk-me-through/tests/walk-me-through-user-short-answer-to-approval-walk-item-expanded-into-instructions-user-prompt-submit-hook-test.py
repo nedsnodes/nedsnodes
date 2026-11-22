@@ -2393,6 +2393,37 @@ def test_a_bare_new_marks_list_or_quotation_is_compared_whole_when_shown_without
               and lines is not None and not counted(lines), f"lines {lines!r}, calls {calls!r}")
 
 
+def test_a_list_or_quotation_shown_below_a_lead_in_ending_in_a_colon_is_compared_with_its_lead_in():
+    for name, block in (("a list", "- Hide rows older than a year.\n- Keep the rest."),
+                        ("a quotation", "> Hide rows older than a year.\n> Keep the rest.")):
+        item = QUOTED_PROPOSAL_ITEM.replace("#new\n> Hide rows older than a year.\n> Keep the rest.",
+                                            f"#new\n\n{block}")
+        for lead_in, separator in (("If you disapprove, the new text:", "\n\n"),
+                                   ("If you disapprove, the new text:", "\n"),
+                                   ("Do not adopt any of the following:", "\n\n")):
+            case = Case(next_to_present="item 4 of 9", document="# A walk\n\n" + item + "\n", model="changed")
+            shown = item.replace("#new\n\n", f"{lead_in}{separator}")
+            lines = case.lines("a", case.transcript(f"{shown}\n\n{ITEM_4_CLOSING_LINE}"))
+            check(f"an answer goes to the model and is refused when {name} a bare `#new` introduces was shown "
+                  f"below \"{lead_in}\" {'on the line above' if separator == chr(10) else 'as its own paragraph'}",
+                  len(case.model_calls()) == 1 and lines is not None and not counted(lines), f"lines {lines!r}")
+        case = Case(next_to_present="item 4 of 9", document="# A walk\n\n" + item + "\n", model="changed")
+        shown = item.replace("#new\n\n", "If you approve, the new text:\n\n")
+        lines = case.lines("a", case.transcript(f"{shown}\n\n{ITEM_4_CLOSING_LINE}"))
+        check(f"an answer counts with no model call when {name} a bare `#new` introduces was shown below \"If you "
+              "approve, the new text:\"", counted(lines) and not case.model_calls(), f"lines {lines!r}")
+
+
+def test_a_new_if_d_line_with_the_new_text_label_counts_shown_as_the_stop_hook_shows_it():
+    # The question Stop hook passes `#new_if_d The new text: X` shown as `If you disapprove, the new text: X`.
+    item = DECISION_ITEM.replace("#new_if_d Show every row.", "#new_if_d The new text: Show every row.")
+    case = Case(next_to_present="item 4 of 9", document="# A walk\n\n" + item + "\n", model="changed")
+    shown = item.replace("#new_if_d The new text: Show", "If you disapprove, the new text: Show")
+    lines = case.lines("d", case.transcript(f"{shown}\n\n{ITEM_4_CLOSING_LINE}"))
+    check("'d' counts with no model call when `#new_if_d The new text: Show every row.` was shown as \"If you "
+          "disapprove, the new text: Show every row.\"", counted(lines) and not case.model_calls(), f"lines {lines!r}")
+
+
 def test_a_range_items_shown_text_ends_at_a_later_item_and_not_at_an_item_inside_the_range():
     closing = f"[Item 11 of 20, grouped](https://claude.ai/artifact/x) · {LETTERS_AFTER_LINK}"
     range_shown = RANGE_HEADING_DOCUMENT.split("## Item 13")[0]

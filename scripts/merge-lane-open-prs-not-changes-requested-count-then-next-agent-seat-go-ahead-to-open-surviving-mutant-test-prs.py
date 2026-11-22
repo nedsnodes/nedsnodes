@@ -7,40 +7,69 @@ Usage:
 
 The program counts the open pull requests that are not drafts, the
 mutant-test ones included, leaving out only those a merge-lane-2 review on
-their newest commit asks to change: those whose newest GitHub review by the
-account ned-review-merge on the pull request's head commit, among the reviews
-in the state APPROVED or CHANGES_REQUESTED, is CHANGES_REQUESTED. A review
-in another state, such as COMMENTED, neither leaves a pull request out nor
-brings it back. When that count is 10 or fewer and the agent-seats file names an
-agent-seat not yet recorded as released, the program sends the first such
-agent-seat, in the file's order, the release message with the idle sweep's own
-send code and prompt, unchanged, from
+their newest commit asks to change. A pull request is left out when the newest
+verdict among the GitHub reviews by the account ned-review-merge on the pull
+request's head commit asks for changes. A verdict is a review in the state
+APPROVED or CHANGES_REQUESTED; on a pull request where ned-review-merge has no
+review in either state on any commit, such as one ned-review-merge opened, whose author
+GitHub lets post only COMMENT reviews, a verdict is a COMMENT review whose body
+opens with the line APPROVE or REQUEST_CHANGES, read as the fix-round program,
+scripts/pull-request-fix-round-author-brief-from-blocking-findings-and-one-commit-every-finding-answered-check.py,
+reads it. Any other review neither leaves a pull request out nor brings it
+back. Only the newest 100 reviews by ned-review-merge on each pull request are
+read, so a verdict followed by 100 or more later reviews from that account is
+not seen.
+
+When that count is 10 or fewer and the agent-seats file, described below,
+names an agent-seat not yet recorded as released, the program sends the first
+such agent-seat, in the file's order, the release message. This program writes
+the release message; the code and prompt that send the message are the idle
+sweep's own, unchanged, from
 scripts/agent-seat-idle-sweep-headless-judge-wake-messages-send-and-user-alerts-write.py.
-It records the agent-seat as released only when the idle sweep's check of that
-send passes and every text sent to the agent-seat is the release message, and
-then prints `RELEASED <agent-seat>`; otherwise it prints what failed and
-records nothing, so the next run, at the next merge or by hand, tries again.
-When no agent-seat is due, it prints the count. The release message says what
-was counted.
+The release message, with N the count, reads:
+  merge-lane-2's queue is quiet: N open pull requests that are not drafts wait
+  for merge-lane-2 to review or merge them. The count includes pull requests
+  that only add tests for surviving mutants, and leaves out only those whose
+  newest commit a review by ned-review-merge asks to change. You may now open
+  your pull requests that only add tests for surviving mutants: one per source
+  file, with at most 5 open at a time.
+
+  Do not reply to this message: its sender has exited, so a reply fails.
+The last line is the idle sweep's DO_NOT_REPLY_SENTENCE. The program records
+the agent-seat as released only when the idle sweep's check of that send
+passes and every text the headless agent-session sent to the agent-seat, which
+may send more than once, is the whole release message, last line included,
+and then prints `RELEASED <agent-seat>` and exits 0;
+otherwise it prints what failed, records nothing and exits 2, so the next
+invocation of this program, at the next merge or by hand, tries again.
+
+No agent-seat is due when the count is over 10, or else when every
+agent-seat in the agent-seats file is already recorded as released. The
+program then prints a sentence giving the count and a sentence giving the
+first of these two reasons that holds, and exits 1.
 
 A mutant-test pull request only adds tests for surviving mutants. Such pull
-requests stay unopened until the agent-seat holding them is told that
-merge-lane-2's queue is quiet; the message says the agent-seat may then open them one
-per source file, with at most 5 open at a time.
+requests stay unopened until the agent-seat holding them is sent the release
+message.
 
 --state-directory, by default
 /home/nedlern/nedsnodes-logs/seats/merge-lane-2/surviving-mutant-test-prs-go-ahead,
-holds two files and the sender's empty working directory:
-  agent-seats-holding-surviving-mutant-test-tasks-in-go-ahead-order.txt: one
-    agent-seat per line, in the order they are released; blank lines are
-    ignored. The program only reads it.
+holds:
+  agent-seats-holding-surviving-mutant-test-tasks-in-go-ahead-order.txt, the
+    agent-seats file: one agent-seat per line, in the order they are
+    released; blank lines are ignored. The program only reads it.
   agent-seats-given-surviving-mutant-test-prs-go-ahead.jsonl: one JSON object
     per agent-seat recorded as released, with the keys agent_seat and
     released_at. The program appends to it, and makes it when it is missing.
+  merge-lane-2-mutant-test-release/: the working directory of the headless
+    agent-session that sends the release message, made when it is missing.
+    The program puts nothing in it; its name is the sender's name the
+    receiving agent-seat sees.
 
 scripts/merge-lane-pull-request-merge-through-merge-gate-with-stacked-pull-request-retarget.py
-runs this program after each merge. gh runs with the environment the program
-is given, so with the GH_TOKEN its caller sets.
+runs this program after each merge, with GH_TOKEN set to ned-review-merge's
+token. gh runs with the environment the program is given: run by hand, the
+program uses whatever gh login that environment has.
 """
 
 import argparse
@@ -57,6 +86,12 @@ _sweep_spec = importlib.util.spec_from_file_location(
         "agent-seat-idle-sweep-headless-judge-wake-messages-send-and-user-alerts-write.py"))
 idle_sweep = importlib.util.module_from_spec(_sweep_spec)
 _sweep_spec.loader.exec_module(idle_sweep)
+_fix_round_spec = importlib.util.spec_from_file_location(
+    "pull_request_fix_round_author_brief_from_blocking_findings_and_one_commit_every_finding_answered_check",
+    Path(__file__).with_name(
+        "pull-request-fix-round-author-brief-from-blocking-findings-and-one-commit-every-finding-answered-check.py"))
+fix_round = importlib.util.module_from_spec(_fix_round_spec)
+_fix_round_spec.loader.exec_module(fix_round)
 
 REPOSITORY_OWNER, REPOSITORY_NAME = "nedsnodes", "nedsnodes"
 MERGE_LANE_ACCOUNT = "ned-review-merge"
@@ -82,7 +117,7 @@ query($owner: String!, $name: String!, $endCursor: String) {
       pageInfo { hasNextPage endCursor }
       nodes {
         number isDraft headRefOid
-        reviews(author: "%s", last: 100) { nodes { state commit { oid } } }
+        reviews(author: "%s", last: 100) { nodes { state body commit { oid } } }
       }
     }
   }
@@ -108,10 +143,23 @@ def parse_arguments(argv):
     return parser.parse_args(argv)
 
 
+def merge_lane_verdict(review, as_comments):
+    """APPROVED, CHANGES_REQUESTED, or None for a review that carries no verdict. as_comments is
+    the fix-round program's are_merge_lane_verdicts_on_pull_request_comment_reviews()."""
+    if review["state"] in ("APPROVED", "CHANGES_REQUESTED"):
+        return review["state"]
+    if as_comments and review["state"] == "COMMENTED":
+        return {"APPROVE": "APPROVED", "REQUEST_CHANGES": "CHANGES_REQUESTED"}.get(
+            fix_round.verdict_line(review))
+    return None
+
+
 def sent_back_on_head_commit(pull_request):
-    verdicts = [review["state"] for review in pull_request["reviews"]["nodes"]
-                if (review["commit"] or {}).get("oid") == pull_request["headRefOid"]
-                and review["state"] in ("APPROVED", "CHANGES_REQUESTED")]
+    reviews = pull_request["reviews"]["nodes"]
+    as_comments = fix_round.are_merge_lane_verdicts_on_pull_request_comment_reviews(reviews)
+    verdicts = [merge_lane_verdict(review, as_comments) for review in reviews
+                if (review["commit"] or {}).get("oid") == pull_request["headRefOid"]]
+    verdicts = [verdict for verdict in verdicts if verdict]
     return bool(verdicts) and verdicts[-1] == "CHANGES_REQUESTED"
 
 

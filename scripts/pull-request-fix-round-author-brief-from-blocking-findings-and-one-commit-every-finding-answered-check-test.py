@@ -825,7 +825,8 @@ def stopped_round_cases(root, repository, made, frozen_head, dated_routes, submi
           "exit 1, saying to finish the round with --check, and leaves the answers file as it was",
           code == 1 and out == ""
           and f"holds the unpushed commit {fix[:12]} on top of the frozen-head {frozen_head[:12]}, and its answers "
-          f"file {answers} answers every finding of this round, so a fix-round subagent stopped after step 5.\n"
+          f"file {answers} answers every finding of this round, so a fix-round subagent wrote every answer and its "
+          "commit.\n"
           "If that subagent is still working there, wait for it to finish.\n" + finish in err
           and "keep those commits on a branch" not in err and answers.read_text() == GOOD_ANSWERS, err + out)
     code, check_out, check_err = run(root, made, dated_routes, "--check")
@@ -840,7 +841,7 @@ def stopped_round_cases(root, repository, made, frozen_head, dated_routes, submi
         write_answers(text, seconds_after_review)
         code, out, err = run(root, repository, routes)
         check(f"stopped round: an unpushed commit with {why} keeps the refusal that names both ways on",
-              code == 1 and "holds commits that the frozen-head" in err and "stopped after step 5" not in err
+              code == 1 and "holds commits that the frozen-head" in err and "wrote every answer" not in err
               and answers.read_text() == text, err + out)
 
     answers.write_bytes(b"1. \xff\n")
@@ -879,8 +880,10 @@ def stopped_round_cases(root, repository, made, frozen_head, dated_routes, submi
           "the round with --check, and leaves the answers file as it was",
           code == 1 and out == ""
           and f"is at the frozen-head {frozen_head[:12]} with no fix-round commit, and its answers file {answers} "
-          "answers every finding of this round, so a fix-round subagent that found nothing to fix stopped after "
-          "step 5.\nIf that subagent is still working there, wait for it to finish.\n" + finish in err
+          "answers every finding of this round, so a fix-round subagent wrote every answer and made no commit.\n"
+          "If that subagent is still working there, wait for it to finish.\n"
+          "If the answers describe fixes, their commit was reset away, or if you mean to start the round again: "
+          f"delete {answers} and run this again.\n" + finish in err
           and answers.read_text() == GOOD_ANSWERS, err + out)
     code, check_out, check_err = run(root, made, dated_routes, "--check")
     check("stopped round: with no fix-round commit, the --check command that refusal names prints the message for "
@@ -1921,6 +1924,9 @@ def move_cases(root, _repository, _base, _frozen_head):
     check("move-finish: a failing test command stops it before the commit",
           code == 1 and "exited 3" in err
           and git(repository, "rev-parse", "HEAD") == git(repository, "rev-parse", "origin/main"), err)
+    check("move-finish: the test command selects since the branch's merge base with origin/main, as a commit",
+          "--only-suites-whose-recorded-inputs-changed-since "
+          + git(repository, "merge-base", "origin/main", "HEAD") + "\n" in err, err)
 
     code, out, err = run(root, repository, routes, *finish)
     pushed = git(repository, "ls-tree", "-r", "--name-only", f"origin/{NEW_BRANCH}").split("\n")
@@ -2202,8 +2208,9 @@ def runner_calls(root):
     return calls
 
 
-def suite_cases(root, repository, _base, _frozen_head):
-    """At the frozen-head a-test.py fails and b-test.py passes; c-test.py does not exist there."""
+def suite_cases(root, repository, base, _frozen_head):
+    """At the frozen-head a-test.py fails and b-test.py passes; c-test.py does not exist there. origin/main has
+    moved past base, the branch's merge base with it."""
     for name in ("a-test.py", "b-test.py"):
         (repository / name).write_text("suite\n")
         git(repository, "add", name)
@@ -2242,10 +2249,12 @@ def suite_cases(root, repository, _base, _frozen_head):
           "change broke them" in err
           and "These fail at the frozen-head too, so they are not the round's doing: a-test.py." in err
           and "Not pushed yet" not in out, out + err)
-    check("suites: the round's commit runs the suites the ready command runs, and the frozen-head only its "
-          "failing suites the frozen-head has, recording nothing, each in a scratch worktree",
-          [call["arguments"] for call in calls] == [
-              ["--only-suites-whose-recorded-inputs-changed-since", "origin/main"],
+    check("suites: the round's commit runs the suites the ready command runs, selected since its merge base with "
+          "origin/main, not since origin/main, and the frozen-head only its failing suites the frozen-head has, "
+          "recording nothing, each in a scratch worktree",
+          base != git(repository, "rev-parse", "origin/main")
+          and [call["arguments"] for call in calls] == [
+              ["--only-suites-whose-recorded-inputs-changed-since", base],
               ["--leave-recorded-inputs-and-failure-history-unchanged", "--only-suites-named", "a-test.py",
                "b-test.py"]]
           and all(call["checkout"] != str(repository) for call in calls)

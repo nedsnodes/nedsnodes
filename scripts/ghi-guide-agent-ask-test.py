@@ -1182,24 +1182,57 @@ with tempfile.TemporaryDirectory() as temporary:
           len(recheck_calls) == 3 and answer == reading_list(13)
           and closed_on == {13: "2026-08-08"}, (recheck_calls, answer, closed_on, error))
 
-    # A drift recheck after a verdict is held to the draft-verdict kinds, as
-    # every turn of that ask is, so a reading list given to the drift notice
-    # is not usable and the first verdict stands.
-    seat_verdict_recheck = root / "seat-verdict-recheck"
-    seat_verdict_recheck.mkdir()
-    fake_refresh_queue([([13], {"13": issue(13, state="CLOSED",
-                                            closed_at="2026-08-08T00:00:00Z")}, None)])
+    # A verdict that cites a closed GHI is used only when its drift recheck
+    # gives a usable verdict citing no closed GHI; otherwise the ask fails as
+    # not usable, which ghi-issue-write.py reports as adjudication skipped.
     first_verdict = {"kind": "verdict", "verdict": "too-similar", "issues": [13]}
-    verdict_recheck_calls = fake_claude_queue([
-        ({"session_id": "sess-W", "result": "(ack)"}, None),
-        ({"session_id": "sess-W", "structured_output": first_verdict}, None),
-        ({"session_id": "sess-W", "structured_output": reading_list(14)}, None),
+    for case_name, recheck, expected in [
+            ("a drift recheck after a verdict that answers with a reading list fails the ask",
+             ({"session_id": "sess-W", "structured_output": reading_list(14)}, None),
+             "kind 'reading-list' is none the schema allows"),
+            ("a drift recheck after a verdict that gives no JSON answer fails the ask",
+             ({"session_id": "sess-W", "structured_output": None, "result": "hm"}, None),
+             "claude returned no JSON answer"),
+            ("a drift recheck after a verdict whose turn fails fails the ask",
+             (None, "claude timed out"), "the turn failed: claude timed out"),
+            ("a drift recheck after a verdict that gives a too-similar verdict naming no GHI fails the ask",
+             ({"session_id": "sess-W", "structured_output":
+               {"kind": "verdict", "verdict": "too-similar", "issues": []}}, None),
+             "names no issue it is too similar to"),
+            ("a drift recheck after a verdict that cites the closed GHI again fails the ask",
+             ({"session_id": "sess-W", "structured_output": first_verdict}, None),
+             "the rechecked verdict still cites a closed GHI")]:
+        seat_verdict_recheck = root / ("seat-" + case_name.replace(" ", "-")[:60])
+        seat_verdict_recheck.mkdir()
+        fake_refresh_queue([([13], {"13": issue(13, state="CLOSED",
+                                                closed_at="2026-08-08T00:00:00Z")}, None)])
+        verdict_recheck_calls = fake_claude_queue([
+            ({"session_id": "sess-W", "result": "(ack)"}, None),
+            ({"session_id": "sess-W", "structured_output": first_verdict}, None),
+            recheck,
+        ])
+        answer, closed_on, error = ghi_ask.ask("q", False, seat_verdict_recheck, "x/y",
+                                               request_form="draft-verdict")
+        check(case_name,
+              len(verdict_recheck_calls) == 3 and answer is None and error is not None
+              and error.startswith(ghi_ask.GHI_GUIDE_AGENT_ANSWER_NOT_USABLE_MESSAGE_OPENING)
+              and "the verdict cited closed GHI #13" in error and expected in error,
+              (verdict_recheck_calls, answer, error))
+    seat_verdict_corrected = root / "seat-verdict-corrected"
+    seat_verdict_corrected.mkdir()
+    fake_refresh_queue([([13], {"13": issue(13, state="CLOSED", closed_at="2026-08-08T00:00:00Z"),
+                                "14": issue(14)}, None)])
+    corrected_verdict = {"kind": "verdict", "verdict": "too-similar", "issues": [14]}
+    fake_claude_queue([
+        ({"session_id": "sess-X", "result": "(ack)"}, None),
+        ({"session_id": "sess-X", "structured_output": first_verdict}, None),
+        ({"session_id": "sess-X", "structured_output": corrected_verdict}, None),
     ])
-    answer, closed_on, error = ghi_ask.ask("q", False, seat_verdict_recheck, "x/y",
+    answer, closed_on, error = ghi_ask.ask("q", False, seat_verdict_corrected, "x/y",
                                            request_form="draft-verdict")
-    check("a drift recheck after a verdict that answers with a reading list keeps the verdict",
-          len(verdict_recheck_calls) == 3 and answer == first_verdict and error is None,
-          (verdict_recheck_calls, answer, error))
+    check("a drift recheck after a verdict that cites only open GHIs is the final answer",
+          answer == corrected_verdict and closed_on == {} and error is None,
+          (answer, closed_on, error))
     draft_verdict_schema = ghi_ask.ghi_guide_agent_answer_json_schema_build_for_kinds(
         ("verdict", "ask-user-about-ruling"))
     check("every turn of a draft-verdict ask, the cold start and the drift "
@@ -1536,6 +1569,122 @@ with tempfile.TemporaryDirectory() as temporary:
                     "--force", str(missing_seat))
     finally:
         patch("ask", ask_orig)
+
+
+# --- the box-side fast-forward runs before the seat's copy parses arguments ---
+# A seat whose copy of this script predates a flag the caller sends rejected it
+# at argparse, before its own fast-forward, so it could never update. Each case
+# runs the real remote command under /bin/sh against a seat whose copy lacks
+# --print-answer-json, with a gh that fails offline so the ask stops at its
+# mirror refresh, the first step after argument parsing.
+import shutil as _shutil
+import subprocess as _remote_subprocess
+
+_REPOSITORY_ROOT = SCRIPT_PATH.resolve().parent.parent
+
+
+def _seat_whose_copy_predates_print_answer_json(root):
+    origin = root / "origin"
+    for directory in ("scripts", "nn-systems"):
+        _shutil.copytree(_REPOSITORY_ROOT / directory, origin / directory,
+                         ignore=_shutil.ignore_patterns("__pycache__", "tests", "*-test.py"))
+    script = origin / "scripts" / "ghi-guide-agent-ask.py"
+    new_text = script.read_text(encoding="utf-8")
+    script.write_text(new_text.replace('"--print-answer-json"', '"--flag-not-yet-added"'),
+                      encoding="utf-8")
+    _git(["init", "-q", "-b", "main"], origin)
+    _git(["config", "user.email", "test@example.invalid"], origin)
+    _git(["config", "user.name", "ghi test"], origin)
+    _git(["add", "-A"], origin)
+    _git(["commit", "-q", "-m", "the copy before --print-answer-json"], origin)
+    seat = root / "home" / "agents" / "ghi-guide-agent"
+    seat.parent.mkdir(parents=True)
+    _git(["clone", "-q", str(origin), str(seat)], root)
+    _git(["checkout", "-q", "--detach", "origin/main"], seat)
+    script.write_text(new_text, encoding="utf-8")
+    _git(["commit", "-q", "-a", "-m", "--print-answer-json lands"], origin)
+    fake_bin = root / "bin"
+    fake_bin.mkdir()
+    (fake_bin / "gh").write_text("#!/bin/sh\necho 'fake gh: offline' >&2\nexit 1\n",
+                                 encoding="utf-8")
+    (fake_bin / "gh").chmod(0o755)
+    environment = {**os.environ, "HOME": str(root / "home"),
+                   "PATH": f"{fake_bin}{os.pathsep}{os.environ.get('PATH', '')}"}
+    return origin, seat, environment
+
+
+def _run_remote_command(command, environment):
+    return _remote_subprocess.run(["/bin/sh", "-c", command], capture_output=True,
+                                  text=True, env=environment, check=False, timeout=300)
+
+
+remote_command_with_new_flag = ghi_ask.build_remote_command("q", False, "x/y", False, True)
+
+with tempfile.TemporaryDirectory() as temporary:
+    origin, seat, environment = _seat_whose_copy_predates_print_answer_json(Path(temporary))
+    fast_forward_line = ("python3 -c " + shlex.quote(
+        ghi_ask.GHI_GUIDE_AGENT_HOME_FAST_FORWARD_TO_ORIGIN_MAIN_SSH_PYTHON_SOURCE) + " </dev/null\n")
+    without_fast_forward_line = remote_command_with_new_flag.replace(fast_forward_line, "")
+    check("the test removes the fast-forward line from the remote command",
+          without_fast_forward_line != remote_command_with_new_flag, remote_command_with_new_flag)
+    stale = _run_remote_command(without_fast_forward_line, environment)
+    check("without the fast-forward line, a seat copy older than a flag rejects it "
+          "and stays stale: the failure this line fixes",
+          "unrecognized arguments: --print-answer-json" in stale.stderr
+          and _git(["rev-parse", "HEAD"], seat).stdout != _git(["rev-parse", "main"], origin).stdout,
+          stale.stderr)
+
+with tempfile.TemporaryDirectory() as temporary:
+    origin, seat, environment = _seat_whose_copy_predates_print_answer_json(Path(temporary))
+    updated = _run_remote_command(remote_command_with_new_flag, environment)
+    check("the remote command fast-forwards a seat copy older than a flag before "
+          "that copy parses it, so the ask gets past argument parsing",
+          _git(["rev-parse", "HEAD"], seat).stdout == _git(["rev-parse", "main"], origin).stdout
+          and "refreshed the seat checkout 1 commit(s)" in updated.stderr
+          and "unrecognized arguments" not in updated.stderr
+          and "ghi-guide-agent-ask: mirror refresh" in updated.stderr,
+          updated.stderr)
+
+with tempfile.TemporaryDirectory() as temporary:
+    origin, seat, environment = _seat_whose_copy_predates_print_answer_json(Path(temporary))
+    (seat / "scripts" / "ghi-mirror-refresh.py").write_text("# edit in progress\n",
+                                                            encoding="utf-8")
+    head_before = _git(["rev-parse", "HEAD"], seat).stdout
+    refused = _run_remote_command(remote_command_with_new_flag, environment)
+    check("when the fast-forward is refused, the remote command says why and the "
+          "stale copy runs on and fails at the flag, exiting nonzero, never silently",
+          "uncommitted tracked change(s); not refreshing it" in refused.stderr
+          and "unrecognized arguments: --print-answer-json" in refused.stderr
+          and refused.returncode != 0
+          and _git(["rev-parse", "HEAD"], seat).stdout == head_before,
+          (refused.returncode, refused.stderr))
+
+with tempfile.TemporaryDirectory() as temporary:
+    origin, seat, environment = _seat_whose_copy_predates_print_answer_json(Path(temporary))
+    head_before = _git(["rev-parse", "HEAD"], seat).stdout
+    with open(seat / ghi_ask.LOCK_FILE_NAME, "a+") as held_lock:
+        fcntl.flock(held_lock.fileno(), fcntl.LOCK_EX)
+        contended = _run_remote_command(remote_command_with_new_flag, environment)
+    check("while another ask holds the state lock, the remote command leaves the "
+          "agent-home as it is, so no running ask has its files swapped",
+          _git(["rev-parse", "HEAD"], seat).stdout == head_before
+          and "refreshed the seat checkout" not in contended.stderr,
+          contended.stderr)
+
+with tempfile.TemporaryDirectory() as temporary:
+    origin, seat, environment = _seat_whose_copy_predates_print_answer_json(Path(temporary))
+    recorder = Path(temporary) / "record-stdin"
+    recorder.write_text('#!/bin/sh\ncat\n', encoding="utf-8")
+    recorder.chmod(0o755)
+    stdin_command = ghi_ask.build_remote_command("q", False, "x/y", True).replace(
+        "python3 scripts/ghi-guide-agent-ask.py --question-file", str(recorder))
+    piped = _remote_subprocess.run(["/bin/sh", "-c", stdin_command], input="the whole question\n",
+                                   capture_output=True, text=True, env=environment,
+                                   check=False, timeout=300)
+    check("a question sent on stdin reaches the ask whole after the fast-forward line runs",
+          piped.stdout == "the whole question\n"
+          and "refreshed the seat checkout 1 commit(s)" in piped.stderr,
+          (piped.stdout, piped.stderr))
 
 
 # --- the seat directory, state file and state key, unpatched ----------------

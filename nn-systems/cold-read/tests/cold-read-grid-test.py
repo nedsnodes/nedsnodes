@@ -1795,6 +1795,44 @@ try:
           len(other_lines) == 1 and "has changed or gone since: agent-draft.md." in other_lines[0]
           and "rm -r" not in other_lines[0] and "restore" not in other_lines[0],
           repr(edited_lines))
+    # While an already-changed file has changed, a stopped cell that moves a clean committed file
+    # leaves its old name gone and its new name present; each line must fit its own path.
+    clean_move_repository = (scratch / "checkout-stopped-cell-moves-a-clean-file-beside-an-edit").resolve()
+    clean_move_repository.mkdir()
+
+    def clean_move_git(*arguments):
+        return subprocess.run(["git", "-C", str(clean_move_repository), "-c", "user.name=grid test",
+                               "-c", "user.email=grid-test@example.invalid", *arguments],
+                              check=True, capture_output=True, text=True).stdout
+
+    clean_move_git("init", "--quiet")
+    (clean_move_repository / "agent-draft.md").write_text("Committed.\n", encoding="utf-8")
+    (clean_move_repository / "clean.md").write_text("Clean.\n", encoding="utf-8")
+    clean_move_git("add", "agent-draft.md", "clean.md")
+    clean_move_git("commit", "--quiet", "-m", "seed")
+    (clean_move_repository / "agent-draft.md").write_text("The agent's own edit.\n", encoding="utf-8")
+    with mock.patch.object(grid_module.cell_common, "REPO_ROOT", clean_move_repository):
+        clean_move_baseline = grid_module.cell_common.working_tree_state()
+        (clean_move_repository / "agent-draft.md").write_text("A reviewer's rewrite.\n", encoding="utf-8")
+        (clean_move_repository / "clean.md").rename(clean_move_repository / "moved-by-a-reviewer.md")
+        clean_move_lines = grid_module.stopped_cells_write_check_lines(
+            [scratch / "claude-hunt-deep.md"], clean_move_baseline, None, set())
+    gone_lines = [line for line in clean_move_lines if line.startswith("STRAY WRITE: clean.md ")]
+    moved_to_lines = [line for line in clean_move_lines if line.startswith("STRAY WRITE: moved-by-a-reviewer.md ")]
+    check("while an already-changed file has changed, a path that is gone is named as gone, with the "
+          "diff that shows what it held, and is not to be read",
+          len(gone_lines) == 1 and "has changed or gone since: agent-draft.md," in gone_lines[0]
+          and "clean.md is gone; `git -C " in gone_lines[0] and "diff -- clean.md`" in gone_lines[0]
+          and "Read clean.md" not in gone_lines[0]
+          and "rm -r" not in gone_lines[0] and "restore --staged" not in gone_lines[0],
+          repr(clean_move_lines))
+    check("while an already-changed file has changed, a path that exists is named as where the "
+          "changes may have moved",
+          len(moved_to_lines) == 1
+          and "may have moved those changes into moved-by-a-reviewer.md" in moved_to_lines[0]
+          and "Read moved-by-a-reviewer.md against" in moved_to_lines[0]
+          and "rm -r" not in moved_to_lines[0] and "restore" not in moved_to_lines[0],
+          repr(clean_move_lines))
     attempt = grid_module.start_attempt(
         [sys.executable, "-c", "import time; time.sleep(120)"],
         scratch / "report.md", 1, scratch / "cell.stderr.log")

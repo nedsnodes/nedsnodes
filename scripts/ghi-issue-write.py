@@ -72,8 +72,11 @@ issue, and `gh issue list --json body` answers from the API rather than the
 index.
 
 WHAT A RERUN TESTS, and why it is not the branch. Step 4 asks first
-whether main's copy of the destination is already the file this run would
-land, and stops there when it is. It asks about the branch only after that.
+whether one of main's files for the issue is already the file this run
+would land, and stops there when it is. It asks about the branch only after
+that. Every file main holds for the issue is compared, not only the path
+today's naming rule gives, so a filing that merged under an older name is
+found too.
 The order is the whole of it: a merged pull request's head branch is deleted
 here seconds after the merge, so a branch test finds nothing exactly when
 the work is most finished, and the run walks into `git worktree add` and
@@ -443,7 +446,9 @@ RECONSIDERED_MARKER_NAME = ".ghi-issue-write-reconsidered"
 GH_NO_SUCH_ISSUE_STDERR_FRAGMENT = "could not resolve to an issue"
 # A file name may be 255 bytes. The longest name built on a slug is the
 # log-store's `<number>-<slug>-proposed-improvements-or-changes-ghi-guide-agent-
-# <YYYY-MM-DD>-<n>.md`, whose other parts take up to 73 characters.
+# <YYYY-MM-DD>-<n>.md`, whose other parts take up to 73 characters. A design's
+# `<slug>.<kind>.design` stands where `<slug>` does, so its slug is cut shorter
+# by the ending's length.
 GHI_MD_FILE_NAME_SLUG_CHARACTER_LIMIT = 180
 GH_TIMEOUT_SECONDS = 120
 # Beyond the pre-push conflict check's own limit: the hook's other checks and
@@ -781,11 +786,16 @@ def slug(title: str) -> str:
     text = re.sub(r"['\u2019]s\b", "", text)
     text = re.sub(r"['\u2019]", "", text)
     joined = "-".join(re.sub(r"[^a-z0-9]+", " ", text).split())
-    if len(joined) > GHI_MD_FILE_NAME_SLUG_CHARACTER_LIMIT:
-        head = joined[:GHI_MD_FILE_NAME_SLUG_CHARACTER_LIMIT + 1]  # pragma: no mutate, the limit is even, so ^ 1 gives + 1
-        joined = (head.rsplit("-", 1)[0] if "-" in head
-                  else joined[:GHI_MD_FILE_NAME_SLUG_CHARACTER_LIMIT])
-    return joined or "issue"
+    return _slug_cut_within(joined, GHI_MD_FILE_NAME_SLUG_CHARACTER_LIMIT) or "issue"
+
+
+def _slug_cut_within(joined: str, limit: int) -> str:
+    """`joined` cut at the last hyphen within `limit` characters, or at
+    `limit` when no hyphen is there."""
+    if len(joined) <= limit:
+        return joined
+    head = joined[:limit + 1]  # pragma: no mutate, 180 less the naming page's .tool.design or .system.design ending is even, so ^ 1 gives + 1
+    return head.rsplit("-", 1)[0] if "-" in head else joined[:limit]
 
 
 def placeholder_body(key: str) -> str:
@@ -1157,9 +1167,19 @@ def adjudicate(repo: str, title: str, text: str, repository_root: Path,
         report("ghi-guide-agent raised a question about a ruling of the "
                "user's; the write goes ahead and records it in a "
                "proposed-improvements-or-changes-file in the log-store")
-        return RulingConflict(answer.get("ruling_issue"),
-                              str(answer.get("sentence", "")).strip())
-    issues = answer.get("issues") or []
+        # The saved file holds the question on one line, and
+        # ruling_question_lines() reads back only that line.
+        # Only line breaks are replaced: the question may quote a command
+        # whose spaces matter, as in printf 'a  b'.
+        return RulingConflict(answer.get("ruling_issue"), " ".join(
+            line.strip() for line in str(answer.get("sentence", "")).splitlines()
+            if line.strip()))
+    named = answer.get("issues") or []
+    issues = [number for number in named if number != exclude_issue]
+    if exclude_issue is not None and exclude_issue in named and not issues:
+        report(f"adjudication skipped: ghi-guide-agent's verdict names only #{exclude_issue}, "
+               "the issue being edited, which the question told it to leave out")
+        return None
     verdict = f"verdict: {answer.get('verdict')}" + (
         " " + ",".join(f"#{number}" for number in issues) if issues else "")
     if answer.get("verdict") == "too-similar":
@@ -1805,9 +1825,11 @@ DESIGN_KIND_ENDING = re.compile(r"(\.[a-z]+\.design)\.md$")
 def _landed_name_without_number(title: str, source_name: str) -> str:
     """The landed file's stem after `<number>-`: the name a ruling question
     raised before the issue has a number is saved under, so the lookup by the
-    landed name finds it."""
+    landed name finds it. A design's slug and ending together stay within
+    GHI_MD_FILE_NAME_SLUG_CHARACTER_LIMIT."""
     kind_ending = DESIGN_KIND_ENDING.search(source_name)
-    return f"{slug(title)}{kind_ending.group(1) if kind_ending else ''}"
+    ending = kind_ending.group(1) if kind_ending else ""
+    return _slug_cut_within(slug(title), GHI_MD_FILE_NAME_SLUG_CHARACTER_LIMIT - len(ending)) + ending
 
 
 def create_ghi_landing_path_for_ghi_md(number, title: str, source_name: str) -> str:
@@ -1821,11 +1843,12 @@ def land_file(repo: str, number: int, title: str, source: Path,
               repository_root: Path, runner, report):
     """Step 4, in a throwaway worktree cut from a just-fetched origin/main,
     so the commit is never made against stale or dirty disk. Returns the
-    path the issue's file will have on main once step 4's pull request
-    merges: the destination, or, when the branch was already pushed, the
-    file that branch holds (`ghi_md_path_on_pushed_filing_branch`).
+    path the issue's file has, or will have once step 4's pull request
+    merges: main's file for the issue when it is already this file, or,
+    when the branch was already pushed, the file that branch holds
+    (`ghi_md_path_on_pushed_filing_branch`), or else the destination.
 
-    Safe to run twice through main's copy of the destination, compared with
+    Safe to run twice through main's files for the issue, compared with
     what this run would land before any branch is looked at: see the module
     docstring, WHAT A RERUN TESTS."""
     branch = f"ghi-{number}-{slug(title)}"
@@ -1834,19 +1857,23 @@ def land_file(repo: str, number: int, title: str, source: Path,
     staged = with_issue_frontmatter(source_text, repo, number, title)
 
     runner(["git", "fetch", "origin", "main"], cwd=str(repository_root))
-    if is_ghi_md_on_main_same_as_staged_copy_reading_name_before_project_rename_as_current(blob_at("origin/main", destination,
-                                    repository_root, runner), staged):
-        report(f"step 4 already done: main's copy of {destination} is this "
-               "file")
-        return destination
+    main_commit = origin_main_commit_hash(repository_root, runner)
+    for landed in ghi_md_paths_for_issue(number, repository_root, runner,
+                                         revision=main_commit):
+        read = runner(["git", "show", f"{main_commit}:{landed}"],
+                      cwd=str(repository_root))
+        if is_ghi_md_on_main_same_as_staged_copy_reading_name_before_project_rename_as_current(
+                read.stdout, staged):
+            report(f"step 4 already done: main's copy of {landed} is this "
+                   "file")
+            return landed
 
     on_remote = runner(
         ["git", "ls-remote", "--heads", "origin", branch],
         cwd=str(repository_root))
     if (on_remote.stdout or "").strip():
         pushed = ghi_md_path_on_pushed_filing_branch(
-            number, branch, on_remote.stdout.split()[0], repository_root,
-            runner)
+            number, branch, source, repository_root, runner)
         waiting = existing_pull_request_for_branch(repo, branch, runner)
         if waiting:
             report(f"step 4 already done: pull request "
@@ -1905,26 +1932,40 @@ def land_file(repo: str, number: int, title: str, source: Path,
 
 
 def ghi_md_path_on_pushed_filing_branch(number: int, branch: str,
-                                        commit: str, repository_root: Path,
+                                        source: Path, repository_root: Path,
                                         runner) -> str:
     """The issue's file on a filing branch already on the remote, read from
     the branch rather than recomputed: the branch may hold a name the naming
     rule of the run that pushed it gave, and step 5's rerun line must name
-    the file the merge puts on main. `commit` is the branch's head as
-    `git ls-remote` printed it, read by its hash because the next
-    `git fetch origin main` overwrites FETCH_HEAD."""
-    runner(["git", "fetch", "origin", branch], cwd=str(repository_root))
+    the file the merge puts on main. Read at the commit this fetch stored,
+    not at the head `git ls-remote` printed before it, since a push between
+    the two moves the branch."""
+    tracking = f"refs/remotes/origin/{branch}"
+    runner(["git", "fetch", "origin", f"+refs/heads/{branch}:{tracking}"],
+           cwd=str(repository_root))
+    commit = (runner(["git", "rev-parse", "--verify", f"{tracking}^{{commit}}"],
+                     cwd=str(repository_root)).stdout or "").strip()
     paths = ghi_md_paths_for_issue(number, repository_root, runner,
                                    revision=commit)
     if len(paths) != 1:
+        held = ", ".join(paths) or "no file named for it"
         raise Refused(
-            f"branch {branch} on the remote should hold one file for issue "
-            f"{number}, and holds {len(paths)}: {', '.join(paths) or 'none'}. "
-            "This run cannot tell which file step 5's rerun needs, and "
-            "stopped before step 5.\n"
-            f"Read the branch with `git fetch origin {branch}` and "
-            f"`git show --stat {commit}`, and tell the user what it holds: "
-            "a filing branch holds the one file step 4 pushed.", 1)
+            "scripts/ghi-issue-write.py create stopped before step 5, which "
+            f"replaces issue {number}'s placeholder body with links to its "
+            f"files: branch {branch} on the remote, at commit {commit}, "
+            f"should hold exactly one file named for issue {number}, and "
+            f"holds {len(paths)}: {held}. This run cannot tell which file "
+            "that branch will put on main, so it stopped, and the issue's "
+            "body keeps its placeholder.\n"
+            "Do not change the branch unless the user tells you to: what "
+            "file it should hold is the user's decision.\n"
+            f"Tell the user two facts: branch {branch} holds {held} for "
+            f"issue {number}; and filing issue {number} stays stopped until "
+            "the branch holds exactly one file for it, after which "
+            f"`scripts/ghi-issue-write.py create {source}` continues it. "
+            "Then leave this filing until the user answers.\n"
+            "If you are a subagent, pass those two facts to the agent that "
+            "dispatched you instead.", 1)
     return paths[0]
 
 
@@ -2047,9 +2088,10 @@ def link_body(repo: str, number: int, repository_root: Path, runner, report,
     `rerun_on` is the path the rerun must be given, which is not always the
     path this run was given: filing moves a source that was already tracked
     on main, so after the merge that source is gone and its landed copy is
-    the file that exists. It is the path `land_file` returned, which is the
-    file the pushed branch holds, so it names a file that exists after the
-    merge even when the naming rule has changed since that branch was pushed.
+    the file that exists. It is the path `land_file` returned, which is
+    main's file or the file the pushed branch holds, so it names a file that
+    exists after the merge even when the naming rule has changed since that
+    branch was pushed.
 
     The fetch raises rather than being ignored. A fetch that failed leaves
     the list below empty exactly as a main with nothing filed does, and the

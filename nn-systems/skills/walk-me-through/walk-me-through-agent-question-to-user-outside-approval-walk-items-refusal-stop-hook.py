@@ -243,15 +243,9 @@ TRAILING_MARKS = "*_ )\"'”’"
 QUOTED = re.compile(r"\"[^\"\n]+\"|“[^”\n]+”")
 LINK = re.compile(r"\[([^\]\n]*)\]\([^)\n]*\)")
 LIST_ITEM = re.compile(r"^(?:[-+*]|\d+[.)])\s")
-LINE_MARKS = re.compile(r"^\s*(?:(?:[-+*>]|\d+[.)])\s+)+")
 HASHTAG_MARKER = re.compile(r"^#\w+\s+")
 EMPHASIS_AND_SPACING = re.compile(r"[\s*_#>`]+")
 ANSWER_LINE_START = "answer a to approve"
-# The opening before the mark, list and quotation marks and a part's `Part N.`, is the one the check program's
-# NEW_LINE reads, so both programs take the same lines as marked.
-NEW_TEXT_LINE = re.compile(r"^(\s*(?:(?:[-*+]|\d+[.)]|>|Part \d+\.)\s+)*)(#new(?:_if_d)?)[:\s]+"
-                           r"(?i:the\s+new\s+text:\s*)?(.*)$")
-NEW_TEXT_SHOWN_AS = {"#new": "If you approve, the new text: ", "#new_if_d": "If you disapprove, the new text: "}
 
 AGENT_REPLY_LINE_MODEL_LABEL_ONLY_ABOUT_WAITING_ITEM_DECISION = "concerns_only_a_waiting_item_decision"
 AGENT_REPLY_LINE_MODEL_LABEL_ASKS_USER_SOMETHING_ELSE = "asks_something_else"
@@ -403,7 +397,7 @@ command_line_prefix = load_module("claude_code_headless_run_command_line_prefix_
 def normalized(line):
     """The line with link targets, list, quotation and heading marks, a hashtag marker opening it, emphasis,
     spacing and case dropped."""
-    line = HASHTAG_MARKER.sub("", LINE_MARKS.sub("", LINK.sub(r"\1", line)))
+    line = HASHTAG_MARKER.sub("", answer_hook.LINE_MARKS.sub("", LINK.sub(r"\1", line)))
     return EMPHASIS_AND_SPACING.sub(" ", line).strip().lower()
 
 
@@ -426,7 +420,7 @@ def normalized_lines(lines):
 def answer_sentence(line):
     """The walk-me-through skill's answer line at the start of line, without a list or quotation mark before it, and
     without what an item adds after it on the same line, such as the ` D: <the alternative>` some walk-documents add."""
-    return SENTENCE_END.split(LINE_MARKS.sub("", line.strip()))[0]
+    return SENTENCE_END.split(answer_hook.LINE_MARKS.sub("", line.strip()))[0]
 
 
 def turn_assistant_texts(records):
@@ -462,12 +456,6 @@ def interruption_item_texts(document_text, units, waiting_numbers, parser):
     return texts
 
 
-def new_text_as_shown(line):
-    """The `#new` or `#new_if_d` line as the agent shows it to the user, or None for any other line."""
-    new_text = NEW_TEXT_LINE.match(line.strip())
-    return new_text[1] + NEW_TEXT_SHOWN_AS[new_text[2]] + new_text[3] if new_text else None
-
-
 def shown_item_lines(reply_lines, document_lines, units, openings):
     """The normalized lines of every item the reply shows, as the module docstring's THE TEXT CHECKED says: the
     heading of its unit, the unit's lines before its first item's or its first Withdrawn heading when the reply
@@ -485,14 +473,14 @@ def shown_item_lines(reply_lines, document_lines, units, openings):
             # A Withdrawn heading, an opening that names no item, ends the lead-in as it ends an item's lines.
             withdrawn = [line for line in openings if first < line < end and not openings[line][0]]
             for line in document_lines[first:min([start for _, start, _ in spans] + withdrawn)]:
-                shown |= normalized_lines([line, new_text_as_shown(line) or ""])
+                shown |= normalized_lines([line, answer_hook.new_text_as_shown(line) or ""])
         for number, start, stop in spans:
             if not (unit_shown or number in own_headings or normalized(document_lines[start]) in reply_set):
                 continue
             # The whole unit stands for each of its items, so no item's answer line ends it.
             whole_shared_unit = len(numbers) > 1 and start == first
             for line in document_lines[start:stop]:
-                shown |= normalized_lines([line, new_text_as_shown(line) or ""])
+                shown |= normalized_lines([line, answer_hook.new_text_as_shown(line) or ""])
                 if normalized(line).startswith(ANSWER_LINE_START):
                     shown |= normalized_lines([answer_sentence(line)])
                     if not whole_shared_unit:

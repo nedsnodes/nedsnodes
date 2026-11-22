@@ -946,12 +946,13 @@ seat.respond({f"pr:{MERGED_PR}": "fail"})
 seat.append(tool_use_record("toolu_after_raise"))
 result = seat.stop()
 text = context_of(result) or ""
-check("next-action: a raised task's expired prerequisite that GitHub cannot answer is "
-      "reported in the prompt",
+check("next-action: a task raised as met is listed without asking GitHub again, so GitHub "
+      "failing on its expired prerequisite is neither reported nor holds it",
       first_text.startswith("[rule due-task-raise-when-prerequisites-met] Act on task 9 ") and result.returncode == 0
       and text.startswith(NEXT_ACTION_FIRST_LINE)
-      and f"This hook could not ask GitHub whether PR {MERGED_PR} is merged" in text
-      and "1 more open task(s) are not listed" in text, (first_text, result))
+      and "could not ask GitHub" not in text
+      and '- task 9 "Raised already"' in text and "more open task(s)" not in text,
+      (first_text, result))
 
 seat = IdleSeat()
 seat.minutes("live-walk", "#next_to_present item 1 of 3\n")
@@ -1011,14 +1012,11 @@ check("next-action: a task list whose directory does not exist yet still gets th
       == {"session_id": "idle-session", "newest_tool_use_id": "toolu_first"}, result)
 
 # One GitHub budget bounds the whole run: tasks 1 and 2 spend it in the due-task pass, so the
-# next-action prompt's check of task 3's expired prerequisite must not get a budget of its own.
+# next-action prompt's check of task 3's prerequisite, skipped there, must not get a budget of its own.
 seat = IdleSeat()
 seat.task("1", metadata={"prerequisites": [{"pr_merged": 301}]})
 seat.task("2", metadata={"prerequisites": [{"pr_merged": 302}]})
 seat.task("3", metadata={"prerequisites": [{"pr_merged": 303}]})
-seat.state_path.parent.mkdir(parents=True)
-seat.state_path.write_text(json.dumps({"raised": {"3": {"prerequisites": hook.canonical_prerequisites(
-    [{"pr_merged": 303}])}}, "checks": {}}))
 gh_calls_made = []
 
 
@@ -1075,7 +1073,7 @@ check("one GitHub budget for the whole run: each condition gh could not answer i
 
 # --- the GitHub budget goes to tasks no blockedBy holds, and a skip is reported ---------------
 # Each fake gh call moves the budget's clock by `seconds_per_call`; the budget is the real one.
-def run_with_fake_gh(seconds_per_call, merged, action):
+def run_with_fake_gh(seconds_per_call, merged, action, closed_without_merging=()):
     """Run `action()` with gh answered in-process; returns (its result, the numbers gh was asked about)."""
     clock_seconds = [0.0]
     asked = []
@@ -1083,7 +1081,8 @@ def run_with_fake_gh(seconds_per_call, merged, action):
     def fake_ask_gh(kind, number, timeout_seconds):
         asked.append(number)
         clock_seconds[0] += seconds_per_call
-        return {"met": number in merged, hook.CLOSED_WITHOUT_MERGING_ANSWER_KEY: False,
+        return {"met": number in merged,
+                hook.CLOSED_WITHOUT_MERGING_ANSWER_KEY: number in closed_without_merging,
                 "title": f"T{number}", "url": f"https://x/{number}"}
 
     real_ask_gh = hook.GitHubConditionChecker.__dict__["ask_gh"]
@@ -1167,6 +1166,63 @@ check("budget spent, with nothing else to say: the skip is a fault, so it does n
           'asked about PR 602, so task 7 "skipped", which waits on it, was treated as still '
           "waiting and not raised.") and "task 6" not in fault and "task 8" not in fault
       and "task 9" not in fault, (output, fault))
+
+seat = Seat()
+seat.task("4", metadata={"prerequisites": [{"pr_merged": 401}]})
+seat.task("5", metadata={"prerequisites": [{"pr_merged": 501}]}, subject="skipped")
+seat.task("6", metadata={"prerequisites": [{"pr_merged": 501}]}, subject="raised before")
+seat.state_path.parent.mkdir(parents=True)
+seat.state_path.write_text(json.dumps({"raised": {"6": {"prerequisites": hook.canonical_prerequisites(
+    [{"pr_merged": 501}])}}, "checks": {}}))
+try:
+    output, asked = run_with_fake_gh(hook.GH_CALLS_TOTAL_BUDGET_SECONDS, set(),
+                                     lambda: hook_run_in_process(seat))
+    fault = None
+except hook.HookFault as error:
+    output, fault = None, str(error)
+check("budget spent before a condition that an unraised task and an already-raised task share: "
+      "only the unraised task is named as not raised",
+      fault is not None and 'so task 5 "skipped"' in fault and "task 6" not in fault,
+      (output, fault))
+
+seat = Seat()
+seat.task("7", metadata={"prerequisites": [{"pr_merged": 701}, {"pr_merged": 702}]},
+          subject="re-plan")
+output, asked = run_with_fake_gh(hook.GH_CALLS_TOTAL_BUDGET_SECONDS, set(),
+                                 lambda: hook_run_in_process(seat), closed_without_merging={701})
+text = json.loads(output)["hookSpecificOutput"]["additionalContext"] if output else ""
+check("budget spent after one pull request of a task is found closed without merging: the task "
+      "is named to re-plan, not as not raised",
+      asked == [701] and '7 "re-plan"' in text and "ran out of its" not in text,
+      (asked, text))
+
+# Held task 2's closed-without-merging check spends the budget in the due-task pass; ready task 1,
+# raised before, must still be listed by the next-action prompt, which runs after that pass.
+seat = IdleSeat()
+seat.task("1", metadata={"prerequisites": [{"pr_merged": 101}]}, subject="ready")
+seat.task("2", blocked_by=["3"], metadata={"prerequisites": [{"pr_merged": 201}]})
+seat.task("3", subject="blocker")
+seat.state_path.parent.mkdir(parents=True)
+seat.state_path.write_text(json.dumps({"raised": {"1": {"prerequisites": hook.canonical_prerequisites(
+    [{"pr_merged": 101}])}}, "checks": {}}))
+real_home = os.environ.get("HOME")
+os.environ["HOME"] = str(seat.home)  # the handoff module finds its markers under Path.home()
+try:
+    output, asked = run_with_fake_gh(hook.GH_CALLS_TOTAL_BUDGET_SECONDS, {101}, lambda: hook.run(
+        json.dumps({"session_id": "idle-session", "transcript_path": str(seat.transcript),
+                    "cwd": str(seat.checkout), "hook_event_name": "Stop", "stop_hook_active": False}),
+        {**seat_session_environment(), "CLAUDE_CODE_TASK_LIST_ID": TASK_LIST_ID},
+        seat.home, hook.datetime.now(hook.timezone.utc)))
+finally:
+    if real_home is None:
+        os.environ.pop("HOME", None)
+    else:
+        os.environ["HOME"] = real_home
+text = json.loads(output)["hookSpecificOutput"]["additionalContext"] if output else ""
+check("budget spent by a held task in the due-task pass: the next-action prompt still lists the "
+      "ready task raised before, and names no task as not raised",
+      asked == [201] and text.startswith(NEXT_ACTION_FIRST_LINE)
+      and '- task 1 "ready"' in text and "ran out of its" not in text, (asked, text))
 
 CountingChecker.clock = staticmethod(lambda: 0.0)
 checker = CountingChecker({}, 0)

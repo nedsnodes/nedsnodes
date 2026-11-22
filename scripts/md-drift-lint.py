@@ -459,13 +459,17 @@ def check_overview_lock_and_environment_variable_sources(line: str, md_path: Pat
             yield f"{claim} does not appear in the source of {names}"
 
 
-GITHUB_REPOSITORY = "nedsnodes/nedsnodes"
-# GitHub redirects the repository's old name, and text written before the rename still holds it.
-OLD_REPOSITORY = "nedschorus/nedschorus"
+_repository_names_spec = importlib.util.spec_from_file_location(
+    "github_repository_name_and_name_before_project_rename_common",
+    Path(__file__).resolve().parents[1] / "nn-systems" / "general-tools"
+    / "github-repository-name-and-name-before-project-rename-common.py")
+repository_names = importlib.util.module_from_spec(_repository_names_spec)
+_repository_names_spec.loader.exec_module(repository_names)
+GITHUB_REPOSITORY = repository_names.REPOSITORY
 PLANNED_WORK_HEADING = "## Planned work"
 PLANNED_WORK_GHI_LINE = re.compile(
     r"\s*(?:[-*+]|\d+[.)]) GHI \[(?P<title>.+)\]\(https://github\.com/"
-    + r"(?:" + re.escape(GITHUB_REPOSITORY) + "|" + re.escape(OLD_REPOSITORY) + r")/issues/(?P<number>\d+)\)")
+    + r"(?:" + re.escape(GITHUB_REPOSITORY) + "|" + re.escape(repository_names.OLD_REPOSITORY) + r")/issues/(?P<number>\d+)\)")
 PLANNED_WORK_ENTRY = re.compile(r"\s*(?:[-*+]|\d+[.)])\s|.*github\.com/[^)\s]+/issues/\d+")
 GITHUB_QUERY_TIMEOUT_SECONDS = 60
 

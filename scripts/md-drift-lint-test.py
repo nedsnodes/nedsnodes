@@ -621,6 +621,8 @@ with tempfile.TemporaryDirectory() as frozen_workspace:
 OVERVIEW_NAME = "docs/nedsnodes-wiki/nedsnodes-demo-architecture-overview.md"
 OVERVIEW_PATH_MODULE = LINT_SCRIPT.with_name(
     "architecture-overview-path-template-and-checked-against-commit-reader-common.py")
+REPOSITORY_NAMES_MODULE_PATH_IN_CHECKOUT = (
+    "nn-systems/general-tools/github-repository-name-and-name-before-project-rename-common.py")
 
 
 def overview_repository(root: Path):
@@ -806,6 +808,9 @@ def run_lint_with_fake_gh(gh_source):
             (root / "scripts" / script.name).write_text(
                 script.read_text(encoding="utf-8"), encoding="utf-8")
         (root / "nn-systems" / "demo" / "unnamed-program.py").write_text("", encoding="utf-8")
+        (root / REPOSITORY_NAMES_MODULE_PATH_IN_CHECKOUT).parent.mkdir(parents=True)
+        (root / REPOSITORY_NAMES_MODULE_PATH_IN_CHECKOUT).write_text(
+            (LINT_SCRIPT.resolve().parents[1] / REPOSITORY_NAMES_MODULE_PATH_IN_CHECKOUT).read_text(encoding="utf-8"), encoding="utf-8")
         (root / OVERVIEW_NAME).write_text(
             "## Planned work\n\n"
             "- GHI [Open one](https://github.com/nedsnodes/nedsnodes/issues/1)\n",
@@ -862,7 +867,7 @@ check("a GHI GitHub reports NOT_FOUND is a finding, not a stopped check",
 
 
 old_name_line = lint.PLANNED_WORK_GHI_LINE.fullmatch(
-    f"- GHI [A title](https://github.com/{lint.OLD_REPOSITORY}/issues/12)")
+    f"- GHI [A title](https://github.com/{lint.repository_names.OLD_REPOSITORY}/issues/12)")
 check("a Planned work line linking with the repository's old name, which GitHub redirects, is read",
       old_name_line is not None and old_name_line.group("number") == "12", repr(old_name_line))
 

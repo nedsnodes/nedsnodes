@@ -710,7 +710,9 @@ try:
         "timeout 5m python3 - <<-\"EOF\" 2>&1\n\tprint(1) && b\n\tEOF\n": "2026-11-02T11:05:00Z",
         "timeout 5m python3 - <<EOF\nprint(1)\nEOF\nb": None,
         "timeout 5m python3 - <<EOF\nnever closed; b": "2026-11-02T11:05:00Z",
-        "timeout 5m grep x <<< 'a\nb'; c": None}
+        "timeout 5m grep x <<< 'a\nb'; c": None,
+        "timeout 5m a $((1<<2))\nb": None,
+        "timeout 5m a <<-EOF\n\tx\n\tEOF\nb": None}
     machine = Machine()
     machine.seat("alpha", [user("go")] + [
         record for number, command in enumerate(TIMEOUT_END_BY_COMMAND_LINE)
@@ -1214,6 +1216,19 @@ try:
           message is not None
           and message.startswith(f"the task list {unlistable_tasks} could not be listed")
           and "holds the agent-seat's work is unknown" in message, message)
+    # Only a direct call can start the shared checker with its GitHub budget already spent.
+    budget_tasks = Path(tempfile.mkdtemp(dir=str(SUITE_ROOT)))
+    (budget_tasks / "1.json").write_text(json.dumps(
+        {"id": "1", "subject": "task 1", "status": "pending", "blockedBy": [],
+         "metadata": {"prerequisites": [{"pr_merged": 50}]}}))
+    checker = program.due_task_hook.GitHubConditionChecker({}, 0)
+    checker.started -= program.due_task_hook.GH_CALLS_TOTAL_BUDGET_SECONDS
+    verdict = {"running": {}, "handoff_deferred_marker": False}
+    decision = program.rules_three_to_five(verdict, None, checker, budget_tasks, budget_tasks)
+    check("a prerequisite the GitHub budget left unasked: rule 5, not rule 4's no wake",
+          decision == {fields.RULE: 5, fields.DECISION: fields.JUDGE}
+          and set(checker.conditions_skipped_for_budget) == {("pr_merged", 50)},
+          (decision, checker.conditions_skipped_for_budget))
     machine = Machine()
     machine.seat("alpha", [user("go"), assistant("Done."), turn_end()])
     machine.seat("beta", [user("go"), assistant("Done."), turn_end()])

@@ -103,7 +103,10 @@ the wiki pages, and it reads those from this disk — a stale checkout is
 stale answers about the very designs the issues point at, and superseded
 skills to answer under. The freshness hook's merge used to keep the
 checkout current; that merge is gone, so the refresh belongs to the caller
-that knows an ask is about to happen. It never fails an ask: any refusal —
+that knows an ask is about to happen. An ask sent over ssh has the box
+fast-forward the checkout before the seat's copy of this script parses its
+arguments (build_remote_command), because a copy older than a flag the
+caller sends would reject it and never reach its own fast-forward. It never fails an ask: any refusal —
 a dirty tree, a local commit not on origin/main, an unreachable origin — is one
 stderr line and the ask proceeds against what is on disk.
 
@@ -975,14 +978,28 @@ def _ask_within_lock(question, include_closed, seat_dir, repo, projects_root,
         if unexpected:
             stale = True
             drift_reply, error = turn(compose_drift_notice(unexpected), session_id)
-            if drift_reply is not None:
+            if drift_reply is None:
+                corrected, recheck_problem = None, f"the turn failed: {error}"
+            else:
                 session_id = drift_reply.get("session_id", session_id)
-                corrected, _ = ghi_guide_agent_answer_extract_and_schema_check_from_claude_result(drift_reply, kinds)
-                if corrected is not None:
-                    answer = corrected
-            # A failed recheck keeps the first answer rather than failing
-            # the whole ask: a closed issue in a reading list is tagged as
-            # closed, which is better than no answer at all.
+                corrected, recheck_problem = ghi_guide_agent_answer_extract_and_schema_check_from_claude_result(drift_reply, kinds)
+            # A reading list whose recheck fails is kept, its closed issue
+            # tagged as closed. A verdict is not: ghi-issue-write.py acts on
+            # it, and a too-similar verdict naming a closed GHI refuses the
+            # write and sends the author to merge into that closed GHI.
+            if answer["kind"] == GHI_GUIDE_AGENT_ANSWER_KIND_VERDICT:
+                cited = ", ".join(f"#{number}" for number, _ in unexpected)
+                still_closed = corrected is not None and find_unexpected_closed_pointers(
+                    answer_issue_numbers(corrected), cache, include_closed)
+                if still_closed:
+                    recheck_problem = ("the rechecked verdict still cites a closed GHI: "
+                                       f"{json.dumps(corrected)[:300]}")
+                if corrected is None or still_closed:
+                    answer, problem = None, (
+                        f"the verdict cited closed GHI {cited}, and the drift "
+                        f"recheck gave no usable verdict: {recheck_problem}")
+            if corrected is not None and answer is not None:
+                answer = corrected
 
     if locked:
         if cold_starting:
@@ -996,6 +1013,28 @@ def _ask_within_lock(question, include_closed, seat_dir, repo, projects_root,
     if answer is None:
         return None, None, GHI_GUIDE_AGENT_ANSWER_NOT_USABLE_MESSAGE_TEMPLATE.format(problem=problem)
     return answer, closed_issue_dates(answer_issue_numbers(answer), cache), None
+
+
+# Run box-side before the ask's own invocation, so the seat's copy of this
+# script is main's before it parses the flags the caller sends; a copy older
+# than a flag would otherwise reject it at argparse and never reach its own
+# fast-forward. It uses no flag, because a stale copy would reject that too:
+# it calls state_lock, LOCK_FILE_NAME and fast_forward_seat_checkout by name
+# in whatever copy the seat holds. Renaming any of them makes this line fail
+# and fall through to the ask, whose own fast-forward then updates the seat,
+# unless the same change also adds a flag the caller sends.
+GHI_GUIDE_AGENT_HOME_FAST_FORWARD_TO_ORIGIN_MAIN_SSH_PYTHON_SOURCE = "\n".join([
+    "import importlib.util, sys",
+    "from pathlib import Path",
+    "spec = importlib.util.spec_from_file_location('ghi_guide_agent_ask', 'scripts/ghi-guide-agent-ask.py')",
+    "ask = importlib.util.module_from_spec(spec)",
+    "spec.loader.exec_module(ask)",
+    "seat = Path.cwd()",
+    "with ask.state_lock(seat / ask.LOCK_FILE_NAME) as locked:",
+    "    line = ask.fast_forward_seat_checkout(seat) if locked else ''",
+    "if line:",
+    "    print(line, file=sys.stderr)",
+])
 
 
 def build_remote_command(question: str, include_closed: bool, repo: str,
@@ -1044,6 +1083,10 @@ def build_remote_command(question: str, include_closed: bool, repo: str,
         ' — bootstrap it (a checkout of this repository at that path), then retry" >&2',
         '  exit 1',
         '}',
+        # No `&&`: a failed fast-forward prints its line and the ask runs on, as
+        # fast_forward_seat_checkout's docstring requires. </dev/null leaves
+        # stdin unread for the ask's --question-file /dev/stdin.
+        "python3 -c " + shlex.quote(GHI_GUIDE_AGENT_HOME_FAST_FORWARD_TO_ORIGIN_MAIN_SSH_PYTHON_SOURCE) + " </dev/null",
         invocation,
     ])
 

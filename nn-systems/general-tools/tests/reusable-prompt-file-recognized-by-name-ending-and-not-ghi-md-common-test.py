@@ -57,11 +57,21 @@ check("a -instructions.md not where a GHI-MD named for its issue may sit is a re
       recognized("docs/issues/queue/7-x-instructions.md")
       and recognized("docs/issues/archived/7-x-instructions.md")
       and recognized("docs/issues/x-instructions.md")
-      and recognized("docs/issues/7-X-instructions.md")
       and recognized("x/docs/issues/7-x-instructions.md")
-      and recognized("docs/issues/7-x--instructions.md")
       and recognized("nn-systems/handoff/docs/7-x-instructions.md")
       and recognized("nn-systems/7-x-instructions.md"))
+check("a name the edit operation accepts but create would not build, such as "
+      "docs/issues/4080-v2.1-instructions.md, is a numbered GHI-MD path and not a reusable-prompt",
+      all(numbered(path) and not recognized(path)
+          for path in ("docs/issues/4080-v2.1-instructions.md", "docs/issues/7-X-instructions.md",
+                       "docs/issues/7-x--instructions.md",
+                       "nn-systems/handoff/4080-v2.1-instructions.md")))
+fresh_rule = load("reusable_prompt_rule_fresh_copy",
+                  REPOSITORY_ROOT / "nn-systems" / "general-tools"
+                  / "reusable-prompt-file-recognized-by-name-ending-and-not-ghi-md-common.py")
+check("a path without a reusable-prompt ending is answered without loading scripts/ghi-issue-write.py",
+      fresh_rule.has_reusable_prompt_file_name_and_is_not_ghi_md("docs/issues/7-x.md") is False
+      and fresh_rule._ghi_issue_write is None)
 check("create's design landing form is a numbered GHI-MD path",
       numbered("docs/issues/46-ghi-guide-agent.system.design.md"))
 check("the path create_ghi_landing_path_for_ghi_md builds, and that path moved into a system's "
