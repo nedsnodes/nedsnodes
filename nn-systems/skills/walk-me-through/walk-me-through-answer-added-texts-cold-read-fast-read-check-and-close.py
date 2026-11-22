@@ -833,6 +833,12 @@ NO_ANSWER_CASES = (
                  "or what the code does",
                  NOT_ASKED_ANY_RATING, (TOUCHES,), (rating_and_needed_lines_problems, touched_files_exist_problems),
                  "touches; every touched file exists", None, NOT_ASKED_FLAG),
+    NoAnswerCase(9, "kind 9", "removing sentences from a file of standing-agent-instructions when a hook, program, "
+                 "skill or an instruction in other standing-agent-instructions gives each agent that reads the file "
+                 "the same instruction at the moment it applies, removing only the part it gives",
+                 NOT_ASKED_ANY_RATING, (TOUCHES, SOURCE), (rating_and_needed_lines_problems, touched_files_exist_problems),
+                 "touches and a source, which names what gives the instruction; every touched file exists", None,
+                 NOT_ASKED_FLAG),
     NoAnswerCase(NOT_ASKED_ADDS_NOTHING, NOT_ASKED_ADDS_NOTHING_LABEL,
                  "an item whose recommendation adds and changes nothing, such as leaving out a definition, a check or "
                  "a step that its alternative would add, whatever its case against is rated",
