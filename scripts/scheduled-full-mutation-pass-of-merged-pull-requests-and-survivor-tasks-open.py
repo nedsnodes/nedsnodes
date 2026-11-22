@@ -116,7 +116,9 @@ seeds, so a merge carried on or run again has the same mutants chosen. The
 merge's kept cosmic-ray sessions (CARRYING A MERGE ON below) hold every mutant
 of the merge and the result of each mutant run: they are this program's record
 of which mutants are judged, and the mutation testing program runs no mutant
-that has a result there. A merge with mutants not run is recorded under
+that has a result there. That program runs at most one mutant of each changed
+line, and marks the line's others skipped (its ONE MUTANT PER CHANGED LINE),
+so a skipped mutant is not counted as not run. A merge with mutants not run is recorded under
 merges_with_mutants_not_run in the state, with merged_at_unix_seconds, the
 time of its commit, mutants_not_run_count, and
 surviving_mutant_keys_already_handled, the key of each surviving mutant an
@@ -147,7 +149,11 @@ new mutants_not_run_count; a merge with none left leaves the state, and a
 merge a suite now fails on with no mutant applied is recorded as untestable
 (AN UNTESTABLE MERGE below) and leaves it too. The second pass never changes
 last_tested_main_commit. No merge is dropped from merges_with_mutants_not_run
-for being old.
+for being old; but the mutation testing program marks skipped every mutant
+with no result in the kept sessions of a merge committed before its
+KEPT_COSMIC_RAY_SESSION_MUTANTS_WITH_NO_RESULT_ALL_SKIPPED_WHEN_HEAD_COMMIT_UNIX_TIME_BEFORE_THIS_CUTOFF,
+so such a merge has none left, and leaves the state, the next time the second
+pass reaches it.
 
 CARRYING A MERGE ON. Each merge's cosmic-ray sessions are kept in
 cosmic-ray-sessions-kept-for-unfinished-merges/<merge>
