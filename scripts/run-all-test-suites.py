@@ -8,6 +8,7 @@ Usage:
                                  [--only-suites-whose-recorded-inputs-changed-since COMMIT]
                                  [--recorded-inputs-directory DIR]
                                  [--save-recorded-inputs-to-directory DIR]
+                                 [--also-leave-out-suites-whose-recorded-inputs-in-read-only-directory-match-checkout DIR]
                                  [--record-inputs-with-strace]
                                  [--suite-files-only-strace-saw-lists-directory DIR]
                                  [--leave-recorded-inputs-and-failure-history-unchanged]
@@ -58,6 +59,18 @@ Usage:
                 tree that never reaches main cannot replace the recordings
                 every other head run selects by; see RECORDINGS ADOPTED
                 AFTER A MERGE below
+  --also-leave-out-suites-whose-recorded-inputs-in-read-only-directory-match-checkout DIR
+                with --only-suites-whose-recorded-inputs-changed-since, a
+                second directory of recordings that this run reads and never
+                writes: a suite selected by its recording in
+                --recorded-inputs-directory, or for having none there, is
+                left out when its recording in DIR would leave it out by the
+                same rules. DIR never selects a suite. A DIR that is missing
+                or cannot be read holds no recording. merge-lane-2's head
+                test runs give as DIR the default --recorded-inputs-directory,
+                where the after-merge test run saves each suite's recording
+                as the suite passes, before the merge program adopts them
+                into the head test runs' store when the after-merge test run ends
   --record-inputs-with-strace
                 on Linux, record with strace as well as the audit hook; see
                 RECORDED INPUTS below. scripts/scheduled-full-test-run-of-main.py
@@ -552,8 +565,8 @@ suite depends on. Two recorders, whose findings are added together:
   files only strace saw it read: those a git command or a shell script
   read. A run that records with the audit hook alone replaces the
   recording, and a run given its own --recorded-inputs-directory, such as
-  merge-lane-2's head runs, never sees the scheduled run's recordings, so
-  selection reads these lists from
+  merge-lane-2's head runs, selects by recordings the scheduled run did not
+  make, so selection reads these lists from
   --suite-files-only-strace-saw-lists-directory, whose default is where the
   scheduled full run keeps its recordings: a suite also runs when a file on its
   list differs. A run with the audit hook alone records the files on the
@@ -4712,19 +4725,35 @@ def adopt_passing_recordings_that_match_the_checkout(top, into_given, from_given
     return adopted
 
 
-def suites_selected_since(top, suites, recordings, commit, differ, files_only_strace_saw_by_suite):
-    """[(suite, selected, why)] for every suite, in order; differ is files_that_differ_since's."""
+def suites_selected_since(top, suites, recordings, commit, differ, files_only_strace_saw_by_suite,
+                          read_only_recordings, read_only_directory):
+    """[(suite, selected, why)] for every suite, in order; differ is files_that_differ_since's.
+
+    A suite selected by its recording in recordings, or for having none there, is left out
+    when its recording in read_only_recordings, read from read_only_directory, would leave it
+    out; read_only_recordings never select a suite."""
     everything = [path for path in sorted(differ)
                   if any(path == prefix or (prefix.endswith("/") and path.startswith(prefix))
                          for prefix in EVERY_SUITE_RUNS_WHEN_THESE_CHANGE)]
     if everything:
         return [(suite, True, f"{everything[0]} differs, and every suite runs under it")
                 for suite in suites]
-    recorded = [recordings.get(suite) for suite in suites]
+    recorded = [found.get(suite) for found in (recordings, read_only_recordings)
+                for suite in suites]
     checkout = CheckoutComparedWithCommit(top, commit, differ, recorded)
-    return [(suite, *selection_reason(suite, recordings.get(suite), checkout, commit,
-                                      files_only_strace_saw_by_suite.get(suite)))
-            for suite in suites]
+    selection = []
+    for suite in suites:
+        selected, why = selection_reason(suite, recordings.get(suite), checkout, commit,
+                                         files_only_strace_saw_by_suite.get(suite))
+        if selected:
+            selected_by_read_only, why_read_only = selection_reason(
+                suite, read_only_recordings.get(suite), checkout, commit,
+                files_only_strace_saw_by_suite.get(suite))
+            if not selected_by_read_only:
+                selected, why = False, (f"its recording in {read_only_directory}, which "
+                                        f"this run only reads, leaves it out: {why_read_only}")
+        selection.append((suite, selected, why))
+    return selection
 
 
 def no_sandbox_suite_file_it_read_that_differs_or_none(suite, recording, files_only_strace_saw,
@@ -4938,6 +4967,8 @@ def parse_arguments(argv):
     parser.add_argument("--recorded-inputs-directory",
                         default=str(DEFAULT_RECORDED_INPUTS_DIRECTORY))
     parser.add_argument("--save-recorded-inputs-to-directory")
+    parser.add_argument("--also-leave-out-suites-whose-recorded-inputs-in-read-only-directory-match-checkout",
+                        dest="read_only_recorded_inputs_directory", metavar="DIR")
     parser.add_argument("--record-inputs-with-strace", action="store_true")
     parser.add_argument("--suite-files-only-strace-saw-lists-directory",
                         default=str(DEFAULT_RECORDED_INPUTS_DIRECTORY))
@@ -5067,12 +5098,16 @@ def main(argv=None, platform=None):
                 if arguments.save_recorded_inputs_to_directory is not None else recordings_dir)
             files_only_strace_saw_dir = recordings_directory_for(
                 arguments.suite_files_only_strace_saw_lists_directory, top)
+            read_only_recordings_dir = (
+                recordings_directory_for(arguments.read_only_recorded_inputs_directory, top)
+                if arguments.read_only_recorded_inputs_directory is not None else None)
         except CouldNotRun as refusal:
             print(refusal, file=sys.stderr)
             return EXIT_COULD_NOT_RUN
         # Each recording is read once, so selection and starting order see the same one
         # even while runs in other checkouts save it.
         recordings, identities_read, files_only_strace_saw_by_suite = {}, {}, {}
+        read_only_recordings = {}
         for suite in suites:
             recordings[suite], identities_read[suite] = load_recording_and_identity(
                 recordings_dir, suite)
@@ -5082,13 +5117,17 @@ def main(argv=None, platform=None):
                     saved_recordings_dir, suite)[1]
             files_only_strace_saw_by_suite[suite] = load_files_only_strace_saw(
                 files_only_strace_saw_dir, suite)
+            if read_only_recordings_dir is not None:
+                # A directory that is missing or cannot be read gives None, as no recording does.
+                read_only_recordings[suite] = load_recording(read_only_recordings_dir, suite)
         try:
             files = checkout_files(top)
             differ = None
             if changed_since is not None:
                 differ = files_that_differ_since(top, changed_since)
                 selection = suites_selected_since(top, suites, recordings, changed_since, differ,
-                                                  files_only_strace_saw_by_suite)
+                                                  files_only_strace_saw_by_suite,
+                                                  read_only_recordings, read_only_recordings_dir)
             else:
                 selection = [(suite, True, "every suite runs without "
                               "--only-suites-whose-recorded-inputs-changed-since")

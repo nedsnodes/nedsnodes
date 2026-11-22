@@ -16,7 +16,11 @@ the suite out. The after-merge test run selects by another store, which head tes
 never write: its stale recording selects the suite on the merge commit, where X's head
 test run passed it on the same files, until the merge adopts the store's matching
 recording into it; a suite that reads a file which differs since the commit the run
-selects since stays selected.
+selects since stays selected. A head test run given the after-merge test run's directory
+read-only leaves out a suite whose recording there matches the checkout, while the store
+still holds an outdated one, as the store does until that run ends; a recording there that
+does not match, and a directory that is missing or cannot be read, leave the selection as
+the store makes it, and the directory is never written.
 
 Run: python3 scripts/run-all-test-suites-recordings-saved-apart-then-adopted-when-they-match-the-merge-commit-test.py   (exit 0 = all passed)
 """
@@ -129,7 +133,8 @@ class Scratch:
             commit(path, files, name)
         return path, git(path, "rev-parse", "HEAD")
 
-    def run(self, checkout, since=None, store="store", save_to=None, driver=None):
+    def run(self, checkout, since=None, store="store", save_to=None, driver=None,
+            read_only=None):
         self.runs += 1
         command = [sys.executable, *(["-c", driver] if driver else []), str(PROGRAM),
                    "--checkout", str(checkout),
@@ -141,6 +146,10 @@ class Scratch:
             command += ["--only-suites-whose-recorded-inputs-changed-since", since]
         if save_to is not None:
             command += ["--save-recorded-inputs-to-directory", str(self.root / save_to)]
+        if read_only is not None:
+            command += [
+                "--also-leave-out-suites-whose-recorded-inputs-in-read-only-directory-match-checkout",
+                str(self.root / read_only)]
         return subprocess.run(command, capture_output=True, text=True, check=False,
                               stdin=subprocess.DEVNULL)
 
@@ -174,7 +183,108 @@ def x_merges_then_z_and_a_are_tested(save_apart):
     return scratch.run(a_checkout, since=m1), scratch, adopted
 
 
+def directory_contents(directory):
+    return {str(path.relative_to(directory)): path.read_bytes() if path.is_file() else None
+            for path in sorted(directory.rglob("*"))}
+
+
+def head_test_runs_while_the_after_merge_test_run_runs():
+    """Main moves from M0 to M1, which changes a file the suite reads; the store still holds
+    the recording made on M0, and the after-merge test run on M1 has saved its passing
+    recording in its own directory, as on 2026-11-21. Pull request A, on M1, changes a file
+    the suite does not read."""
+    scratch = Scratch()
+    main_checkout, _ = scratch.worktree("main-at-m0", scratch.m0)
+    scratch.run(main_checkout)
+    m1 = commit(scratch.repo, {"first.txt": "1\n"}, "M1")
+    merge_commit_checkout, _ = scratch.worktree("merge-commit", m1)
+    scratch.run(merge_commit_checkout, since=scratch.m0, store="after-merge")
+    after_merge = scratch.root / "after-merge"
+    matching = scratch.recording("after-merge")
+    a_checkout, _ = scratch.worktree("pr-a", m1, {"unread.txt": "a\n"})
+    store_reason = (f"SELECTED {SUITE}: its recording read another copy of first.txt than the "
+                    f"checkout holds, so what it reads here is unknown")
+    without = scratch.run(a_checkout, since=m1, save_to="pr-a-recordings")
+    check("reproduced: a head test run selecting by the store alone selects a suite whose "
+          "recording matching main is saved only where the after-merge test run saves",
+          selection_line(without) == store_reason, selection_line(without))
+
+    before = directory_contents(after_merge)
+    leaves_out = scratch.run(a_checkout, since=m1, save_to="pr-a-recordings",
+                             read_only="after-merge")
+    where = runner.recordings_directory_for(after_merge, scratch.repo)
+    check("given the after-merge test run's directory read-only, the head test run leaves "
+          "out the suite whose recording there matches the checkout, and says which "
+          "directory's recording left it out",
+          selection_line(leaves_out).startswith(
+              f"NOT SELECTED {SUITE}: its recording in {where}, which this run only reads, "
+              f"leaves it out: none of the") and leaves_out.returncode == 0,
+          selection_line(leaves_out) + leaves_out.stderr)
+    check("the head test run writes nothing in the directory it reads read-only",
+          directory_contents(after_merge) == before)
+
+    b_checkout, _ = scratch.worktree("pr-b", m1, {"first.txt": "b\n"})
+    reads_the_change = scratch.run(b_checkout, since=m1, save_to="pr-b-recordings",
+                                   read_only="after-merge")
+    check("a suite whose recording in the read-only directory reads a file the pull request "
+          "changes is still selected",
+          selection_line(reads_the_change) == f"SELECTED {SUITE}: it reads first.txt, which "
+          f"differs", selection_line(reads_the_change))
+    check("a head test run that runs the suite writes nothing in the directory it reads "
+          "read-only either",
+          directory_contents(after_merge) == before)
+
+    no_store_recording = scratch.run(a_checkout, since=m1, store="empty-store",
+                                     save_to="pr-a-recordings", read_only="after-merge")
+    check("a suite with no recording in the store is left out by its matching recording in "
+          "the read-only directory",
+          selection_line(no_store_recording).startswith(
+              f"NOT SELECTED {SUITE}: its recording in {where}, which this run only reads, "
+              f"leaves it out: none of the"), selection_line(no_store_recording))
+
+    not_matching = runner.recordings_directory_for(scratch.root / "not-matching", scratch.repo)
+    not_matching.mkdir(parents=True)
+    for name, changes in (
+            ("made on another tree", {"reads": {**matching["reads"], "second.txt": "0" * 40}}),
+            ("of a run that failed", {"exit": 1}),
+            ("of a run that skipped a case without the mark", {"skipped_cases": 1})):
+        runner.recording_file_for(not_matching, SUITE).write_text(
+            json.dumps({**matching, **changes}))
+        result = scratch.run(a_checkout, since=m1, save_to="pr-a-recordings",
+                             read_only="not-matching")
+        check(f"a recording in the read-only directory {name} leaves the suite selected, for "
+              f"the store's reason",
+              selection_line(result) == store_reason, selection_line(result))
+
+    for name, read_only, prepare, restore in (
+            ("missing", "no-such-directory", lambda: None, lambda: None),
+            ("unreadable", "after-merge", lambda: where.chmod(0o000), lambda: where.chmod(0o755))):
+        prepare()
+        try:
+            result = scratch.run(a_checkout, since=m1, save_to="pr-a-recordings",
+                                 read_only=read_only)
+        finally:
+            restore()
+        check(f"a read-only directory that is {name} leaves the selection as the store makes "
+              f"it, and the run passes",
+              selection_line(result) == store_reason and result.returncode == 0,
+              selection_line(result) + result.stderr)
+    check("a missing read-only directory is not made",
+          not (scratch.root / "no-such-directory").exists())
+
+    for read_only, holds in (("store", "an outdated recording"),
+                             ("after-merge", "a matching recording")):
+        store_matches = scratch.run(merge_commit_checkout, since=m1, store="after-merge",
+                                    save_to="unread-recordings", read_only=read_only)
+        check(f"a suite whose store recording matches is left out by the store's recording "
+              f"when the read-only directory holds {holds}",
+              selection_line(store_matches).startswith(f"NOT SELECTED {SUITE}: none of the"),
+              selection_line(store_matches))
+
+
 def main():
+    head_test_runs_while_the_after_merge_test_run_runs()
+
     result, scratch, _ = x_merges_then_z_and_a_are_tested(save_apart=False)
     check("reproduced: when every head test run saves into the store, a pull request built "
           "on the older main replaces the merged pull request's recording, and the next run "
