@@ -357,7 +357,7 @@ for arguments, expected in ((["-e", "--", "-x*"], (3, {1})),
                             (["-A2", "--", "-x*"], (1, set())), (["-A", "--", "-x*"], (3, {1})),
                             (["--include=--", "--", "-x*"], (1, set())), (["-", "--"], (1, set())),
                             (["needle", "file"], (2, set())), (["xe", "file"], (2, set())),
-                            (["-e"], (1, set())),
+                            (["-e"], (1, set())), (["-" + "n" * 256 + "e", "needle", "file"], (3, {1})),
                             (["-e", "--", "-e", "-x*", "notes.md"], (5, {1, 3}))):
     found = check_module.grep_arguments_options_end_and_option_value_positions(arguments)
     check(f"grep's options end, and its option values sit, at {expected} in {arguments}",
