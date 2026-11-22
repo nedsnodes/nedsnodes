@@ -389,7 +389,7 @@ def stopped(state_file, state, commit, started, reason, compared_with=None):
 
 
 def run(arguments):
-    state_file = Path(arguments.state_file).expanduser().absolute()
+    state_file = arguments.state_file
     try:
         lock = take_lock_without_waiting(f"{state_file}.lock")
     except OSError as error:
@@ -522,7 +522,7 @@ def run_under_lock(arguments, state_file):
 
 def record_follow_up_request_sent(arguments):
     """Under the run's own lock, so a run that ends meanwhile cannot have its result overwritten."""
-    state_file = Path(arguments.state_file).expanduser().absolute()
+    state_file = arguments.state_file
     try:
         lock = take_lock_without_waiting(f"{state_file}.lock")
     except OSError as error:
@@ -657,11 +657,12 @@ def parse_arguments(argv):
 
 def main(argv=None):
     arguments = parse_arguments(argv)
+    # Absolute, so every message names the file wherever the reader's directory is.
+    arguments.state_file = Path(arguments.state_file).expanduser().absolute()
     if arguments.record_follow_up_request_sent:
         return record_follow_up_request_sent(arguments)
     if arguments.print_merge_gate_notice_of_last_failed_or_stopped_run:
-        for line in merge_gate_notice(Path(arguments.state_file).expanduser().absolute(),
-                                      Path(arguments.clone)):
+        for line in merge_gate_notice(arguments.state_file, Path(arguments.clone)):
             print(line)
         return EXIT_DONE
     return run(arguments)

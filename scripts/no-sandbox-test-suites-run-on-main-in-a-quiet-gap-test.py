@@ -395,17 +395,22 @@ with tempfile.TemporaryDirectory() as directory:
                in zip(printed.splitlines(), refusal_line_prefixes)] == list(refusal_line_prefixes)
           and len(printed.splitlines()) == 3, (code, printed))
     absolute_state_file = s.state_file
+    # The test sandbox makes TMPDIR a symlink, and after chdir() the program sees the physical path.
+    physical_state_file = absolute_state_file.parent.resolve() / absolute_state_file.name
     working_directory = os.getcwd()
     os.chdir(absolute_state_file.parent)
     try:
         s.state_file = Path(absolute_state_file.name)
         code, printed, _ = s.run("pass", "--record-follow-up-request-sent")
+        notice = s.notice()
     finally:
         os.chdir(working_directory)
         s.state_file = absolute_state_file
     check("a relative --state-file is named by its full path in the refusal",
           code == program.EXIT_REFUSED
-          and f"cannot be read: {absolute_state_file} is not JSON" in printed, (code, printed))
+          and f"cannot be read: {physical_state_file} is not JSON" in printed, (code, printed))
+    check("a relative --state-file is named by its full path in the merge-gate notice",
+          f"cannot be read: {physical_state_file} is not JSON" in notice, notice)
     s.run()
     code, printed, _ = s.run("pass", "--record-follow-up-request-sent")
     check("--record-follow-up-request-sent refuses when the last run passed",
