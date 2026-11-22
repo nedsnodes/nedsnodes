@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """Ask ghi-guide-agent, the project's knowledge agent over its GitHub-issue corpus
-(nedschorus#46, design doc docs/issues/46-ghi-guide-agent-design.md § The
+(nedschorus#46, design doc docs/issues/46-ghi-guide-agent.system.design.md § The
 ask path). Run by any agent — and by the ghi-write skill's step 1 — before
 filing or editing an issue, to learn what already covers the ground.
 
@@ -164,31 +164,31 @@ _threshold_hook_spec.loader.exec_module(threshold_hook)
 
 _git_output_spec = importlib.util.spec_from_file_location(
     "git_machine_readable_output_runner_and_parser_common",
-    SCRIPT_DIRECTORY.parent / "nc-systems" / "general-tools"
+    SCRIPT_DIRECTORY.parent / "nn-systems" / "general-tools"
     / "git-machine-readable-output-runner-and-parser-common.py")
 git_output = importlib.util.module_from_spec(_git_output_spec)
 _git_output_spec.loader.exec_module(git_output)
 
 _command_line_prefix_spec = importlib.util.spec_from_file_location(
     "claude_code_headless_run_command_line_prefix_with_no_connectors_and_explicit_permission_mode_common",
-    SCRIPT_DIRECTORY.parent / "nc-systems" / "general-tools"
+    SCRIPT_DIRECTORY.parent / "nn-systems" / "general-tools"
     / "claude-code-headless-run-command-line-prefix-with-no-connectors-and-explicit-permission-mode-common.py")
 command_line_prefix = importlib.util.module_from_spec(_command_line_prefix_spec)
 _command_line_prefix_spec.loader.exec_module(command_line_prefix)
 
-AGENT_BOX = os.environ.get("NEDSCHORUS_AGENT_BOX", "ned")
+AGENT_BOX = os.environ.get("NEDSNODES_AGENT_BOX", "ned")
 # AGENT_BOX is the Mac's ssh alias for the box, which the box itself cannot resolve.
 NED_BOX_HOSTNAME = "ned-box"
-DEFAULT_AGENTS_ROOT = Path(os.environ.get("NEDSCHORUS_AGENTS_ROOT", "~/agents")).expanduser()
+DEFAULT_AGENTS_ROOT = Path(os.environ.get("NEDSNODES_AGENTS_ROOT", "~/agents")).expanduser()
 DEFAULT_SEAT_DIR = DEFAULT_AGENTS_ROOT / "ghi-guide-agent"
-DEFAULT_REPO = "nedschorus/nedschorus"
+DEFAULT_REPO = "nedsnodes/nedsnodes"
 STATE_FILE_NAME = ".ghi-guide-agent-state.json"
 LOCK_FILE_NAME = ".ghi-guide-agent-state.lock"
 
 # Model: named constant + env override, per issue #46's own framing —
 # "settled empirically." Starting pick for this build, not a measured
 # choice among fable/opus/sonnet.
-GHI_GUIDE_AGENT_MODEL = os.environ.get("GHI_GUIDE_AGENT_MODEL", "claude-sonnet-5")
+GHI_GUIDE_AGENT_MODEL = os.environ.get("GHI_GUIDE_AGENT_MODEL", "claude-sonnet-5-5")
 # ghi-guide-agent only reads: the mirror, the files open issues link to, and the log-store.
 GHI_GUIDE_AGENT_ALLOWED_TOOLS = "Read,Grep,Glob"
 # "One overall timeout (inside the hook budget)" (design § The ask path) —
@@ -358,7 +358,7 @@ Boundaries:
 - A draft-body request gets a verdict, except that a draft that conflicts with a ruling the user made gets the ruling question: whether the ruling still binds, or still binds this draft, is the user's to settle. A question beyond the corpus gets not-about-issues even when it touches a ruling."""
 
 
-ASK_PROMPT_ISSUES_WHOSE_DESIGN_A_PLAN_SHOULD_REUSE_REQUEST_SENTENCE = (
+GHI_GUIDE_AGENT_ASK_PROMPT_SENTENCE_ASKING_THE_AGENT_TO_NAME_ISSUES_WHOSE_DESIGN_A_PLAN_SHOULD_REUSE = (
     "If the question describes a plan, also name any issue whose design built "
     "something the plan should reuse instead of building its own.")
 
@@ -367,7 +367,8 @@ def compose_resume_ask_prompt(question: str, include_closed: bool, changed_numbe
                               is_resume: bool) -> str:
     """§ Prompts: Resume ask prompt. The changed-entries preamble appears only
     on a resumed session whose refresh actually changed entries; the
-    asker's question rides through unrewritten, and ASK_PROMPT_ISSUES_WHOSE_DESIGN_A_PLAN_SHOULD_REUSE_REQUEST_SENTENCE
+    asker's question rides through unrewritten, and
+    GHI_GUIDE_AGENT_ASK_PROMPT_SENTENCE_ASKING_THE_AGENT_TO_NAME_ISSUES_WHOSE_DESIGN_A_PLAN_SHOULD_REUSE
     follows it in every ask."""
     parts = []
     if is_resume and changed_numbers:
@@ -378,7 +379,7 @@ def compose_resume_ask_prompt(question: str, include_closed: bool, changed_numbe
             "moved to issues-closed.md."
         )
     parts.append(f"You are asked for a reading list. {question}")
-    parts.append(ASK_PROMPT_ISSUES_WHOSE_DESIGN_A_PLAN_SHOULD_REUSE_REQUEST_SENTENCE)
+    parts.append(GHI_GUIDE_AGENT_ASK_PROMPT_SENTENCE_ASKING_THE_AGENT_TO_NAME_ISSUES_WHOSE_DESIGN_A_PLAN_SHOULD_REUSE)
     if include_closed:
         parts.append(
             "Closed history is wanted for this request: grep issues-closed.md "
@@ -409,7 +410,7 @@ EXIT_RULING_QUESTION = 3
 NOT_ABOUT_ISSUES_MESSAGE = (
     "Not a question about GitHub issues: ghi-guide-agent reports which issues relate to a subject.\n"
     'Ask again as: scripts/ghi-guide-agent-ask.py "Which issues cover <your subject>?"\n'
-    "If that is refused too, search yourself: gh issue list --repo nedschorus/nedschorus "
+    "If that is refused too, search yourself: gh issue list --repo nedsnodes/nedsnodes "
     '--state all --search "<terms>"')
 RULING_QUESTION_MESSAGE_TEMPLATE = (
     "ghi-guide-agent found a ruling of the user's that it cannot tell still applies: {sentence}\n"
@@ -812,11 +813,11 @@ def fast_forward_seat_checkout(seat_dir: Path) -> str:
     the remaining half of nedschorus#334.
 
     NOT checkout-freshness-catch-up.py's fast_forward_reference_checkout.
-    That one requires the checkout to be parked on main and treats any other
-    branch as a blocker — which is exactly the guarantee a REFERENCE copy
-    needs, and this checkout sits on its own `ghi-guide-agent` branch. Loosening it
-    for this caller would weaken it for the reference copy, so this is a
-    second, narrower function rather than a shared one.
+    That one requires the checkout to be parked on main and treats a detached
+    HEAD as a blocker — which is exactly the guarantee a REFERENCE copy needs,
+    and this checkout is an agent-home, resting detached at origin/main.
+    Loosening it for this caller would weaken it for the reference copy, so
+    this is a second, narrower function rather than a shared one.
 
     FRESHNESS MUST NEVER FAIL AN ASK. Every failure path here returns a line
     and lets the ask proceed against whatever is on disk. A slightly stale
@@ -848,8 +849,8 @@ def fast_forward_seat_checkout(seat_dir: Path) -> str:
     tracked_changes = [entry for entry in git_output.status_entries(status.stdout)
                        if entry.code != "??"]
     if tracked_changes:
-        # ghi-guide-agent's document-side link repairs go through ghi-issue-write.py's
-        # pull requests, so uncommitted tracked changes here are real work, not debris.
+        # The ask writes no tracked file here, so a tracked change is work
+        # someone left in the agent-home, not debris to move past.
         return (f"ghi-guide-agent-ask: the seat checkout has {len(tracked_changes)} uncommitted "
                 f"tracked change(s); not refreshing it")
 
@@ -1118,7 +1119,7 @@ def main(argv=None) -> int:
         print(f"ghi-guide-agent-ask: the ask failed: ghi-guide-agent's agent-home "
               f"{seat_dir} does not exist on {NED_BOX_HOSTNAME}, and the ask runs inside it. "
               f"Create it, from either machine, with `ssh nedlern@{NED_BOX_HOSTNAME} "
-              f"'git -C ~/Projects/nedschorus worktree add --detach {seat_dir} origin/main && "
+              f"'git -C ~/Projects/nedsnodes worktree add --detach {seat_dir} origin/main && "
               f"touch \"$(git -C {seat_dir} rev-parse --absolute-git-dir)/agent-home-marker\"'`, "
               f"which makes it an agent-home resting at origin/main; then run the command that "
               f"printed this message again, unchanged, once. If the agent-home cannot be "

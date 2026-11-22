@@ -38,7 +38,7 @@ _git_environment_fixture.remove_git_redirecting_environment_variables_from_this_
 
 _next_step_lines_spec = importlib.util.spec_from_file_location(
     "failed_command_tool_message_to_agent_rerun_once_then_stop_and_report_lines_common",
-    Path(__file__).resolve().parents[1] / "nc-systems" / "general-tools"
+    Path(__file__).resolve().parents[1] / "nn-systems" / "general-tools"
     / "failed-command-tool-message-to-agent-rerun-once-then-stop-and-report-lines-common.py")
 next_step_lines = importlib.util.module_from_spec(_next_step_lines_spec)
 _next_step_lines_spec.loader.exec_module(next_step_lines)
@@ -48,7 +48,7 @@ PROGRAM = SCRIPTS / "stale-code-citation-check.py"
 LINT = SCRIPTS / "md-drift-lint.py"
 LINT_OVERVIEW_PATH_MODULE = (
     SCRIPTS / "architecture-overview-path-template-and-checked-against-commit-reader-common.py")
-GIT_OUTPUT_MODULE = (SCRIPTS.parent / "nc-systems" / "general-tools"
+GIT_OUTPUT_MODULE = (SCRIPTS.parent / "nn-systems" / "general-tools"
                      / "git-machine-readable-output-runner-and-parser-common.py")
 NEXT_STEP_LINES_MODULE = GIT_OUTPUT_MODULE.with_name(
     "failed-command-tool-message-to-agent-rerun-once-then-stop-and-report-lines-common.py")
@@ -88,9 +88,9 @@ def new_repository(workspace: str) -> Path:
     shutil.copy(PROGRAM, root / "scripts" / PROGRAM.name)
     shutil.copy(LINT, root / "scripts" / LINT.name)
     shutil.copy(LINT_OVERVIEW_PATH_MODULE, root / "scripts" / LINT_OVERVIEW_PATH_MODULE.name)
-    (root / "nc-systems" / "general-tools").mkdir(parents=True)
+    (root / "nn-systems" / "general-tools").mkdir(parents=True)
     for module in (GIT_OUTPUT_MODULE, NEXT_STEP_LINES_MODULE):
-        shutil.copy(module, root / "nc-systems" / "general-tools" / module.name)
+        shutil.copy(module, root / "nn-systems" / "general-tools" / module.name)
     git(root, "init", "-q", "-b", "main")
     git(root, "add", "-A")
     git(root, "commit", "-q", "-m", "scripts", date="2026-01-01")
@@ -125,16 +125,17 @@ def run(root: Path, *arguments, environment=None):
 INJECTED_GIT_ERROR = "fatal: injected git failure"
 
 
-def run_with_git_failing(root: Path, failing_arguments: str, *arguments):
-    """Run the program with a stand-in git first on PATH: it exits 128 when its
-    arguments contain failing_arguments, and runs the real git otherwise."""
+def run_with_git_failing(root: Path, failing_arguments: str, *arguments,
+                         git_error: str = INJECTED_GIT_ERROR):
+    """Run the program with a stand-in git first on PATH: it prints git_error and exits 128 when
+    its arguments contain failing_arguments, and runs the real git otherwise."""
     stand_in_directory = root.parent / "stand-in-git-bin"
     stand_in_directory.mkdir(exist_ok=True)
     stand_in_git = stand_in_directory / "git"
     stand_in_git.write_text(
         f"#!{sys.executable}\nimport os, sys\n"
         f"if {failing_arguments!r} in ' '.join(sys.argv[1:]):\n"
-        f"    sys.stderr.write({INJECTED_GIT_ERROR!r} + '\\n')\n"
+        f"    sys.stderr.write({git_error!r} + '\\n')\n"
         f"    sys.exit(128)\n"
         f"os.execv({shutil.which('git')!r}, ['git', *sys.argv[1:]])\n",
         encoding="utf-8")
@@ -150,7 +151,8 @@ def reports_the_git_failure_and_no_result(root, arguments, code, out, err):
     return (code == 2 and INJECTED_GIT_ERROR in err and "a git command failed" in err
             and "finding(s)" not in err
             and next_step_lines.git_failure_next_step_lines(
-                rerun, "stale-code-citation-check", text_the_failure_line_contains="could not check, because a git command failed") in err)
+                rerun, "stale-code-citation-check", git_error_line_shown_in_tool_message_to_agent_checked_for_lock_file_path=INJECTED_GIT_ERROR,
+                text_the_failure_line_contains="could not check, because a git command failed") in err)
 
 
 def document(stamp="2026-05-01", status="design", body=""):
@@ -390,6 +392,8 @@ with tempfile.TemporaryDirectory() as workspace:
     code, out, err = run(root, "docs/bad-stamp.md")
     check("a stamp that is not a date is reported as one",
           code == 1 and "is not a date" in out, f"{code} {out}")
+    check("a stamp that is not a date counts no citation as pinned",
+          "citation(s) not checked" not in err, err)
 
     # A SHAPE IS NOT A CALENDAR, and getting this wrong is silent. September
     # has thirty days, so 2026-09-31 passes a shape test and then sorts above
@@ -471,7 +475,7 @@ with tempfile.TemporaryDirectory() as workspace:
 
     # A NEGATED BUILT WORD IS NOT A CLAIM THAT THE CODE IS BUILT. The status
     # values here are the ones docs/design-to-main/design-to-main-state-machine-
-    # design.md and nc-systems/main-gatekeeper/main-gatekeeper-design.md carry
+    # design.md and nn-systems/main-gatekeeper/main-gatekeeper.system.design.md carry
     # on main, which a substring test read as built -- so the rider was silent
     # on the clearest unbuilt claim a status can make.
     write_document(root, "docs/not-built.md", document(
@@ -548,7 +552,7 @@ with tempfile.TemporaryDirectory() as workspace:
     # brackets and the full sha in the link.
     landed = git(root, "rev-parse", "HEAD")
     pin = (f"**Pinned to what landed:** commit [{landed[:7]}]"
-           f"(https://github.com/nedschorus/nedschorus/commit/{landed}) on "
+           f"(https://github.com/nedsnodes/nedsnodes/commit/{landed}) on "
            "2026-06-01 — the moved program.")
 
     write_document(root, "docs/pinned.md", document(
@@ -593,7 +597,7 @@ with tempfile.TemporaryDirectory() as workspace:
         status="specification",
         body="The test is `scripts/moved.py` lines 20-24.\n\n"
              f"**Pinned to what landed:** commit [{absent}]"
-             f"(https://github.com/nedschorus/nedschorus/commit/{absent}) on "
+             f"(https://github.com/nedsnodes/nedsnodes/commit/{absent}) on "
              "2026-06-01 — the moved program."))
     code, out, err = run(root, "docs/pin-absent-commit.md")
     check("a pinned line naming a well-formed sha that is no commit here gets the status finding",
@@ -836,6 +840,14 @@ with tempfile.TemporaryDirectory() as workspace:
         check(f"document mode exits 2 with git's error when {what} fails",
               reports_the_git_failure_and_no_result(root, ["docs/design.md"], code, out, err),
               f"{code} {out} {err}")
+    lock_file = root / ".git" / "index.lock"
+    code, out, err = run_with_git_failing(
+        root, "ls-files -z --others", "--base", base,
+        git_error=f"fatal: Unable to create '{lock_file}': File exists.")
+    check("a git error naming a lock file gives the step that waits for that lock file, "
+          "and no misspelt-name step",
+          code == 2 and f"Git's error names the lock file {lock_file}: " in err
+          and "is misspelt" not in err, f"{code} {out} {err}")
 
 print()
 if failures:

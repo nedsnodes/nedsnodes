@@ -14,9 +14,8 @@ a poor advertisement for the rule.
 WHY THE LOG DIRECTORY AND NOT JUST SNAPSHOT AGE. Timeshift is time-driven, not
 content-driven: `--check` means "create a snapshot if one is scheduled", so it
 never skips because nothing changed — it skips because the level is not yet due.
-A manual snapshot therefore resets the hourly clock, and with Timeshift run every
-three hours a perfectly healthy machine can go nearly six hours with no new
-scheduled snapshot. Observed 2026-08-14:
+A manual snapshot therefore resets the hourly clock, and a perfectly healthy
+machine can go nearly two hours with no new scheduled snapshot. Observed 2026-08-14:
 an on-demand snapshot at 11:35 took the H, W and M tags, so the 12:00 run
 correctly created nothing. Snapshot age alone would have cried wolf.
 
@@ -43,14 +42,14 @@ import sys
 import time
 from pathlib import Path
 
-BACKUP_MOUNT = Path(os.environ.get("NEDSCHORUS_BACKUP_MOUNT", "/mnt/backup"))
+BACKUP_MOUNT = Path(os.environ.get("NEDSNODES_BACKUP_MOUNT", "/mnt/backup"))
 TIMESHIFT_LOG_DIRECTORY = Path(
-    os.environ.get("NEDSCHORUS_TIMESHIFT_LOG_DIRECTORY", "/var/log/timeshift"))
+    os.environ.get("NEDSNODES_TIMESHIFT_LOG_DIRECTORY", "/var/log/timeshift"))
 TIMESHIFT_SNAPSHOT_DIRECTORY = Path(
-    os.environ.get("NEDSCHORUS_TIMESHIFT_SNAPSHOT_DIRECTORY",
+    os.environ.get("NEDSNODES_TIMESHIFT_SNAPSHOT_DIRECTORY",
                    "/mnt/backup/timeshift/snapshots"))
 
-# /etc/cron.d/timeshift-hourly runs Timeshift every three hours; this allows one late run.
+# /etc/cron.d/timeshift-hourly runs Timeshift hourly; this limit lets four runs in a row go missing.
 MAXIMUM_LOG_AGE_SECONDS = 4 * 60 * 60 + 30 * 60
 
 # Manual snapshots can take the hourly tag and legitimately delay the next scheduled snapshot.
@@ -118,7 +117,7 @@ def newest_scheduled_snapshot_age(snapshot_directory: Path):
 def diagnose():
     """Return (headline, detail lines), with headline None when healthy."""
     # Timeshift runs only on ned-box; the environment override permits simulated layouts elsewhere.
-    if sys.platform != "linux" and "NEDSCHORUS_BACKUP_MOUNT" not in os.environ:
+    if sys.platform != "linux" and "NEDSNODES_BACKUP_MOUNT" not in os.environ:
         return None, []
 
     detail = []
@@ -135,7 +134,7 @@ def diagnose():
     if log_age is None or log_age > MAXIMUM_LOG_AGE_SECONDS:
         age_text = format_age(log_age) if log_age is not None else "never"
         detail.append(f"Timeshift last ran {age_text} ago; /etc/cron.d/timeshift-hourly "
-                      "runs it every three hours, despite the file's name.")
+                      "runs it hourly.")
         detail.append("The scheduler is not firing. Check that file and whether cron is running.")
         return f"BACKUP STALLED {age_text}", detail
 

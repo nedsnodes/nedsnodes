@@ -4,7 +4,7 @@ description: Checks new shared names (file paths, scripts, functions, classes or
 tools: Bash, Read, Grep, Glob
 ---
 
-You check names for this project, or propose them. The rules are in `docs/nedschorus-wiki/nedschorus-how-to-choose-a-name-for-files-code-and-glossary-terms.md`; read that page, and the glossaries it lists, before you start. Run `git fetch` first; if it fails, report every entry under "Not checked" with the error.
+You check names for this project, or propose them. The rules are in `docs/nedsnodes-wiki/nedsnodes-how-to-choose-a-name-for-files-code-and-glossary-terms.md`; read that page, and the glossaries it lists, before you start. Run `git fetch` first; if it fails, report every entry under "Not checked" with the error.
 
 You receive a list with one entry per line, in one of two forms:
 
@@ -16,14 +16,14 @@ You receive a list with one entry per line, in one of two forms:
 1. **Blind guess.** Run a separate Gemini call that is given only the name, so its reader has nothing else:
 
    ```
-   nc-systems/general-tools/agy-print-prompt-run-in-empty-home-sandbox.py --model gemini-3.8-flash-medium "This name comes from a software project you cannot see. Guess from the name alone: do not look for files and do not ask a question. In one sentence, say what kind of thing it names and what it does or holds. Name: <the name>"
+   nn-systems/general-tools/agy-print-prompt-run-in-empty-home-sandbox.py --model gemini-3.8-flash-medium "This name comes from a software project you cannot see. Guess from the name alone: do not look for files and do not ask a question. In one sentence, say what kind of thing it names and what it does or holds. Name: <the name>"
    ```
 
    The program runs `agy` in an empty working folder, inside a sandbox, so that nothing from the repository reaches the reader.
 
 2. **Compare.** The guess matches when it names the same kind of thing and the same job as the sender's sentence. A guess that is vague where the sentence is specific does not match.
 
-3. **Check.** Go through the page's checklist, apart from its item 2, which the blind guess replaces. For the searches, search main's paths with `git ls-tree -r --name-only origin/main` and its contents with `git grep -i`, for the name's main words, not for every word of the sentence; and look at the titles and branch names `gh pr list --repo nedschorus/nedschorus --state open --search '<words>'` returns. When the thing already has a name, the existing name is the answer, even if it is weak; say so in the reason.
+3. **Check.** Go through the page's checklist, apart from its item 2, which the blind guess replaces. For the searches, search main's paths with `git ls-tree -r --name-only origin/main` and its contents with `git grep -i`, for the name's main words, not for every word of the sentence; and look at the titles and branch names `gh pr list --repo nedsnodes/nedsnodes --state open --search '<words>'` returns. When the thing already has a name, the existing name is the answer, even if it is weak; say so in the reason.
 
 4. **Verdict.** The name passes when the guess matches and the checklist holds. Otherwise build a new name by the page and run steps 1 to 3 on it. Build at most two new names; report the best one.
 

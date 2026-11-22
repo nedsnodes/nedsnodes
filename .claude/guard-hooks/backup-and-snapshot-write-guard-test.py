@@ -76,7 +76,7 @@ with tempfile.TemporaryDirectory() as temporary_directory:
     check("the Time Machine automount tree is blocked", result.returncode == 2)
 
     # Paths that merely look adjacent must stay writable.
-    result = run_hook(workspace, "/Volumes/nedhome/Projects/nedschorus/docs/x.md")
+    result = run_hook(workspace, "/Volumes/nedhome/Projects/nedsnodes/docs/x.md")
     check("the Mac's mount of the box's home is NOT blocked", result.returncode == 0,
           f"rc={result.returncode} {result.stderr}")
 
@@ -117,6 +117,15 @@ with tempfile.TemporaryDirectory() as temporary_directory:
                       path_field="notebook_path")
     check("an ordinary notebook still passes through notebook_path",
           result.returncode == 0, result.stderr)
+
+# Stdin that is not JSON crashes the guard: the call goes ahead, and the agent and the user are told.
+result = subprocess.run([sys.executable, str(SCRIPT_PATH)], input="not json",
+                        capture_output=True, text=True, check=False)
+notice = json.loads(result.stdout) if result.returncode == 0 and result.stdout else {}
+check("stdin that is not JSON lets the call go ahead and tells the agent and the user",
+      "JSONDecodeError" in notice.get("systemMessage", "")
+      and "JSONDecodeError" in notice.get("hookSpecificOutput", {}).get("additionalContext", ""),
+      (result.returncode, result.stdout, result.stderr))
 
 if failures:
     print(f"\n{len(failures)} case(s) failed: {', '.join(failures)}")

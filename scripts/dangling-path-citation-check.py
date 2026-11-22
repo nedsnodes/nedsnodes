@@ -6,6 +6,7 @@ With --only-citations-of-removed-paths, check only the citations of removed path
 Run on a clean tree: diff line numbers come from HEAD, but citation text and
 existence checks read the working tree."""
 import argparse
+import fnmatch
 import importlib.util
 import os
 import pathlib
@@ -20,20 +21,34 @@ REPOSITORY_ROOT = SCRIPTS_DIRECTORY.parent
 
 _git_output_spec = importlib.util.spec_from_file_location(
     "git_machine_readable_output_runner_and_parser_common",
-    REPOSITORY_ROOT / "nc-systems" / "general-tools"
+    REPOSITORY_ROOT / "nn-systems" / "general-tools"
     / "git-machine-readable-output-runner-and-parser-common.py")
 git_output = importlib.util.module_from_spec(_git_output_spec)
 _git_output_spec.loader.exec_module(git_output)
 
 _next_step_lines_spec = importlib.util.spec_from_file_location(
     "failed_command_tool_message_to_agent_rerun_once_then_stop_and_report_lines_common",
-    REPOSITORY_ROOT / "nc-systems" / "general-tools"
+    REPOSITORY_ROOT / "nn-systems" / "general-tools"
     / "failed-command-tool-message-to-agent-rerun-once-then-stop-and-report-lines-common.py")
 next_step_lines = importlib.util.module_from_spec(_next_step_lines_spec)
 _next_step_lines_spec.loader.exec_module(next_step_lines)
 
 EXIT_FINDINGS = 1
 EXIT_BAD_INVOCATION = 2
+
+# Recorded fixtures, archived records and the project rename's own programs
+# quote paths the rename removed, as they were; rewriting them would falsify
+# the record or break the programs that must still read the old names.
+CITING_FILES_THAT_KEEP_REMOVED_PATHS_ON_PURPOSE = (
+    "nn-queue/archived/*",
+    "nn-systems/skills/explain/tests/explain-reply-cold-read-fast-read-fixtures/*",
+    "scripts/handoff-context-threshold-hook-recorded-handoff-deferrals-replay-test-fixtures/*",
+    "scripts/unvalidated-negative-result-check-fixtures/*",
+    "scripts/project-rename-machine-state-move-hack.py",
+    "scripts/project-rename-machine-state-move-hack-test.py",
+    "scripts/project-rename-repository-contents-rewrite-hack.py",
+    "scripts/project-rename-repository-contents-rewrite-hack-test.py",
+)
 
 HUNK_HEADER = re.compile(r"^@@ -\d+(?:,\d+)? \+(\d+)(?:,(\d+))? @@")
 
@@ -219,7 +234,6 @@ def is_project_test_file(path: pathlib.Path, repository_root: pathlib.Path, lint
 
 def findings_for_file(path: pathlib.Path, changed: set, lint, root_directories: tuple):
     """Yield (line number, problem) for changed lines."""
-    relative = path.relative_to(REPOSITORY_ROOT)
     if lint.in_frozen_measured_data(path, REPOSITORY_ROOT):
         return
     # Skip test fixtures only forward; backward checks must still catch stale module citations.
@@ -334,6 +348,9 @@ def citations_of_removed_paths(removed: list, repository_root: pathlib.Path, lin
         # Frozen measurements record historical text, not current citations.
         if lint.in_frozen_measured_data(citing_path, repository_root):
             continue
+        if any(fnmatch.fnmatchcase(citing, pattern)
+               for pattern in CITING_FILES_THAT_KEEP_REMOVED_PATHS_ON_PURPOSE):
+            continue
         try:
             text = citing_path.read_text(encoding="utf-8")
         except (OSError, UnicodeDecodeError):
@@ -350,14 +367,15 @@ def citations_of_removed_paths(removed: list, repository_root: pathlib.Path, lin
     return findings
 
 
-def git_failure_next_steps(argv) -> str:
+def git_failure_next_steps(argv, failure) -> str:
     """The lines telling an agent what to do after a git command failed."""
     # The rerun must start in this directory: FILE arguments are relative to it.
     rerun = (f"cd {shlex.quote(os.getcwd())} && "
              + shlex.join(["python3", str(pathlib.Path(__file__).resolve()),
                            *(sys.argv[1:] if argv is None else argv)]))
     return next_step_lines.git_failure_next_step_lines(
-        rerun, PROGRAM, text_the_failure_line_contains="could not check, because a git command failed")
+        rerun, PROGRAM, git_error_line_shown_in_tool_message_to_agent_checked_for_lock_file_path=str(failure),
+        text_the_failure_line_contains="could not check, because a git command failed")
 
 
 def main(argv=None) -> int:
@@ -366,7 +384,7 @@ def main(argv=None) -> int:
     except git_output.GitCommandFailed as failure:
         fail_bad_invocation(f"could not check, because a git command failed, so "
                             f"no result is reported: {failure}\n"
-                            f"{git_failure_next_steps(argv)}")
+                            f"{git_failure_next_steps(argv, failure)}")
 
 
 def run_check(argv) -> int:

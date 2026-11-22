@@ -57,7 +57,7 @@ HOOK_MODULE_SPEC.loader.exec_module(HOOK_MODULE)
 
 _rule_failure_lines_spec = importlib.util.spec_from_file_location(
     "rule_enforcing_nc_test_suite_failure_message_closing_lines_text_common",
-    REPOSITORY_ROOT / "nc-systems" / "general-tools"
+    REPOSITORY_ROOT / "nn-systems" / "general-tools"
     / "rule-enforcing-nc-test-suite-failure-message-closing-lines-text-common.py")
 RULE_FAILURE_LINES = importlib.util.module_from_spec(_rule_failure_lines_spec)
 _rule_failure_lines_spec.loader.exec_module(RULE_FAILURE_LINES)
@@ -67,11 +67,6 @@ _rule_failure_lines_spec.loader.exec_module(RULE_FAILURE_LINES)
 EXEMPT_FILE_NAMES_IN_TEST = {"skill.md", "readme.md", ".gitkeep"}
 
 failures = []
-
-LOCK_FILE_CONDITION = HOOK_MODULE.next_step_lines.LOCK_FILE_NAMED_BY_GIT_ERROR_CONDITION
-LOCK_FILE_WAIT_CLAUSE = HOOK_MODULE.next_step_lines.lock_file_named_by_git_error_wait_then_rerun_instruction(
-    "the command below this paragraph")
-
 
 def check(case_name, condition, detail=""):
     if condition:
@@ -185,17 +180,17 @@ with tempfile.TemporaryDirectory() as temporary_directory:
     commit_file(repository, "docs/Design-To-Main-Notes.md")
     commit_file(repository, ".claude/skills/walk-me-through/SKILL.md")
     commit_file(repository, "docs/README.md")
-    commit_file(repository, "nc-queue/.gitkeep")
+    commit_file(repository, "nn-queue/.gitkeep")
     commit_file(repository, ".gitignore", "docs/walk/\ncold-read-records/\n")
 
     # --- the instrument can say "something here" ------------------------
-    colliding = write_file(repository, "nc-systems/cold-read/cold-read-grid.py")
+    colliding = write_file(repository, "nn-systems/cold-read/cold-read-grid.py")
     warned = run_hook(hook_payload(repository, colliding))
     warning = agent_text(warned)
     check("a new file whose name is already a tracked file's warns",
           warning != "", f"stdout was {warned.stdout!r}")
     check("the warning names BOTH paths, so no search is needed",
-          "nc-systems/cold-read/cold-read-grid.py" in warning
+          "nn-systems/cold-read/cold-read-grid.py" in warning
           and "scripts/cold-read-grid.py" in warning, warning)
     check("the warning arrives on additionalContext under PostToolUse",
           (json.loads(warned.stdout or "{}").get("hookSpecificOutput", {})
@@ -214,8 +209,8 @@ with tempfile.TemporaryDirectory() as temporary_directory:
           len(warning_lines) == 5, repr(warning))
     padded_warning_lines = warning_lines + ["", "", "", "", ""]
     check("line 1 is the fact, and it names both paths",
-          padded_warning_lines[0].startswith("file-name-collision-warning: "
-                                             "you wrote"),
+          padded_warning_lines[0].startswith(
+              "[rule file-name-collision-same-basename-warning] file-name-collision-warning: you wrote"),
           repr(padded_warning_lines[0]))
     check("line 2 tells a mover to delete the old path, naming it",
           padded_warning_lines[1] == "If you are moving the file, delete "
@@ -237,8 +232,8 @@ with tempfile.TemporaryDirectory() as temporary_directory:
     check("line 4 points at the naming page instead of restating it",
           padded_warning_lines[3].startswith(
               "If both files are meant to exist and the file you wrote is not a draft, "
-              "rename the file you wrote following the rules in docs/nedschorus-wiki/"
-              "nedschorus-how-to-choose-a-name-for-files-code-and-glossary-terms.md")
+              "rename the file you wrote following the rules in docs/nedsnodes-wiki/"
+              "nedsnodes-how-to-choose-a-name-for-files-code-and-glossary-terms.md")
           and "3 or 4 parts" not in warning and "three or four" not in warning,
           repr(padded_warning_lines[3]))
     check("line 5 tells an agent that wrote the file by mistake to delete it",
@@ -254,7 +249,7 @@ with tempfile.TemporaryDirectory() as temporary_directory:
     check("editing the only file with that name is silent",
           silent(run_hook(hook_payload(repository, existing, "Edit"))))
 
-    for exempt in ("nc-systems/handoff/SKILL.md", "scripts/README.md",
+    for exempt in ("nn-systems/handoff/SKILL.md", "scripts/README.md",
                    "docs/.gitkeep"):
         written = write_file(repository, exempt)
         check(f"the exempt name {Path(exempt).name} is silent",
@@ -290,12 +285,12 @@ with tempfile.TemporaryDirectory() as temporary_directory:
     # so each side gets a case whose tracked fixture carries the uppercase.
     # Then the distinction that is not about case at all -- whether there are
     # two files -- which the filesystem answers and the platform does not.
-    cased = write_file(repository, "nc-systems/Cold-Read-Grid.PY")
+    cased = write_file(repository, "nn-systems/Cold-Read-Grid.PY")
     check("a written name differing only in letter case warns",
           agent_text(run_hook(hook_payload(repository, cased))) != "",
           "the fold on the WRITTEN side did not fire")
 
-    lowercased = write_file(repository, "nc-systems/design-to-main-notes.md")
+    lowercased = write_file(repository, "nn-systems/design-to-main-notes.md")
     check("a TRACKED name differing only in letter case warns",
           agent_text(run_hook(hook_payload(repository, lowercased))) != "",
           "the fold on the TRACKED side did not fire")
@@ -446,9 +441,8 @@ with tempfile.TemporaryDirectory() as temporary_directory:
               "that reruns the hook on it, then the line saying what to do if that rerun fails too",
               len(failure_lines) == 4
               and failure_lines[1] == (f"A later run of this hook checks only the file that run's Write or Edit "
-                                       f"touched, so check {written} by running the command printed on its own line below this paragraph. If git's "
-                                       "error above names no lock file, run that command now. "
-                                       f"{LOCK_FILE_CONDITION}, {LOCK_FILE_WAIT_CLAUSE}. The command prints nothing when no other tracked file has the "
+                                       f"touched, so {written} is checked by the command printed on its own line below this paragraph. "
+                                       "Run that command now. The command prints nothing when no other tracked file has the "
                                        "basename, and also when this hook skips the file without checking: a file "
                                        "outside the checkout, a file git ignores, a file named SKILL.md, README.md "
                                        "or .gitkeep in any letter case, or a working directory that no longer "
@@ -461,10 +455,6 @@ with tempfile.TemporaryDirectory() as temporary_directory:
               .hook_agent_instruction_if_rerun_command_reports_git_failure_tell_user_both_outputs_line(
                   "file-name-collision-warning:"), repr(failure_lines))
         rerun_line = failure_lines[1] if len(failure_lines) > 1 else ""
-        check(f"a failing git {failing_subcommand}'s rerun line says to run the command now when git names no lock "
-              "file, and gives the lock-file wait otherwise",
-              "names no lock file, run that command now. " + LOCK_FILE_CONDITION + ", "
-              + LOCK_FILE_WAIT_CLAUSE + "." in rerun_line, repr(rerun_line))
         check(f"a failing git {failing_subcommand}'s rerun line says what the command prints when git fails again "
               "and points to the closing line",
               "or, when git fails again, a git-failure message like this one, and the last line here says what to "
@@ -576,9 +566,9 @@ with tempfile.TemporaryDirectory() as planted_temporary_directory:
     git(["config", "user.email", "test@example.invalid"], planted)
     git(["config", "user.name", "file-name-collision test"], planted)
     commit_file(planted, "scripts/named-twice-on-purpose.py")
-    commit_file(planted, "nc-systems/named-twice-on-purpose.py")
+    commit_file(planted, "nn-systems/named-twice-on-purpose.py")
     commit_file(planted, "docs/README.md")
-    commit_file(planted, "nc-queue/README.md")
+    commit_file(planted, "nn-queue/README.md")
     planted_failure = ""
     planted_names, planted_collisions = {}, {}
     try:
@@ -588,7 +578,7 @@ with tempfile.TemporaryDirectory() as planted_temporary_directory:
     check("the repository-wide check reports a planted collision",
           sorted(planted_collisions) == ["named-twice-on-purpose.py"]
           and sorted(planted_collisions["named-twice-on-purpose.py"]) == [
-              "nc-systems/named-twice-on-purpose.py",
+              "nn-systems/named-twice-on-purpose.py",
               "scripts/named-twice-on-purpose.py"],
           planted_failure or repr(planted_collisions))
     check("the repository-wide check lets the exempt names repeat",
@@ -639,6 +629,19 @@ check("with several matches, the draft line names 'one of those files'",
 check("with several matches, the move line names the file you moved from",
       several_lines[1] == "If you are moving the file, delete the file you moved from in this change.",
       repr(several))
+
+lock_file = "/r/a {dir}/.git/index.lock"
+lock_text = HOOK_MODULE.git_failure_text(
+    HOOK_MODULE.git_machine_readable_output.GitCommandFailed(
+        ["ls-files"], "/r", 128, f"fatal: Unable to create '{lock_file}': File exists.\n"),
+    "notes.md", Path("/r"))
+check("a git failure whose error names a lock file, braces in its path, tells the agent to wait for "
+      "that lock file before running the command below, instead of running it now",
+      f"Git's error names the lock file {lock_file}: " in lock_text
+      and HOOK_MODULE.next_step_lines.git_error_names_a_lock_file_wait_then_rerun_line_or_none(
+          f"fatal: Unable to create '{lock_file}': File exists.", "the command below this paragraph")
+      in lock_text
+      and "Run that command now." not in lock_text, repr(lock_text))
 
 print()
 if failures:

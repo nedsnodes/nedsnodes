@@ -803,7 +803,7 @@ def cases(scratch):
 
     # -- a merge of origin/main, stopped on a conflict, that deletes a guarded file
     world = fresh(scratch, "conflicted-merge-deletes-guarded-file")
-    page = world.repo / "docs" / "nedschorus-wiki" / "page.md"
+    page = world.repo / "docs" / "nedsnodes-wiki" / "page.md"
     notes = world.repo / "notes.txt"
     page.parent.mkdir(parents=True)
     page.write_text("a wiki page\n")
@@ -1565,7 +1565,7 @@ def cases(scratch):
     check("when one of several files cannot be put back, --restore says what it did to each and "
           "exits 1",
           result.returncode == 1 and first.read_text() == "x v1\n"
-          and f"Put back the approved version" in result.stdout
+          and "Put back the approved version" in result.stdout
           and f"Failed on {second}" in result.stdout and "not every file" in result.stderr,
           (result.returncode, result.stdout, result.stderr))
     check("when a file cannot be put back, --restore says what a failed file may hold and that "
@@ -1977,7 +1977,7 @@ def cases(scratch):
           "CLAUDE.md, guard hooks and wiki pages among them",
           fixture_paths == guarded_paths and "CLAUDE.md" in fixture_paths
           and any(path.startswith(".claude/guard-hooks/") for path in fixture_paths)
-          and any(path.startswith("docs/nedschorus-wiki/") for path in fixture_paths),
+          and any(path.startswith("docs/nedsnodes-wiki/") for path in fixture_paths),
           (len(fixture_paths), len(guarded_paths)))
     world.run(cwd=fixture)
     world.run(cwd=fixture)

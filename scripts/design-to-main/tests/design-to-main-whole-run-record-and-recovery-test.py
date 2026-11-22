@@ -22,6 +22,7 @@ import pathlib
 import shutil
 import os
 import tempfile
+import types
 import unittest
 from unittest import mock
 
@@ -719,7 +720,7 @@ class TheStateExitFile(unittest.TestCase):
     instance's evidence directory, its fields spelled with hyphens —
     `state`, `verdict`, `package-commit`, `destination`, `input-named`,
     `investigation-focus`, `coverage-type`, `refusal-class`,
-    `held-ruling`, `named-files`, `rulings`. The reader parses it into
+    `named-files`, `rulings`. The reader parses it into
     the machine's StateExitRecord."""
 
     def setUp(self):
@@ -748,13 +749,11 @@ class TheStateExitFile(unittest.TestCase):
                          "scripts/widget-counter/tests/b-prompt-test.md")))
         path = self.write({
             "state": T.INVESTIGATE_WORKFLOW, "verdict": T.V_RESUME, "package-commit": "b" * 40,
-            "held-ruling": T.V_REJECT_TESTS,
             "rulings": [T.RULING_ZERO_ALL_RUN_COUNTERS_INCLUDING_REDESIGNS,
                         "the exit status of a refusal is 3"],
             "named-files": [],
         })
         record = M.state_exit_record_from_json_file(path)
-        self.assertEqual(record.held_ruling, T.V_REJECT_TESTS)
         self.assertEqual(record.rulings, (T.RULING_ZERO_ALL_RUN_COUNTERS_INCLUDING_REDESIGNS,
                                           "the exit status of a refusal is 3"))
         self.assertEqual(record.coverage_types, ())
@@ -784,6 +783,12 @@ class TheStateExitFile(unittest.TestCase):
         with self.assertRaises(M.MalformedStateExitFile) as refused:
             M.state_exit_record_from_json_file(path)
         self.assertIn("input_named", str(refused.exception))
+        path = self.write({"state": T.INVESTIGATE_WORKFLOW, "verdict": T.V_RESUME,
+                           "package-commit": "a" * 40, "held-ruling": T.V_REJECT_TESTS,
+                           "named-files": []})
+        with self.assertRaises(M.MalformedStateExitFile) as refused:
+            M.state_exit_record_from_json_file(path)
+        self.assertIn("held-ruling", str(refused.exception))
         path = self.write({"state": T.IMPLEMENTATION_WRITING, "package-commit": "a" * 40, "named-files": []})
         with self.assertRaises(M.MalformedStateExitFile) as refused:
             M.state_exit_record_from_json_file(path)
@@ -887,6 +892,64 @@ class TopicBranchRefusedAtRow1(unittest.TestCase):
             self.assertEqual(machine.launcher.launched, [])
             self.assertEqual(fixture.git(repository.checkout, "status", "--porcelain"), "")
             self.assertFalse(record.absolute(record.record_directory).exists())
+        finally:
+            repository.remove()
+
+    def detached_worktree_at_origin_main(self, repository, name, agent_home):
+        worktree = repository.root / name
+        fixture.git(repository.checkout, "worktree", "add", "-q", "--detach", str(worktree), "origin/main")
+        if agent_home:
+            git_directory = pathlib.Path(
+                fixture.git(worktree, "rev-parse", "--absolute-git-dir").strip())
+            (git_directory / G.AGENT_HOME_MARKER_FILE_NAME).touch()
+        return worktree
+
+    def test_an_agent_home_is_refused_before_anything_runs_and_stays_detached(self):
+        repository = fixture.ThrowawayRepository()
+        try:
+            agent_home = self.detached_worktree_at_origin_main(repository, "agent-home", agent_home=True)
+            head_before = fixture.git(agent_home, "rev-parse", "HEAD")
+            record = G.TopicBranchGitRecord(
+                agent_home, fixture.COMPONENT, fixture.COMPONENT_DIRECTORY, fixture.DESIGN_PATH)
+            machine = M.DesignToMainStateMachineFlow(
+                record, M.ScriptedStateExitLauncher([]), today=lambda: "2026-09-08")
+            with self.assertRaises(M.TopicBranchCutRefused) as refused:
+                machine.start(fixture.COMPONENT)
+            self.assertIn("agent-home", str(refused.exception))
+            self.assertIn("--detach %s origin/main\nThen, in Python code of your own, whether the program that "
+                          "called start(%r) and received this error or a new one" % (
+                              fixture.COMPONENT, fixture.COMPONENT), str(refused.exception))
+            self.assertIn("a new TopicBranchGitRecord (scripts/design-to-main/design-to-main-git-record.py) "
+                          "with the path the command prints as its repository_dir, and the component, "
+                          "component_directory, design_path and topic_branch_start_point of the refused record",
+                          str(refused.exception))
+            self.assertIn("a new DesignToMainStateMachineFlow (scripts/design-to-main/design-to-main-state-machine.py) "
+                          "over the new record, with the launcher the refused flow was given. "
+                          "Then call start(%r) on the new flow, which checks the worktree and returns the run's "
+                          "state record, and pass that record to the new flow's run_until_ended(), whose first step "
+                          "cuts the topic branch in that worktree." % fixture.COMPONENT,
+                          str(refused.exception))
+            self.assertEqual(machine.launcher.launched, [])
+            self.assertEqual(fixture.git(agent_home, "rev-parse", "--abbrev-ref", "HEAD").strip(), "HEAD")
+            self.assertEqual(fixture.git(agent_home, "rev-parse", "HEAD"), head_before)
+            self.assertEqual(fixture.git(agent_home, "branch", "--list", fixture.COMPONENT), "")
+            self.assertEqual(fixture.git(agent_home, "status", "--porcelain"), "")
+            self.assertFalse(record.absolute(record.record_directory).exists())
+        finally:
+            repository.remove()
+
+    def test_a_detached_worktree_that_is_not_an_agent_home_cuts_the_topic_branch_there(self):
+        # The remedy the agent-home refusal names: a worktree detached at origin/main, with no marker.
+        repository = fixture.ThrowawayRepository()
+        try:
+            worktree = self.detached_worktree_at_origin_main(repository, "run-worktree", agent_home=False)
+            machine, run, _, _ = fixture.make_machine(
+                [(T.INITIATE_DESIGN_TO_MAIN, T.V_INVOKED, {})],
+                types.SimpleNamespace(checkout=worktree))
+            fixture.drive(machine, run)
+            self.assertTrue(run.topic_branch_cut)
+            self.assertEqual(fixture.git(worktree, "rev-parse", "--abbrev-ref", "HEAD").strip(),
+                             fixture.COMPONENT)
         finally:
             repository.remove()
 
@@ -1168,6 +1231,10 @@ class AGitFailureIsRaisedNotReadAsAnAnswer(unittest.TestCase):
         self.assertEqual(failed.exception.returncode, 128)
         self.assertIn(STAND_IN_GIT_ERROR, str(failed.exception))
         return failed.exception
+
+    def test_a_failing_look_for_the_agent_home_marker_is_raised_not_read_as_no_agent_home(self):
+        with self.git_failing("rev-parse"):
+            self.assert_raises_git_failure(self.record.require_checkout_is_not_an_agent_home)
 
     def test_a_failing_rev_parse_of_the_start_point_is_not_a_missing_start_point(self):
         with self.git_failing("rev-parse"):

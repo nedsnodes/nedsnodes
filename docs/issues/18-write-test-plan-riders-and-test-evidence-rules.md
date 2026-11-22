@@ -1,12 +1,12 @@
 ---
-issue: "[Candidate skill: write-test-plan — consequence-ranked test plan with observable oracles and traceability (likely FIRST build)](https://github.com/nedschorus/nedschorus/issues/18)"
-status: working material for issue [Candidate skill: write-test-plan — consequence-ranked test plan with observable oracles and traceability (likely FIRST build)](https://github.com/nedschorus/nedschorus/issues/18)
+issue: "[Candidate skill: write-test-plan — consequence-ranked test plan with observable oracles and traceability (likely FIRST build)](https://github.com/nedsnodes/nedsnodes/issues/18)"
+status: working material for issue [Candidate skill: write-test-plan — consequence-ranked test plan with observable oracles and traceability (likely FIRST build)](https://github.com/nedsnodes/nedsnodes/issues/18)
 as-of: 2026-09-16
 ---
 
 # write-test-plan: the riders, and the rules on what counts as test evidence
 
-The GHI-MD of issue [Candidate skill: write-test-plan — consequence-ranked test plan with observable oracles and traceability (likely FIRST build)](https://github.com/nedschorus/nedschorus/issues/18), the candidate skill write-test-plan. It carries the summary, the disposition, the next action, and the substance: the four riders drained into the issue on 2026-09-02, the worked example that triggered the build, and the user's rules on what evidence a change needs before it merges. Every section from the riders down to "Evidence of record" moved here verbatim from the issue body on 2026-09-16, when adding the newest ruling would have passed the body's 1000-word cap; the summary, the disposition and the next action followed on 2026-09-30 from the issue's former body. The section on code that runs only against a stand-in is new.
+The GHI-MD of issue [Candidate skill: write-test-plan — consequence-ranked test plan with observable oracles and traceability (likely FIRST build)](https://github.com/nedsnodes/nedsnodes/issues/18), the candidate skill write-test-plan. It carries the summary, the disposition, the next action, and the substance: the four riders drained into the issue on 2026-09-02, the worked example that triggered the build, and the user's rules on what evidence a change needs before it merges. Every section from the riders down to "Evidence of record" moved here verbatim from the issue body on 2026-09-16, when adding the newest ruling would have passed the body's 1000-word cap; the summary, the disposition and the next action followed on 2026-09-30 from the issue's former body. The section on code that runs only against a stand-in is new.
 
 ## What the skill does
 
@@ -28,7 +28,7 @@ Source: `git show 7a99785c:docs/issues/queue/18-write-test-plan-agent-native-rid
 
 2. **Reach-posit obligation.** Each planned test declares which design-significant paths it reaches; the declared set is diffed against measured execution (coverage.py dynamic contexts) — red on posited-but-unreached (false-green detector) or reached-but-forbidden. Escalation layers, per-claim rather than standing: trace assertions for ordering claims; scripted-debugger interior-state assertions for claims with no test-visible seam.
 
-3. **Test-kind taxonomy (selection menu).** The skill selects kinds per claim across five axes (scope, oracle, input production, environment/workload, suite adequacy) rather than defaulting to example-based functional tests. Reference by pointer, not import: `nedlern@ned-box:/home/nedlern/nedschorus-logs/seats/MD-skills/automated-testing-kinds-survey-2026-07-29.md` (COPS, 2026-07-29; routine / trigger-reserved / reject buckets, 24-kind menu, 11 planner questions). Binding framing rulings: evidence value for good, maintainable code first — cost (CPU/tokens/storage) is a bound, not a ranking key; standard terminology only.
+3. **Test-kind taxonomy (selection menu).** The skill selects kinds per claim across five axes (scope, oracle, input production, environment/workload, suite adequacy) rather than defaulting to example-based functional tests. Reference by pointer, not import: `nedlern@ned-box:/home/nedlern/nedsnodes-logs/seats/MD-skills/automated-testing-kinds-survey-2026-07-29.md` (COPS, 2026-07-29; routine / trigger-reserved / reject buckets, 24-kind menu, 11 planner questions). Binding framing rulings: evidence value for good, maintainable code first — cost (CPU/tokens/storage) is a bound, not a ranking key; standard terminology only.
 
 4. **Skip-expiry convention.** Every skipped or disabled test carries an owner and an expiry date from day one. Belongs in this skill's text or implement-with-evidence's, whichever first writes a test.
 
@@ -45,7 +45,7 @@ Two rules the 2026-09-02 walk adopted, to be carried into the skill as concrete 
 - When adding or changing a test fixture that represents the output of an external system, run the real command first and generate the fixture from what it printed. If the command is unsafe to run directly, capture it in a sandbox and say so in the capture note — the fixture then proves what the sandbox does, not what the real system does. Never type, copy or infer those values from the code under test. Record the capture command and the machine it ran on beside the fixture. Without that capture, the test is not finished.
 - Do not merge a code path that neither the author nor a reviewer can execute. If nobody can run it, get an environment that can, or leave the path out.
 
-A third rule — at least one test per script that asks the real system on every run, rather than replaying a recording — was drafted four times and never reached wording the user accepted. It is the live-check half of rider 1 and is closed, replaced by the canary-test rules the user approved in items 19 to 32 of approval-walk md-skills-seat-open-decisions-2026-10-15 (minutes `nedlern@ned-box:/home/nedlern/nedschorus-logs/walk/md-skills-seat-open-decisions-2026-10-15-minutes.md`): a change needs a canary test when no test in the repository runs the real program to check a behaviour the change relies on, and a test in the repository that runs the real program counts, and is better. A scheduled-canary-test is kept, and a scheduled job reruns it. The project's existing idiom for its absent-system case is the visible SKIP line, as in `scripts/clean-worktrees-test.py`.
+A third rule — at least one test per script that asks the real system on every run, rather than replaying a recording — was drafted four times and never reached wording the user accepted. It is the live-check half of rider 1 and is closed, replaced by the canary-test rules the user approved in items 19 to 32 of approval-walk md-skills-seat-open-decisions-2026-10-15 (minutes `nedlern@ned-box:/home/nedlern/nedsnodes-logs/walk/md-skills-seat-open-decisions-2026-10-15-minutes.md`): a change needs a canary test when no test in the repository runs the real program to check a behaviour the change relies on, and a test in the repository that runs the real program counts, and is better. A scheduled-canary-test is kept, and a scheduled job reruns it. The project's existing idiom for its absent-system case is the visible SKIP line, as in `scripts/clean-worktrees-test.py`.
 
 ## 2026-09-16: code that runs only against a stand-in
 
@@ -70,7 +70,7 @@ The 2026-09-02 research pass above found that **mutation testing would have prai
 
 The loop that mutation testing is usually run as: apply a mutation to the file under test, run the suite, expect red, then revert with `git checkout -- <file>` and go on to the next mutation. `git checkout --` restores the file **as of the last commit**. So when the fix being exercised is still uncommitted, the first revert discards the fix along with the mutation, and every mutation after the first runs against pristine code.
 
-Measured on 2026-09-21, building pull request [The ignition prompt's tail sentences are constants, and a note that claimed coverage it did not have](https://github.com/nedschorus/nedschorus/pull/591). Four mutations were planned. The first ran against the real change and failed correctly, two cases named. Its revert then removed the change. Mutations two, three and four ran against the file as `origin/main` had it.
+Measured on 2026-09-21, building pull request [The ignition prompt's tail sentences are constants, and a note that claimed coverage it did not have](https://github.com/nedsnodes/nedsnodes/pull/591). Four mutations were planned. The first ran against the real change and failed correctly, two cases named. Its revert then removed the change. Mutations two, three and four ran against the file as `origin/main` had it.
 
 What makes it dangerous is the failure mode, not the mistake. A mutation run against code that does not contain the guard should report a **pass**, and a pass is what the loop is reading for when it says "this one was not caught". Here it surfaced only because the change added module constants the test file referenced by name, so the suite raised `AttributeError` and crashed instead of passing. A change that added no new name — a bounded comparison, a corrected literal, a narrowed condition — would have produced three clean greens and a mutation table that was false in good faith.
 
@@ -84,7 +84,7 @@ This is rider 1 turned on the test harness itself. A mutation loop that cannot r
 
 ## 2026-10-10: a failure-test rule held in CLAUDE.md until this build lands
 
-Pull request [CLAUDE.md "Before pushing": a test for each failure the change handles; the full-run explanation goes](https://github.com/nedschorus/nedschorus/pull/1171) puts this rule in CLAUDE.md's "Before pushing" bullet: "When you add code that handles a failure that a bad input or a failing stub can cause, such as an `except` block or a check of an exit code, add a test that causes that failure; check the test by removing that code for a moment, and a test must fail." The pull request that lands this build moves the rule into what the build produces and deletes it from CLAUDE.md. Removing the code for a moment is mutation testing done by hand, and it shows only that the failure path is exercised, not that the test's baseline is true, which the 2026-09-02 research pass found mutation testing cannot show.
+Pull request [CLAUDE.md "Before pushing": a test for each failure the change handles; the full-run explanation goes](https://github.com/nedsnodes/nedsnodes/pull/1171) puts this rule in CLAUDE.md's "Before pushing" bullet: "When you add code that handles a failure that a bad input or a failing stub can cause, such as an `except` block or a check of an exit code, add a test that causes that failure; check the test by removing that code for a moment, and a test must fail." The pull request that lands this build moves the rule into what the build produces and deletes it from CLAUDE.md. Removing the code for a moment is mutation testing done by hand, and it shows only that the failure path is exercised, not that the test's baseline is true, which the 2026-09-02 research pass found mutation testing cannot show.
 
 ## 2026-10-10: three tiers of test run
 
@@ -99,7 +99,7 @@ The cost of running a check decides which tier runs it, not whether the check is
 
 Whether write-test-plan is a skill at all, the question that came before the build, is settled. The user ruled on 2026-09-06, on the reboot-test seat's walk: "prose instructions are a skill only if used outside the state machine, e.g. at the user's request; instructions that exist only for a node are 'canned instructions', not skills." The state machine is design-to-main's. Planning tests is what design-to-main's `test-design-writing` node does, but as of 2026-10-30 design-to-main is not running, and every pull request is built outside it, by an author who plans its tests.
 
-On 2026-10-30 at 14:00 the user approved item 5 of approval-walk md-skills-seat-open-questions-from-item-2-carried-over-approval-walk-2026-10-28 (minutes `nedlern@ned-box:/home/nedlern/nedschorus-logs/walk/md-skills-seat-open-questions-from-item-2-carried-over-approval-walk-2026-10-28-minutes.md`, line 189). The choice he approved, as the item showed it (walk-document `nedlern@ned-box:/home/nedlern/nedschorus-logs/walk/md-skills-seat-open-questions-from-item-2-carried-over-approval-walk-2026-10-28.md`, line 232):
+On 2026-10-30 at 14:00 the user approved item 5 of approval-walk md-skills-seat-open-questions-from-item-2-carried-over-approval-walk-2026-10-28 (minutes `nedlern@ned-box:/home/nedlern/nedsnodes-logs/walk/md-skills-seat-open-questions-from-item-2-carried-over-approval-walk-2026-10-28-minutes.md`, line 189). The choice he approved, as the item showed it (walk-document `nedlern@ned-box:/home/nedlern/nedsnodes-logs/walk/md-skills-seat-open-questions-from-item-2-carried-over-approval-walk-2026-10-28.md`, line 232):
 
 > Choice 1: a skill, in `.claude/skills/write-test-plan/`, for any agent writing tests; the test-design-writing agent-instructions point to it.
 
@@ -111,8 +111,8 @@ Build the skill `.claude/skills/write-test-plan/`, with the riders and rules in 
 
 ## Evidence of record
 
-- Six-agent source read: `nc-queue/archived/2026-07-22-candidate-skill-source-evidence.md` (this skill's section)
-- cops delta packet: `nc-queue/archived/2026-07-23-cops-candidate-skill-delta-packet.md` (this skill's section)
+- Six-agent source read: `nn-queue/archived/2026-07-22-candidate-skill-source-evidence.md` (this skill's section)
+- cops delta packet: `nn-queue/archived/2026-07-23-cops-candidate-skill-delta-packet.md` (this skill's section)
 - Shortlist origin: `docs/issues/9-neds-notes.md` § Working skill shortlist
 - The 2026-09-02 walk that triggered the build: `docs/walk/prevention-rules-from-the-2026-08-31-fix-rounds-minutes.md` (lands with the build)
-- The defects: https://github.com/nedschorus/nedschorus/pull/222 and https://github.com/nedschorus/nedschorus/pull/223
+- The defects: https://github.com/nedsnodes/nedsnodes/pull/222 and https://github.com/nedsnodes/nedsnodes/pull/223

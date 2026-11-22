@@ -8,10 +8,10 @@ Usage:
 
 Cron runs it every 5 minutes on ned-box, whether or not any agent-session is
 running. It is installed on ned-box alone by
-nc-systems/general-tools/install-scheduled-jobs-on-this-machine.py, from the
+nn-systems/general-tools/install-scheduled-jobs-on-this-machine.py, from the
 table beside it, scheduled-jobs-on-each-machine.json:
 
-    */5 * * * * /usr/bin/python3 /home/nedlern/Projects/nedschorus/scripts/merge-lane-ghi-md-edit-pull-requests-provisional-additions-only-check-approve-and-merge.py >> /home/nedlern/.claude/merge-lane-ghi-md-edit-pull-requests-provisional-additions-only-check-approve-and-merge.log 2>&1
+    */5 * * * * /usr/bin/python3 /home/nedlern/Projects/nedsnodes/scripts/merge-lane-ghi-md-edit-pull-requests-provisional-additions-only-check-approve-and-merge.py >> /home/nedlern/.claude/merge-lane-ghi-md-edit-pull-requests-provisional-additions-only-check-approve-and-merge.log 2>&1
 
 Each invocation lists every open pull request
 whose title starts "GHI-MD edit for issue" and, for each one that is not a
@@ -66,8 +66,8 @@ Every other pull request, and every one whose approval or merge fails, gets
 one message for merge-lane-2: a file
 needs-a-look/pr<number>-<first 12 characters of the nc-head-commit>.txt under
 the state directory, <merge-lane-worktrees-and-outputs-directory>/merge-lane-ghi-md-edit-pull-requests-check-approve-and-merge-hold-list-reported-heads-and-needs-a-look-messages,
-by default /home/nedlern/nedschorus-logs/seats/merge-lane-2/merge-helpers/merge-lane-ghi-md-edit-pull-requests-check-approve-and-merge-hold-list-reported-heads-and-needs-a-look-messages.
-merge-lane-2's watcher, scripts/watch-open-pull-requests-nbd.py, prints one
+by default /home/nedlern/nedsnodes-logs/seats/merge-lane-2/merge-helpers/merge-lane-ghi-md-edit-pull-requests-check-approve-and-merge-hold-list-reported-heads-and-needs-a-look-messages.
+merge-lane-2's watcher, scripts/watch-open-pull-requests-hack.py, prints one
 event line for each file in needs-a-look/ at every start until the file is
 moved; the watcher loads this program by its path and calls its function
 needs_a_look_directory() for the directory. merge-lane-2 moves the file into
@@ -116,7 +116,7 @@ invocation stopped before handling every pull request, and the pull request
 it was handling, if any, and those after it wait for the next invocation,
 because the lock file could
 not be opened, the held list, the record, ned-review-merge's token in
-~/.config/nedschorus/ned-review-merge.token, a gh read, the Markdown parser,
+~/.config/nedsnodes/ned-review-merge.token, a gh read, the Markdown parser,
 the review tools worktree or a message file could not be read, loaded or
 written, the held list or the record is malformed, or anything else raised
 an exception the program does not expect, whose traceback goes to the log.
@@ -146,7 +146,7 @@ MERGE_PROGRAM = Path(__file__).resolve().with_name(
     "merge-lane-pull-request-merge-through-merge-gate-with-stacked-pull-request-retarget.py")
 TITLE_PREFIX = "GHI-MD edit for issue"
 PROVISIONAL_HEADING = "## Provisional additions (not yet vetted by the user)"
-MARKDOWN_PARSER_MODULE = (CHECKOUT / "nc-systems" / "general-tools"
+MARKDOWN_PARSER_MODULE = (CHECKOUT / "nn-systems" / "general-tools"
                           / "markdown-commonmark-parser-with-tables-common.py")
 # Every character Python's str.splitlines() splits on except "\n": CommonMark reads a carriage
 # return as a line break where git does not, and other Markdown tools split on the rest.
@@ -171,7 +171,7 @@ EXIT_STOPPED = 2
 
 def needs_a_look_directory(
         merge_lane_worktrees_and_outputs_directory=common.DEFAULT_MERGE_LANE_WORKTREES_AND_OUTPUTS_DIRECTORY):
-    """Return the directory of merge-lane-2's messages, which watch-open-pull-requests-nbd.py lists too."""
+    """Return the directory of merge-lane-2's messages, which watch-open-pull-requests-hack.py lists too."""
     return (Path(merge_lane_worktrees_and_outputs_directory) / STATE_DIRECTORY_NAME
             / MESSAGES_DIRECTORY_NAME)
 
@@ -389,7 +389,9 @@ def approval_body(path, section_is_new):
         section = f"adding a \"{PROVISIONAL_HEADING[3:]}\" section"
     else:
         section = f"adding lines to its existing \"{PROVISIONAL_HEADING[3:]}\" section"
-    return (f"Approved by merge-lane-2's scheduled job {PROGRAM}. Prose tier: the pull request "
+    # scripts/merge-gate.sh refuses an approval by the merge account whose body does not open with the line
+    # APPROVE, the verdict line scripts/merge-lane-pull-request-reviewer-review-post-and-read-back.py writes.
+    return (f"APPROVE\n\nApproved by merge-lane-2's scheduled job {PROGRAM}. Prose tier: the pull request "
             f"changes only {path} (checked against the file at the merge base and at the "
             f"nc-head-commit with a CommonMark parser: one file, no other text, heading or link "
             f"reference definition changed, the section not moved), {section}, the form the "
@@ -516,8 +518,8 @@ class Invocation:
                 f"{(merge.stdout.splitlines() or [''])[-1]}")
             return
         self.failed = True
-        outcome = ("merged, but a step after the merge was not done" if merge.returncode == 3
-                   else "not merged")
+        outcome = {3: "merged, but a step after the merge was not done",
+                   4: "whether it merged is unknown"}.get(merge.returncode, "not merged")
         self.report(pull_request, f"{MERGE_PROGRAM.name} exited {merge.returncode}: {outcome}",
                     f"The last lines it printed:\n{last_lines}")
 

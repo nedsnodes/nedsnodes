@@ -95,11 +95,11 @@ SANITY_CHECK_RECORD_SHIPPER_SCRIPT = pathlib.Path(__file__).with_name(
 # resolves to the production log-store. On 2026-09-17 a run of this suite
 # copied its own fixture reports -- `model=a-test-model ... cli=1.1.1-test ...
 # commit=test` -- into
-# nedlern@ned-box:/home/nedlern/nedschorus-logs/sanity-check-records/, where
+# nedlern@ned-box:/home/nedlern/nedsnodes-logs/sanity-check-records/, where
 # they read as a real sanity check of a real document; found in review of
 # nedschorus#453, the change that gave the runner its shipper. Every run now
 # ships into a temporary directory of its own instead, the way
-# nc-systems/cold-read/tests/cold-read-grid-test.py contains its own runs: the store is real and
+# nn-systems/cold-read/tests/cold-read-grid-test.py contains its own runs: the store is real and
 # the copy is the real rsync, only the destination is scratch. The override
 # names the cold-read kind because the shipper picks its own kind beside it,
 # so records land in <scratch>/sanity-check-records/. It is set here, at
@@ -508,7 +508,7 @@ def main():
     runner_gate.run_claude = lambda prompt, checkout=None: (
         0, "the cell's report body\n\n## Questions\n\nNone.\n\n"
            "## Leanness certification\n\n- the whole document\n",
-        "claude-fable-5-1", "")
+        "claude-fable-5-2", "")
     buffer = io.StringIO()
     # A real record directory, in a temporary tree: run_cell makes the cell's
     # scratch directory under the one it is handed, and a relative path here
@@ -1013,7 +1013,7 @@ def main():
     # CREDENTIAL_DIRECTORIES drops out of the profile.
     credential_scratch = tempfile.TemporaryDirectory()
     scratch_home = pathlib.Path(credential_scratch.name)
-    (scratch_home / ".config" / "nedschorus").mkdir(parents=True)
+    (scratch_home / ".config" / "nedsnodes").mkdir(parents=True)
     (scratch_home / ".config" / "gh").mkdir(parents=True)
     login_canary = scratch_home / ".codex" / "auth.json"
     login_canary.parent.mkdir(parents=True)
@@ -1051,7 +1051,7 @@ def main():
           and "permissions.sanity-check-no-credentials.network.enabled=true" in codex_overrides,
           repr(codex_overrides))
     check("run_codex's profile denies the credential directories and a reviewer program's login file",
-          f'"{scratch_home}/.config/nedschorus"="deny"' in denied_table
+          f'"{scratch_home}/.config/nedsnodes"="deny"' in denied_table
           and f'"{scratch_home}/.config/gh"="deny"' in denied_table
           and f'"{login_canary}"="deny"' in denied_table, denied_table)
     credential_scratch.cleanup()
@@ -1095,14 +1095,14 @@ def main():
     # The claude agent-binary's model chain. Fable 5 is obsolete (user, 2026-09-04)
     # and Fable is sometimes unavailable (user, 2026-09-11: "sometimes fable is
     # not available, so it should fall back to opus in that case"), so the cell
-    # tries Fable 5.1 and falls back to Opus 5. The three ways an attempt can
+    # tries Fable 5.2 and falls back to Opus 5.5. The three ways an attempt can
     # produce no review are the house chain's (run_model_chain in
-    # nc-systems/cold-read/cold-read-cell-common.py). No model is called: the
+    # nn-systems/cold-read/cold-read-cell-common.py). No model is called: the
     # launch is replaced for the length of these cases and answers per model.
     runner_chain = load_runner()
     fable, opus = runner_chain.CLAUDE_MODEL_CHAIN
-    check("the chain is Fable 5.1 then Opus 5, and Opus ends it",
-          runner_chain.CLAUDE_MODEL_CHAIN == ("claude-fable-5-1", "claude-opus-5"),
+    check("the chain is Fable 5.2 then Opus 5.5, and Opus ends it",
+          runner_chain.CLAUDE_MODEL_CHAIN == ("claude-fable-5-2", "claude-opus-5-5"),
           runner_chain.CLAUDE_MODEL_CHAIN)
 
     def answering(answers):
@@ -1193,15 +1193,15 @@ def main():
     runner_chain.subprocess.run = no_cli_launch_here
     try:
         fell_back = runner_chain.provenance_line(
-            "claude", "claude-opus-5", "cut", "docs/x.md", False, "commit=abc1234",
-            "claude-fable-5-1(exit1)")
+            "claude", "claude-opus-5-5", "cut", "docs/x.md", False, "commit=abc1234",
+            "claude-fable-5-2(exit1)")
         straight_through = runner_chain.provenance_line(
             "codex", "gpt-5.6-sol", "cut", "docs/x.md", False, "commit=abc1234")
     finally:
         runner_chain.subprocess.run = real_version_probe_run
     check("the provenance line records the model that answered and the fallback",
-          "model=claude-opus-5 " in fell_back
-          and "fallback_from=claude-fable-5-1(exit1) " in fell_back, fell_back)
+          "model=claude-opus-5-5 " in fell_back
+          and "fallback_from=claude-fable-5-2(exit1) " in fell_back, fell_back)
     check("a cell that did not fall back carries no fallback_from field",
           "fallback_from=" not in straight_through, straight_through)
     check("and neither line launched a CLI: both versions came from the cache",
@@ -1268,7 +1268,7 @@ def main():
         def fake_run(command, **kwargs):
             shipper_calls.append(command)
             return ShipperResult(0, "shipped: 2026-09-17-design — 3 file(s) added to "
-                                    "nedlern@ned-box:/home/nedlern/nedschorus-logs/"
+                                    "nedlern@ned-box:/home/nedlern/nedsnodes-logs/"
                                     "sanity-check-records/2026-09-17-design\n")
         runner_ship.subprocess.run = fake_run
         line = runner_ship.ship_record(pathlib.Path("sanity-check-records/2026-09-17-design"))
@@ -1968,7 +1968,7 @@ def main():
     # returns the four values of the older contract, with no cause, is
     # reported by its exit code.
     for runtime in runner_relaunch.RUNTIMES:
-        attempts = "claude-fable-5-1(exit1)+claude-opus-5(exit1)" if runtime == "claude" else ""
+        attempts = "claude-fable-5-2(exit1)+claude-opus-5-5(exit1)" if runtime == "claude" else ""
         launcher = with_launcher(runner_relaunch, answering_in_turn([
             (1, "", "", attempts, ("exit-1", "first launch: overloaded")),
             (1, "", "", attempts, ("exit-1", capacity))]))
@@ -2078,7 +2078,7 @@ def main():
     # The classes come from what each CLI really prints, through the real
     # launchers: the launch is replaced under them. The texts are the
     # captured ones kept beside the cold-read cells
-    # (nc-systems/cold-read/cold-read-claude-cell.py and
+    # (nn-systems/cold-read/cold-read-claude-cell.py and
     # cold-read-codex-cell.py, recognised_failure_texts_for_model).
     runner_classes = load_runner()
     real_classes_run = agent_binary_launch_a_case_replaces(runner_classes)
@@ -3863,10 +3863,19 @@ sys.exit(module.main())
           exit_code == 2 and "a git failure this case made" in errors.getvalue()
           and runner_git_main.git_failure_next_step_lines(shlex.join(
               [str(RUNNER_SCRIPT.resolve()), *sys_argv_of_the_baseline_case[1:]]),
-              runner_git_main.STOPPED_BEFORE_LAUNCH_AGAIN)
+              runner_git_main.STOPPED_BEFORE_LAUNCH_AGAIN, "a git failure this case made")
           in errors.getvalue()
           and claimed == [],
           f"exit {exit_code}, stderr {errors.getvalue()!r}, records {claimed}")
+    lock_steps = runner_git_main.git_failure_next_step_lines(
+        "`rerun`", runner_git_main.STOPPED_BEFORE_LAUNCH_AGAIN,
+        runner_git_main.git_output.GitCommandFailed(
+            ["status"], "/review-copy", 128,
+            "fatal: Unable to create '/review-copy/.git/index.lock': File exists.\n"))
+    check("the runner's next steps for a git error naming a lock file wait for that lock file "
+          "instead of offering the misspelt-name step",
+          "Git's error names the lock file /review-copy/.git/index.lock: " in lock_steps
+          and "is misspelt" not in lock_steps, lock_steps)
 
     # A git failure in a cell's thread, once its agent has finished: the report
     # is saved, the failure is printed, the provenance line says the commit was
@@ -3910,7 +3919,8 @@ sys.exit(module.main())
               and runner_cell_git.git_failure_next_step_lines(
                   runner_cell_git.rerun_command_for_cell(
                       "cut", "claude", "docs/agents/sanity-checker-cut-adversarial-prompt.md",
-                      [], None), runner_cell_git.CELL_GIT_CHECK_FAILED_AGAIN) in printed.getvalue()
+                      [], None), runner_cell_git.CELL_GIT_CHECK_FAILED_AGAIN,
+                  "a git failure this case made") in printed.getvalue()
               and "a git failure this case made" in printed.getvalue(),
               f"exit {exit_code}, report {report_text[:200]!r}, output {printed.getvalue()!r}")
 

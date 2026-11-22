@@ -135,8 +135,8 @@ class Scratch:
         self.directory = root / name
         self.directory.mkdir()
         self.home = self.directory / "home"
-        (self.home / ".config" / "nedschorus").mkdir(parents=True)
-        (self.home / ".config" / "nedschorus" / "ned-review-merge.token").write_text(TOKEN + "\n")
+        (self.home / ".config" / "nedsnodes").mkdir(parents=True)
+        (self.home / ".config" / "nedsnodes" / "ned-review-merge.token").write_text(TOKEN + "\n")
         self.bin = self.directory / "bin"
         self.bin.mkdir()
         (self.bin / "gh").write_text(FAKE_GH)
@@ -221,11 +221,13 @@ def main():
               and "event=APPROVE" in approval[0]
               and any(argument.startswith("body=") and "adding a \"Provisional additions"
                       in argument for argument in approval[0])
+              # The merge gate refuses the merge account's approval without the posting program's verdict line.
+              and any(argument.startswith("body=APPROVE\n\n") for argument in approval[0])
               and merges and merges[0][:3] == ["9", HEAD, SUBMITTED]
               and "merged: merge program last line" in output and scratch.messages() == [],
               f"exit {code}\n{output}\n{approval}\n{merges}")
         check("the file is read at the nc-head-commit",
-              any(call["argv"][-1] == f"repos/nedschorus/nedschorus/contents/docs/issues/9-x.md"
+              any(call["argv"][-1] == f"repos/nedsnodes/nedsnodes/contents/docs/issues/9-x.md"
                   f"?ref={HEAD}" for call in scratch.gh_calls()), scratch.gh_calls())
         check("every gh call carries the merge account's token",
               all(call["gh_token"] == TOKEN for call in scratch.gh_calls()), scratch.gh_calls())
@@ -304,10 +306,10 @@ def main():
                 ("an added link reference definition is named with the one it adds",
                  "See [x].\n\n" + HEADING + "\n- a\n",
                  "See [x].\n\n" + HEADING + "\n- a\n\n[x]: https://example.com\n",
-                 f"it adds, removes or changes a Markdown link reference definition, such as "
-                 f"\"[x]: https://example.com\", which renders as nothing and can change where "
-                 f"other links in the file point: definition 1 is 'none' at the merge base and "
-                 f"('X', 'https://example.com', '') at the nc-head-commit"),
+                 "it adds, removes or changes a Markdown link reference definition, such as "
+                 "\"[x]: https://example.com\", which renders as nothing and can change where "
+                 "other links in the file point: definition 1 is 'none' at the merge base and "
+                 "('X', 'https://example.com', '') at the nc-head-commit"),
                 ("a moved section is named with the line its heading moved from and to",
                  "## A\na\n\n" + HEADING + "\n- x\n\n## B\nb\n",
                  "## A\na\n\n## B\nb\n\n" + HEADING + "\n- x\n",
@@ -459,7 +461,7 @@ def main():
                   f"merged, exit 0",
                   code == 0 and scratch.messages() == [message_name]
                   and why in scratch.message(message_name)
-                  and "https://github.com/nedschorus/nedschorus/pull/9" in scratch.message(
+                  and "https://github.com/nedsnodes/nedsnodes/pull/9" in scratch.message(
                       message_name)
                   and approvals(scratch) == [] and scratch.merge_calls() == []
                   and scratch.record() == {"9": HEAD}, f"exit {code}\n{output}")
@@ -544,7 +546,8 @@ def main():
               f"exit {code}\n{output}")
         for merge_exit, outcome in ((1, "not merged"), (2, "not merged"),
                                     (3, "merged, but a step after the merge was not done"),
-                                    (4, "not merged"), (-9, "not merged")):
+                                    (4, "whether it merged is unknown"), (5, "not merged"),
+                                    (-9, "not merged")):
             scratch = Scratch(root, f"merge-exit-{merge_exit}")
             (scratch.directory / "merge.exit").write_text(str(merge_exit))
             scratch.routes(routes_for())
@@ -669,7 +672,7 @@ def main():
               and "could not run" in output, f"exit {code}\n{output}")
 
         scratch = Scratch(root, "no-token")
-        (scratch.home / ".config" / "nedschorus" / "ned-review-merge.token").unlink()
+        (scratch.home / ".config" / "nedsnodes" / "ned-review-merge.token").unlink()
         scratch.routes(routes_for())
         code, output = scratch.run()
         check("a missing token stops the invocation before any gh call, exit 2",

@@ -32,28 +32,28 @@ LISTER_PATH = Path(__file__).resolve().parent / "new-shared-names-in-changed-fil
 
 _git_machine_readable_output_spec = importlib.util.spec_from_file_location(
     "git_machine_readable_output_runner_and_parser_common",
-    Path(__file__).resolve().parents[1] / "nc-systems" / "general-tools"
+    Path(__file__).resolve().parents[1] / "nn-systems" / "general-tools"
     / "git-machine-readable-output-runner-and-parser-common.py")
 git_machine_readable_output = importlib.util.module_from_spec(_git_machine_readable_output_spec)
 _git_machine_readable_output_spec.loader.exec_module(git_machine_readable_output)
 
 _next_step_lines_spec = importlib.util.spec_from_file_location(
     "failed_command_tool_message_to_agent_rerun_once_then_stop_and_report_lines_common",
-    Path(__file__).resolve().parents[1] / "nc-systems" / "general-tools"
+    Path(__file__).resolve().parents[1] / "nn-systems" / "general-tools"
     / "failed-command-tool-message-to-agent-rerun-once-then-stop-and-report-lines-common.py")
 next_step_lines = importlib.util.module_from_spec(_next_step_lines_spec)
 _next_step_lines_spec.loader.exec_module(next_step_lines)
-NAMING_PAGE_PATH = "docs/nedschorus-wiki/nedschorus-how-to-choose-a-name-for-files-code-and-glossary-terms.md"
+NAMING_PAGE_PATH = "docs/nedsnodes-wiki/nedsnodes-how-to-choose-a-name-for-files-code-and-glossary-terms.md"
 NAMING_FRESH_AGENT_NAME = "new-name-propose-and-check-fresh-agent"
 REPORTED_NAMES_FILE_NAME = "new-shared-names-reported.json"
 
 REMINDER_TEMPLATE = (
-    "new-shared-names-reminder: your branch now adds these shared names, which other files "
+    "[rule new-shared-names-naming-check-reminder] new-shared-names-reminder: your branch now adds these shared names, which other files "
     "or agents will meet:\n{names}\n"
     "Send them, with one sentence on what each names, to the {agent} subagent, run in the "
     "background, and keep working.\n"
     "If you are a subagent and cannot start one, do not run the check yourself. In your final "
-    "report, put a heading `New shared names: send these to the {agent} subagent` and under it "
+    "report, put a heading `{heading}` and under it "
     "one line per name: <name>: <one sentence saying what it names and which file it is in>, "
     "leaving out the parentheses that follow each name above. The agent that dispatched you "
     "runs the check and makes any renames.\n"
@@ -323,14 +323,14 @@ def failure_report_once(state: dict, error: str):
     return FAILURE_TEMPLATE.format(error=error, page=NAMING_PAGE_PATH)
 
 
-def reminder_text(new_names) -> str:
+def reminder_text(new_names, subagent_report_heading: str) -> str:
     lines = [f"  {name} ({kind}{', in ' + path if path and path != name else ''})"
              for path, kind, name in new_names[:REMINDER_NAME_LIMIT]]
     if len(new_names) > REMINDER_NAME_LIMIT:
         lines.append(MORE_NAMES_LINE.format(count=len(new_names) - REMINDER_NAME_LIMIT,
                                             command=LISTER_COMMAND))
     return REMINDER_TEMPLATE.format(names="\n".join(lines), agent=NAMING_FRESH_AGENT_NAME,
-                                    page=NAMING_PAGE_PATH)
+                                    heading=subagent_report_heading, page=NAMING_PAGE_PATH)
 
 
 def emit(text: str) -> None:
@@ -448,7 +448,8 @@ def main() -> int:
         record_merge_prune_and_write_telling_failures(newly_reported)
     write_state(session_id, state)
     if names:
-        messages.append(reminder_text(names))
+        messages.append(reminder_text(
+            names, lister.SUBAGENT_REPORT_HEADING_ABOVE_NEW_SHARED_NAMES_FOR_DISPATCHING_AGENT_TO_CHECK))
     if messages:
         emit("\n\n".join(messages))
     return 0

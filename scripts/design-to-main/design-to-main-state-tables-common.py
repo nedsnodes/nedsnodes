@@ -61,6 +61,8 @@ REFUSAL_FORM = "form"
 COVERAGE_TYPES_THAT_ARE_AGENT_INSTRUCTIONS = ("prompt", "script-and-prompt")
 # no-tests runs nothing and counts as neither pass nor fail; emit it alone when the coverage set is empty.
 COVERAGE_TYPE_NO_TESTS = "no-tests"
+# A person tests a user requirement by hand from the test-design, so test-writing writes and emits nothing for it.
+COVERAGE_TYPE_USER_TESTS_BY_HAND = "user"
 # Only coverage-type lines are machine-readable; the rest of the test-design syntax belongs to its author.
 TEST_DESIGN_COVERAGE_TYPE_LINE_PREFIX = "coverage-type:"
 
@@ -252,9 +254,8 @@ COUNTER_TABLE = (
     CounterCeilingRule(
         "arbitrator-rulings",
         "`test-suite-arbitrating` is entered",
-        2, 2, "the third entry opens the investigation with the user, launching no "
-              "arbitrator here; the investigation's arbitrator rules, and its ruling rides "
-              "in the report and on its resume. A write the arbitrator orders is bounded by "
+        2, 2, "the third entry opens the investigation with the user, and the "
+              "arbitrator does not rule on that entry. A write the arbitrator orders is bounded by "
               "this counter, not the writer's, whose counter stops deciding once the "
               "arbitrator is in and is not reset"),
     CounterCeilingRule(
@@ -319,13 +320,7 @@ WRITING_STATE_ENTRY_REASON_TO_BUCKET = {
 TO_HOLD_READY_FOR_TEST_SUITE = "hold at ready-for-test-suite"
 TO_BOTH_WORK_STREAMS_RE_ENTER = "both work-streams re-enter their writing states"
 TO_RESUME_DESTINATION = "the resume destination (section 6.6)"
-# A resume without a destination applies the held ruling without re-entering the arbitrator.
-TO_APPLY_THE_HELD_RULING = "the ruling the arbitrator held in its report (section 6.6)"
 RESUME_MAY_NOT_NAME = (ENDED, INITIATE_DESIGN_TO_MAIN)
-# A held ruling cannot escalate: the arbitrator is already consulting the user.
-HELD_RULINGS_A_RESUME_MAY_CARRY = (
-    V_REJECT_IMPLEMENTATION, V_REJECT_TESTS, V_REJECT_IMPLEMENTATION_AND_TESTS,
-    V_FLAKY_TEST, V_REJECT_CONTRACT, V_ADVANCE)
 TO_RETRY_SAME_STATE = "the same state (retry)"
 TO_THE_NEXT_ACCEPTANCE_CHECK = "the state's next acceptance-check, in the order section 3.1 lists"
 TO_THE_WRITER_THE_VERDICT_NAMES = "that writer anyway, fresh"
@@ -696,9 +691,7 @@ TRANSITION_TABLE = (
     _row("65", TEST_SUITE_ARBITRATING, (),
          (G_ENTERED_FOR_THE_THIRD_TIME_IN_THE_DESIGN_VERSION,), INVESTIGATE_WORKFLOW,
          investigation_focus=FOCUS_UNKNOWN,
-         note="no arbitrator launched here; the investigation's arbitrator rules, and "
-              "the ruling it would have made rides in its report and on its resume "
-              "state-exit as held-ruling (section 6.6); applied on entry (sections 6.5, 7)",
+         note="the arbitrator does not rule on that entry; applied on entry (sections 6.5, 7)",
          view=DIAGRAM_VIEW_INVESTIGATION),
     _row("66", TEST_SUITE_ARBITRATING, V_REJECT_CONTRACT, (counter_below_ceiling("contract-revisions"),),
          CONTRACT_REVISING, "contract-revisions",
@@ -814,7 +807,6 @@ STATE_EXIT_JSON_FIELDS = {
     "investigation-focus": "investigation_focus",
     "coverage-type": "coverage_types",       # comma-separated coverage types
     "refusal-class": "refusal_class",
-    "held-ruling": "held_ruling",
     "named-files": "named_files",
     "rulings": "rulings",                    # the user's words verbatim
 }

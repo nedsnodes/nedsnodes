@@ -96,8 +96,10 @@ os.execv(os.environ[{REAL_GIT_VARIABLE!r}], ["git", *sys.argv[1:]])
 BASELINE_FILE_CONTENTS = {
     "docs/review-note.md": "A prose heading\n\nOld prose.\n\n```python\nprint('old')\n```\n",
     "operative-note.md": "Old prose outside docs.\n",
-    "scripts/example-program.py": '"""Old module documentation."""\n# Old comment\nVALUE = "old"\n\ndef show_value():\n    """Old function documentation."""\n    print(VALUE)\n    return 1\n',
+    "scripts/example-program.py": '"""Old module documentation."""\n# Old comment\nVALUE_MESSAGE = "old"\n\ndef show_value():\n    """Old function documentation."""\n    print(VALUE_MESSAGE)\n    return 1\n',
     "scripts/example-program-test.py": 'EXPECTED = "old"\nassert EXPECTED\n',
+    "scripts/guard-example.py": 'REFUSED_GIT_SUBCOMMANDS = ["push", "reset"]\n\ndef refused(c):\n    return c in REFUSED_GIT_SUBCOMMANDS\n',
+    "scripts/pattern-example.py": 'import re\nPATTERN = re.compile(r"^git push\\b")\nLIMIT = 1\n',
     ".claude/guard-hooks/example-hook.py": 'print("old")\n',
     ".claude/guard-hooks/example-hook-test.py": 'print("old")\n',
     ".claude/guard-hooks/synthetic-keystroke-guard-hook.py": 'print("old")\n',
@@ -108,8 +110,8 @@ BASELINE_FILE_CONTENTS = {
     "scripts/sibling-program-test.py": 'assert True\n',
     "scripts/nested-program.py": 'print("old")\n',
     "scripts/tests/nested-program-test.py": 'assert True\n',
-    "nc-systems/example/parent-program.py": 'print("old")\n',
-    "nc-systems/tests/parent-program-test.py": 'assert True\n',
+    "nn-systems/example/parent-program.py": 'print("old")\n',
+    "nn-systems/tests/parent-program-test.py": 'assert True\n',
     "scripts/agent-messages.py": '"""Old help.\nHelp details.\n"""\nimport sys\nHELP_TEXT = __doc__\nCHECK_ADVICE = "Old advice ``` marker"\n\ndef show_message(name):\n    print(f"Old message for {name}", "unchanged", file=sys.stderr)\n    raise ValueError("Old failure")\n',
     "scripts/agent-messages-test.py": 'print("Old test message")\n',
     "docs/plain-note.txt": "Old note.\n",
@@ -243,14 +245,47 @@ def run_unit_cases():
           review_plan_module.fenced_code_block_line_numbers_in_markdown(fence_source) == {2, 3, 4, 5, 6, 8, 9})
     check("fence detection distinguishes tildes from backticks",
           review_plan_module.fenced_code_block_line_numbers_in_markdown("~~~\n```\n~~~~\nprose\n") == {1, 2, 3})
-    old_source = '"""module old"""\nclass Example:\n    """class old"""\n    async def show(self, x):\n        """function old"""\n        return f"old {x}"\n'
+    normalized = review_plan_module.normalized_syntax_tree_dump_without_docstrings_or_tool_message_to_agent_strings
+    old_source = '"""module old"""\nclass Example:\n    """class old"""\n    async def show(self, x):\n        """function old"""\n        print(f"old {x}", "old " + x)\n'
     new_source = old_source.replace("old", "new") + "# a comment\n"
-    check("normalized AST ignores docstrings, comments and f-string constant parts",
-          review_plan_module.normalized_syntax_tree_dump_without_strings(old_source)
-          == review_plan_module.normalized_syntax_tree_dump_without_strings(new_source))
+    check("normalized AST ignores docstrings, comments, printed f-string constant parts and printed + chain pieces",
+          normalized(old_source) == normalized(new_source))
     check("normalized AST preserves behaviour and f-string expressions",
-          review_plan_module.normalized_syntax_tree_dump_without_strings(old_source)
-          != review_plan_module.normalized_syntax_tree_dump_without_strings(old_source.replace("{x}", "{x + 1}")))
+          normalized(old_source) != normalized(old_source.replace("{x}", "{x + 1}")))
+    behaviour_string_cases = [
+        ("a command list element", 'REFUSED_GIT_SUBCOMMANDS = ["push", "reset"]\n\ndef refused(c):\n    return c in REFUSED_GIT_SUBCOMMANDS\n',
+         '"push"', '"push --force"'),
+        ("a regular expression", 'import re\nPATTERN = re.compile(r"^git push\\b")\n', 'r"^git push\\b"', 'r"^git (push|reset)\\b"'),
+        ("a string beside a printed one on the same line", 'import re\nprint(re.sub("a", "b", "shown"))\n', '"a"', '"z"'),
+        ("a string compared inside a printed argument", 'print(x == "yes")\n', '"yes"', '"no"'),
+        ("a string compared inside an assignment expression in a printed argument",
+         'print(allowed := command == "push")\n', '"push"', '"reset"'),
+        ("a method's result compared inside a printed argument", 'print(x == "yes".upper())\n', '"yes"', '"no"'),
+        ("a .format result compared inside a printed argument", 'print(x == "a {}".format(y))\n', '"a {}"', '"b {}"'),
+        ("a .startswith call on a string inside a printed argument", 'print("yes".startswith(x))\n', '"yes"', '"no"'),
+        ("a .count call on a string inside a printed argument", 'print("a,b".count(x))\n', '"a,b"', '"a;b"'),
+        ("a join separator inside a printed argument", 'print("old, ".join(xs))\n', '"old, "', '"new, "'),
+        ("a + chain join separator inside a printed argument", 'print(("old " + x).join(xs))\n', '"old "', '"new "'),
+        ("the test of a conditional expression in a printed argument", 'print("a" if c == "yes" else "b")\n', '"yes"', '"no"'),
+    ]
+    for case_name, source, old_text, new_text in behaviour_string_cases:
+        check(f"normalized AST keeps a string that carries behaviour: {case_name}",
+              normalized(source) != normalized(source.replace(old_text, new_text)))
+    tool_message_to_agent_string_cases = [
+        ("a raised exception's message", 'def f():\n    raise ValueError("old failure")\n'),
+        ("a helper printer's text", 'import sys\ndef say(stream, text):\n    print(text, file=stream)\nsay(sys.stderr, "old line")\n'),
+        ("a .format template that is printed", 'print("old {}".format(1))\n'),
+        ("a + chain whose other operand is a repetition", 'print("old " + ("x" * count))\n'),
+        ("a keyword argument of a printing call", 'print("a", end="old")\n'),
+        ("a conditional expression reached through a + parent", 'print(x + ("old" if c else "b"))\n'),
+        ("a branch of a conditional expression", 'print("a" if c else "old")\n'),
+        ("a method called on a method's result that is printed", 'print("old {}".format(1).strip())\n'),
+    ]
+    for case_name, source in tool_message_to_agent_string_cases:
+        check(f"normalized AST ignores a tool-message-to-agent string: {case_name}",
+              normalized(source) == normalized(source.replace("old", "new")))
+    check("normalized AST ignores a printed module constant named as a message",
+          normalized('CHECK_MESSAGE = "old"\nprint(CHECK_MESSAGE)\n') == normalized('CHECK_MESSAGE = "new"\nprint(CHECK_MESSAGE)\n'))
     prompt_before = "# Task\n\nRead the whole file, then\nreport each name.\n\n- first step\n- second step\n"
     compare = review_plan_module.prompt_texts_differ_only_in_trailing_whitespace_or_blank_lines
     cosmetic_cases = [
@@ -330,7 +365,7 @@ def run_classification_cases(fixture):
     plan = fixture.plan_for_changed_file("scripts/example-program-test.py", 'EXPECTED = "new"\nassert EXPECTED\n')
     check("a changed test gets codex-review-and-head-tests-tier", plan["tier"] == "codex-review-and-head-tests-tier" and plan["changed_files"][0]["class"] == "test", plan)
     plan = fixture.plan_for_changed_file("scripts/example-program.py", BASELINE_FILE_CONTENTS["scripts/example-program.py"].replace("Old", "New").replace('"old"', '"new"'))
-    check("Python string, docstring and comment changes get codex-review-and-head-tests-tier", plan["tier"] == "codex-review-and-head-tests-tier" and "string constants" in plan["tier_decided_by"], plan)
+    check("Python tool-message-to-agent string, docstring and comment changes get codex-review-and-head-tests-tier", plan["tier"] == "codex-review-and-head-tests-tier" and "tool-message-to-agent strings" in plan["tier_decided_by"], plan)
     plan = fixture.plan_for_changed_file("docs/review-note.md", BASELINE_FILE_CONTENTS["docs/review-note.md"].replace("print('old')", "print('new')"))
     check("fenced Markdown code changes get codex-review-and-head-tests-tier", plan["tier"] == "codex-review-and-head-tests-tier" and "fenced code blocks" in plan["tier_decided_by"], plan)
     full_reviewer_cases = [
@@ -341,6 +376,12 @@ def run_classification_cases(fixture):
         ("a registered hook string-only change gets claude-and-codex-review-and-head-tests-tier", "scripts/registered-example-hook.py", 'print("new")\n'),
         ("a new Python program gets claude-and-codex-review-and-head-tests-tier", "scripts/new-example-program.py", 'print("new")\n'),
         ("a test under the hook directory gets claude-and-codex-review-and-head-tests-tier", ".claude/guard-hooks/example-hook-test.py", 'print("new")\n'),
+        ("a command list element that is not printed gets claude-and-codex-review-and-head-tests-tier", "scripts/guard-example.py",
+         BASELINE_FILE_CONTENTS["scripts/guard-example.py"].replace('"push"', '"push --force"')),
+        ("a widened regular expression gets claude-and-codex-review-and-head-tests-tier", "scripts/pattern-example.py",
+         BASELINE_FILE_CONTENTS["scripts/pattern-example.py"].replace("push", "(push|reset)")),
+        ("a number constant change gets claude-and-codex-review-and-head-tests-tier", "scripts/pattern-example.py",
+         BASELINE_FILE_CONTENTS["scripts/pattern-example.py"].replace("LIMIT = 1", "LIMIT = 2")),
     ]
     for case_name, path, content in full_reviewer_cases:
         plan = fixture.plan_for_changed_file(path, content)
@@ -692,6 +733,16 @@ def run_agent_text_cases(fixture):
     fixture.configure_github_answers(head, reviews=[[fixture_review(101, earlier)]])
     plan = fixture.read_review_plan()
     check("reflowed identical messages are omitted", plan["tool_message_to_agent_text_delta"] == [], plan)
+    # The collector builds each side's placeholder tuple separately, so equal tuples are distinct objects.
+    fixture.reset_fixture_to_base()
+    fixture.write_fixture_file("scripts/scoped-messages.py", 'print(\n    f"same moved message for {name}")\n')
+    earlier = fixture.commit_fixture_changes("multiline f-string message")
+    fixture.write_fixture_file("scripts/scoped-messages.py", 'print(f"same moved message for {name}")\n')
+    head = fixture.commit_fixture_changes("reflow f-string message")
+    fixture.configure_github_answers(head, reviews=[[fixture_review(101, earlier)]])
+    plan = fixture.read_review_plan()
+    check("reflowed identical f-string messages with equal placeholders are omitted",
+          plan["tool_message_to_agent_text_delta"] == [], plan)
     # Modelled on pull request 2119, which changed only the recovery note that
     # IgnitionPlanWithoutConversationTail.compose() builds in a local name and returns in its prompt.
     compose_before = ('class IgnitionPlan:\n    def compose(self):\n        if self.transcript_path is None:\n'
@@ -699,9 +750,9 @@ def run_agent_text_cases(fixture):
                       '            recovery_note = f"old note, transcript at {self.transcript_path}."\n'
                       '        prompt = f"{self.next_step} (Recovered: {recovery_note})"\n        return prompt\n')
     fixture.reset_fixture_to_base()
-    fixture.write_fixture_file("nc-systems/handoff/recovery-note-program.py", compose_before)
+    fixture.write_fixture_file("nn-systems/handoff/recovery-note-program.py", compose_before)
     earlier = fixture.commit_fixture_changes("recovery note")
-    fixture.write_fixture_file("nc-systems/handoff/recovery-note-program.py",
+    fixture.write_fixture_file("nn-systems/handoff/recovery-note-program.py",
                                compose_before.replace("old note, transcript", "new note, transcript"))
     head = fixture.commit_fixture_changes("recovery note changed")
     fixture.configure_github_answers(head, reviews=[[fixture_review(101, earlier)]])
@@ -741,11 +792,11 @@ def run_agent_text_cases(fixture):
             ("a literal {path} that becomes a name operand in a + chain", literal_brace_prompt, name_in_chain_prompt, False),
             ("a name operand in a + chain that becomes a literal {path}", name_in_chain_prompt, literal_brace_prompt, False)]):
         fixture.reset_fixture_to_base()
-        fixture.write_fixture_file("nc-systems/handoff/cosmetic-prompt-program.py", program_before)
+        fixture.write_fixture_file("nn-systems/handoff/cosmetic-prompt-program.py", program_before)
         earlier = fixture.commit_fixture_changes("prompt before")
         # On the merge base too, so that the whole pull request's list pairs the prompt with its old text.
         fixture.git_command("update-ref", "refs/remotes/origin/main", earlier)
-        fixture.write_fixture_file("nc-systems/handoff/cosmetic-prompt-program.py", prompt_program_after)
+        fixture.write_fixture_file("nn-systems/handoff/cosmetic-prompt-program.py", prompt_program_after)
         head = fixture.commit_fixture_changes("prompt after")
         fixture.configure_github_answers(head, reviews=[[fixture_review(101, earlier)]])
         delta = fixture.read_review_plan()["tool_message_to_agent_text_delta"]
@@ -767,9 +818,9 @@ def run_agent_text_cases(fixture):
               and expected_label in skeleton and other_label not in skeleton, (delta, text_plan, skeleton_result, skeleton))
     fixture.reset_fixture_to_base()
     printed_before = compose_before.replace("return prompt", "print(prompt)").replace("prompt", "line")
-    fixture.write_fixture_file("nc-systems/handoff/recovery-note-program.py", printed_before)
+    fixture.write_fixture_file("nn-systems/handoff/recovery-note-program.py", printed_before)
     earlier = fixture.commit_fixture_changes("printed note")
-    fixture.write_fixture_file("nc-systems/handoff/recovery-note-program.py",
+    fixture.write_fixture_file("nn-systems/handoff/recovery-note-program.py",
                                printed_before.replace("old note, transcript", "new note, transcript"))
     head = fixture.commit_fixture_changes("printed note changed")
     fixture.configure_github_answers(head, reviews=[[fixture_review(101, earlier)]])
@@ -780,13 +831,13 @@ def run_agent_text_cases(fixture):
           == [("recovery_note = in IgnitionPlan.compose()", False)]
           and review_plan_module.PULL_REQUEST_REVIEW_PLAN_LABEL_PRINTED_BESIDE_CHANGED_AGENT_PROMPT_NEEDING_USER_APPROVAL_LINE not in text_plan, (delta, text_plan))
     fixture.reset_fixture_to_base()
-    fixture.write_fixture_file("nc-systems/handoff/added-prompt-program.py",
+    fixture.write_fixture_file("nn-systems/handoff/added-prompt-program.py",
                                'def compose(next_step):\n    prompt = f"added prompt: {next_step}"\n    return prompt\n\n\n'
                                'def report(name):\n    line = f"added message: {name}"\n    print(line)\n')
     head = fixture.commit_fixture_changes("added prompt program")
     fixture.configure_github_answers(head, reviews=[[fixture_review(101, fixture.base_head)]])
     entries = [entry for entry in fixture.read_review_plan()["tool_message_to_agent_text_whole_pull_request"]
-               if entry["path"] == "nc-systems/handoff/added-prompt-program.py"]
+               if entry["path"] == "nn-systems/handoff/added-prompt-program.py"]
     check("an added file's prompt built in a local name needs approval, and its printed message does not",
           sorted((entry["label"], entry["needs_user_approval"]) for entry in entries)
           == [("line = in report()", False), ("prompt = in compose()", True)], entries)
@@ -802,7 +853,7 @@ def run_fast_read_command_cases(fixture):
     plan = fixture.read_review_plan()
     whole_entry = next(entry for entry in plan["tool_message_to_agent_text_whole_pull_request"] if entry["label"] == "raise in show_message()")
     delta_entry = next(entry for entry in plan["tool_message_to_agent_text_delta"] if entry["label"] == "raise in show_message()")
-    command_prefix = "python3 nc-systems/cold-read/cold-read-fast-read.py --target "
+    command_prefix = "python3 nn-systems/cold-read/cold-read-fast-read.py --target "
     try:
         command_words = shlex.split(whole_entry["fast_read_command"])
     except ValueError:
@@ -954,6 +1005,7 @@ def run_named_cold_read_record_cases(fixture):
     fixture.reset_fixture_to_base()
     fixture.write_fixture_file("scripts/sibling-program.py", 'print("Sibling message to reuse")\n')
     fixture.write_fixture_file("scripts/nested-program.py", 'print("Nested message kept")\n')
+    fixture.write_fixture_file("scripts/unnamed-program.py", 'print("Message no record holds")\n')
     head = fixture.commit_fixture_changes("messages with named records")
     fixture.configure_github_answers(head, description=description)
     plan = fixture.read_review_plan()
@@ -967,6 +1019,11 @@ def run_named_cold_read_record_cases(fixture):
           and sibling.get("fast_read_target_error") is None and not sibling_target.exists(), sibling)
     check("a string that is only part of a named record's target file, or matches only a record with no report, keeps its command",
           nested.get("cold_read_record") is None and bool(nested.get("fast_read_command")), nested)
+    unnamed = entries.get("scripts/unnamed-program.py", {})
+    check("a string listed after one its named record covers still gets its own command",
+          [path for path in entries if path in ("scripts/sibling-program.py", "scripts/unnamed-program.py")]
+          == ["scripts/sibling-program.py", "scripts/unnamed-program.py"]
+          and unnamed.get("cold_read_record") is None and bool(unnamed.get("fast_read_command")), unnamed)
     problems = {record["path"]: record["problem"] for record in plan["named_cold_read_records"]}
     check("each named record is read once, its path cut at the backtick, slash, colon, comma, semicolon, bracket or full stop "
           "that follows it, and an abbreviated path is not read",
@@ -1082,7 +1139,7 @@ def run_repository_and_output_cases(fixture):
     check("origin ahead of GitHub produces no stale warning", plan["base_branch_behind_github_warning"] is None, plan)
 
     fixture.reset_fixture_to_base()
-    for path in ("scripts/sibling-program.py", "scripts/nested-program.py", "nc-systems/example/parent-program.py"):
+    for path in ("scripts/sibling-program.py", "scripts/nested-program.py", "nn-systems/example/parent-program.py"):
         fixture.write_fixture_file(path, 'print("new")\n')
     fixture.write_fixture_file("scripts/example-program-test.py", 'EXPECTED = "new"\n')
     (fixture.repository / "scripts/sibling-program-test.py").unlink()
@@ -1090,12 +1147,12 @@ def run_repository_and_output_cases(fixture):
     head = fixture.commit_fixture_changes("associated tests with deleted sibling")
     fixture.configure_github_answers(head)
     plan = fixture.read_review_plan()
-    check("test discovery includes changed tests and nested/parent test directories, excluding deleted tests", plan["test_files_to_run"] == ["nc-systems/tests/parent-program-test.py", "scripts/example-program-test.py", "scripts/tests/nested-program-test.py"], plan)
+    check("test discovery includes changed tests and nested/parent test directories, excluding deleted tests", plan["test_files_to_run"] == ["nn-systems/tests/parent-program-test.py", "scripts/example-program-test.py", "scripts/tests/nested-program-test.py"], plan)
     fixture.write_fixture_file("scripts/sibling-program-test.py", "assert True\n")
     head = fixture.commit_fixture_changes("restore sibling test")
     fixture.configure_github_answers(head)
     plan = fixture.read_review_plan()
-    check("changed programs discover sibling tests and results are sorted and deduplicated", plan["test_files_to_run"] == ["nc-systems/tests/parent-program-test.py", "scripts/example-program-test.py", "scripts/sibling-program-test.py", "scripts/tests/nested-program-test.py"], plan)
+    check("changed programs discover sibling tests and results are sorted and deduplicated", plan["test_files_to_run"] == ["nn-systems/tests/parent-program-test.py", "scripts/example-program-test.py", "scripts/sibling-program-test.py", "scripts/tests/nested-program-test.py"], plan)
     text_result = fixture.run_review_plan(json_output=False)
     check("text output includes tier and posting rule", text_result.returncode == 0 and "tier: " in text_result.stdout and "posting rule: " in text_result.stdout, text_result)
     skeleton_path = fixture.control_directory / "review-brief.md"
@@ -1243,8 +1300,8 @@ def run_git_failure_cases(fixture):
           refused_with_git_failure(result) and not result.stdout, result.stderr + result.stdout)
 
 
-FIXTURE_OVERVIEW_PATH = "docs/nedschorus-wiki/nedschorus-example-architecture-overview.md"
-FIXTURE_HOW_TO_PAGE_PATH = "docs/nedschorus-wiki/nedschorus-how-to-write-an-architecture-overview.md"
+FIXTURE_OVERVIEW_PATH = "docs/nedsnodes-wiki/nedsnodes-example-architecture-overview.md"
+FIXTURE_HOW_TO_PAGE_PATH = "docs/nedsnodes-wiki/nedsnodes-how-to-write-an-architecture-overview.md"
 
 
 def run_architecture_overview_claim_check_cases(fixture):
@@ -1263,12 +1320,13 @@ def run_architecture_overview_claim_check_cases(fixture):
     fixture.reset_fixture_to_base()
     shutil.rmtree(report_directory, ignore_errors=True)
     fixture.write_fixture_file(FIXTURE_OVERVIEW_PATH, "# Example overview\n\nThe example system.\n")
-    head = fixture.commit_fixture_changes("add an overview of nc-systems/example")
+    head = fixture.commit_fixture_changes("add an overview of nn-systems/example")
     fixture.configure_github_answers(head)
     blob = fixture.git_command("rev-parse", f"{head}:{FIXTURE_OVERVIEW_PATH}")
     result = fixture.run_review_plan(*flag)
-    check("an added overview with no claim-check report is refused, naming the overview and the command that checks it",
+    check("an added overview with no claim-check report is refused, naming the head's 12-character short hash, the overview and the command that checks it",
           refusal_has_expected_prefix(result) and not result.stdout
+          and f"the overview's text at head {head[:12]} shows that no " in result.stderr
           and f"{FIXTURE_OVERVIEW_PATH} (git blob {blob[:12]} at head): looked " in result.stderr
           and "newest report found: none" in result.stderr
           and f"--overview {FIXTURE_OVERVIEW_PATH}\n" in result.stderr, result.stderr)
@@ -1300,11 +1358,11 @@ def run_architecture_overview_claim_check_cases(fixture):
 
     fixture.reset_fixture_to_base()
     fixture.write_fixture_file(FIXTURE_HOW_TO_PAGE_PATH, "# How to write one\n")
-    fixture.write_fixture_file("docs/nedschorus-wiki/nedschorus-nosystem-architecture-overview.md", "# No system\n")
-    head = fixture.commit_fixture_changes("pages the template matches with no nc-systems directory")
+    fixture.write_fixture_file("docs/nedsnodes-wiki/nedsnodes-nosystem-architecture-overview.md", "# No system\n")
+    head = fixture.commit_fixture_changes("pages the template matches with no nn-systems directory")
     fixture.configure_github_answers(head)
     result = fixture.run_review_plan(*flag)
-    check("the how-to page and a page naming no directory under nc-systems/ are not overviews, so they are not refused",
+    check("the how-to page and a page naming no directory under nn-systems/ are not overviews, so they are not refused",
           result.returncode == 0, result.stderr)
     fixture.reset_fixture_to_base()
     fixture.write_fixture_file(FIXTURE_OVERVIEW_PATH, "# Example overview\n")
@@ -1325,9 +1383,9 @@ def run_architecture_overview_checked_against_commit_cases(fixture):
     flag = ["--overview-write-architecture-overview-claim-check-report-directory", str(report_directory)]
 
     def write_overview_with_report(named, path=FIXTURE_OVERVIEW_PATH):
-        last_line = f"**Checked against:** commit [{named}](https://github.com/nedschorus/nedschorus/commit/{named})\n" if named else ""
+        last_line = f"**Checked against:** commit [{named}](https://github.com/nedsnodes/nedsnodes/commit/{named})\n" if named else ""
         text = ("# Example overview\n\nIt is not `scripts/sibling-program.py`.\n\n## Components\n\n"
-                "- `nc-systems/example/parent-program.py`: the program.\n"
+                "- `nn-systems/example/parent-program.py`: the program.\n"
                 "- `scripts/example-program.py`: a shared script.\n- `config`: its settings.\n"
                 "- `claude`, run by `~/bin/x` and `/usr/bin/y`.\n\n"
                 "## Invariants\n\n- `scripts/sibling-program.py` is mentioned, not a component.\n\n" + last_line)
@@ -1358,15 +1416,15 @@ def run_architecture_overview_checked_against_commit_cases(fixture):
 
     fixture.reset_fixture_to_base()
     shutil.rmtree(report_directory, ignore_errors=True)
-    code_commit = change_and_commit("nc-systems/example/parent-program.py", 'print("new")\n')
+    code_commit = change_and_commit("nn-systems/example/parent-program.py", 'print("new")\n')
     commit_overview_naming(code_commit)
     result = fixture.run_review_plan(*flag)
     check("an overview naming the pull request's own code commit, with no code it describes changed after it, lets the plan through",
           result.returncode == 0, result.stderr)
-    change_and_commit("nc-systems/example/example-design.md", "Design prose.\n")
+    change_and_commit("nn-systems/example/example-design.md", "Design prose.\n")
     change_and_commit("scripts/sibling-program.py", 'print("new")\n')
     result = fixture.run_review_plan(*flag)
-    check("a later change to a .md file under nc-systems/<system>/, or to a path named outside the Components section, lets the plan through",
+    check("a later change to a .md file under nn-systems/<system>/, or to a path named outside the Components section, lets the plan through",
           result.returncode == 0, result.stderr)
 
     fixture.reset_fixture_to_base()
@@ -1374,7 +1432,7 @@ def run_architecture_overview_checked_against_commit_cases(fixture):
     commit_overview_naming(code_commit)
     head = change_and_commit("scripts/example-program.py", "VALUE = 'second'\n")
     result = fixture.run_review_plan(*flag)
-    check("a later commit changing a component the Components section names outside nc-systems/ is refused, naming the path",
+    check("a later commit changing a component the Components section names outside nn-systems/ is refused, naming the path",
           refused_for_checked_against(result)
           and f"names commit {code_commit}, and later commits of the pull request change code the overview describes: "
               "scripts/example-program.py." in result.stderr, result.stderr)
@@ -1403,15 +1461,15 @@ def run_architecture_overview_checked_against_commit_cases(fixture):
           result.stderr)
 
     fixture.reset_fixture_to_base()
-    code_commit = change_and_commit("nc-systems/example/parent-program.py", 'print("first")\n')
+    code_commit = change_and_commit("nn-systems/example/parent-program.py", 'print("first")\n')
     commit_overview_naming(code_commit)
-    change_and_commit("nc-systems/example/unlisted-program.py", 'print("new")\n')
+    change_and_commit("nn-systems/example/unlisted-program.py", 'print("new")\n')
     result = fixture.run_review_plan(*flag)
-    check("a later commit adding a program under nc-systems/<system>/ that the overview does not list is refused",
-          refused_for_checked_against(result) and "nc-systems/example/unlisted-program.py." in result.stderr, result.stderr)
+    check("a later commit adding a program under nn-systems/<system>/ that the overview does not list is refused",
+          refused_for_checked_against(result) and "nn-systems/example/unlisted-program.py." in result.stderr, result.stderr)
 
     fixture.reset_fixture_to_base()
-    side_commit = change_and_commit("nc-systems/example/parent-program.py", 'print("side")\n')
+    side_commit = change_and_commit("nn-systems/example/parent-program.py", 'print("side")\n')
     fixture.git_command("checkout", "-q", "--detach", fixture.base_head)
     commit_overview_naming(side_commit)
     result = fixture.run_review_plan(*flag)
@@ -1419,12 +1477,12 @@ def run_architecture_overview_checked_against_commit_cases(fixture):
     check("an overview naming a commit off main that is not in the head's history is refused",
           refused_for_checked_against(result) and f"describes at head {head[:12]}, so no plan" in result.stderr
           and f"names commit {side_commit}, which is not in the history of head {head[:12]}.\n" in result.stderr, result.stderr)
-    second_overview_path = "docs/nedschorus-wiki/nedschorus-second-architecture-overview.md"
+    second_overview_path = "docs/nedsnodes-wiki/nedsnodes-second-architecture-overview.md"
     for first_named, case in ((None, "has no **Checked against:** line"), (fixture.base_head, "names a commit of main"),
                               (side_commit, "is refused too")):
         fixture.git_command("checkout", "-q", "--detach", fixture.base_head)
         fixture.git_command("clean", "-fdq")
-        fixture.write_fixture_file("nc-systems/second/second-program.py", 'print("second")\n')
+        fixture.write_fixture_file("nn-systems/second/second-program.py", 'print("second")\n')
         write_overview_with_report(first_named)
         write_overview_with_report(side_commit, second_overview_path)
         fixture.configure_github_answers(fixture.commit_fixture_changes("two overviews"))
@@ -1442,20 +1500,20 @@ def run_architecture_overview_checked_against_commit_cases(fixture):
     fixture.reset_fixture_to_base()
     commit_overview_naming(fixture.base_head)
     change_and_commit("scripts/example-program.py", "VALUE = 'later'\n")
-    change_and_commit("nc-systems/example/unlisted-program.py", 'print("new")\n')
+    change_and_commit("nn-systems/example/unlisted-program.py", 'print("new")\n')
     result = fixture.run_review_plan(*flag)
     check("an overview naming a commit of main is refused when the pull request changes code the overview describes, naming each path",
           refused_for_checked_against(result)
           and f"names commit {fixture.base_head} of main, and this pull request changes code the overview describes: "
-              "nc-systems/example/unlisted-program.py, scripts/example-program.py." in result.stderr, result.stderr)
+              "nn-systems/example/unlisted-program.py, scripts/example-program.py." in result.stderr, result.stderr)
 
     fixture.reset_fixture_to_base()
     commit_overview_naming(fixture.base_head)
-    change_and_commit("nc-systems/example/example-design.md", "Design prose.\n")
+    change_and_commit("nn-systems/example/example-design.md", "Design prose.\n")
     change_and_commit("scripts/sibling-program.py", 'print("new")\n')
     result = fixture.run_review_plan(*flag)
     check("an overview naming a commit of main lets the plan through when the pull request changes only a .md file under "
-          "nc-systems/<system>/ and a path named outside the Components section", result.returncode == 0, result.stderr)
+          "nn-systems/<system>/ and a path named outside the Components section", result.returncode == 0, result.stderr)
 
     fixture.reset_fixture_to_base()
     main_code_commit = change_and_commit("scripts/example-program.py", "VALUE = 'on main'\n")

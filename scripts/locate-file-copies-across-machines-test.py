@@ -51,14 +51,14 @@ FAKE_BOX = "fake-box"
 # strips, so the suite is as safe run directly as it is under the runner.
 _git_redirecting_removal_spec = importlib.util.spec_from_file_location(
     "git_redirecting_environment_variables_removal_common",
-    SCRIPTS_DIR.parent / "nc-systems" / "general-tools"
+    SCRIPTS_DIR.parent / "nn-systems" / "general-tools"
     / "git-redirecting-environment-variables-removal-common.py")
 git_redirecting_removal = importlib.util.module_from_spec(_git_redirecting_removal_spec)
 _git_redirecting_removal_spec.loader.exec_module(git_redirecting_removal)
 GIT_REDIRECTING_ENVIRONMENT_VARIABLES = git_redirecting_removal.GIT_REDIRECTING_ENVIRONMENT_VARIABLES
 _ned_box_home_spec = importlib.util.spec_from_file_location(
     "ned_box_home_directory_and_its_mac_mount_point_path_constants_common",
-    SCRIPTS_DIR.parent / "nc-systems" / "general-tools"
+    SCRIPTS_DIR.parent / "nn-systems" / "general-tools"
     / "ned-box-home-directory-and-its-mac-mount-point-path-constants-common.py")
 ned_box_home_path_constants = importlib.util.module_from_spec(_ned_box_home_spec)
 _ned_box_home_spec.loader.exec_module(ned_box_home_path_constants)
@@ -249,7 +249,7 @@ def commit_files(repository, files, message="Add the files"):
 
 def make_plan(base, other="ssh", timeout_seconds=20, extra_mac_roots=()):
     """Both machines' plans under `base`, laid out as production lays them
-    out: this repository's main clone is <machine>/Projects/nedschorus, seat
+    out: this repository's main clone is <machine>/Projects/nedsnodes, seat
     checkouts are children of <machine>/agents, and <machine>/tmp is the
     scratch tree. The Mac spells its tmp also as mac/private/tmp, and ned-box's
     home, `base/box`, as mac/Volumes/nedhome."""
@@ -261,7 +261,7 @@ def make_plan(base, other="ssh", timeout_seconds=20, extra_mac_roots=()):
         {"name": "handoffs",
          "roots": [str(base / "mac" / "handoffs"), *extra_mac_roots]},
     ], "this_repository": {
-        "clones": [str(base / "mac" / "Projects" / "nedschorus")],
+        "clones": [str(base / "mac" / "Projects" / "nedsnodes")],
         "checkout_parents": [str(base / "mac" / "agents")],
         "scratch_trees": [str(base / "mac" / "tmp")],
     }, "spellings": [[str(base / "mac" / "private" / "tmp"),
@@ -274,7 +274,7 @@ def make_plan(base, other="ssh", timeout_seconds=20, extra_mac_roots=()):
         {"name": "log-store", "roots": [str(base / "box" / "logs")]},
         {"name": "handoffs", "roots": [str(base / "box" / "handoffs")]},
     ], "this_repository": {
-        "clones": [str(base / "box" / "Projects" / "nedschorus")],
+        "clones": [str(base / "box" / "Projects" / "nedsnodes")],
         "checkout_parents": [str(base / "box" / "agents")],
         "scratch_trees": [str(base / "box" / "tmp")],
     }, "spellings": [[str(base / "mac" / "Volumes" / "nedhome"),
@@ -325,6 +325,15 @@ def program_environment(base, mode="ok", plan=None, backup_mode="not-found"):
     return environment
 
 
+def fail_on_traceback(arguments, stderr):
+    """Records a failure when the program died with a traceback, which every
+    case rejects: a crash exits 1, the code for "not found", so a case that
+    expects exit 1 passes on a crash unless this checks."""
+    if "Traceback" in stderr:
+        check(f"the run with {arguments!r} ends without a traceback", False,
+              stderr)
+
+
 def run(base, query, mode="ok", plan=None, cwd=None, backup_mode="not-found",
         extra_environment=None, double_dash=False):
     """(exit code, stdout, stderr) of one run of the program, from `cwd`
@@ -335,6 +344,7 @@ def run(base, query, mode="ok", plan=None, cwd=None, backup_mode="not-found",
                              *(["--"] if double_dash else []), query],
                             capture_output=True, text=True, cwd=cwd or base,
                             env=environment, timeout=120)
+    fail_on_traceback(query, result.stderr)
     return result.returncode, result.stdout, result.stderr
 
 
@@ -477,7 +487,7 @@ with scratch() as directory:
     make_stand_in_bin(base)
     mirror = base / "box/logs/agent-session-files-by-machine"
     write(mirror / "mac/seat-briefs/some-seat/CLAUDE.local.md", "brief")
-    write(mirror / "ned-box/tasks/nedschorus-some-seat-tasks/41.json", "task")
+    write(mirror / "ned-box/tasks/nedsnodes-some-seat-tasks/41.json", "task")
     write(mirror / "mac/CLAUDE.md", "global instructions")
     write(mirror / "mac/handoffs/mirror-only-handoff.md", "handoff")
     write(mirror / "mac/projects/-Users-el-x/memory/mirror-only-memory.md",
@@ -489,7 +499,7 @@ with scratch() as directory:
           "old")
     for query, paths in (
             ("CLAUDE.local.md", ["mac/seat-briefs/some-seat/CLAUDE.local.md"]),
-            ("41.json", ["ned-box/tasks/nedschorus-some-seat-tasks/41.json"]),
+            ("41.json", ["ned-box/tasks/nedsnodes-some-seat-tasks/41.json"]),
             ("CLAUDE.md", ["mac/CLAUDE.md"]),
             ("mirror-only-handoff.md", ["mac/handoffs/mirror-only-handoff.md"]),
             ("mirror-only-memory.md",
@@ -921,7 +931,7 @@ check("the production plan searches ned-box's scratch worktrees, "
       box_checkouts)
 supervisor_temp_parent = re.search(
     r'^NED_BOX_CLAUDE_CODE_TMPDIR = "([^"]+)"$',
-    (pathlib.Path(__file__).resolve().parents[1] / "nc-systems" / "handoff"
+    (pathlib.Path(__file__).resolve().parents[1] / "nn-systems" / "handoff"
      / "handoff-supervisor.py").read_text(encoding="utf-8"), re.M).group(1)
 check("the production plan searches ned-box's temp folders under the "
       "handoff-supervisor's CLAUDE_CODE_TMPDIR as well as under /tmp, and "
@@ -937,7 +947,7 @@ check("the production plan searches ned-box's temp folders under the "
 check("the production log-store surface searches the whole log-store, the "
       "transcript mirror included",
       log_store == [{"name": "log-store",
-                     "roots": ["/home/nedlern/nedschorus-logs"]}], log_store)
+                     "roots": ["/home/nedlern/nedsnodes-logs"]}], log_store)
 
 # --- The query reaches the other machine intact ---------------------------------
 with scratch() as directory:
@@ -1230,7 +1240,8 @@ with scratch() as directory:
     check("no rerun when the candidate list was cut, since the cut candidates "
           "may have other names",
           code == 1 and RERUN_LINE_OPENING not in stdout
-          and "were considered" in stdout, stdout + stderr)
+          and "were considered" in stdout,
+          stdout + stderr)
 
 # --- A query with directories is found only at its own path ---------------------
 # The log-store reuses generic names across records (40 dispositions.md on
@@ -1353,7 +1364,7 @@ with scratch() as directory:
 with scratch() as directory:
     base = pathlib.Path(directory)
     make_stand_in_bin(base)
-    clone = base / "mac" / "Projects" / "nedschorus"
+    clone = base / "mac" / "Projects" / "nedsnodes"
     clone.mkdir(parents=True)
     git(clone, "init", "-q")
     write(clone / "README.md", "the clone")
@@ -1387,7 +1398,7 @@ with scratch() as directory:
 with scratch() as directory:
     base = pathlib.Path(directory)
     make_stand_in_bin(base)
-    clone = base / "box" / "Projects" / "nedschorus"
+    clone = base / "box" / "Projects" / "nedsnodes"
     clone.mkdir(parents=True)
     git(clone, "init", "-q")
     write(clone / "docs" / "box-probe.md", "on the box")
@@ -1442,8 +1453,8 @@ with scratch() as directory:
     base = pathlib.Path(directory)
     make_stand_in_bin(base)
     plan = make_plan(base)
-    clones = {"mac": base / "mac" / "Projects" / "nedschorus",
-              "box": base / "box" / "Projects" / "nedschorus"}
+    clones = {"mac": base / "mac" / "Projects" / "nedsnodes",
+              "box": base / "box" / "Projects" / "nedsnodes"}
     for clone in clones.values():
         clone.mkdir(parents=True)
         git(clone, "init", "-q")
@@ -1567,7 +1578,7 @@ with scratch() as directory:
     base = pathlib.Path(directory)
     make_stand_in_bin(base)
     plan = make_plan(base)
-    clone = base / "mac" / "Projects" / "nedschorus"
+    clone = base / "mac" / "Projects" / "nedsnodes"
     sibling = base / "mac" / "Projects" / "nedlern"
     for repository in (clone, sibling):
         repository.mkdir(parents=True)
@@ -1584,7 +1595,7 @@ with scratch() as directory:
     check("a query into another project under Projects is found only at that "
           "path, not by this repository's copy at the same place",
           code == 0 and "/Projects/nedlern/sibling-probe.md" in same
-          and "/Projects/nedschorus/sibling-probe.md" not in same
+          and "/Projects/nedsnodes/sibling-probe.md" not in same
           and "Add this repository's probe" not in same, stdout + stderr)
     write(sibling / "other-repo-probe.md", "only in the sibling")
     git(sibling, "add", "other-repo-probe.md")
@@ -1718,6 +1729,7 @@ with scratch() as directory:
         [sys.executable, str(PROGRAM),
          str(linked / "docs" / "linked-worktree-probe.md")],
         capture_output=True, text=True, cwd=base, env=environment, timeout=120)
+    fail_on_traceback("linked-worktree-probe.md", result.stderr)
     # The failure line is matched whole. The query's own path begins with
     # the project's (linked-project-wt), so "the project's path appears
     # somewhere below NOT searched" held without the listing being named
@@ -1762,7 +1774,7 @@ with scratch() as directory:
     base = pathlib.Path(directory).resolve()
     make_stand_in_bin(base)
     plan = make_plan(base)
-    clone = base / "mac" / "Projects" / "nedschorus"
+    clone = base / "mac" / "Projects" / "nedsnodes"
     commit_files(clone, {"README.md": "the clone"}, "Start")
     seat_a = base / "mac" / "agents" / "seat-a"
     seat_b = base / "mac" / "agents" / "seat-b"
@@ -1885,7 +1897,7 @@ with scratch() as directory:
 with scratch() as directory:
     base = pathlib.Path(directory)
     make_stand_in_bin(base)
-    clone = base / "mac" / "Projects" / "nedschorus"
+    clone = base / "mac" / "Projects" / "nedsnodes"
     commit_files(clone, {"docs/anchor-probe.md": "the tracked copy"}, "Start")
     other_worktree = base / "mac" / "tmp" / "other-wt"
     git(clone, "worktree", "add", "-q", "-b", "other-wt", str(other_worktree))
@@ -1908,7 +1920,7 @@ with scratch() as directory:
 with scratch() as directory:
     base = pathlib.Path(directory).resolve()
     make_stand_in_bin(base)
-    clone = base / "mac" / "Projects" / "nedschorus"
+    clone = base / "mac" / "Projects" / "nedsnodes"
     commit_files(clone, {"README.md": "the clone"}, "Start")
     nested = clone / ".claude" / "worktrees" / "agent-rel"
     git(clone, "worktree", "add", "-q", "-b", "agent-rel", str(nested))
@@ -1938,7 +1950,7 @@ with scratch() as directory:
     base = pathlib.Path(directory).resolve()
     make_stand_in_bin(base)
     plan = make_plan(base)
-    clone = base / "mac" / "Projects" / "nedschorus"
+    clone = base / "mac" / "Projects" / "nedsnodes"
     commit_files(clone, {"README.md": "the clone",
                          "docs/rel-tracked-probe.md": "tracked"}, "Start")
     seat_a = base / "mac" / "agents" / "rel-seat-a"
@@ -2017,6 +2029,7 @@ with scratch() as directory:
         result = subprocess.run(["sh", "-c", script], capture_output=True,
                                 text=True, env=program_environment(base),
                                 timeout=120)
+        fail_on_traceback(query, result.stderr)
         return result.returncode, result.stdout, result.stderr
 
     code, stdout, stderr = run_in_removed_directory("docs/gone-dir-probe.md")
@@ -2024,7 +2037,7 @@ with scratch() as directory:
           "searches nothing",
           code == 3 and "the current directory no longer exists" in stdout
           and "Run again with the file's absolute path" in stdout
-          and "Searched:" not in stdout and "Traceback" not in stderr,
+          and "Searched:" not in stdout,
           f"exit {code}\n{stdout}{stderr}")
     code, stdout, stderr = run_in_removed_directory("./gone-dir-probe.md")
     check("... and so does ./ before a bare name",
@@ -2034,13 +2047,13 @@ with scratch() as directory:
     check("a bare name needs no current directory, and is still searched "
           "from a removed one",
           code == 0 and "/agents/s/docs/gone-dir-probe.md"
-          in sections(stdout)[0] and "Traceback" not in stderr,
+          in sections(stdout)[0],
           f"exit {code}\n{stdout}{stderr}")
     # PR 703 review 5308486733, inline at :896: git refuses to start in a
     # directory that no longer exists, so every git surface went unsearched
     # and a file that only git history holds read as "not established", exit
     # 3. The clone here holds such a file.
-    clone = base / "mac" / "Projects" / "nedschorus"
+    clone = base / "mac" / "Projects" / "nedsnodes"
     commit_files(clone, {"docs/removed-cwd-history-probe.md": "only in git"})
     git(clone, "rm", "-q", "docs/removed-cwd-history-probe.md")
     git(clone, "commit", "-q", "-m", "Remove the history probe")
@@ -2135,6 +2148,7 @@ with scratch() as directory:
         [sys.executable, str(PROGRAM),
          str(asked_worktree / "docs" / "common-dir-probe.md")],
         capture_output=True, text=True, cwd=base, env=environment, timeout=120)
+    fail_on_traceback("common-dir-probe.md", result.stderr)
     check("a whole run with GIT_COMMON_DIR naming another clone finds the "
           "asked clone's commit at its linked worktree's path, exit 0",
           result.returncode == 0
@@ -2234,7 +2248,7 @@ with scratch() as directory:
 with scratch() as directory:
     base = pathlib.Path(directory)
     make_stand_in_bin(base)
-    clone = base / "mac" / "Projects" / "nedschorus"
+    clone = base / "mac" / "Projects" / "nedsnodes"
     commit_files(clone, {"README.md": "the clone"}, "Start")
     adhoc = base / "elsewhere" / "adhoc-listed"
     git(clone, "worktree", "add", "-q", "-b", "adhoc-listed", str(adhoc))
@@ -2347,11 +2361,11 @@ with scratch() as directory:
 # --- The pieces, in process -------------------------------------------------------
 # How a query written as it is cited is read (PR 703 review 5299114606).
 check("the scp form is read as the path after the colon",
-      program.resolve_query("nedlern@ned-box:/home/nedlern/nedschorus-logs/a.md")
-      == "/home/nedlern/nedschorus-logs/a.md")
+      program.resolve_query("nedlern@ned-box:/home/nedlern/nedsnodes-logs/a.md")
+      == "/home/nedlern/nedsnodes-logs/a.md")
 check("a bare known host is read the same way, and its ~ is its home",
-      program.resolve_query("ned-box:~/nedschorus-logs/a.md")
-      == "/home/nedlern/nedschorus-logs/a.md"
+      program.resolve_query("ned-box:~/nedsnodes-logs/a.md")
+      == "/home/nedlern/nedsnodes-logs/a.md"
       and program.resolve_query("ned-box:agents/a.md")
       == "/home/nedlern/agents/a.md")
 check("a file name that merely holds a colon is left alone",
@@ -2381,7 +2395,7 @@ layouts = [program.MAC_SURFACES["this_repository"],
            program.NED_BOX_SURFACES["this_repository"]]
 check("the production layout places each of the fleet's checkout places",
       program.place_in_this_repository(
-          "/Users/el/Projects/nedschorus/.claude/worktrees/agent-a/docs/a.md",
+          "/Users/el/Projects/nedsnodes/.claude/worktrees/agent-a/docs/a.md",
           layouts) == ("checkout", ["docs", "a.md"])
       and program.place_in_this_repository(
           "/home/nedlern/agents/prof/.claude/worktrees/x/docs/a.md", layouts)
@@ -2395,7 +2409,7 @@ check("the production layout places each of the fleet's checkout places",
       and program.place_in_this_repository(
           "/Users/el/Projects/nedlern/README.md", layouts) is None
       and program.place_in_this_repository(
-          "/home/nedlern/nedschorus-logs/seats/a.md", layouts) is None)
+          "/home/nedlern/nedsnodes-logs/seats/a.md", layouts) is None)
 check("a ~ with no host is this machine's home",
       program.resolve_query("~/a.md") == os.path.expanduser("~/a.md"))
 check("a path that climbs out with .. is made absolute from the current "

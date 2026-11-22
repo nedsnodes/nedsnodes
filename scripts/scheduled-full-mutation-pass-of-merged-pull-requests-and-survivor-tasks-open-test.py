@@ -160,10 +160,10 @@ class Fixture:
         return git(self.work, "rev-parse", "HEAD")
 
     def seat(self, name, with_checkout=True):
-        (self.tasks / f"nedschorus-{name}-tasks").mkdir(parents=True, exist_ok=True)
+        (self.tasks / f"nedsnodes-{name}-tasks").mkdir(parents=True, exist_ok=True)
         if with_checkout:
             (self.agents / name).mkdir(parents=True, exist_ok=True)
-        return self.tasks / f"nedschorus-{name}-tasks"
+        return self.tasks / f"nedsnodes-{name}-tasks"
 
     def options(self):
         return ["--clone", str(self.clone),
@@ -227,7 +227,7 @@ def task_files(list_directory):
 
 
 def job_failure_tasks(fixture):
-    directory = fixture.tasks / f"nedschorus-{job.JOB_FAILURE_TASK_AGENT_SEAT}-tasks"
+    directory = fixture.tasks / f"nedsnodes-{job.JOB_FAILURE_TASK_AGENT_SEAT}-tasks"
     return [json.loads(path.read_text()) for path in sorted(directory.glob("*.json"))]
 
 
@@ -273,7 +273,7 @@ def run_every_exit_but_0_6_7_9_opens_a_job_failure_task_cases():
               and f"JOB FAILURE TASK: task #{tasks[0]['id']} on " in completed.stderr
               and f"\"{job.RUN_RECORD_NOT_WRITTEN_TASK_SUBJECT}\", opened." in completed.stderr,
               (completed.returncode, completed.stderr, tasks))
-        task_file = (fixture.tasks / f"nedschorus-{job.JOB_FAILURE_TASK_AGENT_SEAT}-tasks"
+        task_file = (fixture.tasks / f"nedsnodes-{job.JOB_FAILURE_TASK_AGENT_SEAT}-tasks"
                      / f"{tasks[0]['id']}.json")
         task_file.write_text(json.dumps({**tasks[0], "description": "an older night's"}))
         completed = fixture.run()
@@ -379,7 +379,7 @@ def run_untestable_merge_cases():
               and untestable in tasks[0]["description"]
               and failing_suite in tasks[0]["description"]
               and f"--base {start}" in tasks[0]["description"]
-              and f"--head <that commit>" in tasks[0]["description"],
+              and "--head <that commit>" in tasks[0]["description"],
               tasks)
         check("the record names the untestable merge, its failing suite and its task, and "
               "counts it among the merges tested",
@@ -476,7 +476,7 @@ def run_carry_on_and_job_failure_task_cases():
         check("the next run with no progress opens no second task while the first is open",
               len(job_failure_tasks(fixture)) == 1
               and "already open, so none opened: task #1" in record, record)
-        task_file = fixture.tasks / f"nedschorus-{job.JOB_FAILURE_TASK_AGENT_SEAT}-tasks" / "1.json"
+        task_file = fixture.tasks / f"nedsnodes-{job.JOB_FAILURE_TASK_AGENT_SEAT}-tasks" / "1.json"
         task_file.write_text(json.dumps(dict(json.loads(task_file.read_text()),
                                              status="completed")))
         fixture.run({merge: {"sleep": 30}}, timeout_seconds=1)
@@ -654,9 +654,9 @@ def run_carry_on_and_job_failure_task_cases():
               and f"The oldest is merge {three_days_old}," in warnings[0]["description"],
               f"rc={completed.returncode} tasks={tasks} err={completed.stderr}")
         # With the task list gone, neither of this run's two tasks can be opened.
-        for path in (fixture.tasks / f"nedschorus-{job.JOB_FAILURE_TASK_AGENT_SEAT}-tasks").iterdir():
+        for path in (fixture.tasks / f"nedsnodes-{job.JOB_FAILURE_TASK_AGENT_SEAT}-tasks").iterdir():
             path.unlink()
-        (fixture.tasks / f"nedschorus-{job.JOB_FAILURE_TASK_AGENT_SEAT}-tasks").rmdir()
+        (fixture.tasks / f"nedsnodes-{job.JOB_FAILURE_TASK_AGENT_SEAT}-tasks").rmdir()
         completed = fixture.run({old: {"sleep": 30}}, timeout_seconds=1)
         record = fixture.records()[-1].read_text()
         failed = [line for line in record.splitlines()
@@ -733,11 +733,12 @@ def run_carry_on_and_job_failure_task_cases():
               "and counted, its skipped mutants left out",
               journal_left and count == 2, (journal_left, count))
 
-    # mutant_worker_count_for_free_cores: the cores less the load, from 1 to the cores.
+    # mutant_worker_count_for_free_cores: the cores less the load, from 1 to the cores and 4.
     counts = [job.mutant_worker_count_for_free_cores(cores, load)
-              for cores, load in ((16, 3.5), (16, 40.0), (16, 0.0), (1, 0.0))]
+              for cores, load in ((16, 13.5), (16, 40.0), (16, 0.0), (16, 3.5), (3, 0.0),
+                                  (1, 0.0))]
     check("the worker count is the cores less the 1-minute load average, at least 1, at most "
-          "the cores", counts == [12, 1, 16, 1], counts)
+          "the cores and at most 4", counts == [2, 1, 4, 4, 3, 1], counts)
 
 
 def errored_mutant(line, operator, reason, diff=""):
@@ -865,7 +866,7 @@ def run_errored_mutants_cases():
                   job.ERRORED_MUTANT_KEYS_ALREADY_REPORTED_STATE_KEY]
               == [job.errored_mutant_key(timed_out)],
               (completed.returncode, completed.stderr, tasks, record))
-        task_file = (fixture.tasks / f"nedschorus-{job.JOB_FAILURE_TASK_AGENT_SEAT}-tasks"
+        task_file = (fixture.tasks / f"nedsnodes-{job.JOB_FAILURE_TASK_AGENT_SEAT}-tasks"
                      / f"{tasks[0]['id']}.json")
         note = "Judged: the timeout came from a busy machine; nothing needs fixing."
         task_file.write_text(json.dumps(
@@ -958,7 +959,7 @@ def run_first_pass_and_second_pass_cases():
         state = fixture.state_json()
         record = fixture.records()[-1].read_text() if fixture.records() else ""
         alpha_tasks = [json.loads(path.read_text()) for path in
-                       sorted((fixture.tasks / "nedschorus-alpha-tasks").glob("*.json"))]
+                       sorted((fixture.tasks / "nedsnodes-alpha-tasks").glob("*.json"))]
         check("the first pass runs every waiting merge, oldest first, each with at most 12 "
               "mutants shared among its changed files and no stop time",
               [(option_value(call, "--head"), option_value(call, AT_MOST_FLAG),
@@ -1015,7 +1016,7 @@ def run_first_pass_and_second_pass_cases():
         record = fixture.records()[-1].read_text()
         check("a survivor an earlier run of the merge handled, killed since and so no longer in "
               "the state's tasks, gets no second task when the second pass reports it again",
-              len(task_files(fixture.tasks / "nedschorus-alpha-tasks")) == 2
+              len(task_files(fixture.tasks / "nedsnodes-alpha-tasks")) == 2
               and job.mutant_key(first_survivor) not in state["tasks_opened"]
               and f"merge {oldest[:12]}, second pass" in record,
               f"state={state} record={record} err={completed.stderr}")
@@ -1408,7 +1409,7 @@ def run_cases():
               completed.returncode == 0
               and "Agent-seat retired wrote the line" in task.get("description", "")
               and "has no task list or no checkout on ned-box" in task.get("description", "")
-              and task_files(fixture.tasks / "nedschorus-retired-tasks") == [],
+              and task_files(fixture.tasks / "nedsnodes-retired-tasks") == [],
               (completed.returncode, completed.stderr, task))
 
     # Failures: the run stops at the merge, records why, exits 4 and leaves the state there.
@@ -1452,7 +1453,7 @@ def run_cases():
                   and fixture.state_json()["last_tested_main_commit"] == start,
                   f"rc={completed.returncode} record={record} err={completed.stderr}")
             crash_tasks = [json.loads(path.read_text()) for path in
-                           (fixture.tasks / f"nedschorus-{job.JOB_FAILURE_TASK_AGENT_SEAT}-tasks"
+                           (fixture.tasks / f"nedsnodes-{job.JOB_FAILURE_TASK_AGENT_SEAT}-tasks"
                             ).glob("*.json")]
             check(f"{case_name}: no job failure task list, so the task is named on stderr "
                   f"as not opened", "could not be opened on fleet-restart-at-login's task list"
@@ -1475,7 +1476,7 @@ def run_cases():
               completed.returncode == job.EXIT_STEP_FAILED
               and f"merge {merge[:12]}: no task could be opened on merge-lane-2's task list"
               in completed.stderr
-              and "nedschorus-merge-lane-2-tasks does not exist" in completed.stderr
+              and "nedsnodes-merge-lane-2-tasks does not exist" in completed.stderr
               and fixture.state_json()["last_tested_main_commit"] == start,
               f"rc={completed.returncode} err={completed.stderr}")
 
@@ -2069,15 +2070,19 @@ def run_cases():
         before = (alpha_list / "1.json").read_text()
         later = fixture.commit("scripts/other.py", "VALUE = 2\n", author="alpha")
         added = survivor(2, "core/ReplaceComparisonOperator")
-        (alpha_list / ".1.json.partial").mkdir()
-        completed = fixture.run({later: {"json": verdict(survived=[added])}})
+        alpha_list.chmod(0o555)
+        try:
+            completed = fixture.run({later: {"json": verdict(survived=[added])}})
+        finally:
+            alpha_list.chmod(0o755)
         check("a survivor on a line whose open task cannot be rewritten stops the run at that "
               "merge, exit 4, naming the error, with the task unchanged, the merge not recorded "
               "as tested and the state not naming the task for the survivor",
               completed.returncode == job.EXIT_STEP_FAILED
               and f"merge {later[:12]}: no task could be opened on alpha's task list, or "
                   f"rewritten there" in completed.stderr
-              and "IsADirectoryError" in completed.stderr
+              and "PermissionError" in completed.stderr
+              and f"{alpha_list}/.1.json." in completed.stderr
               and (alpha_list / "1.json").read_text() == before
               and fixture.state_json()["last_tested_main_commit"] == merge
               and job.mutant_key(added) not in fixture.state_json()["tasks_opened"],
@@ -2256,18 +2261,22 @@ def run_cases():
         fixture.run({merge: {"json": verdict(survived=mutants)}})
         before = (alpha_list / "1.json").read_text()
         state_before = fixture.state_json()
-        (alpha_list / ".1.json.partial").mkdir()
         later = fixture.commit("scripts/other.py", "VALUE = 2\n", author="alpha")
         calls_before = len(fixture.calls())
-        completed = fixture.run({"recheck": {"verdicts": {
-            job.mutant_key(mutants[0]): "killed"}}, later: {"json": verdict()}})
+        alpha_list.chmod(0o555)
+        try:
+            completed = fixture.run({"recheck": {"verdicts": {
+                job.mutant_key(mutants[0]): "killed"}}, later: {"json": verdict()}})
+        finally:
+            alpha_list.chmod(0o755)
         check("a task the recheck cannot rewrite stops the run, exit 4, naming the task and the "
               "error, with the task and the state as they were and no merge tested",
               completed.returncode == job.EXIT_STEP_FAILED
               and "task #1 on alpha's task list" in completed.stderr
               and "was rechecked on main (1 killed, 0 no longer exists, 1 survived, 0 could not "
-                  "be judged), but a file could not be read or written (IsADirectoryError"
+                  "be judged), but a file could not be read or written (PermissionError"
                   in completed.stderr
+              and f"{alpha_list}/.1.json." in completed.stderr
               and (alpha_list / "1.json").read_text() == before
               and fixture.state_json() == state_before
               and len(fixture.calls()) == calls_before + 1,
@@ -2291,12 +2300,17 @@ def run_cases():
               completed.returncode == job.EXIT_STEP_FAILED
               and "a key holds the wrong type" in completed.stderr, completed.stderr)
         fixture.set_last("0" * 40)
+        state_text = (fixture.state / job.STATE_FILE_NAME).read_text()
         completed = fixture.run()
         check("a state file naming a commit not on origin/main: exit 4, saying how to fix it",
               completed.returncode == job.EXIT_STEP_FAILED
               and "is not an ancestor of origin/main" in completed.stderr
               and "Set last_tested_main_commit" in completed.stderr
               and "the next run tests the merges after it" in completed.stderr, completed.stderr)
+        # The state is written indented, and set_last wrote it compact, so a rewrite shows.
+        check("a run that loses no task and changes no state leaves the state file as it was",
+              (fixture.state / job.STATE_FILE_NAME).read_text() == state_text,
+              (fixture.state / job.STATE_FILE_NAME).read_text())
 
     # No cosmic-ray venv, with merges to test.
     with tempfile.TemporaryDirectory() as scratch:

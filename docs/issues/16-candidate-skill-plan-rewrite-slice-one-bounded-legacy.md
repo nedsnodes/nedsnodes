@@ -1,5 +1,5 @@
 ---
-issue: "[Candidate skill: plan-rewrite-slice — one bounded legacy slice with four-way behavior classification](https://github.com/nedschorus/nedschorus/issues/16)"
+issue: "[Candidate skill: plan-rewrite-slice — one bounded legacy slice with four-way behavior classification](https://github.com/nedsnodes/nedsnodes/issues/16)"
 ---
 
 # Candidate skill: plan-rewrite-slice — one bounded legacy slice with four-way behavior classification
@@ -12,6 +12,6 @@ Captured per the artifact-lifecycle rule (pending state -> GHI, lean -> issue-on
 
 ## Evidence of record
 
-- Six-agent source read: `nc-queue/archived/2026-07-22-candidate-skill-source-evidence.md` (this skill's section)
-- cops delta packet: `nc-queue/archived/2026-07-23-cops-candidate-skill-delta-packet.md` (this skill's section)
+- Six-agent source read: `nn-queue/archived/2026-07-22-candidate-skill-source-evidence.md` (this skill's section)
+- cops delta packet: `nn-queue/archived/2026-07-23-cops-candidate-skill-delta-packet.md` (this skill's section)
 - Shortlist origin: `docs/issues/9-neds-notes.md` § Working skill shortlist

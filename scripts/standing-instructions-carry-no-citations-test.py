@@ -66,11 +66,13 @@ POINTER_PATTERNS = (
 EXCEPTIONS = {
     (".claude/skills/explain/SKILL.md", "a `(user-ruled …)` line in a file"):
         "tells the agent the form a recorded ruling takes in a file, so the agent can find one",
-    ("nc-systems/skills/explain/explain-how-to-write-an-identifier-instructions.md",
+    ("nn-systems/skills/explain/explain-how-to-write-an-identifier-instructions.md",
      '`ruled 2026-09-15 at "<which walk or'):
         "an example of a citation's form, which the agent copies when it cites a ruling",
     (".claude/skills/cold-read/SKILL.md", "`--user-ruled-cold-read-full-run-count-restart`"):
         "the name of a cold-read-grid.py flag the agent must type, not a record of a ruling",
+    (".claude/skills/walk-me-through/SKILL.md", "the user's answer of 2026-11-17 to item 58.5 of approval-walk"):
+        "the citation the agent writes into the walk-minutes' check --already-decided for a clarity-only change",
 }
 
 

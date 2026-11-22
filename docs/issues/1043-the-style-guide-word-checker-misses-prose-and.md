@@ -1,12 +1,12 @@
 ---
-issue: "[The style-guide-word-checker misses prose and flags code in six Markdown shapes](https://github.com/nedschorus/nedschorus/issues/1043)"
+issue: "[The style-guide-word-checker misses prose and flags code in six Markdown shapes](https://github.com/nedsnodes/nedsnodes/issues/1043)"
 ---
 
 # The style-guide-word-checker misses prose and flags code in six Markdown shapes
 
 Filed without the user's sign-off by the agent-seat merge-lane-2 on 2026-10-04. The user ruled on 2026-08-23 that a reproduced finding whose consequence is at least wrong behavior in operation is filed that way; the ruling is recorded in merge-lane-2's `CLAUDE.local.md` on ned-box. The sections are, in order: the reproductions, where each finding came from, why the findings matter, their causes, and the next action.
 
-The programs are `scripts/style-guide-word-checker-nbd.py` (the checker) and `scripts/style-guide-word-checker-markdown-edit-hook-nbd.py` (the PostToolUse hook that runs the checker after an agent's Edit or Write of a Markdown file), as they are on main at commit `07fbc10e`, where their names did not yet end in `-nbd`. Line numbers below are at that commit. The style guide page, `docs/nedschorus-wiki/nedschorus-style-guide.md`, says the checker skips code; each shape below is a case where the checker or the hook gets the boundary between code and prose wrong, or does not check a line an agent just wrote.
+The programs are `scripts/style-guide-word-checker-hack.py` (the checker) and `scripts/style-guide-word-checker-markdown-edit-hook-hack.py` (the PostToolUse hook that runs the checker after an agent's Edit or Write of a Markdown file), as they are on main at commit `07fbc10e`, where their names did not yet end in `-hack`. Line numbers below are at that commit. The style guide page, `docs/nedsnodes-wiki/nedsnodes-style-guide.md`, says the checker skips code; each shape below is a case where the checker or the hook gets the boundary between code and prose wrong, or does not check a line an agent just wrote.
 
 ## Reproductions
 
@@ -25,7 +25,7 @@ starts = not (len(sys.argv) > 3 and sys.argv[3] == "fragment")
 print([(h.line_number, h.form) for h in m.find_style_guide_word_hits_in_markdown(text, m.APPLIES_TO_FILES, text_starts_document=starts)])
 ```
 
-The command is `python3 run_checker.py scripts/style-guide-word-checker-nbd.py <input>.md`, with `fragment` added as a third argument to scan the input the way the hook scans an Edit's `new_string` (`text_starts_document=False`). The output is the list of hits as (line number, word). The word used in every input is "seat", a word the style guide lists.
+The command is `python3 run_checker.py scripts/style-guide-word-checker-hack.py <input>.md`, with `fragment` added as a third argument to scan the input the way the hook scans an Edit's `new_string` (`text_starts_document=False`). The output is the list of hits as (line number, word). The word used in every input is "seat", a word the style guide lists.
 
 ### 1. A line holding a list marker before three backticks closes a fenced code block
 
@@ -70,7 +70,7 @@ Run `git switch
 seat --force` now.
 ```
 
-Then pipe this payload to `python3 scripts/style-guide-word-checker-markdown-edit-hook-nbd.py` (`<repository>` stands for the scratch repository's absolute path):
+Then pipe this payload to `python3 scripts/style-guide-word-checker-markdown-edit-hook-hack.py` (`<repository>` stands for the scratch repository's absolute path):
 
 ```json
 {"tool_name": "Edit", "cwd": "<repository>", "tool_input": {"file_path": "<repository>/notes.md", "old_string": "seat --force` now.", "new_string": "seat --force` today."}}
@@ -116,7 +116,7 @@ Output: nothing (exit 0). Expected: a report of "seat" on line 3, the copy the W
 
 Control: the same Write content as case 4a, written to an untracked new file `fresh.md` in the same repository, reports `fresh.md:1: "seat": ...` (exit 0).
 
-merge-lane-2's [review 5394540218](https://github.com/nedschorus/nedschorus/pull/934#pullrequestreview-5394540218), where this was first recorded, notes that the hook's author has said comparing the Write's lines against the set of committed lines is intended. Case 4a shows the comparison misjudging a line whose text is unchanged but whose context changed from code to prose, which is a case that design answer did not address.
+merge-lane-2's [review 5394540218](https://github.com/nedsnodes/nedsnodes/pull/934#pullrequestreview-5394540218), where this was first recorded, notes that the hook's author has said comparing the Write's lines against the set of committed lines is intended. Case 4a shows the comparison misjudging a line whose text is unchanged but whose context changed from code to prose, which is a case that design answer did not address.
 
 ### 5. A heading after a list item, then an indented line of three tildes, hides all later prose
 
@@ -153,7 +153,7 @@ Expected: `[(5, 'seat')]` in both. A fragment does not show whether line 3 is an
 
 ## Provenance
 
-Items 1 to 4 were found by the Codex review cell, `scripts/code-review-codex-cell.py`, on PR [style-guide-word-checker: the project word list, its scanner, and a PostToolUse hook on markdown writes](https://github.com/nedschorus/nedschorus/pull/934), and recorded for a follow-up GHI in merge-lane-2's [review 5394540218](https://github.com/nedschorus/nedschorus/pull/934#pullrequestreview-5394540218) of that pull request. A fifth finding in that review, an indented code block read as prose, was fixed by PR [style-guide-word-checker: an indented code block is code, and a capitalised form is looked up](https://github.com/nedschorus/nedschorus/pull/1003) and is not part of this GHI. Items 5 and 6 were found by the Codex review cell on the second review round of that same PR 1003 and recorded in merge-lane-2's [review 5408173384](https://github.com/nedschorus/nedschorus/pull/1003#pullrequestreview-5408173384), which ran both inputs through main's checker and found main silent on both before PR 1003 merged.
+Items 1 to 4 were found by the Codex review cell, `scripts/code-review-codex-cell.py`, on PR [style-guide-word-checker: the project word list, its scanner, and a PostToolUse hook on markdown writes](https://github.com/nedsnodes/nedsnodes/pull/934), and recorded for a follow-up GHI in merge-lane-2's [review 5394540218](https://github.com/nedsnodes/nedsnodes/pull/934#pullrequestreview-5394540218) of that pull request. A fifth finding in that review, an indented code block read as prose, was fixed by PR [style-guide-word-checker: an indented code block is code, and a capitalised form is looked up](https://github.com/nedsnodes/nedsnodes/pull/1003) and is not part of this GHI. Items 5 and 6 were found by the Codex review cell on the second review round of that same PR 1003 and recorded in merge-lane-2's [review 5408173384](https://github.com/nedsnodes/nedsnodes/pull/1003#pullrequestreview-5408173384), which ran both inputs through main's checker and found main silent on both before PR 1003 merged.
 
 ## Why this matters
 
@@ -164,7 +164,7 @@ Each shape is wrong behavior in operation, in one of two directions:
 
 ## Causes
 
-All line numbers are in `scripts/style-guide-word-checker-nbd.py` at `07fbc10e` unless the hook is named.
+All line numbers are in `scripts/style-guide-word-checker-hack.py` at `07fbc10e` unless the hook is named.
 
 - Item 1: `FENCE_PATTERN` (line 117) accepts any indentation and an optional list marker before the fence characters. That is right for an opening fence that starts a list item, but `find_style_guide_word_hits_in_markdown` uses the same match to close an open fence (lines 263 to 269), where CommonMark allows at most three spaces of indentation and no list marker.
 - Item 2: `INLINE_CODE_SPAN_PATTERN` (line 124), `` (`+).+?\1 ``, can match a backtick run shorter than the run that opens the span, because the regular expression backtracks into the opening run. On line 1 of the input the pattern takes `` `a ` `` as a span of single backticks, so no span is left open to carry to line 2. CommonMark requires the closing run to have the same length as the opening run, with no backtick on either side of either run.
@@ -175,7 +175,7 @@ All line numbers are in `scripts/style-guide-word-checker-nbd.py` at `07fbc10e` 
 
 ## Next action
 
-Fix the six shapes in the checker and the hook, adding one case per item to `scripts/style-guide-word-checker-markdown-edit-hook-nbd-test.py`, built from the inputs above. Each case fails on main at `07fbc10e` and passes after the fix.
+Fix the six shapes in the checker and the hook, adding one case per item to `scripts/style-guide-word-checker-markdown-edit-hook-hack-test.py`, built from the inputs above. Each case fails on main at `07fbc10e` and passes after the fix.
 
 - Items 1, 5 and 6: accept a closing fence only at zero to three spaces of indentation with nothing before the run, as CommonMark does. End list tracking at a heading as well as at an unindented line after a blank. Decide how a fence that never closes is treated; one choice is to treat an indented opening fence whose closing fence never comes as not a fence, so that a misread line cannot hide the rest of the text.
 - Item 2: match a code span's closing run only when the closing run has exactly the opening run's length, with no backtick next to either run; `backtick_run_closing` (line 192) already matches runs that way and can serve as the model.
@@ -184,4 +184,4 @@ Fix the six shapes in the checker and the hook, adding one case per item to `scr
 
 ## Provisional additions (not yet vetted by the user)
 
-- Agent-seat agent-instructions-editor, 2026-10-14: the open notes from the review of PR [style-guide-word-checker: the page parser raises on every malformed table, and tests run on a fixture page](https://github.com/nedschorus/nedschorus/pull/985), to act on at the checker's next change, name two recognition gaps: a heading that interrupts a list, and an Edit fragment with an indented `~~~`. They are items 5 and 6 above, so they are fixed with this GHI.
+- Agent-seat agent-instructions-editor, 2026-10-14: the open notes from the review of PR [style-guide-word-checker: the page parser raises on every malformed table, and tests run on a fixture page](https://github.com/nedsnodes/nedsnodes/pull/985), to act on at the checker's next change, name two recognition gaps: a heading that interrupts a list, and an Edit fragment with an indented `~~~`. They are items 5 and 6 above, so they are fixed with this GHI.

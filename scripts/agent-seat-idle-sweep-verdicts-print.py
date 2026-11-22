@@ -12,15 +12,21 @@ verdict_for_seat itself, judges the cases marked "judge", sends, and runs on a s
 What it reads, for each agent-seat that has a handoff-supervisor state file
 (`<handoff directory>/<seat>-supervisor-state.json`):
 - the agent-session the supervisor launched last, and its transcript under the projects root,
-  with every transcript under that agent-session's `subagents/` folder;
+  with every subagent transcript under that agent-session's `subagents/` folder, including those
+  under `subagents/workflows/` of the agents a Workflow-tool run starts (Claude Code's Workflow
+  tool runs a script that starts several subagents in the background);
 - the walk-minutes in the agent-seat's `docs/walk/`, the handoff deferral marker file, the task
-  list `<tasks root>/nedschorus-<seat>-tasks/`, and, for a usage limit, `oauthAccount.accountUuid`
+  list `<tasks root>/nedsnodes-<seat>-tasks/`, and, for a usage limit, `oauthAccount.accountUuid`
   in `~/.claude.json`;
+- for rule 4, the due-task hook's state file for the task list, which says which tasks that hook
+  has already raised for a pull request closed without merging;
 - GitHub, through `gh`, for the prerequisites of open tasks, only when rule 4 needs the answer.
 
 It prints one JSON object per agent-seat, one per line. Each holds what the later slice needs
 without reading anything again: the session id, the transcript path, the last time a token was
-spent and the file that showed it, what is running and since when (a subagent that reported and
+spent and the file that showed it, what is running and since when, Workflow-tool runs included, each
+background command with the description of the Bash call that started it and, when its command line
+starts with coreutils `timeout <duration>`, the time that timeout stops it (a subagent that reported and
 stopped while background commands it launched still run gets the time of its report under
 `stopped_at` and a list of those commands under `own_running_background_commands`), the matched sentences with the code's reading of each, the agent-seat's last message, the tool calls a judge of the sentences
 looks through, the rule that applies and its decision.
@@ -53,7 +59,7 @@ import importlib.util
 import json
 import re
 import sys
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
 
@@ -68,13 +74,13 @@ _SCRIPTS = Path(__file__).resolve().parent
 threshold_hook = _load("handoff_context_threshold_hook",
                        _SCRIPTS / "handoff-context-threshold-hook.py")
 supervisor = _load("handoff_supervisor",
-                   _SCRIPTS.parent / "nc-systems" / "handoff" / "handoff-supervisor.py")
+                   _SCRIPTS.parent / "nn-systems" / "handoff" / "handoff-supervisor.py")
 deferred_marker_files = _load(
     "handoff_deferred_marker_and_refused_commands_files_common",
-    _SCRIPTS.parent / "nc-systems" / "handoff" / "handoff-deferred-marker-and-refused-commands-files-common.py")
+    _SCRIPTS.parent / "nn-systems" / "handoff" / "handoff-deferred-marker-and-refused-commands-files-common.py")
 due_task_hook = _load("agent_seat_due_task_raise_hook", _SCRIPTS / "agent-seat-due-task-raise-hook.py")
 walk_finder = _load("walk_me_through_approval_walk_minutes_and_walk_document_item_finder_common",
-                    _SCRIPTS.parent / "nc-systems" / "skills" / "walk-me-through"
+                    _SCRIPTS.parent / "nn-systems" / "skills" / "walk-me-through"
                     / "walk-me-through-approval-walk-minutes-and-walk-document-item-finder-common.py")
 fields = _load("agent_seat_idle_sweep_verdict_fields_common",
                _SCRIPTS / "agent-seat-idle-sweep-verdict-fields-common.py")
@@ -91,6 +97,16 @@ AGENT_EXIT_CODE_KEY = "agent_exit_code"
 USAGE_LIMIT_API_ERROR = "usage_limit_reached"
 SYNTHETIC_MODEL = "<synthetic>"
 TASK_TOOL_NAMES = ("TaskCreate", "TaskUpdate")
+# The texts Claude Code's task tools return on success: "Task #<n> created successfully: <subject>"
+# and "Updated task #<n> <fields>".
+TASK_TOOL_SUCCESS_RESULT_PATTERN = re.compile(
+    r"Task #(?P<created>\d+) created successfully\b|Updated task #(?P<updated>\d+)\b")
+# Coreutils `timeout`: its options, then the duration, a number with an optional unit.
+TIMEOUT_COMMAND_LINE_START_PATTERN = re.compile(
+    r"\s*timeout(?:\s+(?:-[fpv]+|--(?:foreground|preserve-status|verbose)"
+    r"|--(?:kill-after|signal)(?:=|\s+)\S+|-[ks]\s*\S+))*"
+    r"\s+(?P<number>\d+(?:\.\d*)?|\.\d+)(?P<unit>[smhd]?)\s")
+SECONDS_BY_TIMEOUT_DURATION_UNIT = {"": 1, "s": 1, "m": 60, "h": 3600, "d": 86400}
 HANDOFF_PUT_OFF_TEXT = ("Your handoff was put off at {time} and nothing is running now. "
                         "Is now a good time to hand off?")
 
@@ -122,7 +138,7 @@ _VERBS = (
     "fetch|pull|clone|grep|search|verify|investigate|record|save|publish|comment|"
     "close|revert|rename|move|copy|land|kick off|fire|queue|retry|rerun|amend|"
     "squash|reopen|resolve|patch|implement|scan|compare|diff|inspect|confirm|"
-    "re-?dispatch|re-?push|re-?file|re-?open|relaunch|notify|ping|hand|stage"
+    "re-?dispatch|re-?push|re-?file|re-?open|relaunch|notify|ping|hand|stage|finish"
 )
 _GERUNDS = (
     "opening|filing|creating|pushing|committing|running|re-?running|starting|"
@@ -135,7 +151,7 @@ _GERUNDS = (
     "kicking off|firing|queueing|queuing|retrying|amending|squashing|"
     "reopening|resolving|patching|implementing|scanning|comparing|inspecting|"
     "confirming|re-?dispatching|re-?pushing|relaunching|notifying|pinging|"
-    "handing|staging"
+    "handing|staging|finishing"
 )
 _FILLER = (r"(?:(?:now|then|first|next|go ahead and|go|quickly|also|immediately|just|"
            r"straight away|right away|actually|instead|again)\s+)*")
@@ -161,17 +177,32 @@ RX_GERUND_NARRATIVE = re.compile(
 RX_GERUND_NOUN = re.compile(r"^\W*\w+\s+(list|order|time|notes?|material|guide|room)\b", re.I)
 RX_NOW_NEXT = re.compile(r"^\W*(?:now|next|then)\b|\bnow\b|\bnext\b", re.I)
 # The user has the next move in these; an event-conditional sentence is a promise after the event.
+# "If you don't, I'll ..." and "unless you object, I'll ..." leave the move with the agent.
 RX_CONDITIONAL_ON_USER = re.compile(
-    r"\b(?:should you|want me|would you|shall I|say the word|say go|your call|if you'?d like|"
+    r"\b(?:should you|want me|would you|shall I|say the word|say go|your call|"
     r"can I|may I|on your (?:go|word|approval|ok|yes|y))\b"
+    r"|\bif you\b(?!\s+(?:don'?t|do not|haven'?t|have not|didn'?t|did not|won'?t|will not)\s*(?:[,;.]|$))"
     r"|^\W*(?:say|tell me|reply|answer|pick|choose)\b", re.I)
+# "as" is temporal only before "each" or before "it" or "they" and a verb that is not a form of be,
+# a modal or past tense: "as it opens", not "as it is", "as it currently stands", "as the task
+# requires" or "as those two items"; "these", "those" and "that" are left out, being determiners too.
 RX_CONDITIONAL_ON_EVENT = re.compile(
     r"\b(?:if|once|when|whenever|after|unless|until|tomorrow|later|next session|next time|"
-    r"as soon as|the moment|in a day|in an hour|by tomorrow)\b", re.I)
+    r"as soon as|the moment|in a day|in an hour|by tomorrow)\b"
+    r"|\bas\s+(?:each\b|(?:it|they)\s+(?!(?:(?:\w+ly|always|now|still|already|often|never)\s+)?"
+    r"(?:is|are|was|were|be|should|would|could|can|may|might|must|will|does|did|do|has|had|have|"
+    r"says?|said|stands?|seems?|looks?|goes|went|happens|turns|\w+ed)\b)[a-z])", re.I)
 RX_NEGATED_ACTION = re.compile(
     r"\b(?:without|instead of|rather than|not yet|never|no longer|don't|won't|can't)\s+"
     r"(?:\w+\s+){0,2}?(?:push|pushing|commit|committing|dispatch|dispatching|fork|forking|file|"
-    r"filing|open|opening|send|sending|message|messaging|start|starting|spawn|spawning)\b", re.I)
+    r"filing|open|opening|send|sending|message|messaging|start|starting|spawn|spawning)\b"
+    # A negated object declines the action too, as in "I'm starting nothing else for now"; but
+    # "nothing but the test" names what is done, and "no more than five" sets a limit.
+    r"|\b(?:" + _VERBS + "|" + _GERUNDS + r")\s+(?:nothing|none|no\s+(?:more|other|new|further))\b"
+    r"(?!\s+(?:else\s+)?(?:but|than)\b)",
+    re.I)
+# Coordinated clauses share the sentence's subject: "I'll push no further changes and merge it now".
+RX_CLAUSE_BREAK = re.compile(r",\s*(?:and\s+)?then\s+|\s+and\s+(?:then\s+)?|;\s*", re.I)
 
 
 def clean_text(text):
@@ -216,6 +247,16 @@ def _announces(sentence):
     return bool(match and _gerund_announces(sentence, match))
 
 
+def _declines_every_action(sentence):
+    """Whether a clause declines an action and no other clause announces one."""
+    clauses = RX_CLAUSE_BREAK.split(sentence)
+    if not any(RX_NEGATED_ACTION.search(clause) for clause in clauses):
+        return False
+    return not any(not RX_NEGATED_ACTION.search(clause)
+                   and (_announces(clause) or _announces("I'll " + clause))
+                   for clause in clauses)
+
+
 def sentence_kind(sentence):
     """Return the kind of a sentence the phrase lists match, or None for a sentence they miss."""
     if sentence.endswith("?"):
@@ -224,7 +265,7 @@ def sentence_kind(sentence):
     if kind is None:
         if not _announces(sentence):
             return None
-        if RX_NEGATED_ACTION.search(sentence):
+        if _declines_every_action(sentence):
             return NEGATIVE
     # The user has the next move whatever else the sentence promises.
     if RX_CONDITIONAL_ON_USER.search(sentence):
@@ -323,10 +364,60 @@ class TranscriptFacts:
         self.last_model_turn_record = None
         self.turn_ended_after_last_model_turn_record = False
         self.turn_ending_messages = []   # (record, time, time of the prompt that began its turn)
-        self.task_tool_calls = []        # (time, name, input)
+        self.task_tool_calls = []        # (time, name, input, task id), only calls whose result succeeded
         self.tool_calls = []             # (time, name, input), every tool call
         self.launch_times = {}           # subagent or background task id -> time
         self.last_task_notification = {} # task id -> (time, whether it is interim)
+        self.background_command_calls = BackgroundCommandCalls()
+
+
+class BackgroundCommandCalls:
+    """The Bash call that started each background command, and when, read record by record. Claude
+    Code moves a Bash call not run in the background there once it has run long enough, so every
+    Bash call is kept, not only those with run_in_background."""
+
+    def __init__(self):
+        self.call_by_tool_use_id = {}   # tool use id -> (input, time of the call)
+        self.call_by_task_id = {}
+
+    def read(self, record):
+        for block in tool_uses(record):
+            if block.get("name") == "Bash" and isinstance(block.get("input"), dict):
+                self.call_by_tool_use_id[block.get("id")] = (
+                    block["input"], parse_time(record.get("timestamp")))
+        result = record.get("toolUseResult")
+        task_id = result.get(threshold_hook.BACKGROUND_TASK_LAUNCH_KEY) if isinstance(result, dict) \
+            else None
+        if isinstance(task_id, str) and task_id not in self.call_by_task_id:
+            self.call_by_task_id[task_id] = self.call_by_tool_use_id.get(
+                threshold_hook.tool_result_tool_use_id(record), ({}, None))
+
+    def entry(self, task_id, started):
+        """The verdict's entry for one running background command. Its timeout counts from the
+        Bash call, which for a call moved to the background is earlier than the command's start."""
+        tool_input, called_at = self.call_by_task_id.get(task_id, ({}, None))
+        command = tool_input.get("command") if isinstance(tool_input.get("command"), str) else ""
+        description = tool_input.get("description")
+        if not (isinstance(description, str) and description.strip()):
+            line = " ".join(command.split())
+            kept = fields.BACKGROUND_COMMAND_LINE_CHARACTERS_KEPT
+            description = (line if len(line) <= kept else line[:kept - 1] + "…") or None
+        seconds = timeout_seconds_of_command_line(command)
+        timeout_starts_at = called_at or started
+        return {"id": task_id, "started": iso(started),
+                fields.BACKGROUND_COMMAND_DESCRIPTION: description,
+                fields.BACKGROUND_COMMAND_TIMEOUT_ENDS_AT:
+                    iso(timeout_starts_at + timedelta(seconds=seconds))
+                    if seconds and timeout_starts_at else None}
+
+
+def timeout_seconds_of_command_line(command):
+    """The duration of the coreutils `timeout` a command line starts with, in seconds; None when it
+    starts with none, and 0 for a duration of 0, which disables the timeout."""
+    match = TIMEOUT_COMMAND_LINE_START_PATTERN.match(command)
+    if not match:
+        return None
+    return float(match["number"]) * SECONDS_BY_TIMEOUT_DURATION_UNIT[match["unit"]]
 
 
 def task_notification_carrier_text(record):
@@ -347,8 +438,11 @@ def read_main_transcript(path):
     newest_text_record = None
     turn_started_at = None
     awaiting_turn_start = True
+    task_tool_calls = []                 # (tool use id, (time, name, input))
+    task_id_by_succeeded_tool_use_id = {}
     for record in transcript_records(path):
         moment = parse_time(record.get("timestamp"))
+        task_id_by_succeeded_tool_use_id.update(succeeded_task_tool_result_task_ids(record))
         if awaiting_turn_start and record.get("type") == "user":
             turn_started_at = moment
             awaiting_turn_start = False
@@ -371,19 +465,52 @@ def read_main_transcript(path):
         for block in tool_uses(record):
             facts.tool_calls.append((moment, block.get("name"), block.get("input") or {}))
             if block.get("name") in TASK_TOOL_NAMES:
-                facts.task_tool_calls.append((moment, block.get("name"), block.get("input") or {}))
+                task_tool_calls.append(
+                    (block.get("id"), (moment, block.get("name"), block.get("input") or {})))
         if "<task-id>" in (text := task_notification_carrier_text(record)):
             for notification in threshold_hook.TASK_NOTIFICATION_PATTERN.findall(text):
                 interim = interim_recognizer.task_notification_is_interim(notification)
                 for task_id in TASK_NOTIFICATION_TASK_ID_PATTERN.findall(notification):
                     facts.last_task_notification[task_id] = (moment, interim)
+        facts.background_command_calls.read(record)
         result = record.get("toolUseResult")
         if isinstance(result, dict) and moment:
             for key in ("agentId", threshold_hook.BACKGROUND_TASK_LAUNCH_KEY):
                 launched = result.get(key)
                 if isinstance(launched, str) and launched not in facts.launch_times:
                     facts.launch_times[launched] = moment
+    facts.task_tool_calls = [(*call, task_id_by_succeeded_tool_use_id[tool_use_id])
+                             for tool_use_id, call in task_tool_calls
+                             if tool_use_id in task_id_by_succeeded_tool_use_id]
     return facts
+
+
+def succeeded_task_tool_result_task_ids(record):
+    """{tool use id: task id} for each result in this record that shows a task call recorded
+    something, the task id read from the success text. A TaskUpdate on a task id that does not
+    exist returns "Task not found" with no is_error, and a call whose turn was interrupted has no
+    result, so only the success text counts; a TaskCreate's input names no id, so its id comes from
+    its result."""
+    content = (record.get("message") or {}).get("content")
+    if record.get("type") != "user" or not isinstance(content, list):
+        return {}
+    task_ids = {}
+    for block in content:
+        if isinstance(block, dict) and block.get("type") == "tool_result":
+            success = TASK_TOOL_SUCCESS_RESULT_PATTERN.match(tool_result_text(block))
+            if success:
+                task_ids[block.get("tool_use_id")] = success["created"] or success["updated"]
+    return task_ids
+
+
+def tool_result_text(block):
+    content = block.get("content")
+    if isinstance(content, str):
+        return content
+    if isinstance(content, list):
+        return "".join(part.get("text", "") for part in content
+                       if isinstance(part, dict) and isinstance(part.get("text"), str))
+    return ""
 
 
 def newest_token_spend_in(path):
@@ -395,7 +522,8 @@ def newest_token_spend_in(path):
     return newest
 
 
-def running_subagent_entry(agent_id, facts, transcript, newest_spend_by_subagent_transcript, now):
+def running_subagent_entry(agent_id, facts, transcript, newest_spend_by_subagent_transcript, now,
+                           task_ids_ended_in_session_transcript):
     """The entry for a subagent the session's records leave running. Claude Code marks a subagent's
     report interim while background commands it launched still run, its final report included, so
     a subagent whose last report is interim and that has spent no token since is reported as
@@ -408,10 +536,14 @@ def running_subagent_entry(agent_id, facts, transcript, newest_spend_by_subagent
         return entry
     own = threshold_hook.work_in_flight(str(own_transcript),
                                         background_task_wait_seconds=float("inf"), now=now,
-                                        should_raise_on_undecodable_bytes=True)
+                                        should_raise_on_undecodable_bytes=True,
+                                        task_ids_ended_in_session_transcript=task_ids_ended_in_session_transcript)
+    own_calls = BackgroundCommandCalls()
+    for record in transcript_records(own_transcript):
+        own_calls.read(record)
     entry[fields.SUBAGENT_STOPPED_AT] = iso(stopped_at)
     entry[fields.SUBAGENT_OWN_RUNNING_BACKGROUND_COMMANDS] = [
-        {"id": task_id, "started": iso(own.launched_at_by_id.get(task_id))}
+        own_calls.entry(task_id, own.launched_at_by_id.get(task_id))
         for task_id in own.background_task_ids]
     return entry
 
@@ -450,21 +582,35 @@ def logged_in_account(claude_json):
     return account.get("accountUuid") if isinstance(account, dict) else None
 
 
-def open_tasks_nothing_holds(task_directory, checker):
-    """Open tasks nothing recorded holds back, as the due-task hook counts them for its idle check."""
-    if not task_directory.is_dir():
-        return []
+def tasks_of_task_list(task_directory, unknown_without_them):
+    """Every task in the agent-seat's task list, by id, as the due-task hook reads it; a missing
+    task list holds none. Raises ReadFailure, completed by unknown_without_them, such as "whether it
+    backs a promise of the agent-seat", when the list or one of its task files cannot be read."""
     unreadable = []
-    tasks = due_task_hook.read_tasks(task_directory, unreadable)
+    try:
+        tasks = due_task_hook.read_tasks(task_directory, unreadable)
+    except OSError as error:
+        raise ReadFailure(f"the task list {task_directory} could not be listed ({error}), so "
+                          f"{unknown_without_them} is unknown. Repair the directory so that it "
+                          "can be listed, then run this program again.") from error
     if unreadable:
-        raise ReadFailure(f"{unreadable[0]} could not be read as a task with an id, so whether it "
-                          "holds the agent-seat's work is unknown. Repair the file so that it holds "
-                          "a task with an id, or remove it if it is not a task, then run this "
-                          "program again.")
+        raise ReadFailure(f"{unreadable[0]} could not be read as a task with an id, so "
+                          f"{unknown_without_them} is unknown. Repair the file so that it holds a "
+                          "task with an id, or remove it if it is not a task, then run this program "
+                          "again.")
+    return tasks
+
+
+def open_tasks_nothing_holds(task_directory, checker, due_task_raise_state_directory):
+    """Open tasks nothing recorded holds back, as the due-task hook counts them for its idle check,
+    from that hook's state file for the task list."""
+    tasks = tasks_of_task_list(task_directory, "whether it holds the agent-seat's work")
     # The checker is shared by every agent-seat, so only the failures appended here are this one's.
     failures_before = len(checker.gh_failures)
-    free, _ = due_task_hook.unheld_and_held_tasks(tasks, task_directory, checker)
-    if len(checker.gh_failures) > failures_before:
+    raised = due_task_hook.read_state(
+        due_task_raise_state_directory / f"{task_directory.name}.json")["raised"]
+    free, _ = due_task_hook.unheld_and_held_tasks(tasks, task_directory, checker, raised)
+    if len(checker.gh_failures) > failures_before:  # pragma: no mutate, gh_failures is only appended to, so != gives what > gives; a test kills is not
         kind, number, cause = checker.gh_failures[failures_before]
         raise ReadFailure(f"GitHub could not say whether {kind} {number} holds: {cause}")
     return [{"id": task_id, "subject": tasks[task_id].get("subject")} for task_id in free]
@@ -473,15 +619,7 @@ def open_tasks_nothing_holds(task_directory, checker):
 def open_tasks_with_prerequisites_or_blocked_by(task_directory):
     """Every open task that waits on something, whenever it was created: any of them may be the
     one that backs a promise or a hold."""
-    if not task_directory.is_dir():
-        return []
-    unreadable = []
-    tasks = due_task_hook.read_tasks(task_directory, unreadable)
-    if unreadable:
-        raise ReadFailure(f"{unreadable[0]} could not be read as a task with an id, so whether it "
-                          "backs a promise of the agent-seat is unknown. Repair the file so that "
-                          "it holds a task with an id, or remove it if it is not a task, then run "
-                          "this program again.")
+    tasks = tasks_of_task_list(task_directory, "whether it backs a promise of the agent-seat")
     waiting = []
     for task_id, task in tasks.items():
         prerequisites = (task.get("metadata") or {}).get("prerequisites")
@@ -495,6 +633,21 @@ def open_tasks_with_prerequisites_or_blocked_by(task_directory):
 
 # --- One agent-seat's verdict ---
 
+def sets_prerequisites_or_blocked_by(task_tool_input):
+    """Whether a TaskCreate or TaskUpdate call records what a task waits on: the only call that can
+    back a promise to act after an event or a hold."""
+    metadata = task_tool_input.get("metadata")
+    # The transcript keeps the input as the model wrote it, and TaskCreate accepts metadata
+    # written as a JSON string.
+    if isinstance(metadata, str):
+        try:
+            metadata = json.loads(metadata)
+        except ValueError:
+            metadata = None
+    return bool((metadata.get("prerequisites") if isinstance(metadata, dict) else None)
+                or task_tool_input.get("addBlockedBy"))
+
+
 def code_reading_of_sentence(kind, turn_started_at, task_tool_calls, open_waiting_tasks):
     """What code settles about one matched sentence: not_raised, unbacked, or judge.
 
@@ -507,8 +660,7 @@ def code_reading_of_sentence(kind, turn_started_at, task_tool_calls, open_waitin
             return fields.JUDGE
         backing_candidates = [call for call in task_tool_calls
                               if call[0] and turn_started_at and call[0] >= turn_started_at
-                              and ((call[2].get("metadata") or {}).get("prerequisites")
-                                   or call[2].get("addBlockedBy"))]
+                              and sets_prerequisites_or_blocked_by(call[2])]
         return fields.JUDGE if backing_candidates else fields.UNBACKED
     return fields.JUDGE
 
@@ -554,13 +706,15 @@ def tool_calls_since_start_of_earliest_turn_with_sentence_to_judge(facts, judged
             for moment, name, tool_input in facts.tool_calls if moment and moment >= earliest]
 
 
-def rules_three_to_five(verdict, put_off_at, checker, task_directory):
-    running = verdict["running"]["subagents"] or verdict["running"]["background_commands"]
+def rules_three_to_five(verdict, put_off_at, checker, task_directory,
+                        due_task_raise_state_directory):
+    running = any(verdict["running"].values())
     if verdict["handoff_deferred_marker"] and not running:
         return {fields.RULE: 3, fields.DECISION: fields.WAKE_HANDOFF_PUT_OFF,
                 fields.TEXT: HANDOFF_PUT_OFF_TEXT.format(time=iso(put_off_at))}
     if not running and not verdict["handoff_deferred_marker"]:
-        verdict["open_tasks_nothing_holds"] = open_tasks_nothing_holds(task_directory, checker)
+        verdict["open_tasks_nothing_holds"] = open_tasks_nothing_holds(
+            task_directory, checker, due_task_raise_state_directory)
         if not verdict["open_tasks_nothing_holds"]:
             return {fields.RULE: 4, fields.DECISION: fields.NO_WAKE}
     return {fields.RULE: 5, fields.DECISION: fields.JUDGE}
@@ -600,17 +754,19 @@ def verdict_for_seat(seat, paths, now, since, checker, parser, usage_limit_recor
         facts = read_main_transcript(transcript)
         last_spend, source = facts.last_token_spend, transcript
         newest_spend_by_subagent_transcript = {}
-        subagent_directory = project_directory / session_id / "subagents"
-        if subagent_directory.is_dir():
-            for subagent_transcript in sorted(subagent_directory.glob("*.jsonl")):
-                spent = newest_token_spend_in(subagent_transcript)
-                newest_spend_by_subagent_transcript[subagent_transcript] = spent
-                if spent and (last_spend is None or spent > last_spend):
-                    last_spend, source = spent, subagent_transcript
+        for subagent_transcript in threshold_hook.session_subagent_transcript_paths(transcript):
+            spent = newest_token_spend_in(subagent_transcript)
+            newest_spend_by_subagent_transcript[subagent_transcript] = spent
+            if spent and (last_spend is None or spent > last_spend):
+                last_spend, source = spent, subagent_transcript
         verdict["last_activity"] = {"time": iso(last_spend),
                                     "source": str(source) if last_spend else None}
         verdict[fields.LAST_TOOL_CALL_AT] = iso(max(
             (moment for moment, _, _ in facts.tool_calls if moment), default=None))
+        verdict[fields.SUCCESSFUL_TASK_TOOL_CALLS_SETTING_PREREQUISITES_OR_BLOCKED_BY] = [
+            {"time": iso(moment), "name": name, "task": task_id}
+            for moment, name, tool_input, task_id in facts.task_tool_calls
+            if moment and sets_prerequisites_or_blocked_by(tool_input)]
 
         last = facts.last_model_turn_record or {}
         limit = is_usage_limit(last)
@@ -627,15 +783,19 @@ def verdict_for_seat(seat, paths, now, since, checker, parser, usage_limit_recor
                 str(transcript), background_task_wait_seconds=float("inf"), now=now)
             running_subagents = [
                 running_subagent_entry(agent_id, facts, transcript,
-                                       newest_spend_by_subagent_transcript, now)
+                                       newest_spend_by_subagent_transcript, now,
+                                       flight.ended_task_ids)
                 for agent_id in flight.subagent_ids]
         except threshold_hook.TranscriptCouldNotBeFullyRead as error:
             raise ReadFailure(f"{error}: it is the last line, still being written, which the next "
                               "run reads") from error
         verdict["running"] = {
             "subagents": running_subagents,
-            "background_commands": [{"id": task_id, "started": iso(facts.launch_times.get(task_id))}
-                                    for task_id in flight.background_task_ids]}
+            "background_commands": [
+                facts.background_command_calls.entry(task_id, facts.launch_times.get(task_id))
+                for task_id in flight.background_task_ids],
+            "workflows": [{"id": task_id, "started": iso(flight.launched_at_by_id.get(task_id))}
+                          for task_id in flight.workflow_ids]}
         marker = deferred_marker_files.handoff_deferred_marker_path(
             paths.handoff_directory, session_id)
         try:
@@ -663,26 +823,30 @@ def verdict_for_seat(seat, paths, now, since, checker, parser, usage_limit_recor
             return verdict
 
         verdict[fields.LAST_TURN_ENDING_MESSAGE] = last_message_of(facts)
-        task_directory = paths.tasks_root / f"nedschorus-{seat}-tasks"
+        task_directory = paths.tasks_root / f"nedsnodes-{seat}-tasks"
         open_waiting_tasks = open_tasks_with_prerequisites_or_blocked_by(task_directory)
         verdict["sentences"] = matched_sentences(facts, since, open_waiting_tasks)
-        raised = [item for item in verdict["sentences"] if item["code_reading"] != fields.NOT_RAISED]
-        if not raised:
-            verdict.update(rules_three_to_five(verdict, put_off_at, checker, task_directory))
-        elif any(item["code_reading"] == fields.JUDGE for item in raised):  # pragma: no mutate, raised holds only the UNBACKED and JUDGE constants themselves, and "unbacked" sorts after "judge", so <= and is give what == gives
-            judged = [item for item in raised if item["code_reading"] == fields.JUDGE]
+        sentences_by_code_reading = fields.verdict_sentences_grouped_by_code_reading(
+            verdict["sentences"])
+        judged = sentences_by_code_reading.get(fields.JUDGE)
+        unbacked = sentences_by_code_reading.get(fields.UNBACKED)
+        if judged:
             verdict[fields.TOOL_CALLS_SINCE_START_OF_EARLIEST_TURN_WITH_SENTENCE_TO_JUDGE] = (
                 tool_calls_since_start_of_earliest_turn_with_sentence_to_judge(facts, judged))
             verdict[fields.OPEN_TASKS_WITH_PREREQUISITES_OR_BLOCKED_BY] = open_waiting_tasks
             # Only the judge can find every sentence backed, and then rules 3 to 5 decide; a
             # sentence code already found unbacked means that can never happen. Rule 2 is set
             # after those reads, so one that fails leaves the rule null.
-            if not any(item["code_reading"] == fields.UNBACKED for item in raised):
+            if not unbacked:
                 verdict[fields.IF_EVERY_SENTENCE_BACKED] = rules_three_to_five(
-                    verdict, put_off_at, checker, task_directory)
+                    verdict, put_off_at, checker, task_directory,
+                    paths.due_task_raise_state_directory)
             verdict.update({fields.RULE: 2, fields.DECISION: fields.JUDGE})
-        else:
+        elif unbacked:
             verdict.update({fields.RULE: 2, fields.DECISION: fields.SEND_UNBACKED})
+        else:
+            verdict.update(rules_three_to_five(verdict, put_off_at, checker, task_directory,
+                                               paths.due_task_raise_state_directory))
     except ReadFailure as error:
         verdict["errors"].append(str(error))
     return verdict
@@ -697,6 +861,8 @@ class Paths:
         self.projects_root = Path(arguments.projects_root).expanduser()
         self.tasks_root = Path(arguments.tasks_root).expanduser()
         self.claude_json = Path(arguments.claude_json).expanduser()
+        self.due_task_raise_state_directory = Path(
+            arguments.due_task_raise_state_directory).expanduser()
 
 
 def agent_seats(handoff_directory):
@@ -716,6 +882,8 @@ def main(argv=None):
     parser.add_argument("--projects-root", default="~/.claude/projects")
     parser.add_argument("--tasks-root", default="~/.claude/tasks")
     parser.add_argument("--claude-json", default="~/.claude.json")
+    parser.add_argument("--due-task-raise-state-directory",
+                        default=str(Path("~") / due_task_hook.STATE_DIRECTORY_UNDER_HOME))
     parser.add_argument("--usage-limit-record-uuid-to-ignore", action="append", default=[],
                         help="uuid of a usage-limit record rule 1 no longer applies to; may repeat")
     arguments = parser.parse_args(argv)

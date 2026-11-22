@@ -44,12 +44,12 @@ import unittest
 
 MACHINE_DIRECTORY = pathlib.Path(__file__).resolve().parent.parent
 REPOSITORY_ROOT = MACHINE_DIRECTORY.parent.parent
-DESIGN_RELATIVE_PATH = "docs/design-to-main/design-to-main-state-machine-design.md"
+DESIGN_RELATIVE_PATH = "docs/design-to-main/design-to-main-state-machine.system.design.md"
 DESIGN_PATH = REPOSITORY_ROOT / DESIGN_RELATIVE_PATH
 
 _rule_failure_lines_spec = importlib.util.spec_from_file_location(
     "rule_enforcing_nc_test_suite_failure_message_closing_lines_text_common",
-    REPOSITORY_ROOT / "nc-systems" / "general-tools"
+    REPOSITORY_ROOT / "nn-systems" / "general-tools"
     / "rule-enforcing-nc-test-suite-failure-message-closing-lines-text-common.py")
 RULE_FAILURE_LINES = importlib.util.module_from_spec(_rule_failure_lines_spec)
 _rule_failure_lines_spec.loader.exec_module(RULE_FAILURE_LINES)
@@ -86,7 +86,7 @@ def machine_names_in_the_state_tables_module(tables):
         "refusal-class": {
             value for name, value in vars(tables).items() if name.startswith("REFUSAL_")},
         "coverage-type": set(tables.COVERAGE_TYPES_THAT_ARE_AGENT_INSTRUCTIONS)
-                         | {tables.COVERAGE_TYPE_NO_TESTS},
+                         | {tables.COVERAGE_TYPE_NO_TESTS, tables.COVERAGE_TYPE_USER_TESTS_BY_HAND},
         "user-ruling the machine acts on": {
             value for name, value in vars(tables).items() if name.startswith("RULING_")},
     }
@@ -138,7 +138,7 @@ BACKTICKED_TOKENS_THAT_ARE_NOT_MACHINE_NAMES = {
     "git show": "a git command the arbitrator runs (section 9)",
     "supersedes": "the notes' section 13 edge name, which a run does not use (section 9)",
     "script": "a coverage-type (section 2) the tables module does not name: the machine "
-              "reads only the agent-instructions types and no-tests",
+              "reads only the agent-instructions types, user and no-tests",
     "can-not-be-tested": "a no-tests reason, written in the test-design, which the machine "
                          "reads only for its coverage-type lines (section 2)",
     "do-not-know-how-to-test": "a no-tests reason (section 2), as can-not-be-tested",
@@ -345,8 +345,8 @@ class TheCheckerFailsOnANameTheCodeDoesNotHave(unittest.TestCase):
         self.assertEqual(self.undefined_in(text), {"reject the tests"})
 
     def test_a_misspelled_state_exit_field_fails(self):
-        text = self.design_text + "\nIt writes `held-rulings`.\n"
-        self.assertEqual(self.undefined_in(text), {"held-rulings"})
+        text = self.design_text + "\nIt writes `named-file`.\n"
+        self.assertEqual(self.undefined_in(text), {"named-file"})
 
     def test_a_name_the_code_no_longer_defines_fails(self):
         without_flaky_test = dict(self.name_classes)

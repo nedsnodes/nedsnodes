@@ -135,8 +135,10 @@ with tempfile.TemporaryDirectory() as temporary:
           len(claude_calls) == 2, claude_calls)
     check("a cold start's ask turn carries the plan-reuse sentence and its "
           "cold-start turn does not",
-          ghi_ask.ASK_PROMPT_ISSUES_WHOSE_DESIGN_A_PLAN_SHOULD_REUSE_REQUEST_SENTENCE in claude_calls[1][0]
-          and ghi_ask.ASK_PROMPT_ISSUES_WHOSE_DESIGN_A_PLAN_SHOULD_REUSE_REQUEST_SENTENCE not in claude_calls[0][0],
+          ghi_ask.GHI_GUIDE_AGENT_ASK_PROMPT_SENTENCE_ASKING_THE_AGENT_TO_NAME_ISSUES_WHOSE_DESIGN_A_PLAN_SHOULD_REUSE
+          in claude_calls[1][0]
+          and ghi_ask.GHI_GUIDE_AGENT_ASK_PROMPT_SENTENCE_ASKING_THE_AGENT_TO_NAME_ISSUES_WHOSE_DESIGN_A_PLAN_SHOULD_REUSE
+          not in claude_calls[0][0],
           claude_calls)
     check("cold-start's second call resumes the session the first call opened",
           claude_calls[1][1] == "sess-A", claude_calls)
@@ -169,7 +171,7 @@ with tempfile.TemporaryDirectory() as temporary:
           len(refresh_calls) == 1 and refresh_calls[0]["full"] is False, refresh_calls)
 
     # --- every question ghi-guide-agent is sent carries the plan-reuse sentence ----
-    reuse = ghi_ask.ASK_PROMPT_ISSUES_WHOSE_DESIGN_A_PLAN_SHOULD_REUSE_REQUEST_SENTENCE
+    reuse = ghi_ask.GHI_GUIDE_AGENT_ASK_PROMPT_SENTENCE_ASKING_THE_AGENT_TO_NAME_ISSUES_WHOSE_DESIGN_A_PLAN_SHOULD_REUSE
     check("the plan-reuse sentence is the one the user approved",
           reuse == ("If the question describes a plan, also name any issue whose "
                     "design built something the plan should reuse instead of "
@@ -380,7 +382,7 @@ with tempfile.TemporaryDirectory() as temporary:
         project_directory = ghi_ask.claude_code_session_transcript_lookup_and_text_search_common.project_directory_for_seat(seat, projects_root)
         project_directory.mkdir(parents=True, exist_ok=True)
         record = {"type": "assistant", "message": {
-            "model": "claude-sonnet-5",
+            "model": "claude-sonnet-5-5",
             "usage": {"input_tokens": 1_000, "cache_read_input_tokens": tokens - 1_000,
                       "cache_creation_input_tokens": 0}}}
         (project_directory / f"{session_id}.jsonl").write_text(
@@ -507,7 +509,7 @@ check("the remote command carries NO path from this machine",
 check("the seat is resolved box-side at the launcher's fixed box root, $HOME/agents",
       'seat="$HOME/agents/ghi-guide-agent"' in command, command)
 check("the seat path reads no agents-root variable (launch-claude-ubuntu reads none)",
-      "NEDSCHORUS_AGENTS_ROOT" not in command, command)
+      "NEDSNODES_AGENTS_ROOT" not in command, command)
 check("the box-side run is pinned to --seat-dir \"$PWD\", so it runs in the "
       "seat the shell entered",
       '--seat-dir "$PWD"' in command, command)
@@ -611,7 +613,7 @@ finally:
 APPROVED_NOT_ABOUT_ISSUES_MESSAGE = (
     "Not a question about GitHub issues: ghi-guide-agent reports which issues relate to a subject.\n"
     'Ask again as: scripts/ghi-guide-agent-ask.py "Which issues cover <your subject>?"\n'
-    'If that is refused too, search yourself: gh issue list --repo nedschorus/nedschorus '
+    'If that is refused too, search yourself: gh issue list --repo nedsnodes/nedsnodes '
     '--state all --search "<terms>"\n')
 ESCALATE_SENTENCE = ("the 2026-09-19 body ruling in #46 may not hold after "
                      "the 2026-09-29 ruling")
@@ -902,7 +904,7 @@ try:
                                 if recorded_keyword_arguments else {})
         check("run_claude: claude's environment tells the handoff hook this script "
               "reincarnates the session",
-              launched_environment.get("NEDSCHORUS_SESSION_REINCARNATION_OWNED_BY_CALLER")
+              launched_environment.get("NEDSNODES_SESSION_REINCARNATION_OWNED_BY_CALLER")
               and launched_environment.get("PATH") == os.environ.get("PATH"),
               recorded_keyword_arguments)
         launched_command = recorded_commands[0] if recorded_commands else []
@@ -937,8 +939,8 @@ def _commit(repository, name, content, message):
 
 
 def _make_origin_and_seat(root, seat_name):
-    """An origin repository and a seat checkout of it on its own branch —
-    the box's layout: ghi-guide-agent sits on a branch named `ghi-guide-agent`, never main."""
+    """An origin repository and a seat checkout of it detached at origin/main —
+    the box's layout: ghi-guide-agent's agent-home rests detached, on no branch."""
     origin = root / f"{seat_name}-origin"
     origin.mkdir()
     _git(["init", "-q", "-b", "main"], origin)
@@ -949,7 +951,7 @@ def _make_origin_and_seat(root, seat_name):
     _git(["clone", "-q", str(origin), str(seat)], root)
     _git(["config", "user.email", "test@example.invalid"], seat)
     _git(["config", "user.name", "ghi test"], seat)
-    _git(["checkout", "-q", "-b", "ghi-guide-agent"], seat)
+    _git(["checkout", "-q", "--detach", "origin/main"], seat)
     return origin, seat
 
 
@@ -963,8 +965,10 @@ with tempfile.TemporaryDirectory() as temporary:
           (seat / "design.md").exists(), line)
     check("and it says how far it moved",
           "refreshed the seat checkout 1 commit(s)" in line, line)
-    check("on its own branch, not main — the reference-checkout rule does not apply here",
-          _git(["rev-parse", "--abbrev-ref", "HEAD"], seat).stdout.strip() == "ghi-guide-agent")
+    check("and it stays detached, at origin/main — the reference-checkout rule does not apply here",
+          _git(["symbolic-ref", "-q", "HEAD"], seat).returncode == 1
+          and _git(["rev-parse", "HEAD"], seat).stdout.strip()
+          == _git(["rev-parse", "origin/main"], seat).stdout.strip())
 
     check("a checkout already level with main says nothing",
           ghi_ask.fast_forward_seat_checkout(seat) == "",
@@ -990,10 +994,10 @@ with tempfile.TemporaryDirectory() as temporary:
           "has 1 uncommitted tracked change(s)" in line
           and not (seat / "design.md").exists(), line)
 
-    # ghi-guide-agent commits its own document-side link repairs, so a checkout
-    # carrying a commit main does not have is a real state, not debris.
+    # A commit main does not have is someone's work, even though the
+    # pre-commit hook refuses commits in an agent-home: it may predate the hook.
     origin, seat = _make_origin_and_seat(root, "ff-diverged")
-    _commit(seat, "repair.md", "a link repair\n", "ghi-guide-agent repairs a link")
+    _commit(seat, "work.md", "work of its own\n", "a commit main does not have")
     _commit(origin, "design.md", "new design\n", "a design lands on main")
     head_before = _git(["rev-parse", "HEAD"], seat).stdout.strip()
     line = ghi_ask.fast_forward_seat_checkout(seat)
@@ -1491,7 +1495,7 @@ with tempfile.TemporaryDirectory() as temporary:
         # It is given as `ssh nedlern@ned-box '<shell command>'`, so it runs on
         # ned-box from either machine; the shell command inside is what runs here.
         given_commands = re.findall(
-            r"`ssh nedlern@ned-box '(git -C ~/Projects/nedschorus [^'`]+)'`", said)
+            r"`ssh nedlern@ned-box '(git -C ~/Projects/nedsnodes [^'`]+)'`", said)
         import subprocess as real_subprocess
         patch_module_function(real_subprocess, "run", subprocess_run_orig)
         git_environment = dict(os.environ, GIT_AUTHOR_NAME="t", GIT_AUTHOR_EMAIL="t@t",
@@ -1512,7 +1516,7 @@ with tempfile.TemporaryDirectory() as temporary:
                 run_git("-C", str(projects_repository), "branch", "ghi-guide-agent")
             command = given_commands[0] if len(given_commands) == 1 else "false"
             created = real_subprocess.run(
-                ["sh", "-c", command.replace("~/Projects/nedschorus", str(projects_repository))],
+                ["sh", "-c", command.replace("~/Projects/nedsnodes", str(projects_repository))],
                 capture_output=True, text=True, env=git_environment, check=False)
             git_directory = run_git("-C", str(missing_seat), "rev-parse",
                                     "--absolute-git-dir").stdout.strip()
@@ -1538,7 +1542,7 @@ import subprocess as real_subprocess
 
 with tempfile.TemporaryDirectory() as home:
     environment = {key: value for key, value in os.environ.items()
-                   if key != "NEDSCHORUS_AGENTS_ROOT"}
+                   if key != "NEDSNODES_AGENTS_ROOT"}
     environment["HOME"] = home
     import_and_print_default_seat_dir = (
         "import importlib.util, sys\n"

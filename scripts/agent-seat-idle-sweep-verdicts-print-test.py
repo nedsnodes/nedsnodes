@@ -19,6 +19,7 @@ import subprocess
 import sys
 import tempfile
 import time
+import types
 from pathlib import Path
 
 PROGRAM = Path(__file__).with_name("agent-seat-idle-sweep-verdicts-print.py")
@@ -50,12 +51,12 @@ def check(case_name, condition, detail=""):
         failures.append(case_name)
 
 
-def assistant(text=None, at=LONG_AGO, tokens=100, tool=None, uuid=None):
+def assistant(text=None, at=LONG_AGO, tokens=100, tool=None, uuid=None, tool_id="t"):
     content = []
     if text is not None:
         content.append({"type": "text", "text": text})
     if tool is not None:
-        content.append({"type": "tool_use", "id": "t", "name": tool[0], "input": tool[1]})
+        content.append({"type": "tool_use", "id": tool_id, "name": tool[0], "input": tool[1]})
     return {"type": "assistant", "timestamp": at, "uuid": uuid or f"u-{at}-{text}",
             "message": {"model": "claude-opus-5-5", "content": content,
                         "usage": {"input_tokens": tokens, "output_tokens": tokens}}}
@@ -66,6 +67,16 @@ def user(text, at=LONG_AGO, tool_result=None):
     if tool_result is not None:
         record["toolUseResult"] = tool_result
     return record
+
+
+def task_result(text, at=LONG_AGO, tool_id="t"):
+    """The record holding a task call's result, as Claude Code writes it: a success text such as
+    "Task #1 created successfully: <subject>", or "Task not found" with no is_error."""
+    return user([{"type": "tool_result", "tool_use_id": tool_id, "content": text}], at=at)
+
+
+CREATED = "Task #1 created successfully: report"
+UPDATED = "Updated task #3 blockedBy"
 
 
 def turn_end(at=LONG_AGO):
@@ -100,6 +111,7 @@ class Machine:
         gh.chmod(0o755)
         self.gh_responses = self.root / "gh.json"
         self.gh_responses.write_text("{}")
+        self.due_task_raise_state = self.root / "due-task-raise-state"
 
     def seat(self, name, records=(), session="s-1", state=None, raw_tail=b""):
         (self.agents / name).mkdir(exist_ok=True)
@@ -115,7 +127,7 @@ class Machine:
         return project, transcript
 
     def task(self, seat, task_id, status="pending", metadata=None, blocked_by=()):
-        directory = self.tasks / f"nedschorus-{seat}-tasks"
+        directory = self.tasks / f"nedsnodes-{seat}-tasks"
         directory.mkdir(exist_ok=True)
         task = {"id": task_id, "subject": f"task {task_id}", "status": status,
                 "blocks": [], "blockedBy": list(blocked_by)}
@@ -135,7 +147,8 @@ class Machine:
         completed = subprocess.run(
             [sys.executable, str(PROGRAM), "--now", NOW, "--handoff-directory", str(self.handoffs),
              "--agents-root", str(self.agents), "--projects-root", str(self.projects),
-             "--tasks-root", str(self.tasks), "--claude-json", str(self.claude_json), *extra],
+             "--tasks-root", str(self.tasks), "--claude-json", str(self.claude_json),
+             "--due-task-raise-state-directory", str(self.due_task_raise_state), *extra],
             capture_output=True, text=True, env=environment, check=False)
         verdicts = {}
         for line in completed.stdout.splitlines():
@@ -151,11 +164,11 @@ class Machine:
 
 _scratch_directory_common_spec = importlib.util.spec_from_file_location(
     "test_scratch_directory_whose_earlier_killed_runs_leftovers_are_removed_first_common",
-    Path(__file__).resolve().parent.parent / "nc-systems" / "general-tools"
+    Path(__file__).resolve().parent.parent / "nn-systems" / "general-tools"
     / "test-scratch-directory-whose-earlier-killed-runs-leftovers-are-removed-first-common.py")
 _scratch_directory_common = importlib.util.module_from_spec(_scratch_directory_common_spec)
 _scratch_directory_common_spec.loader.exec_module(_scratch_directory_common)
-SUITE_ROOT = _scratch_directory_common.scratch_directory_after_removing_ones_killed_runs_left(
+SUITE_ROOT = _scratch_directory_common.make_test_scratch_directory_after_removing_killed_runs_leftovers(
     "agent-seat-idle-sweep-verdicts-print-test-")
 
 # Set in the copy of this suite the SIGTERM case starts, which waits to be stopped.
@@ -231,7 +244,7 @@ try:
                            assistant(tool=("TaskCreate", {"subject": "report",
                                                           "metadata": {"prerequisites": [
                                                               {"pr_merged": 927}]}})),
-                           turn_end()])
+                           task_result(CREATED), turn_end()])
     _, verdicts, _ = machine.run()
     check("promise with a task carrying prerequisites: the judge decides whether it names the event",
           verdicts["alpha"]["sentences"][0]["code_reading"] == "judge"
@@ -239,7 +252,7 @@ try:
     machine = Machine()
     machine.seat("alpha", [user("go"), assistant("I'll hold."),
                            assistant(tool=("TaskUpdate", {"taskId": "3", "addBlockedBy": ["2"]})),
-                           turn_end()])
+                           task_result(UPDATED), turn_end()])
     _, verdicts, _ = machine.run()
     check("a hold backed by addBlockedBy goes to the judge",
           [(s["kind"], s["code_reading"]) for s in verdicts["alpha"]["sentences"]]
@@ -248,7 +261,7 @@ try:
     machine.seat("alpha", [user("go"), assistant("I'll hold."),
                            assistant(tool=("TaskUpdate", {"taskId": "3", "addBlockedBy": ["2"]}),
                                      at=None),
-                           turn_end()])
+                           task_result(UPDATED), turn_end()])
     code, verdicts, _ = machine.run()
     check("a task call in a record with no timestamp cannot back a hold: code finds it unbacked",
           code == 0 and [(s["kind"], s["code_reading"]) for s in verdicts["alpha"]["sentences"]]
@@ -288,7 +301,7 @@ try:
     machine.seat("alpha", [user("go", at="2026-11-02T11:49:00Z"),
                            assistant(tool=("TaskCreate", {"metadata": {"prerequisites": [
                                {"pr_merged": 927}]}}), at="2026-11-02T11:49:30Z"),
-                           user("", at="2026-11-02T11:49:31Z", tool_result={"task": {"id": "1"}}),
+                           task_result(CREATED, at="2026-11-02T11:49:31Z"),
                            assistant(PROMISE), turn_end()])
     _, verdicts, _ = machine.run()
     check("a task created earlier in the promise's own turn backs it, so the judge decides",
@@ -303,6 +316,7 @@ try:
                            user("go", at="2026-11-02T11:49:00Z"),
                            assistant(tool=("TaskCreate", {"metadata": {"prerequisites": [
                                {"pr_merged": 927}]}}), at="2026-11-02T11:49:30Z"),
+                           task_result(CREATED, at="2026-11-02T11:49:31Z"),
                            assistant(PROMISE), turn_end()])
     _, verdicts, _ = machine.run()
     check("a task created earlier in the promise's later turn backs it",
@@ -316,7 +330,7 @@ try:
         machine.seat("alpha", [user("a", at="2026-11-02T11:30:00Z"),
                                assistant(tool=("TaskCreate", {"metadata": {"prerequisites": [
                                    {"pr_merged": 927}]}}), at="2026-11-02T11:35:00Z"),
-                               interrupted, user("new prompt", at="2026-11-02T11:49:00Z"),
+                               task_result(CREATED, at="2026-11-02T11:35:01Z"), interrupted, user("new prompt", at="2026-11-02T11:49:00Z"),
                                assistant(PROMISE), turn_end()])
         _, verdicts, _ = machine.run()
         check(f"a task from a turn ended by {interruption!r} does not back the next turn's promise",
@@ -330,7 +344,8 @@ try:
             meta = {**user(feedback, at="2026-11-02T11:49:45Z"), "isMeta": True}
             records = [user("go", at="2026-11-02T11:49:00Z"),
                        assistant(tool=("TaskCreate", {"metadata": {"prerequisites": [
-                           {"pr_merged": 927}]}}), at="2026-11-02T11:49:30Z")]
+                           {"pr_merged": 927}]}}), at="2026-11-02T11:49:30Z"),
+                       task_result(CREATED, at="2026-11-02T11:49:31Z")]
             records += ([assistant(PROMISE), meta] if after_text else [meta, assistant(PROMISE)])
             machine.seat("alpha", records + [turn_end()])
             code, verdicts, error = machine.run()
@@ -338,6 +353,48 @@ try:
                   code == 0 and verdicts["alpha"]["decision"] == "judge"
                   and verdicts["alpha"]["sentences"][0]["code_reading"] == "judge",
                   (code, verdicts, error))
+
+    # --- an "as" clause and an "if you" clause: the first three sentences are from the sweep's log --
+    expected_kinds = [
+        ("I'll review each pull request as it opens.", "promise_after_event"),
+        ("It has two small cleanup pull requests coming first, and I'll review all three as they open.",
+         "promise_after_event"),
+        ("If you'd rather not, I'll close it, and the fetch keeps failing now and then, leaving main "
+         "untested after those merges.", "conditional_on_user"),
+        ("I'll remove the worktree if you say so.", "conditional_on_user"),
+        ("As each check finishes, I'll merge whatever comes back clean.", "promise_after_event"),
+        ("I'll review them as they come in.", "promise_after_event"),
+        ("If you don't want it, I'll close it.", "conditional_on_user"),
+        ("I'll start by reading the glossary, as the task requires, then the document under review.",
+         "announced_action"),
+        ("I'll make a fresh branch that fits your approved paragraph to the page as it is now.",
+         "announced_action"),
+        ("I'm checking item 11 of the merged walk against the design as it now stands.",
+         "announced_action"),
+        ("I'll write it up as the next item.", "announced_action"),
+        ("I'll fix the cases such as those listed below.", "announced_action"),
+        ("I'll add them as those two items.", "announced_action"),
+        ("I'll merge it as it currently stands.", "announced_action"),
+        ("If you don't, I'll check back in about 30 minutes.", "promise_after_event"),
+        ("Unless you object, I'll add that as one clause to the item's new text.",
+         "promise_after_event"),
+        ("If you haven't, I'll hold it.", "hold"),
+        # A clause that declines does not hide an action another clause announces.
+        ("I'm starting nothing else until the tests finish, then I'll merge PR 4001.",
+         "promise_after_event"),
+        ("I'll push no further changes and merge it now.", "announced_action"),
+        ("I'll start no new reviews and finish grading the ones already running.",
+         "announced_action"),
+        ("I'll merge it without waiting and push the tag.", "announced_action"),
+        ("I'll run nothing but the failing test now.", "announced_action"),
+        ("I'll open no more than five pull requests, then merge them.", "announced_action"),
+    ]
+    machine = Machine()
+    machine.seat("alpha", [user("go"), assistant("\n".join(s for s, _ in expected_kinds)), turn_end()])
+    _, verdicts, _ = machine.run()
+    found_kinds = {s["sentence"]: s["kind"] for s in verdicts["alpha"].get("sentences", [])}
+    for sentence, kind in expected_kinds:
+        check(f"{sentence!r} is {kind}", found_kinds.get(sentence) == kind, found_kinds.get(sentence))
 
     # --- sentences that are not raised; rules 3 to 5 then decide --------------------------------
     for sentence, kind in (("Say the word and I'll merge it.", "conditional_on_user"),
@@ -348,12 +405,20 @@ try:
         check(f"not raised: {sentence!r}",
               [(s["kind"], s["code_reading"]) for s in verdicts["alpha"]["sentences"]]
               == [(kind, "not_raised")] and verdicts["alpha"].get("rule") == 4, verdicts["alpha"])
-    machine = Machine()
-    machine.seat("alpha", [user("go"), assistant("I'll merge it without pushing the tag."), turn_end()])
-    _, verdicts, _ = machine.run()
-    check("a negative sentence is not raised, and rules 3 to 5 decide",
-          [(s["kind"], s["code_reading"]) for s in verdicts["alpha"]["sentences"]]
-          == [("negative", "not_raised")] and verdicts["alpha"].get("rule") == 4, verdicts["alpha"])
+    for sentence in ("I'll merge it without pushing the tag.",
+                     "ned-box's load is near 22, so I'm starting nothing else for now.",
+                     "I'm starting none of them today.",
+                     "I'll open no more pull requests today.",
+                     "I'll push no other branches.",
+                     "I'm starting no new reviews for now and the load is high.",
+                     "I'll file no further issues today."):
+        machine = Machine()
+        machine.seat("alpha", [user("go"), assistant(sentence), turn_end()])
+        _, verdicts, _ = machine.run()
+        check(f"a negative sentence is not raised, and rules 3 to 5 decide: {sentence!r}",
+              [(s["kind"], s["code_reading"]) for s in verdicts["alpha"]["sentences"]]
+              == [("negative", "not_raised")] and verdicts["alpha"].get("rule") == 4,
+              verdicts["alpha"])
     machine = Machine()
     machine.seat("alpha", [user("go"),
                            assistant("Here is the diff.\n```\n-old\n+new\n```\nI'll push it now."),
@@ -420,6 +485,20 @@ try:
           verdicts["beta"]["idle"] is False and verdicts["beta"]["last_activity"]
           == {"time": "2026-11-02T11:59:00Z", "source": str(subagents / "agent-x.jsonl")}
           and set(verdicts) == {"beta"}, verdicts)
+
+    project, _ = machine.seat("gamma", IDLE_TURN)
+    workflow_run = project / "s-1" / "subagents" / "workflows" / "wf_1"
+    workflow_run.mkdir(parents=True)
+    (workflow_run / "agent-y.jsonl").write_text(
+        json.dumps(assistant("working", at="2026-11-02T11:59:00Z")) + "\n")
+    (workflow_run / "journal.jsonl").write_text(
+        json.dumps(assistant("not a transcript", at="2026-11-02T11:59:30Z")) + "\n")
+    _, verdicts, _ = machine.run("--agent-seat", "gamma")
+    check("a Workflow-tool agent spent a token a minute ago: not idle, and the source is its "
+          "transcript, not the workflow run's journal",
+          verdicts["gamma"]["idle"] is False and verdicts["gamma"]["last_activity"]
+          == {"time": "2026-11-02T11:59:00Z", "source": str(workflow_run / "agent-y.jsonl")},
+          verdicts)
 
     # --- approval-walk items --------------------------------------------------------------------
     machine = Machine()
@@ -513,8 +592,42 @@ try:
     check("a subagent and a background command running, each with its start: rule 5",
           verdicts["alpha"]["running"] == {
               "subagents": [{"id": "agent-1", "started": "2026-11-02T11:20:00Z"}],
-              "background_commands": [{"id": "bash-1", "started": "2026-11-02T11:25:00Z"}]}
+              "background_commands": [{"id": "bash-1", "started": "2026-11-02T11:25:00Z",
+                                       "description": None, "timeout_ends_at": None}],
+              "workflows": []}
           and verdicts["alpha"]["rule"] == 5, verdicts["alpha"])
+
+    # The Workflow tool's result, trimmed from a real transcript: a taskId, and no agentId or
+    # backgroundTaskId.
+    WORKFLOW_LAUNCH = user("", at="2026-11-02T11:20:00Z",
+                           tool_result={"status": "async_launched", "taskId": "wn6fctb8y",
+                                        "taskType": "local_workflow",
+                                        "workflowName": "grade-cold-read-findings"})
+    machine = Machine()
+    machine.seat("alpha", [user("go"), WORKFLOW_LAUNCH, assistant("Waiting on the workflow."),
+                           turn_end()])
+    _, verdicts, _ = machine.run()
+    check("a Workflow-tool run with no notification since its launch is running, with its start: "
+          "rule 5",
+          verdicts["alpha"]["running"] == {
+              "subagents": [], "background_commands": [],
+              "workflows": [{"id": "wn6fctb8y", "started": "2026-11-02T11:20:00Z"}]}
+          and verdicts["alpha"]["rule"] == 5, verdicts["alpha"])
+    marker = machine.handoffs / "s-1-handoff-deferred"
+    marker.write_text("")
+    _, verdicts, _ = machine.run()
+    check("a handoff put off while a Workflow-tool run is running: not rule 3, which says nothing "
+          "is running",
+          verdicts["alpha"]["rule"] == 5, verdicts["alpha"])
+    machine = Machine()
+    machine.seat("alpha", [user("go"), WORKFLOW_LAUNCH,
+                           user("<task-notification><task-id>wn6fctb8y</task-id><status>completed"
+                                "</status><result>done</result></task-notification>"),
+                           assistant("Done."), turn_end()])
+    _, verdicts, _ = machine.run()
+    check("a Workflow-tool run whose completion notification came is not running",
+          verdicts["alpha"]["running"]["workflows"] == [] and verdicts["alpha"]["rule"] == 4,
+          verdicts["alpha"])
     machine.seat("alpha", [user("go"),
                            user("", tool_result={"status": "async_launched", "agentId": "agent-1"}),
                            user("<task-notification><task-id>agent-1</task-id><status>completed"
@@ -524,6 +637,80 @@ try:
     check("a subagent whose final report came is not running",
           verdicts["alpha"]["running"]["subagents"] == [] and verdicts["alpha"]["rule"] == 4,
           verdicts["alpha"])
+
+
+    def background_bash_launch(task_id, tool_input, at, tool_id):
+        """The Bash call that starts a background command, and its result naming the command's id."""
+        return [assistant(tool=("Bash", {**tool_input, "run_in_background": True}), at=at,
+                          tool_id=tool_id),
+                user([{"type": "tool_result", "tool_use_id": tool_id,
+                       "content": f"Command running in background with ID: {task_id}"}],
+                     at=at, tool_result={"backgroundTaskId": task_id})]
+
+
+    LONG_COMMAND = "cd /home/nedlern/Projects/nedsnodes && " + "python3 scripts/x-test.py && " * 6
+    machine = Machine()
+    machine.seat("alpha", [
+        user("go"),
+        *background_bash_launch("bk1", {"command": "timeout -k 5 10m python3 scripts/x-test.py",
+                                        "description": "Run the x test suite"},
+                                "2026-11-02T11:25:00Z", "tb1"),
+        *background_bash_launch("bk2", {"command": LONG_COMMAND}, "2026-11-02T11:26:00Z", "tb2"),
+        *background_bash_launch("bk3", {"command": "timeout 0 sleep 999", "description": "  "},
+                                "2026-11-02T11:27:00Z", "tb3"),
+        assistant("Waiting on them."), turn_end()])
+    _, verdicts, _ = machine.run()
+    commands = verdicts["alpha"]["running"]["background_commands"]
+    check("a background command is named by the description of the Bash call that started it, and "
+          "a command line starting with `timeout -k 5 10m` gives the time that timeout stops it",
+          commands[0] == {"id": "bk1", "started": "2026-11-02T11:25:00Z",
+                          "description": "Run the x test suite",
+                          "timeout_ends_at": "2026-11-02T11:35:00Z"}, commands)
+    check("a background command whose Bash call gave no description is named by its command line, "
+          "cut to the characters kept, and a line with no timeout gives no timeout end",
+          commands[1] == {"id": "bk2", "started": "2026-11-02T11:26:00Z",
+                          "description": " ".join(LONG_COMMAND.split())[
+                              :fields.BACKGROUND_COMMAND_LINE_CHARACTERS_KEPT - 1] + "…",
+                          "timeout_ends_at": None}, commands)
+    check("a blank description falls back to the command line, and `timeout 0`, which disables the "
+          "timeout, gives no timeout end",
+          commands[2] == {"id": "bk3", "started": "2026-11-02T11:27:00Z",
+                          "description": "timeout 0 sleep 999", "timeout_ends_at": None}, commands)
+    machine = Machine()
+    machine.seat("alpha", [
+        user("go"),
+        assistant(tool=("Bash", {"command": "timeout 10m python3 scripts/x-test.py",
+                                 "description": "Run the x test suite"}),
+                  at="2026-11-02T11:20:00Z", tool_id="tb1"),
+        user([{"type": "tool_result", "tool_use_id": "tb1",
+               "content": "Command was moved to the background (ID: bk1) after running for 180s."}],
+             at="2026-11-02T11:23:00Z", tool_result={"backgroundTaskId": "bk1"}),
+        assistant("Waiting on it."), turn_end()])
+    _, verdicts, _ = machine.run()
+    check("a Bash call Claude Code moved to the background is named by its description, and its "
+          "timeout counts from the call, not from the move",
+          verdicts["alpha"]["running"]["background_commands"] == [
+              {"id": "bk1", "started": "2026-11-02T11:23:00Z", "description": "Run the x test suite",
+               "timeout_ends_at": "2026-11-02T11:30:00Z"}], verdicts["alpha"])
+    TIMEOUT_END_BY_COMMAND_LINE = {
+        "timeout 900 python3 x.py": "2026-11-02T11:15:00Z",
+        "timeout --signal=KILL 1.5h x": "2026-11-02T12:30:00Z",
+        "timeout -s KILL 2d x": "2026-11-04T11:00:00Z",
+        "timeout -k5 30s x": "2026-11-02T11:00:30Z",
+        "timeout --preserve-status -v 3m x": "2026-11-02T11:03:00Z",
+        "cd a && timeout 5 x": None, "timeoutx 5 y": None, "timeout 5": None}
+    machine = Machine()
+    machine.seat("alpha", [user("go")] + [
+        record for number, command in enumerate(TIMEOUT_END_BY_COMMAND_LINE)
+        for record in background_bash_launch(f"bk{number}", {"command": command, "description": "d"},
+                                             "2026-11-02T11:00:00Z", f"tb{number}")]
+        + [assistant("Waiting on them."), turn_end()])
+    _, verdicts, _ = machine.run()
+    found = {command: entry["timeout_ends_at"] for command, entry in zip(
+        TIMEOUT_END_BY_COMMAND_LINE, verdicts["alpha"]["running"]["background_commands"])}
+    check("the timeout end of a command line starting with coreutils `timeout`, after any options, "
+          "with each duration unit; none for a timeout later in the line or no duration",
+          found == TIMEOUT_END_BY_COMMAND_LINE, found)
 
 
     def subagent_report(agent_id, result, at, interim):
@@ -570,7 +757,8 @@ try:
               "id": "a1b2", "started": "2026-11-02T09:00:00Z",
               fields.SUBAGENT_STOPPED_AT: "2026-11-02T09:20:00Z",
               fields.SUBAGENT_OWN_RUNNING_BACKGROUND_COMMANDS: [
-                  {"id": "bash-9", "started": "2026-11-02T09:05:00Z"}]}]
+                  {"id": "bash-9", "started": "2026-11-02T09:05:00Z", "description": None,
+                   "timeout_ends_at": None}]}]
           and verdicts["alpha"]["rule"] == 5, verdicts["alpha"])
     machine = Machine()
     subagent_with_own_background_command(machine, last_spend_at="2026-11-02T09:30:00Z")
@@ -594,8 +782,31 @@ try:
     _, verdicts, _ = machine.run()
     check("a subagent the parent stopped with TaskStop after its interim report is not running, "
           "nor is its own background command",
-          verdicts["alpha"]["running"] == {"subagents": [], "background_commands": []}
+          verdicts["alpha"]["running"] == {"subagents": [], "background_commands": [],
+                                            "workflows": []}
           and verdicts["alpha"]["rule"] == 4, verdicts["alpha"])
+
+    # A parent can instead stop one of the subagent's background commands with TaskStop; the stop is
+    # in the parent's transcript, and only the launch is in the subagent's own.
+    machine = Machine()
+    subagent_with_own_background_command(machine, last_spend_at="2026-11-02T09:19:59Z")
+    project, transcript = machine.seat("alpha", None)
+    with (project / "s-1" / "subagents" / "agent-a1b2.jsonl").open("a") as handle:
+        handle.write(json.dumps(user("", at="2026-11-02T09:06:00Z",
+                                     tool_result={"backgroundTaskId": "bash-10"})) + "\n")
+    stop_result = {"message": "Successfully stopped task: bash-9 (sleep 15 loop)", "task_id": "bash-9",
+                   "task_type": "local_bash", "command": "sleep 15 loop"}
+    with transcript.open("a") as handle:
+        for record in (user("", at="2026-11-02T09:30:00Z", tool_result=stop_result),
+                       assistant("Stopped it."), turn_end()):
+            handle.write(json.dumps(record) + "\n")
+    _, verdicts, _ = machine.run()
+    check("a background command of a subagent that the parent stopped with TaskStop is not among "
+          "the subagent's running commands; one it did not stop still is",
+          [entry.get(fields.SUBAGENT_OWN_RUNNING_BACKGROUND_COMMANDS)
+           for entry in verdicts["alpha"]["running"]["subagents"]]
+          == [[{"id": "bash-10", "started": "2026-11-02T09:06:00Z", "description": None,
+               "timeout_ends_at": None}]], verdicts["alpha"])
 
     # Claude Code delivers a notification queued while the session was busy as a queued_command
     # attachment, not as a user record.
@@ -619,7 +830,46 @@ try:
               "id": "a1b2", "started": "2026-11-02T09:00:00Z",
               fields.SUBAGENT_STOPPED_AT: "2026-11-02T09:20:00Z",
               fields.SUBAGENT_OWN_RUNNING_BACKGROUND_COMMANDS: [
-                  {"id": "bash-9", "started": "2026-11-02T09:05:00Z"}]}], verdicts["alpha"])
+                  {"id": "bash-9", "started": "2026-11-02T09:05:00Z", "description": None,
+                   "timeout_ends_at": None}]}], verdicts["alpha"])
+
+    machine = Machine()
+    project, _ = machine.seat("alpha", [
+        user("go"), SUBAGENT_SPAWN,
+        subagent_report("a1b2", "Started the check.", "2026-11-02T09:20:00Z", interim=True),
+        assistant("Done."), turn_end()])
+    own = project / "s-1" / "subagents"
+    own.mkdir(parents=True, exist_ok=True)
+    (own / "agent-a1b2.jsonl").write_text("".join(json.dumps(record) + "\n" for record in [
+        *background_bash_launch(
+            "bk9617lvz", {"command": "python3 scripts/surviving-mutants-check.py",
+                          "description": "Check which recorded surviving mutants current main kills"},
+            "2026-11-02T09:05:00Z", "tb9"),
+        assistant("Started the check.", at="2026-11-02T09:19:59Z")]))
+    _, verdicts, _ = machine.run()
+    check("a stopped subagent's own background command is named by the description of the Bash "
+          "call in the subagent's transcript that started it",
+          [entry.get(fields.SUBAGENT_OWN_RUNNING_BACKGROUND_COMMANDS)
+           for entry in verdicts["alpha"]["running"]["subagents"]]
+          == [[{"id": "bk9617lvz", "started": "2026-11-02T09:05:00Z",
+                "description": "Check which recorded surviving mutants current main kills",
+                "timeout_ends_at": None}]], verdicts["alpha"])
+
+    # A record the subagent wrote within the last 5 minutes keeps the session transcript's read from
+    # reading the subagent's own transcript past its last line, so only the subagent's own read can
+    # find that line's bytes cut in two by Claude Code still writing it.
+    machine = Machine()
+    subagent_with_own_background_command(machine, last_spend_at="2026-11-02T09:19:59Z")
+    project, _ = machine.seat("alpha", None)
+    with (project / "s-1" / "subagents" / "agent-a1b2.jsonl").open("ab") as handle:
+        handle.write(json.dumps(user("test output", at="2026-11-02T11:58:00Z")).encode() + b"\n"
+                     + b'{"type": "assistant", "message": {"content": "caf\xc3')
+    code, verdicts, _ = machine.run()
+    check("a stopped subagent that wrote a record within the last 5 minutes, whose own transcript's "
+          "last line, still being written, ends in bytes that are not UTF-8: an error for that "
+          "agent-seat, exit 1",
+          code == 1 and verdicts["alpha"]["rule"] is None
+          and "still being written" in verdicts["alpha"]["errors"][0], verdicts["alpha"])
 
     # --- rule 4 against rule 5: open tasks and their prerequisites -------------------------------
     machine = Machine()
@@ -637,6 +887,25 @@ try:
     check("a task whose prerequisite is met: rule 5, and the task is named",
           verdicts["alpha"]["rule"] == 5
           and verdicts["alpha"]["open_tasks_nothing_holds"] == [{"id": "3", "subject": "task 3"}],
+          verdicts["alpha"])
+    machine.task("alpha", "3", metadata={"prerequisites": [{"pr_merged": 50}]},
+                 blocked_by=["4"])
+    machine.task("alpha", "4", metadata={"prerequisites": [{"pr_merged": 51}]})
+    machine.task("alpha", "2", blocked_by=["4"])
+    machine.gh_responses.write_text(json.dumps({"pr:50": {"state": "CLOSED"},
+                                                "pr:51": {"state": "OPEN"}}))
+    _, verdicts, _ = machine.run()
+    check("a task whose pull request closed without merging, though a blocker holds it, not yet "
+          "raised by the due-task hook: rule 5, and the task is named",
+          verdicts["alpha"]["rule"] == 5
+          and verdicts["alpha"]["open_tasks_nothing_holds"] == [{"id": "3", "subject": "task 3"}],
+          verdicts["alpha"])
+    machine.due_task_raise_state.mkdir()
+    (machine.due_task_raise_state / "nedsnodes-alpha-tasks.json").write_text(json.dumps(
+        {"raised": {"3": {"pull_requests_closed_without_merging": [50]}}, "checks": {}}))
+    _, verdicts, _ = machine.run()
+    check("the same task once the due-task hook has raised it for that pull request: rule 4",
+          verdicts["alpha"]["rule"] == 4 and verdicts["alpha"]["open_tasks_nothing_holds"] == [],
           verdicts["alpha"])
     machine.gh_responses.write_text("{}")
     machine.seat("beta", [user("go"), assistant("Done."), turn_end()])
@@ -797,6 +1066,70 @@ try:
     check("an agent-session with no tool call: last tool call null",
           "last_tool_call_at" in verdicts["alpha"] and verdicts["alpha"]["last_tool_call_at"] is None,
           verdicts["alpha"])
+    machine = Machine()
+    machine.seat("alpha", [user("go"),
+                           assistant(tool=("TaskCreate", {"subject": "after PR 927", "metadata": {
+                               "prerequisites": [{"pr_merged": 927}]}}), at="2026-11-02T11:38:00Z",
+                                     tool_id="t1"),
+                           task_result("Task #1 created successfully: after PR 927",
+                                       at="2026-11-02T11:38:01Z", tool_id="t1"),
+                           assistant(tool=("TaskUpdate", {"taskId": "3", "addBlockedBy": ["2"]}),
+                                     at="2026-11-02T11:40:00Z", tool_id="t2"),
+                           task_result(UPDATED, at="2026-11-02T11:40:01Z", tool_id="t2"),
+                           assistant(tool=("TaskUpdate", {"taskId": "99", "addBlockedBy": ["2"]}),
+                                     at="2026-11-02T11:42:00Z", tool_id="t3"),
+                           task_result("Task not found", at="2026-11-02T11:42:01Z", tool_id="t3"),
+                           assistant(tool=("TaskUpdate", {"taskId": "4", "addBlockedBy": ["2"]}),
+                                     at="2026-11-02T11:43:00Z", tool_id="t5"),
+                           user([{"type": "tool_result", "tool_use_id": "t5", "is_error": True,
+                                  "content": "InputValidationError: metadata"}],
+                                at="2026-11-02T11:43:01Z"),
+                           assistant(tool=("TaskUpdate", {"taskId": "5", "addBlockedBy": ["2"]}),
+                                     at="2026-11-02T11:44:00Z", tool_id="t6"),
+                           assistant(tool=("TaskCreate", {"subject": "plain"}),
+                                     at="2026-11-02T11:45:00Z", tool_id="t4"),
+                           task_result("Task #2 created successfully: plain",
+                                       at="2026-11-02T11:45:01Z", tool_id="t4"),
+                           assistant(tool=("Bash", {"command": "ls"}), at="2026-11-02T11:46:00Z"),
+                           assistant("Done.", at="2026-11-02T11:48:00Z"), turn_end()])
+    _, verdicts, _ = machine.run()
+    check("each task call that sets prerequisites or addBlockedBy and whose result shows success is "
+          "listed, oldest first; one answered 'Task not found' with no is_error, one whose result is an "
+          "error, one with no result, one that sets neither, and a tool call of another kind are not",
+          verdicts["alpha"].get("successful_task_tool_calls_setting_prerequisites_or_blocked_by")
+          == [{"time": "2026-11-02T11:38:00Z", "name": "TaskCreate", "task": "1"},
+              {"time": "2026-11-02T11:40:00Z", "name": "TaskUpdate", "task": "3"}],
+          verdicts["alpha"])
+    machine = Machine()
+    machine.seat("alpha", [user("go"), assistant(tool=("TaskCreate", {"subject": "plain"})),
+                           assistant("Done."), turn_end()])
+    _, verdicts, _ = machine.run()
+    check("an agent-session whose task calls set neither prerequisites nor addBlockedBy: an empty list",
+          verdicts["alpha"].get("successful_task_tool_calls_setting_prerequisites_or_blocked_by") == [],
+          verdicts["alpha"])
+    machine = Machine()
+    machine.seat("alpha", [user("go"),
+                           assistant(tool=("TaskCreate", {"subject": "after PR 2042", "metadata": json.dumps(
+                               {"prerequisites": [{"pr_merged": 2042}]})}), at="2026-11-02T11:40:00Z"),
+                           task_result(CREATED, at="2026-11-02T11:40:01Z"),
+                           assistant("Done.", at="2026-11-02T11:48:00Z"), turn_end()])
+    code, verdicts, _ = machine.run()
+    check("a task call whose metadata is a JSON string holding prerequisites is read as setting them",
+          code == 0 and verdicts["alpha"].get("successful_task_tool_calls_setting_prerequisites_or_blocked_by")
+          == [{"time": "2026-11-02T11:40:00Z", "name": "TaskCreate", "task": "1"}],
+          (code, verdicts.get("alpha")))
+    for metadata, kind in [(json.dumps({"branches": ["some-topic-branch"]}), "a JSON object without prerequisites"),
+                           ("{not json", "not JSON"),
+                           (json.dumps([{"prerequisites": [1]}]), "JSON that is not an object")]:
+        machine = Machine()
+        machine.seat("alpha", [user("go"),
+                               assistant(tool=("TaskUpdate", {"taskId": "1", "metadata": metadata})),
+                               task_result("Updated task #1 metadata"), assistant("Done."), turn_end()])
+        code, verdicts, _ = machine.run()
+        check(f"a task call whose metadata is a string holding {kind}: printed, an empty list",
+              code == 0 and "alpha" in verdicts
+              and verdicts["alpha"].get("successful_task_tool_calls_setting_prerequisites_or_blocked_by") == [],
+              (code, verdicts.get("alpha")))
 
     # --- the task list is read as the due-task hook reads it ------------------------------------
     machine = Machine()
@@ -806,13 +1139,13 @@ try:
     code, verdicts, _ = machine.run()
     check("a task whose prerequisites are unmet is held: rule 4, no wake",
           code == 0 and verdicts["alpha"]["rule"] == 4, verdicts["alpha"])
-    (machine.tasks / "nedschorus-alpha-tasks" / "2.json").write_text("{not json")
+    (machine.tasks / "nedsnodes-alpha-tasks" / "2.json").write_text("{not json")
     code, verdicts, _ = machine.run()
     check("a task file that will not read: an error and exit 1, not rule 4",
           code == 1 and verdicts["alpha"]["rule"] is None
           and "2.json could not be read as a task" in verdicts["alpha"]["errors"][0]
           and "then run this program again" in verdicts["alpha"]["errors"][0], verdicts["alpha"])
-    (machine.tasks / "nedschorus-alpha-tasks" / "1.json").write_text("{not json")
+    (machine.tasks / "nedsnodes-alpha-tasks" / "1.json").write_text("{not json")
     code, verdicts, _ = machine.run()
     check("two task files that will not read: the error names the first",
           code == 1 and "1.json could not be read as a task" in verdicts["alpha"]["errors"][0],
@@ -827,12 +1160,45 @@ try:
     for name in ("1.json", "2.json"):
         (unreadable_tasks / name).write_text("{not json")
     try:
-        program.open_tasks_nothing_holds(unreadable_tasks, checker=None)
+        program.open_tasks_nothing_holds(unreadable_tasks, None, unreadable_tasks)
         message = None
     except program.ReadFailure as error:
         message = str(error)
     check("open tasks nothing holds, from two task files that will not read: the error names the first",
           message is not None and message.startswith(f"{unreadable_tasks / '1.json'} could not be read")
+          and "holds the agent-seat's work is unknown" in message, message)
+    machine = Machine()
+    machine.seat("alpha", [user("go"), assistant("Done."), turn_end()])
+    machine.seat("beta", [user("go"), assistant("Done."), turn_end()])
+    machine.task("alpha", "1")
+    machine.task("beta", "1", metadata={"prerequisites": [{"pr_merged": 50}]})
+    machine.gh_responses.write_text(json.dumps({"pr:50": {"state": "OPEN"}}))
+    unlistable_tasks = machine.tasks / "nedsnodes-alpha-tasks"
+    unlistable_tasks.chmod(0o000)
+    try:
+        code, verdicts, _ = machine.run("--agent-seat", "alpha", "--agent-seat", "beta")
+    finally:
+        unlistable_tasks.chmod(0o755)
+    check("a task list that cannot be listed: that agent-seat's error, and the next agent-seat "
+          "still gets its verdict",
+          code == 1 and verdicts.get("alpha", {}).get("rule", "no verdict") is None
+          and verdicts["alpha"]["errors"][0].startswith(f"the task list {unlistable_tasks} could not "
+                                                        "be listed")
+          and verdicts.get("beta", {}).get("errors") == [] and verdicts["beta"]["rule"] == 4,
+          (code, verdicts))
+    unlistable_tasks = Path(tempfile.mkdtemp(dir=str(SUITE_ROOT)))
+    unlistable_tasks.chmod(0o000)
+    try:
+        program.open_tasks_nothing_holds(unlistable_tasks, checker=None,
+                                         due_task_raise_state_directory=None)
+        message = None
+    except program.ReadFailure as error:
+        message = str(error)
+    finally:
+        unlistable_tasks.chmod(0o755)
+    check("open tasks nothing holds, from a task list that cannot be listed: a read failure",
+          message is not None
+          and message.startswith(f"the task list {unlistable_tasks} could not be listed")
           and "holds the agent-seat's work is unknown" in message, message)
     machine = Machine()
     machine.seat("alpha", [user("go"), assistant("Done."), turn_end()])
@@ -844,6 +1210,21 @@ try:
     check("one agent-seat's gh failure is not reported for the next agent-seat",
           code == 1 and "pr_merged 51" in verdicts["alpha"]["errors"][0]
           and verdicts["beta"]["errors"] == [] and verdicts["beta"]["rule"] == 5, verdicts)
+    # Past 256 the two equal failure counts are different int objects, so this case tells a test of
+    # identity from a comparison of the counts.
+    many_failures_tasks = Path(tempfile.mkdtemp(dir=str(SUITE_ROOT)))
+    (many_failures_tasks / "1.json").write_text(
+        json.dumps({"id": "1", "subject": "Free", "status": "pending"}))
+    earlier_seats_checker = types.SimpleNamespace(
+        gh_failures=[("pr_merged", number, "gh failed") for number in range(300)])
+    try:
+        free = program.open_tasks_nothing_holds(many_failures_tasks, earlier_seats_checker,
+                                                many_failures_tasks)
+    except Exception as error:
+        free = error
+    check("open tasks nothing holds, after 300 gh failures of earlier agent-seats and none of its "
+          "own: the free task, no error",
+          free == [{"id": "1", "subject": "Free"}], free)
 
     # --- rule 2 settled by code asks GitHub nothing ----------------------------------------------
     machine = Machine()
@@ -868,9 +1249,24 @@ try:
           code == 0 and verdicts["alpha"]["rule"] == 2 and verdicts["alpha"]["decision"] == "judge"
           and "if_every_sentence_backed" not in verdicts["alpha"], (code, verdicts["alpha"]))
     machine = Machine()
+    machine.seat("alpha", [user("a", at="2026-11-02T11:20:00Z"),
+                           assistant(tool=("Edit", {"file_path": "old.py"}), at="2026-11-02T11:21:00Z"),
+                           assistant(PROMISE, at="2026-11-02T11:21:30Z"),
+                           turn_end(at="2026-11-02T11:22:00Z"), user("go", at="2026-11-02T11:40:00Z"),
+                           assistant(ANNOUNCED, at="2026-11-02T11:41:00Z"),
+                           assistant(tool=("Bash", {"command": "ls"}), at="2026-11-02T11:42:00Z"),
+                           turn_end(at="2026-11-02T11:43:00Z")])
+    _, verdicts, _ = machine.run("--turn-ending-messages-since", "2026-11-02T11:00:00Z")
+    calls = verdicts["alpha"].get("tool_calls_since_start_of_earliest_turn_with_sentence_to_judge")
+    check("an unbacked promise in an earlier turn than the sentence for the judge: the judge is "
+          "handed the tool calls from the judged sentence's turn on only",
+          [item["code_reading"] for item in verdicts["alpha"].get("sentences", [])]
+          == ["unbacked", "judge"]
+          and calls is not None and [call["name"] for call in calls] == ["Bash"], verdicts["alpha"])
+    machine = Machine()
     machine.seat("alpha", IDLE_TURN)
     machine.task("alpha", "1")
-    (machine.tasks / "nedschorus-alpha-tasks" / "2.json").write_text("{not json")
+    (machine.tasks / "nedsnodes-alpha-tasks" / "2.json").write_text("{not json")
     code, verdicts, _ = machine.run()
     check("a sentence for the judge whose rules 3 to 5 read fails: an error, rule null, no decision",
           code == 1 and verdicts["alpha"]["rule"] is None and "decision" not in verdicts["alpha"]

@@ -4,7 +4,7 @@ environment the seat is launched with.
 
 The rule (PR #137 review P3, user-ruled 2026-08-22): an override either
 works or is blocked, never a third state. A literal-tilde
-NEDSCHORUS_AGENTS_ROOT (a quoted export sends one) used to half-work — this
+NEDSNODES_AGENTS_ROOT (a quoted export sends one) used to half-work — this
 launcher would mkdir a literal ~ directory while every fleet Python tool
 expanduser()s the same value, splitting the seat across two directories.
 Now ~/ resolves to $HOME exactly as the operator's shell would have made
@@ -28,7 +28,7 @@ observed in a process started after it, and a case that greps the composed
 string would pass on a string that never runs.
 
 The launcher's own CLAUDE_CODE_* variables are stripped alongside
-NEDSCHORUS_* and LAUNCH_CLAUDE_*: the launcher runs locally and its
+NEDSNODES_* and LAUNCH_CLAUDE_*: the launcher runs locally and its
 children inherit its environment, so without the strip a suite run from a
 seat that already has CLAUDE_CODE_TASK_LIST_ID set would pass on the
 ambient value rather than the composed one.
@@ -218,7 +218,7 @@ class MacLaunchSandbox:
         """Hand the supervisor's GitHub token check to the real interpreter, so
         the case measures the refusal the real supervisor prints for the
         sandbox HOME. token_file_accounts names the accounts given a token file."""
-        token_directory = self.home / ".config" / "nedschorus"
+        token_directory = self.home / ".config" / "nedsnodes"
         for account in token_file_accounts:
             token_directory.mkdir(parents=True, exist_ok=True)
             (token_directory / f"{account}.token").write_text(
@@ -237,6 +237,17 @@ class MacLaunchSandbox:
         tmux.write_text(tmux.read_text(encoding="utf-8").replace(
             '(has-session) exit 1;;', '(has-session) exit 0;;', 1), encoding="utf-8")
 
+    def tmux_lists_one_session_per_socket(self):
+        """Make the tmux stub answer list-sessions with one session named
+        after the socket it was given, in the launcher's name@socket form."""
+        tmux = self.stubs / "tmux"
+        tmux.write_text(tmux.read_text(encoding="utf-8").replace(
+            'for argument in "$@"; do\n',
+            'case " $* " in (*" list-sessions "*) '
+            'seat_socket=$(basename "$2"); echo "$seat_socket@$seat_socket"; '
+            'exit 0;; esac\n'
+            'for argument in "$@"; do\n', 1), encoding="utf-8")
+
     def boot_programs_fail(self):
         """Make the python3 stub fail clean-worktrees.py and
         checkout-freshness-catch-up.py the way a broken run does: a line on
@@ -253,27 +264,33 @@ class MacLaunchSandbox:
             extra_arguments=None, update_timeout_seconds=None,
             seat_github_account=None, inherited_github_token=None,
             ambient_git_identity=None, term_program=None,
-            stdout_on_terminal=False):
+            stdout_on_terminal=False, no_arguments=False,
+            tmux_socket_parent_directory=None):
         """Run the launcher in the sandbox. extra_arguments, when given, is
         placed in LAUNCH_CLAUDE_SUPERVISOR_EXTRA_ARGUMENTS the way
         recover-crashed-seats.py's launch_seat places it — after the strip
         of ambient LAUNCH_CLAUDE_* values, so the case measures its own.
-        seat_github_account rides NEDSCHORUS_SEAT_GITHUB_ACCOUNT the same
-        way, after the strip of ambient NEDSCHORUS_* values.
+        seat_github_account rides NEDSNODES_SEAT_GITHUB_ACCOUNT the same
+        way, after the strip of ambient NEDSNODES_* values.
         inherited_github_token sets GH_TOKEN, which is otherwise stripped so
         the suite's own token cannot decide a case.
         term_program sets TERM_PROGRAM, which is otherwise stripped so the
         terminal the suite runs in cannot decide a case.
         stdout_on_terminal gives the launcher a pseudo-terminal as stdout in
-        place of a pipe, and returns what it wrote there as result.stdout."""
+        place of a pipe, and returns what it wrote there as result.stdout.
+        no_arguments runs the launcher with no argument at all.
+        tmux_socket_parent_directory sets TMUX_TMPDIR, so the no-name usage
+        walks the sandbox's sockets rather than this machine's."""
         arguments = [seat_name] if attach else [seat_name, "--no-attach"]
+        if no_arguments:
+            arguments = []
         environment = {
             **{key: value for key, value in os.environ.items()
                if key not in ("TERM_PROGRAM", "GH_TOKEN")
                and key not in GIT_IDENTITY_VARIABLES
-               and not key.startswith(("NEDSCHORUS_", "LAUNCH_CLAUDE_",
+               and not key.startswith(("NEDSNODES_", "LAUNCH_CLAUDE_",
                                        "CLAUDE_CODE_"))},
-            "NEDSCHORUS_AGENTS_ROOT": agents_root,
+            "NEDSNODES_AGENTS_ROOT": agents_root,
             "HOME": str(self.home),
             "SHELL": str(self.stubs / "record-shell"),
             "PATH": f"{self.stubs}:/usr/bin:/bin:/usr/sbin:/sbin",
@@ -288,13 +305,15 @@ class MacLaunchSandbox:
             environment["LAUNCH_CLAUDE_UPDATE_TIMEOUT_SECONDS"] = str(
                 update_timeout_seconds)
         if seat_github_account is not None:
-            environment["NEDSCHORUS_SEAT_GITHUB_ACCOUNT"] = seat_github_account
+            environment["NEDSNODES_SEAT_GITHUB_ACCOUNT"] = seat_github_account
         if inherited_github_token is not None:
             environment["GH_TOKEN"] = inherited_github_token
         if ambient_git_identity is not None:
             environment.update(ambient_git_identity)
         if term_program is not None:
             environment["TERM_PROGRAM"] = term_program
+        if tmux_socket_parent_directory is not None:
+            environment["TMUX_TMPDIR"] = str(tmux_socket_parent_directory)
         if stdout_on_terminal:
             return run_with_stdout_on_terminal(
                 [str(LAUNCHER), *arguments], str(self.workdir), environment)
@@ -639,10 +658,10 @@ def main() -> int:
             check(f"boot programs fail: stderr says the {step} failed with exit 2, "
                   "that the launch goes on, where its error is, and who acts",
                   len(first) == 1
-                  and (lines + ["", ""])[first[0] + 1].startswith(f"launch-claude-mac: any error the ")
+                  and (lines + ["", ""])[first[0] + 1].startswith("launch-claude-mac: any error the ")
                   and "if none is there" in (lines + ["", ""])[first[0] + 1]
-                  and (lines + ["", "", ""])[first[0] + 2].startswith(f"launch-claude-mac: if you are an agent that ran this launch, tell the user")
-                  and (lines + ["", "", ""])[first[0] + 3].startswith(f"launch-claude-mac: if you are the user, run the command in the first of these lines")
+                  and (lines + ["", "", ""])[first[0] + 2].startswith("launch-claude-mac: if you are an agent that ran this launch, tell the user")
+                  and (lines + ["", "", ""])[first[0] + 3].startswith("launch-claude-mac: if you are the user, run the command in the first of these lines")
                   and "if it fails and prints nothing, ask an agent" in (lines + ["", "", ""])[first[0] + 3],
                   result.stderr)
         sandbox = MacLaunchSandbox(root / "boot-programs-succeed")
@@ -674,9 +693,9 @@ def main() -> int:
               len(detached_pane_commands) == 1
               and detached_pane_commands[0].endswith("; exit $?"),
               detached_pane_commands)
-        check("task list: the pin reaches the supervisor as nedschorus-<seat>-tasks",
+        check("task list: the pin reaches the supervisor as nedsnodes-<seat>-tasks",
               sandbox.supervisor_environment().get("CLAUDE_CODE_TASK_LIST_ID")
-              == "nedschorus-seat-a-tasks",
+              == "nedsnodes-seat-a-tasks",
               sandbox.supervisor_environment())
         check("task list: the task tools are enabled for the supervisor",
               sandbox.supervisor_environment().get(
@@ -692,7 +711,7 @@ def main() -> int:
                                                  encoding="utf-8")
         result = sandbox.run("~/agents", seat_name="seat-m")
         prefixed_store = (sandbox.home / ".claude" / "tasks"
-                          / "nedschorus-seat-m-tasks")
+                          / "nedsnodes-seat-m-tasks")
         check("migration: the unprefixed store is renamed to the prefixed id",
               result.returncode == 0 and not unprefixed_store.exists()
               and (prefixed_store / "1.json").is_file(),
@@ -705,7 +724,7 @@ def main() -> int:
         (unprefixed_store / "1.json").write_text("unprefixed",
                                                  encoding="utf-8")
         prefixed_store = (sandbox.home / ".claude" / "tasks"
-                          / "nedschorus-seat-m-tasks")
+                          / "nedsnodes-seat-m-tasks")
         prefixed_store.mkdir(parents=True)
         (prefixed_store / "2.json").write_text("prefixed", encoding="utf-8")
         result = sandbox.run("~/agents", seat_name="seat-m")
@@ -721,7 +740,7 @@ def main() -> int:
         sandbox.run("~/agents", seat_name="seat-b")
         check("task list: a second seat name yields a DIFFERENT list id",
               sandbox.supervisor_environment().get("CLAUDE_CODE_TASK_LIST_ID")
-              == "nedschorus-seat-b-tasks",
+              == "nedsnodes-seat-b-tasks",
               sandbox.supervisor_environment())
 
         # --- the seat's git identity (user-approved 2026-09-22): author and
@@ -745,10 +764,10 @@ def main() -> int:
               git_identity(sandbox.supervisor_environment()))
         sandbox = MacLaunchSandbox(root / "git-identity-ambient")
         sandbox.run("~/agents", seat_name="seat-a", ambient_git_identity={
-            "GIT_AUTHOR_NAME": "Edward Lerner",
-            "GIT_AUTHOR_EMAIL": "junk@lerner1.com",
-            "GIT_COMMITTER_NAME": "Edward Lerner",
-            "GIT_COMMITTER_EMAIL": "junk@lerner1.com"})
+            "GIT_AUTHOR_NAME": "Ambient User",
+            "GIT_AUTHOR_EMAIL": "ambient-user@example.invalid",
+            "GIT_COMMITTER_NAME": "Ambient User",
+            "GIT_COMMITTER_EMAIL": "ambient-user@example.invalid"})
         check("git identity: an identity in the launching shell is replaced, not inherited",
               git_identity(sandbox.supervisor_environment())
               == seat_git_identity("seat-a"),
@@ -766,15 +785,15 @@ def main() -> int:
         check("attached: tmux gets mouse mode on and copy-command pbcopy",
               tmux_argv_sets_mouse_mode_and_pbcopy(sandbox.tmux_argv()),
               sandbox.tmux_argv())
-        check("task list (attached): the supervisor gets nedschorus-<seat>-tasks",
+        check("task list (attached): the supervisor gets nedsnodes-<seat>-tasks",
               sandbox.supervisor_environment().get("CLAUDE_CODE_TASK_LIST_ID")
-              == "nedschorus-seat-c-tasks"
+              == "nedsnodes-seat-c-tasks"
               and sandbox.supervisor_environment().get(
                   "CLAUDE_CODE_ENABLE_TODO_TOOLS") == "1",
               sandbox.supervisor_environment())
         check("task list (attached): the after-exit shell keeps the binding",
               sandbox.after_exit_environment().get("CLAUDE_CODE_TASK_LIST_ID")
-              == "nedschorus-seat-c-tasks"
+              == "nedsnodes-seat-c-tasks"
               and sandbox.after_exit_environment().get(
                   "CLAUDE_CODE_ENABLE_TODO_TOOLS") == "1",
               sandbox.after_exit_environment())
@@ -857,7 +876,7 @@ def main() -> int:
               result.returncode == 0
               and "handoff-supervisor.py" in composed_command
               and "GH_TOKEN" not in composed_command
-              and ".config/nedschorus" not in composed_command,
+              and ".config/nedsnodes" not in composed_command,
               (result.returncode, composed_command[:400], result.stderr[:300]))
 
         # --- a GH_TOKEN the launcher inherits reaches neither the seat's tmux
@@ -915,7 +934,7 @@ def main() -> int:
                              seat_github_account="ned-review-merge")
         check("account override: refused with exit 2, naming the variable and the table",
               result.returncode == 2
-              and "NEDSCHORUS_SEAT_GITHUB_ACCOUNT" in result.stderr
+              and "NEDSNODES_SEAT_GITHUB_ACCOUNT" in result.stderr
               and "AGENT_SEAT_GITHUB_ACCOUNTS_OTHER_THAN_THE_MACHINE_DEFAULT" in result.stderr,
               (result.returncode, result.stderr[:300]))
         check("account override: refused before any side effect",
@@ -936,6 +955,27 @@ def main() -> int:
               and not any(sandbox.workdir.iterdir()),
               (sandbox.invoked_commands()[:200],
                sorted(str(p) for p in sandbox.workdir.iterdir())))
+
+        # No name: the usage names the agent tmux sessions it finds on this
+        # Mac's tmux sockets under its heading.
+        sandbox = MacLaunchSandbox(root / "no-name-lists-sessions")
+        sandbox.tmux_lists_one_session_per_socket()
+        tmux_socket_parent_directory = root / "no-name-lists-sessions" / "tmux-sockets"
+        tmux_socket_directory = tmux_socket_parent_directory / f"tmux-{os.getuid()}"
+        tmux_socket_directory.mkdir(parents=True)
+        # Bound by a relative name: a socket path over about 104 bytes is
+        # refused on macOS, and this suite's resolved temporary root is long there.
+        subprocess.run([sys.executable, "-c",
+                        "import socket; socket.socket(socket.AF_UNIX).bind('seat-a')"],
+                       cwd=str(tmux_socket_directory), check=True)
+        result = sandbox.run("~/agents", no_arguments=True,
+                             tmux_socket_parent_directory=tmux_socket_parent_directory)
+        check("no name: exit 2, naming the sessions found under the running "
+              "agent-seats or leftover-shells heading",
+              result.returncode == 2
+              and "Agent tmux sessions on this Mac now (running agent-seats or "
+                  "leftover-shells): seat-a@seat-a" in result.stderr,
+              (result.returncode, result.stderr[:800]))
 
         # A first argument starting with - is refused as a seat name: the
         # first argument is always the name, so the launcher would otherwise
