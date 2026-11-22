@@ -150,11 +150,14 @@ passes when its words, compared without punctuation, letter case or the
 marks `#new`, `#new_if_d`, `#case_against` and `[advisor]`, are those of an
 unused line of the same kind in the message's copy, read by the same rules;
 or, when the message holds no line of that kind and the line is no
-`Recommendation:` or `The alternative:` line, are the words a unit of the
-message ends with, as when the message dropped a `#new` mark or put "If
-you approve, the new text:" before the text. A unit is a paragraph, a visible
+`Recommendation:` or `The alternative:` line, are the words of a unit of the
+message, alone or after the lead-in its kind may carry, "If you approve, the
+new text:", "If you disapprove, the new text:" or "Case against", as when the
+message dropped a `#new` mark or put "If you approve, the new text:" before
+the text; any other words before them, such as "Do not", send the line to
+the model. A unit is a paragraph, a visible
 HTML block, or a whole list or quotation, since a bare `#new` can introduce
-one. Lines passing that second way must end units in the item's order, each
+one. Lines passing that second way must be units in the item's order, each
 unit below the last, so that a `#new` and a `#new_if_d` text swapped in a
 message that dropped both marks do not pass. Words found elsewhere in the
 message do not count, because a recommendation and an alternative swapped
@@ -185,11 +188,7 @@ it does not ask the agent to show the item again for an unreadable transcript,
 because that cannot make it readable. A refused answer gets none of the
 answer's lines and no --user-reply-as-typed line.
 
-Not handled: a `#new` and a `#new_if_d` text both shown with labels in
-place of their marks, such as "If you approve, the new text:", and swapped,
-pass with no model call, since each ends a unit in order; so does a current
-`#new Restart the workers.` against a shown "Do not restart the workers.",
-which ends with its words. Lines of the same kind are matched against one
+Not handled: lines of the same kind are matched against one
 pool for the whole item, so the recommendations of sub-steps 4.1 and 4.2
 swapped pass with no model call too. A `#new` and a `#new_if_d` text both
 shown without their marks and then swapped in the walk-document go to the
@@ -603,6 +602,11 @@ MARK_WORDS = re.compile(r"\[advisor\]|#(?:new_if_d|new|case_against)(?!\w)", re.
 # A line of these kinds that the message shows without its label could sit inside another line, so only the model
 # decides it.
 UNMARKED_LINE_NAMES_NEEDING_THE_MODEL = ("`Recommendation:` line", "`The alternative:` line")
+# The only words a message may put before a line it shows without its mark and still pass with no model call; any
+# other words, such as "Do not", could reverse the line's meaning.
+LEAD_INS_BEFORE_A_LINE_SHOWN_WITHOUT_ITS_MARK = {"`#new` line": "If you approve, the new text:",
+                                                 "`#new_if_d` line": "If you disapprove, the new text:",
+                                                 "`#case_against` line": "Case against"}
 # Words in a message paragraph that show it carries the same kind of line, for pairing a line the message changed.
 PAIRING_HINTS = {"`Recommendation:` line": r"recommend", "`The alternative:` line": r"alternative",
                  "`#case_against` line": r"case\W+against"}
@@ -1144,8 +1148,9 @@ def decision_line_checks(current_lines, shown_lines, units, current_units):
     Each line keeps its place, so a pair is made from the lines' positions, not from which text looks most alike.
     A current line passes when an unused shown line of its kind has its words, the first such at or after the last
     shown line taken; or, when the message has no line of its kind and it is no `Recommendation:` or `The
-    alternative:` line, when a unit of the message ends with its words, each such unit below the last one taken, as
-    for a message that dropped the mark or put `If you approve, the new text:` before it. Each line that does not pass
+    alternative:` line, when a unit of the message has its words, alone or after its kind's lead-in in
+    LEAD_INS_BEFORE_A_LINE_SHOWN_WITHOUT_ITS_MARK, each such unit below the last one taken, as for a message that
+    dropped the mark or put `If you approve, the new text:` before it. Each line that does not pass
     is paired with the unit holding the first unused shown line of its kind between the shown lines its neighbours
     above and below took, and else with the message unit most like it; a shown line left unused is one the item
     dropped, paired with the item's unit most like it. The copy ends where message_copy_of_item ends it, so every
@@ -1160,8 +1165,9 @@ def decision_line_checks(current_lines, shown_lines, units, current_units):
         if same:
             taken[index] = next((place for place in same if place > after), same[0])
         elif name not in UNMARKED_LINE_NAMES_NEEDING_THE_MODEL and not any(kind == name for kind, _, _ in shown_lines):
+            lead_in = comparable_words(LEAD_INS_BEFORE_A_LINE_SHOWN_WITHOUT_ITS_MARK.get(name, ""))
             unit = next((unit for unit in units if unit[0] >= unit_end
-                         and f" {comparable_words(unit[2])}".endswith(f" {words}")), None)
+                         and comparable_words(unit[2]) in (words, f"{lead_in} {words}")), None)
             if unit is not None:
                 passed.add(index)
                 unit_end = unit[1]
@@ -1267,24 +1273,27 @@ def last_showing_message(transcript_path, heading, parser, references):
 def message_copy_of_item(heading_line, message_heading_line, after_heading, number):
     """The part of after_heading, a message's text below message_heading_line, its line that opens with the item's
     heading, that shows item number, up to the item's closing line: the walk finder reads heading_line, the item's
-    heading in the walk-document, at message_heading_line's heading level, and after_heading below it as it reads a
+    heading in the walk-document, in message_heading_line's form, an ATX or setext heading of its level, or a `#` heading
+    when message_heading_line is no heading, and after_heading below it as it reads a
     walk-document, so that under a heading several items share, only this item's own text is compared; the text of
     every unit that names the item, as when the message puts a heading for item 11 inside the range `Items 10 to 12`;
     after_heading whole when the finder reads no item number there. The message's heading level counts, not the
     walk-document's, since a `### Explanation` ends a `###` item but not a `##` one."""
     walk_finder = load_walk_finder()
     parser = walk_finder.markdown_parser()
-    # The parsed token gives the level of a setext heading too, whose underline is the heading's last line.
     opening = parser.parse(f"{message_heading_line}\n{after_heading}", {})
-    if opening and opening[0].type == "heading_open" and opening[0].map[0] == 0:
-        marks = "#" * int(opening[0].tag[1])
-        heading_line = (re.sub(r"^ {0,3}#{1,6}(?=[ \t]|$)", marks, heading_line, count=1)
-                        if re.match(r" {0,3}#{1,6}(?=[ \t]|$)", heading_line) else f"{marks} {heading_line}")
-        if opening[0].markup in ("=", "-"):
-            # Only the underline goes: a setext heading's further lines, such as a `#new_if_d` line, were shown to the
-            # user, and below an ATX heading_line they read as the item's first paragraph.
-            below = after_heading.split("\n")
-            after_heading = "\n".join(below[:opening[0].map[1] - 2] + below[opening[0].map[1] - 1:])
+    words = re.sub(r"^ {0,3}#{1,6}(?:[ \t]+|$)", "", heading_line, count=1)
+    if not (opening and opening[0].type == "heading_open" and opening[0].map[0] == 0):
+        # Below a plain or bold title, the finder would read a `## Explanation` heading as an unnumbered item of its
+        # own; under a `#` heading it is the item's sub-heading. last_showing_message already ends after_heading at
+        # the next item's opening.
+        heading_line = f"# {words}"
+    elif opening[0].markup in ("=", "-"):
+        # The message's own setext heading stays whole, its further lines and underline included, so that the finder
+        # reads it as it reads one in a walk-document.
+        heading_line = words
+    else:
+        heading_line = f"{'#' * int(opening[0].tag[1])} {words}"
     text = f"{heading_line}\n{after_heading}"
     units = walk_finder.item_unit_spans(text, parser)
     pieces = [walk_finder.approval_walk_item_text_as_shown_to_user(text, parser, units, unit, number)

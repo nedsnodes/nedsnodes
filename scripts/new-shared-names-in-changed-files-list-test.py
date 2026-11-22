@@ -652,6 +652,11 @@ def case_hook_reports_once_per_worktree(root):
           "and rename any name that breaks the page" in first, first)
     check("the hook says renames from the report and from the by-hand check go in one commit",
           "Make every rename, from its report and from your own check, in one single commit" in first, first)
+    check("the hook says a new project-term goes to the user before it is used",
+          "is a new project-term, put the new term to the user before you use it." in first, first)
+    check("the hook says a new system-term is added to its system's glossary without asking the user",
+          "If it is a new system-term, add it to its system's glossary yourself, without asking the user." in first
+          and "project-term or system-term, put the new term" not in first, first)
     _, second = run_hook(clone, state_root, {"tool_name": "Edit", "tool_input": {"file_path": "beta.py"}})
     check("the same names are not reported twice in one agent-session", second == "", second)
     git_directory = subprocess.run(["git", "rev-parse", "--absolute-git-dir"], cwd=str(clone), check=True,

@@ -1027,6 +1027,8 @@ def run_cases(scratch: Path):
         "gh issue list": Completed(PLACEHOLDER),
         "git show": Completed("", returncode=1),
         "git ls-remote": Completed("abc123\trefs/heads/ghi-570-a\n"),
+        "git ls-tree -r --name-only -z abc123": Completed(
+            "docs/issues/570-a-statusline-that-drops-its-branch-name.md\0"),
         "gh pr list": Completed(
             '[{"number": 9, "title": "GHI-MD for issue 570", '
             '"url": "https://github.com/x/y/pull/9"}]'),
@@ -1047,6 +1049,8 @@ def run_cases(scratch: Path):
         "gh issue list": Completed(PLACEHOLDER),
         "git show": Completed("", returncode=1),
         "git ls-remote": Completed("abc123\trefs/heads/ghi-570-a\n"),
+        "git ls-tree -r --name-only -z abc123": Completed(
+            "docs/issues/570-a-statusline-that-drops-its-branch-name.md\0"),
         "gh pr list": Completed("[]"),
         "git ls-tree": Completed(""),
         "gh pr create": Completed("https://github.com/x/y/pull/10\n"),
@@ -1057,6 +1061,25 @@ def run_cases(scratch: Path):
     check("and nothing is committed or pushed over it to get there",
           not pushed_only.ran("git worktree add")
           and not pushed_only.ran("git push"), str(pushed_only.commands()))
+
+    two_on_branch = Recorder({
+        "gh issue list": Completed(PLACEHOLDER),
+        "git show": Completed("", returncode=1),
+        "git ls-remote": Completed("abc123\trefs/heads/ghi-570-a\n"),
+        "git ls-tree -r --name-only -z abc123": Completed(
+            "docs/issues/570-a.md\0docs/issues/570-b.md\0"),
+        "git ls-tree": Completed(""),
+    })
+    try:
+        tool.create(source, REPO, scratch, two_on_branch, quiet)
+        two_refusal = None
+    except tool.Refused as refused:
+        two_refusal = refused
+    check("a pushed filing branch holding two files for its issue stops the "
+          "run with exit 1, naming both, before step 5",
+          two_refusal is not None and two_refusal.code == 1
+          and "570-a.md, docs/issues/570-b.md" in str(two_refusal)
+          and not two_on_branch.ran("gh issue edit"), str(two_refusal))
 
     unlanded = Recorder({
         "gh issue list": Completed("[]"),
@@ -5226,6 +5249,90 @@ def run_edit_landing_real_git_cases(scratch: Path):
           other_line in merged and author_line in merged, merged)
 
 
+def run_pushed_filing_branch_rerun_line_real_git_cases(scratch: Path):
+    """Step 5's rerun line names the file the pushed filing branch holds.
+
+    Real git, with a bare remote; only `gh` is stubbed. The branch holds
+    `<number>-<slug>.md` for a source named `<name>.tool.design.md`, a name
+    today's naming rule would not give it, so the line must be read from the
+    branch: the rerun needs a file the merge puts on main."""
+    remote = scratch / "remote.git"
+    author = scratch / "author"
+    pusher = scratch / "pusher"
+    number, title = 4100, "Widget"
+    branch = f"ghi-{number}-{tool.slug(title)}"
+    pushed_name = f"docs/issues/{number}-{tool.slug(title)}.md"
+
+    def git(*arguments, cwd=None):
+        return subprocess.run(
+            ["git", *arguments], cwd=cwd, check=True, capture_output=True,
+            text=True).stdout.strip()
+
+    # The branch is pushed from another clone, so the author's clone holds
+    # its commit only once the run fetches it.
+    git("init", "-q", "--bare", "-b", "main", str(remote))
+    git("clone", "-q", str(remote), str(pusher))
+    git("config", "user.email", "test@example.com", cwd=pusher)
+    git("config", "user.name", "test", cwd=pusher)
+    (pusher / "README.md").write_text("base\n", encoding="utf-8")
+    git("add", "-A", cwd=pusher)
+    git("commit", "-q", "-m", "base", cwd=pusher)
+    git("push", "-q", "origin", "HEAD:main", cwd=pusher)
+    git("clone", "-q", str(remote), str(author))
+    git("checkout", "-q", "-b", branch, cwd=pusher)
+    (pusher / pushed_name).parent.mkdir(parents=True)
+    (pusher / pushed_name).write_text(
+        tool.with_issue_frontmatter(f"# {title}\n\nbody\n", REPO, number,
+                                    title), encoding="utf-8")
+    git("add", "-A", cwd=pusher)
+    git("commit", "-q", "-m", "filing", cwd=pusher)
+    git("push", "-q", "origin", f"HEAD:refs/heads/{branch}", cwd=pusher)
+    git("checkout", "-q", "main", cwd=pusher)
+
+    source = scratch / "widget.tool.design.md"
+    source.write_text(f"# {title}\n\nbody\n", encoding="utf-8")
+
+    open_pull_requests = ['[{"number": 9, "title": "GHI-MD for issue '
+                          f'{number}", "url": "u"}}]']
+
+    def runner(arguments, timeout=None, cwd=None, check=True):
+        if arguments[0] == "gh":
+            return Completed(open_pull_requests[0])
+        return tool.run(arguments, timeout=timeout or tool.GH_TIMEOUT_SECONDS,
+                        cwd=cwd, check=check)
+
+    lines = []
+    returned = tool.land_file(REPO, number, title, source, author, runner,
+                              lines.append)
+    tool.link_body(REPO, number, author, runner, lines.append, returned)
+    check("a create resumed on a pushed filing branch whose file has a name "
+          "today's naming rule would not give tells the rerun to use the "
+          "file that branch holds",
+          returned == pushed_name
+          and lines[-1].endswith(f"create {pushed_name}"),
+          (returned, lines))
+
+    open_pull_requests[0] = "[]"
+    reopened = tool.land_file(REPO, number, title, source, author, runner,
+                              quiet)
+    check("and so does one pushed with no pull request open on it",
+          reopened == pushed_name, reopened)
+
+    # A branch whose file for the issue cannot be found leaves no file to
+    # name, so the run stops rather than naming one by the naming rule.
+    git("push", "-q", "origin", "HEAD:refs/heads/ghi-4101-gadget",
+        cwd=pusher)
+    try:
+        tool.land_file(REPO, 4101, "Gadget", source, author, runner, quiet)
+        refusal = None
+    except tool.Refused as refused:
+        refusal = refused
+    check("a pushed filing branch holding no file for its issue stops the "
+          "run with exit 1, naming the branch",
+          refusal is not None and refusal.code == 1
+          and "ghi-4101-gadget" in str(refusal), str(refusal))
+
+
 def run_push_time_limit_cases(scratch: Path):
     conflict = tool.pre_push_conflict_check
     # The longest the hook can take: its stop_process_group waits its grace
@@ -5478,6 +5585,8 @@ def main():
                     run_group(run_real_git_listing_cases, Path(name))
                 with tempfile.TemporaryDirectory(prefix="ghi-issue-landing-test-") as name:
                     run_group(run_edit_landing_real_git_cases, Path(name))
+                with tempfile.TemporaryDirectory(prefix="ghi-issue-pushed-branch-test-") as name:
+                    run_group(run_pushed_filing_branch_rerun_line_real_git_cases, Path(name))
                 with tempfile.TemporaryDirectory(prefix="ghi-issue-landed-test-") as name:
                     run_group(run_landed_design_cases, Path(name))
                 with tempfile.TemporaryDirectory(prefix="ghi-issue-push-test-") as name:

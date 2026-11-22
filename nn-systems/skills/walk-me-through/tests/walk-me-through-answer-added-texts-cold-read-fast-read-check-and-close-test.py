@@ -2267,7 +2267,7 @@ def test_status_lines_end_at_the_first_line_that_is_not_one():
     case.minutes.write_text("# Minutes\n\nitem 4 of 9: the user answered approved (2026-10-23 10:00), which makes its "
                             "change. Fast reads:\n- the status line\nA note.\n- a later bullet\n"
                             "#next_to_present item 4 of 9\n")
-    _, _, statuses = program.last_answer(walk_finder, case.minutes, walk_finder.markdown_parser())
+    _, _, statuses, _ = program.last_answer(walk_finder, case.minutes, walk_finder.markdown_parser())
     check("the answer's status lines stop at the first line that is not a status line",
           statuses == ["the status line"], repr(statuses))
 
@@ -4411,6 +4411,41 @@ def test_an_item_the_walk_moves_on_from_is_recorded_without_a_fast_read_and_not_
               "List it, with its number, in one line of your next message to the user.",
               read_next_item_line(case, "item 2 of 5"), prerequisite_line(case, "item 2 of 5", "## Item 2 of 5: two")]
           and marker(case) == "#next_to_present item 2 of 5", described(closed) + case.minutes.read_text())
+
+
+def test_an_item_the_walk_moves_on_from_after_it_was_shown_is_recorded_as_shown():
+    for page in ("https://claude.ai/artifact/x", "publish failed: the Artifact tool timed out"):
+        case = Case(next_to_present="item 1.1 of 2", document=SUB_STEPS_DOCUMENT)
+        case.minutes.write_text(f"# Minutes\n\n#next_to_present item 1.1 of 2\n#item_page item 1.1 of 2 {page}\n")
+        checked = case.run("check", "--moved-on", "no-decision sub-step; the user typed N")
+        closed = case.run("close")
+        minutes = case.minutes.read_text()
+        check(f"check --moved-on on an item with the `#item_page` line `{page}` records it as shown, and close says "
+              "it was shown, never that it was settled without asking the user or without being shown",
+              checked.returncode == 0 and closed.returncode == 0
+              and re.search(r"\nitem 1\.1 of 2: shown to the user, moved on, no decision: `no-decision sub-step; the "
+                            r"user typed N` \(\d{4}-\d\d-\d\d \d\d:\d\dZ\), which makes no change\.\n", minutes)
+              and minutes.count("<moved on, no decision>") == 1
+              and "\nitem 1.1 of 2: moved on, no decision: `no-decision sub-step; the user typed N`; the walk does not "
+                  "come back to it. <moved on, no decision>\n#next_to_present item 1.2 of 2\n" in minutes
+              and "settled without" not in minutes + closed.stdout and "List it" not in closed.stdout
+              and closed.stdout.split("\n")[0] == "item 1.1 of 2 was shown to the user, and the minutes record that "
+                                                  "the walk moved on from it with no decision.",
+              described(checked) + described(closed) + minutes)
+    case = Case(next_to_present="item 1.2 of 2", document=SUB_STEPS_DOCUMENT)
+    case.minutes.write_text("# Minutes\n\n#item_page item 1.1 of 2 https://claude.ai/artifact/x\n"
+                            "#next_to_present item 1.2 of 2\n")
+    checked = case.run("check", "--moved-on", "the item was withdrawn")
+    closed = case.run("close")
+    check("check --moved-on on an item with no `#item_page` line of its own, another item having one, records it as "
+          "settled without asking the user, and close tells the agent to list it",
+          checked.returncode == 0 and closed.returncode == 0
+          and "\nitem 1.2 of 2: settled without asking the user, moved on, no decision: `the item was withdrawn`"
+              in case.minutes.read_text()
+          and closed.stdout.split("\n")[:2] == [
+              "item 1.2 of 2 is recorded in the minutes as settled without being shown to the user.",
+              "List it, with its number, in one line of your next message to the user."],
+          described(checked) + described(closed) + case.minutes.read_text())
 
 
 def test_an_item_not_shown_needs_no_case_against_line():

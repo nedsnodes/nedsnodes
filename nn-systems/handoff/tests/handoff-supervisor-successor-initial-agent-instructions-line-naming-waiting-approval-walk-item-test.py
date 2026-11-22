@@ -5,8 +5,9 @@ initial-agent-instructions:
 successor_initial_agent_instructions_line_naming_waiting_approval_walk_item
 on fixture walk-minutes and walk-documents (open, closed, paused, no `#item_page` line, a failed
 publish, a failed-publish value equal to the walk finder's but not the same
-object, a link sorting after that value, two open walks, several waiting items, no point, an unreadable
-walk), and where the line goes in the prompts both ignition plans compose and
+object, a link sorting after that value, two open walks, one of them named by the next step,
+a reused item number, several waiting items, no point, an unreadable walk), and where the line
+goes in the prompts both ignition plans compose and
 in the prompt the launch site hands the successor.
 
 Run: python3 nn-systems/handoff/tests/handoff-supervisor-successor-initial-agent-instructions-line-naming-waiting-approval-walk-item-test.py
@@ -37,8 +38,8 @@ WALK_DOCUMENT = (
     "## Item 3 of 3\n\nRecommendation: none.\n")
 
 
-def lines_for(root):
-    return supervisor.successor_initial_agent_instructions_line_naming_waiting_approval_walk_item(root)
+def lines_for(root, next_step=""):
+    return supervisor.successor_initial_agent_instructions_line_naming_waiting_approval_walk_item(root, next_step)
 
 
 def walk_in(root, minutes, document=WALK_DOCUMENT, name=WALK):
@@ -188,6 +189,23 @@ def run_walk_minutes_cases(workspace):
           lines_for(root) == (approved_line("fixture-older-walk", "1 of 3, Keep the first thing,",
                                             "https://claude.ai/artifact/Old", "1 of 3"),),
           repr(lines_for(root)))
+
+    older_line = (approved_line("fixture-older-walk", "1 of 3, Keep the first thing,",
+                                "https://claude.ai/artifact/Old", "1 of 3"),)
+    os.utime(older, (1_000_000_000, 1_000_000_000))
+    named = lines_for(root, "Continue approval-walk fixture-older-walk at item 1.")
+    check("two open walks, the next step naming the one with the older walk-minutes: that one",
+          named == older_line, repr(named))
+    prefix_only = lines_for(root, "Continue approval-walk fixture-older-walk-2 at item 1.")
+    check("two open walks, the next step naming only a longer name that begins with one walk's name: the latest",
+          prefix_only == expected, repr(prefix_only))
+
+    root = workspace / "reused-number"
+    walk_in(root, "#next_to_present item 2 of 3\n" f"#item_page item 2 of 3 {LINK}\n",
+            document=WALK_DOCUMENT + "\n## Item 2 of 4: Old proposal\n\nRecommendation: old.\n")
+    reused = lines_for(root)
+    check("two headings for the waiting item, told apart by M: the point of the heading the walk-minutes' M picks",
+          reused == expected, f"{reused!r}\nexpected {expected!r}")
 
     root = workspace / "open-and-paused"
     paused = walk_in(root, "#next_to_present item 1 of 3\n#approval_walk_paused away\n", name="fixture-paused-walk")
