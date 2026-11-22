@@ -17,7 +17,7 @@ candidate to six readers at once, eighteen calls in all, each a new process
 in its own empty temporary folder, given the name alone: Claude Sonnet 5.5 and
 Opus 5.5 (`claude -p` behind the shared headless prefix, so no connectors, in
 dontAsk mode, with no tools and no settings files, so no CLAUDE.md), Gemini
-gemini-3.8-flash-low and gemini-4-carbon-medium (through
+gemini-3.8-flash-low and gemini-4-neon-medium (through
 nn-systems/general-tools/agy-print-prompt-run-in-empty-home-sandbox.py), and
 gpt-6.1-terra and gpt-6.2-sol (`codex exec`, read-only, ephemeral). Each
 reader answers what the thing does, what else the name could mean, and which
@@ -104,7 +104,7 @@ READERS = (
     ("claude", "claude-sonnet-5-5", "medium"),
     ("claude", "claude-opus-5-5", "medium"),
     ("agy", "gemini-3.8-flash-low", None),
-    ("agy", "gemini-4-carbon-medium", None),
+    ("agy", "gemini-4-neon-medium", None),
     ("codex", "gpt-6.1-terra", "medium"),
     ("codex", "gpt-6.2-sol", "medium"),
 )
