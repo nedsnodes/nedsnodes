@@ -675,7 +675,8 @@ calls, judge_facts = rule_five_judge_facts(machine)
 check("rule 5: a command named in a message whose send failed is handed to the judge again",
       ids_handed_to_judge(judge_facts) == ["bk1"], calls)
 
-BK1_ASKED = "Your background command \"A\" (bk1) started 30 minutes ago. Is it taking longer than expected?"
+BK1_ASKED = ("Your background command \"A\" (bk1) started 30 minutes ago. Is it taking longer than "
+             "expected?")
 machine = Machine()
 machine.seat("alpha", [
     user("go"),
@@ -867,7 +868,8 @@ def promise_sent_on_rule_five_wait(promise_sender):
     return machine
 
 
-PROMISE_SEND_FAILS = {"sends": [send_to("alpha", is_error=True)], "answer": {"sent": False, "reason": "r"}}
+PROMISE_SEND_FAILS = {"sends": [send_to("alpha", is_error=True)],
+                      "answer": {"sent": False, "reason": "r"}}
 machine = promise_sent_on_rule_five_wait(PROMISE_SEND_FAILS)
 check("rule 2: a promise message on an open wait whose send failed logs neither a promise step nor "
       "a promise_message event",
