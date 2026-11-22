@@ -5,7 +5,8 @@ Every case runs the program as a subprocess against folders this suite made, nev
 a handoff directory, agents, projects and tasks roots, a ~/.claude.json, a log file, a state
 directory and HOME, under which user-alerts are written. `claude` is a fake placed first on PATH:
 it answers each call with the next scripted answer, as stream-json, and records the call's
-arguments and prompt. `gh` is never reached: no case gives a task prerequisites. Each invocation
+arguments and prompt. `gh` is never reached: the one case that gives a task prerequisites runs the
+program through GITHUB_BUDGET_SPENT_RUNNER, which starts the GitHub budget spent. Each invocation
 fixes the time with --now.
 """
 
@@ -149,6 +150,21 @@ def sent_ok(seat="alpha"):
     return {"sends": [send_to(seat)], "answer": {"sent": True, "reason": "sent"}}
 
 
+# Runs the program in a process whose GitHubConditionChecker reads 0 when it starts its budget and a
+# time past the budget at every later read, so no prerequisite is asked of gh.
+GITHUB_BUDGET_SPENT_RUNNER = r'''
+import importlib.util, sys
+spec = importlib.util.spec_from_file_location("sweep", sys.argv[1])
+sweep = importlib.util.module_from_spec(spec)
+spec.loader.exec_module(sweep)
+due_task_hook = sweep.verdicts_print.due_task_hook
+readings = iter([0])
+due_task_hook.GitHubConditionChecker.clock = staticmethod(
+    lambda: next(readings, due_task_hook.GH_CALLS_TOTAL_BUDGET_SECONDS + 1))
+sys.exit(sweep.main(sys.argv[2:]))
+'''
+
+
 def judged(send, message="", reason="r"):
     """A rule 5 judge's answer."""
     return {"answer": {"send": send, "message": message, "reason": reason}}
@@ -249,7 +265,7 @@ class Machine:
         return ([json.loads(path.read_text()) for path in sorted(pending.glob("*.json"))]
                 if pending.is_dir() else [])
 
-    def run(self, minutes, *extra, path_has_fake=True):
+    def run(self, minutes, *extra, path_has_fake=True, github_budget_spent=False):
         environment = dict(os.environ)
         environment["HOME"] = str(self.home)
         # Python finds the user's site-packages from HOME, and on the Mac markdown-it-py is installed there.
@@ -263,8 +279,9 @@ class Machine:
         environment["FAKE_CLAUDE_CALLS"] = str(self.calls)
         environment["FAKE_CLAUDE_ANSWERS"] = str(self.answers)
         environment["FAKE_CLAUDE_PROJECTS"] = str(self.projects)
+        runner = ["-c", GITHUB_BUDGET_SPENT_RUNNER] if github_budget_spent else []
         completed = subprocess.run(
-            [sys.executable, str(PROGRAM), "--now", at(minutes), "--handoff-directory",
+            [sys.executable, *runner, str(PROGRAM), "--now", at(minutes), "--handoff-directory",
              str(self.handoffs), "--agents-root", str(self.agents), "--projects-root",
              str(self.projects), "--tasks-root", str(self.tasks), "--claude-json",
              str(self.claude_json), "--due-task-raise-state-directory",
@@ -1234,6 +1251,24 @@ for case, answer in (("an index missing", {"sentences": []}),
           code == 1 and not machine.alerts() and machine.owner_task_subjects()
           == ["Idle sweep: a headless agent-session failed: the judge's answer could not be used"]
           and not machine.events("message_sent"), (code, machine.alerts(), machine.owner_tasks()))
+
+# --- a prerequisite the GitHub budget left unasked ----------------------------------------------
+machine = Machine()
+machine.seat("alpha", DONE_TURN)
+machine.task("alpha", "1")
+task_file = machine.tasks / "nedsnodes-alpha-tasks" / "1.json"
+task_file.write_text(json.dumps({**json.loads(task_file.read_text()),
+                                 "metadata": {"prerequisites": [{"pr_merged": 50}]}}))
+machine.script(judged(False, reason="r"))
+code, output = machine.run(0, github_budget_spent=True)
+calls, judge_facts = rule_five_judge_facts(machine)
+skipped = [{"kind": "pr_merged", "number": 50}]
+check("a prerequisite the GitHub budget left unasked: logged by name, and handed to the rule 5 judge",
+      code == 0 and [(event["agent_seat"], event["conditions"]) for event in
+                     machine.events("github_conditions_skipped_for_budget")] == [("alpha", skipped)]
+      and judge_facts.get("github_conditions_skipped_for_budget") == skipped
+      and judge_facts.get("open_tasks_nothing_holds") == [],
+      (code, output, machine.events(), judge_facts))
 
 # --- rule 1: a usage limit ------------------------------------------------------------------------
 RESET_PASSED = int(START.timestamp()) - 60

@@ -13,7 +13,9 @@ Each invocation, under a lock that keeps two from overlapping:
    checked.
 2. Takes slice 1's verdict for each agent-seat, by calling verdict_for_seat in
    scripts/agent-seat-idle-sweep-verdicts-print.py, which is the only reader of the transcripts,
-   walk-minutes and task lists.
+   walk-minutes and task lists. Each prerequisite a verdict names as not asked of GitHub because
+   the time budget for GitHub calls was spent is logged, at every invocation that skips it, as a
+   github_conditions_skipped_for_budget event, and handed to the rule 5 judge.
 3. When `oauthAccount.accountUuid` in ~/.claude.json differs from the account last logged, sends
    every agent-seat with a running agent-session the account-change notice, through one headless
    agent-session; for an agent-seat idle at a usage limit, that notice is its limit wake.
@@ -263,7 +265,8 @@ You judge one idle agent-seat for the idle sweep, a program on ned-box. The agen
 spent no tokens for {idle_minutes} minutes, and its last turn has ended. Code could not settle the \
 case: something may be left for it to do, or it may rightly be waiting. The facts code found are in \
 the JSON below. An approval-walk item waiting on the user holds back only that walk, not the \
-agent-seat's other work.
+agent-seat's other work. A condition under github_conditions_skipped_for_budget is one an open task \
+waits on that the idle sweep ran out of time to ask GitHub about, so that task may be free to work on.
 
 Judge whether the agent-seat could act now. If it could, write it one short message saying what you \
 saw. Name each background command, workflow and subagent that has not finished or reported, \
@@ -1081,6 +1084,8 @@ class Sweep:
                 "last_token_spent_at": (verdict.get(fields.LAST_ACTIVITY) or {}).get("time"),
                 "last_turn_ending_message": last_message or None,
                 "open_tasks_nothing_holds": verdict.get(fields.OPEN_TASKS_NOTHING_HOLDS),
+                fields.GITHUB_CONDITIONS_SKIPPED_FOR_BUDGET:
+                    verdict.get(fields.GITHUB_CONDITIONS_SKIPPED_FOR_BUDGET) or [],
                 "handoff_deferral_marker_file": verdict.get(fields.HANDOFF_DEFERRED_MARKER),
                 "approval_walk_items_waiting_on_the_user":
                     verdict.get(fields.APPROVAL_WALK_ITEMS_WAITING_ON_THE_USER),
@@ -1329,6 +1334,9 @@ def sweep(arguments, now):
             verdict = verdicts_print.verdict_for_seat(seat, paths, now, None, checker, parser,
                                                       skipped)
         verdicts[seat] = verdict
+        if verdict.get(fields.GITHUB_CONDITIONS_SKIPPED_FOR_BUDGET):
+            run.record({"event": fields.GITHUB_CONDITIONS_SKIPPED_FOR_BUDGET, "agent_seat": seat,
+                        "conditions": verdict[fields.GITHUB_CONDITIONS_SKIPPED_FOR_BUDGET]})
     run.account_change(verdicts)
     run.delivery_checks(verdicts)
     for seat, verdict in verdicts.items():

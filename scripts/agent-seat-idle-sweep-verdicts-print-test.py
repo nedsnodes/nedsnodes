@@ -1225,10 +1225,13 @@ try:
     checker.started -= program.due_task_hook.GH_CALLS_TOTAL_BUDGET_SECONDS
     verdict = {"running": {}, "handoff_deferred_marker": False}
     decision = program.rules_three_to_five(verdict, None, checker, budget_tasks, budget_tasks)
-    check("a prerequisite the GitHub budget left unasked: rule 5, not rule 4's no wake",
+    check("a prerequisite the GitHub budget left unasked: rule 5, not rule 4's no wake, and the "
+          "verdict names it",
           decision == {fields.RULE: 5, fields.DECISION: fields.JUDGE}
-          and set(checker.conditions_skipped_for_budget) == {("pr_merged", 50)},
-          (decision, checker.conditions_skipped_for_budget))
+          and set(checker.conditions_skipped_for_budget) == {("pr_merged", 50)}
+          and verdict.get(fields.GITHUB_CONDITIONS_SKIPPED_FOR_BUDGET)
+          == [{"kind": "pr_merged", "number": 50}],
+          (decision, checker.conditions_skipped_for_budget, verdict))
     machine = Machine()
     machine.seat("alpha", [user("go"), assistant("Done."), turn_end()])
     machine.seat("beta", [user("go"), assistant("Done."), turn_end()])
