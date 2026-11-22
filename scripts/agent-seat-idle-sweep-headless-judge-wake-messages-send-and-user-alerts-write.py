@@ -23,8 +23,7 @@ Each invocation, under a lock that keeps two from overlapping:
    rule 2 has unbacked promises and announced actions judged and named to it; rule 3 sends the
    handoff text; rule 4 ends a wait no rule 2 message was sent on; rule 5 has the judge
    decide whether to message it, and write the message. The judge is not told of a background
-   command whose command line starts with coreutils `timeout` that has not yet ended it, since
-   such work ends by itself, nor of a background command, subagent or workflow a rule 5 message
+   command whose verdict gives a `timeout_ends_at` not yet reached, since such work ends by itself, nor of a background command, subagent or workflow a rule 5 message
    has already named, since the sweep asks once about each; when something runs and all of it is
    such work, the judge is not asked. A wait whose rule 2 messages named only
    promises to act after an event and hold sentences ends when the agent-seat has recorded, after each
@@ -727,18 +726,20 @@ class Sweep:
         return text, outcome, started_at
 
     def send(self, seat, verdict, text, step):
-        """Send code's text to one agent-seat; log the send for the delivery check."""
+        """Send code's text to one agent-seat; log the send for the delivery check. Returns whether
+        the send succeeded."""
         text, outcome, started_at = self.send_wake_message([seat], text)
         if outcome.error:
             self.headless_failed(seat, f"send its {step} message", outcome.error,
                                  outcome.error_kind)
-            return
+            return False
         self.sent_texts_differ(outcome, [seat], text, step)
         problems = send_problems(outcome, [seat])
         if problems:
             self.headless_failed(seat, f"send its {step} message", "; ".join(problems), SENDS_WRONG)
-            return
+            return False
         self.message_sent(seat, verdict, text_sent_to(outcome, seat, text), step, started_at)
+        return True
 
     def message_sent(self, seat, verdict, text, step, started_at):
         # The delivery check compares transcript times with the send's start: a sender may run on
@@ -1028,18 +1029,20 @@ class Sweep:
         problem = outcome.error or idle_judge_answer_problem(outcome.answer)
         answer = outcome.answer or {}
         send = not problem and answer["send"]
+        sent = False
+        if send:
+            self.start_wait(seat, verdict, stretch, answer["message"], 5)
+            sent = self.send(seat, verdict, answer["message"], NUDGE)
+        # Work counts as asked about only once a message reached the agent-seat: a failed send
+        # leaves it for a later sweep to hand to the judge again.
         self.record({"event": "judge_answer", "agent_seat": seat, "rule": 5,
                      "session_id": verdict[fields.SESSION_ID], "last_activity": stretch,
                      "send": send, "reason": answer.get("reason"), "failed": bool(problem),
                      RUNNING_WORK_ASKED_ABOUT: running_work_named_in(facts, answer["message"])
-                     if send else []})
+                     if sent else []})
         if problem:
             self.headless_failed(seat, "judge whether it could act now", problem,
                                  outcome.error_kind or JUDGE_ANSWER_UNUSABLE)
-            return
-        if answer["send"]:
-            self.start_wait(seat, verdict, stretch, answer["message"], 5)
-            self.send(seat, verdict, answer["message"], NUDGE)
 
     def sentences(self, seat, verdict):
         """Rule 2: judge what code could not settle, and word one message naming every unbacked

@@ -17,10 +17,11 @@ agent-seat, in the file's order, the release message with the idle sweep's own
 send code and prompt, unchanged, from
 scripts/agent-seat-idle-sweep-headless-judge-wake-messages-send-and-user-alerts-write.py.
 It records the agent-seat as released only when the idle sweep's check of that
-send passes, and then prints `RELEASED <agent-seat>`; when the send or that
-check fails, it prints what failed and records nothing, so the next run, at
-the next merge or by hand, tries again. Otherwise it prints the count. The
-release message says what was counted.
+send passes and every text sent to the agent-seat is the release message, and
+then prints `RELEASED <agent-seat>`; otherwise it prints what failed and
+records nothing, so the next run, at the next merge or by hand, tries again.
+When no agent-seat is due, it prints the count. The release message says what
+was counted.
 
 A mutant-test pull request only adds tests for surviving mutants. Such pull
 requests stay unopened until the agent-seat holding them is told that
@@ -222,7 +223,8 @@ def release_recorded(state_directory, agent_seat):
 
 def release_message_send_problems(state_directory, agent_seat, text):
     """Send text to agent_seat as the idle sweep sends its wake messages; return what failed,
-    by the idle sweep's own check, or [] when the send passed it."""
+    by the idle sweep's own check and by a comparison of each text sent with the release
+    message, or [] when the send passed both."""
     text = f"{text}\n\n{idle_sweep.DO_NOT_REPLY_SENTENCE}"
     prompt = idle_sweep.SENDER_PROMPT.format(
         seat=agent_seat, text=text,
@@ -234,7 +236,10 @@ def release_message_send_problems(state_directory, agent_seat, text):
                                       idle_sweep.HEADLESS_TIMEOUT_SECONDS)
     if outcome.error:
         return [f"the headless agent-session that sends the message failed: {outcome.error}"]
-    return idle_sweep.send_problems(outcome, [agent_seat])
+    return idle_sweep.send_problems(outcome, [agent_seat]) + [
+        f"sent {seat} a text other than the release message: {sent_text!r}"
+        for seat, sent_text in idle_sweep.sent_texts_other_than_code_wrote(
+            outcome, [agent_seat], text)]
 
 
 def counted_sentence(count):

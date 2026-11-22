@@ -63,7 +63,9 @@ The cycle, per reincarnation:
      a count of the first prompts that have listed it, such as "(listed in 2
      first prompt(s))"; the branches the first-prompt list deleted go above
      the leftovers' opening sentence, under a line that opens with their
-     heading (launch_prompt_with_leftovers_before_the_next_step).
+     heading, and so does a part that lists no entry, so the sentence is
+     shown only when an entry follows it
+     (launch_prompt_with_leftovers_before_the_next_step).
   6. Keep the current and previous handoff and conversation-tail; delete older ones.
 
 The handoff file the agent writes (simple `key: value` lines):
@@ -123,6 +125,13 @@ every agent-session it starts, to the token of the GitHub account the agent-seat
 (agent_seat_github_account_lookup_and_token_file_read), replacing any GH_TOKEN it inherited. Every way
 an agent-seat is started runs this program, so this is the one place that decides the
 account.
+
+Terminal capture: at every start, a restart onto main's code at a session-handoff included,
+once it holds its lock, the supervisor runs `tmux pipe-pane` on its own tmux pane, so the pane's
+output from then on is appended to a new file in the agent-seat terminal captures directory
+(agent-seat-terminal-captures-common.py beside this file says where, and how the file is named),
+and prints one line saying where, or why the terminal is not captured. A failed start of the
+terminal capture never stops the agent-seat.
 """
 
 import argparse
@@ -270,6 +279,12 @@ agent_seat_worktrees_and_branches_list = importlib.util.module_from_spec(
     _agent_seat_worktrees_and_branches_list_spec)
 _agent_seat_worktrees_and_branches_list_spec.loader.exec_module(
     agent_seat_worktrees_and_branches_list)
+
+_agent_seat_terminal_captures_spec = importlib.util.spec_from_file_location(
+    "agent_seat_terminal_captures_common",
+    Path(__file__).resolve().with_name("agent-seat-terminal-captures-common.py"))
+agent_seat_terminal_captures = importlib.util.module_from_spec(_agent_seat_terminal_captures_spec)
+_agent_seat_terminal_captures_spec.loader.exec_module(agent_seat_terminal_captures)
 
 # One loaded copy, so the GitCommandFailed checkout_freshness_catch_up raises is the class caught here.
 git_machine_readable_output = checkout_freshness_catch_up.git_output
@@ -1628,7 +1643,7 @@ def overview_refresh_due_lines(working_directory: Path,
                   f"{handoff_architecture_overview_refresh_user_shown_mark.SYSTEM_NAME_PATTERN}, "
                   f"the system-name pattern "
                   f"nn-systems/handoff/handoff-architecture-overview-refresh-user-shown-mark.py "
-                  f"accepts, so its nc-architecture-overview is not checked; the other systems "
+                  f"accepts, so its nn-architecture-overview is not checked; the other systems "
                   f"still are.\n"
                   f"If nn-systems/{printable} holds a system's programs, propose to the user a "
                   f"name for it that matches, to be renamed in a pull request; otherwise "
@@ -1877,20 +1892,24 @@ def forget_leftover_prompt_listing_counts(counts_path: Path) -> None:
 def launch_prompt_with_leftovers_before_the_next_step(prompt: str, leftover_parts: tuple,
                                                       counts_path: Path) -> str:
     """The prompt with the leftovers between its opening and its next step, or after it when it
-    has no next step. Branches the list deleted go above the leftovers' opening sentence, which
-    asks the agent to act on each leftover below it, because they need nothing."""
+    has no next step. The leftovers' opening sentence asks the agent to act on each leftover
+    below it, so only parts that list an entry go below it; branches the list deleted, and parts
+    that list no entry, such as a failure that carries its own instruction or the line on what
+    open tasks hold, go above it."""
     heading_start = agent_seat_worktrees_and_branches_list.ALREADY_DELETED_HEADING_START
-    listed_parts, deleted_parts = [], []
+    listed_parts, deleted_parts, parts_with_no_entry = [], [], []
     for part in leftover_parts:
         # Only a line that opens with the heading starts the deleted block: an entry's commit
         # subject may quote the heading's words.
         found = re.search("^" + re.escape(heading_start), part, re.MULTILINE)
         listed = part[:found.start()] if found else part
-        if listed.strip():
+        if any(line.startswith(LEFTOVER_ENTRY_PREFIXES) for line in listed.split("\n")):
             listed_parts.append(listed.rstrip("\n"))
+        elif listed.strip():
+            parts_with_no_entry.append(listed.rstrip("\n"))
         if found:
             deleted_parts.append(part[found.start():])
-    blocks = deleted_parts
+    blocks = deleted_parts + parts_with_no_entry
     leftovers = "\n\n".join(listed_parts)
     if leftovers:
         blocks.append(LEFTOVERS_BEFORE_THE_NEXT_STEP_SENTENCE + "\n\n"
@@ -3029,6 +3048,9 @@ def main(argv=None) -> int:
         print(f"handoff-supervisor: startup stopped: {error}", file=sys.stderr)
         return 4
 
+    print(f"handoff-supervisor: "
+          f"{agent_seat_terminal_captures.agent_seat_terminal_capture_start_in_this_tmux_pane(settings.agent)}",
+          flush=True)
     try:
         return supervise_sessions(settings)
     finally:
