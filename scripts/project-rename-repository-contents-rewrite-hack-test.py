@@ -151,7 +151,7 @@ check("stage 3 refuses a move onto a path that holds other content, names it, an
 checkout = scratch_checkout({
     "README.md": "gh pr list --repo nedschorus/nedschorus\n",
     "scripts/merge-gate-test-captured-github-responses/x.json": '{"url": "repos/nedschorus/nedschorus"}\n',
-    "scripts/project-rename-machine-state-move-hack.py": 'OLD_REPOSITORY = "nedschorus/nedschorus"\n',
+    "scripts/project-rename-repository-contents-rewrite-hack.py": 'OLD_REPOSITORY = "nedschorus/nedschorus"\n',
     "docs/issues/1-a.md": "nc-systems/x and /home/nedlern/nedschorus-logs\n",
     "scripts/run.sh": "gh pr list --repo nedschorus/nedschorus\n",
     "scripts/binary.bin": b"\xff\xfe nedschorus/nedschorus\n",
@@ -159,10 +159,10 @@ checkout = scratch_checkout({
 os.chmod(checkout / "scripts/run.sh", 0o755)
 for stage in ("1", "2", "3"):
     run(checkout, "--stage", stage)
-check("stage 1 leaves Markdown, captured responses, the move program and non-UTF-8 files alone",
+check("stage 1 leaves Markdown, captured responses, a kept program file and non-UTF-8 files alone",
       read(checkout, "README.md") == "gh pr list --repo nedschorus/nedschorus\n"
       and "nedschorus/nedschorus" in read(checkout, "scripts/merge-gate-test-captured-github-responses/x.json")
-      and "nedschorus/nedschorus" in read(checkout, "scripts/project-rename-machine-state-move-hack.py")
+      and "nedschorus/nedschorus" in read(checkout, "scripts/project-rename-repository-contents-rewrite-hack.py")
       and (checkout / "scripts/binary.bin").read_bytes() == b"\xff\xfe nedschorus/nedschorus\n")
 check("stages 2 and 3 rewrite a GHI-MD file's paths like any other file's",
       read(checkout, "docs/issues/1-a.md") == "nn-systems/x and /home/nedlern/nedsnodes-logs\n",

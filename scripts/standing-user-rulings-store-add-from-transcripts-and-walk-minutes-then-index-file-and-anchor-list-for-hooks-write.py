@@ -421,7 +421,7 @@ class Repository:
 
 
 # Transcripts, walk minutes and stored tags written before the project rename name files and directories by their old
-# names, and the move program leaves those records as they are.
+# names, and the project rename left those records as they were.
 _path_names_spec = importlib.util.spec_from_file_location(
     "project_rename_path_names_before_and_after_common",
     Path(__file__).resolve().with_name("project-rename-path-names-before-and-after-common.py"))
