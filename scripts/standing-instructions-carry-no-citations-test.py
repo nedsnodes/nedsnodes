@@ -50,6 +50,8 @@ SUITE = "scripts/standing-instructions-carry-no-citations-test.py"
 STANDING_INSTRUCTION_PATHSPECS = ("CLAUDE.md", "*/CLAUDE.md", "AGENTS.md", "*/AGENTS.md",
                                   "SKILL.md", "*/SKILL.md", "*-instructions.md", "*-prompt.md",
                                   ".claude/agents/*.md", ".claude/skills/cold-read/prompts/*.md")
+# A GHI-MD's file name comes from its issue's title, so a title ending in "instructions" or "prompt" would match.
+NOT_STANDING_INSTRUCTION_PATHSPECS = (":(exclude)docs/issues/",)
 
 MARKER_PATTERNS = {
     "date": _date_pattern.DATE_MARKER_PATTERN_OUTSIDE_PATH_AND_FILE_NAMES,
@@ -71,6 +73,8 @@ EXCEPTIONS = {
         "an example of a citation's form, which the agent copies when it cites a ruling",
     (".claude/skills/cold-read/SKILL.md", "`--user-ruled-cold-read-full-run-count-restart`"):
         "the name of a cold-read-grid.py flag the agent must type, not a record of a ruling",
+    (".claude/skills/walk-me-through/SKILL.md", "the user's answer of 2026-11-17 to item 58.5 of approval-walk"):
+        "the citation the agent writes into the walk-minutes' check --already-decided for a clarity-only change",
 }
 
 
@@ -95,7 +99,8 @@ def markers_in(path, source, exceptions=EXCEPTIONS):
 
 def standing_instruction_paths(repository):
     listing = subprocess.run(
-        ["git", "-C", str(repository), "ls-files", "-z", "--", *STANDING_INSTRUCTION_PATHSPECS],
+        ["git", "-C", str(repository), "ls-files", "-z", "--", *STANDING_INSTRUCTION_PATHSPECS,
+         *NOT_STANDING_INSTRUCTION_PATHSPECS],
         capture_output=True, text=True, check=True).stdout
     return sorted(path for path in listing.split("\0") if path)
 
@@ -123,6 +128,7 @@ def the_file_listing_takes_exactly_the_standing_instruction_files():
         names = ["CLAUDE.md", "x/CLAUDE.md", "x/y/SKILL.md", "a-instructions.md",
                  "x/b-prompt.md", "AGENTS.md", "x/AGENTS.md", ".claude/agents/d.md",
                  ".claude/skills/cold-read/prompts/e.md", "c-design.md", "NOTCLAUDE.md",
+                 "docs/issues/4080-fix-the-arbitrator-agent-instructions.md",
                  "x/SKILL.md.bak", ".claude/skills/other/prompts/f.md", ".claude/g.md"]
         for name in names:
             (scratch / name).parent.mkdir(parents=True, exist_ok=True)

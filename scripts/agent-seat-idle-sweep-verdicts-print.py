@@ -18,11 +18,16 @@ What it reads, for each agent-seat that has a handoff-supervisor state file
 - the walk-minutes in the agent-seat's `docs/walk/`, the handoff deferral marker file, the task
   list `<tasks root>/nedsnodes-<seat>-tasks/`, and, for a usage limit, `oauthAccount.accountUuid`
   in `~/.claude.json`;
+- for rule 4, the due-task hook's state file for the task list, which says which tasks that hook
+  has already raised for a pull request closed without merging;
 - GitHub, through `gh`, for the prerequisites of open tasks, only when rule 4 needs the answer.
 
 It prints one JSON object per agent-seat, one per line. Each holds what the later slice needs
 without reading anything again: the session id, the transcript path, the last time a token was
-spent and the file that showed it, what is running and since when, Workflow-tool runs included (a subagent that reported and
+spent and the file that showed it, what is running and since when, Workflow-tool runs included, each
+background command with the description of the Bash call that started it and, when its command line
+starts with coreutils `timeout <duration>` and runs nothing after the timed command except through a
+pipe, the time that timeout stops it (a subagent that reported and
 stopped while background commands it launched still run gets the time of its report under
 `stopped_at` and a list of those commands under `own_running_background_commands`), the matched sentences with the code's reading of each, the agent-seat's last message, the tool calls a judge of the sentences
 looks through, the rule that applies and its decision.
@@ -55,7 +60,7 @@ import importlib.util
 import json
 import re
 import sys
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
 
@@ -97,6 +102,12 @@ TASK_TOOL_NAMES = ("TaskCreate", "TaskUpdate")
 # and "Updated task #<n> <fields>".
 TASK_TOOL_SUCCESS_RESULT_PATTERN = re.compile(
     r"Task #(?P<created>\d+) created successfully\b|Updated task #(?P<updated>\d+)\b")
+# Coreutils `timeout`: its options, then the duration, a number with an optional unit.
+TIMEOUT_COMMAND_LINE_START_PATTERN = re.compile(
+    r"\s*timeout(?:\s+(?:-[fpv]+|--(?:foreground|preserve-status|verbose)"
+    r"|--(?:kill-after|signal)(?:=|\s+)\S+|-[ks]\s*\S+))*"
+    r"\s+(?P<number>\d+(?:\.\d*)?|\.\d+)(?P<unit>[smhd]?)\s")
+SECONDS_BY_TIMEOUT_DURATION_UNIT = {"": 1, "s": 1, "m": 60, "h": 3600, "d": 86400}
 HANDOFF_PUT_OFF_TEXT = ("Your handoff was put off at {time} and nothing is running now. "
                         "Is now a good time to hand off?")
 
@@ -128,7 +139,7 @@ _VERBS = (
     "fetch|pull|clone|grep|search|verify|investigate|record|save|publish|comment|"
     "close|revert|rename|move|copy|land|kick off|fire|queue|retry|rerun|amend|"
     "squash|reopen|resolve|patch|implement|scan|compare|diff|inspect|confirm|"
-    "re-?dispatch|re-?push|re-?file|re-?open|relaunch|notify|ping|hand|stage"
+    "re-?dispatch|re-?push|re-?file|re-?open|relaunch|notify|ping|hand|stage|finish"
 )
 _GERUNDS = (
     "opening|filing|creating|pushing|committing|running|re-?running|starting|"
@@ -141,7 +152,7 @@ _GERUNDS = (
     "kicking off|firing|queueing|queuing|retrying|amending|squashing|"
     "reopening|resolving|patching|implementing|scanning|comparing|inspecting|"
     "confirming|re-?dispatching|re-?pushing|relaunching|notifying|pinging|"
-    "handing|staging"
+    "handing|staging|finishing"
 )
 _FILLER = (r"(?:(?:now|then|first|next|go ahead and|go|quickly|also|immediately|just|"
            r"straight away|right away|actually|instead|again)\s+)*")
@@ -185,7 +196,14 @@ RX_CONDITIONAL_ON_EVENT = re.compile(
 RX_NEGATED_ACTION = re.compile(
     r"\b(?:without|instead of|rather than|not yet|never|no longer|don't|won't|can't)\s+"
     r"(?:\w+\s+){0,2}?(?:push|pushing|commit|committing|dispatch|dispatching|fork|forking|file|"
-    r"filing|open|opening|send|sending|message|messaging|start|starting|spawn|spawning)\b", re.I)
+    r"filing|open|opening|send|sending|message|messaging|start|starting|spawn|spawning)\b"
+    # A negated object declines the action too, as in "I'm starting nothing else for now"; but
+    # "nothing but the test" names what is done, and "no more than five" sets a limit.
+    r"|\b(?:" + _VERBS + "|" + _GERUNDS + r")\s+(?:nothing|none|no\s+(?:more|other|new|further))\b"
+    r"(?!\s+(?:else\s+)?(?:but|than)\b)",
+    re.I)
+# Coordinated clauses share the sentence's subject: "I'll push no further changes and merge it now".
+RX_CLAUSE_BREAK = re.compile(r",\s*(?:and\s+)?then\s+|\s+and\s+(?:then\s+)?|;\s*", re.I)
 
 
 def clean_text(text):
@@ -230,6 +248,16 @@ def _announces(sentence):
     return bool(match and _gerund_announces(sentence, match))
 
 
+def _declines_every_action(sentence):
+    """Whether a clause declines an action and no other clause announces one."""
+    clauses = RX_CLAUSE_BREAK.split(sentence)
+    if not any(RX_NEGATED_ACTION.search(clause) for clause in clauses):
+        return False
+    return not any(not RX_NEGATED_ACTION.search(clause)
+                   and (_announces(clause) or _announces("I'll " + clause))
+                   for clause in clauses)
+
+
 def sentence_kind(sentence):
     """Return the kind of a sentence the phrase lists match, or None for a sentence they miss."""
     if sentence.endswith("?"):
@@ -238,7 +266,7 @@ def sentence_kind(sentence):
     if kind is None:
         if not _announces(sentence):
             return None
-        if RX_NEGATED_ACTION.search(sentence):
+        if _declines_every_action(sentence):
             return NEGATIVE
     # The user has the next move whatever else the sentence promises.
     if RX_CONDITIONAL_ON_USER.search(sentence):
@@ -341,6 +369,90 @@ class TranscriptFacts:
         self.tool_calls = []             # (time, name, input), every tool call
         self.launch_times = {}           # subagent or background task id -> time
         self.last_task_notification = {} # task id -> (time, whether it is interim)
+        self.background_command_calls = BackgroundCommandCalls()
+
+
+class BackgroundCommandCalls:
+    """The Bash call that started each background command, and when, read record by record. Claude
+    Code moves a Bash call not run in the background there once it has run long enough, so every
+    Bash call is kept, not only those with run_in_background."""
+
+    def __init__(self):
+        self.call_by_tool_use_id = {}   # tool use id -> (input, time of the call)
+        self.call_by_task_id = {}
+
+    def read(self, record):
+        for block in tool_uses(record):
+            if block.get("name") == "Bash" and isinstance(block.get("input"), dict):
+                self.call_by_tool_use_id[block.get("id")] = (
+                    block["input"], parse_time(record.get("timestamp")))
+        result = record.get("toolUseResult")
+        task_id = result.get(threshold_hook.BACKGROUND_TASK_LAUNCH_KEY) if isinstance(result, dict) \
+            else None
+        if isinstance(task_id, str) and task_id not in self.call_by_task_id:
+            self.call_by_task_id[task_id] = self.call_by_tool_use_id.get(
+                threshold_hook.tool_result_tool_use_id(record), ({}, None))
+
+    def entry(self, task_id, started):
+        """The verdict's entry for one running background command. Its timeout counts from the
+        Bash call, which for a call moved to the background is earlier than the command's start."""
+        tool_input, called_at = self.call_by_task_id.get(task_id, ({}, None))
+        command = tool_input.get("command") if isinstance(tool_input.get("command"), str) else ""
+        description = tool_input.get("description")
+        if not (isinstance(description, str) and description.strip()):
+            line = " ".join(command.split())
+            kept = fields.BACKGROUND_COMMAND_LINE_CHARACTERS_KEPT
+            description = (line if len(line) <= kept else line[:kept - 1] + "…") or None
+        seconds = timeout_seconds_of_command_line(command)
+        timeout_starts_at = called_at or started
+        return {"id": task_id, "started": iso(started),
+                fields.BACKGROUND_COMMAND_DESCRIPTION: description,
+                fields.BACKGROUND_COMMAND_TIMEOUT_ENDS_AT:
+                    iso(timeout_starts_at + timedelta(seconds=seconds))
+                    if seconds and timeout_starts_at else None}
+
+
+def timeout_seconds_of_command_line(command):
+    """The duration of the coreutils `timeout` a command line starts with, in seconds, when that
+    timeout stops the whole line; 0 for a duration of 0, which disables the timeout. None when the
+    line starts with no timeout, or goes on past the timed command with a `;`, `&&`, `||`, `&` or
+    line break, since the shell runs what follows outside the timeout. A pipe is allowed: once the
+    timeout stops the first command, the rest of the pipeline reads the end of its input."""
+    match = TIMEOUT_COMMAND_LINE_START_PATTERN.match(command)
+    if not match or command_line_runs_another_command_after(command[match.end():]):
+        return None
+    return float(match["number"]) * SECONDS_BY_TIMEOUT_DURATION_UNIT[match["unit"]]
+
+
+def command_line_runs_another_command_after(text):
+    """Whether shell text holds a `;`, `&&`, `||`, `&` or line break outside quotes and parentheses.
+    The `&` of a redirection, as in `2>&1`, `&>` or `|&`, does not count."""
+    quote = None
+    depth = 0
+    index = 0
+    while index < len(text):
+        character = text[index]
+        if quote == "'":
+            quote = None if character == "'" else quote
+        elif quote == '"':
+            if character == "\\":
+                index += 1
+            elif character == '"':
+                quote = None
+        elif character == "\\":
+            index += 1
+        elif character in "'\"":
+            quote = character
+        elif character == "(":
+            depth += 1
+        elif character == ")":
+            depth -= 1
+        elif depth == 0 and (character in ";\n" or text[index:index + 2] == "||"
+                             or (character == "&" and (index == 0 or text[index - 1] not in "<>|")
+                                 and text[index + 1:index + 2] != ">")):
+            return True
+        index += 1
+    return False
 
 
 def task_notification_carrier_text(record):
@@ -395,6 +507,7 @@ def read_main_transcript(path):
                 interim = interim_recognizer.task_notification_is_interim(notification)
                 for task_id in TASK_NOTIFICATION_TASK_ID_PATTERN.findall(notification):
                     facts.last_task_notification[task_id] = (moment, interim)
+        facts.background_command_calls.read(record)
         result = record.get("toolUseResult")
         if isinstance(result, dict) and moment:
             for key in ("agentId", threshold_hook.BACKGROUND_TASK_LAUNCH_KEY):
@@ -460,9 +573,12 @@ def running_subagent_entry(agent_id, facts, transcript, newest_spend_by_subagent
                                         background_task_wait_seconds=float("inf"), now=now,
                                         should_raise_on_undecodable_bytes=True,
                                         task_ids_ended_in_session_transcript=task_ids_ended_in_session_transcript)
+    own_calls = BackgroundCommandCalls()
+    for record in transcript_records(own_transcript):
+        own_calls.read(record)
     entry[fields.SUBAGENT_STOPPED_AT] = iso(stopped_at)
     entry[fields.SUBAGENT_OWN_RUNNING_BACKGROUND_COMMANDS] = [
-        {"id": task_id, "started": iso(own.launched_at_by_id.get(task_id))}
+        own_calls.entry(task_id, own.launched_at_by_id.get(task_id))
         for task_id in own.background_task_ids]
     return entry
 
@@ -520,12 +636,15 @@ def tasks_of_task_list(task_directory, unknown_without_them):
     return tasks
 
 
-def open_tasks_nothing_holds(task_directory, checker):
-    """Open tasks nothing recorded holds back, as the due-task hook counts them for its idle check."""
+def open_tasks_nothing_holds(task_directory, checker, due_task_raise_state_directory):
+    """Open tasks nothing recorded holds back, as the due-task hook counts them for its idle check,
+    from that hook's state file for the task list."""
     tasks = tasks_of_task_list(task_directory, "whether it holds the agent-seat's work")
     # The checker is shared by every agent-seat, so only the failures appended here are this one's.
     failures_before = len(checker.gh_failures)
-    free, _ = due_task_hook.unheld_and_held_tasks(tasks, task_directory, checker)
+    raised = due_task_hook.read_state(
+        due_task_raise_state_directory / f"{task_directory.name}.json")["raised"]
+    free, _ = due_task_hook.unheld_and_held_tasks(tasks, task_directory, checker, raised)
     if len(checker.gh_failures) > failures_before:  # pragma: no mutate, gh_failures is only appended to, so != gives what > gives; a test kills is not
         kind, number, cause = checker.gh_failures[failures_before]
         raise ReadFailure(f"GitHub could not say whether {kind} {number} holds: {cause}")
@@ -622,13 +741,15 @@ def tool_calls_since_start_of_earliest_turn_with_sentence_to_judge(facts, judged
             for moment, name, tool_input in facts.tool_calls if moment and moment >= earliest]
 
 
-def rules_three_to_five(verdict, put_off_at, checker, task_directory):
+def rules_three_to_five(verdict, put_off_at, checker, task_directory,
+                        due_task_raise_state_directory):
     running = any(verdict["running"].values())
     if verdict["handoff_deferred_marker"] and not running:
         return {fields.RULE: 3, fields.DECISION: fields.WAKE_HANDOFF_PUT_OFF,
                 fields.TEXT: HANDOFF_PUT_OFF_TEXT.format(time=iso(put_off_at))}
     if not running and not verdict["handoff_deferred_marker"]:
-        verdict["open_tasks_nothing_holds"] = open_tasks_nothing_holds(task_directory, checker)
+        verdict["open_tasks_nothing_holds"] = open_tasks_nothing_holds(
+            task_directory, checker, due_task_raise_state_directory)
         if not verdict["open_tasks_nothing_holds"]:
             return {fields.RULE: 4, fields.DECISION: fields.NO_WAKE}
     return {fields.RULE: 5, fields.DECISION: fields.JUDGE}
@@ -705,8 +826,9 @@ def verdict_for_seat(seat, paths, now, since, checker, parser, usage_limit_recor
                               "run reads") from error
         verdict["running"] = {
             "subagents": running_subagents,
-            "background_commands": [{"id": task_id, "started": iso(facts.launch_times.get(task_id))}
-                                    for task_id in flight.background_task_ids],
+            "background_commands": [
+                facts.background_command_calls.entry(task_id, facts.launch_times.get(task_id))
+                for task_id in flight.background_task_ids],
             "workflows": [{"id": task_id, "started": iso(flight.launched_at_by_id.get(task_id))}
                           for task_id in flight.workflow_ids]}
         marker = deferred_marker_files.handoff_deferred_marker_path(
@@ -752,12 +874,14 @@ def verdict_for_seat(seat, paths, now, since, checker, parser, usage_limit_recor
             # after those reads, so one that fails leaves the rule null.
             if not unbacked:
                 verdict[fields.IF_EVERY_SENTENCE_BACKED] = rules_three_to_five(
-                    verdict, put_off_at, checker, task_directory)
+                    verdict, put_off_at, checker, task_directory,
+                    paths.due_task_raise_state_directory)
             verdict.update({fields.RULE: 2, fields.DECISION: fields.JUDGE})
         elif unbacked:
             verdict.update({fields.RULE: 2, fields.DECISION: fields.SEND_UNBACKED})
         else:
-            verdict.update(rules_three_to_five(verdict, put_off_at, checker, task_directory))
+            verdict.update(rules_three_to_five(verdict, put_off_at, checker, task_directory,
+                                               paths.due_task_raise_state_directory))
     except ReadFailure as error:
         verdict["errors"].append(str(error))
     return verdict
@@ -772,6 +896,8 @@ class Paths:
         self.projects_root = Path(arguments.projects_root).expanduser()
         self.tasks_root = Path(arguments.tasks_root).expanduser()
         self.claude_json = Path(arguments.claude_json).expanduser()
+        self.due_task_raise_state_directory = Path(
+            arguments.due_task_raise_state_directory).expanduser()
 
 
 def agent_seats(handoff_directory):
@@ -791,6 +917,8 @@ def main(argv=None):
     parser.add_argument("--projects-root", default="~/.claude/projects")
     parser.add_argument("--tasks-root", default="~/.claude/tasks")
     parser.add_argument("--claude-json", default="~/.claude.json")
+    parser.add_argument("--due-task-raise-state-directory",
+                        default=str(Path("~") / due_task_hook.STATE_DIRECTORY_UNDER_HOME))
     parser.add_argument("--usage-limit-record-uuid-to-ignore", action="append", default=[],
                         help="uuid of a usage-limit record rule 1 no longer applies to; may repeat")
     arguments = parser.parse_args(argv)
