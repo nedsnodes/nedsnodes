@@ -312,9 +312,14 @@ STRAY_WRITE_NO_UNDO_ALREADY_CHANGED = (
 # be shown to be free of those edits once any already-edited file has changed or gone.
 STRAY_WRITE_NO_UNDO_MAY_HOLD_MOVED_CHANGES = (
     "No undo command is given. A file with uncommitted changes from before the cells launched "
-    "has changed or gone since: {touched}. A stopped cell may have moved it here, so an undo "
-    "could delete those changes. Read this path against the edits you know are your own, and ask "
-    "the user about any change you did not make.")
+    "has changed or gone since: {touched}. A stopped cell may have moved those changes into {path}, "
+    "so an undo of {path} could delete them. Read {path} against the edits you know are your own, "
+    "and ask the user about any change you did not make.")
+STRAY_WRITE_NO_UNDO_GONE_WHILE_CHANGES_MAY_HAVE_MOVED = (
+    "No undo command is given for any path, because a file with uncommitted changes from before "
+    "the cells launched has changed or gone since: {touched}, and a stopped cell may have moved "
+    "those changes. {path} is gone; `git -C {repository} diff -- {path}` shows what it held. Ask the "
+    "user before you restore it, and about any change you did not make.")
 STOPPED_CELL_LINE = "{report}: stopped before it finished{deleted}."
 WORKING_TREE_SNAPSHOT_NOT_TAKEN_REASON = "its snapshot of the working tree before the cells launched failed ({error})"
 WORKING_TREE_CHECK_FAILED_REASON = "git status failed when it checked ({error})"
@@ -1000,7 +1005,9 @@ def stopped_cells_write_check_lines(stopped_report_paths: list, baseline,
             continue
         already_reported.add(name)
         undo = (STRAY_WRITE_NO_UNDO_ALREADY_CHANGED if name in changed_before
-                else STRAY_WRITE_NO_UNDO_MAY_HOLD_MOVED_CHANGES if touched
+                else STRAY_WRITE_NO_UNDO_MAY_HOLD_MOVED_CHANGES
+                if touched and os.path.lexists(cell_common.REPO_ROOT / name)
+                else STRAY_WRITE_NO_UNDO_GONE_WHILE_CHANGES_MAY_HAVE_MOVED if touched
                 else STRAY_WRITE_UNDO_UNTRACKED if name in untracked
                 else STRAY_WRITE_UNDO_TRACKED)
         lines.append(STOPPED_CELLS_STRAY_WRITE_LINE.format(
