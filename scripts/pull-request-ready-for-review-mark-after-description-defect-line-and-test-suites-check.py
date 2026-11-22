@@ -13,8 +13,9 @@ Run it from the pull request's own checkout, with its nn-head-commit checked out
 3. refuses a description with no defect line (#root_cause, #root_cause_not_fixed or
    #no_defect_fixed), read by the same reader scripts/merge-gate.sh uses; a placeholder
    description has none;
-4. runs this checkout's test suites whose recorded inputs changed since origin/main, with this
-   checkout's own scripts/run-all-test-suites.py, and refuses when any fails;
+4. runs this checkout's test suites whose recorded inputs changed since the checkout's merge
+   base with origin/main, so a change main made after the branch started selects no suite, with
+   this checkout's own scripts/run-all-test-suites.py, and refuses when any fails;
 5. marks the pull request ready for review with gh pr ready.
 
 It does not check what scripts/merge-gate.sh checks again before merging, such as a not-fixed
@@ -50,6 +51,7 @@ GIT_MERGE_BASE_IS_ANCESTOR_NO = 1
 # --untracked-files=normal overrides a status.showUntrackedFiles=no setting, which would hide
 # untracked files from the check.
 UNCOMMITTED_CHANGES_COMMAND = ["git", "status", "--porcelain", "--untracked-files=normal"]
+MERGE_BASE_WITH_ORIGIN_MAIN_COMMAND = ["git", "merge-base", "origin/main", "HEAD"]
 MESSAGE_PREFIX = "pull request ready for review: "
 # Messages follow docs/nedsnodes-wiki/nedsnodes-how-to-write-a-tool-message-to-agent-such-as-a-hook-refusal-or-script-error.md.
 NOTHING_CHANGED_LINE = "Nothing was changed on GitHub."
@@ -63,12 +65,12 @@ class StepFailed(Exception):
     """A step refused the pull request, or could not run; the message says which and why."""
 
 
-def selective_test_run_command(checkout):
-    """The run of the suites whose recorded inputs changed since origin/main, with checkout's own
-    runner, which tests the checkout it sits in; the runner beside this program may sit in another
-    checkout."""
+def selective_test_run_command(checkout, merge_base):
+    """The run of the suites whose recorded inputs changed since merge_base, the checkout's merge
+    base with origin/main, with checkout's own runner, which tests the checkout it sits in; the
+    runner beside this program may sit in another checkout."""
     return ["python3", str(Path(checkout) / "scripts" / "run-all-test-suites.py"),
-            "--only-suites-whose-recorded-inputs-changed-since", "origin/main"]
+            "--only-suites-whose-recorded-inputs-changed-since", merge_base]
 
 
 def first_stderr_line(completed):
@@ -260,7 +262,15 @@ def check_and_mark_ready(number, runner, output):
             "lines. Then upload the "
             f"file with gh pr edit {number} --body-file <file>, which replaces the whole "
             "description, and run this again.")
-    command = selective_test_run_command(checkout)
+    merge_base = run_command(
+        MERGE_BASE_WITH_ORIGIN_MAIN_COMMAND, runner, GIT_TIMEOUT_SECONDS,
+        "finding this checkout's merge base with origin/main",
+        NOTHING_CHANGED_LINE + "\n"
+        "If git's error says origin/main is not a valid object name: run git fetch origin main, "
+        "then run this again.\n"
+        "If git gave any other error, or none: "
+        + RETRY_THEN_USER_INSTRUCTION.format(number=number)).strip()
+    command = selective_test_run_command(checkout, merge_base)
     output.write(MESSAGE_PREFIX + "running " + " ".join(command[1:]) + "\n")
     output.flush()
     try:
