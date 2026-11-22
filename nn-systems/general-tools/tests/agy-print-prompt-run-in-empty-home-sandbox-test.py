@@ -19,7 +19,7 @@ and a stub agy stands in for the real one.
     its stdout passed through and its arguments as the program built them;
     it runs as the sandbox's agy with only .gemini in its home, in the empty
     /tmp/agy-working-directory, with no agy on PATH and the caller's stdin not
-    reaching it, and a GEMINI_API_KEY the caller set does not reach it, while
+    reaching it, and a GEMINI_API_KEY, GH_TOKEN or GITHUB_TOKEN the caller set does not reach it, while
     other variables do.
   - Without --model the program refuses, exit 2.
   - Run in this process with sys.platform set, the program hands agy a fresh
@@ -100,7 +100,8 @@ def read_only_mount_points(mountinfo: str) -> set:
 
 def run_program(home, path, *arguments, extra_environment=None):
     environment = {**os.environ, "HOME": str(home), "PATH": path,
-                   "GEMINI_API_KEY": "caller-key", "AAA_CALLER_VARIABLE": "kept-a",
+                   "GEMINI_API_KEY": "caller-key", "GH_TOKEN": "caller-gh-token",
+                   "GITHUB_TOKEN": "caller-github-token", "AAA_CALLER_VARIABLE": "kept-a",
                    "ZZZ_CALLER_VARIABLE": "kept-z", **(extra_environment or {})}
     return subprocess.run([sys.executable, str(SCRIPT_PATH), *arguments],
                           input="caller-stdin", capture_output=True, text=True,
@@ -110,13 +111,13 @@ def run_program(home, path, *arguments, extra_environment=None):
 # What the echoing stub agy prints, field by field: its arguments, then what it
 # sees of its key, the caller's variables, its own path, its home, its working
 # directory, PATH and stdin.
-ECHOING_AGY_BODY = ('printf "%s|" "$@" "key=${GEMINI_API_KEY-unset}" '
+ECHOING_AGY_BODY = ('printf "%s|" "$@" "key=${GEMINI_API_KEY-unset}${GH_TOKEN-unset}${GITHUB_TOKEN-unset}" '
                     '"${AAA_CALLER_VARIABLE-unset}" "${ZZZ_CALLER_VARIABLE-unset}" "$0" '
                     '"$(ls -A "$HOME" | tr "\\n" " ")" "cwd=$(pwd)" '
                     '"cwd-entries=$(ls -A)" "agy-on-path=$(command -v agy || echo none)" '
                     '"stdin=$(cat)"\n')
 ECHOED_FIELDS = ["--model", "gemini-x", "--output-format", "text", "--print", "say hi",
-                 "key=unset", "kept-a", "kept-z", program.AGY_PATH_INSIDE_SANDBOX,
+                 "key=unsetunsetunset", "kept-a", "kept-z", program.AGY_PATH_INSIDE_SANDBOX,
                  ".gemini ", "cwd=/tmp/agy-working-directory", "cwd-entries=",
                  "agy-on-path=none", "stdin=", ""]
 # The fields only the real bwrap makes true: agy's own path is the bind's
@@ -196,7 +197,7 @@ def cases_with_the_stand_in_sandbox(root, home):
                          extra_environment={"FAKE_SANDBOX_PROGRAM_ARGV_LOG": str(argv_log)})
     fields = result.stdout.split("|")
     check("agy succeeding: stdout passed through, arguments as built, no "
-          "GEMINI_API_KEY but every other variable, in "
+          "GEMINI_API_KEY, GH_TOKEN or GITHUB_TOKEN but every other variable, in "
           "/tmp/agy-working-directory, with agy off PATH and stdin closed, exit 0",
           result.returncode == 0 and len(fields) == len(ECHOED_FIELDS)
           and all(field == expected for index, (field, expected)
