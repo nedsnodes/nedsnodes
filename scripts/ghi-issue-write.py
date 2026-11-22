@@ -2285,9 +2285,8 @@ def validate_edit(path: Path, repository_root: Path):
     text = path.read_text(encoding="utf-8")
     if not text.strip():
         raise Refused(f"{path} is empty", 64)
-    numbered = re.match(r"^(\d+)-", path.name)
-    if numbered:
-        number = int(numbered.group(1))
+    number = issue_number_in_file_name(path)
+    if number is not None:
         relative = relative_to_root(path, repository_root)
         if not writable_relative_path(relative):
             raise Refused(
