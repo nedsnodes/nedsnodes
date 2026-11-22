@@ -251,18 +251,18 @@ def agy_run_with_stubs(platform):
         return subprocess.CompletedProcess(command, 0)
 
     saved = (sys.platform, sys.argv, program.shutil.which, program.subprocess.run,
-             program.gemini_launcher_module)
+             program.load_cold_read_skill_agy_cell_launcher_program_module)
     sys.platform = platform
     sys.argv = [str(SCRIPT_PATH), "--model", "m", "prompt"]
     program.shutil.which = lambda name: f"/stub/{name}"
     program.subprocess.run = fake_run
-    program.gemini_launcher_module = lambda: StubGeminiLauncher
+    program.load_cold_read_skill_agy_cell_launcher_program_module = lambda: StubGeminiLauncher
     os.environ[StubGeminiLauncher.EXTRA_REMOVED_VARIABLE] = "x"
     try:
         exit_code = program.main()
     finally:
         (sys.platform, sys.argv, program.shutil.which, program.subprocess.run,
-         program.gemini_launcher_module) = saved
+         program.load_cold_read_skill_agy_cell_launcher_program_module) = saved
         del os.environ[StubGeminiLauncher.EXTRA_REMOVED_VARIABLE]
     return exit_code, seen.get("cwd"), seen.get("existed"), seen.get("env")
 

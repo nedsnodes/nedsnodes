@@ -100,7 +100,7 @@ def empty_home_sandbox_prefix(home: pathlib.Path, agy_path: str) -> list:
     ]
 
 
-def gemini_launcher_module():
+def load_cold_read_skill_agy_cell_launcher_program_module():
     """Return the Gemini cold-read-cell launcher, loaded from its file."""
     spec = importlib.util.spec_from_file_location("cold_read_agy_cell", GEMINI_LAUNCHER_PATH)
     launcher = importlib.util.module_from_spec(spec)
@@ -123,7 +123,7 @@ def main() -> int:
             print(f"{PROGRAM}: refused: {needed} is not on PATH, so agy was not run.",
                   file=sys.stderr)
             return 1
-    launcher = gemini_launcher_module()
+    launcher = load_cold_read_skill_agy_cell_launcher_program_module()
     working_directory_context = (tempfile.TemporaryDirectory(prefix="agy-working-directory-")
                                  if sys.platform == "darwin" else contextlib.nullcontext())
     with working_directory_context as working_directory:
