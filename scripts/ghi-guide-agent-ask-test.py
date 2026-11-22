@@ -1626,6 +1626,33 @@ with tempfile.TemporaryDirectory() as temporary:
           and _git(["rev-parse", "HEAD"], seat).stdout == head_before,
           (refused.returncode, refused.stderr))
 
+with tempfile.TemporaryDirectory() as temporary:
+    origin, seat, environment = _seat_whose_copy_predates_print_answer_json(Path(temporary))
+    head_before = _git(["rev-parse", "HEAD"], seat).stdout
+    with open(seat / ghi_ask.LOCK_FILE_NAME, "a+") as held_lock:
+        fcntl.flock(held_lock.fileno(), fcntl.LOCK_EX)
+        contended = _run_remote_command(remote_command_with_new_flag, environment)
+    check("while another ask holds the state lock, the remote command leaves the "
+          "agent-home as it is, so no running ask has its files swapped",
+          _git(["rev-parse", "HEAD"], seat).stdout == head_before
+          and "refreshed the seat checkout" not in contended.stderr,
+          contended.stderr)
+
+with tempfile.TemporaryDirectory() as temporary:
+    origin, seat, environment = _seat_whose_copy_predates_print_answer_json(Path(temporary))
+    recorder = Path(temporary) / "record-stdin"
+    recorder.write_text('#!/bin/sh\ncat\n', encoding="utf-8")
+    recorder.chmod(0o755)
+    stdin_command = ghi_ask.build_remote_command("q", False, "x/y", True).replace(
+        "python3 scripts/ghi-guide-agent-ask.py --question-file", str(recorder))
+    piped = _remote_subprocess.run(["/bin/sh", "-c", stdin_command], input="the whole question\n",
+                                   capture_output=True, text=True, env=environment,
+                                   check=False, timeout=300)
+    check("a question sent on stdin reaches the ask whole after the fast-forward line runs",
+          piped.stdout == "the whole question\n"
+          and "refreshed the seat checkout 1 commit(s)" in piped.stderr,
+          (piped.stdout, piped.stderr))
+
 
 # --- the seat directory, state file and state key, unpatched ----------------
 # Every case above patches DEFAULT_SEAT_DIR or reads STATE_FILE_NAME and the

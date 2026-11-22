@@ -1006,8 +1006,9 @@ def _ask_within_lock(question, include_closed, seat_dir, repo, projects_root,
 # than a flag would otherwise reject it at argparse and never reach its own
 # fast-forward. It uses no flag, because a stale copy would reject that too:
 # it calls state_lock, LOCK_FILE_NAME and fast_forward_seat_checkout by name
-# in whatever copy the seat holds, so renaming any of them breaks this line
-# for every seat until it is updated by hand.
+# in whatever copy the seat holds. Renaming any of them makes this line fail
+# and fall through to the ask, whose own fast-forward then updates the seat,
+# unless the same change also adds a flag the caller sends.
 GHI_GUIDE_AGENT_HOME_FAST_FORWARD_TO_ORIGIN_MAIN_SSH_PYTHON_SOURCE = "\n".join([
     "import importlib.util, sys",
     "from pathlib import Path",
@@ -1069,8 +1070,8 @@ def build_remote_command(question: str, include_closed: bool, repo: str,
         '  exit 1',
         '}',
         # No `&&`: a failed fast-forward prints its line and the ask runs on, as
-        # fast_forward_seat_checkout's docstring requires. </dev/null keeps git
-        # from reading the question meant for the ask's --question-file /dev/stdin.
+        # fast_forward_seat_checkout's docstring requires. </dev/null leaves
+        # stdin unread for the ask's --question-file /dev/stdin.
         "python3 -c " + shlex.quote(GHI_GUIDE_AGENT_HOME_FAST_FORWARD_TO_ORIGIN_MAIN_SSH_PYTHON_SOURCE) + " </dev/null",
         invocation,
     ])
