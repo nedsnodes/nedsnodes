@@ -901,7 +901,7 @@ def _ask_within_lock(question, include_closed, seat_dir, repo, projects_root,
     # checkout's files beneath the holder's running claude would undo that.
     # Over ssh the line before this run has already fetched under the lock;
     # a second fetch could spend 60 of the ask's seconds on nothing.
-    if locked and not os.environ.get(GHI_GUIDE_AGENT_HOME_FAST_FORWARD_ALREADY_TRIED_ENVIRONMENT_VARIABLE):
+    if locked and not os.environ.get(GHI_GUIDE_AGENT_HOME_FAST_FORWARD_TO_ORIGIN_MAIN_ALREADY_TRIED_ENVIRONMENT_VARIABLE):
         refresh_line = fast_forward_seat_checkout(seat_dir)
         if refresh_line:
             print(refresh_line, file=sys.stderr)
@@ -1017,7 +1017,7 @@ def _ask_within_lock(question, include_closed, seat_dir, repo, projects_root,
 # ask, through an environment variable a stale copy ignores rather than a flag
 # it would reject, not to fetch a second time. An unusable seat directory exits
 # quietly: the ask reports it in its own one line.
-GHI_GUIDE_AGENT_HOME_FAST_FORWARD_ALREADY_TRIED_ENVIRONMENT_VARIABLE = "GHI_GUIDE_AGENT_HOME_FAST_FORWARD_ALREADY_TRIED"
+GHI_GUIDE_AGENT_HOME_FAST_FORWARD_TO_ORIGIN_MAIN_ALREADY_TRIED_ENVIRONMENT_VARIABLE = "GHI_GUIDE_AGENT_HOME_FAST_FORWARD_TO_ORIGIN_MAIN_ALREADY_TRIED"
 GHI_GUIDE_AGENT_HOME_FAST_FORWARD_TO_ORIGIN_MAIN_SSH_PYTHON_SOURCE = "\n".join([
     "import importlib.util, sys",
     "from pathlib import Path",
@@ -1085,7 +1085,7 @@ def build_remote_command(question: str, include_closed: bool, repo: str,
         # Not `&&`: a failed fast-forward prints its line and the ask runs on, as
         # fast_forward_seat_checkout's docstring requires.
         "if python3 -c " + shlex.quote(GHI_GUIDE_AGENT_HOME_FAST_FORWARD_TO_ORIGIN_MAIN_SSH_PYTHON_SOURCE) + "; then",
-        f"  export {GHI_GUIDE_AGENT_HOME_FAST_FORWARD_ALREADY_TRIED_ENVIRONMENT_VARIABLE}=1",
+        f"  export {GHI_GUIDE_AGENT_HOME_FAST_FORWARD_TO_ORIGIN_MAIN_ALREADY_TRIED_ENVIRONMENT_VARIABLE}=1",
         "fi",
         invocation,
     ])

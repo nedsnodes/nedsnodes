@@ -1616,7 +1616,7 @@ with tempfile.TemporaryDirectory() as temporary:
     origin, seat, environment = _seat_whose_copy_predates_print_answer_json(Path(temporary))
     fast_forward_line = ("if python3 -c " + shlex.quote(
         ghi_ask.GHI_GUIDE_AGENT_HOME_FAST_FORWARD_TO_ORIGIN_MAIN_SSH_PYTHON_SOURCE) + "; then\n"
-        f"  export {ghi_ask.GHI_GUIDE_AGENT_HOME_FAST_FORWARD_ALREADY_TRIED_ENVIRONMENT_VARIABLE}=1\n"
+        f"  export {ghi_ask.GHI_GUIDE_AGENT_HOME_FAST_FORWARD_TO_ORIGIN_MAIN_ALREADY_TRIED_ENVIRONMENT_VARIABLE}=1\n"
         "fi\n")
     without_fast_forward_line = remote_command_with_new_flag.replace(fast_forward_line, "")
     check("the test removes the fast-forward line from the remote command",
