@@ -130,6 +130,20 @@ def end_started_processes():
 atexit.register(end_started_processes)
 
 
+def end_processes_earlier_cases_started():
+    """End every process the suite has started so far, and wait until none still runs.
+
+    Every case shares one agent-home, and step 5 stops at any process working there that step 2
+    did not list, so a process an earlier case left running, as a failed case does, fails each
+    later case that reaches step 5.
+    """
+    end_started_processes()
+    deadline = time.monotonic() + 10
+    while any(running(process_id) for process_id in started_process_ids) and time.monotonic() < deadline:
+        time.sleep(0.05)
+    started_process_ids.clear()
+
+
 def git(*arguments, cwd):
     return subprocess.run(["git", *arguments], cwd=str(cwd), capture_output=True, text=True,
                           check=True).stdout.strip()
@@ -509,6 +523,7 @@ def second_half(state_path, opened=None, now=time.time):
 
 def fresh_state(**changes):
     """Freeze a new fake handoff-supervisor and write a state file for it, as the foreground does."""
+    end_processes_earlier_cases_started()
     supervisor_id, claude_id = start_fake_supervisor()
     os.kill(supervisor_id, signal.SIGSTOP)
     directory = program.restart_log_directory(SEAT, Path(os.environ[
@@ -703,8 +718,8 @@ def start_leftover_in_agent_home():
 
 def state_with_leftover():
     """A frozen fake handoff-supervisor whose step-2 list also holds a leftover that outlives step 4."""
-    leftover_id, leftover_command = start_leftover_in_agent_home()
     supervisor_id, claude_id, state_path = fresh_state()
+    leftover_id, leftover_command = start_leftover_in_agent_home()
     state = json.loads(state_path.read_text())
     state["agent_home_processes"][str(leftover_id)] = leftover_command
     state_path.write_text(json.dumps(state))
@@ -783,6 +798,18 @@ def step_4_and_leftover_cases():
     check("step 5: a leftover of step 2 that outlives step 4 is ended before recover-crashed-seats.py runs",
           status == 0 and not running(leftover_id) and ended_line in result
           and result.index(ended_line) < result.index("step 6:"), result)
+
+    left_by_a_failed_case, _ = start_leftover_in_agent_home()
+    reset_control()
+    control("resupervise-exit-codes", "0")
+    control("recover-exit-codes", "0")
+    control("successor-reply", "replied")
+    supervisor_id, claude_id, leftover_id, state_path = state_with_leftover()
+    write_session_handoff()
+    status, half, output = second_half(state_path)
+    result = (state_path.parent / program.HANDOFF_SUPERVISOR_RESTART_RESULT_FILE_NAME).read_text()
+    check("a process an earlier case left running in the agent-home is ended before the next case starts",
+          status == 0 and not running(left_by_a_failed_case) and "FAILED" not in result, result)
 
 
 def step_5_cases():
