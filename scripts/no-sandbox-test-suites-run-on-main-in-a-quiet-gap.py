@@ -389,7 +389,7 @@ def stopped(state_file, state, commit, started, reason, compared_with=None):
 
 
 def run(arguments):
-    state_file = Path(arguments.state_file).expanduser()
+    state_file = Path(arguments.state_file).expanduser().absolute()
     try:
         lock = take_lock_without_waiting(f"{state_file}.lock")
     except OSError as error:
@@ -522,7 +522,7 @@ def run_under_lock(arguments, state_file):
 
 def record_follow_up_request_sent(arguments):
     """Under the run's own lock, so a run that ends meanwhile cannot have its result overwritten."""
-    state_file = Path(arguments.state_file).expanduser()
+    state_file = Path(arguments.state_file).expanduser().absolute()
     try:
         lock = take_lock_without_waiting(f"{state_file}.lock")
     except OSError as error:
@@ -660,7 +660,7 @@ def main(argv=None):
     if arguments.record_follow_up_request_sent:
         return record_follow_up_request_sent(arguments)
     if arguments.print_merge_gate_notice_of_last_failed_or_stopped_run:
-        for line in merge_gate_notice(Path(arguments.state_file).expanduser(),
+        for line in merge_gate_notice(Path(arguments.state_file).expanduser().absolute(),
                                       Path(arguments.clone)):
             print(line)
         return EXIT_DONE
