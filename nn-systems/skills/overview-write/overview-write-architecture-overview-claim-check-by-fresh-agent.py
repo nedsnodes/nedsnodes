@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Check an nc-architecture-overview's claims about the code with a fresh-agent, and keep the report.
+"""Check an nn-architecture-overview's claims about the code with a fresh-agent, and keep the report.
 
 This is the check of the section "Checking an overview" of
 docs/nedsnodes-wiki/nedsnodes-how-to-write-an-architecture-overview.md, run by
@@ -201,7 +201,7 @@ Give each contradicted or unsupported assertion one of three ranks:
 """
 
 FRESH_AGENT_PROMPT_TEMPLATE = """\
-You are the fresh-agent of stage 2 of the section "Checking an overview" in {page}. Read that page, then check the nc-architecture-overview {overview} against the repository in your working directory, a checkout at commit {commit}, which the overview's last line names. Stage 1 has passed. Do stage 2 as the page says, leaving out what the page says is not checked against the code. You have the Read, Grep and Glob tools only, and cannot change files or run commands.
+You are the fresh-agent of stage 2 of the section "Checking an overview" in {page}. Read that page, then check the nn-architecture-overview {overview} against the repository in your working directory, a checkout at commit {commit}, which the overview's last line names. Stage 1 has passed. Do stage 2 as the page says, leaving out what the page says is not checked against the code. You have the Read, Grep and Glob tools only, and cannot change files or run commands.
 {ranks}{writer_answers}
 Your final message is the report. A program counts its verdicts and ranks and treats a report in any other form as a failed check, so write it in this form:
 - One block per assertion, which the page calls a row, numbered from 1 in the overview's order. Each block starts with the line `VERDICT <number> supported: <the assertion>`, or `VERDICT <number> <verdict> <rank>: <the assertion>`, where <verdict> is contradicted or unsupported and <rank> is must-fix, fix-later or nit. The lines after it, in any form, give the evidence the page asks for that verdict; the program copies them into the record of an assertion ranked fix later.
@@ -209,7 +209,7 @@ Your final message is the report. A program counts its verdicts and ranks and tr
 """
 
 RECHECK_PROMPT_TEMPLATE = """\
-You are a fresh-agent checking one assertion of the nc-architecture-overview {overview} against the repository in your working directory, a checkout at commit {commit}, which the overview's last line names. Read stage 2 of the section "Checking an overview" in {page} for how to check an assertion and the evidence each verdict needs, then check this assertion only. You have the Read, Grep and Glob tools only, and cannot change files or run commands.
+You are a fresh-agent checking one assertion of the nn-architecture-overview {overview} against the repository in your working directory, a checkout at commit {commit}, which the overview's last line names. Read stage 2 of the section "Checking an overview" in {page} for how to check an assertion and the evidence each verdict needs, then check this assertion only. You have the Read, Grep and Glob tools only, and cannot change files or run commands.
 The assertion: {assertion}
 {ranks}{recheck_writer_answers}
 Your final message is the report. A program reads it and treats a report in any other form as a failed check, so write it in this form:
@@ -227,7 +227,7 @@ The overview's writer disputes verdicts of an earlier check. The file {answers} 
 
 
 UNSETTLED_ENTRY_COVERS_FIX_LATER_CLAIM_JUDGE_PROMPT_TEMPLATE = """\
-You are a fresh-agent of the overview claim check. It checked the nc-architecture-overview {overview} against the code and ranked the claims below fix later: loose, incomplete or badly worded, but no agent would act wrongly on them. Each such claim is recorded as an entry in the overview's proposed-improvements-or-changes-file, {proposals}, unless an unsettled entry there, one whose State: line says open or needs the user and not settled, already covers it. Judge, for each claim, whether one of the unsettled entries below covers it: an entry covers a claim when settling the entry would also settle the claim, because both are about the same statement of the overview and the same fault in it, however each is worded. An entry about another statement, or about another fault in the same statement, does not cover it. You have no tools; everything you need is below.
+You are a fresh-agent of the overview claim check. It checked the nn-architecture-overview {overview} against the code and ranked the claims below fix later: loose, incomplete or badly worded, but no agent would act wrongly on them. Each such claim is recorded as an entry in the overview's proposed-improvements-or-changes-file, {proposals}, unless an unsettled entry there, one whose State: line says open or needs the user and not settled, already covers it. Judge, for each claim, whether one of the unsettled entries below covers it: an entry covers a claim when settling the entry would also settle the claim, because both are about the same statement of the overview and the same fault in it, however each is worded. An entry about another statement, or about another fault in the same statement, does not cover it. You have no tools; everything you need is below.
 
 The claims, each with the evidence the check gave:
 {claims}
@@ -304,7 +304,7 @@ class RefusingArgumentParser(argparse.ArgumentParser):
         raise ClaimCheckRefusal(f"{message}\nTo see the arguments: run this with --help.")
 
 
-def nc_architecture_overview_described_system_name_from_page_path(path):
+def nn_architecture_overview_described_system_name_from_page_path(path):
     """Return the <system> of a path the page gives for an overview, or None.
 
     The template alone also matches the how-to page itself; a caller checks
@@ -410,14 +410,14 @@ def result_from_fresh_agent_report(report, recheck_reports=None):
     return claims, result_from_ranked_claims(claims)
 
 
-def nc_architecture_overview_proposed_improvements_or_changes_file_path_from_page_path(overview_path):
+def nn_architecture_overview_proposed_improvements_or_changes_file_path_from_page_path(overview_path):
     """Return the repository-relative path of the overview's one proposed-improvements-or-changes-file."""
     return PROPOSED_IMPROVEMENTS_OR_CHANGES_FILE_PATH_TEMPLATE.format(
-        system=nc_architecture_overview_described_system_name_from_page_path(overview_path))
+        system=nn_architecture_overview_described_system_name_from_page_path(overview_path))
 
 
 def overview_pointer_line_to_proposed_improvements_or_changes_file(overview_path):
-    path = Path(nc_architecture_overview_proposed_improvements_or_changes_file_path_from_page_path(overview_path))
+    path = Path(nn_architecture_overview_proposed_improvements_or_changes_file_path_from_page_path(overview_path))
     return PROPOSED_IMPROVEMENTS_OR_CHANGES_POINTER_LINE_TEMPLATE.format(name=path.name, directory=path.parent)
 
 
@@ -445,7 +445,7 @@ def fix_later_claims_not_yet_in_proposed_improvements_or_changes_file(text, clai
 def unsettled_entry_covers_fix_later_claim_judge_prompt(overview_path, claims, unsettled_entries):
     return UNSETTLED_ENTRY_COVERS_FIX_LATER_CLAIM_JUDGE_PROMPT_TEMPLATE.format(
         overview=overview_path,
-        proposals=nc_architecture_overview_proposed_improvements_or_changes_file_path_from_page_path(overview_path),
+        proposals=nn_architecture_overview_proposed_improvements_or_changes_file_path_from_page_path(overview_path),
         claims="".join(f"\nCLAIM {claim.number}: {normalized_claim(claim.assertion)}\n{claim.evidence or 'none given'}\n"
                        for claim in claims),
         entries="".join(f"\n{entry}\n" for entry in unsettled_entries.values()))
@@ -479,7 +479,7 @@ def fix_later_claims_uncovered_by_unsettled_entries_after_judge_run(repository, 
     the file's text these were decided against).
 
     Runs the covering judge only when a claim is new word for word and the file has an unsettled entry."""
-    path = repository / nc_architecture_overview_proposed_improvements_or_changes_file_path_from_page_path(overview_path)
+    path = repository / nn_architecture_overview_proposed_improvements_or_changes_file_path_from_page_path(overview_path)
     text = path.read_text(encoding="utf-8") if path.exists() else ""
     new_claims = fix_later_claims_not_yet_in_proposed_improvements_or_changes_file(text, claims)
     unsettled_entries = unsettled_entries_in_proposed_improvements_or_changes_file(text)
@@ -500,7 +500,7 @@ def fix_later_claims_uncovered_by_unsettled_entries_after_judge_run(repository, 
 def refuse_when_proposed_improvements_or_changes_file_changed_since_decided(repository, overview_path, decided_text):
     """Another claim check or a handler can change the file while the covering judge runs; its decisions then may not
     fit the file, so neither a skip nor an append is safe."""
-    path = repository / nc_architecture_overview_proposed_improvements_or_changes_file_path_from_page_path(overview_path)
+    path = repository / nn_architecture_overview_proposed_improvements_or_changes_file_path_from_page_path(overview_path)
     if (path.read_text(encoding="utf-8") if path.exists() else "") != decided_text:
         raise ClaimCheckRefusal(
             f"{path} changed while this claim check decided which claims ranked fix later to append, so it appended "
@@ -520,7 +520,7 @@ def write_fix_later_claims_to_proposed_improvements_or_changes_file(repository, 
                                                                     report_path, for_regular_maintenance):
     """Append the new claims ranked fix later to the overview's proposed-improvements-or-changes-file in the checkout,
     creating it when it is missing; return its path, or None when there is no claim to append."""
-    destination = repository / nc_architecture_overview_proposed_improvements_or_changes_file_path_from_page_path(overview_path)
+    destination = repository / nn_architecture_overview_proposed_improvements_or_changes_file_path_from_page_path(overview_path)
     existing = destination.read_text(encoding="utf-8") if destination.exists() else ""
     if not new_claims:
         return None
@@ -528,7 +528,7 @@ def write_fix_later_claims_to_proposed_improvements_or_changes_file(repository, 
                        default=0)
     lines = [existing.rstrip("\n")] if existing else [
         f"# Proposed improvements or changes: {Path(overview_path).name}", "",
-        f"Each entry proposes a change to the nc-architecture-overview {overview_path} or to the system it describes. "
+        f"Each entry proposes a change to the nn-architecture-overview {overview_path} or to the system it describes. "
         "An entry with a Claim: line is an assertion of the overview that the overview claim check found "
         "contradicted or unsupported and ranked fix later: loose, incomplete or badly worded, but no agent would act "
         "wrongly on it."]
@@ -635,12 +635,12 @@ def check_overview_claims(arguments):
                                 "To check an overview: run this from a checkout of this repository.")
     repository = Path(top_level.stdout.strip())
     overview_path = arguments.overview
-    system = nc_architecture_overview_described_system_name_from_page_path(overview_path)
+    system = nn_architecture_overview_described_system_name_from_page_path(overview_path)
     revision = run_git(repository, "rev-parse", "--verify", f"{arguments.revision}^{{commit}}").stdout.strip()
     if system is None or not run_git(repository, "ls-tree", "-d", "--name-only", revision,
                                      f"nn-systems/{system}").stdout.strip():
         raise ClaimCheckRefusal(
-            f"{overview_path} is not an nc-architecture-overview at {revision[:12]}: an overview is at "
+            f"{overview_path} is not an nn-architecture-overview at {revision[:12]}: an overview is at "
             f"{overview_path_reader.PATH_TEMPLATE}, where nn-systems/<system> is a directory.\n"
             "To check an overview: pass its path, relative to the top of the checkout, with --overview.")
     blob = run_git(repository, "rev-parse", "--verify", "--quiet", f"{revision}:{overview_path}", check=False)
@@ -665,7 +665,7 @@ def check_overview_claims(arguments):
         raise ClaimCheckRefusal(f"origin/main is missing from the repository at {repository}, so this program cannot "
                                 "tell whether a follow-up pull request is due for claims ranked fix later.\n"
                                 f"To make it available: run `git -C {repository} fetch origin`, then run this again.")
-    proposals_path = nc_architecture_overview_proposed_improvements_or_changes_file_path_from_page_path(overview_path)
+    proposals_path = nn_architecture_overview_proposed_improvements_or_changes_file_path_from_page_path(overview_path)
     fix_later_for_regular_maintenance = bool(claims_in_proposed_improvements_or_changes_file(
         text_at_revision_or_empty(repository, "refs/remotes/origin/main", proposals_path)))
     report_directory = Path(arguments.report_directory)

@@ -16,7 +16,7 @@ Only `*.json` files are read, because
 the list directory also holds the harness's `.lock`. Task files are never
 written.
 
-WHAT MAKES A TASK DUE. One optional key in a task's `metadata`:
+WHAT MAKES A TASK DUE. Two optional keys in a task's `metadata`:
 
   prerequisites  a non-empty list of conditions, each {"pr_merged": <number>}
                  or {"issue_closed": <number>} on the repository
@@ -30,6 +30,8 @@ WHAT MAKES A TASK DUE. One optional key in a task's `metadata`:
                  list this hook cannot read is never met, and the hook names
                  its fault to the agent once, as RAISED ONCE says, so the task
                  is not held in silence for good.
+  approval       a string, not blank, saying why the task needs no
+                 decision from the user. Any other value is no record.
 
 APPROVAL-WALK ITEMS. An item is named by its heading, because its number and
 count can change while the walk runs. The walk-document is the walk-minutes'
@@ -61,6 +63,14 @@ raise for prerequisites also records the completed blockedBy list, so the
 same blockers do not raise the task a second time. A deleted blocker frees such
 a task without raising it, because nothing it waited on was done.
 
+A PENDING TASK THAT RECORDS approval is raised once it is ready: nothing in
+its blockedBy holds it, and its prerequisites are met or it has none, so an
+approval opts in even a task with nothing to wait on. Its raise tells the
+agent to set the task in_progress and dispatch a forked subagent for it, in
+place of "Act on task N now", whatever made it ready. A task whose
+prerequisites cannot be used is never ready. An in_progress task with an
+approval is raised as a task without one, since someone is already on it.
+
 A PULL REQUEST CLOSED WITHOUT MERGING never meets its `pr_merged`
 condition, so its task would wait in silence. An open task is raised once
 for each such pull request, with the words "closed without merging", so its
@@ -76,8 +86,9 @@ whether to wake it.
 
 RAISED ONCE. The hook records, per task, the prerequisites list it raised
 the task for, or for a task raised because its blockers completed, its
-blockedBy list, and does not raise the task again for the same value;
-changing either lets the task be raised again. A task raised because a
+blockedBy list, and for a task raised for its approval, the approval, and
+does not raise the task again for the same values; changing any of them
+lets the task be raised again. A task raised because a
 pull request closed without merging records that pull request's number, and is
 never raised again for that number. A prerequisites list the
 hook cannot read, or whose approval-walk item it cannot find, is named to the
@@ -158,11 +169,12 @@ OUTPUT. Something to raise, or the next-action prompt: one JSON object,
 {"hookSpecificOutput": {"hookEventName": "Stop", "additionalContext": ...}},
 which Claude Code delivers to the model as non-error feedback while the
 conversation continues. No `decision` field and no `systemMessage`: the text
-is for the agent. The text is one instruction per due task, then, when any
-task was raised, the instruction for a task that cannot be acted on yet,
-then one line per task whose pull request closed without merging and, when
-there is any, the instructions for re-planning it, then two lines per
-prerequisites list the hook cannot use, then the
+is for the agent. The text is one instruction per due task, the approval
+raise for a pending task that records approval and "Act on task N now" for
+any other, then, when any task was raised, the instruction for a task that
+cannot be acted on yet, then one line per task whose pull request closed
+without merging and, when there is any, the instructions for re-planning it,
+then two lines per prerequisites list the hook cannot use, then the
 next-action prompt's lines, then one line per condition gh could not answer
 at this stop. Nothing to raise or name and no next-action prompt:
 nothing printed, exit 0. A fault, such as a payload
@@ -253,6 +265,8 @@ WALK_MINUTES_FIELD = "approval_walk_minutes_file_path"
 ITEM_HEADING_FIELD = "approval_walk_item_heading"
 WALK_MINUTES_SUFFIX = "-minutes.md"
 PREREQUISITES_KEY = "prerequisites"
+APPROVAL_KEY = "approval"
+PENDING_TASK_STATUS = "pending"
 PULL_REQUEST_KIND = "pr_merged"
 CLOSED_WITHOUT_MERGING_ANSWER_KEY = "closed_without_merging"
 CLOSED_WITHOUT_MERGING_RECORD_KEY = "pull_requests_closed_without_merging"
@@ -264,6 +278,12 @@ PREREQUISITE_FORMS = (
 
 RAISE_LINE_TEMPLATE = ('[rule due-task-raise-when-prerequisites-met] Act on task {task_id} "{subject}" '
                        "now: {reasons}.")
+# The user set this wording; change it only with his approval. The rule ID is the only addition.
+APPROVAL_RAISE_LINE_TEMPLATE = (
+    '[rule due-task-approved-ready-task-forked-subagent-dispatch-reminder] Task {task_id} "{subject}" is ready and '
+    "needs no decision from the user ({approval}). Set it in_progress with TaskUpdate, then dispatch a "
+    'forked subagent for it now, with the Agent tool\'s isolation "worktree", and mark the task '
+    "completed when the subagent reports it done.")
 DEFER_INSTRUCTION = (
     "If a task above cannot be acted on yet, record what it now waits on with TaskUpdate "
     "instead: a pull request, a GHI or an approval-walk item in a new "
@@ -640,6 +660,12 @@ def raise_line(task: dict, met_citations, done_blockers=None) -> str:
                                       reasons=", and ".join(reasons))
 
 
+def approval_raise_line(task: dict, approval: str) -> str:
+    return APPROVAL_RAISE_LINE_TEMPLATE.format(
+        task_id=task["id"], subject=single_line(task.get("subject", "")),
+        approval=single_line(approval))
+
+
 def due_task_lines(tasks: dict, directory: Path, state: dict,
                    checker: "GitHubConditionChecker") -> "tuple[list, list, list, bool]":
     """The raise lines, the lines naming tasks whose pull request closed without merging, the
@@ -693,6 +719,9 @@ def due_task_lines(tasks: dict, directory: Path, state: dict,
                     citations="; ".join(github_item_citation(PULL_REQUEST_KIND, number, answer)
                                         for number, answer in newly_closed)))
 
+        approval = metadata.get(APPROVAL_KEY)
+        if not isinstance(approval, str) or not approval.strip():
+            approval = None
         prerequisite_citations = None
         done_blockers = None
         if not is_held_by_blockers(task, tasks, directory):
@@ -718,7 +747,17 @@ def due_task_lines(tasks: dict, directory: Path, state: dict,
                     and blockers is not None and record.get("blocked_by") != blockers):
                 done_blockers = blockers
                 new_record["blocked_by"] = blockers
-            if prerequisite_citations is not None or done_blockers is not None:
+            approval_ready = (approval is not None
+                              and task.get("status") == PENDING_TASK_STATUS
+                              and (prerequisites_value is None
+                                   or already_raised_for_prerequisites
+                                   or prerequisite_citations is not None))
+            if approval_ready and (record.get(APPROVAL_KEY) != approval
+                                   or prerequisite_citations is not None
+                                   or done_blockers is not None):
+                new_record[APPROVAL_KEY] = approval
+                lines.append(approval_raise_line(task, approval))
+            elif prerequisite_citations is not None or done_blockers is not None:
                 lines.append(raise_line(task, prerequisite_citations, done_blockers))
         # Kept while the list is unchanged, so a stop that does not look at the list, such as one
         # where a blocker holds the task, does not name the same fault again later.

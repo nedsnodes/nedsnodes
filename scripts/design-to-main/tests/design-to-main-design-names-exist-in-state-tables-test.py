@@ -48,9 +48,9 @@ DESIGN_RELATIVE_PATH = "docs/design-to-main/design-to-main-state-machine.system.
 DESIGN_PATH = REPOSITORY_ROOT / DESIGN_RELATIVE_PATH
 
 _rule_failure_lines_spec = importlib.util.spec_from_file_location(
-    "rule_enforcing_nc_test_suite_failure_message_closing_lines_text_common",
+    "rule_enforcing_nn_test_suite_failure_message_closing_lines_text_common",
     REPOSITORY_ROOT / "nn-systems" / "general-tools"
-    / "rule-enforcing-nc-test-suite-failure-message-closing-lines-text-common.py")
+    / "rule-enforcing-nn-test-suite-failure-message-closing-lines-text-common.py")
 RULE_FAILURE_LINES = importlib.util.module_from_spec(_rule_failure_lines_spec)
 _rule_failure_lines_spec.loader.exec_module(RULE_FAILURE_LINES)
 
@@ -345,8 +345,8 @@ class TheCheckerFailsOnANameTheCodeDoesNotHave(unittest.TestCase):
         self.assertEqual(self.undefined_in(text), {"reject the tests"})
 
     def test_a_misspelled_state_exit_field_fails(self):
-        text = self.design_text + "\nIt writes `held-rulings`.\n"
-        self.assertEqual(self.undefined_in(text), {"held-rulings"})
+        text = self.design_text + "\nIt writes `named-file`.\n"
+        self.assertEqual(self.undefined_in(text), {"named-file"})
 
     def test_a_name_the_code_no_longer_defines_fails(self):
         without_flaky_test = dict(self.name_classes)
