@@ -96,6 +96,13 @@ def main():
     scratch = Path(tempfile.mkdtemp(prefix="merge-lane-common-test-")).resolve()
     saved_directory, saved_home = os.getcwd(), os.environ.get("HOME")
     try:
+        names_module = (MODULE.resolve().parents[1] / "nn-systems" / "general-tools"
+                        / "github-repository-name-and-name-before-project-rename-common.py")
+        check("REPOSITORY comes from the shared module merge-gate.sh reads, not a copy of its own",
+              Path(common._repository_names.__file__).resolve() == names_module.resolve()
+              and common.REPOSITORY == common._repository_names.REPOSITORY
+              and f'"{common.REPOSITORY}"' not in MODULE.read_text(),
+              common.REPOSITORY)
         os.chdir(scratch)
         arguments = parse(["--merge-lane-worktrees-and-outputs-directory", "helpers",
                            "--merge-lane-review-worktrees-directory", "worktrees",
