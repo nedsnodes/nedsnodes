@@ -62,10 +62,12 @@ LOG_STORE_WRITER_MODULE_RELATIVE = Path(
 NED_BOX_HOME_CONSTANTS_MODULE_RELATIVE = Path(
     "nn-systems/general-tools/ned-box-home-directory-and-its-mac-mount-point-path-constants-common.py")
 # The cleaner reads the review checkouts directory from the merge-lane helpers' common module,
-# which loads the test runner, which loads the git-redirecting variables module, the attendance check
-# and the project-rename path names.
+# which loads the repository-name module and the test runner, which loads the git-redirecting
+# variables module, the attendance check and the project-rename path names.
 MERGE_LANE_COMMON_MODULE_RELATIVE = Path(
     "scripts/merge-lane-pull-request-helpers-common-options-paths-and-token.py")
+REPOSITORY_NAME_MODULE_RELATIVE = Path(
+    "nn-systems/general-tools/github-repository-name-and-name-before-project-rename-common.py")
 TEST_RUNNER_RELATIVE = Path("scripts/run-all-test-suites.py")
 GIT_REDIRECTING_REMOVAL_MODULE_RELATIVE = Path(
     "nn-systems/general-tools/git-redirecting-environment-variables-removal-common.py")
@@ -165,7 +167,7 @@ def new_clone():
                      GIT_OUTPUT_MODULE_RELATIVE, TASK_WRITE_MODULE_RELATIVE, TASK_FILE_REWRITE_MODULE_RELATIVE,
                      NEXT_STEP_LINES_MODULE_RELATIVE,
                      LOG_STORE_WRITER_MODULE_RELATIVE, NED_BOX_HOME_CONSTANTS_MODULE_RELATIVE,
-                     MERGE_LANE_COMMON_MODULE_RELATIVE, TEST_RUNNER_RELATIVE,
+                     MERGE_LANE_COMMON_MODULE_RELATIVE, REPOSITORY_NAME_MODULE_RELATIVE, TEST_RUNNER_RELATIVE,
                      GIT_REDIRECTING_REMOVAL_MODULE_RELATIVE, ATTENDANCE_CHECK_MODULE_RELATIVE,
                      PROJECT_RENAME_PATH_NAMES_MODULE_RELATIVE):
         (main / relative).parent.mkdir(parents=True, exist_ok=True)
