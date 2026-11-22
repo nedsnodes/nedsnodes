@@ -12,6 +12,7 @@ A change is the difference an agent's work makes, from before it starts to after
 - A change to what a document on main directs, decides or plans, including one a review finding asks for.
 - A change to code or data that makes a program do other than its design or a user-ruling says. A program's design is the design document on main it was built from, such as a GHI-MD that is a design; a program with none has no design for this purpose.
 - Choosing which term the project uses for a thing, coining a term, or adding, changing or removing a glossary entry.
+- Making a new system directory, whether for files moved into it or for new files.
 - Creating a wiki page: a Markdown file in `docs/nedsnodes-wiki/`, whether written there or moved in from elsewhere; moving a file into the wiki is never a cosmetic-change, though moving a page within the wiki can be.
 - Rewording a sentence of prose when it is unclear which meaning is intended.
 - A change to what a sentence that states a user-ruling says.
@@ -20,7 +21,7 @@ A change is the difference an agent's work makes, from before it starts to after
 ## Exceptions: changes that need no approval, even when they fall under the list above
 
 - A user-approved-change.
-- Coining a system-term and adding its entry to the glossary of its system, creating that glossary in the system's directory when the directory has none, as Step 5 of `docs/nedsnodes-wiki/nedsnodes-how-to-choose-a-name-for-files-code-and-glossary-terms.md` says. Making a new system, by moving files that belong together into a new system directory, still needs the user's approval.
+- Coining a system-term and adding its entry to the glossary of its system; when the system's directory has no glossary, creating that glossary there and listing it at the top of the project glossary, as Step 5 of `docs/nedsnodes-wiki/nedsnodes-how-to-choose-a-name-for-files-code-and-glossary-terms.md` says. This exception does not cover changing or removing an entry.
 - Deleting a guarded-file, as the project glossary defines it, even one the user has not retired and whose change the list above covers, such as `CLAUDE.md`, a skill or a hook; the guarded-file hook, `.claude/guard-hooks/guarded-file-unapproved-change-afterward-backup-and-ask-hook.py`, does not ask about a deletion either. A rename or a move is not a deletion: it is judged as the paragraph that begins "A change is the difference an agent's work makes" says. Emptying a file is a change to its text, not a deletion.
 - Removing whole sentences, list items, table rows or paragraphs of prose from any file other than `CLAUDE.md`, when nothing is added or reworded and no removed sentence states a user-ruling.
 - An obvious-error-fix, which the project glossary defines; it covers prose only.
