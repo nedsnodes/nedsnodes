@@ -89,6 +89,7 @@ def machine_names_in_the_state_tables_module(tables):
                          | {tables.COVERAGE_TYPE_NO_TESTS, tables.COVERAGE_TYPE_USER_TESTS_BY_HAND},
         "user-ruling the machine acts on": {
             value for name, value in vars(tables).items() if name.startswith("RULING_")},
+        "kind in a design's name": set(tables.DESIGN_KINDS),
     }
 
 
