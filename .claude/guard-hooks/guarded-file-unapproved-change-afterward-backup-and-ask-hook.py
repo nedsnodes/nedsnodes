@@ -441,14 +441,15 @@ class Store:
         self.missing.difference_update(prefixes)
         return fd
 
-    def read(self, path: str, name: str) -> bytes:
+    def read(self, path: str, name: str, missing=b""):
+        """The stored file's bytes; missing when the store holds no such file."""
         fd = self.path_directory(path, create=False)
         if fd is None:
-            return b""
+            return missing
         try:
             file_fd = os.open(name, os.O_RDONLY, dir_fd=fd)
         except FileNotFoundError:
-            return b""
+            return missing
         finally:
             os.close(fd)
         try:
@@ -524,7 +525,10 @@ class Store:
     def copied_version(self, path: str, copy_hash: str, log):
         """The copy's bytes when they match its name or a hash of its own bytes that a seen line
         of log records beside the name, as for a file a line-ending filter changes; else None."""
-        data = self.read(path, copy_hash)
+        # A missing copy is not a copy of the empty file, whose bytes are also b"".
+        data = self.read(path, copy_hash, missing=None)
+        if data is None:
+            return None
         own_hash = blob_hash(data)
         if own_hash == copy_hash or any(
                 fields[5] == copy_hash and fields[7] == own_hash
