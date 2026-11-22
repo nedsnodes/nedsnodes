@@ -703,7 +703,14 @@ try:
         "timeout 5m a\nb": None, "timeout 5m a & b": None,
         "timeout 5m a 2>&1 | tail -5": "2026-11-02T11:05:00Z",
         "timeout 5m bash -c 'a && b; c' &>log": "2026-11-02T11:05:00Z",
-        "timeout 5m grep \";\" f $(cd d && ls) \\\n -q": "2026-11-02T11:05:00Z"}
+        "timeout 5m grep \";\" f $(cd d && ls) \\\n -q": "2026-11-02T11:05:00Z",
+        "timeout 30m sleep 900;": "2026-11-02T11:30:00Z",
+        "timeout 30m sleep 900 ;\n": "2026-11-02T11:30:00Z",
+        "timeout 5m python3 - <<'EOF'\nimport x; x.run()\nEOF": "2026-11-02T11:05:00Z",
+        "timeout 5m python3 - <<-\"EOF\" 2>&1\n\tprint(1) && b\n\tEOF\n": "2026-11-02T11:05:00Z",
+        "timeout 5m python3 - <<EOF\nprint(1)\nEOF\nb": None,
+        "timeout 5m python3 - <<EOF\nnever closed; b": "2026-11-02T11:05:00Z",
+        "timeout 5m grep x <<< 'a\nb'; c": None}
     machine = Machine()
     machine.seat("alpha", [user("go")] + [
         record for number, command in enumerate(TIMEOUT_END_BY_COMMAND_LINE)
