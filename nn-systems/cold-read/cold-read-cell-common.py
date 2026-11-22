@@ -104,8 +104,8 @@ REVIEWER_PROGRAM_LOGIN_FILES = {
 }
 
 
-# Outside the denied ~/.config/nedsnodes: a denied directory hides only its own subtree,
-# not siblings sharing its name as a prefix (measured with Codex's profile and bwrap).
+# Outside ~/.config/nedsnodes, which the Mac denies: a denied directory hides only its own
+# subtree, not siblings sharing its name as a prefix (measured with Codex's profile and bwrap).
 SANDBOXED_MODELS_READ_ONLY_GITHUB_TOKEN_FILE = (
     pathlib.Path.home() / ".config" / "nedsnodes-sandboxed-models"
     / "github-public-repositories-read-only-token")
@@ -119,8 +119,9 @@ def process_environment_copy_with_agent_seat_github_tokens_replaced_by_read_only
     """Return (environment copy for a sandboxed model, note or None).
 
     The copy has no agent-seat GitHub token. When token_file holds a token, the
-    copy's GH_TOKEN is that token and GH_CONFIG_DIR is the token's folder, since
-    gh stops on its usual config folder, which the sandboxes deny. Otherwise the
+    copy's GH_TOKEN is that token and GH_CONFIG_DIR is the token's folder, which
+    holds no gh config: gh stops when it cannot read ~/.config/gh/hosts.yml, which
+    ned-box's sandboxes mask and the Mac's deny with ~/.config/gh. Otherwise the
     note says why the model reads GitHub unauthenticated.
     """
     token_file = token_file or SANDBOXED_MODELS_READ_ONLY_GITHUB_TOKEN_FILE

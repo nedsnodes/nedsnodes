@@ -764,6 +764,28 @@ with tempfile.TemporaryDirectory() as scratch:
           and "cold-read-agy-cell: no read-only GitHub token (" in result.stderr,
           f"exit {result.returncode}; tokens={received_tokens!r}; stderr={result.stderr!r}")
 
+    read_only_token_file = (scratch_home_for(stubs) / ".config" / "nedsnodes-sandboxed-models"
+                            / "github-public-repositories-read-only-token")
+    read_only_token_file.parent.mkdir(parents=True, exist_ok=True)
+    read_only_token_file.write_text("read-only-token\n", encoding="utf-8")
+    repository = build_scratch_repository(scratch)
+    report = report_path_for(repository, "read-only-github-token")
+    tokens_dump = scratch / "read-only-github-token.json"
+    try:
+        result = run_agy_cell(repository, stubs,
+                              {"*": {"report": "STUB AGY REVIEW\n",
+                                     "dump_github_tokens": str(tokens_dump)}},
+                              report, github_token="agent-seat-token")
+    finally:
+        read_only_token_file.unlink()
+    received_tokens = (json.loads(tokens_dump.read_text(encoding="utf-8"))
+                       if tokens_dump.is_file() else "NOT RUN")
+    check("with a read-only GitHub token file, agy's GH_TOKEN is that token, not the "
+          "agent-seat's, and it has no GITHUB_TOKEN",
+          result.returncode == 0 and received_tokens == ["read-only-token", None]
+          and "no read-only GitHub token" not in result.stderr,
+          f"exit {result.returncode}; tokens={received_tokens!r}; stderr={result.stderr!r}")
+
     repository = build_scratch_repository(scratch)
     report = report_path_for(repository, "gh-read-only-token-refused")
     result = run_agy_cell(repository, stubs,
