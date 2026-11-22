@@ -355,10 +355,12 @@ def listening_unix_sockets_of_this_machine():
 
 TARGET_NAME_PREFIX = "run-all-test-suites-escape-test-"
 # Every name run_probe gives what it makes outside its scratch directory, so a later run
-# can find what a run killed before its cleanup left; the 8 characters are mkdtemp's.
+# can find what a run killed before its cleanup left.
 TARGET_NAME_PATTERN = re.compile(
     r"\.?" + re.escape(TARGET_NAME_PREFIX)
-    + r"(\d+)(-unlisted|-log|-probe|-late\.sock|\.sock|-[a-z0-9_]{8})?")
+    + r"(\d+)(-unlisted|-log|-probe|-main-worktree|-late\.sock|\.sock)?")
+# run_probe's mkdtemp directory, whose 8 characters are mkdtemp's, made only in /tmp.
+TMP_TARGET_NAME_PATTERN = re.compile(re.escape(TARGET_NAME_PREFIX) + r"(\d+)-[a-z0-9_]{8}")
 
 
 def remove_targets_left_by_ended_runs(directories):
@@ -376,6 +378,8 @@ def remove_targets_left_by_ended_runs(directories):
             continue
         for path in entries:
             matched = TARGET_NAME_PATTERN.fullmatch(path.name)
+            if not matched and pathlib.Path(directory) == pathlib.Path("/tmp"):
+                matched = TMP_TARGET_NAME_PATTERN.fullmatch(path.name)
             if not matched:
                 continue
             pid = int(matched.group(1))
@@ -387,10 +391,14 @@ def remove_targets_left_by_ended_runs(directories):
                     pass
                 except PermissionError:
                     continue
-            if path.is_dir() and not path.is_symlink():
-                shutil.rmtree(path)
-            else:
-                path.unlink()
+            # Another run starting at the same time may remove the same path first.
+            try:
+                if path.is_dir() and not path.is_symlink():
+                    shutil.rmtree(path)
+                else:
+                    path.unlink()
+            except FileNotFoundError:
+                continue
             removed.append(str(path))
     return removed
 
@@ -983,6 +991,7 @@ def check_targets_of_a_killed_run_removed_by_the_next(scratch):
          "(cache / name).mkdir()\n"
          "(cache / f'{name}-log').mkdir()\n"
          "(cache / f'{name}-probe').write_text('')\n"
+         "(cache / f'{name}-main-worktree').mkdir()\n"
          "print('planted', flush=True)\n"
          "time.sleep(600)\n",
          str(home), str(cache)],
@@ -993,30 +1002,71 @@ def check_targets_of_a_killed_run_removed_by_the_next(scratch):
     planter.stdout.close()
     killed = TARGET_NAME_PREFIX + str(planter.pid)
     killed_paths = [home / f".{killed}-unlisted", cache / killed, cache / f"{killed}-log",
-                    cache / f"{killed}-probe"]
+                    cache / f"{killed}-probe", cache / f"{killed}-main-worktree"]
     running = subprocess.Popen(["sleep", "600"])
+    # A PID this process may not signal; os.kill is made to say so below.
+    unsignalable_pid = planter.pid + 1_000_000_000
+    real_kill = os.kill
+
+    def kill_refusing_the_unsignalable_pid(pid, signal_number):
+        if pid == unsignalable_pid:
+            raise PermissionError(1, "Operation not permitted")
+        return real_kill(pid, signal_number)
+
+    tmp_target = pathlib.Path("/tmp") / f"{killed}-abc_1234"
     try:
-        # PID 1 is another user's process, which this one may not signal.
         kept = [home / f".{TARGET_NAME_PREFIX}{running.pid}-unlisted",
-                home / f".{TARGET_NAME_PREFIX}1-unlisted",
-                home / f".{killed}-unlisted-by-someone-else", cache / f"{TARGET_NAME_PREFIX}notes"]
+                home / f".{TARGET_NAME_PREFIX}{unsignalable_pid}-unlisted",
+                home / f".{killed}-unlisted-by-someone-else", cache / f"{TARGET_NAME_PREFIX}notes",
+                cache / f"{killed}-abc_1234"]
         for path in kept:
             path.mkdir()
+        tmp_target.mkdir()
         own = cache / f"{TARGET_NAME_PREFIX}{os.getpid()}-log"
         own.mkdir()
         check("a run killed with SIGKILL leaves its targets, among them a planted credential",
               planted_line == "planted\n" and all(path.exists() for path in killed_paths),
               planted_line)
-        removed = remove_targets_left_by_ended_runs([home, cache, scratch / "missing"])
+        os.kill = kill_refusing_the_unsignalable_pid
+        try:
+            removed = remove_targets_left_by_ended_runs([home, cache, scratch / "missing"])
+        finally:
+            os.kill = real_kill
         check("the next run removes every target the killed run left, and one named for its "
               "own PID",
               not any(path.exists() for path in [*killed_paths, own])
               and sorted(removed) == sorted(map(str, [*killed_paths, own])), removed)
-        check("the next run keeps a running run's targets and names this file never makes",
+        check("the next run keeps a running run's targets, one named for a process it may not "
+              "signal, names this file never makes, and a mkdtemp-like name outside /tmp",
               all(path.exists() for path in kept))
+        removed_from_tmp = remove_targets_left_by_ended_runs(["/tmp"])
+        check("the next run removes the killed run's mkdtemp directory in /tmp",
+              not tmp_target.exists() and str(tmp_target) in removed_from_tmp, removed_from_tmp)
+
+        # Another run removes the same target between this run's listing and its removal.
+        raced = cache / f"{killed}-log"
+        raced.mkdir()
+        real_rmtree = shutil.rmtree
+
+        def rmtree_after_another_run_removed_it(path, *arguments, **keywords):
+            real_rmtree(path)
+            real_rmtree(path, *arguments, **keywords)
+
+        shutil.rmtree = rmtree_after_another_run_removed_it
+        try:
+            raced_removed = remove_targets_left_by_ended_runs([cache])
+            raised = None
+        except OSError as error:
+            raced_removed, raised = [], error
+        finally:
+            shutil.rmtree = real_rmtree
+        check("the next run passes over a target another run removed first",
+              raised is None and not raced.exists() and str(raced) not in raced_removed,
+              (raised, raced_removed))
     finally:
         running.kill()
         running.wait()
+        shutil.rmtree(tmp_target, ignore_errors=True)
 
 
 with tempfile.TemporaryDirectory() as scratch_name:
