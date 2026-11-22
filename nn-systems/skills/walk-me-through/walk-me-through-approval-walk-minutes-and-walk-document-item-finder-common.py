@@ -772,8 +772,15 @@ def own_lines_of_unit(text, parser, lines, unit, openings, own=None):
     numbers own of the item numbers unit names: all of them when own is None, and otherwise, as
     approval_walk_item_line_range_within_heading_shared_by_several_items gives each, the lines of own's first
     number and those of each later one that has an opening of its own. openings is a list that holds
-    item_opening_lines' result once one call has needed it, so that the walk-document is read once."""
+    item_opening_lines' result once one call has needed it, so that the walk-document is read once. Below a setext
+    heading, the heading's further lines come first, as a paragraph, and a blank line stands where its underline was."""
     numbers, total, _, first, end = unit
+    opening = parser.parse("\n".join(lines[first:end]))
+    if opening and opening[0].type == "heading_open" and opening[0].markup in ("=", "-") and opening[0].map[0] == 0:
+        # Read as the heading's own body, a further line such as `#new_if_d Show every row.` would sit above the
+        # underline and make a second heading; and the blank line keeps an indented code block below the underline a
+        # code block rather than that paragraph's last line.
+        lines = [*lines[:first + opening[0].map[1] - 1], "", *lines[first + opening[0].map[1]:]]
     if own is None:
         ranges = [(first, end)]
     else:

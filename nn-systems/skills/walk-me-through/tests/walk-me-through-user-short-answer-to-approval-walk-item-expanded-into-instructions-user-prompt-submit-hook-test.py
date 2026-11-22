@@ -2211,6 +2211,36 @@ def test_a_decision_line_inside_a_multi_line_setext_heading_reaches_the_messages
           and not counted(lines), f"lines {lines!r}, calls {calls!r}")
 
 
+def test_an_unchanged_multi_line_setext_item_counts_with_no_model_call():
+    item = DECISION_ITEM.replace("#new_if_d Show every row.\n\n", "").replace(
+        "## Item 4 of 9: a filter", "Item 4 of 9: a filter\n#new_if_d Show every row.\n---")
+    case = Case(next_to_present="item 4 of 9", document="# A walk\n\n" + item + "\n", model="changed")
+    lines = case.lines("a", case.transcript(f"{item}\n\n{ITEM_4_CLOSING_LINE}"))
+    check("an answer counts with no model call when the walk-document and the message hold the same item under a "
+          "setext heading whose second line is a `#new_if_d` line",
+          counted(lines) and not case.model_calls(), f"lines {lines!r}")
+
+
+def test_an_indented_code_block_right_below_a_setext_underline_stays_a_code_block():
+    shown = DECISION_ITEM.replace("## Item 4 of 9: a filter",
+                                  "Item 4 of 9: a filter\nextra heading text\n---\n    #new Delete every row.")
+    case = Case(next_to_present="item 4 of 9", document="# A walk\n\n" + DECISION_ITEM + "\n", model="changed")
+    lines = case.lines("a", case.transcript(f"{shown}\n\n{ITEM_4_CLOSING_LINE}"))
+    check("an answer counts with no model call when an indented code block holding `#new` text sits right below the "
+          "message's setext underline",
+          counted(lines) and not case.model_calls(), f"lines {lines!r}")
+
+
+def test_an_item_shown_under_a_plain_or_bold_title_keeps_its_lines_below_a_level_two_heading():
+    for title in ("**Item 4 of 9: a filter**", "Item 4 of 9: a filter"):
+        shown = DECISION_ITEM.replace("## Item 4 of 9: a filter", f"{title}\n\n## Explanation")
+        case = Case(next_to_present="item 4 of 9", document="# A walk\n\n" + DECISION_ITEM + "\n", model="changed")
+        lines = case.lines("a", case.transcript(f"{shown}\n\n{ITEM_4_CLOSING_LINE}"))
+        check(f"an answer counts with no model call when the walk-document heads the item `##` and the message shows "
+              f"it under the title {title!r} followed by `## Explanation`",
+              counted(lines) and not case.model_calls(), f"lines {lines!r}")
+
+
 def test_a_closing_line_with_no_blank_line_before_it_keeps_the_items_last_line():
     case = Case(next_to_present="item 4 of 9", document="# A walk\n\n" + DECISION_ITEM + "\n", model="changed")
     lines = case.lines("a", case.transcript(f"{DECISION_ITEM}\n{ITEM_4_CLOSING_LINE}"))
