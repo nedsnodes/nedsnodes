@@ -1011,7 +1011,13 @@ def _ask_within_lock(question, include_closed, seat_dir, repo, projects_root,
         save_state(state_path, state)
 
     if answer is None:
-        return None, None, GHI_GUIDE_AGENT_ANSWER_NOT_USABLE_MESSAGE_TEMPLATE.format(problem=problem)
+        # On one line: ghi-issue-write.py reports only the line that opens
+        # with the not-usable opening, and a failed turn's detail, such as
+        # claude's logged-out message and its remedy, can span several.
+        one_line_problem = " ".join(
+            line.strip() for line in str(problem).splitlines() if line.strip())
+        return None, None, GHI_GUIDE_AGENT_ANSWER_NOT_USABLE_MESSAGE_TEMPLATE.format(
+            problem=one_line_problem)
     return answer, closed_issue_dates(answer_issue_numbers(answer), cache), None
 
 

@@ -1105,7 +1105,13 @@ def adjudicate(repo: str, title: str, text: str, repository_root: Path,
     Returns the RulingConflict when ghi-guide-agent answered with a ruling
     question, for the caller to record in the log-store before anything
     reaches GitHub; otherwise None. A ruling question
-    does not stop the write."""
+    does not stop the write.
+
+    Not handled: a too-similar verdict naming the edited issue and a number
+    that is not a GHI, such as a pull request's. The edited issue is dropped,
+    the ask's closed-GHI check passes a number its mirror does not hold, and
+    the refusal sends the author to that number; the author's reconsider
+    path in RECONSIDER_LINE passes the write."""
     marker = repository_root / RECONSIDERED_MARKER_NAME
     if marker.is_file():
         marker.unlink()
@@ -1169,8 +1175,9 @@ def adjudicate(repo: str, title: str, text: str, repository_root: Path,
                "proposed-improvements-or-changes-file in the log-store")
         # The saved file holds the question on one line, and
         # ruling_question_lines() reads back only that line.
-        # Only line breaks are replaced: the question may quote a command
-        # whose spaces matter, as in printf 'a  b'.
+        # Each line is trimmed at both ends and the lines are joined with one
+        # space; whitespace within a line is kept, because the question may
+        # quote a command whose spaces matter, as in printf 'a  b'.
         return RulingConflict(answer.get("ruling_issue"), " ".join(
             line.strip() for line in str(answer.get("sentence", "")).splitlines()
             if line.strip()))

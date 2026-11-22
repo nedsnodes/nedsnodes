@@ -1201,7 +1201,12 @@ with tempfile.TemporaryDirectory() as temporary:
              "names no issue it is too similar to"),
             ("a drift recheck after a verdict that cites the closed GHI again fails the ask",
              ({"session_id": "sess-W", "structured_output": first_verdict}, None),
-             "the rechecked verdict still cites a closed GHI")]:
+             "the rechecked verdict still cites a closed GHI"),
+            # ghi-issue-write.py reports only the not-usable line, so a
+            # multi-line failure must reach it on that one line.
+            ("a drift recheck whose turn fails with a multi-line error keeps its remedy on the not-usable line",
+             (None, "claude exited 1: Invalid API key\n  Please run claude auth login"),
+             "the turn failed: claude exited 1: Invalid API key Please run claude auth login")]:
         seat_verdict_recheck = root / ("seat-" + case_name.replace(" ", "-")[:60])
         seat_verdict_recheck.mkdir()
         fake_refresh_queue([([13], {"13": issue(13, state="CLOSED",
