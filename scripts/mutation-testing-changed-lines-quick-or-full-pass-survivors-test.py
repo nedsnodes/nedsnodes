@@ -2017,6 +2017,7 @@ def run_one_mutant_per_changed_line_and_kept_sessions_of_heads_before_cutoff_cas
     at_most_flag = script.MUTANTS_RUN_AT_MOST_SHARED_EVENLY_AMONG_CHANGED_FILES_FLAG
     stop_flag = script.NO_MUTANT_STARTED_AFTER_UNIX_TIME_FLAG
     kept_flag = script.COSMIC_RAY_SESSIONS_DIRECTORY_KEPT_TO_RESUME_FLAG
+    backlog_flag = script.MUTANTS_WITH_NO_RESULT_IN_KEPT_COSMIC_RAY_SESSIONS_MARKED_SKIPPED_WHEN_HEAD_COMMIT_BEFORE_CUTOFF_COMMAND_LINE_FLAG
     future = repr(time.time() + 3600)
 
     def run_full(repository, control, base, head, venv, sessions, *flags):
@@ -2103,15 +2104,17 @@ def run_one_mutant_per_changed_line_and_kept_sessions_of_heads_before_cutoff_cas
               f"err={completed.stderr}")
 
     # ------------------------------------------------------------------
-    # A kept session of a head committed before the cutoff: its mutants with no result are
-    # skipped. At the cutoff, they run.
+    # A kept session of a head committed before the cutoff, given the backlog flag: its mutants
+    # with no result are skipped. At the cutoff, or without the flag, as when a first pass
+    # stopped after it made its sessions is resumed, they run.
     # ------------------------------------------------------------------
     plan = {"init_sessions": {"scripts/a.py": [["core/One", 2, False], ["core/Two", 2, False],
                                                ["core/Three", 3, False]]},
             "killed_output": SUITE_FAILED_RUNNER_OUTPUT}
     head_files = {"scripts/a.py": "def double(x):\n    return x + x\n",
                   "scripts/a-test.py": "import sys\nsys.exit(0)\n"}
-    for committed, skipped in ((cutoff - 1, True), (cutoff, False)):
+    for committed, backlog, skipped in ((cutoff - 1, True, True), (cutoff - 1, False, False),
+                                        (cutoff, True, False)):
         with tempfile.TemporaryDirectory() as scratch_name:
             repository, base, _ = scratch_repository(scratch_name, head_files)
             head = head_committed_at(repository, committed)
@@ -2124,7 +2127,7 @@ def run_one_mutant_per_changed_line_and_kept_sessions_of_heads_before_cutoff_cas
                   completed.returncode == 1 and written["mutants_not_run_count"] == 1,
                   f"rc={completed.returncode} json={written} err={completed.stderr}")
             completed, written = run_full(repository, control, base, head, venv, sessions,
-                                          stop_flag, future)
+                                          stop_flag, future, *([backlog_flag] if backlog else []))
             by_line = kept_session_mutants_by_line(sessions)
             ran = [c for c in calls(control) if c["tool"] == "python"]
             backlog = [output for mutants in by_line.values() for _, _, output in mutants
@@ -2138,7 +2141,9 @@ def run_one_mutant_per_changed_line_and_kept_sessions_of_heads_before_cutoff_cas
                       f"rc={completed.returncode} ran={ran} by_line={by_line} "
                       f"out={completed.stdout} err={completed.stderr}")
             else:
-                check("a head committed at the cutoff: its kept session's waiting mutant runs",
+                check(f"a head committed {cutoff - committed} s before the cutoff, "
+                      f"{'given' if backlog else 'without'} the backlog flag: its kept "
+                      f"session's waiting mutant runs",
                       completed.returncode == 0 and len(ran) == 1 and not backlog
                       and "2 killed, 0 survived, 0 errored, 0 not run" in completed.stdout,
                       f"rc={completed.returncode} ran={ran} by_line={by_line} "
@@ -2204,12 +2209,13 @@ def run_one_mutant_per_changed_line_and_kept_sessions_of_heads_before_cutoff_cas
             for _, outcome, _ in mutants)
         (control / "calls.log").write_text("")
         completed = run_script(repository, control, "--head", head, "--base", base,
-                               "--cosmic-ray-venv", str(venv), kept_flag, str(sessions))
+                               "--cosmic-ray-venv", str(venv), kept_flag, str(sessions),
+                               backlog_flag)
         steps = [c["arguments"][0] for c in calls(control)]
         by_line = kept_session_mutants_by_line(sessions)
         check("with no limit on the mutants run, a kept session of a head committed before the "
-              "cutoff: its waiting mutants are marked skipped, RESUMED is printed, and only its "
-              "dump runs",
+              "cutoff, given the backlog flag: its waiting mutants are marked skipped, RESUMED is "
+              "printed, and only its dump runs",
               waiting_after_first_run == 2 and steps == ["dump"]
               and "RESUMED  scripts/a.py" in completed.stdout
               and sum(output == before_cutoff for mutants in by_line.values()
@@ -2228,7 +2234,7 @@ def run_one_mutant_per_changed_line_and_kept_sessions_of_heads_before_cutoff_cas
         for session in sessions.glob("*.sqlite"):
             session.chmod(0o444)
         completed, written = run_full(repository, control, base, head, venv, sessions,
-                                      stop_flag, future)
+                                      stop_flag, future, backlog_flag)
         check("a kept session whose waiting mutants cannot be marked skipped: exit 2, naming "
               "the session and the error, the command to run again, and the worktree removed",
               completed.returncode == 2 and written is None

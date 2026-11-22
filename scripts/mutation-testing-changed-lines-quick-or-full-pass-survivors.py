@@ -143,10 +143,11 @@ SKIPPED in the session, as a filter marks a mutant it skips, with
 ONE_MUTANT_PER_CHANGED_LINE_SKIPPED_OUTPUT as its output. A session kept from
 an earlier run (KEPT SESSIONS below) is handled the same way before any of its
 mutants runs, and a line one of whose mutants already has a result keeps no
-other to run; but when the head was committed before
+other to run; but given
+MUTANTS_WITH_NO_RESULT_IN_KEPT_COSMIC_RAY_SESSIONS_MARKED_SKIPPED_WHEN_HEAD_COMMIT_BEFORE_CUTOFF_COMMAND_LINE_FLAG, when the
+head was committed before
 KEPT_COSMIC_RAY_SESSION_MUTANTS_WITH_NO_RESULT_ALL_SKIPPED_WHEN_HEAD_COMMIT_UNIX_TIME_BEFORE_THIS_CUTOFF,
-2026-11-22T19:59:19Z, every mutant of a kept session with no result is marked
-SKIPPED instead, with KEPT_COSMIC_RAY_SESSION_MUTANT_SKIPPED_WHEN_HEAD_COMMIT_BEFORE_CUTOFF_RESULT_OUTPUT_TEXT
+every mutant of a kept session with no result is marked SKIPPED instead, with KEPT_COSMIC_RAY_SESSION_MUTANT_SKIPPED_WHEN_HEAD_COMMIT_BEFORE_CUTOFF_RESULT_OUTPUT_TEXT
 as its output, and none runs. A session that cannot be written exits 2.
 
 KEPT SESSIONS. --cosmic-ray-sessions-directory-kept-to-resume DIR keeps each
@@ -369,6 +370,10 @@ COSMIC_RAY_SESSION_PENDING_MUTANTS_COUNT_SQL_QUERY = (
 COSMIC_RAY_ONE_WORK_ITEM_MUTATE_AND_TEST_FLAG = "--cosmic-ray-one-work-item-mutate-and-test"
 MUTANTS_RUN_AT_MOST_SHARED_EVENLY_AMONG_CHANGED_FILES_FLAG = "--mutants-run-at-most-shared-evenly-among-changed-files"
 NO_MUTANT_STARTED_AFTER_UNIX_TIME_FLAG = "--no-mutant-started-after-unix-time"
+# Only the scheduled pass's second pass, which runs the backlog, gives it: a first pass that was
+# stopped after it made its sessions resumes them instead.
+MUTANTS_WITH_NO_RESULT_IN_KEPT_COSMIC_RAY_SESSIONS_MARKED_SKIPPED_WHEN_HEAD_COMMIT_BEFORE_CUTOFF_COMMAND_LINE_FLAG = (
+    "--mutants-with-no-result-in-kept-cosmic-ray-sessions-marked-skipped-when-head-commit-before-cutoff")
 # cosmic-ray 8.7.0's session schema. `cosmic-ray init` gives each mutant a random job_id, so the
 # columns of mutation_specs, the same at every init of one file at one commit, tell which
 # mutant a work item is. A mutant its filters skipped has a result whose worker_outcome is
@@ -387,8 +392,9 @@ ONE_MUTANT_PER_CHANGED_LINE_SKIPPED_OUTPUT = (
     "Filtered one mutant per changed line: another mutant of this line is the one run")
 KEPT_COSMIC_RAY_SESSION_MUTANT_SKIPPED_WHEN_HEAD_COMMIT_BEFORE_CUTOFF_RESULT_OUTPUT_TEXT = (
     "Filtered waiting mutant of a head committed before one mutant per changed line")
-# 2026-11-22T19:59:19Z. A session kept from an earlier run of a head committed before it has its
-# mutants with no result skipped rather than run.
+# The commit time of main's tip when one mutant per changed line began. Given
+# MUTANTS_WITH_NO_RESULT_IN_KEPT_COSMIC_RAY_SESSIONS_MARKED_SKIPPED_WHEN_HEAD_COMMIT_BEFORE_CUTOFF_COMMAND_LINE_FLAG, a session kept from an
+# earlier run of a head committed before it has its mutants with no result skipped rather than run.
 KEPT_COSMIC_RAY_SESSION_MUTANTS_WITH_NO_RESULT_ALL_SKIPPED_WHEN_HEAD_COMMIT_UNIX_TIME_BEFORE_THIS_CUTOFF = 1795377559
 ALL_MUTANTS_WITH_NO_RESULT_ARGUMENT = "all"
 NO_UNIX_TIME_AFTER_WHICH_NO_MUTANT_STARTS_ARGUMENT = "never"
@@ -1243,14 +1249,15 @@ def cosmic_ray_session_mutants_skipped_but_one_per_changed_line_seeded_by_head(
 
 
 def cosmic_ray_session_kept_from_an_earlier_run_mutants_skipped(path, session, head, worktree,
-                                                                environment):
-    """For a session kept from an earlier run: when the head was committed before
+                                                                environment, backlog_skipped):
+    """For a session kept from an earlier run: given backlog_skipped, when the head was
+    committed before
     KEPT_COSMIC_RAY_SESSION_MUTANTS_WITH_NO_RESULT_ALL_SKIPPED_WHEN_HEAD_COMMIT_UNIX_TIME_BEFORE_THIS_CUTOFF,
     mark skipped every mutant with no result; otherwise keep one per changed line, as a session
     made now does."""
-    committed = int(run_or_raise(["git", "show", "-s", "--format=%ct", head], worktree,
-                                 environment, what=f"git show of {head}'s commit time"))
-    if committed < \
+    if backlog_skipped and int(run_or_raise(
+            ["git", "show", "-s", "--format=%ct", head], worktree, environment,
+            what=f"git show of {head}'s commit time")) < \
             KEPT_COSMIC_RAY_SESSION_MUTANTS_WITH_NO_RESULT_ALL_SKIPPED_WHEN_HEAD_COMMIT_UNIX_TIME_BEFORE_THIS_CUTOFF:
         cosmic_ray_session_mutants_marked_skipped(
             path, session, [job_id for job_id, has_result in
@@ -1283,8 +1290,9 @@ def cosmic_ray_sessions_made_for_every_file_and_mutant_job_ids_to_run_chosen(
             cosmic_ray_session_made_and_filtered(path, config, session, tools, worktree,
                                                  environment, None, head)
         else:
-            cosmic_ray_session_kept_from_an_earlier_run_mutants_skipped(path, session, head,
-                                                                        worktree, environment)
+            cosmic_ray_session_kept_from_an_earlier_run_mutants_skipped(
+                path, session, head, worktree, environment,
+                arguments.mutants_with_no_result_in_kept_cosmic_ray_sessions_marked_skipped_when_head_commit_before_cutoff)
         mutants_of_file[path] = cosmic_ray_session_mutants_not_skipped_by_filters(path, session)
     at_most = arguments.mutants_run_at_most_shared_evenly_among_changed_files
     if at_most is None:
@@ -1385,8 +1393,9 @@ def mutation_test_one_file(path, suites, worktrees, scratch, tools, head, merge_
     not_started_after = arguments.no_mutant_started_after_unix_time
     # With the mutants run limited, a kept session was handled when the sessions were made.
     if not mutants_run_are_limited and session.is_file():
-        cosmic_ray_session_kept_from_an_earlier_run_mutants_skipped(path, session, head, worktree,
-                                                                    environment)
+        cosmic_ray_session_kept_from_an_earlier_run_mutants_skipped(
+            path, session, head, worktree, environment,
+            arguments.mutants_with_no_result_in_kept_cosmic_ray_sessions_marked_skipped_when_head_commit_before_cutoff)
     if mutants_run_are_limited and (
             mutant_job_ids_to_run == []
             or not_started_after is not None and time.time() >= not_started_after):
@@ -2002,6 +2011,11 @@ def parse_arguments(argv):
                         metavar="UNIX_TIME",
                         help="in the full pass, start no mutant after this time; those not "
                              "started stay with no result in the kept sessions")
+    parser.add_argument(MUTANTS_WITH_NO_RESULT_IN_KEPT_COSMIC_RAY_SESSIONS_MARKED_SKIPPED_WHEN_HEAD_COMMIT_BEFORE_CUTOFF_COMMAND_LINE_FLAG,
+                        action="store_true",
+                        help="in a kept session of a head committed before one mutant per "
+                             "changed line began, mark skipped every mutant with no result "
+                             "rather than run it")
     parser.add_argument("--survived-and-errored-mutants-json-file", default=None,
                         help="a file to write the survived and errored mutants to, as JSON")
     parser.add_argument("--recorded-mutant-killed-check-verdicts-json-file-to-write", default=None,
