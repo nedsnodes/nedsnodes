@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Release the next agent-seat holding mutant-test tasks when merge-lane-2's queue is quiet. Exits 0 if it released an agent-seat, 1 if none was due, 2 if it could not tell or the message was not sent.
+"""Release the next agent-seat holding mutant-test tasks when merge-lane-2's queue is quiet. Exits 0 if it released an agent-seat, 3 if none was due, 2 if it could not tell or the message was not sent.
 
 Usage:
   scripts/merge-lane-open-prs-not-changes-requested-count-then-next-agent-seat-go-ahead-to-open-surviving-mutant-test-prs.py
@@ -10,13 +10,14 @@ mutant-test ones included, leaving out only those a merge-lane-2 review on
 their newest commit asks to change. A pull request is left out when the newest
 verdict among the GitHub reviews by the account ned-review-merge on the pull
 request's head commit asks for changes. A verdict is a review in the state
-APPROVED or CHANGES_REQUESTED; on a pull request where ned-review-merge has no
-review in either state on any commit, such as one ned-review-merge opened, whose author
-GitHub lets post only COMMENT reviews, a verdict is a COMMENT review whose body
-opens with the line APPROVE or REQUEST_CHANGES, read as the fix-round program,
+APPROVED or CHANGES_REQUESTED; on a pull request ned-review-merge opened, whose
+author GitHub lets post only COMMENT reviews, a verdict is a COMMENT review
+whose body opens with the line APPROVE or REQUEST_CHANGES, read as the
+fix-round program,
 scripts/pull-request-fix-round-author-brief-from-blocking-findings-and-one-commit-every-finding-answered-check.py,
-reads it. Any other review neither leaves a pull request out nor brings it
-back. Only the newest 100 reviews by ned-review-merge on each pull request are
+reads it. The pull request's author decides which form is read, as it decides
+which form the review-posting program posts. Any other review neither leaves a
+pull request out nor brings it back. Only the newest 100 reviews by ned-review-merge on each pull request are
 read, so a verdict followed by 100 or more later reviews from that account is
 not seen.
 
@@ -46,7 +47,10 @@ invocation of this program, at the next merge or by hand, tries again.
 No agent-seat is due when the count is over 10, or else when every
 agent-seat in the agent-seats file is already recorded as released. The
 program then prints a sentence giving the count and a sentence giving the
-first of these two reasons that holds, and exits 1.
+first of these two reasons that holds, and exits 3. That status is its own, apart
+from the 1 Python exits with when the program crashes before main() runs, such
+as when a module it loads cannot be loaded, so the merge script reports such a
+crash instead of reading it as no agent-seat due.
 
 A mutant-test pull request only adds tests for surviving mutants. Such pull
 requests stay unopened until the agent-seat holding them is sent the release
@@ -106,7 +110,7 @@ RELEASED_LINE_PREFIX = "RELEASED "
 SENDER_WORKING_DIRECTORY_NAME = "merge-lane-2-mutant-test-release"
 
 EXIT_RELEASED = 0
-EXIT_NONE_DUE = 1
+EXIT_NONE_DUE = 3
 EXIT_COULD_NOT_TELL = 2
 
 # reviews(last: 100), oldest first: a pull request's reviews on its head commit are its newest.
@@ -116,7 +120,7 @@ query($owner: String!, $name: String!, $endCursor: String) {
     pullRequests(states: OPEN, first: 100, after: $endCursor) {
       pageInfo { hasNextPage endCursor }
       nodes {
-        number isDraft headRefOid
+        number isDraft headRefOid author { login }
         reviews(author: "%s", last: 100) { nodes { state body commit { oid } } }
       }
     }
@@ -145,7 +149,7 @@ def parse_arguments(argv):
 
 def merge_lane_verdict(review, as_comments):
     """APPROVED, CHANGES_REQUESTED, or None for a review that carries no verdict. as_comments is
-    the fix-round program's are_merge_lane_verdicts_on_pull_request_comment_reviews()."""
+    whether the pull request's author is the merge account."""
     if review["state"] in ("APPROVED", "CHANGES_REQUESTED"):
         return review["state"]
     if as_comments and review["state"] == "COMMENTED":
@@ -156,7 +160,7 @@ def merge_lane_verdict(review, as_comments):
 
 def sent_back_on_head_commit(pull_request):
     reviews = pull_request["reviews"]["nodes"]
-    as_comments = fix_round.are_merge_lane_verdicts_on_pull_request_comment_reviews(reviews)
+    as_comments = (pull_request["author"] or {}).get("login") == MERGE_LANE_ACCOUNT
     verdicts = [merge_lane_verdict(review, as_comments) for review in reviews
                 if (review["commit"] or {}).get("oid") == pull_request["headRefOid"]]
     verdicts = [verdict for verdict in verdicts if verdict]
