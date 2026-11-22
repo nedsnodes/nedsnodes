@@ -4,7 +4,7 @@
 
 Since Grace Hopper’s invention of the compiler in 1951, software development has been based on two types of intelligence: humans and code/tools. Pre-AI systems could only automate what code can check: tests, linters, builds. The rest needed humans. 
 
-AI’s are a new, third type of intelligence, and we introduce Code-Prompt-Code (CPC), a powerful hybrid fourth. NedsNodes (NN) is a blueprint for a novel, highly automated SDLC, built around these four pillars. 
+AIs are a new, third type of intelligence, and we introduce Code-Prompt-Code (CPC), a powerful hybrid fourth. NedsNodes (NN) is a blueprint for a novel, highly automated SDLC, built around these four pillars. 
 
 Without NedsNodes AIs write code and prompts quickly but sloppily. They simply disgorge a mass of hard to understand, low quality work (just good enough to pass the tests), overwhelming existing systems and the human experts who are responsible for them.
 
@@ -36,7 +36,7 @@ A robust SDLC needs \>1,000 nodes. NedsNodes has \~100. It is young, open-source
 
 Since Konrad Zuse (1941) software development best practices have advanced as computers improve and software multiplies. The standard **S**oftware **D**evelopment **L**ife **C**ycle (SDLC) is rooted in this 85 year tradition. Before 2025 every SDLC step was handled by either humans or code. *Now AIs can handle many manual SDLC steps, better and cheaper than humans. Many SDLC best practices are now obsolete.* It's time to rethink the SDLC to fully leverage the near infinite patience, scalability and flexibility of AIs.
 
-*Code, AI, and human brains are three complementary types or dimensions of intelligence.* Code is cheap, fast, precise and reliable, but inflexible, AI's are slower and less reliable than code, but faster and more predictable than humans. And humans are supremely flexible, grounded in reality, expert in human interactions, but not particularly precise, reliable or predictable. NedsNodes' starting point is the best human+code SDLC’s, updated to take full advantage of AIs, to build a new, better SDLC.
+*Code, AI, and human brains are three complementary types or dimensions of intelligence.* Code is cheap, fast, precise and reliable, but inflexible, AIs are slower and less reliable than code, but faster and more predictable than humans. And humans are supremely flexible, grounded in reality, expert in human interactions, but not particularly precise, reliable or predictable. NedsNodes' starting point is the best human+code SDLCs, updated to take full advantage of AIs, to build a new, better SDLC.
 
 ## **Divide & Conquer**
 
