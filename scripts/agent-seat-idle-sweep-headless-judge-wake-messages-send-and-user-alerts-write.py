@@ -378,8 +378,9 @@ class SweepLog:
                 if (owed and owed_by != invocation) or "sentences" not in event:
                     wait[PROMISE_MESSAGES] = None
                 elif wait[PROMISE_MESSAGES] is not None:
-                    wait[PROMISE_MESSAGES].append({"at": event["at"], "kinds": set(event["kinds"]),
-                                                   "sentences": event["sentences"]})
+                    wait[PROMISE_MESSAGES].append({
+                        "at": event.get("send_started_at", event["at"]),
+                        "kinds": set(event["kinds"]), "sentences": event["sentences"]})
                 owed = False
             elif event["step"] == NUDGE or (wait is not None and event["step"] == PROMISE):
                 if event["step"] == NUDGE:
@@ -400,7 +401,12 @@ class SweepLog:
         return answers[-1] if answers else None
 
     def running_work_asked_about(self, seat):
+        """The running work rule 5 messages named, less what a message the delivery check did not
+        find in the agent-seat's transcript named."""
+        not_found = {event["message_id"] for event in self.of_seat(seat, "delivery_checked")
+                     if not event["found"]}
         return {work_id for event in self.of_seat(seat, "judge_answer") if event.get("rule") == 5
+                and event.get("message_id") not in not_found
                 for work_id in event.get(RUNNING_WORK_ASKED_ABOUT, [])}
 
     def checked_sentences(self, seat):
@@ -726,8 +732,8 @@ class Sweep:
         return text, outcome, started_at
 
     def send(self, seat, verdict, text, step):
-        """Send code's text to one agent-seat; log the send for the delivery check. Returns whether
-        the send succeeded."""
+        """Send code's text to one agent-seat; log the send for the delivery check. Returns the
+        message_sent event, or False when the send failed."""
         text, outcome, started_at = self.send_wake_message([seat], text)
         if outcome.error:
             self.headless_failed(seat, f"send its {step} message", outcome.error,
@@ -738,16 +744,15 @@ class Sweep:
         if problems:
             self.headless_failed(seat, f"send its {step} message", "; ".join(problems), SENDS_WRONG)
             return False
-        self.message_sent(seat, verdict, text_sent_to(outcome, seat, text), step, started_at)
-        return True
+        return self.message_sent(seat, verdict, text_sent_to(outcome, seat, text), step, started_at)
 
     def message_sent(self, seat, verdict, text, step, started_at):
         # The delivery check compares transcript times with the send's start: a sender may run on
         # for minutes after its SendMessage, and the record is written when it ends.
-        self.record({"event": "message_sent", "agent_seat": seat, "step": step, "text": text,
-                     "send_started_at": iso(started_at),
-                     "message_id": uuid.uuid4().hex, "session_id": verdict.get(fields.SESSION_ID),
-                     "transcript_path": verdict.get(fields.TRANSCRIPT_PATH)})
+        return self.record({"event": "message_sent", "agent_seat": seat, "step": step, "text": text,
+                            "send_started_at": iso(started_at), "message_id": uuid.uuid4().hex,
+                            "session_id": verdict.get(fields.SESSION_ID),
+                            "transcript_path": verdict.get(fields.TRANSCRIPT_PATH)})
 
     # --- The account ---
 
@@ -912,12 +917,21 @@ class Sweep:
             # A promise given in answer to a message goes on the open wait, so that repeated
             # promises cannot put off its escalation and the user-alert.
             if not wait:
+                # Logged before the send: the escalation quotes the nudge that opened the wait, so
+                # a promise message whose own send failed still reaches the agent-seat.
                 self.start_wait(seat, verdict, stretch, promise_text, 2)
-            elif PROMISE not in wait:
-                self.record({"event": "wait_step", "agent_seat": seat, "step": PROMISE})
-            self.record({"event": PROMISE_MESSAGE, "agent_seat": seat, "kinds": promise_kinds,
-                         "sentences": promise_sentences})
-            self.send(seat, verdict, promise_text, NUDGE)
+                self.record({"event": PROMISE_MESSAGE, "agent_seat": seat, "kinds": promise_kinds,
+                             "sentences": promise_sentences})
+                self.send(seat, verdict, promise_text, NUDGE)
+            else:
+                # Logged only once sent, since no later message quotes it.
+                sent = self.send(seat, verdict, promise_text, NUDGE)
+                if sent:
+                    if PROMISE not in wait:
+                        self.record({"event": "wait_step", "agent_seat": seat, "step": PROMISE})
+                    self.record({"event": PROMISE_MESSAGE, "agent_seat": seat,
+                                 "kinds": promise_kinds, "sentences": promise_sentences,
+                                 "send_started_at": sent["send_started_at"]})
         elif not wait:
             self.nudge(seat, verdict, rule, text, stretch)
 
@@ -1039,7 +1053,7 @@ class Sweep:
                      "session_id": verdict[fields.SESSION_ID], "last_activity": stretch,
                      "send": send, "reason": answer.get("reason"), "failed": bool(problem),
                      RUNNING_WORK_ASKED_ABOUT: running_work_named_in(facts, answer["message"])
-                     if sent else []})
+                     if sent else [], **({"message_id": sent["message_id"]} if sent else {})})
         if problem:
             self.headless_failed(seat, "judge whether it could act now", problem,
                                  outcome.error_kind or JUDGE_ANSWER_UNUSABLE)
