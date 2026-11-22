@@ -4327,6 +4327,9 @@ def test_kind_7_reports_a_git_ls_files_that_fails_and_writes_nothing():
     check("kind 7 fails the check when `git ls-files` fails, naming git's error, writing nothing",
           result.returncode == 1 and "fatal: stub ls-files failure" in result.stdout + result.stderr
           and case.minutes.read_text() == before, described(result))
+    check("the retry command kind 7 prints when `git ls-files` fails names the checkout it checked",
+          f"check --not-asked 7 --cwd {shlex.quote(str(case.checkout))}`" in result.stdout + result.stderr,
+          described(result))
 
 
 def test_a_git_grep_that_fails_is_reported_and_writes_nothing():

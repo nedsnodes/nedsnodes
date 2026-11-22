@@ -1076,7 +1076,7 @@ NOT_ASKED_WEAK_JUDGEMENT_LINE = (
     "widens an agent's permissions, as a settings change can, or turns off a guard, do not run close: present {item} to the user.")
 GIT_LS_FILES_GLOSSARIES_FAILED = (
     "{error}\nThe system glossaries git tracks could not be listed while checking {item}'s evidence.\n"
-    "Run `python3 {program} check --not-asked 7` again once; if it fails the same way, present {item} to the user "
+    "Run `python3 {program} check --not-asked 7 --cwd {top}` again once; if it fails the same way, present {item} to the user "
     "and run check with the flag for his answer, as `--help` lists it.")
 GIT_GREP_FAILED = ("`git grep` failed with exit {code} in {top} while checking {item}'s evidence: {error}\n"
                    "Run `python3 {program} check --not-asked {kind}` again once; if it fails the same way, "
@@ -2004,8 +2004,8 @@ def not_system_glossary_problems(touched, top, item):
     try:
         tracked = set(glossaries_listed.glossary_paths_git_tracks(top)) - {project_glossary}
     except glossaries_listed.CouldNotListGlossaries as error:
-        raise Failure(GIT_LS_FILES_GLOSSARIES_FAILED.format(error=error, item=item,
-                                                            program=Path(__file__).resolve()))
+        raise Failure(GIT_LS_FILES_GLOSSARIES_FAILED.format(error=error, item=item, program=Path(__file__).resolve(),
+                                                            top=shlex.quote(str(top))))
     root = Path(top).resolve()
     problems = []
     for path in touched:
