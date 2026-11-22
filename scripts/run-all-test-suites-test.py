@@ -4790,6 +4790,35 @@ with tempfile.TemporaryDirectory() as scratch:
           signalled[-2:] == [("kill", 205, signal.SIGKILL), ("killpg", 200, signal.SIGKILL)]
           and still_running == [], (signalled, still_running))
 
+# A checkout committed before runs read the real-claude list from it: the nightly mutation
+# pass tests such checkouts with main's module.
+own_runner_source = PROGRAM.read_text(encoding="utf-8")
+own_real_claude_assignment = re.search(
+    r"^SUITES_THAT_RUN_THE_REAL_CLAUDE_CLI = \{\n.*?^\}\n", own_runner_source,
+    re.MULTILINE | re.DOTALL).group(0)
+older_checkout_sources = (
+    ("assigns the real-claude list the set it was before it became a dict",
+     own_runner_source.replace(
+         own_real_claude_assignment,
+         "SUITES_THAT_RUN_THE_REAL_CLAUDE_CLI = {\n    \"scripts/an-older-real-claude-test.py\",\n}\n")),
+    ("has no real-claude list", own_runner_source.replace(own_real_claude_assignment, "")),
+)
+for how, source in older_checkout_sources:
+    with tempfile.TemporaryDirectory() as scratch:
+        older = pathlib.Path(scratch)
+        (older / "scripts").mkdir()
+        (older / "scripts" / "run-all-test-suites.py").write_text(source, encoding="utf-8")
+        try:
+            lists, _ = module.suite_sandbox_lists_read_from_checkout_under_test(older)
+        except module.CouldNotRun as refusal:
+            lists = refusal
+        check(f"a checkout whose scripts/run-all-test-suites.py {how} is read without a "
+              f"refusal, and gets the runner's own real-claude list",
+              isinstance(lists, dict)
+              and lists["SUITES_THAT_RUN_THE_REAL_CLAUDE_CLI"]
+              == module.SUITE_SANDBOX_LISTS_OF_THIS_PROGRAM["SUITES_THAT_RUN_THE_REAL_CLAUDE_CLI"],
+              lists)
+
 print()
 # The count is printed so a short run is visible on sight: a run that ends
 # early leaves the cases it never reached with no trace at all.

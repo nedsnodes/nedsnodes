@@ -100,6 +100,7 @@ print("SUMMARY: 2 passed, 0 failed, 2 total")
 RUNNER_LISTS = ('SUITES_RUN_WITHOUT_ANY_SANDBOX = {"outside-a-test.py": "x", '
                 '"outside-b-test.py": "y"}\n'
                 "SUITES_GIVEN_A_COPY_ON_WRITE_OVERLAY_OF_THE_REPOSITORY_GIT_DIRECTORY = {}\n"
+                "SUITES_THAT_RUN_THE_REAL_CLAUDE_CLI = {}\n"
                 "SUITES_WHOSE_TEST_SANDBOX_SHARES_THE_MACHINE_NETWORK = {}\n")
 
 
