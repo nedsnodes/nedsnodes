@@ -210,7 +210,7 @@ def main(argv=None):
         stage = "preparing the sandbox"
         environment, token_note = (
             agy_cell.common.process_environment_copy_with_agent_seat_github_tokens_replaced_by_read_only_github_token(
-                agy_cell.agy_environment_copy_without_gemini_api_key(os.environ)))
+                agy_cell.agy_environment_copy_without_gemini_api_key_or_github_token(os.environ)))
         stage = "creating the run's folder in the shared writable folder"
         shared_subfolder = (
             codex_task.codex_or_gemini_task_run_subfolder_in_shared_writable_folder_create(brief))

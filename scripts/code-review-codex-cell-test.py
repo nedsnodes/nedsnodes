@@ -445,15 +445,17 @@ with tempfile.TemporaryDirectory() as scratch:
     # takes a value, so finding both words somewhere in argv would also pass
     # for a command that disabled something else entirely.
     argv_report = scratch / "argv-report.md"
-    # Two credential directories, `gh`'s login directory one of them, and a
-    # reviewer program's login file in the scratch home, for the credential
-    # profile checked below.
+    # Two credential directories, `gh`'s login directory one of them, a
+    # listed credential file of ned-box in it, and a reviewer program's login
+    # file in the scratch home, for the credential profile checked below.
     scratch_home = scratch_home_for(stubs)
     (scratch_home / ".config" / "nedsnodes").mkdir(parents=True, exist_ok=True)
     (scratch_home / ".config" / "gh").mkdir(parents=True, exist_ok=True)
     login_canary = scratch_home / ".codex" / "auth.json"
+    listed_canary = scratch_home / ".config" / "gh" / "hosts.yml"
     login_canary.parent.mkdir(parents=True, exist_ok=True)
-    login_canary.write_text("CANARY-NOT-A-SECRET-code-review-codex-cell-test\n", encoding="utf-8")
+    for canary in (login_canary, listed_canary):
+        canary.write_text("CANARY-NOT-A-SECRET-code-review-codex-cell-test\n", encoding="utf-8")
     os.environ.update(GH_TOKEN="agent-seat-token", GITHUB_TOKEN="agent-seat-token")
     try:
         result = run_cell(stubs, STUB_CODEX_RECORDS_ARGV,
@@ -514,9 +516,10 @@ with tempfile.TemporaryDirectory() as scratch:
           not [override for override in overrides_before_review
                if override.startswith(("default_permissions=", "permissions."))],
           repr(overrides_before_review))
-    check("the profile denies the credential directories and a reviewer program's login file",
-          f'"{scratch_home}/.config/nedsnodes"="deny"' in denied_table
-          and f'"{scratch_home}/.config/gh"="deny"' in denied_table
+    expected_denials = ([f'"{listed_canary}"="deny"'] if sys.platform.startswith("linux")
+                        else [f'"{scratch_home}/.config/nedsnodes"="deny"', f'"{scratch_home}/.config/gh"="deny"'])
+    check("the profile denies this machine's credential paths and a reviewer program's login file",
+          all(denial in denied_table for denial in expected_denials)
           and f'"{login_canary}"="deny"' in denied_table, denied_table)
 
     # --- The PR reviewer instructions and the pull request's description ---

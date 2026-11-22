@@ -151,7 +151,7 @@ check("stage 3 refuses a move onto a path that holds other content, names it, an
 checkout = scratch_checkout({
     "README.md": "gh pr list --repo nedschorus/nedschorus\n",
     "scripts/merge-gate-test-captured-github-responses/x.json": '{"url": "repos/nedschorus/nedschorus"}\n',
-    "scripts/project-rename-machine-state-move-hack.py": 'OLD_REPOSITORY = "nedschorus/nedschorus"\n',
+    "scripts/project-rename-repository-contents-rewrite-hack.py": 'OLD_REPOSITORY = "nedschorus/nedschorus"\n',
     "docs/issues/1-a.md": "nc-systems/x and /home/nedlern/nedschorus-logs\n",
     "scripts/run.sh": "gh pr list --repo nedschorus/nedschorus\n",
     "scripts/binary.bin": b"\xff\xfe nedschorus/nedschorus\n",
@@ -159,10 +159,10 @@ checkout = scratch_checkout({
 os.chmod(checkout / "scripts/run.sh", 0o755)
 for stage in ("1", "2", "3"):
     run(checkout, "--stage", stage)
-check("stage 1 leaves Markdown, captured responses, the move program and non-UTF-8 files alone",
+check("stage 1 leaves Markdown, captured responses, a kept program file and non-UTF-8 files alone",
       read(checkout, "README.md") == "gh pr list --repo nedschorus/nedschorus\n"
       and "nedschorus/nedschorus" in read(checkout, "scripts/merge-gate-test-captured-github-responses/x.json")
-      and "nedschorus/nedschorus" in read(checkout, "scripts/project-rename-machine-state-move-hack.py")
+      and "nedschorus/nedschorus" in read(checkout, "scripts/project-rename-repository-contents-rewrite-hack.py")
       and (checkout / "scripts/binary.bin").read_bytes() == b"\xff\xfe nedschorus/nedschorus\n")
 check("stages 2 and 3 rewrite a GHI-MD file's paths like any other file's",
       read(checkout, "docs/issues/1-a.md") == "nn-systems/x and /home/nedlern/nedsnodes-logs\n",
@@ -215,6 +215,11 @@ checkout = scratch_checkout({"a.py": "x = 1  # see nedschorus#418 and nc-head-co
 covered = run(checkout, "--residue-report")
 check("the residue report exits 0 when the allowlist covers every old name, and counts each by reason",
       covered.returncode == 0 and "2 old-name matches covered" in covered.stdout, covered.stdout)
+checkout = scratch_checkout({"a.md": "An nc-canary-test, an nc-scheduled-canary-test, an nc-one-shot-canary-test and "
+                                     "the nc-canary-runner.\n"})
+covered = run(checkout, "--residue-report")
+check("the residue report covers the four canary glossary terms as nc- glossary terms",
+      covered.returncode == 0 and "4 old-name matches covered" in covered.stdout, covered.stdout)
 checkout = scratch_checkout({"a.py": "PATH = 'nc-systems/x'\n"})
 uncovered = run(checkout, "--residue-report")
 check("the residue report exits 1 and prints each old name no reason covers",
@@ -393,6 +398,125 @@ check("stage 3 maps a Bash guard it moves from its former path, once, so the Bas
           'GUARDS = {\n    ".claude/guard-hooks/guard.py": read_guard,\n    "nn-systems/x/stop-hook.py": read_stop,\n}\n')
       and run(checkout, "--stage", "3").returncode == 0 and read(checkout, moved_check).count("stop-hook.py\":") == 2,
       read(checkout, moved_check))
+
+# --- Stage 1 leaves Markdown alone for every one of its rules ---------------------------------------
+MARKDOWN_STAGE_1_NAMES = ('Run `gh pr view 1 -Rnedschorus/nedschorus`.\n'
+                          'GITHUB_REPOSITORY_OWNER = "nedschorus"\nGITHUB_REPOSITORY_NAME = "nedschorus"\n')
+checkout = scratch_checkout({"docs/a.md": MARKDOWN_STAGE_1_NAMES})
+run(checkout, "--stage", "1")
+check("stage 1 leaves a -R argument and the citation hook's constants alone in Markdown",
+      read(checkout, "docs/a.md") == MARKDOWN_STAGE_1_NAMES, read(checkout, "docs/a.md"))
+
+# --- The program's own path stays kept for text stage 1 would otherwise rewrite --------------------
+checkout = scratch_checkout({"scripts/project-rename-repository-contents-rewrite-hack.py":
+                             "gh pr list --repo nedschorus/nedschorus\n"})
+run(checkout, "--stage", "1")
+check("stage 1 leaves this program's own file alone, though its text is one stage 1 rewrites elsewhere",
+      read(checkout, "scripts/project-rename-repository-contents-rewrite-hack.py")
+      == "gh pr list --repo nedschorus/nedschorus\n",
+      read(checkout, "scripts/project-rename-repository-contents-rewrite-hack.py"))
+
+# --- Stage 2 renames the shared database's unit file, at the top or in a directory ------------------
+checkout = scratch_checkout({"nc-shared-database-service.service": "[Unit]\n",
+                             "systemd/nc-shared-database-service.service": "[Unit]\n",
+                             "systemd/other.service": "[Unit]\n"})
+unit = run(checkout, "--stage", "2")
+check("stage 2 renames the shared database's unit file, at the top or in a directory, and no other unit file",
+      unit.returncode == 0 and sorted(git(checkout, "ls-files").split()) == [
+          "nn-shared-database-service.service", "systemd/nn-shared-database-service.service", "systemd/other.service"],
+      (unit.returncode, unit.stderr, git(checkout, "ls-files")))
+
+# --- Stage 3 does not rename a citation of a kept nedschorus- file ----------------------------------
+CAPTURED = "scripts/merge-gate-test-captured-github-responses/nedschorus-nedschorus-1-pr-view.json"
+checkout = scratch_checkout({CAPTURED: "{}\n", "scripts/gate-test.py": 'NAME = "nedschorus-nedschorus-1-pr-view.json"\n'})
+run(checkout, "--stage", "3")
+check("stage 3 leaves a citation of a kept file whose name starts nedschorus-, which keeps its name",
+      read(checkout, "scripts/gate-test.py") == 'NAME = "nedschorus-nedschorus-1-pr-view.json"\n'
+      and read(checkout, CAPTURED) == "{}\n", read(checkout, "scripts/gate-test.py"))
+
+# --- Stages 1 and 2 leave stage 3's page names and Bash-guard map alone ------------------------------
+checkout = scratch_checkout({
+    "docs/nedschorus-wiki/nedschorus-glossary.md": "terms\n",
+    "docs/issues/1-a.md": "See `nedschorus-glossary.md`.\n",
+    "nn-systems/general-tools/" + BASH_GUARD_CHECK.rsplit("/", 1)[-1]: (
+        'BASH_GUARD_CURRENT_PATHS_BY_FORMER_PATH = {\n}\nGUARDS = {\n    "nn-systems/x/stop-hook.py": read_stop,\n}\n')})
+for stage in ("1", "2"):
+    run(checkout, "--stage", stage)
+check("stages 1 and 2 rename no page cited by name alone and add no former path to the Bash-guard check",
+      git(checkout, "status", "--porcelain") == "", git(checkout, "diff"))
+
+# --- The summary counts the files rewritten and the paths moved, a twin's removal included ------------
+checkout = scratch_checkout({"nc-systems/x/a.py": "see nc-systems/x/b.py\nb = 1\n",
+                             "nn-systems/x/a.py": "see nn-systems/x/b.py\nb = 1\n", "nc-systems/x/b.py": "b = 1\n"})
+counted = run(checkout, "--stage", "3")
+check("stage 3's summary counts each file it rewrote and each path it moved or removed beside its twin",
+      counted.returncode == 0 and "stage 3: rewrote 1 files, moved 2 paths\n" in counted.stdout, counted.stdout)
+
+# --- A tracked symlink is not written through, and the files after it are still rewritten ------------
+checkout = scratch_checkout({"scripts/merge-gate-test-captured-github-responses/x.json": '{"url": "repos/nedschorus/nedschorus"}\n',
+                             "scripts/run.sh": "gh pr list --repo nedschorus/nedschorus\n",
+                             "scripts/binary.bin": b"\xff\xfe nedschorus/nedschorus\n"})
+os.symlink("merge-gate-test-captured-github-responses/x.json", checkout / "scripts/link.json")
+git(checkout, "add", "scripts/link.json")
+linked = run(checkout, "--stage", "1")
+check("stage 1 does not write through a tracked symlink into a kept file, and still rewrites the files after it",
+      read(checkout, "scripts/merge-gate-test-captured-github-responses/x.json") == '{"url": "repos/nedschorus/nedschorus"}\n'
+      and read(checkout, "scripts/run.sh") == "gh pr list --repo nedsnodes/nedsnodes\n",
+      (read(checkout, "scripts/merge-gate-test-captured-github-responses/x.json"), read(checkout, "scripts/run.sh")))
+check("stage 1 names a file it skips because it is not UTF-8 text",
+      "skipped scripts/binary.bin: not UTF-8 text" in linked.stdout, linked.stdout)
+covered = run(checkout, "--residue-report")
+check("the residue report does not read a kept file's old names again through a tracked symlink",
+      covered.returncode == 0, covered.stdout)
+
+# --- Stage 3 refuses a move onto other content whatever the two contents' order ----------------------
+checkout = scratch_checkout({"nc-queue/c.md": "a\n", "nn-queue/c.md": "b\n"})
+refused = run(checkout, "--stage", "3")
+check("stage 3 refuses a move onto a path whose content sorts after the old path's",
+      refused.returncode == 1 and "nc-queue/c.md -> nn-queue/c.md" in refused.stdout
+      and read(checkout, "nc-queue/c.md") == "a\n", (refused.returncode, refused.stdout))
+
+# --- Stage 3 finds the Bash-guard check among other files, and leaves one without a map alone --------
+checkout = scratch_checkout({"a/a.py": "a = 1\n", "a/z.py": "z = 1\n", BASH_GUARD_CHECK: (
+    'BASH_GUARD_CURRENT_PATHS_BY_FORMER_PATH = {\n}\nGUARDS = {\n    "nc-systems/x/stop-hook.py": read_stop,\n}\n')})
+run(checkout, "--stage", "3")
+check("stage 3 finds the Bash-guard check by its file name among files whose names sort before and after it",
+      '"nc-systems/x/stop-hook.py":  # in git history only' in read(checkout, moved_check), read(checkout, moved_check))
+checkout = scratch_checkout({BASH_GUARD_CHECK: 'GUARDS = {\n    "nc-systems/x/stop-hook.py": read_stop,\n}\n'})
+no_map = run(checkout, "--stage", "3")
+check("stage 3 leaves a Bash-guard check that has no map of former paths as stage 3 rewrote it",
+      no_map.returncode == 0 and read(checkout, moved_check) == 'GUARDS = {\n    "nn-systems/x/stop-hook.py": read_stop,\n}\n',
+      (no_map.returncode, no_map.stderr))
+
+# --- The residue report's counts, their order, and the lines it prints --------------------------------
+checkout = scratch_checkout({"a.py": "x = 1  # see nedschorus#418\n",
+                             "scripts/merge-gate-test-captured-github-responses/x.json": "repos/nedschorus/x\nnc-systems\n"})
+counts = run(checkout, "--residue-report")
+captured_line = "       2  captured GitHub responses, which tests name by literal file name\n"
+citation_line = "       1  a `nedschorus#<number>` citation, prose for the later pull request\n"
+check("the residue report counts each line of a kept file and prints the counts largest first",
+      counts.returncode == 0 and "residue: 3 old-name matches covered by the allowlist, 0 not covered\n" in counts.stdout
+      and captured_line in counts.stdout and citation_line in counts.stdout
+      and counts.stdout.index(captured_line) < counts.stdout.index(citation_line), counts.stdout)
+LONG_LINE = "PATH = 'nc-systems/x'  # " + "y" * 300
+checkout = scratch_checkout({"a.py": "# nedschorus#418nedschorus\n# nedschorus#418 x nedschorus\n" + LONG_LINE + "\n"})
+uncovered = run(checkout, "--residue-report")
+check("the residue report does not let a covered span cover an old name that starts where or after it ends, "
+      "and prints a line's first 200 characters",
+      uncovered.returncode == 1 and "a.py:1: # nedschorus#418nedschorus\n" in uncovered.stdout
+      and "a.py:2: # nedschorus#418 x nedschorus\n" in uncovered.stdout
+      and f"a.py:3: {LONG_LINE[:200]}\n" in uncovered.stdout, uncovered.stdout)
+
+# --- The command line -------------------------------------------------------------------------------
+help_text = subprocess.run([sys.executable, str(PROGRAM), "--help"], capture_output=True, text=True).stdout
+check("--help describes the program by its docstring's first line alone",
+      "Rewrite one git checkout's tracked files" in help_text and "WHAT IT DOES NOT DO" not in help_text, help_text)
+no_checkout = subprocess.run([sys.executable, str(PROGRAM), "--stage", "1"], capture_output=True, text=True)
+no_action = subprocess.run([sys.executable, str(PROGRAM), "--checkout", str(checkout)], capture_output=True, text=True)
+check("--checkout and one of --stage or --residue-report are required",
+      no_checkout.returncode == 2 and "--checkout" in no_checkout.stderr
+      and no_action.returncode == 2 and "--stage" in no_action.stderr,
+      (no_checkout.returncode, no_checkout.stderr, no_action.returncode, no_action.stderr))
 
 print(f"{len(failures)} failed" if failures else "all passed")
 sys.exit(1 if failures else 0)

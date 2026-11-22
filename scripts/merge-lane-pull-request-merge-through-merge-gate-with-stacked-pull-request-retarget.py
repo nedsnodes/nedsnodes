@@ -3,7 +3,7 @@
 
 Usage:
   scripts/merge-lane-pull-request-merge-through-merge-gate-with-stacked-pull-request-retarget.py <pull request number>
-      <nc-head-commit, all 40 characters> <reviewed-since>
+      <nn-head-commit, all 40 characters> <reviewed-since>
       [--merge-lane-worktrees-and-outputs-directory DIR] [--merge-lane-review-worktrees-directory DIR] [--review-tools-worktree-at-main DIR]
 
 Runs --review-tools-worktree-at-main's scripts/merge-gate.sh, never the pull
@@ -39,7 +39,7 @@ worktrees and outputs directory, one test log per pr<n>-merged commit, named
 by its hash, the program takes each test log whose last record says it tested
 that commit and exited 0, and uses the one started last. When there is no
 such record, or a test log cannot be read, which the program prints, <since>
-is the nc-head-commit, which predates main's newer merges and so selects more
+is the nn-head-commit, which predates main's newer merges and so selects more
 suites, never fewer; the program prints that it fell back. The run's suite logs and test-run-report.txt go in
 <merge-lane-worktrees-and-outputs-directory>/pr<n>-after-merge-test-run-logs-<the
 merge commit's first 12 characters>. The program prints the run's SUMMARY line,
@@ -78,6 +78,14 @@ included, stay: where origin/main tracks a path such a file is at, git
 refuses the checkout and the program stops. A review whose Codex cell runs
 from the same worktree at the same time may fail when the checkout moves
 files under it; such a review is run again.
+
+Last, once the pull request has merged, the program runs
+merge-lane-open-prs-not-changes-requested-count-then-next-agent-seat-go-ahead-to-open-surviving-mutant-test-prs.py,
+beside it, with the merge account's GH_TOKEN, and prints what it printed:
+`RELEASED <agent-seat>` when it sent that agent-seat the release message, what
+failed when it could not, or the count of pull requests waiting for merge-lane-2. When it exits 2 or another code it does
+not document, the program prints that too; the exit code below never depends
+on it.
 
 Exit codes: 0 merged, with the review worktrees removed, and main's after-merge
 test run passed; 1 the gate refused,
@@ -147,6 +155,10 @@ EXIT_MERGED_BUT_A_STEP_AFTER_THE_MERGE_NOT_DONE = 3
 EXIT_MERGE_OUTCOME_UNKNOWN = 4
 MERGE_GATE_DOCUMENTED_EXITS = (0, 1, 2)
 MERGE_GATE = Path("scripts") / "merge-gate.sh"
+SURVIVING_MUTANT_TEST_PRS_GO_AHEAD_PROGRAM = Path(__file__).resolve().with_name(
+    "merge-lane-open-prs-not-changes-requested-count-then-next-agent-seat-go-ahead-to-open-surviving-mutant-test-prs.py")
+# 0 named an agent-seat to release, 3 named none; 1, Python's status for a crash, is not an answer.
+SURVIVING_MUTANT_TEST_PRS_GO_AHEAD_ANSWERS = (0, 3)
 
 
 def parse_arguments(argv):
@@ -155,7 +167,7 @@ def parse_arguments(argv):
                     "open pull requests based on its branch, then run the merge command the "
                     "gate printed.")
     parser.add_argument("pull_request", help="the pull request's number")
-    parser.add_argument("head_commit", help="the nc-head-commit, all 40 characters")
+    parser.add_argument("head_commit", help="the nn-head-commit, all 40 characters")
     parser.add_argument("reviewed_since",
                         help="the reviewed-since time merge-gate.sh takes, YYYY-MM-DDTHH:MM:SSZ")
     common.add_directory_options(parser, "the after-merge test runs' logs")
@@ -462,12 +474,12 @@ def after_merge_test_run(arguments, merge_commit):
     since, why_not = head_test_run_passed_merged_commit(arguments)
     if since is None:
         since = arguments.head_commit
-        print(f"selecting the nc-test-suites whose recorded inputs changed since the head "
+        print(f"selecting the nn-test-suites whose recorded inputs changed since the head "
               f"commit {since[:12]}, which selects more suites than "
               f"the merge changed: {why_not}.\n"
               f"Nothing to do: this run still tests every suite the merge could have changed.")
     else:
-        print(f"selecting the nc-test-suites whose recorded inputs changed since "
+        print(f"selecting the nn-test-suites whose recorded inputs changed since "
               f"{since[:12]}, the commit the head test run passed on: "
               f"pull request {arguments.pull_request}'s head merged with main as main was "
               f"when that run started")
@@ -513,8 +525,10 @@ def after_merge_test_run(arguments, merge_commit):
     runner = common.run_all_test_suites
     store = common.merge_lane_head_test_run_recorded_inputs_store_directory(arguments)
     stale_in_the_store = (f"Until a later merge adopts recordings that match main, merge-lane "
-                          f"head test runs select the suites whose recordings in {store} are "
-                          f"stale, and so run more suites than they need.")
+                          f"head test runs select each suite whose recording in {store} is "
+                          f"stale, unless its recording in "
+                          f"{runner.DEFAULT_RECORDED_INPUTS_DIRECTORY} matches main, and so may run "
+                          f"more suites than they need.")
     # Before the test run, so head test runs on the new main find the merged pull request's
     # recordings for the minutes the run takes.
     saved_apart = common.pull_request_head_test_run_saved_recorded_inputs_directory(
@@ -591,6 +605,22 @@ def after_merge_test_run(arguments, merge_commit):
         return EXIT_MERGED_BUT_A_STEP_AFTER_THE_MERGE_NOT_DONE
     print(f"removed the worktree {worktree}")
     return exit_code
+
+
+def surviving_mutant_test_prs_go_ahead_printed(environment):
+    """Run the go-ahead program and print its output; its outcome never changes the exit code."""
+    program = SURVIVING_MUTANT_TEST_PRS_GO_AHEAD_PROGRAM
+    go_ahead = subprocess.run([sys.executable, str(program)], stdout=subprocess.PIPE,
+                              stderr=subprocess.STDOUT, text=True, env=environment,
+                              stdin=subprocess.DEVNULL)
+    print(go_ahead.stdout, end="" if go_ahead.stdout.endswith("\n") or not go_ahead.stdout
+          else "\n")
+    if go_ahead.returncode not in SURVIVING_MUTANT_TEST_PRS_GO_AHEAD_ANSWERS:
+        print(f"{program.name} exited {go_ahead.returncode}, so whether an agent-seat holding "
+              f"mutant-test tasks may open its pull requests was not decided; the merge is done "
+              f"all the same.\n"
+              f"Follow the instructions it printed above; when it printed none, run it once: "
+              f"python3 scripts/{program.name}", flush=True)
 
 
 def main(argv=None, wait=time.sleep):
@@ -686,6 +716,7 @@ def main(argv=None, wait=time.sleep):
         branch_exit = merged_branch_deleted(branch, environment)
     removal_exit = review_worktrees_remove(arguments)
     test_exit = after_merge_test_run(arguments, read.get("mc") or "")
+    surviving_mutant_test_prs_go_ahead_printed(environment)
     return next((code for code in (test_exit, removal_exit, branch_exit) if code != EXIT_MERGED),
                 EXIT_MERGED)
 

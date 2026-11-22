@@ -38,8 +38,8 @@ WHAT ONE RUN DOES, in order:
      That lock is the file named by run-all-test-suites.py's
      SUITES_RUN_WITHOUT_ANY_SANDBOX_LOCK_FILE_NAME, inside the admission
      directory, whose path is the --runner-lock-file path with
-     .test-suite-admission added. When another run holds it, ned-box is not
-     quiet, and this exits 0.
+     .test-suite-admission added. When a runner running a no-sandbox suite holds
+     it, ned-box is not quiet, and this exits 0.
   6. Makes a detached worktree of that commit at
      <--temporary-directory>/no-sandbox-test-suites-run-on-main-in-a-quiet-gap/worktree-of-main,
      removing first any worktree a killed run left at that path, and runs the
@@ -48,19 +48,25 @@ WHAT ONE RUN DOES, in order:
      --only-suites-whose-recorded-inputs-changed-since <passing commit> when
      there is one. The runner gets RUNNER_TIMEOUT_SECONDS (3600); past it, its
      process group gets SIGTERM, then SIGKILL after RUNNER_STOP_GRACE_SECONDS (60).
-  7. Removes the worktree, writes the run's record to the log-store and the
-     state file; a record that cannot be written stops the run. Runner exit 0
+     A leftover worktree that cannot be removed, a worktree that cannot be made,
+     or a suite list that cannot be read stops the run.
+  7. Removes the worktree, printing why when it cannot and going on; writes the
+     run's record to the log-store, then the state file; a record that cannot
+     be written stops the run, and the state file records that. Runner exit 0
      is passed, and the commit becomes the passing commit; exit 1 is failed,
      with each suite the runner's FAIL lines name and its log copied beside the
      record, and an empty failing_suites list when it prints no FAIL line;
-     anything else is stopped, with the reason: each NOT RUN line the runner
-     prints, which says why that suite was not run, such as claude's usage
+     a runner stopped at RUNNER_TIMEOUT_SECONDS is stopped, with the reason that
+     it ran past that limit; any other exit is stopped, with the reason: each NOT RUN line the
+     runner prints, which says why that suite was not run, such as claude's usage
      limit, or else the first line of the runner's stderr, or else "no detail".
 
 THE STATE FILE, a JSON object written whole to a temporary file renamed into
-place, with these keys:
-  passing_commit           the last commit whose run passed, or null
-  last_run.commit          the commit tested, or null when main was not resolved
+place, with these keys; a run that exits at step 1, 4 or 5 writes nothing to
+it:
+  passing_commit           the last commit whose run passed, or null; a run that
+                           fails or stops keeps it
+  last_run.commit          the commit tested, or null when step 3 stopped the run
   last_run.compared_with   the passing commit the run was compared with, or null
   last_run.started, .ended times, UTC, as YYYY-MM-DDTHH:MM:SSZ
   last_run.result          "passed", "failed" or "stopped"
@@ -71,31 +77,35 @@ place, with these keys:
                            writing it
   last_run.follow_up_request_sent  the time recorded, or null
 
-THE RECORD, one file per run that reaches step 6:
+THE RECORD, one file per run whose runner ran in step 6:
   <log-store>/no-sandbox-test-suites-runs/<YYYY-MM-DD>/<HHMMSS>Z.txt
 with each failing suite's log beside it as <HHMMSS>Z-<suite, / as __>.log.
 
 --record-follow-up-request-sent writes the time into the last run, once
 merge-lane-2 has sent the follow-up request for a failed or stopped run, and
 writes it again over the old time when run again; it refuses, exit 2, when the
-last run passed or there is none, or while a run holds the program's lock,
-since that run rewrites the state file when it ends.
+last run passed or there is none, when the state file cannot be read or the
+lock file cannot be opened, or while a run holds the program's lock, since that run rewrites the
+state file when it ends.
 
---print-merge-gate-notice-of-last-failed-or-stopped-run prints, on stdout, the notice scripts/merge-gate.sh
-puts on its stderr: nothing when the state file is missing or the last run
+--print-merge-gate-notice-of-last-failed-or-stopped-run prints, on stdout, the notice that
+scripts/merge-gate.sh passes on to its stderr: nothing when the state file is missing or the last run
 passed; for a failed run each failing suite, its log, the commit range and the
 pull requests merged in it, read from the clone's first-parent merge commits,
-or "range: none" when no run has passed yet, and for a failed run whose
-failing_suites list is empty, the same lines with no suite named; for a stopped run its reason, and
+or git's error in their place when they cannot be read, or "range: none" when
+no run has passed yet, and for a failed run whose failing_suites list is empty,
+the heading, range and pull request lines with no suite line; for a stopped run its reason, and
 its record when last_run.record is not null, so a run that stopped before
-step 6 gets no record line; for an unreadable state file, that it cannot be
+its runner ran gets no record line; for an unreadable state file, that it cannot be
 read and why. After a follow-up was recorded, one line naming when. It always
 exits 0.
 
 EXIT. 0 the run finished, whatever the suites did, or no run was due, or
-another run or a no-sandbox suite held its lock; 2 bad invocation or a refused
---record-follow-up-request-sent; 4 the run stopped: the fetch, the worktree, the
-runner or a write failed, or the runner reported a suite NOT RUN, which the state file records where it can.
+another run held this program's lock, or a no-sandbox suite held the suites'
+lock of step 5; 2 bad invocation or a refused --record-follow-up-request-sent;
+4 the run stopped, as steps 3, 6 and 7 say, or the state file could not be
+written, or this program's own lock could not be taken. The state file records
+a stopped run where it can; a lock that could not be taken is only printed.
 
 SCHEDULE. Installed on ned-box alone by
 nn-systems/general-tools/install-scheduled-jobs-on-this-machine.py, from the
@@ -544,8 +554,12 @@ def record_follow_up_request_sent_under_lock(state_file):
     try:
         state = read_state(state_file)
     except StateUnreadable as error:
-        print(f"{PROGRAM}: not recorded — {error}.\nThe next run of this program replaces "
-              f"the file; there is no run to record a follow-up for until then.",
+        print(f"{PROGRAM}: not recorded — {error}.\nThe next run of this program that "
+              f"records a passed, failed or stopped run replaces the file; a run that exits "
+              f"without recording one, such as a run that finds a no-sandbox suite running, "
+              f"leaves it. Until a run replaces the file, there is no run to record a "
+              f"follow-up for.\nIf you have not yet sent reboot-test the follow-up request "
+              f"the merge gate's notice asks for, send it; nothing more is needed.",
               file=sys.stderr)
         return EXIT_REFUSED
     last = state.get("last_run")
@@ -565,15 +579,14 @@ MERGE_LINE = re.compile(r"^Merge pull request #(\d+)")
 
 
 def pull_requests_merged_between(clone, older, newer):
-    """['#N: subject'] from the first-parent merge commits in older..newer, or why not."""
-    listed = git(clone, "log", "--first-parent", "--merges", "--format=%s%x09%b",
+    """['#N'] from the first-parent merge commits in older..newer, or why not."""
+    listed = git(clone, "log", "--first-parent", "--merges", "--format=%s",
                  f"{older}..{newer}")
     if listed.returncode != 0:
         return ["the merged pull requests could not be read: "
                 f"{git_output.git_stderr_first_error_message_else_last_line(listed.stderr)}"]
     found = []
-    for entry in listed.stdout.split("\n"):
-        subject = entry.split("\t", 1)[0]
+    for subject in listed.stdout.split("\n"):
         matched = MERGE_LINE.match(subject)
         if matched:
             found.append(f"#{matched.group(1)}")

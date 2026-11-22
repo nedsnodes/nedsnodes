@@ -7,13 +7,13 @@ Usage:
 
 Each stage makes the change of one pull request of the project rename:
   1. the GitHub repository's owner and name: `nedschorus/nedschorus` becomes `nedsnodes/nedsnodes` in every file but Markdown, and the owner and name constants of the bare-number citation hook. It leaves the value of an `OLD_REPOSITORY` constant alone, through which code that reads GitHub links keeps accepting the old name.
-  2. the machine paths, env vars, task-list names, job labels and unit names the move program, scripts/project-rename-machine-state-move-hack.py, moves: the reference-checkout and worktrees directory under Projects, the log-store, ~/.config/nedschorus, Claude Code project keys, `NEDSCHORUS_*` names, `nedschorus-<seat>-tasks`, `com.nedschorus.*` labels, ~/.local/state/nedschorus, ~/.local/share/nedschorus and each ~/.cache/nedschorus-* directory, the `nc-shared-database-service.service` unit, whose file it also renames, and the test suites' slice `nc\x2dtest\x2dsuites.slice`. It leaves the value of an `TASK_LIST_ID_PREFIX_BEFORE_PROJECT_RENAME` constant alone, through which code that reads task-list IDs keeps accepting the old prefix.
+  2. the machine paths, env vars, task-list names, job labels and unit names the project rename moved on each machine: the reference-checkout and worktrees directory under Projects, the log-store, ~/.config/nedschorus, Claude Code project keys, `NEDSCHORUS_*` names, `nedschorus-<seat>-tasks`, `com.nedschorus.*` labels, ~/.local/state/nedschorus, ~/.local/share/nedschorus and each ~/.cache/nedschorus-* directory, the `nc-shared-database-service.service` unit, whose file it also renames, and the test suites' slice `nc\x2dtest\x2dsuites.slice`. It leaves the value of an `TASK_LIST_ID_PREFIX_BEFORE_PROJECT_RENAME` constant alone, through which code that reads task-list IDs keeps accepting the old prefix.
   3. the paths that scripts/project-rename-path-names-before-and-after-common.py's one rename list names: the directories nc-systems, nc-queue and docs/nedschorus-wiki, the directories and files whose names start `nc-shared-database` or `nedschorus-`, and in contents every citation of those paths, every wiki page name, and the nc- system names in code, alone or inside a longer identifier (`nc-shared-database`, `nc_shared_database`, `NC_SHARED_DATABASE`, `NcSharedDatabase`, `nc_systems`, `NC_SYSTEMS`). A kept file moves with its directory but keeps its name and content. For each Bash guard it moves, it adds the guard's former path to the map of former paths in the Bash-guard verdict check, so that check still reads a base ref's hook as the same guard.
 A stage changes only the names its rules match, so it can be run alone on any checkout, including one that does not hold this program, and a second invocation changes nothing. Run the stages in order 1, 2, 3 on a branch that should carry all three.
 
 --residue-report lists every match of an old name left in the checkout's tracked files and paths, each with the allowlist reason that covers it, counted by reason, and prints each match no reason covers. In a GHI-MD, a `nedschorus-` name counts as kept only when no directory or file in the checkout has its new name, so a citation stage 3 missed is reported.
 
-WHAT IT DOES NOT DO OR HANDLE. It changes only files git tracks; it does not commit. It leaves alone a path as it was at a past commit: a commit-pinned link (`blob/<commit>/<path>`), a `<commit>:<path>`, a line marked `# in git history only`, and a line that assigns a name ending `_BEFORE_PROJECT_RENAME`. It leaves alone the files the KEPT_PATHS list names: this program and its test, the move program and its test, which hold the old names on purpose, captured GitHub responses, recorded fixtures and transcripts, and archived queue records. It does not rewrite prose: glossary terms that start nc-, such as nc-head-commit, the words NedsChorus and NC, Markdown links to github.com/nedschorus/nedschorus, which GitHub redirects, and `nedschorus#<number>` citations wait for a later pull request, and the residue report names each. It keeps names of machine state that no step of the move program renames: /etc/sudoers.d/nedschorus-* and the `user.email` `unconfigured-agent@nedschorus.invalid` that each checkout's git config pins. The residue report finds an old name only in the spellings its OLD_NAME pattern lists. A file that is not UTF-8 is skipped and named.
+WHAT IT DOES NOT DO OR HANDLE. It changes only files git tracks; it does not commit. It leaves alone a path as it was at a past commit: a commit-pinned link (`blob/<commit>/<path>`), a `<commit>:<path>`, a line marked `# in git history only`, and a line that assigns a name ending `_BEFORE_PROJECT_RENAME`. It leaves alone the files the KEPT_PATHS list names: this program and its test, which hold the old names on purpose, captured GitHub responses, recorded fixtures and transcripts, and archived queue records. It does not rewrite prose: glossary terms that start nc-, such as nc-head-commit, the words NedsChorus and NC, Markdown links to github.com/nedschorus/nedschorus, which GitHub redirects, and `nedschorus#<number>` citations wait for a later pull request, and the residue report names each. It keeps names of machine state that the project rename left as they were: /etc/sudoers.d/nedschorus-* and the `user.email` `unconfigured-agent@nedschorus.invalid` that each checkout's git config pins. The residue report finds an old name only in the spellings its OLD_NAME pattern lists. A file that is not UTF-8 is skipped and named.
 
 HARM IT CAN CAUSE. It rewrites tracked files in place; `git checkout -- .` and `git clean` on the moved paths undo an invocation whose changes were not committed. A path as it was at a past commit in a form it does not recognise, such as a path in prose with no commit beside it, is rewritten to a path that commit never had. A rule that matches too much corrupts the names it touches, which the tests guard against for `sync-`, `async-`, `func-` and `SYNC_`.
 
@@ -49,8 +49,6 @@ ENDH = r"(?![A-Za-z0-9_-])"
 KEPT_PATHS = {
     "scripts/project-rename-repository-contents-rewrite-hack.py": "this program: holds the old names on purpose",
     "scripts/project-rename-repository-contents-rewrite-hack-test.py": "this program's test: holds the old names on purpose",
-    "scripts/project-rename-machine-state-move-hack.py": "the move program: holds the old names on purpose",
-    "scripts/project-rename-machine-state-move-hack-test.py": "the move program's test: holds the old names on purpose",
     "scripts/merge-gate-test-captured-github-responses/*": "captured GitHub responses, which tests name by literal file name",
     "*-fixtures/*": "recorded fixtures",
     "*.jsonl": "recorded transcripts and streams",
@@ -104,7 +102,7 @@ STAGE_RULES = {
         Rule(BH + r"nedschorus-logs", "nedsnodes-logs"),
         Rule(r"(?<=\.config/)nedschorus" + ENDH, "nedsnodes"),
         Rule(r'(?<="\.config" / ")nedschorus(?=")', "nedsnodes"),
-        # The state directories and caches the move program's step 6a renames.
+        # The state directories and caches the project rename renamed on disk.
         Rule(r"(?<=\.local/state/)nedschorus" + ENDH, "nedsnodes"),
         Rule(r"(?<=\.local/share/)nedschorus" + ENDH, "nedsnodes"),
         Rule(r'(?<="state" / ")nedschorus(?=")|(?<="share" / ")nedschorus(?=")', "nedsnodes"),
@@ -133,7 +131,7 @@ STAGE_RULES = {
         # A wiki page name built from a template, such as f"nedschorus-{system}-architecture-overview.md";
         # the task-list template nedschorus-{seat}-tasks belongs to stage 2.
         Rule(BH + r"nedschorus-(?=\{[^}]*\}-(?!tasks" + ENDH + "))", "nedsnodes-"),
-        # Its file, backups and token files too, which the move program's step 6a renames on disk.
+        # Its file, backups and token files too, which the project rename renamed on disk.
         Rule(BH + r"nc-shared-database", "nn-shared-database"),
         Rule(B + r"nc_shared_database", "nn_shared_database"),
         Rule(B + r"NC_SHARED_DATABASE", "NN_SHARED_DATABASE"),
@@ -344,7 +342,8 @@ OLD_NAME = re.compile(r"(?i:nedschorus)|" + B + r"(?:nc[-_]|NC_|Nc(?=[A-Z]))|" +
 
 GLOSSARY_TERM_STEMS = (r"head[-_]commits?|test[-_]suites?|test[-_]sandbox(?:es)?|architecture[-_]overviews?|"
                        r"topic[-_]branch(?:es)?|mutation[-_]testing|critical[-_]code|checkin[-_]quality[-_]gate|"
-                       r"python[-_]toolchain|system(?!s)|tests?|candidate|prune[-_]test")
+                       r"python[-_]toolchain|system(?!s)|tests?|candidate|prune[-_]test|"
+                       r"(?:scheduled[-_]|one[-_]shot[-_])?canary[-_]test|canary[-_]runner")
 
 # (path glob, pattern, reason): the pattern is searched in one line of a file whose path matches the glob,
 # and every span it matches is covered by the reason.
@@ -363,13 +362,13 @@ ALLOWLIST = [
     ("*", r"(?:NedSchorus|Nedschorus)/(?:NedSchorus|nedschorus)", "test data spelling the owner in another case"),
     ("*", r"nedschorus-nedschorus-\d+-[a-z-]+(?:\.json)?", "the name of a captured GitHub response file"),
     ("*", r"nedschorus\.invalid",
-     "the git user.email each checkout's config pins, and test identities; no step of the move program changes the config"),
-    ("*", r"nedschorus-git-gatekeeper-github-token", "a keychain item on the Mac, which no step of the move program renames"),
-    ("*", r"nc-sandboxed-models-public-read-only", "a GitHub fine-grained token's name, set in GitHub's settings, which no step of the move program renames"),
+     "the git user.email each checkout's config pins, and test identities; the project rename left the config as it was"),
+    ("*", r"nedschorus-git-gatekeeper-github-token", "a keychain item on the Mac, which the project rename left as it was"),
+    ("*", r"nc-sandboxed-models-public-read-only", "a GitHub fine-grained token's name, set in GitHub's settings, which the project rename left as it was"),
     ("*", r"(?:(?<=in )|(?<=for ))nedschorus\b|(?<=org )`nedschorus`", "the project's name in prose, for the later pull request"),
     ("*", r"(?i:nedschorus)/(?:ghi-api-probes|side-work|topic-)", "another repository or a branch of the old owner, in prose or test data"),
     ("*", r"from (?i:nedschorus)/", "a merge commit subject in test data"),
-    ("*", r"sudoers\.d/nedschorus-[a-z-]+|# nedschorus:", "an installed sudoers file no step of the move program renames"),
+    ("*", r"sudoers\.d/nedschorus-[a-z-]+|# nedschorus:", "an installed sudoers file the project rename left as it was"),
     ("*", r"nc-systems-[a-z0-9-]+-tool-message-to-agent-[0-9-]+|[0-9-]+-nedschorus-[a-z0-9-]+",
      "the name of a file already in the log-store"),
     ("*", r"(?i:nedschorus)[-_](?:gatekeeper|emergency-stop-hook-notes|pull-request-head-test-run|run-all-test-suites-test|"

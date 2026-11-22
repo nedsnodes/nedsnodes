@@ -35,9 +35,9 @@ fails before any model cost is spent.
 
 Operating rules:
 
-- Both agent-binaries on every audit — the claude CLI (claude-fable-5-1, falling
-  back to claude-opus-5 when Fable produces no review) and
-  gpt-6.1-sol (the codex CLI), at xhigh reasoning effort. Each audit
+- Both agent-binaries on every audit — the claude CLI (claude-fable-5-2, falling
+  back to claude-opus-5-5 when Fable produces no review) and
+  gpt-6.2-sol (the codex CLI), at xhigh reasoning effort. Each audit
   therefore runs as two review agents, one per agent-binary, named
   `<audit>-adversarial-prompt-<runtime>`, such as `cut-adversarial-prompt-claude`
   (the `--adversarial-prompt` flag still takes the short `<audit>`, such as
@@ -491,7 +491,7 @@ IGNORED_PATHS_WATCHED_FOR_WRITES = (RECORDS_DIRECTORY_NAME,)
 IGNORED_PATH_STATUS_CODE = "!!"
 
 # The claude agent-binary's chain, tried in order until one produces a review.
-# "claude-fable-5" is obsolete, and Fable is sometimes unavailable, so Opus 5
+# "claude-fable-5" is obsolete, and Fable is sometimes unavailable, so Opus 5.5
 # stands behind it and ends the chain.
 #
 # WHAT COUNTS AS A FAILURE WORTH FALLING BACK FROM follows the house chain,
@@ -500,10 +500,10 @@ IGNORED_PATH_STATUS_CODE = "!!"
 # one event — no review was produced — so the chain advances on all three.
 # That module is not imported here: it is built around the cold-read cell's
 # command line and report file, and this runner has neither.
-CLAUDE_MODEL_CHAIN = ("claude-fable-5-1", "claude-opus-5")
-# Matches cold-read-codex-cell.py's `deep` tier; the id needs codex-cli 0.159.1
+CLAUDE_MODEL_CHAIN = ("claude-fable-5-2", "claude-opus-5-5")
+# Matches cold-read-codex-cell.py's `deep` tier; the id needs codex-cli 0.169.1
 # or later.
-CODEX_MODEL = "gpt-6.1-sol"
+CODEX_MODEL = "gpt-6.2-sol"
 # xhigh for both agent-binaries, by the user's calibration and a tier probe of both:
 # max earned neither slot.
 REASONING_EFFORT = "xhigh"

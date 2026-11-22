@@ -117,10 +117,7 @@ def launcher_credential_sandbox_prefix() -> list:
 
 def agy_environment(environment) -> dict:
     """Return a copy of environment without GEMINI_API_KEY or any agent-seat GitHub token."""
-    launcher = gemini_launcher()
-    return {name: value
-            for name, value in launcher.agy_environment_copy_without_gemini_api_key(environment).items()
-            if name not in launcher.common.AGENT_SEAT_GITHUB_TOKEN_ENVIRONMENT_VARIABLES}
+    return gemini_launcher().agy_environment_copy_without_gemini_api_key_or_github_token(environment)
 
 
 def main() -> int:

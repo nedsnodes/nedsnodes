@@ -627,15 +627,15 @@ class GeminiTaskTests(unittest.TestCase):
 
     def test_sandbox_arguments_and_credential_denial_order(self):
         common = runner.agy_cell.common
-        with patch.object(common, "credential_directories_present", return_value=["/credentials"]), \
-                patch.object(common, "reviewer_program_login_files", return_value=["/codex/auth.json"]) as login:
+        with patch.object(common, "ned_box_credential_and_login_files_present",
+                          return_value=["/credentials/key", "/codex/auth.json"]) as listed:
             prefix = runner.agy_cell.credential_sandbox_prefix("linux", writable_paths=[
                 (self.report, False), (self.base, True)])
             self.assertEqual(prefix, ["bwrap", "--ro-bind", "/", "/", "--dev", "/dev", "--bind", str(self.report),
                                      str(self.report), "--bind", str(self.base), str(self.base),
-                                     "--tmpfs", "/credentials", "--ro-bind", "/dev/null",
-                                     "/codex/auth.json"])
-            login.assert_called_with(except_program="agy", only_present=True)
+                                     "--ro-bind", "/dev/null", "/credentials/key",
+                                     "--ro-bind", "/dev/null", "/codex/auth.json"])
+            listed.assert_called_with(except_program="agy")
             legacy = runner.agy_cell.credential_sandbox_prefix("linux")
             self.assertEqual(legacy[:4], ["bwrap", "--dev-bind", "/", "/"])
         prefix = runner.agy_cell.credential_sandbox_prefix("darwin", writable_paths=[

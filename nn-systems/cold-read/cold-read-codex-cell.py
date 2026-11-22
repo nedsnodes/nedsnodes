@@ -63,8 +63,8 @@ while "this file holds something else now" says the reviewer wrote it
 (nedschorus#167).
 
 WHY A PERMISSION PROFILE, NOT `--sandbox workspace-write`. No reviewer opens
-a credential file (user-ruled 2026-09-28; the rule and why are beside
-CREDENTIAL_DIRECTORIES in nn-systems/cold-read/cold-read-cell-common.py).
+a credential file (user-ruled 2026-09-28; the lists of credential files are
+CREDENTIAL_FILES_ON_NED_BOX and its neighbours in nn-systems/cold-read/cold-read-cell-common.py).
 `--sandbox workspace-write` lets a reviewer read anything, so the cell runs
 under a named permission profile instead: it extends Codex's `:workspace`
 profile, which writes where workspace-write did, and denies the credential
@@ -83,11 +83,10 @@ workspace-write the reviewer read all three canaries; under the profile it
 read none, still read README.md, and wrote its report. Codex expands a deny
 pattern with ripgrep before it starts on Linux, and aborts when any
 directory under the pattern's prefix is unreadable (ned-box's home holds
-one), so on Linux the profile denies only the credential directories and
-login files, and a file named like a credential outside them is not covered;
-on macOS it takes the patterns too. Only credential directories that
-exist are listed: Codex on Linux turns a missing one into an empty file on
-the real disk. The reviewer programs' login files that exist are denied
+one), so on Linux the profile denies ned-box's credential files by their
+exact paths; on macOS it denies the credential directories and the patterns.
+Only paths that exist are listed: Codex on Linux turns a missing one into an
+empty file on the real disk. The reviewer programs' login files that exist are denied
 too, Codex's own `~/.codex/auth.json` included: the Codex CLI reads its login
 outside the profile, which governs only the model's commands, and a cell
 denying it still answered, on both machines (user-ruled and measured
@@ -156,9 +155,9 @@ _common_spec.loader.exec_module(common)
 
 PROGRAM = "cold-read-codex-cell"
 
-# Use version-prefixed model IDs; gpt-6.1-sol requires codex-cli 0.159.1 or later.
+# Use version-prefixed model IDs; gpt-6.2-sol requires codex-cli 0.169.1 or later.
 TIER_TO_CODEX_MODEL_CHAIN = {
-    "deep": ("gpt-6.1-sol",),
+    "deep": ("gpt-6.2-sol",),
     "second-strongest-model": ("gpt-6-luna",),
 }
 
