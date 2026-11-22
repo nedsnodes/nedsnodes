@@ -1618,23 +1618,23 @@ def test_a_check_started_with_a_stop_signal_ignored_keeps_ignoring_it():
 
 def test_a_scratch_directory_a_stop_signal_cannot_remove_is_reported_with_the_command_that_removes_it():
     for number in (signal.SIGTERM, signal.SIGHUP):
-        # A space in the path shows the command quotes the directory; the word "flag" in it shows the
-        # check below for that word ignores paths.
-        case = Case(temporary_directory_name="scratch flag root")
+        # A space in the path shows the command quotes the directory.
+        case = Case(temporary_directory_name="scratch root")
         result = case.run("check", mode=f"stopped-unremovable {number.name}")
         left = [case.temporary_directory / name for name in case.left_in_temporary_directory()]
         command = re.search(r"Run `(.+?)`", result.stderr)
         check(f"a scratch directory a {number.name} cannot remove is named, with the command that removes it, "
               f"and the check still ends as {number.name} does",
               result.returncode == -number and len(left) == 1 and command is not None
-              and f"a {number.name} stopped this check step" in result.stderr
+              and f"a {number.name} stopped it while a cold-read-fast-read was running" in result.stderr
               and f"the scratch directory {left[0]}, which held the text" in result.stderr
-              and f"Then run the same `python3 {shlex.quote(str(PROGRAM))} check` command again, with the same "
-                  f"answer" in result.stderr,
+              and result.stderr.rstrip("\n").split("\n")[-1] == (
+                  f"The walk-minutes do not record the user's answer: then run "
+                  f"`{check_command_for(case, '--user-reply-as-typed', 'a')}` again, "
+                  "with the same answer, so that they record it."),
               described(result))
-        check(f"the {number.name} message names no answer's flags, and gives a reason for the removal that "
-              f"holds wherever TMPDIR points",
-              "flag" not in outside_paths(result.stderr, case) and "/tmp has a quota" not in result.stderr
+        check(f"the {number.name} message gives a reason for the removal that holds wherever TMPDIR points",
+              "/tmp has a quota" not in result.stderr
               and "the disk it is on can fill" in result.stderr,
               described(result))
         removal = subprocess.run(["sh", "-c", command.group(1) if command else "false"], capture_output=True,
@@ -1659,7 +1659,7 @@ def test_a_fast_read_that_raises_partway_leaves_no_scratch_directory_and_restore
     before_handlers = [signal.getsignal(number) for number in (signal.SIGTERM, signal.SIGHUP)]
     saved_tempdir, tempfile.tempdir = tempfile.tempdir, str(case.temporary_directory)
     try:
-        program.run_fast_read("A text.", "a-name", case.stand_in)
+        program.run_fast_read("A text.", "a-name", case.stand_in, "Then redo the step.")
         raised = None
     except RuntimeError as error:
         raised = error
@@ -1689,7 +1689,7 @@ def test_a_stop_signal_right_after_the_scratch_directory_is_made_removes_it():
         try:
             signal.signal(signal.SIGTERM, signal.SIG_DFL)
             program.tempfile = types.SimpleNamespace(mkdtemp=mkdtemp_then_stopped)
-            with program.scratch_directory_removed_on_every_exit():
+            with program.scratch_directory_removed_on_every_exit("Then redo the step."):
                 pass
         finally:
             os._exit(0)
@@ -1700,11 +1700,10 @@ def test_a_stop_signal_right_after_the_scratch_directory_is_made_removes_it():
           and not case.left_in_temporary_directory(), f"status {status}, left {case.left_in_temporary_directory()}")
 
 
-def test_the_check_command_a_stop_signal_message_gives_quotes_the_programs_path():
-    """The program's real path holds no character a shell splits on, so a forked child gives the loaded program a
-    path with a space, and a removal that fails, then sends itself SIGTERM."""
+def test_a_stop_signal_message_ends_with_the_callers_sentence_on_what_to_run_next():
+    """Only the caller knows the command, --cwd included, that redoes its step, so a forked child gives the scratch
+    directory the caller's sentence, and a removal that fails, then sends itself SIGTERM."""
     program = load_program()
-    program.__file__ = str(SUITE_ROOT / "a checkout" / PROGRAM.name)
     case = Case()
 
     def rmtree_failing(_):
@@ -1718,7 +1717,7 @@ def test_the_check_command_a_stop_signal_message_gives_quotes_the_programs_path(
             tempfile.tempdir = str(case.temporary_directory)
             signal.signal(signal.SIGTERM, signal.SIG_DFL)
             program.shutil = types.SimpleNamespace(rmtree=rmtree_failing)
-            with program.scratch_directory_removed_on_every_exit():
+            with program.scratch_directory_removed_on_every_exit("Then redo the step."):
                 os.kill(os.getpid(), signal.SIGTERM)
         finally:
             os._exit(0)
@@ -1726,8 +1725,8 @@ def test_the_check_command_a_stop_signal_message_gives_quotes_the_programs_path(
     with os.fdopen(read_end) as stderr:
         message = stderr.read()
     os.waitpid(child, 0)
-    check("the check command a stop signal's message gives names the program's path quoted for the shell",
-          f"Then run the same `python3 {shlex.quote(program.__file__)} check` command again" in message, message)
+    check("a stop signal's message ends with the sentence its caller gave, and names no command of its own",
+          message.rstrip("\n").split("\n")[-1] == "Then redo the step." and "python3" not in message, message)
 
 
 def test_a_scratch_directory_that_cannot_be_made_leaves_the_stop_signals_unblocked_and_their_handlers_restored():
@@ -1739,7 +1738,7 @@ def test_a_scratch_directory_that_cannot_be_made_leaves_the_stop_signals_unblock
     program.tempfile = types.SimpleNamespace(mkdtemp=mkdtemp_failing)
     before_handlers = [signal.getsignal(number) for number in (signal.SIGTERM, signal.SIGHUP)]
     try:
-        with program.scratch_directory_removed_on_every_exit():
+        with program.scratch_directory_removed_on_every_exit("Then redo the step."):
             pass
         raised = None
     except OSError as error:
@@ -4346,7 +4345,7 @@ def check_and_its_printed_retry_run_outside_the_checkout(case, flags, environmen
     paths_but_cwd = case_paths(case)[2:]
     result = subprocess.run([sys.executable, str(PROGRAM), "check", *flags, "--cwd", str(case.checkout),
                              *paths_but_cwd], capture_output=True, text=True, env=environment, cwd=elsewhere)
-    printed = re.search(r"`(python3 \S+ check [^`]*)`", result.stderr)
+    printed = re.search("`(" + re.escape(shlex.join(["python3", str(PROGRAM)])) + " check [^`]*)`", result.stderr)
     if printed is None:
         return result, None, None
     retry = subprocess.run(["bash", "-c", printed[1] + " " + shlex.join(paths_but_cwd)], capture_output=True,
@@ -5003,7 +5002,7 @@ def close_the_issue_case(touches="", recorded=""):
 
 
 def settle_command(case):
-    return f"python3 {PROGRAM} check --not-asked none --cwd {shlex.quote(str(case.checkout.resolve()))}"
+    return check_command_for(case, "--not-asked", "none")
 
 
 def test_the_read_step_says_an_item_rated_none_that_asks_a_decision_is_not_shown_and_how_to_settle_it():
@@ -5124,8 +5123,8 @@ def test_close_reads_the_item_after_the_next_one_ahead_and_the_read_step_uses_it
           and lines[0].endswith("/cold-read-fast-read.md") and times_read(case, "## Item 3 of 5: three") == 1
           and lines[-1] == prerequisite_line(case, "item 3 of 5", "## Item 3 of 5: three")
           and lines[-2] == ("Then present item 3 of 5, unless its only choice is whether to build something now or "
-                            f"later and it recommends now: then run `python3 {PROGRAM} check "
-                            f"--now-over-later-already-decided --cwd {shlex.quote(str(case.checkout))}`, then the "
+                            "later and it recommends now: then run "
+                            f"`{check_command_for(case, '--now-over-later-already-decided')}`, then the "
                             "close command it prints.")
           and f"{WAITING_ITEM_READ} {AFTER_FIXES} --cwd" in lines[2], described(first))
     answered_and_closed(case)
@@ -5250,6 +5249,21 @@ def test_a_read_that_fails_in_the_read_step_says_not_to_present_the_item():
           and "started ahead" not in retried.stdout, described(retried))
 
 
+def test_a_stop_signal_that_cannot_remove_the_read_steps_scratch_directory_gives_the_read_step_command():
+    case = item_read_case()
+    answered_and_closed(case)
+    result = case.run(WAITING_ITEM_READ, mode="stopped-unremovable SIGTERM")
+    check("a SIGTERM the read step's scratch directory cannot be removed after ends with the read step's own "
+          "command, naming the walk's checkout",
+          result.returncode == -signal.SIGTERM and result.stderr.rstrip("\n").split("\n")[-1] == (
+              "item 3 of 5 has had no cold-read-fast-read of its text as it stands: then run "
+              f"`python3 {PROGRAM} {WAITING_ITEM_READ} --cwd {shlex.quote(str(case.checkout.resolve()))}` again, "
+              "and present item 3 of 5 only after it."), described(result))
+    for directory in case.temporary_directory.iterdir():
+        if (directory / "locked").exists():
+            (directory / "locked").chmod(0o700)  # Else the suite's own removal leaves it behind.
+
+
 def test_the_last_item_and_a_closed_walk_start_no_read_ahead():
     recorded = "".join(approved_line(f"item {number} of 5") for number in (1, 2, 3))
     case = summary_case(next_to_present="item 4 of 5", recorded=recorded)
@@ -5307,8 +5321,8 @@ def test_a_fix_that_touches_no_fact_is_not_read_again():
               "item 3 of 5: no new cold-read-fast-read: your changes since its last one (")
           and result.stdout.rstrip("\n").split("\n")[-2:] == [
               "Present item 3 of 5, unless its only choice is whether to build something now or later and it "
-              f"recommends now: then run `python3 {PROGRAM} check --now-over-later-already-decided --cwd "
-              f"{shlex.quote(str(case.checkout))}`, then the close command it prints.",
+              f"recommends now: then run `{check_command_for(case, '--now-over-later-already-decided')}`, then the "
+              "close command it prints.",
               prerequisite_line(case, "item 3 of 5", "## Item 3 of 5: three")]
           and times_read(case, ITEM_3_HEADING) == 1, described(result))
     second = case.run(WAITING_ITEM_READ, AFTER_FIXES)

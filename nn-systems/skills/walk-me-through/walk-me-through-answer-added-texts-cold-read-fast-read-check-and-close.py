@@ -672,13 +672,17 @@ FAST_READ_FAILED_LINES = (
     "answer the item another way.",
 )
 STOP_SIGNAL_SCRATCH_NOT_REMOVED_LINES = (
-    "{program} check: a {signal} stopped this check step while a cold-read-fast-read was running, so the "
-    "walk-minutes do not record the user's answer, and the scratch directory {directory}, which held the text "
-    "sent to that cold-read-fast-read, could not be removed: {error}\n"
+    "{program}: a {signal} stopped it while a cold-read-fast-read was running, and the scratch directory "
+    "{directory}, which held the text sent to that cold-read-fast-read, could not be removed: {error}\n"
     "Run `chmod -R u+rwX {quoted_directory} && rm -rf {quoted_directory}`, because nothing else removes that "
     "directory, and the disk it is on can fill.\n"
-    "Then run the same `python3 {quoted_program_path} check` command again, with the same answer, so that the "
-    "walk-minutes record his answer.")
+    "{after_removal}")
+STOP_SIGNAL_CHECK_AFTER_REMOVAL = ("The walk-minutes do not record the user's answer: then run `{command}` again, "
+                                   "with the same answer, so that they record it.")
+STOP_SIGNAL_READ_STEP_AFTER_REMOVAL = ("{item} has had no cold-read-fast-read of its text as it stands: then run "
+                                       "`{command}` again, and present {item} only after it.")
+STOP_SIGNAL_READ_AHEAD_AFTER_REMOVAL = ("The read step finds this read ended without an outcome, and runs the "
+                                        "cold-read-fast-read itself.")
 CHECK_MINUTES = ("{item}: the user answered {answered}{hashtag}{rating} ({date_and_time}){words}, which makes its change. "
                  "Fast reads:")
 CHECK_NOT_ASKED_MINUTES = ("{item}: settled without asking the user, {answered}{rating} ({date_and_time}), which makes "
@@ -1644,10 +1648,12 @@ STOP_SIGNALS = (signal.SIGTERM, signal.SIGHUP)
 
 
 @contextlib.contextmanager
-def scratch_directory_removed_on_every_exit():
+def scratch_directory_removed_on_every_exit(after_removal):
     """Make a scratch directory and yield its path; remove it when the block ends, however the block ends. A
     SIGTERM or SIGHUP during the block removes it and then ends the program as that signal's default does; one
-    the program was started with ignored, as under nohup, stays ignored.
+    the program was started with ignored, as under nohup, stays ignored. When that removal fails, the message
+    ends with after_removal, the caller's sentence saying what to run next, since only the caller knows the
+    command, its --cwd included, that redoes its step.
 
     The handler raises nothing: an exception raised inside subprocess's own code, between Popen._wait()'s lock
     acquire and its try, leaves the lock held, and the wait() that subprocess.run() then makes blocks forever.
@@ -1661,9 +1667,9 @@ def scratch_directory_removed_on_every_exit():
                 shutil.rmtree(directory)
             except OSError as error:
                 print(STOP_SIGNAL_SCRATCH_NOT_REMOVED_LINES.format(
-                    program=PROGRAM, signal=signal.Signals(number).name,
-                    quoted_program_path=shlex.quote(str(Path(__file__).resolve())), directory=directory,
-                    quoted_directory=shlex.quote(directory), error=error), file=sys.stderr)
+                    program=PROGRAM, signal=signal.Signals(number).name, directory=directory,
+                    quoted_directory=shlex.quote(directory), error=error, after_removal=after_removal),
+                    file=sys.stderr)
         signal.signal(number, signal.SIG_DFL)
         os.kill(os.getpid(), number)
 
@@ -1685,13 +1691,14 @@ def scratch_directory_removed_on_every_exit():
             signal.signal(number, handler)
 
 
-def run_fast_read(text, name, fast_read_program):
+def run_fast_read(text, name, fast_read_program, after_removal):
     """Fast-read the text from a scratch file; return (the report's directory, the lines the fast read printed
-    on stderr about an unshipped record or a changed target), or raise FastReadFailed.
+    on stderr about an unshipped record or a changed target), or raise FastReadFailed. after_removal is as
+    scratch_directory_removed_on_every_exit takes it.
 
     The scratch directory is removed on every exit, SIGTERM and SIGHUP included: the fast read keeps its own copy
     of the text in its record's target/, which is where a later check looks for it."""
-    with scratch_directory_removed_on_every_exit() as scratch:
+    with scratch_directory_removed_on_every_exit(after_removal) as scratch:
         target = Path(scratch) / f"{name}.md"
         target.write_text(text + "\n", encoding="utf-8")
         result = subprocess.run([sys.executable, str(fast_read_program), "--target", str(target),
@@ -2186,7 +2193,9 @@ def check(arguments):
             continue
         name = walk_fast_read_name(walk_name, item, mark, number)
         try:
-            record, notes = run_fast_read(text, name, arguments.fast_read_program)
+            record, notes = run_fast_read(text, name, arguments.fast_read_program,
+                                          STOP_SIGNAL_CHECK_AFTER_REMOVAL.format(
+                                              command=check_command_with_cwd(top, *check_words(arguments))))
         except FastReadFailed as failure:
             print("\n".join([failure.args[0]] + [
                 line.format(command=check_command_with_cwd(top, *check_words(arguments)))
@@ -2289,11 +2298,12 @@ def read_ahead_bound_to_item(reads, key, outcome, item):
     return bound
 
 
-def fast_read_outcome(text, name, fast_read_program):
+def fast_read_outcome(text, name, fast_read_program, after_removal):
     """Fast-read the text and return the outcome a read-ahead worker writes: done with the report and the fast
-    read's notes, or failed with its FAILED line."""
+    read's notes, or failed with its FAILED line. after_removal is as scratch_directory_removed_on_every_exit
+    takes it."""
     try:
-        record, notes = run_fast_read(text, name, fast_read_program)
+        record, notes = run_fast_read(text, name, fast_read_program, after_removal)
     except FastReadFailed as failure:
         return {"status": READ_FAILED, "failed": failure.args[0]}
     record_names = load_module("cold_read_record_names", RECORD_NAMES_FILE)
@@ -2306,7 +2316,9 @@ def read_ahead_worker(arguments):
     """The detached process close starts: fast-read the text kept at --text-file and write its outcome."""
     reads, key = arguments.text_file.parent, arguments.text_file.stem
     text = arguments.text_file.read_text(encoding="utf-8").rstrip("\n")
-    record_read(reads, key, arguments.item, text, fast_read_outcome(text, arguments.name, arguments.fast_read_program),
+    record_read(reads, key, arguments.item, text,
+                fast_read_outcome(text, arguments.name, arguments.fast_read_program,
+                                  STOP_SIGNAL_READ_AHEAD_AFTER_REMOVAL),
                 arguments.item_number_predicted)
     return 0
 
@@ -2754,7 +2766,9 @@ def waiting_item_read(arguments, sub_step_of=None):
                 return 1 if withheld else 0
             why = ITEM_READ_RUN_FACTS.format(report=latest[1]["report"], facts=", ".join(facts[:FACTS_LISTED]))
         walk_name = minutes.name[:-len(walk_finder.MINUTES_SUFFIX)]
-        outcome = fast_read_outcome(text, walk_fast_read_name(walk_name, item), arguments.fast_read_program)
+        outcome = fast_read_outcome(text, walk_fast_read_name(walk_name, item), arguments.fast_read_program,
+                                    STOP_SIGNAL_READ_STEP_AFTER_REMOVAL.format(
+                                        item=item, command=command.replace(" " + AFTER_FIXES_FLAG, "")))
         reads.mkdir(exist_ok=True)
         (reads / f"{key}-started.json").unlink(missing_ok=True)
         record_read(reads, key, item, text, outcome)
