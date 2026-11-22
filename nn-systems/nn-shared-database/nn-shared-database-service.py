@@ -374,7 +374,7 @@ def store_event(connection, raw_body):
                               (event["event_id"],)).fetchone()
     if held is not None:
         connection.execute("ROLLBACK")
-        return {"sequence": held[0]}
+        return {"sequence": held[0]}  # pragma: no mutate, the query selects the sequence alone, so [-1] is the same column
     check_event_fits_its_operation(connection, event)
     sequence = connection.execute(
         "INSERT INTO event (event_id, machine, operation, occurred_at, received_at, body) "
