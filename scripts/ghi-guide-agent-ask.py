@@ -367,11 +367,22 @@ GHI_GUIDE_AGENT_ASK_PROMPT_SENTENCE_ASKING_THE_AGENT_TO_NAME_ISSUES_WHOSE_DESIGN
     "something the plan should reuse instead of building its own.")
 
 
+GHI_GUIDE_AGENT_ASK_PROMPT_OPENING_SENTENCE_FOR_EACH_REQUEST_FORM = {
+    GHI_GUIDE_AGENT_REQUEST_FORM_VALUE_ASKING_FOR_READING_LIST:
+        "You are asked for a reading list.",
+    GHI_GUIDE_AGENT_REQUEST_FORM_VALUE_ASKING_FOR_VERDICT_ON_DRAFT_ISSUE:
+        "You are shown a draft issue — its title and its GHI-MD — and asked "
+        "whether the corpus already covers it.",
+}
+
+
 def compose_resume_ask_prompt(question: str, include_closed: bool, changed_numbers,
-                              is_resume: bool) -> str:
-    """§ Prompts: Resume ask prompt. The changed-entries preamble appears only
-    on a resumed session whose refresh actually changed entries; the
-    asker's question rides through unrewritten, and
+                              is_resume: bool, *, request_form: str) -> str:
+    """§ Prompts: Resume ask prompt, whose opening is a reading-list
+    request's; a draft-verdict request opens as § Adjudication request does.
+    The changed-entries preamble appears only on a resumed session whose
+    refresh actually changed entries; the asker's question rides through
+    unrewritten after the opening, and
     GHI_GUIDE_AGENT_ASK_PROMPT_SENTENCE_ASKING_THE_AGENT_TO_NAME_ISSUES_WHOSE_DESIGN_A_PLAN_SHOULD_REUSE
     follows it in every ask."""
     parts = []
@@ -382,7 +393,7 @@ def compose_resume_ask_prompt(question: str, include_closed: bool, changed_numbe
             "Re-read them in the mirror before answering — an entry may have "
             "moved to issues-closed.md."
         )
-    parts.append(f"You are asked for a reading list. {question}")
+    parts.append(f"{GHI_GUIDE_AGENT_ASK_PROMPT_OPENING_SENTENCE_FOR_EACH_REQUEST_FORM[request_form]} {question}")
     parts.append(GHI_GUIDE_AGENT_ASK_PROMPT_SENTENCE_ASKING_THE_AGENT_TO_NAME_ISSUES_WHOSE_DESIGN_A_PLAN_SHOULD_REUSE)
     if include_closed:
         parts.append(
@@ -765,13 +776,14 @@ def ask(question: str, include_closed: bool, seat_dir: Path, repo: str,
 
     try:
         return _locked_ask(question, include_closed, seat_dir, repo,
-                           projects_root, state_path, lock_path, turn, kinds)
+                           projects_root, state_path, lock_path, turn, kinds,
+                           request_form)
     except SeatDirectoryUnusable as error:
         return None, None, str(error)
 
 
 def _locked_ask(question, include_closed, seat_dir, repo, projects_root,
-                state_path, lock_path, turn, kinds):
+                state_path, lock_path, turn, kinds, request_form):
     """Holds the lock, settles which mirror this run publishes into, and
     cleans up a throwaway one on every exit path."""
     with state_lock(lock_path) as locked:
@@ -798,7 +810,7 @@ def _locked_ask(question, include_closed, seat_dir, repo, projects_root,
         try:
             return _ask_within_lock(question, include_closed, seat_dir, repo,
                                     projects_root, state, state_path, locked,
-                                    mirror_dir, turn, kinds)
+                                    mirror_dir, turn, kinds, request_form)
         finally:
             if throwaway_mirror is not None:
                 shutil.rmtree(throwaway_mirror, ignore_errors=True)
@@ -885,7 +897,8 @@ def fast_forward_seat_checkout(seat_dir: Path) -> str:
 
 
 def _ask_within_lock(question, include_closed, seat_dir, repo, projects_root,
-                     state, state_path, locked, mirror_dir, turn, kinds):
+                     state, state_path, locked, mirror_dir, turn, kinds,
+                     request_form):
     """The ask itself, with the lock decision and the mirror already settled.
 
     Split out so the throwaway mirror's cleanup is one `finally` around the
@@ -959,10 +972,12 @@ def _ask_within_lock(question, include_closed, seat_dir, repo, projects_root,
         if cold_reply is None:
             return None, None, f"ghi-guide-agent cold-start failed: {error}"
         session_id = cold_reply["session_id"]
-        resume_prompt = compose_resume_ask_prompt(question, include_closed, [], False)
+        resume_prompt = compose_resume_ask_prompt(question, include_closed, [], False,
+                                                  request_form=request_form)
     else:
         session_id = state[GHI_GUIDE_AGENT_SESSION_ID_STATE_KEY]
-        resume_prompt = compose_resume_ask_prompt(question, include_closed, changed, True)
+        resume_prompt = compose_resume_ask_prompt(question, include_closed, changed, True,
+                                                  request_form=request_form)
 
     answer_reply, error = turn(resume_prompt, session_id)
     if answer_reply is None:
