@@ -490,6 +490,13 @@ UNREADABLE_MARK_CASES = (
      ["- line 5: `#new` has no text after it on its line."]),
     ("a mark with an empty quotation", '#new ""\n',
      ["- line 5: `#new` has no text after it on its line."]),
+    ("a mark with only a `The new text:` label, which the short-answer hook does not read as text",
+     "#new The new text:\n\n> A note\n> says why.\n",
+     ["- line 5: `#new` has no text after it on its line. The mark's line with its text joined onto it: "
+      "#new A note says why."]),
+    ("a mark with only a bold `The new text:` label", "#new_if_d **The new text:**\n\n> A note\n> says why.\n",
+     ["- line 5: `#new_if_d` has no text after it on its line. The mark's line with its text joined onto it: "
+      "#new_if_d A note says why."]),
     ("a `#new_if_d` mark with no text, on an A answer", "#new_if_d\n\n> A note\n> says why.\n\nThe end.\n",
      ["- line 5: `#new_if_d` has no text after it on its line. The mark's line with its text joined onto it: "
       "#new_if_d A note says why."]),
