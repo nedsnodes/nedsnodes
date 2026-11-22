@@ -68,20 +68,23 @@ def check(name, condition, detail=""):
         if detail:
             print("      " + str(detail).replace("\n", "\n      "))
 
-# Runs the runner with its save failing and, right after the run reads a recording, another
-# run's save replacing that file.
-STRACE_UNUSABLE_DRIVER = r'''
+# Runs the runner with strace_usable() giving ANSWER, so that a case does not depend on
+# whether this machine can trace: the Mac, or a run under an outer strace, cannot.
+STRACE_ANSWER_DRIVER_TEMPLATE = r'''
 import importlib.util, sys
 program_path, *arguments = sys.argv[1:]
 spec = importlib.util.spec_from_file_location("run_all_test_suites", program_path)
 program = importlib.util.module_from_spec(spec)
 sys.argv = [program_path, *arguments]
 spec.loader.exec_module(program)
-# As on the Mac, or on Linux without a working strace.
-program.strace_usable = lambda: None
+program.strace_usable = lambda: ANSWER
 sys.exit(program.main())
 '''
+STRACE_UNUSABLE_DRIVER = STRACE_ANSWER_DRIVER_TEMPLATE.replace("ANSWER", "None")
+STRACE_USABLE_DRIVER = STRACE_ANSWER_DRIVER_TEMPLATE.replace("ANSWER", repr("/usr/bin/strace"))
 
+# Runs the runner with its save failing and, right after the run reads a recording, another
+# run's save replacing that file.
 SAVE_FAILS_AFTER_ANOTHER_RUN_SAVES_DRIVER = r'''
 import importlib.util, os, sys
 program_path, *arguments = sys.argv[1:]
@@ -319,7 +322,7 @@ def head_test_runs_while_the_after_merge_test_run_runs():
         written_to.mkdir(parents=True, exist_ok=True)
         before_refusal = directory_contents(scratch.root / read_only)
         refused = scratch.run(a_checkout, since=m1, save_to=save_to, read_only=read_only,
-                              extra=extra)
+                              extra=extra, driver=STRACE_USABLE_DRIVER)
         check(f"a run given as its read-only directory the directory {name} refuses, exit 2, "
               f"says so and how to run again, and writes nothing there",
               refused.returncode == 2
@@ -328,9 +331,10 @@ def head_test_runs_while_the_after_merge_test_run_runs():
               and "run the same command again with --" in refused.stderr
               and directory_contents(scratch.root / read_only) == before_refusal,
               (refused.returncode, refused.stderr))
-    both = scratch.run(a_checkout, since=m1, read_only="store", extra=(
-        "--record-inputs-with-strace",
-        "--suite-files-only-strace-saw-lists-directory", str(scratch.root / "store")))
+    both = scratch.run(a_checkout, since=m1, read_only="store", driver=STRACE_USABLE_DRIVER,
+                       extra=("--record-inputs-with-strace",
+                              "--suite-files-only-strace-saw-lists-directory",
+                              str(scratch.root / "store")))
     check("a run that would write both its recordings and its strace lists to its read-only "
           "directory names both, and both flags to add, in one refusal",
           both.returncode == 2
