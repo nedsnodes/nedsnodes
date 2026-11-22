@@ -429,8 +429,11 @@ def timeout_seconds_of_command_line(command):
     timeout stops the first command, the rest of the pipeline reads the end of its input. Not
     handled, so each keeps a deadline although work runs outside the timeout: a command
     substitution the outer shell runs before the timeout starts, as in `timeout 1h echo "$(a)"`; a
-    comment holding a lone `'` or `)` before a line break; an ANSI-C string, as in `$'it\\'s'; b`;
-    and odd nesting, as in `"$(b ")")" ; c`."""
+    comment holding a lone `'` or `)` before a line break, or a `<<`; an ANSI-C string, as in
+    `$'it\\'s'; b`; odd nesting, as in `"$(b ")")" ; c`; a `$(...)` in an unquoted here-document's
+    body, which the outer shell runs before the timeout starts; a delimiter partly quoted, as in
+    `<<'END'OF`, whose body is read to a line `END`, not `ENDOF`; a `;` with a here-document body
+    or a comment after it and no command; and a delimiter line continued with a backslash."""
     match = TIMEOUT_COMMAND_LINE_START_PATTERN.match(command)
     if not match or command_line_runs_another_command_after(command[match.end():]):
         return None
@@ -452,7 +455,7 @@ def command_line_runs_another_command_after(text):
             here_document_delimiters = []
             continue
         here_document_operator = HERE_DOCUMENT_OPERATOR_PATTERN.match(text, index) \
-            if quote is None and text[index - 1:index] != "<" else None
+            if quote is None and depth == 0 and text[index - 1:index] != "<" else None
         if here_document_operator:
             here_document_delimiters.append((
                 re.sub(r"['\"\\]", "", here_document_operator["delimiter"]),
