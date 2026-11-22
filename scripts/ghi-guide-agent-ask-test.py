@@ -1550,11 +1550,36 @@ import subprocess as _remote_subprocess
 _REPOSITORY_ROOT = SCRIPT_PATH.resolve().parent.parent
 
 
+def _files_the_ask_script_loads():
+    """The ask script and every repository .py file it loads, followed through
+    the files those load in turn, so each fixture copies these and not the
+    whole tree, which run-all-test-suites.py would record as this suite's inputs."""
+    by_name = {}
+    for directory in ("scripts", "nn-systems"):
+        for walked, subdirectories, names in os.walk(_REPOSITORY_ROOT / directory):
+            subdirectories[:] = [name for name in subdirectories if name != "__pycache__"]
+            for name in names:
+                if name.endswith(".py") and not name.endswith("-test.py"):
+                    by_name.setdefault(name, []).append(Path(walked) / name)
+    loaded, waiting = set(), [SCRIPT_PATH.resolve()]
+    while waiting:
+        path = waiting.pop()
+        if path in loaded:
+            continue
+        loaded.add(path)
+        for name in re.findall(r"[\"']([\w.-]+\.py)[\"']", path.read_text(encoding="utf-8")):
+            waiting.extend(by_name.get(name, []))
+    return sorted(path.relative_to(_REPOSITORY_ROOT) for path in loaded)
+
+
+_ASK_SCRIPT_AND_WHAT_IT_LOADS = _files_the_ask_script_loads()
+
+
 def _seat_whose_copy_predates_print_answer_json(root):
     origin = root / "origin"
-    for directory in ("scripts", "nn-systems"):
-        _shutil.copytree(_REPOSITORY_ROOT / directory, origin / directory,
-                         ignore=_shutil.ignore_patterns("__pycache__", "tests", "*-test.py"))
+    for relative in _ASK_SCRIPT_AND_WHAT_IT_LOADS:
+        (origin / relative).parent.mkdir(parents=True, exist_ok=True)
+        _shutil.copy2(_REPOSITORY_ROOT / relative, origin / relative)
     script = origin / "scripts" / "ghi-guide-agent-ask.py"
     new_text = script.read_text(encoding="utf-8")
     script.write_text(new_text.replace('"--print-answer-json"', '"--flag-not-yet-added"'),
@@ -1589,8 +1614,10 @@ remote_command_with_new_flag = ghi_ask.build_remote_command("q", False, "x/y", F
 
 with tempfile.TemporaryDirectory() as temporary:
     origin, seat, environment = _seat_whose_copy_predates_print_answer_json(Path(temporary))
-    fast_forward_line = ("python3 -c " + shlex.quote(
-        ghi_ask.GHI_GUIDE_AGENT_HOME_FAST_FORWARD_TO_ORIGIN_MAIN_SSH_PYTHON_SOURCE) + " </dev/null\n")
+    fast_forward_line = ("if python3 -c " + shlex.quote(
+        ghi_ask.GHI_GUIDE_AGENT_HOME_FAST_FORWARD_TO_ORIGIN_MAIN_SSH_PYTHON_SOURCE) + "; then\n"
+        f"  export {ghi_ask.GHI_GUIDE_AGENT_HOME_FAST_FORWARD_ALREADY_TRIED_ENVIRONMENT_VARIABLE}=1\n"
+        "fi\n")
     without_fast_forward_line = remote_command_with_new_flag.replace(fast_forward_line, "")
     check("the test removes the fast-forward line from the remote command",
           without_fast_forward_line != remote_command_with_new_flag, remote_command_with_new_flag)
@@ -1652,6 +1679,70 @@ with tempfile.TemporaryDirectory() as temporary:
           piped.stdout == "the whole question\n"
           and "refreshed the seat checkout 1 commit(s)" in piped.stderr,
           (piped.stdout, piped.stderr))
+
+
+def _environment_whose_git_logs_each_fetch(root, environment):
+    real_git = _shutil.which("git")
+    log = root / "git-fetches"
+    logging_bin = root / "logging-bin"
+    logging_bin.mkdir()
+    (logging_bin / "git").write_text(
+        f'#!/bin/sh\ncase " $* " in *" fetch "*) echo fetch >> {shlex.quote(str(log))} ;; esac\n'
+        f'exec {shlex.quote(real_git)} "$@"\n', encoding="utf-8")
+    (logging_bin / "git").chmod(0o755)
+    return log, {**environment, "PATH": f"{logging_bin}{os.pathsep}{environment['PATH']}"}
+
+
+with tempfile.TemporaryDirectory() as temporary:
+    origin, seat, environment = _seat_whose_copy_predates_print_answer_json(Path(temporary))
+    _git(["merge", "-q", "--ff-only", "origin/main"], seat)
+    _git(["checkout", "-q", "--detach"], seat)
+    log, logging_environment = _environment_whose_git_logs_each_fetch(Path(temporary), environment)
+    once = _run_remote_command(ghi_ask.build_remote_command("q", False, "x/y"), logging_environment)
+    fetches = log.read_text(encoding="utf-8").count("fetch") if log.exists() else 0
+    check("over ssh, the seat checkout is fetched once: the ask does not fetch again after "
+          "the fast-forward line has, which could spend 60 of its seconds",
+          fetches == 1 and "ghi-guide-agent-ask: mirror refresh" in once.stderr,
+          (fetches, once.stderr))
+
+with tempfile.TemporaryDirectory() as temporary:
+    origin, seat, environment = _seat_whose_copy_predates_print_answer_json(Path(temporary))
+    _git(["merge", "-q", "--ff-only", "origin/main"], seat)
+    _git(["checkout", "-q", "--detach"], seat)
+    log, logging_environment = _environment_whose_git_logs_each_fetch(Path(temporary), environment)
+    failing_line = ghi_ask.build_remote_command("q", False, "x/y").replace(
+        "ask.fast_forward_seat_checkout(seat)", "ask.name_no_copy_has(seat)")
+    fell_through = _run_remote_command(failing_line, logging_environment)
+    fetches = log.read_text(encoding="utf-8").count("fetch") if log.exists() else 0
+    check("when the fast-forward line fails before fetching, the ask fetches the seat "
+          "checkout itself",
+          fetches == 1 and "ghi-guide-agent-ask: mirror refresh" in fell_through.stderr,
+          (fetches, fell_through.stderr))
+
+with tempfile.TemporaryDirectory() as temporary:
+    origin, seat, environment = _seat_whose_copy_predates_print_answer_json(Path(temporary))
+    fast_forward_line_alone = ["python3", "-c",
+                               ghi_ask.GHI_GUIDE_AGENT_HOME_FAST_FORWARD_TO_ORIGIN_MAIN_SSH_PYTHON_SOURCE]
+    with open(seat / ghi_ask.LOCK_FILE_NAME, "a+") as held_lock:
+        fcntl.flock(held_lock.fileno(), fcntl.LOCK_EX)
+        while_held = _remote_subprocess.run(fast_forward_line_alone, cwd=seat, capture_output=True,
+                                            text=True, env=environment, check=False, timeout=300)
+    once_free = _remote_subprocess.run(fast_forward_line_alone, cwd=seat, capture_output=True,
+                                       text=True, env=environment, check=False, timeout=300)
+    check("the fast-forward line exits nonzero when another ask holds the lock and it did not "
+          "try, so that ask is not told the seat was already fetched, and exits 0 once it tried",
+          while_held.returncode != 0 and once_free.returncode == 0,
+          (while_held.returncode, while_held.stderr, once_free.returncode, once_free.stderr))
+
+with tempfile.TemporaryDirectory() as temporary:
+    origin, seat, environment = _seat_whose_copy_predates_print_answer_json(Path(temporary))
+    (seat / ghi_ask.LOCK_FILE_NAME).mkdir()
+    unusable = _run_remote_command(ghi_ask.build_remote_command("q", False, "x/y"), environment)
+    check("when the agent-home's state lock cannot be opened, the remote command reports it "
+          "once, in the ask's one line, with no traceback, and exits nonzero",
+          unusable.stderr.count("is not usable") == 1 and "Traceback" not in unusable.stderr
+          and unusable.returncode != 0,
+          (unusable.returncode, unusable.stderr))
 
 
 # --- the seat directory, state file and state key, unpatched ----------------
