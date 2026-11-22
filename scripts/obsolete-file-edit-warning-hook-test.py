@@ -811,7 +811,7 @@ with tempfile.TemporaryDirectory() as temporary_directory:
     shared_lines = [f"line {number}\n" for number in range(1, 11)]
     commit_file(detached_origin, "lib/shared.py", "".join(shared_lines), "shared file")
     commit_file(detached_origin, "lib/gone.py", "main will delete this\n", "a file main deletes")
-    commit_file(detached_origin, "lib/bystander.py", "".join(shared_lines),
+    commit_file(detached_origin, "lib/bystander.py", "a file of its own, unlike any other here\n",
                 "a file main moves in the commit that deletes gone.py")
     latin1_lines = [f"ligne {number} \xe9t\xe9\n".encode("latin-1") for number in range(1, 11)]
     (detached_origin / "lib" / "latin1.txt").write_bytes(b"".join(latin1_lines))
