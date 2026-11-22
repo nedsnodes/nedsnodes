@@ -84,6 +84,7 @@ import fcntl
 import importlib.util
 import json
 import os
+import re
 import shutil
 import signal
 import socket
@@ -213,9 +214,11 @@ KEEP_THE_LAST_SENTENCE = (
 
 FIND_THE_ENTRY = """\
 Find the agent-seat's entry with ListAgents (load ListAgents and SendMessage with ToolSearch first \
-if they are not loaded). Write only to the one entry whose name is the agent-seat's name, that is \
-shown as interactive, and whose tmux pane is in the tmux session named after the agent-seat, as in \
-"{seat} [9cbc4b] · interactive · tmux {seat}:@0.%0". Never write to a Remote Control entry, or to \
+if they are not loaded). Write only to the one entry that is shown as interactive and whose tmux \
+pane is in the tmux session named after the agent-seat, as in \
+"{seat} [9cbc4b] · interactive · tmux {seat}:@0.%0". Its name may differ from the agent-seat's, \
+because the user can rename an agent-session, as in "Cpc [537f8b] · interactive · tmux {seat}:@0.%0"; \
+the tmux session is what names the agent-seat. Never write to a Remote Control entry, or to \
 any other entry. In SendMessage's "to", give the name and the ref as ListAgents lists them, as in \
 "{seat} [9cbc4b]". If there is no such entry, or more than one, send nothing."""
 
@@ -500,7 +503,12 @@ class HeadlessOutcome:
         self.error_kind = None     # the error's cause, worded by code alone: a user-alert's key
         self.answer = None         # its --json-schema answer
         self.sends = []            # [{"to", "message", "succeeded", "result"}]
+        self.listings = []         # the text of each ListAgents result
 
+
+# One ListAgents line, as "  Cpc [537f8b]  ·  interactive  ·  idle  ·  tmux MD-skills:@0.%0  ·  ...".
+LISTED_ENTRY = re.compile(r"^\s*(?P<name>\S.*?) \[(?P<ref>[0-9a-f]+)\]\s+·(?P<rest>.*)$")
+LISTED_TMUX_SESSION = re.compile(r"·\s*tmux (?P<session>[^:\s]+):")
 
 def claude_binary():
     # Cron's PATH does not hold ~/.local/bin, where claude is installed.
@@ -532,7 +540,7 @@ def run_headless(prompt, schema, tools, working_directory, timeout_seconds):
         stdout, stderr = process.communicate()
         outcome.error = f"stopped after {timeout_seconds} seconds"
         outcome.error_kind = "stopped at its time limit"
-    calls, result = {}, None
+    calls, listing_ids, result = {}, set(), None
     for line in stdout.splitlines():
         try:
             event = json.loads(line)
@@ -551,6 +559,10 @@ def run_headless(prompt, schema, tools, working_directory, timeout_seconds):
                 calls[block.get("id")] = {"to": str(tool_input.get("to", "")),
                                           "message": str(tool_input.get("message", "")),
                                           "succeeded": False, "result": None}
+            elif block.get("type") == "tool_use" and block.get("name") == "ListAgents":
+                listing_ids.add(block.get("id"))
+            elif block.get("type") == "tool_result" and block.get("tool_use_id") in listing_ids:
+                outcome.listings.append(tool_result_text(block.get("content")))
             elif block.get("type") == "tool_result" and block.get("tool_use_id") in calls:
                 call = calls[block["tool_use_id"]]
                 call["succeeded"] = not block.get("is_error")
@@ -576,18 +588,40 @@ def run_headless(prompt, schema, tools, working_directory, timeout_seconds):
     return outcome
 
 
-def entry_seat(to):
-    """The agent-seat's name in a SendMessage "to", which may carry " [ref]" after it."""
-    return to.split(" [", 1)[0].strip()
+def tool_result_text(content):
+    """A tool result's text, whether Claude Code gave it as a string or as content blocks."""
+    if isinstance(content, list):
+        return "\n".join(str(block.get("text", "")) for block in content if isinstance(block, dict))
+    return str(content)
+
+
+def entry_seat(to, listings):
+    """The agent-seat a SendMessage "to" reaches: the tmux session of the interactive entry it
+    names, by name and, when it gives one, ref, in the sender's ListAgents results; None when no
+    one such entry was listed. The tmux session keeps the agent-seat's name when the user
+    renames the agent-session, so "Cpc [537f8b]", listed in tmux session MD-skills, reaches
+    MD-skills."""
+    name, _, ref = to.strip().partition(" [")
+    name, ref = name.strip(), ref.rstrip("]").strip()
+    sessions = set()
+    for line in "\n".join(listings).splitlines():
+        entry = LISTED_ENTRY.match(line)
+        tmux = LISTED_TMUX_SESSION.search(line)
+        if not entry or not tmux or "interactive" not in entry["rest"]:
+            continue
+        if entry["name"] == name and (not ref or entry["ref"] == ref):
+            sessions.add(tmux["session"])
+    return sessions.pop() if len(sessions) == 1 else None
 
 
 def send_problems(outcome, seats):
     """What is wrong with where a sender sent: each send must go to one of the agent-seats, and a
     send to each must succeed."""
     problems = [f"sent to {send['to']!r}, which is not {', '.join(seats)}"
-                for send in outcome.sends if entry_seat(send["to"]) not in seats]
+                for send in outcome.sends if entry_seat(send["to"], outcome.listings) not in seats]
     for seat in seats:
-        if not any(send["succeeded"] and entry_seat(send["to"]) == seat for send in outcome.sends):
+        if not any(send["succeeded"] and entry_seat(send["to"], outcome.listings) == seat
+                   for send in outcome.sends):
             problems.append(f"no SendMessage to {seat} succeeded")
     return problems
 
@@ -596,8 +630,8 @@ def sent_texts_other_than_code_wrote(outcome, seats, text):
     """Each send to one of the agent-seats whose message is not the text code wrote, as
     (agent-seat, message)."""
     # Compared as the delivery check compares: a sender may reflow the lines of the text.
-    return [(entry_seat(send["to"]), send["message"]) for send in outcome.sends
-            if entry_seat(send["to"]) in seats
+    return [(entry_seat(send["to"], outcome.listings), send["message"]) for send in outcome.sends
+            if entry_seat(send["to"], outcome.listings) in seats
             and " ".join(send["message"].split()) != " ".join(text.split())]
 
 
@@ -605,7 +639,7 @@ def text_sent_to(outcome, seat, text):
     """The message of the last send to the agent-seat that succeeded, or code's text when none
     did: the text the delivery check looks for."""
     sent = [send["message"] for send in outcome.sends
-            if send["succeeded"] and entry_seat(send["to"]) == seat]
+            if send["succeeded"] and entry_seat(send["to"], outcome.listings) == seat]
     return sent[-1] if sent else text
 
 

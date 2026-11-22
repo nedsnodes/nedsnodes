@@ -43,6 +43,22 @@ time.sleep(answer.get("sleep", 0))
 def emit(event):
     print(json.dumps(event), flush=True)
 text = prompt.split("----------\n", 1)[-1].rsplit("\n----------", 1)[0]
+# The ListAgents result a sender reads before it sends: an answer's own "listing", or else one
+# interactive entry for each send, named as the send names it and in the tmux session of that name.
+listing = answer.get("listing")
+if listing is None and answer.get("sends"):
+    lines = []
+    for number, send in enumerate(answer["sends"]):
+        name, _, ref = send["to"].partition(" [")
+        ref = ref.rstrip("]") or "a{{:05x}}".format(number)
+        lines.append("  {{}} [{{}}]  \u00b7  interactive  \u00b7  idle  \u00b7  tmux {{}}:@0.%0".format(
+            name, ref, name))
+    listing = "\n".join(lines)
+if listing is not None:
+    emit({{"type": "assistant", "message": {{"content": [
+        {{"type": "tool_use", "id": "list", "name": "ListAgents", "input": {{}}}}]}}}})
+    emit({{"type": "user", "message": {{"content": [
+        {{"type": "tool_result", "tool_use_id": "list", "content": listing}}]}}}})
 for number, send in enumerate(answer.get("sends", [])):
     message = {{"@prompt-text": text, "@prompt-text-without-last-paragraph": text.rsplit("\n\n", 1)[0]
                }}.get(send.get("message"), send.get("message", ""))
@@ -1343,6 +1359,37 @@ machine.script(sent_ok())
 machine.run(0)
 check("the sender is told that the do-not-reply sentence is part of the message",
       KEEP_IT in machine.claude_calls()[0]["prompt"].replace("\n", " "), machine.claude_calls())
+check("the sender is told the entry is found by its tmux session, whatever its name",
+      "Its name may differ from the agent-seat's" in machine.claude_calls()[0]["prompt"]
+      and '"Cpc [537f8b] · interactive · tmux alpha:@0.%0"'
+      in machine.claude_calls()[0]["prompt"].replace("\n", " "), machine.claude_calls())
+
+# When the user renames an agent-session, as MD-skills' was renamed "Cpc", ListAgents lists it by the new
+# name, in the tmux session that keeps the agent-seat's name.
+RENAMED_LISTING = ("  Cpc [537f8b]  ·  interactive  ·  idle  ·  tmux alpha:@0.%0  ·  started 2h ago\n"
+                   "  alpha [3ac422]  ·  Remote Control  ·  offline")
+machine = Machine()
+machine.seat("alpha", DONE_TURN)
+machine.handoff_put_off()
+machine.script({"listing": RENAMED_LISTING,
+                "sends": [{"to": "Cpc [537f8b]", "message": "@prompt-text"}],
+                "answer": {"sent": True, "reason": "sent"}})
+machine.run(0)
+check("a renamed agent-session, listed in the agent-seat's tmux session, is the agent-seat: the send "
+      "counts and no failure is logged",
+      not machine.events("headless_failed") and machine.events("message_sent"),
+      machine.events())
+
+machine = Machine()
+machine.seat("alpha", DONE_TURN)
+machine.handoff_put_off()
+machine.script({"listing": "  alpha [9cbc4b]  ·  interactive  ·  idle  ·  tmux beta:@0.%0",
+                "sends": [{"to": "alpha [9cbc4b]", "message": "@prompt-text"}],
+                "answer": {"sent": True, "reason": "sent"}})
+machine.run(0)
+check("an entry named after the agent-seat but in another tmux session is not the agent-seat",
+      any("no SendMessage to alpha succeeded" in event["problem"]
+          for event in machine.events("headless_failed")), machine.events("headless_failed"))
 
 # --- headless agent-sessions that fail --------------------------------------------------------------
 FAILURES = (

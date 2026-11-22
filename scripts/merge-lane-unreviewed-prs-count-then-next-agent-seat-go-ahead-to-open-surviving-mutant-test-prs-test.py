@@ -123,6 +123,8 @@ class Case:
             seat, message = (SEATS[0], value) if kind == "sent-text" else (value, text)
             outcome.sends = [{"to": f"{seat} [1c88e6]", "message": message, "succeeded": True,
                               "result": "ok"}]
+            # The ListAgents result the sender read: the entry it sent to, in its own tmux session.
+            outcome.listings = [f"  {seat} [1c88e6]  ·  interactive  ·  idle  ·  tmux {seat}:@0.%0"]
             outcome.answer = {"sent": True, "reason": "sent"}
         return outcome
 
