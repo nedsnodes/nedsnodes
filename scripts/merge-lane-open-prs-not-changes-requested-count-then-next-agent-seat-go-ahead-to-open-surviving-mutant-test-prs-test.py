@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Tests for merge-lane-unreviewed-prs-count-then-next-agent-seat-go-ahead-to-open-surviving-mutant-test-prs.py.
+"""Tests for merge-lane-open-prs-not-changes-requested-count-then-next-agent-seat-go-ahead-to-open-surviving-mutant-test-prs.py.
 
 The program is loaded by path and its main() is called in this process with a
 scratch --state-directory and a fake `gh` first on PATH. The fake gh logs its
@@ -8,7 +8,7 @@ arguments and prints the pages a case writes, as `gh api graphql --paginate
 sweep's run_headless is replaced by a fake sender that logs its prompt and
 returns the outcome a case sets, so the idle sweep's own check judges it.
 
-Run: python3 scripts/merge-lane-unreviewed-prs-count-then-next-agent-seat-go-ahead-to-open-surviving-mutant-test-prs-test.py
+Run: python3 scripts/merge-lane-open-prs-not-changes-requested-count-then-next-agent-seat-go-ahead-to-open-surviving-mutant-test-prs-test.py
 """
 
 import contextlib
@@ -22,7 +22,7 @@ import tempfile
 from pathlib import Path
 
 PROGRAM = Path(__file__).with_name(
-    "merge-lane-unreviewed-prs-count-then-next-agent-seat-go-ahead-to-open-surviving-mutant-test-prs.py")
+    "merge-lane-open-prs-not-changes-requested-count-then-next-agent-seat-go-ahead-to-open-surviving-mutant-test-prs.py")
 _spec = importlib.util.spec_from_file_location("surviving_mutant_test_prs_go_ahead", PROGRAM)
 program = importlib.util.module_from_spec(_spec)
 _spec.loader.exec_module(program)
@@ -51,13 +51,13 @@ def check(name, condition, detail=""):
             print("      " + str(detail).replace("\n", "\n      "))
 
 
-def pull_request(number, draft=False, reviewed_on=None, head=None):
-    """reviewed_on: None, "head", "older" or "other-account-on-head"."""
-    head = head or f"{number:040x}"
-    reviews = {"head": [{"commit": {"oid": head}}], "older": [{"commit": {"oid": "f" * 40}}],
-               None: [], "deleted-commit": [{"commit": None}]}
+def pull_request(number, draft=False, reviews=()):
+    """reviews: (state, on) pairs, oldest first; on is "head", "older" or "deleted-commit"."""
+    head = f"{number:040x}"
+    commits = {"head": {"oid": head}, "older": {"oid": "f" * 40}, "deleted-commit": None}
     return {"number": number, "isDraft": draft, "headRefOid": head,
-            "reviews": {"nodes": reviews.get(reviewed_on, [])}}
+            "reviews": {"nodes": [{"state": state, "commit": commits[on]}
+                                  for state, on in reviews]}}
 
 
 def pages(*page_nodes):
@@ -143,25 +143,31 @@ def main():
 
 def cases(root):
 
-    ten_unreviewed = [pull_request(number) for number in range(1, 11)]
+    ten_counted = [pull_request(number) for number in range(1, 11)]
     case = Case(root, "ten")
-    case.gh_answer(pages(ten_unreviewed))
+    case.gh_answer(pages(ten_counted))
     case.sender_answers(("sent", "reboot-test"))
     code, output = case.run()
-    check("10 unreviewed open pull requests: the first agent-seat is sent the message and "
+    check("10 counted open pull requests: the first agent-seat is sent the message and "
           "recorded as released, and RELEASED is printed, exit 0",
           code == 0 and output.startswith("RELEASED reboot-test\n")
-          and "10 open pull requests, not drafts, have no review from ned-review-merge" in output
+          and "10 open pull requests that are not drafts wait for merge-lane-2 to review or "
+              "merge them" in output
           and case.released() == ["reboot-test"], f"exit {code}\n{output}")
     prompt = case.prompts[0]["prompt"] if case.prompts else ""
-    check("the message is sent with the idle sweep's own sender prompt, tools and schema, and "
-          "says the agent-seat may open them one per source file, at most 5 at a time",
+    check("the message is sent with the idle sweep's own sender prompt, tools and schema, "
+          "says what was counted, and says the agent-seat may open them one per source file, at "
+          "most 5 at a time",
           len(case.prompts) == 1
           and prompt.startswith(program.idle_sweep.SENDER_PROMPT.split("{seat}")[0])
           and program.idle_sweep.FIND_THE_ENTRY.format(seat="reboot-test") in prompt
           and "You may now open your pull requests that only add tests for surviving mutants: "
               "one per source file, with at most 5 open at a time." in prompt
           and program.idle_sweep.DO_NOT_REPLY_SENTENCE in prompt
+          and "10 open pull requests that are not drafts wait for merge-lane-2 to review or merge "
+              "them. The count includes pull requests that only add tests for surviving mutants, "
+              "and leaves out only those whose newest commit a review by ned-review-merge asks "
+              "to change." in prompt
           and case.prompts[0]["tools"] == program.idle_sweep.SENDING_TOOLS
           and case.prompts[0]["schema"] == program.idle_sweep.SEND_ANSWER_SCHEMA
           and case.prompts[0]["working_directory"]
@@ -186,7 +192,7 @@ def cases(root):
              "sent reboot-test a text other than the release message: 'You may open your "
              "mutant-test pull requests now.'")):
         case = Case(root, name)
-        case.gh_answer(pages(ten_unreviewed))
+        case.gh_answer(pages(ten_counted))
         case.sender_answers(outcome)
         code, output = case.run()
         check(f"when the {name.split('-')[0]} {'differs' if name == 'text-differs' else 'fails'}, nothing is recorded, what failed is printed, "
@@ -204,25 +210,55 @@ def cases(root):
     case = Case(root, "eleven")
     case.gh_answer(pages([pull_request(number) for number in range(1, 12)]))
     code, output = case.run()
-    check("11 unreviewed open pull requests name no agent-seat and print the count, exit 1",
+    check("11 counted open pull requests name no agent-seat and print the count, exit 1",
           code == 1 and "RELEASE" not in output and case.prompts == []
-          and output.startswith("11 open pull requests, not drafts"), f"exit {code}\n{output}")
+          and output.startswith("11 open pull requests that are not drafts"),
+          f"exit {code}\n{output}")
+
+    for name, eleventh, counted in (
+            ("approved-not-merged", pull_request(11, reviews=[("APPROVED", "head")]), True),
+            ("changes-requested", pull_request(11, reviews=[("CHANGES_REQUESTED", "head")]),
+             False),
+            ("draft", pull_request(11, draft=True), False),
+            ("sent-back-then-approved",
+             pull_request(11, reviews=[("CHANGES_REQUESTED", "head"), ("APPROVED", "head")]),
+             True),
+            ("approved-then-sent-back",
+             pull_request(11, reviews=[("APPROVED", "head"), ("CHANGES_REQUESTED", "head")]),
+             False)):
+        case = Case(root, name)
+        case.gh_answer(pages(ten_counted + [eleventh]))
+        case.sender_answers(("sent", "reboot-test"))
+        code, output = case.run()
+        check(f"beside 10 counted pull requests, a {name} pull request "
+              f"{'is counted, so none is released' if counted else 'is not counted'}",
+              (code == 1 and output.startswith("11 open pull requests")) if counted
+              else (code == 0 and "\n10 open pull requests" in output),
+              f"exit {code}\n{output}")
 
     case = Case(root, "counted-right")
     case.gh_answer(pages(
-        ten_unreviewed[:5],
-        ten_unreviewed[5:] + [pull_request(20, draft=True), pull_request(21, reviewed_on="head"),
-                              pull_request(22, reviewed_on="older"),
-                              pull_request(23, reviewed_on="deleted-commit")]))
+        ten_counted[:5],
+        ten_counted[5:] + [
+            pull_request(20, draft=True),
+            pull_request(21, reviews=[("APPROVED", "head")]),
+            pull_request(22, reviews=[("CHANGES_REQUESTED", "head")]),
+            pull_request(23, reviews=[("CHANGES_REQUESTED", "older")]),
+            pull_request(24, reviews=[("CHANGES_REQUESTED", "deleted-commit")]),
+            pull_request(25, reviews=[("CHANGES_REQUESTED", "head"), ("COMMENTED", "head")]),
+            pull_request(26, reviews=[("CHANGES_REQUESTED", "head"), ("APPROVED", "head")]),
+            pull_request(27, reviews=[("APPROVED", "head"), ("CHANGES_REQUESTED", "head")]),
+            pull_request(28, reviews=[("DISMISSED", "head")])]))
     code, output = case.run()
-    check("across pages, drafts and pull requests reviewed on their head commit are not counted, "
-          "and a review on an older commit or on a commit GitHub no longer has does not count "
-          "as one",
-          code == 1 and output.startswith("12 open pull requests"), f"exit {code}\n{output}")
+    check("across pages, a pull request is left out only when it is a draft or the newest "
+          "approval or request for changes on its head commit is a request for changes; one on "
+          "an older commit, or on a commit GitHub no longer has, does not leave it out, and a "
+          "later COMMENTED review does not bring it back",
+          code == 1 and output.startswith("15 open pull requests"), f"exit {code}\n{output}")
 
     case = Case(root, "all-released",
                 released="".join(json.dumps({"agent_seat": seat}) + "\n" for seat in SEATS))
-    case.gh_answer(pages(ten_unreviewed))
+    case.gh_answer(pages(ten_counted))
     code, output = case.run()
     check("when every listed agent-seat is recorded as released, none is named, exit 1",
           code == 1 and "RELEASE" not in output and "already recorded as released" in output,
@@ -243,20 +279,20 @@ def cases(root):
           f"exit {code}\n{output}")
 
     case = Case(root, "no-seats-file", seats=None)
-    case.gh_answer(pages(ten_unreviewed))
+    case.gh_answer(pages(ten_counted))
     code, output = case.run()
     check("a missing agent-seats file exits 2, naming the file",
           code == 2 and f"could not read the agent-seats file {case.state}" in output,
           f"exit {code}\n{output}")
 
     case = Case(root, "bad-record", released='{"agent_seat": "reboot-test"}\nnot json\n')
-    case.gh_answer(pages(ten_unreviewed))
+    case.gh_answer(pages(ten_counted))
     code, output = case.run()
     check("a released record that is not JSON exits 2, naming its line",
           code == 2 and "line 2 of the released records" in output, f"exit {code}\n{output}")
 
     case = Case(root, "record-unwritable")
-    case.gh_answer(pages(ten_unreviewed))
+    case.gh_answer(pages(ten_counted))
     case.sender_answers(("sent", "reboot-test"))
     case.state.chmod(0o555)
     try:
@@ -270,7 +306,7 @@ def cases(root):
           and '"agent_seat": "reboot-test"' in output, f"exit {code}\n{output}")
 
     case = Case(root, "crash")
-    case.gh_answer(pages(ten_unreviewed))
+    case.gh_answer(pages(ten_counted))
     saved = program.agent_seats_in_release_order
     program.agent_seats_in_release_order = lambda directory: 1 / 0
     try:

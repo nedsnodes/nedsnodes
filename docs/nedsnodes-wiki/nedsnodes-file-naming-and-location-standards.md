@@ -63,7 +63,7 @@ The user reviews each change to these files that `docs/nedsnodes-wiki/nedsnodes-
 - every file of standing instructions, whose name ends `-prompt.md` or `-instructions.md`;
 - `CLAUDE.md`, any `CLAUDE.local.md`, and everything under `.claude/` except its working space: `worktrees/`, `jobs/` and `handoffs/`.
 
-The list does not reach the places for documents pending approval, where agents write them freely: any `queue/` directory, such as `docs/agents/queue/`, `docs/issues/queue/` or `docs/nedsnodes-wiki/queue/`, `nn-queue/`, and `docs/drafts/`. Test-designs and design-contracts are not on the list, wherever they sit, `nn-systems/skills/` included: design-to-main brings them to the user. Nor are the frozen copies inside `cold-read-records/`, `md-review-records/` and `sanity-check-records/`. `.claude/guard-hooks/instruction-file-guard.py` enforces the list for an agent's file-editing tools; a shell command, `git mv` or a program is not checked.
+The list does not reach the places for documents pending approval, where agents write them freely: any `queue/` directory, such as `docs/agents/queue/`, `docs/issues/queue/` or `docs/nedsnodes-wiki/queue/`, and `docs/drafts/`. Test-designs and design-contracts are not on the list, wherever they sit, `nn-systems/skills/` included: design-to-main brings them to the user. Nor are the frozen copies inside `cold-read-records/`, `md-review-records/` and `sanity-check-records/`. `.claude/guard-hooks/instruction-file-guard.py` enforces the list for an agent's file-editing tools; a shell command, `git mv` or a program is not checked.
 
 ## Filename suffixes
 

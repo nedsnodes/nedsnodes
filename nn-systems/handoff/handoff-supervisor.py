@@ -1256,12 +1256,14 @@ def load_module_from_path(name: str, path: Path):
     return module
 
 
-def successor_initial_agent_instructions_line_naming_waiting_approval_walk_item(working_directory: Path) -> tuple:
+def successor_initial_agent_instructions_line_naming_waiting_approval_walk_item(working_directory: Path,
+                                                                                next_step: str = "") -> tuple:
     """Return the first prompt's line naming the open approval-walk's waiting item and its last page link, or no
     lines when no approval-walk is open or every one is paused; never block launch.
 
-    The walk is the one with the latest walk-minutes, by modification time, among the open ones in
-    working_directory's docs/walk/, as /walk-me-through chooses when several are open. When the walk-minutes'
+    The walk is the open one in working_directory's docs/walk/ that next_step names, or else the one with the
+    latest walk-minutes, by modification time, as /walk-me-through chooses when several are open; when
+    next_step names more than one, the latest of those. When the walk-minutes'
     `#next_to_present` line names several items, the line names the first, where the walk resumes. When the
     walk-document cannot be read, the line names the item from the walk-minutes alone, without its point, and
     says why; its count then lacks `of M` when the `#next_to_present` line gives none, so the `#item_page` line
@@ -1279,7 +1281,9 @@ def successor_initial_agent_instructions_line_naming_waiting_approval_walk_item(
                  if not walk[3]]
         if not walks:
             return ()
-        minutes, value, _, _ = max(walks, key=lambda walk: walk[0].stat().st_mtime)
+        named_in_next_step = [walk for walk in walks if re.search(
+            rf"(?<![\w-]){re.escape(walk[0].name[:-len(walk_finder.MINUTES_SUFFIX)])}(?![\w-])", next_step)]
+        minutes, value, _, _ = max(named_in_next_step or walks, key=lambda walk: walk[0].stat().st_mtime)
         name = minutes.name[:-len(walk_finder.MINUTES_SUFFIX)]
         numbers, total = walk_finder.parse_items(value)
         number = numbers[0]
@@ -1297,8 +1301,8 @@ def successor_initial_agent_instructions_line_naming_waiting_approval_walk_item(
         document = minutes.with_name(name + ".md")
         text = document.read_text(encoding="utf-8")
         spans = walk_finder.item_unit_spans(text, parser)
-        total, _ = walk_finder.waiting_item_units(document, value, numbers, total, parser, spans)
-        point = walk_short_answer_hook.heading_points(text.split("\n"), spans, parser).get(number)
+        total, units = walk_finder.waiting_item_units(document, value, numbers, total, parser, spans)
+        point = walk_short_answer_hook.heading_points(text.split("\n"), units, parser).get(number)
     except Exception as error:
         print(f"handoff-supervisor: waiting approval-walk item's walk-document unreadable: "
               f"{type(error).__name__}: {error}")
@@ -1371,6 +1375,10 @@ class DialogIgnitionPlan:
     extract_path: Path
     handoff_fields: dict
     predecessor_session_directory: Optional[Path] = None
+
+    @property
+    def next_step(self) -> str:
+        return next_step_from(self.handoff_fields)
 
     def compose(self, launch_time_git_sync_report: str,
                 overview_refresh_due: tuple = (),
@@ -1643,7 +1651,7 @@ def overview_refresh_due_lines(working_directory: Path,
                   f"{handoff_architecture_overview_refresh_user_shown_mark.SYSTEM_NAME_PATTERN}, "
                   f"the system-name pattern "
                   f"nn-systems/handoff/handoff-architecture-overview-refresh-user-shown-mark.py "
-                  f"accepts, so its nc-architecture-overview is not checked; the other systems "
+                  f"accepts, so its nn-architecture-overview is not checked; the other systems "
                   f"still are.\n"
                   f"If nn-systems/{printable} holds a system's programs, propose to the user a "
                   f"name for it that matches, to be renamed in a pull request; otherwise "
@@ -2757,7 +2765,8 @@ def supervise_sessions(settings: SupervisorSettings) -> int:
                 choose_branch_state_instruction_from_working_directory_push_state(
                     settings.working_directory))
             waiting_approval_walk_item = (
-                successor_initial_agent_instructions_line_naming_waiting_approval_walk_item(settings.working_directory))
+                successor_initial_agent_instructions_line_naming_waiting_approval_walk_item(
+                    settings.working_directory, ignition_plan.next_step))
             prompt = ignition_plan.compose(
                 launch_time_git_sync_report, overview_refresh_due, memory_review_due,
                 branch_state_instruction=branch_state_instruction,

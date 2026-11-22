@@ -1652,6 +1652,13 @@ with tempfile.TemporaryDirectory() as workspace:
               " work to your task list"
               in hook.NEW_WORK_DURING_HANDOFF_DEFERRAL_INSTRUCTION,
               hook.NEW_WORK_DURING_HANDOFF_DEFERRAL_INSTRUCTION)
+        # The writer lists every running background Bash task, so naming one by hand is wrong.
+        check("the instruction on new work does not tell the agent to name a background Bash task"
+              " started before the deferral in the next-step file",
+              "started before the deferral" not in hook.NEW_WORK_DURING_HANDOFF_DEFERRAL_INSTRUCTION
+              and "is named, with its command, in the next-step file"
+              not in hook.NEW_WORK_DURING_HANDOFF_DEFERRAL_INSTRUCTION,
+              hook.NEW_WORK_DURING_HANDOFF_DEFERRAL_INSTRUCTION)
         check("the instruction on new work limits the subagent, background or detached rule to work left running at the turn's end",
               "Work you leave running when your turn ends must run as a subagent, a background Bash task,"
               " or a detached process, such as one started with setsid or systemd-run --user, that writes"
@@ -2199,7 +2206,7 @@ with tempfile.TemporaryDirectory() as workspace:
         # wait-limit, and one millisecond less.
         boundary_clock = clock.replace(microsecond=clock.microsecond // 1000 * 1000)
         for kind_name, command, limit_minutes in (
-                ("nc-mutation-testing",
+                ("nn-mutation-testing",
                  "python3 scripts/mutation-testing-changed-lines-quick-or-full-pass-survivors.py", 105),
                 ("test-suite", "cd /tmp/x && python3 scripts/run-all-test-suites.py", 90),
                 ("a command no kind matches", "python3 nn-systems/cold-read/cold-read-grid.py", 75)):
