@@ -319,8 +319,8 @@ def deleted_branch_entry(repo, branch, tip):
             f"copy; restore it with: {restore}")
 
 
-def branch_entries(repo, branches, by_head_branch, by_head_commit, deleted,
-                   delete_cherry_picked_copies=False, holding=None):
+def branch_entries(repo, branches, by_head_branch, by_head_commit, deleted, holding,
+                   delete_cherry_picked_copies=False):
     """Return the entry text of each branch that no pull request has as its head. The entry text
     of each such branch deleted because origin/main holds a copy of its every commit is appended
     to deleted, the caller's list, at once, so that the deletion and its restore command are
@@ -331,7 +331,7 @@ def branch_entries(repo, branches, by_head_branch, by_head_commit, deleted,
     for branch, tip, date in branches:
         if pull_request_for(branch, tip, by_head_branch, by_head_commit) is not None:
             continue
-        if holding is not None and holding.holds(branch):
+        if holding.holds(branch):
             continue
         deletion_failure = ""
         if delete_cherry_picked_copies and every_commit_is_a_cherry_picked_copy_on_origin_main(
@@ -418,7 +418,7 @@ def list_text_and_failure(repo, agent_seat, skip_worktree=None, entries_at_most=
                                             by_head_commit))
         branches = ([] if pull_request_failure else
                     branch_entries(repo, authored, by_head_branch, by_head_commit, deleted,
-                                   delete_cherry_picked_copies, holding))
+                                   holding, delete_cherry_picked_copies))
     except Exception as error:
         failure = (f"This agent-seat's worktrees and branches with no pull request could not be "
                    f"listed ({type(error).__name__}: {error}). Work an earlier agent-session left "
