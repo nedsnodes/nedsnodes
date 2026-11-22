@@ -8,7 +8,8 @@ runs and nc-mutation-testing use. The probe tries every escape. Each target is o
 this file made for the purpose: a file in the real home directory, a tmux server
 on a socket of its own, a listening socket in the session's runtime directory, a
 sleeper process, a scratch repository. If a protection were missing, the worst a
-probe can do is change those targets, and this file removes them afterwards. The
+probe can do is change those targets, and this file removes them afterwards; what a run
+killed with SIGKILL could not remove, the next run removes before it starts. The
 real credential files are only measured, never printed, and the machine's real
 listening sockets only connected to and closed.
 
@@ -29,6 +30,7 @@ import importlib.util
 import json
 import os
 import pathlib
+import re
 import shutil
 import socket
 import subprocess
@@ -351,6 +353,48 @@ def listening_unix_sockets_of_this_machine():
     return sorted(found)
 
 
+TARGET_NAME_PREFIX = "run-all-test-suites-escape-test-"
+# Every name run_probe gives what it makes outside its scratch directory, so a later run
+# can find what a run killed before its cleanup left; the 8 characters are mkdtemp's.
+TARGET_NAME_PATTERN = re.compile(
+    r"\.?" + re.escape(TARGET_NAME_PREFIX)
+    + r"(\d+)(-unlisted|-log|-probe|-late\.sock|\.sock|-[a-z0-9_]{8})?")
+
+
+def remove_targets_left_by_ended_runs(directories):
+    """Remove each target in directories named for a process that no longer runs, or for
+    this process, whose PID an ended run may have had; return the paths removed.
+
+    The runner ends a suite past its time limit, or every suite of a stopped run, with
+    SIGKILL, so run_probe's own cleanup never runs and the targets stay, among them a
+    directory in the real home directory holding a planted credential."""
+    removed = []
+    for directory in directories:
+        try:
+            entries = sorted(pathlib.Path(directory).iterdir())
+        except FileNotFoundError:
+            continue
+        for path in entries:
+            matched = TARGET_NAME_PATTERN.fullmatch(path.name)
+            if not matched:
+                continue
+            pid = int(matched.group(1))
+            if pid != os.getpid():
+                try:
+                    os.kill(pid, 0)
+                    continue
+                except ProcessLookupError:
+                    pass
+                except PermissionError:
+                    continue
+            if path.is_dir() and not path.is_symlink():
+                shutil.rmtree(path)
+            else:
+                path.unlink()
+            removed.append(str(path))
+    return removed
+
+
 @contextlib.contextmanager
 def environment_set(values):
     saved = {name: os.environ.get(name) for name in values}
@@ -393,7 +437,13 @@ def run_probe(scratch):
         return
     home = pathlib.Path(runner.REAL_HOME_DIRECTORY_PATH_HIDDEN_BY_EMPTY_TMPFS_IN_TEST_SANDBOX)
     runtime = pathlib.Path(runner.XDG_RUNTIME_DIRECTORY_PATH_HIDDEN_BY_EMPTY_TMPFS_IN_TEST_SANDBOX)
-    name = f"run-all-test-suites-escape-test-{os.getpid()}"
+    name = f"{TARGET_NAME_PREFIX}{os.getpid()}"
+    left = remove_targets_left_by_ended_runs(
+        [home, home / ".cache", "/tmp", pathlib.Path("/tmp") / f"tmux-{os.getuid()}",
+         "/var/tmp", "/dev/shm", runtime])
+    if left:
+        print(f"removed {len(left)} target(s) runs killed before their cleanup left: "
+              + ", ".join(left))
 
     git_directory, checkout = make_linked_worktree(scratch)
     (checkout / PROBE_SUITE).write_text(X11_PROBE_SOURCE + PROBE_SOURCE)
@@ -917,10 +967,64 @@ def check_blob_hashes_run_no_filter(scratch):
           not marker.exists() and hashes.get("file.txt") not in (None, "unknown"), hashes)
 
 
+def check_targets_of_a_killed_run_removed_by_the_next(scratch):
+    """What a run killed with SIGKILL planted is removed by the next run's start, while a
+    running run's targets and names this file never makes are kept."""
+    home, cache = scratch / "home", scratch / "cache"
+    home.mkdir()
+    cache.mkdir()
+    planter = subprocess.Popen(
+        [sys.executable, "-c",
+         "import os, pathlib, sys, time\n"
+         "home, cache = pathlib.Path(sys.argv[1]), pathlib.Path(sys.argv[2])\n"
+         f"name = {TARGET_NAME_PREFIX!r} + str(os.getpid())\n"
+         "(home / f'.{name}-unlisted').mkdir()\n"
+         "(home / f'.{name}-unlisted' / 'oauth-token').write_text('planted-secret')\n"
+         "(cache / name).mkdir()\n"
+         "(cache / f'{name}-log').mkdir()\n"
+         "(cache / f'{name}-probe').write_text('')\n"
+         "print('planted', flush=True)\n"
+         "time.sleep(600)\n",
+         str(home), str(cache)],
+        stdout=subprocess.PIPE, text=True)
+    planted_line = planter.stdout.readline()
+    planter.kill()
+    planter.wait()
+    planter.stdout.close()
+    killed = TARGET_NAME_PREFIX + str(planter.pid)
+    killed_paths = [home / f".{killed}-unlisted", cache / killed, cache / f"{killed}-log",
+                    cache / f"{killed}-probe"]
+    running = subprocess.Popen(["sleep", "600"])
+    try:
+        # PID 1 is another user's process, which this one may not signal.
+        kept = [home / f".{TARGET_NAME_PREFIX}{running.pid}-unlisted",
+                home / f".{TARGET_NAME_PREFIX}1-unlisted",
+                home / f".{killed}-unlisted-by-someone-else", cache / f"{TARGET_NAME_PREFIX}notes"]
+        for path in kept:
+            path.mkdir()
+        own = cache / f"{TARGET_NAME_PREFIX}{os.getpid()}-log"
+        own.mkdir()
+        check("a run killed with SIGKILL leaves its targets, among them a planted credential",
+              planted_line == "planted\n" and all(path.exists() for path in killed_paths),
+              planted_line)
+        removed = remove_targets_left_by_ended_runs([home, cache, scratch / "missing"])
+        check("the next run removes every target the killed run left, and one named for its "
+              "own PID",
+              not any(path.exists() for path in [*killed_paths, own])
+              and sorted(removed) == sorted(map(str, [*killed_paths, own])), removed)
+        check("the next run keeps a running run's targets and names this file never makes",
+              all(path.exists() for path in kept))
+    finally:
+        running.kill()
+        running.wait()
+
+
 with tempfile.TemporaryDirectory() as scratch_name:
     check_runner_writes_and_reads_refuse_symbolic_links(pathlib.Path(scratch_name))
 with tempfile.TemporaryDirectory() as scratch_name:
     check_blob_hashes_run_no_filter(pathlib.Path(scratch_name))
+with tempfile.TemporaryDirectory() as scratch_name:
+    check_targets_of_a_killed_run_removed_by_the_next(pathlib.Path(scratch_name))
 
 unavailable = bwrap_unavailable_reason()
 if unavailable:
