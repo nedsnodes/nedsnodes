@@ -145,7 +145,7 @@ def main():
     check("a draft with a defect line, its head checked out and passing suites is marked ready, "
           "the suites running before gh pr ready",
           status == program.EXIT_MARKED_READY
-          and runner.calls == ["view", "rev-parse", "status", "suites", "ready"]
+          and runner.calls == ["view", "rev-parse", "status", "suites", "rev-parse", "status", "ready"]
           and f"#77 ({URL}) is marked ready for review." in output
           and "merge-lane-2" not in output + errors,
           (status, runner.calls, output, errors))
@@ -304,6 +304,34 @@ def main():
         check(f"{label} is refused before gh pr ready, saying why and what to do",
               status == program.EXIT_MARK_READY_REFUSED_OR_FAILED and runner.calls == expected_calls
               and all(line in errors for line in expected_lines), (status, runner.calls, errors))
+
+    # The checkout changes while the suites run, as an agent may change it while the runner waits for
+    # the machine's test lock: the suites pass, but on other content.
+    for label, edit, expected in [
+            ("a branch switch", "head", f"its HEAD moved from {HEAD[:12]} to {OTHER[:12]}"),
+            ("an uncommitted edit", "edit", "it now has 1 uncommitted change(s), as git status --porcelain "
+                                            "lists them:\n  M hook.py")]:
+        state = {"ran": False}
+
+        def suites_then_change(command, state=state):
+            state["ran"] = True
+            return completed(command, 0)
+
+        def rev_parse_after(command, state=state, edit=edit):
+            moved = state["ran"] and edit == "head"
+            return completed(command, 0, f"{CHECKOUT}\n{OTHER if moved else HEAD}\n")
+
+        def status_after(command, state=state, edit=edit):
+            return completed(command, 0, " M hook.py\n" if state["ran"] and edit == "edit" else "")
+
+        runner = FakeRunner(suites=suites_then_change, rev_parse=rev_parse_after, status=status_after)
+        status, output, errors = run(runner)
+        check(f"{label} while the suites ran is refused after their pass, before gh pr ready, saying so",
+              status == program.EXIT_MARK_READY_REFUSED_OR_FAILED
+              and runner.calls == ["view", "rev-parse", "status", "suites", "rev-parse", "status"]
+              and "the test suites passed, but this checkout changed while they ran: " + expected in errors
+              and "stays a draft pull request. Nothing was changed on GitHub." in errors
+              and "is marked ready" not in output, (status, runner.calls, errors))
 
     # Only the lines for the pull request's actual state are printed.
     _, _, errors = run(FakeRunner(view=answers(view_answer(state="MERGED"))))

@@ -15,7 +15,8 @@ Run it from the pull request's own checkout, with its nn-head-commit checked out
    description has none;
 4. runs this checkout's test suites whose recorded inputs changed since origin/main, with this
    checkout's own scripts/run-all-test-suites.py, waiting for the machine's test lock where the
-   runner takes one, and refuses when any fails;
+   runner takes one, and refuses when any fails, or when they pass but HEAD moved or the
+   checkout gained an uncommitted change while they ran;
 5. marks the pull request ready for review with gh pr ready.
 
 It does not check what scripts/merge-gate.sh checks again before merging, such as a not-fixed
@@ -182,6 +183,41 @@ def head_mismatch_next_steps(pull_request, head, runner, git_failed):
             "the agent that dispatched you, which files conflict.")
 
 
+def refuse_checkout_changed_while_suites_ran(name, number, head, runner, git_failed):
+    """The suites test the live checkout, which an agent can change while the runner waits for the
+    machine's test lock, so a pass counts only when HEAD is still head and the checkout still clean."""
+    printed = run_command(["git", "rev-parse", "--show-toplevel", "HEAD"], runner, GIT_TIMEOUT_SECONDS,
+                          "reading this checkout's HEAD again after the test suites", git_failed).splitlines()
+    head_after = printed[-1] if printed else "(nothing)"
+    changed = run_command(UNCOMMITTED_CHANGES_COMMAND, runner, GIT_TIMEOUT_SECONDS,
+                          "reading this checkout's uncommitted changes again after the test suites",
+                          git_failed).splitlines()
+    if head_after == head and not changed:
+        return
+    what = []
+    if head_after != head:
+        what.append(f"its HEAD moved from {head[:12]} to {head_after[:12]}")
+    if changed:
+        what.append(f"it now has {len(changed)} uncommitted change(s), as git status --porcelain lists them:\n"
+                    + "".join(f"  {line.strip()}\n" for line in changed))
+    rerun = f"python3 scripts/{Path(__file__).name} {number}"
+    raise StepFailed(
+        f"the test suites passed, but this checkout changed while they ran: {' and '.join(what).rstrip()}\n"
+        f"So the suites may have tested files other than {name}'s pushed commits, and {name} stays a "
+        f"draft pull request. {NOTHING_CHANGED_LINE}\n"
+        "Leave this checkout unchanged while this command runs: it may wait up to "
+        f"{test_suite_runner.MACHINE_LOCK_WAIT_SECONDS_SUGGESTED / 60:g} minutes for the machine's "
+        "test lock before the suites start, and the suites test the checkout as it is then.\n"
+        f"If you or another agent changed the checkout on purpose: once that work is done, and pushed if "
+        f"it made commits for {name}, run {rerun} from this checkout. It refuses while HEAD is not "
+        f"{name}'s pushed nn-head-commit, or while the checkout has an uncommitted change, and says what "
+        "to do in either case.\n"
+        f"If no one meant to change it: run {rerun} from this checkout once, and do what it prints. If it "
+        "refuses again because the checkout changed while the suites ran, tell the user, in one sentence, "
+        f"that pull request {number} could not be marked ready for review because its checkout keeps "
+        "changing while the test suites run; if you are a subagent, tell the agent that dispatched you instead.")
+
+
 def check_and_mark_ready(number, runner, output):
     pull_request = read_pull_request(number, runner)
     name = f"#{number} ({pull_request.get('url')})"
@@ -298,6 +334,7 @@ def check_and_mark_ready(number, runner, output):
             "suite, "
             f"{stays_a_draft} Its error is above.\n"
             + RETRY_THEN_USER_INSTRUCTION.format(number=number))
+    refuse_checkout_changed_while_suites_ran(name, number, head, runner, rev_parse_failed)
     run_command(
         ["gh", "pr", "ready", str(number)], runner, GH_TIMEOUT_SECONDS,
         f"marking {name} ready for review",

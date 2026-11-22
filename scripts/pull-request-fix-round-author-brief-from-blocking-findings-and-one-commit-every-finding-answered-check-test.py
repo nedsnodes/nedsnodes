@@ -114,6 +114,8 @@ if os.environ.get("FAKE_RUNNER_LOCK_FILE"):
             fcntl.flock(lock.fileno(), fcntl.LOCK_EX | fcntl.LOCK_NB)
             break
         except BlockingIOError:
+            if os.environ.get("FAKE_RUNNER_LOCK_CONTENDED_SIGNAL"):
+                Path(os.environ["FAKE_RUNNER_LOCK_CONTENDED_SIGNAL"]).touch()
             if time.monotonic() >= deadline:
                 print("run-all-test-suites: not run \u2014 another run holds the lock", file=sys.stderr)
                 sys.exit(3)
@@ -1762,7 +1764,11 @@ PARTLY_KEPT_ONLY = PARTLY_MAIN.replace("line 2\n", "line 2 kept\n")
 PARTLY_MOVED_ONLY = PARTLY_MAIN.replace("line 18\n", "line 18 moved\n")
 ANSWERS_TEXT = "1. Fixed.\n2. Moved.\n"
 # Stands in for scripts/run-all-test-suites.py in the scratch repository.
-FAKE_TESTS = 'import os, sys\nsys.exit(int(os.environ.get("FAKE_TESTS_EXIT", "0")))\n'
+# FAKE_TESTS_EDIT names a file the fake appends to, standing in for an edit made while the real runner waits for the
+# machine's test lock.
+FAKE_TESTS = ('import os, sys\nif os.environ.get("FAKE_TESTS_EDIT"):\n'
+              '    open(os.environ["FAKE_TESTS_EDIT"], "a").write("edited while the tests ran\\n")\n'
+              'sys.exit(int(os.environ.get("FAKE_TESTS_EXIT", "0")))\n')
 # A git that leaves a branch in place on git branch -D, so the program's check that the branch is gone can fail.
 GIT_KEEPING_DELETED_BRANCH = r'''#!/usr/bin/env python3
 import os, sys
@@ -1938,9 +1944,14 @@ def move_cases(root, _repository, _base, _frozen_head):
     check("move-finish: a failing test command stops it before the commit",
           code == 1 and "exited 3" in err
           and git(repository, "rev-parse", "HEAD") == git(repository, "rev-parse", "origin/main"), err)
+    code, out, err = run(root, repository, routes, *finish, environment_extra={"FAKE_TESTS_EDIT": "partly.txt"})
+    check("move-finish: a worktree edited while the tests ran is refused, with nothing committed",
+          code == 1 and "changed while it ran" in err and "nothing is committed yet" in err
+          and git(repository, "rev-parse", "HEAD") == git(repository, "rev-parse", "origin/main"), out + err)
+    (repository / "partly.txt").write_text(PARTLY_MOVED_ONLY)
 
     code, out, err = run(root, repository, routes, *finish)
-    pushed = git(repository, "ls-tree", "-r", "--name-only", f"origin/{NEW_BRANCH}").split("\n")
+    pushed =git(repository, "ls-tree", "-r", "--name-only", f"origin/{NEW_BRANCH}").split("\n")
     check("move-finish: pushes the moved change alone, without the answers file",
           code == 0 and sorted(pushed) == sorted(["moved.py", "partly.txt", "scripts/run-all-test-suites.py"])
           and git(repository, "show", f"origin/{NEW_BRANCH}:partly.txt") + "\n" == PARTLY_MOVED_ONLY, out + err)
@@ -2279,16 +2290,25 @@ def suite_cases(root, repository, _base, _frozen_head):
           code == 0 and "Not pushed yet" in out and "at the frozen-head too, so not because of this round; the "
           "message for merge-lane-2 will name them: a-test.py" in out and len(runner_calls(root)) == 2, out + err)
     lock_file = root / "machine-test-lock"
+    contended = root / "machine-test-lock-contended"
     with open(lock_file, "a") as held:
         fcntl.flock(held.fileno(), fcntl.LOCK_EX)
-        releaser = threading.Timer(1.0, fcntl.flock, (held.fileno(), fcntl.LOCK_UN))
+
+        def release_once_the_runner_found_the_lock_held():
+            deadline = datetime.datetime.now() + datetime.timedelta(seconds=120)
+            while not contended.exists() and datetime.datetime.now() < deadline:
+                threading.Event().wait(0.05)
+            fcntl.flock(held.fileno(), fcntl.LOCK_UN)
+
+        releaser = threading.Thread(target=release_once_the_runner_found_the_lock_held)
         releaser.start()
-        code, out, err = check_with_head(frozen_head, {"FAKE_RUNNER_LOCK_FILE": str(lock_file)})
+        code, out, err = check_with_head(frozen_head, {"FAKE_RUNNER_LOCK_FILE": str(lock_file),
+                                                       "FAKE_RUNNER_LOCK_CONTENDED_SIGNAL": str(contended)})
         releaser.join()
     check("suites: while another process holds the machine's test lock, the check's suite runs wait for it "
           "instead of exiting 3, and the check passes once it is released",
-          code == 0 and "Not pushed yet" in out and "another run holds the lock" not in out + err
-          and len(runner_calls(root)) == 2, out + err)
+          contended.exists() and code == 0 and "Not pushed yet" in out
+          and "another run holds the lock" not in out + err and len(runner_calls(root)) == 2, out + err)
     code, out, err = check_with_head(frozen_head, {"FAKE_RUNNER_NOT_RUN": "b-test.py c-test.py"})
     check("suites: suites NOT RUN beside a failure the frozen-head shares fail the check with exit 2, "
           "before any push, and the refusal quotes every NOT RUN line",
