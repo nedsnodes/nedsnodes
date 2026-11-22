@@ -5341,6 +5341,32 @@ def run_pushed_filing_branch_rerun_line_real_git_cases(scratch: Path):
           and f"at commit {gadget_commit}," in str(refusal)
           and f"`scripts/ghi-issue-write.py create {source}`" in str(refusal),
           str(refusal))
+    told = str(refusal)
+    check("and tells the agent to leave the branch to the user, tell the "
+          "user two facts, then leave the filing, or as a subagent to pass "
+          "the facts on",
+          "\nDo not change the branch unless the user tells you to" in told
+          and "\nTell the user two facts: branch ghi-4101-gadget holds no "
+          "file named for it for issue 4101;" in told
+          and "Then leave this filing until the user answers." in told
+          and "\nIf you are a subagent, pass those two facts to the agent "
+          "that dispatched you instead." in told, told)
+
+    # Followed as the refusal says: once the branch holds one file for the
+    # issue, the same rerun names it.
+    git("checkout", "-q", "ghi-4101-gadget", cwd=pusher)
+    (pusher / "docs/issues").mkdir(parents=True, exist_ok=True)
+    (pusher / "docs/issues/4101-gadget.md").write_text("# Gadget\n",
+                                                      encoding="utf-8")
+    git("add", "-A", cwd=pusher)
+    git("commit", "-q", "-m", "the one file", cwd=pusher)
+    git("push", "-q", "origin", "HEAD:refs/heads/ghi-4101-gadget",
+        cwd=pusher)
+    git("checkout", "-q", "main", cwd=pusher)
+    rerun = tool.land_file(REPO, 4101, "Gadget", source, author, runner,
+                           quiet)
+    check("and the rerun it gives continues once the branch holds one file",
+          rerun == "docs/issues/4101-gadget.md", rerun)
 
     # A push lands between the run's `git ls-remote` and its fetch, renaming
     # the file, so the head ls-remote printed is no longer the branch's.
