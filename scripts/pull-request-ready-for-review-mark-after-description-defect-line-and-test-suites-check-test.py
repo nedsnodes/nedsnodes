@@ -74,7 +74,7 @@ class FakeRunner:
     be replaced by a behaviour(command) that returns or raises. Records each call."""
 
     def __init__(self, view=None, rev_parse=None, status=None, suites=None, ready=None,
-                 branch=None, has_commit=None, ancestor=None):
+                 branch=None, has_commit=None, ancestor=None, worktree_add=None, worktree_remove=None):
         self.behaviours = {
             "view": view or (lambda command: completed(command, 0, view_answer())),
             "rev-parse": rev_parse or (lambda command: completed(command, 0,
@@ -85,8 +85,11 @@ class FakeRunner:
             "status": status or (lambda command: completed(command, 0, "")),
             "suites": suites or (lambda command: completed(command, 0)),
             "ready": ready or (lambda command: completed(command, 0)),
+            "worktree-add": worktree_add or (lambda command: completed(command, 0)),
+            "worktree-remove": worktree_remove or (lambda command: completed(command, 0)),
         }
         self.calls = []
+        self.commands = {}
 
     def __call__(self, command, **options):
         if command[:3] == ["gh", "pr", "view"]:
@@ -101,13 +104,18 @@ class FakeRunner:
             kind = "ancestor"
         elif command == program.UNCOMMITTED_CHANGES_COMMAND:
             kind = "status"
-        elif command == program.selective_test_run_command(CHECKOUT):
+        elif command[:3] == ["git", "worktree", "add"]:
+            kind = "worktree-add"
+        elif command[:3] == ["git", "worktree", "remove"]:
+            kind = "worktree-remove"
+        elif command[0] == "python3" and command[1].endswith("/scripts/run-all-test-suites.py"):
             kind = "suites"
         elif command[:3] == ["gh", "pr", "ready"]:
             kind = "ready"
         else:
             raise AssertionError(f"unexpected command {command}")
         self.calls.append(kind)
+        self.commands[kind] = command
         return self.behaviours[kind](command)
 
 
@@ -145,7 +153,7 @@ def main():
     check("a draft with a defect line, its head checked out and passing suites is marked ready, "
           "the suites running before gh pr ready",
           status == program.EXIT_MARKED_READY
-          and runner.calls == ["view", "rev-parse", "status", "suites", "rev-parse", "status", "ready"]
+          and runner.calls == ["view", "rev-parse", "status", "worktree-add", "suites", "worktree-remove", "ready"]
           and f"#77 ({URL}) is marked ready for review." in output
           and "merge-lane-2" not in output + errors,
           (status, runner.calls, output, errors))
@@ -155,8 +163,17 @@ def main():
               "python3", CHECKOUT + "/scripts/run-all-test-suites.py",
               "--only-suites-whose-recorded-inputs-changed-since", "origin/main",
               "--wait-for-lock-seconds", "3600"]
-          and f"running {CHECKOUT}/scripts/run-all-test-suites.py" in output,
+          and f"running {CHECKOUT}/scripts/run-all-test-suites.py" not in output,
           repr(program.selective_test_run_command(CHECKOUT)))
+    added = runner.commands["worktree-add"]
+    check("the test suites run in a detached scratch worktree of the pushed nn-head-commit, with that "
+          "worktree's own runner, not in this checkout, and the scratch worktree is removed after",
+          added[:5] == ["git", "worktree", "add", "--quiet", "--detach"] and added[6] == HEAD
+          and runner.commands["suites"] == program.selective_test_run_command(added[5])
+          and not added[5].startswith(CHECKOUT)
+          and runner.commands["worktree-remove"] == ["git", "worktree", "remove", "--force", added[5]]
+          and f"running, in a scratch worktree of {HEAD[:12]}, {added[5]}/scripts/run-all-test-suites.py" in output,
+          (runner.commands, output))
 
     # Already ready: nothing to do, nothing run.
     runner = FakeRunner(view=answers(view_answer(isDraft=False)))
@@ -286,7 +303,7 @@ def main():
              ["view", "rev-parse", "status"],
              ["description has no line beginning \"#root_cause\""]),
             ("a failing test suite", FakeRunner(suites=exits(1)),
-             ["view", "rev-parse", "status", "suites"],
+             ["view", "rev-parse", "status", "worktree-add", "suites", "worktree-remove"],
              ["the test suites exited with status 1, so #77",
               "The failing suites are named above.",
               "Fix the cause of each suite's failure and commit the fix; then push, and run "
@@ -296,7 +313,7 @@ def main():
               "then run this again; if it names nothing to do, tell the user, or the agent that "
               "dispatched you, what it printed."]),
             ("a test suite runner that stops before judging every suite",
-             FakeRunner(suites=exits(2)), ["view", "rev-parse", "status", "suites"],
+             FakeRunner(suites=exits(2)), ["view", "rev-parse", "status", "worktree-add", "suites", "worktree-remove"],
              ["scripts/run-all-test-suites.py exited with status 2, before judging every suite, "
               "so #77",
               "Its error is above.", RETRY_LINE])]:
@@ -304,34 +321,6 @@ def main():
         check(f"{label} is refused before gh pr ready, saying why and what to do",
               status == program.EXIT_MARK_READY_REFUSED_OR_FAILED and runner.calls == expected_calls
               and all(line in errors for line in expected_lines), (status, runner.calls, errors))
-
-    # The checkout changes while the suites run, as an agent may change it while the runner waits for
-    # the machine's test lock: the suites pass, but on other content.
-    for label, edit, expected in [
-            ("a branch switch", "head", f"its HEAD moved from {HEAD[:12]} to {OTHER[:12]}"),
-            ("an uncommitted edit", "edit", "it now has 1 uncommitted change(s), as git status --porcelain "
-                                            "lists them:\n  M hook.py")]:
-        state = {"ran": False}
-
-        def suites_then_change(command, state=state):
-            state["ran"] = True
-            return completed(command, 0)
-
-        def rev_parse_after(command, state=state, edit=edit):
-            moved = state["ran"] and edit == "head"
-            return completed(command, 0, f"{CHECKOUT}\n{OTHER if moved else HEAD}\n")
-
-        def status_after(command, state=state, edit=edit):
-            return completed(command, 0, " M hook.py\n" if state["ran"] and edit == "edit" else "")
-
-        runner = FakeRunner(suites=suites_then_change, rev_parse=rev_parse_after, status=status_after)
-        status, output, errors = run(runner)
-        check(f"{label} while the suites ran is refused after their pass, before gh pr ready, saying so",
-              status == program.EXIT_MARK_READY_REFUSED_OR_FAILED
-              and runner.calls == ["view", "rev-parse", "status", "suites", "rev-parse", "status"]
-              and "the test suites passed, but this checkout changed while they ran: " + expected in errors
-              and "stays a draft pull request. Nothing was changed on GitHub." in errors
-              and "is marked ready" not in output, (status, runner.calls, errors))
 
     # Only the lines for the pull request's actual state are printed.
     _, _, errors = run(FakeRunner(view=answers(view_answer(state="MERGED"))))
@@ -466,6 +455,11 @@ def main():
             ("python3 cannot run the test suites",
              FakeRunner(suites=raises(FileNotFoundError(2, "No such file", "python3"))),
              ["running the test suites failed: python3 could not be run (", RETRY_LINE]),
+            ("git cannot add the scratch worktree",
+             FakeRunner(worktree_add=exits(128, "fatal: could not create directory")),
+             ["git worktree add of the scratch worktree the test suites run in failed: git worktree add "
+              "exited with status 128: fatal: could not create directory.", "Nothing was changed on GitHub.",
+              RETRY_LINE]),
             ("gh pr ready fails",
              FakeRunner(ready=exits(1, "HTTP 502: Bad Gateway")),
              [f"marking #77 ({URL}) ready for review failed: gh pr ready exited with status "

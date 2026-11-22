@@ -1941,16 +1941,22 @@ def move_cases(root, _repository, _base, _frozen_head):
     check("move-finish: refuses a description file inside the worktree", code == 1 and "inside this worktree" in err, err)
     inside.unlink()
     code, out, err = run(root, repository, routes, *finish, environment_extra={"FAKE_TESTS_EXIT": "3"})
-    check("move-finish: a failing test command stops it before the commit",
-          code == 1 and "exited 3" in err
-          and git(repository, "rev-parse", "HEAD") == git(repository, "rev-parse", "origin/main"), err)
-    code, out, err = run(root, repository, routes, *finish, environment_extra={"FAKE_TESTS_EDIT": "partly.txt"})
-    check("move-finish: a worktree edited while the tests ran is refused, with nothing committed",
-          code == 1 and "changed while it ran" in err and "nothing is committed yet" in err
-          and git(repository, "rev-parse", "HEAD") == git(repository, "rev-parse", "origin/main"), out + err)
-    (repository / "partly.txt").write_text(PARTLY_MOVED_ONLY)
+    check("move-finish: a failing test command undoes the commit, leaving the moved change staged",
+          code == 1 and "exited 3" in err and "That commit is undone" in err
+          and git(repository, "rev-parse", "HEAD") == git(repository, "rev-parse", "origin/main")
+          and sorted(git(repository, "diff", "--cached", "--name-only").split("\n")) == ["moved.py", "partly.txt"]
+          and len(git(repository, "worktree", "list").splitlines()) == 1, out + err)
 
-    code, out, err = run(root, repository, routes, *finish)
+    # An edit to the worktree while the tests run, as an agent may make while the runner waits for the machine's
+    # test lock, reaches neither the tests, which run in a scratch worktree of the commit, nor what is pushed.
+    edited_during_tests = repository / "edited-during-tests.txt"
+    code, out, err = run(root, repository, routes, *finish,
+                         environment_extra={"FAKE_TESTS_EDIT": str(edited_during_tests)})
+    check("move-finish: the tests run in a scratch worktree of the commit, which an edit to the worktree "
+          "during them does not reach, and the scratch worktree is removed",
+          code == 0 and edited_during_tests.exists() and len(git(repository, "worktree", "list").splitlines()) == 1,
+          out + err)
+    edited_during_tests.unlink()
     pushed =git(repository, "ls-tree", "-r", "--name-only", f"origin/{NEW_BRANCH}").split("\n")
     check("move-finish: pushes the moved change alone, without the answers file",
           code == 0 and sorted(pushed) == sorted(["moved.py", "partly.txt", "scripts/run-all-test-suites.py"])
@@ -2294,17 +2300,21 @@ def suite_cases(root, repository, _base, _frozen_head):
     with open(lock_file, "a") as held:
         fcntl.flock(held.fileno(), fcntl.LOCK_EX)
 
+        check_ended = threading.Event()
+
         def release_once_the_runner_found_the_lock_held():
-            deadline = datetime.datetime.now() + datetime.timedelta(seconds=120)
-            while not contended.exists() and datetime.datetime.now() < deadline:
-                threading.Event().wait(0.05)
+            while not contended.exists() and not check_ended.wait(0.05):
+                pass
             fcntl.flock(held.fileno(), fcntl.LOCK_UN)
 
         releaser = threading.Thread(target=release_once_the_runner_found_the_lock_held)
         releaser.start()
-        code, out, err = check_with_head(frozen_head, {"FAKE_RUNNER_LOCK_FILE": str(lock_file),
-                                                       "FAKE_RUNNER_LOCK_CONTENDED_SIGNAL": str(contended)})
-        releaser.join()
+        try:
+            code, out, err = check_with_head(frozen_head, {"FAKE_RUNNER_LOCK_FILE": str(lock_file),
+                                                           "FAKE_RUNNER_LOCK_CONTENDED_SIGNAL": str(contended)})
+        finally:
+            check_ended.set()
+            releaser.join()
     check("suites: while another process holds the machine's test lock, the check's suite runs wait for it "
           "instead of exiting 3, and the check passes once it is released",
           contended.exists() and code == 0 and "Not pushed yet" in out

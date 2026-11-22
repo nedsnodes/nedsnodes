@@ -123,8 +123,8 @@ the pull request's branch after the round's commit, with a clean worktree apart 
 switches to NEW_TOPIC_BRANCH cut from origin/main and copies each PATH from the frozen-head, and only then
 records the move in MOVE_STATE_FILE_NAME in the git directory and moves the answers file there, so a failed
 switch or copy leaves nothing recorded and the answers file in place. The second refuses while an answers
-file or the description file is in the worktree, stages every change, runs the nn-test-suites as the pull
-request ready command runs them, refuses when HEAD, the index or the worktree changed while they ran, commits,
+file or the description file is in the worktree, stages every change, commits, runs the nn-test-suites as the
+pull request ready command runs them, in a scratch worktree of that commit, undoing the commit when they fail,
 pushes with the pre-push hook's time limit, opens the pull request with gh pr create, switches back,
 restores the answers file, deletes the local NEW_TOPIC_BRANCH and checks that it is gone. A failure after
 the commit undoes nothing and prints the commit, the steps done and the steps still to do, which are
@@ -1149,12 +1149,6 @@ def fix_commit_range(frozen_head, commits):
                   "If they are pushed, tell merge-lane-2 with SendMessage; do not force-push.")
 
 
-def staged_content_and_unstaged_changes():
-    """HEAD, the index's tree, and the worktree's changes beside the index, untracked files included."""
-    return (git(["rev-parse", "HEAD"]).strip(), git(["write-tree"]).strip(),
-            git(["status", "--porcelain", "-z", "--untracked-files=normal"]))
-
-
 def files_added_since(frozen_head, commit):
     """Files commit's tree holds that frozen_head's tree does not, whichever commit of the round added them."""
     # --no-renames, so that an answers file renamed from a file the frozen-head holds still counts as added.
@@ -1194,28 +1188,23 @@ def failing_suites_in_scratch_worktree(commit, command_for_checkout):
     its output through as it arrives; return each suite it reports failing, once, in its order."""
     failing = []
     unfinished = []
-    with tempfile.TemporaryDirectory(prefix="fix-round-check-suites-") as scratch:
-        checkout = Path(scratch) / "checkout"
-        git(["worktree", "add", "--quiet", "--detach", str(checkout), commit])
-        try:
-            command = command_for_checkout(checkout)
-            print(f"Running the nn-test-suites in a scratch worktree of {commit[:12]}: {shlex.join(command)}",
-                  flush=True)
-            with subprocess.Popen(command, cwd=checkout, stdin=subprocess.DEVNULL, stdout=subprocess.PIPE,
-                                  text=True) as runner:
-                for line in runner.stdout:
-                    sys.stdout.write(line)
-                    sys.stdout.flush()
-                    if line.startswith(test_suite_runner.FAILED_SUITE_LINE_PREFIX):
-                        suite = line[len(test_suite_runner.FAILED_SUITE_LINE_PREFIX):].split(" ", 1)[0].strip()
-                        if suite not in failing:
-                            failing.append(suite)
-                    elif line.startswith((test_suite_runner.NOT_RUN_SUITE_LINE_PREFIX,
-                                          *test_suite_runner.TEST_RUNNER_WHOLE_RUN_NOT_RUN_TO_THE_END_LINE_PREFIXES_FILE_PATH_AND_BARE_NAME_FORMS)):
-                        unfinished.append(line.strip())
-            status = runner.returncode
-        finally:
-            git(["worktree", "remove", "--force", str(checkout)])
+    with ready_command.scratch_worktree_of_commit(commit, git) as checkout:
+        command = command_for_checkout(checkout)
+        print(f"Running the nn-test-suites in a scratch worktree of {commit[:12]}: {shlex.join(command)}",
+              flush=True)
+        with subprocess.Popen(command, cwd=checkout, stdin=subprocess.DEVNULL, stdout=subprocess.PIPE,
+                              text=True) as runner:
+            for line in runner.stdout:
+                sys.stdout.write(line)
+                sys.stdout.flush()
+                if line.startswith(test_suite_runner.FAILED_SUITE_LINE_PREFIX):
+                    suite = line[len(test_suite_runner.FAILED_SUITE_LINE_PREFIX):].split(" ", 1)[0].strip()
+                    if suite not in failing:
+                        failing.append(suite)
+                elif line.startswith((test_suite_runner.NOT_RUN_SUITE_LINE_PREFIX,
+                                      *test_suite_runner.TEST_RUNNER_WHOLE_RUN_NOT_RUN_TO_THE_END_LINE_PREFIXES_FILE_PATH_AND_BARE_NAME_FORMS)):
+                    unfinished.append(line.strip())
+        status = runner.returncode
     # The runner exits 1 when a suite failed even if others never ran, so a failure the
     # frozen-head shares must not let an unfinished run through.
     if unfinished:
@@ -1570,32 +1559,7 @@ def move_finish(number, title, body_file):
         raise Refused(f"{new_branch} holds no change beside origin/main, so there is nothing to move.\n"
                       "Bring the moved change onto it, by hand or by naming whole files to "
                       "--move-change-to-own-pull-request-cut-new-topic-branch, and run this again.")
-    test_command = ready_command.selective_test_run_command(root)
-    tested = staged_content_and_unstaged_changes()
-    tests = subprocess.run(test_command, cwd=root, stdin=subprocess.DEVNULL)
-    if tests.returncode:
-        raise Refused(f"The test command exited {tests.returncode} on {new_branch}: {shlex.join(test_command)}\n"
-                      f"Fix the moved change on {new_branch} and run this again; nothing is committed yet.")
-    # The tests read the live worktree, which can change while the runner waits for the machine's test lock,
-    # and the commit below takes the index as it is then.
-    if staged_content_and_unstaged_changes() != tested:
-        rerun = shlex.join(["python3", PROGRAM, str(number), "--move-change-to-own-pull-request-finish",
-                            "--title", title, "--body-file", str(body_file)])
-        raise Refused(f"The test command passed on {new_branch}, but this worktree's HEAD, staged files or unstaged "
-                      "files, untracked files included, changed while it ran, so it may have tested other content "
-                      "than this step would commit; nothing is committed yet.\n"
-                      "Leave this worktree unchanged while this step runs: its tests may wait up to "
-                      f"{test_suite_runner.MACHINE_LOCK_WAIT_SECONDS_SUGGESTED / 60:g} minutes for the machine's "
-                      "test lock before they start, and they test the worktree as it is then.\n"
-                      f"If you or another agent changed the worktree on purpose: once that work is done, with "
-                      f"{new_branch} checked out, run {rerun}\n"
-                      "  It stages every change in the worktree, untracked files included, as the change this "
-                      f"step moves to {new_branch}, reruns the tests and commits what they tested.\n"
-                      "If no one meant to change it: read the worktree's changes beside origin/main with git status "
-                      "and git diff HEAD, and edit back by hand each change that does not belong in the change moved "
-                      f"to {new_branch}, keeping the moved change; do not run git restore or git checkout on a file "
-                      f"of the moved change, as that drops the moved change too. Then, with {new_branch} checked "
-                      f"out, run {rerun}")
+    base = git(["rev-parse", "HEAD"]).strip()
     with tempfile.NamedTemporaryFile("w", suffix=".txt", delete=False) as message:
         message.write(title + "\n\n" + Path(body_file).read_text())
     try:
@@ -1603,6 +1567,28 @@ def move_finish(number, title, body_file):
     finally:
         os.unlink(message.name)
     commit = git(["rev-parse", "HEAD"]).strip()
+    # The tests run on a scratch worktree of the commit, so an edit to this worktree while the runner waits for
+    # the machine's test lock reaches neither the tests nor what is pushed.
+    passed = False
+    try:
+        with ready_command.scratch_worktree_of_commit(commit, git) as checkout:
+            test_command = ready_command.selective_test_run_command(checkout)
+            tests = subprocess.run(test_command, cwd=checkout, stdin=subprocess.DEVNULL)
+        passed = tests.returncode == 0
+    finally:
+        if not passed:
+            # Back to origin/main with the moved change still staged, as before the commit; the old value makes
+            # git refuse if the branch moved meanwhile.
+            git(["update-ref", f"refs/heads/{new_branch}", base, commit])
+    if not passed:
+        rerun = shlex.join(["python3", PROGRAM, str(number), "--move-change-to-own-pull-request-finish",
+                            "--title", title, "--body-file", str(body_file)])
+        raise Refused(f"The test command exited {tests.returncode} on the moved change, run in a scratch worktree of "
+                      f"its commit {commit[:12]}, since removed: {shlex.join(test_command)}\n"
+                      "Its output above names each failing suite.\n"
+                      f"That commit is undone: {new_branch} is back at origin/main with the moved change staged, so "
+                      "nothing is committed.\n"
+                      f"Fix the moved change in this worktree, on {new_branch}, then run {rerun}")
     created = {}
     hook_output = []
 

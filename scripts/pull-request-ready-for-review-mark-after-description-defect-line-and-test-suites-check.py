@@ -13,10 +13,11 @@ Run it from the pull request's own checkout, with its nn-head-commit checked out
 3. refuses a description with no defect line (#root_cause, #root_cause_not_fixed or
    #no_defect_fixed), read by the same reader scripts/merge-gate.sh uses; a placeholder
    description has none;
-4. runs this checkout's test suites whose recorded inputs changed since origin/main, with this
-   checkout's own scripts/run-all-test-suites.py, waiting for the machine's test lock where the
-   runner takes one, and refuses when any fails, or when they pass but HEAD moved or the
-   checkout gained an uncommitted change while they ran;
+4. runs the test suites whose recorded inputs changed since origin/main in a detached scratch
+   worktree of the pushed nn-head-commit, with that worktree's own scripts/run-all-test-suites.py,
+   waiting for the machine's test lock where the runner takes one, and refuses when any fails;
+   the scratch worktree is what is tested, so a change to this checkout during the wait does not
+   reach the test run;
 5. marks the pull request ready for review with gh pr ready.
 
 It does not check what scripts/merge-gate.sh checks again before merging, such as a not-fixed
@@ -28,11 +29,13 @@ Exit codes: 0 marked ready for review, or already was; 1 refused or failed; 2 ba
 """
 
 import argparse
+import contextlib
 import importlib.util
 import json
 import shlex
 import subprocess
 import sys
+import tempfile
 from pathlib import Path
 
 SCRIPTS_DIRECTORY = Path(__file__).resolve().parent
@@ -77,6 +80,20 @@ def selective_test_run_command(checkout):
     return ["python3", str(Path(checkout) / "scripts" / "run-all-test-suites.py"),
             "--only-suites-whose-recorded-inputs-changed-since", "origin/main",
             *test_suite_runner_machine_lock_wait_command_line_arguments_build()]
+
+
+@contextlib.contextmanager
+def scratch_worktree_of_commit(commit, run_git):
+    """Yield the path of a detached worktree of commit in a new temporary directory, and remove the
+    worktree when the block ends, whatever ends it. run_git(arguments) runs git with the arguments
+    after "git" and raises when git fails."""
+    with tempfile.TemporaryDirectory(prefix="test-suites-scratch-worktree-") as scratch:
+        checkout = Path(scratch) / "checkout"
+        run_git(["worktree", "add", "--quiet", "--detach", str(checkout), commit])
+        try:
+            yield checkout
+        finally:
+            run_git(["worktree", "remove", "--force", str(checkout)])
 
 
 def test_suite_runner_machine_lock_wait_command_line_arguments_build():
@@ -183,41 +200,6 @@ def head_mismatch_next_steps(pull_request, head, runner, git_failed):
             "the agent that dispatched you, which files conflict.")
 
 
-def refuse_checkout_changed_while_suites_ran(name, number, head, runner, git_failed):
-    """The suites test the live checkout, which an agent can change while the runner waits for the
-    machine's test lock, so a pass counts only when HEAD is still head and the checkout still clean."""
-    printed = run_command(["git", "rev-parse", "--show-toplevel", "HEAD"], runner, GIT_TIMEOUT_SECONDS,
-                          "reading this checkout's HEAD again after the test suites", git_failed).splitlines()
-    head_after = printed[-1] if printed else "(nothing)"
-    changed = run_command(UNCOMMITTED_CHANGES_COMMAND, runner, GIT_TIMEOUT_SECONDS,
-                          "reading this checkout's uncommitted changes again after the test suites",
-                          git_failed).splitlines()
-    if head_after == head and not changed:
-        return
-    what = []
-    if head_after != head:
-        what.append(f"its HEAD moved from {head[:12]} to {head_after[:12]}")
-    if changed:
-        what.append(f"it now has {len(changed)} uncommitted change(s), as git status --porcelain lists them:\n"
-                    + "".join(f"  {line.strip()}\n" for line in changed))
-    rerun = f"python3 scripts/{Path(__file__).name} {number}"
-    raise StepFailed(
-        f"the test suites passed, but this checkout changed while they ran: {' and '.join(what).rstrip()}\n"
-        f"So the suites may have tested files other than {name}'s pushed commits, and {name} stays a "
-        f"draft pull request. {NOTHING_CHANGED_LINE}\n"
-        "Leave this checkout unchanged while this command runs: it may wait up to "
-        f"{test_suite_runner.MACHINE_LOCK_WAIT_SECONDS_SUGGESTED / 60:g} minutes for the machine's "
-        "test lock before the suites start, and the suites test the checkout as it is then.\n"
-        f"If you or another agent changed the checkout on purpose: once that work is done, and pushed if "
-        f"it made commits for {name}, run {rerun} from this checkout. It refuses while HEAD is not "
-        f"{name}'s pushed nn-head-commit, or while the checkout has an uncommitted change, and says what "
-        "to do in either case.\n"
-        f"If no one meant to change it: run {rerun} from this checkout once, and do what it prints. If it "
-        "refuses again because the checkout changed while the suites ran, tell the user, in one sentence, "
-        f"that pull request {number} could not be marked ready for review because its checkout keeps "
-        "changing while the test suites run; if you are a subagent, tell the agent that dispatched you instead.")
-
-
 def check_and_mark_ready(number, runner, output):
     pull_request = read_pull_request(number, runner)
     name = f"#{number} ({pull_request.get('url')})"
@@ -256,7 +238,7 @@ def check_and_mark_ready(number, runner, output):
     if len(printed) != 2:
         raise StepFailed("reading this checkout's HEAD failed: git rev-parse --show-toplevel HEAD "
                          f"printed {len(printed)} lines, not 2.\n{rev_parse_failed}")
-    checkout, head = printed
+    _toplevel, head = printed
     if head != pull_request["headRefOid"]:
         raise StepFailed(
             f"this checkout's HEAD, {head[:12]}, is not {name}'s pushed nn-head-commit, "
@@ -307,15 +289,22 @@ def check_and_mark_ready(number, runner, output):
             "lines. Then upload the "
             f"file with gh pr edit {number} --body-file <file>, which replaces the whole "
             "description, and run this again.")
-    command = selective_test_run_command(checkout)
-    output.write(MESSAGE_PREFIX + "running " + " ".join(command[1:]) + "\n")
-    output.flush()
-    try:
-        status = runner(command, check=False).returncode
-    except OSError as error:
-        raise StepFailed(f"running the test suites failed: python3 could not be run ({error}). "
-                         f"{NOTHING_CHANGED_LINE}\n"
-                         + RETRY_THEN_USER_INSTRUCTION.format(number=number)) from None
+    retry = NOTHING_CHANGED_LINE + "\n" + RETRY_THEN_USER_INSTRUCTION.format(number=number)
+
+    def run_git(arguments):
+        run_command(["git", *arguments], runner, GIT_TIMEOUT_SECONDS,
+                    f"git {arguments[0]} {arguments[1]} of the scratch worktree the test suites run in", retry)
+
+    with scratch_worktree_of_commit(head, run_git) as scratch_checkout:
+        command = selective_test_run_command(scratch_checkout)
+        output.write(MESSAGE_PREFIX + f"running, in a scratch worktree of {head[:12]}, "
+                     + " ".join(command[1:]) + "\n")
+        output.flush()
+        try:
+            status = runner(command, check=False).returncode
+        except OSError as error:
+            raise StepFailed(f"running the test suites failed: python3 could not be run ({error}). "
+                             + retry) from None
     stays_a_draft = (f"so {name} stays a draft pull request: its pushed commits must pass the "
                      "test suites before it is marked ready for review, which starts their review.")
     if status == TEST_RUNNER_EXIT_SOME_SUITE_FAILED:
@@ -334,7 +323,6 @@ def check_and_mark_ready(number, runner, output):
             "suite, "
             f"{stays_a_draft} Its error is above.\n"
             + RETRY_THEN_USER_INSTRUCTION.format(number=number))
-    refuse_checkout_changed_while_suites_ran(name, number, head, runner, rev_parse_failed)
     run_command(
         ["gh", "pr", "ready", str(number)], runner, GH_TIMEOUT_SECONDS,
         f"marking {name} ready for review",
