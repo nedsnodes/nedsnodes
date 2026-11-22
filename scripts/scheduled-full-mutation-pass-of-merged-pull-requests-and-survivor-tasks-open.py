@@ -1370,7 +1370,7 @@ def unix_time_cron_next_starts_this_program_on_ned_box(scheduled_jobs_file, now)
     today = time.localtime(now)
     for day in (today.tm_mday, today.tm_mday + 1):
         # mktime reads a day past the month's end as a day of the next month.
-        due = time.mktime((today.tm_year, today.tm_mon, day, hour, minute, 0, 0, 0, -1))
+        due = time.mktime((today.tm_year, today.tm_mon, day, hour, minute, 0, 0, 0, -1))  # pragma: no mutate, mktime ignores the weekday and the day of the year and reads any negative is-DST flag as unknown; the test's summer time case fails a flag of 0
         if due > now:
             break
     return due
