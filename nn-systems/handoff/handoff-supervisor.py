@@ -642,12 +642,18 @@ BACKGROUND_TASKS_STOPPED_AT_SESSION_HANDOFF_SUCCESSOR_RESTART_SENTENCE_TEMPLATE 
     "ended: {joined_tasks}. Restart any you still need."
 )
 
+# Shown after the past-wait-limit sentence, so "other" refers to tasks the successor has just read about.
+BACKGROUND_TASKS_STOPPED_BESIDE_PAST_WAIT_LIMIT_TASKS_SUCCESSOR_RESTART_SENTENCE_TEMPLATE = (
+    "The session you are replacing had {task_count} other background task(s) still running when it "
+    "ended: {joined_tasks}. Restart any you still need."
+)
+
 BACKGROUND_TASKS_PAST_WAIT_LIMIT_SENTENCE_TEMPLATE = (
     "When the session you are replacing ended, it had {task_count} background Bash task(s), none "
     "of them a waiting-task, each still running past its kind's wait-limit, so they were stopped: "
-    "{joined_tasks}. Run each again, then look first for a way to make it faster, such as removing "
-    "repeated work or running its steps in parallel, and raise its kind's wait-limit in the "
-    "wait-limit table only when you find no such way."
+    "{joined_tasks}. Run again any you still need, looking first for a way to make it faster, such "
+    "as removing repeated work or running its steps in parallel, and raise its kind's wait-limit in "
+    "the wait-limit table only when you find no such way."
 )
 
 COLD_READ_FULL_RUN_COMMANDS_REFUSED_DURING_HANDOFF_DEFERRAL_SENTENCE_TEMPLATE = (
@@ -1341,16 +1347,20 @@ def build_ignition_prompt(extract_path: Path, handoff_fields: dict,
             joined_roster="; ".join(roster),
             transcript_directory=transcript_directory,
         ))
-    still_running_tasks = numbered_field_values_from(
-        handoff_fields, SESSION_HANDOFF_BACKGROUND_TASK_STILL_RUNNING_FIELD_PREFIX)
-    if still_running_tasks:
-        lines.append(BACKGROUND_TASKS_STOPPED_AT_SESSION_HANDOFF_SUCCESSOR_RESTART_SENTENCE_TEMPLATE.format(
-            task_count=len(still_running_tasks), joined_tasks="; ".join(still_running_tasks)))
     past_wait_limit_tasks = numbered_field_values_from(
         handoff_fields, BACKGROUND_TASK_PAST_WAIT_LIMIT_FIELD_PREFIX)
     if past_wait_limit_tasks:
         lines.append(BACKGROUND_TASKS_PAST_WAIT_LIMIT_SENTENCE_TEMPLATE.format(
             task_count=len(past_wait_limit_tasks), joined_tasks="; ".join(past_wait_limit_tasks)))
+    still_running_tasks = numbered_field_values_from(
+        handoff_fields, SESSION_HANDOFF_BACKGROUND_TASK_STILL_RUNNING_FIELD_PREFIX)
+    if still_running_tasks:
+        restart_template = (
+            BACKGROUND_TASKS_STOPPED_BESIDE_PAST_WAIT_LIMIT_TASKS_SUCCESSOR_RESTART_SENTENCE_TEMPLATE
+            if past_wait_limit_tasks
+            else BACKGROUND_TASKS_STOPPED_AT_SESSION_HANDOFF_SUCCESSOR_RESTART_SENTENCE_TEMPLATE)
+        lines.append(restart_template.format(
+            task_count=len(still_running_tasks), joined_tasks="; ".join(still_running_tasks)))
     refused_commands = numbered_field_values_from(
         handoff_fields, COLD_READ_FULL_RUN_COMMAND_REFUSED_DURING_HANDOFF_DEFERRAL_FIELD_PREFIX)
     if refused_commands:
