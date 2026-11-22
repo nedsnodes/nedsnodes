@@ -1462,8 +1462,10 @@ with tempfile.TemporaryDirectory() as scratch_name:
         subprocess.run(["git", "-c", "user.name=t", "-c", "user.email=t@t", "commit", "-q", "-m",
                         "list the real-claude suite", "--", "scripts/run-all-test-suites.py"],
                        cwd=left_out_repository, check=True)
+        # .get, so that against a runner that read this list only from itself the case below
+        # is reached and fails for not leaving the suite out.
         check("this runner's own list does not name the suite the checkout lists as running the "
-              "real claude", "outside-test.py" not in runner.SUITE_SANDBOX_LISTS_OF_THIS_PROGRAM["SUITES_THAT_RUN_THE_REAL_CLAUDE_CLI"])
+              "real claude", "outside-test.py" not in runner.SUITE_SANDBOX_LISTS_OF_THIS_PROGRAM.get("SUITES_THAT_RUN_THE_REAL_CLAUDE_CLI", {}))
         selective = ("--only-suites-whose-recorded-inputs-changed-since", "HEAD")
         code, printed = left_out_run("real-claude-run", *selective,
                                      run_one_suite=note_and_fail_the_claude_suite)
@@ -1500,7 +1502,7 @@ with tempfile.TemporaryDirectory() as scratch_name:
         check("this runner lists the trial against the installed Claude Code among the suites that "
               "run the real claude",
               "nn-systems/general-tools/tests/agent-seat-worktree-create-with-owner-file-claude-code-"
-              "worktree-create-hook-real-claude-code-test.py" in runner.SUITE_SANDBOX_LISTS_OF_THIS_PROGRAM["SUITES_THAT_RUN_THE_REAL_CLAUDE_CLI"])
+              "worktree-create-hook-real-claude-code-test.py" in runner.SUITE_SANDBOX_LISTS_OF_THIS_PROGRAM.get("SUITES_THAT_RUN_THE_REAL_CLAUDE_CLI", {}))
 
         two_suites = scratch / "two-suites-repository"
         two_suites.mkdir()

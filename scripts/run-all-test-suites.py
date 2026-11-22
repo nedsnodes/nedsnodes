@@ -907,6 +907,14 @@ _attendance_check = importlib.util.module_from_spec(_attendance_check_spec)
 _attendance_check_spec.loader.exec_module(_attendance_check)
 AGENT_SESSION_ATTENDANCE_ENVIRONMENT_VARIABLES = _attendance_check.AGENT_SESSION_ATTENDANCE_ENVIRONMENT_VARIABLES
 
+_path_names_spec = importlib.util.spec_from_file_location(
+    "project_rename_path_names_before_and_after_common",
+    Path(__file__).resolve().with_name("project-rename-path-names-before-and-after-common.py"))
+_path_names = importlib.util.module_from_spec(_path_names_spec)
+_path_names_spec.loader.exec_module(_path_names)
+convert_file_path_after_project_rename_to_path_before = (
+    _path_names.convert_file_path_after_project_rename_to_path_before)
+
 # Suites run as the same account as every agent-seat, so a stray kill(-1) or
 # killpg from a suite reaches all of them. In its own PID namespace a suite can
 # signal only the processes it started. Children of bwrap cannot start bwrap
@@ -1072,11 +1080,6 @@ SUITE_SANDBOX_LIST_NAMES_READ_FROM_CHECKOUT_UNDER_TEST = (
     "SUITES_THAT_RUN_THE_REAL_CLAUDE_CLI",
     "SUITES_GIVEN_A_COPY_ON_WRITE_OVERLAY_OF_THE_REPOSITORY_GIT_DIRECTORY",
     "SUITES_WHOSE_TEST_SANDBOX_SHARES_THE_MACHINE_NETWORK")
-# A checkout committed before a run read this list from it lacks the list, or assigns it the
-# set it was then, as the nightly mutation pass's checkouts do; such a checkout gets this
-# program's own list.
-SUITE_SANDBOX_LIST_NAMES_OLDER_CHECKOUTS_LACK_OR_ASSIGN_A_SET = (
-    "SUITES_THAT_RUN_THE_REAL_CLAUDE_CLI",)
 SUITE_SANDBOX_LISTS_SOURCE_LINE_PREFIX = "which sandbox each suite runs in, from the lists in "
 SUITE_SANDBOX_LISTS_OF_THIS_PROGRAM = {
     name: dict(globals()[name]) for name in SUITE_SANDBOX_LIST_NAMES_READ_FROM_CHECKOUT_UNDER_TEST}
@@ -1911,17 +1914,35 @@ def suite_sandbox_lists_read_from_checkout_under_test(top):
             f"this run tests, then rerun the command you ran.")
     found = {}
     for node in tree.body:
-        if (isinstance(node, ast.Assign) and len(node.targets) == 1
-                and isinstance(node.targets[0], ast.Name)
-                and node.targets[0].id in SUITE_SANDBOX_LIST_NAMES_READ_FROM_CHECKOUT_UNDER_TEST):
+        if isinstance(node, ast.Assign) and len(node.targets) == 1:
+            target, value = node.targets[0], node.value
+        elif isinstance(node, ast.AnnAssign) and node.value is not None:
+            target, value = node.target, node.value
+        else:
+            target = value = None
+        if (isinstance(target, ast.Name)
+                and target.id in SUITE_SANDBOX_LIST_NAMES_READ_FROM_CHECKOUT_UNDER_TEST):
             try:
-                found[node.targets[0].id] = ast.literal_eval(node.value)
+                found[target.id] = ast.literal_eval(value)
             except (ValueError, TypeError, SyntaxError, RecursionError):
-                found[node.targets[0].id] = None
-    for name in SUITE_SANDBOX_LIST_NAMES_OLDER_CHECKOUTS_LACK_OR_ASSIGN_A_SET:
+                found[target.id] = None
+            continue
+        # A list bound any other way is the checkout's own but cannot be read, so it is
+        # refused below rather than taken for an older checkout's missing list.
+        for bound in ast.walk(node):
+            if (isinstance(bound, ast.Name) and isinstance(bound.ctx, ast.Store)
+                    and bound.id in SUITE_SANDBOX_LIST_NAMES_READ_FROM_CHECKOUT_UNDER_TEST):
+                found.setdefault(bound.id, None)
+    # A checkout committed before a run read a list from it lacks the list, or assigns it the
+    # set it was then, as the nightly mutation pass's checkouts do. It gets this program's own
+    # list, with each suite also under the path it had before the project rename, since such a
+    # checkout may predate the rename.
+    for name in SUITE_SANDBOX_LIST_NAMES_READ_FROM_CHECKOUT_UNDER_TEST:
         if name not in found or isinstance(found[name], set):
-            found[name] = dict(SUITE_SANDBOX_LISTS_OF_THIS_PROGRAM[name])
-    unreadable =[name for name in SUITE_SANDBOX_LIST_NAMES_READ_FROM_CHECKOUT_UNDER_TEST
+            own = SUITE_SANDBOX_LISTS_OF_THIS_PROGRAM[name]
+            found[name] = {**{convert_file_path_after_project_rename_to_path_before(suite): reason
+                              for suite, reason in own.items()}, **own}
+    unreadable = [name for name in SUITE_SANDBOX_LIST_NAMES_READ_FROM_CHECKOUT_UNDER_TEST
                   if not isinstance(found.get(name), dict)]
     if unreadable:
         raise CouldNotRun(
