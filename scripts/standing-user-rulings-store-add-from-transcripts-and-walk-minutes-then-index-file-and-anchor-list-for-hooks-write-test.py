@@ -58,14 +58,14 @@ def check(case_name, condition, detail=""):
 
 
 SEAT_DIRECTORY = "/home/nedlern/agents/alpha-seat"
+# A file the project rename kept under its old name; it is on origin/main under this name.
+KEPT_FILE = "scripts/merge-gate-test-captured-github-responses/nedschorus-nedschorus-1154-issue-view-open-issue.json"
 REPOSITORY_FILES = ("CLAUDE.md", "scripts/tool-one.py", "nn-systems/cold-read/cold-read-fast-read.py",
                     "nn-systems/handoff/handoff-supervisor.py", ".claude/skills/find-info/SKILL.md",
                     "docs/issues/2118-ruling-agent-keeps-user-rulings.md", "SKILL.md", "CLAUDE",
                     "nn-systems/nn-shared-database/nn-shared-database-service.py",
                     "docs/cross-project/nedsnodes-ai-native-software-development-notes.md",
-                    "scripts/merge-gate-test-captured-github-responses/nedschorus-nedschorus-1154-issue-view-open-issue.json")
-# A file the project rename kept under its old name; it is on origin/main under this name.
-KEPT_FILE = REPOSITORY_FILES[-1]
+                    KEPT_FILE)
 
 
 def human(text, stamp, cwd=SEAT_DIRECTORY, **fields):
