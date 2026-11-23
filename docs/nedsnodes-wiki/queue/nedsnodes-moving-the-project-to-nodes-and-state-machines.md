@@ -33,7 +33,7 @@ The user's overview of NedsNodes describes "many modular building blocks that fi
 
 - **machine**: a workflow's state machine, stored as one JSON file.
 - **node**: one state's work in a machine. Its kind is code, cpc-node, user, machine or parallel (section 4).
-- **output state**: the one name, from the node's fixed list, that a node ends in and that picks the next node. Approved items 3 and 4 call the same thing a "termination" (open question 1).
+- **output state**: the one name, from the node's fixed list, that a node ends in and that picks the next node.
 - **runner**: the one program that starts, advances and records every machine.
 - **state-machine-run**: one execution of a machine, from `start` to an end state.
 - **state-machine-user-answer-node**: a node of kind `user`, whose work is the user's answer.
@@ -55,7 +55,7 @@ Each node follows one contract (item 3), built by one shared contract module fro
 For example, `background-task-check` answers "Did the task finish?":
 
 ```json
-{"termination": "past-wait-limit", "pid": 4182, "minutes_running": 47}
+{"output_state": "past-wait-limit", "pid": 4182, "minutes_running": 47}
 ```
 
 A model's answer that picks the next step gives one output state from a fixed list, so that a program can read it without interpreting prose. A missing or unlisted output state is a failure (item 6.3). A schema tests only the structure of an answer: a model can fill a required field with an invented value.
@@ -273,7 +273,7 @@ The user has no "strong opinions" on order beyond easy parts first. Each step is
 
 ## 13. Open questions for the user
 
-1. Does the JSON field stay `termination`, as approved item 3 shows, or become `output_state`, after the term "output state" approved in item 6.3?
+1. Each node's JSON object names how it ended in the field `output_state`.
 2. Which comes first after the runner: background work, as item 67 approved, or approval-walks, which the user said on 2026-11-23 "we could do" first?
 3. The project's one JSON Schema library is python-jsonschema 4.26.0, pinned, with `types-jsonschema` for mypy.
 4. After a state-machine-run exits to wait, what calls the later `next`: the agent that owns the state-machine-run, a hook, or a scheduled job?
