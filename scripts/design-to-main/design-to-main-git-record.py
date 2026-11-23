@@ -64,6 +64,7 @@ class TopicBranchGitRecord:
         self.component = component
         # The design is refined in its issue document before code exists; the contract stays beside it.
         self.design_path = str(design_path)
+        self.design_kind = tables.design_kind_of_design_path(self.design_path)
         # Use the same start point for branch creation and instance counting so recovery counts the same span.
         self.topic_branch_start_point = topic_branch_start_point
         self.component_directory = pathlib.Path(component_directory)
@@ -283,9 +284,21 @@ class TopicBranchGitRecord:
         record = str(self.record_directory)
         return sorted(p for p in changed if not p.startswith(record + "/"))
 
+    def component_document_path(self, name_ending):
+        """Return `<component directory>/<component>.<kind><name_ending>`, the kind taken from the design's name."""
+        return self.component_directory / ("%s.%s%s" % (self.component, self.design_kind, name_ending))
+
+    @property
+    def component_design_path(self):
+        return self.component_document_path(tables.DESIGN_NAME_ENDING)
+
+    @property
+    def component_design_contract_path(self):
+        return self.component_document_path(tables.DESIGN_CONTRACT_NAME_ENDING)
+
     @property
     def test_design_path(self):
-        return self.component_directory / ("%s-test-design.md" % self.component)
+        return self.component_document_path(tables.TEST_DESIGN_NAME_ENDING)
 
     def test_design_text(self):
         """Return the working-tree test-design text, or None when absent."""
@@ -297,11 +310,10 @@ class TopicBranchGitRecord:
     def document_of_path(self, path):
         """Classify a path as design, design-contract, test-design, tests, or implementation."""
         component_dir = str(self.component_directory)
-        if path in (self.design_path,
-                    "%s/%s-design.md" % (component_dir, self.component)):
+        if path in (self.design_path, str(self.component_design_path)):
             return "design"
         if path in (tables.contract_path_beside_design(self.design_path),
-                    "%s/%s-contract.md" % (component_dir, self.component)):
+                    str(self.component_design_contract_path)):
             return "design-contract"
         if path == str(self.test_design_path):
             return "test-design"

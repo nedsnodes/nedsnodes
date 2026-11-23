@@ -91,9 +91,10 @@ WHAT ONE RUN DOES, in order.
      --mutants-run-at-most-shared-evenly-among-changed-files
      FIRST_PASS_MUTANTS_RUN_PER_MERGE_AT_MOST, 12 (THE TWO PASSES below). The
      worker count, read as each merge starts, is the machine's cores less its
-     load average over the last minute, at least 1; each worker has a
-     worktree of its own, and its suites still wait for the suite runner's
-     admission.
+     load average over the last minute, at least 1 and at most
+     MUTANT_WORKERS_AT_MOST, 4, a quarter of ned-box's 16 cores, which leaves
+     the rest for reviews and other work; each worker has a worktree of its
+     own, and its suites still wait for the suite runner's admission.
   7. Opens a survivor task for each line with surviving mutants (TASKS
      below), and one job failure task for the merge's ERRORED mutants (JOB
      FAILURE TASKS below), then records the commit as tested, and, when
@@ -105,7 +106,7 @@ WHAT ONE RUN DOES, in order.
      their survivor tasks.
   9. Opens a task for each failure of the run (JOB FAILURE TASKS below).
   10. Writes the record (THE RECORD below), in full over any written at step
-     4, and prints its citation.
+     4 or 5, and prints its citation.
 
 THE TWO PASSES. The first pass runs at most
 FIRST_PASS_MUTANTS_RUN_PER_MERGE_AT_MOST mutants of a merge, which the
@@ -115,7 +116,9 @@ seeds, so a merge carried on or run again has the same mutants chosen. The
 merge's kept cosmic-ray sessions (CARRYING A MERGE ON below) hold every mutant
 of the merge and the result of each mutant run: they are this program's record
 of which mutants are judged, and the mutation testing program runs no mutant
-that has a result there. A merge with mutants not run is recorded under
+that has a result there. That program runs at most one mutant of each changed
+line, and marks the line's others skipped (its ONE MUTANT PER CHANGED LINE),
+so a skipped mutant is not counted as not run. A merge with mutants not run is recorded under
 merges_with_mutants_not_run in the state, with merged_at_unix_seconds, the
 time of its commit, mutants_not_run_count, and
 surviving_mutant_keys_already_handled, the key of each surviving mutant an
@@ -146,7 +149,14 @@ new mutants_not_run_count; a merge with none left leaves the state, and a
 merge a suite now fails on with no mutant applied is recorded as untestable
 (AN UNTESTABLE MERGE below) and leaves it too. The second pass never changes
 last_tested_main_commit. No merge is dropped from merges_with_mutants_not_run
-for being old.
+for being old; but the second pass gives the mutation testing program its
+MUTANTS_WITH_NO_RESULT_IN_KEPT_COSMIC_RAY_SESSIONS_MARKED_SKIPPED_WHEN_HEAD_COMMIT_BEFORE_CUTOFF_COMMAND_LINE_FLAG, so it
+marks skipped every mutant with no result in the kept sessions of a merge
+committed before its
+KEPT_COSMIC_RAY_SESSION_MUTANTS_WITH_NO_RESULT_ALL_SKIPPED_WHEN_HEAD_COMMIT_UNIX_TIME_BEFORE_THIS_CUTOFF,
+and such a merge has none left, and leaves the state, the next time the second
+pass reaches it. The first pass never gives it, so a first pass stopped after
+it made its sessions resumes them.
 
 CARRYING A MERGE ON. Each merge's cosmic-ray sessions are kept in
 cosmic-ray-sessions-kept-for-unfinished-merges/<merge>
@@ -233,7 +243,11 @@ it lists survives on main, or the line is gone or ends with a `# pragma: no
 mutate` comment.",
 as in a task an earlier version opened, is rewritten to list only them; its
 other keys, status included, are kept. A mutant the program could not judge
-stays listed. A run of the program still going after
+stays listed. A task whose file is gone when the recheck comes to rewrite it,
+which can happen because its suites run for minutes, is not written again:
+its mutants killed or no longer existing leave the state, and each other one
+goes the way step 4 sends a mutant whose task file is gone, moved or reported
+once, and the run goes on. A run of the program still going after
 --survivor-task-recorded-mutant-killed-check-timeout-seconds is sent SIGTERM;
 a run that writes no readable verdicts leaves its task as it was, is named in
 the record and on standard error, and the run goes on and exits
@@ -331,7 +345,8 @@ wrote the state file; EXIT_STEP_FAILED (4) a step failed, as above;
 EXIT_RECORD_NOT_WRITTEN (5) the record could not be written;
 EXIT_ANOTHER_RUN_HOLDS_THE_LOCK (6) another run holds the lock;
 EXIT_OPENED_TASK_NO_LONGER_HOLDS_ITS_SURVIVOR (7) no step failed, but a
-mutant a survivor task an earlier run opened held was reported at step 4:
+mutant a survivor task an earlier run opened held was reported at step 4,
+or at step 5 for a task whose file was gone when the recheck came to rewrite it:
 its task's file is gone or cannot be read, and no other open task or two or
 more name it; or its task, not marked completed, no longer lists it, and two
 or more other open tasks name it; or its task is marked completed and two or
@@ -390,6 +405,7 @@ UNTESTABLE_MERGES_STATE_KEY = "untestable_merges"
 MERGES_WITH_MUTANTS_NOT_RUN_STATE_KEY = "merges_with_mutants_not_run"
 ERRORED_MUTANT_KEYS_ALREADY_REPORTED_STATE_KEY = "errored_mutant_keys_already_reported"
 FIRST_PASS_MUTANTS_RUN_PER_MERGE_AT_MOST = 12
+MUTANT_WORKERS_AT_MOST = 4
 SCHEDULED_JOBS_ON_EACH_MACHINE_JSON_FILE = (
     REPOSITORY_ROOT / "nn-systems" / "general-tools" / "scheduled-jobs-on-each-machine.json")
 DEFAULT_SECOND_PASS_STOPS_STARTING_MUTANTS_SECONDS_BEFORE_NEXT_SCHEDULED_RUN = 30 * 60
@@ -583,20 +599,24 @@ def task_on_list_open_for_line(list_directory, place):
 
 def task_ids_on_list_open_naming_mutant(list_directory, key):
     """Ids of the tasks on the list, not marked completed, whose description names the
-    mutant's diff file. Raises OSError."""
+    mutant's diff file; a task file gone since the listing is skipped. Raises OSError."""
     if not list_directory.is_dir():
         return []
     ids = []
     for path in sorted(list_directory.iterdir(), key=lambda path: path.name):
         if not TASK_FILE_NAME_PATTERN.fullmatch(path.name):
             continue
-        task = task_file_read(path)
+        try:
+            task = task_file_read(path)
+        except FileNotFoundError:
+            # Deleted since the listing, as by a session-handoff while the recheck runs.
+            continue
         if task_names_mutant(task, key) and task.get("status") != "completed":
             ids.append(int(path.stem))
     return ids
 
 
-def lost_tasks_reported(state, arguments, record):
+def lost_tasks_reported(state, arguments, record, keys=None):
     """Drop from the state in memory each task that is completed or no longer holds its mutant,
     and re-point a mutant to the one other open task on its owner's list that names it. An open
     task whose description no longer names its mutant keeps the mutant while no other open task
@@ -605,9 +625,10 @@ def lost_tasks_reported(state, arguments, record):
     Return one line per task whose file is gone or is not a task and that has no single open
     task on the list naming the mutant, and per task, open or completed, whose mutant more than
     one other open task names; the caller writes the state. Raises OSError when another task
-    file on the list cannot be read."""
+    file on the list cannot be read. `keys` limits the check to those mutants."""
     lost = []
-    for key, given in list(state["tasks_opened"].items()):
+    for key in list(state["tasks_opened"]) if keys is None else keys:
+        given = state["tasks_opened"][key]
         list_directory = arguments.task_lists_directory / f"nedsnodes-{given['agent_seat']}-tasks"
         task_file = list_directory / f"{given['task_id']}.json"
         completed = False
@@ -746,8 +767,9 @@ def run_mutation_testing(arguments, merge, parent, json_file, workers, sessions_
 
 
 def mutant_worker_count_for_free_cores(cores, load):
-    """The cores less the load average, at least 1 and at most the cores."""
-    return max(1, min(cores, int(cores - load)))
+    """The cores less the load average, at least 1 and at most the cores and
+    MUTANT_WORKERS_AT_MOST."""
+    return max(1, min(cores, MUTANT_WORKERS_AT_MOST, int(cores - load)))
 
 
 def sessions_directory_of_merge(arguments, merge):
@@ -846,18 +868,25 @@ def all_said_on_stderr_or_last_line_of_stdout_indented(stdout, stderr):
     return "\n".join(f"    {line}" for line in said.splitlines())
 
 
-def survivor_tasks_rechecked(state, state_file, arguments, main_commit, record, record_citation,
-                             scratch):
+def survivor_tasks_rechecked(state, state_file, arguments, main_commit, record, record_path,
+                             record_citation, lost, scratch):
     """Run the recorded mutant killed check on main for each task the state names; drop each
     mutant killed or no longer existing from the task and the state, and complete a task none
-    of whose mutants survive. Return one line per task the check gave no verdicts for. Raises
-    StepFailed when a task, a diff file or the state cannot be read or written."""
-    tasks = {}
-    for key, given in state["tasks_opened"].items():
-        tasks.setdefault((given["agent_seat"], given["task_id"]), []).append(key)
+    of whose mutants survive. A task whose file is gone by the time it is rewritten has its
+    mutants not killed handled by lost_tasks_reported, which adds a line to `lost` per mutant
+    reported lost. Return one line per task the check gave no verdicts for. Raises StepFailed
+    when a diff file, the record, the state, or a task file other than a gone one cannot be
+    read or written."""
+    tasks = list(dict.fromkeys((given["agent_seat"], given["task_id"])
+                               for given in state["tasks_opened"].values()))
     limit = arguments.survivor_task_recorded_mutant_killed_check_timeout_seconds
     not_rechecked = []
-    for (agent_seat, task_id), keys in tasks.items():
+    for agent_seat, task_id in tasks:
+        # Read at the task's turn: a gone task rechecked earlier may have moved a mutant here.
+        keys = [key for key, given in state["tasks_opened"].items()
+                if (given["agent_seat"], given["task_id"]) == (agent_seat, task_id)]
+        if not keys:
+            continue
         named = f"task #{task_id} on {agent_seat}'s task list"
         task_file = (arguments.task_lists_directory / f"nedsnodes-{agent_seat}-tasks"
                      / f"{task_id}.json")
@@ -886,20 +915,36 @@ def survivor_tasks_rechecked(state, state_file, arguments, main_commit, record, 
         counted = ", ".join(f"{list(verdict_of.values()).count(verdict)} {verdict}" for verdict
                             in ("killed", "no longer exists", "survived", "could not be judged"))
         try:
-            outcome = survivor_task_rechecked_write(
-                task_file, [diff_files[key] for key in keys],
-                [diff_files[key] for key in surviving], main_commit, record_citation)
+            try:
+                outcome = survivor_task_rechecked_write(
+                    task_file, [diff_files[key] for key in keys],
+                    [diff_files[key] for key in surviving], main_commit, record_citation)
+            except FileNotFoundError as error:
+                # The recheck runs suites for minutes per task, so a task file found at step 4
+                # can be gone by now, as when a session-handoff deletes a completed task.
+                if error.filename != str(task_file):
+                    raise
+                outcome = None
             for key in keys:
                 if key not in surviving:
                     del state["tasks_opened"][key]
+            if outcome is None:
+                record.append(f"RECHECKED {named}: {counted}; not rewritten: its file is gone")
+                gone = lost_tasks_reported(state, arguments, record, surviving)
+                if gone:
+                    # As at step 4: a run killed later has still reported them.
+                    record_write(record_path, record)
             write_state(state_file, state)
+            if outcome is None:
+                lost += gone
         except OSError as error:
             raise StepFailed(
                 f"{named} ({task_file}) was rechecked on main ({counted}), but a file could "
                 f"not be read or written ({type(error).__name__}: {error}). No merge was tested.\n"
                 f"Fix what the error names, then run this program again on ned-box: "
                 f"{RUN_BY_HAND}") from error
-        record.append(f"RECHECKED {named}: {counted}; {outcome}")
+        if outcome is not None:
+            record.append(f"RECHECKED {named}: {counted}; {outcome}")
     return not_rechecked
 
 
@@ -1097,7 +1142,8 @@ def test_one_merge(arguments, state, state_file, merge, record, record_citation,
     if in_second_pass:
         which_mutants_run_options = [
             mutation_testing.NO_MUTANT_STARTED_AFTER_UNIX_TIME_FLAG,
-            repr(second_pass_no_mutant_started_after_unix_time)]
+            repr(second_pass_no_mutant_started_after_unix_time),
+            mutation_testing.MUTANTS_WITH_NO_RESULT_IN_KEPT_COSMIC_RAY_SESSIONS_MARKED_SKIPPED_WHEN_HEAD_COMMIT_BEFORE_CUTOFF_COMMAND_LINE_FLAG]
         limit_seconds = second_pass_limit_seconds
         not_run_before = state[MERGES_WITH_MUTANTS_NOT_RUN_STATE_KEY][merge]
     parent = git_or_raise(arguments.clone, "rev-parse", "--verify", f"{merge}^1^{{commit}}")
@@ -1109,16 +1155,19 @@ def test_one_merge(arguments, state, state_file, merge, record, record_citation,
     cores, load = os.cpu_count() or 1, os.getloadavg()[0]
     workers = mutant_worker_count_for_free_cores(cores, load)
     record.append(f"merge {merge[:12]}{', second pass' if in_second_pass else ''}: {workers} "
-                  f"mutant worker(s), from {cores} cores and a "
-                  f"load average over the last minute of {load:.1f}; {judged_before} mutant(s) "
+                  f"mutant worker(s), from {cores} cores, a "
+                  f"load average over the last minute of {load:.1f} and a cap of "
+                  f"{MUTANT_WORKERS_AT_MOST}; {judged_before} mutant(s) "
                   f"already judged in its kept sessions")
     exit_code, stdout, stderr = run_mutation_testing(
         arguments, merge, parent, json_file, workers, sessions_directory,
         which_mutants_run_options, limit_seconds)
-    # A hand run of a second pass merge takes no stop time, so it runs every mutant not run.
+    # A hand run of a second pass merge takes no stop time, so it runs every mutant not run that
+    # is not backlog.
     command_shown = mutation_testing_hand_run_command(
         arguments, merge, parent, workers, sessions_directory,
-        [] if in_second_pass else which_mutants_run_options)
+        [mutation_testing.MUTANTS_WITH_NO_RESULT_IN_KEPT_COSMIC_RAY_SESSIONS_MARKED_SKIPPED_WHEN_HEAD_COMMIT_BEFORE_CUTOFF_COMMAND_LINE_FLAG]
+        if in_second_pass else which_mutants_run_options)
     said = last_line_said(stdout, stderr)
     if exit_code is None:
         judged = count_of_mutants_judged_in_kept_cosmic_ray_sessions(sessions_directory)
@@ -1495,8 +1544,9 @@ def main_under_lock(arguments):
                 write_state(state_file, state)
             lost_tasks = lost
             with tempfile.TemporaryDirectory(prefix=f"{PROGRAM}-") as scratch:
-                not_rechecked = survivor_tasks_rechecked(state, state_file, arguments, main_commit,
-                                                         record, record_citation, Path(scratch))
+                not_rechecked = survivor_tasks_rechecked(
+                    state, state_file, arguments, main_commit, record, record_path,
+                    record_citation, lost_tasks, Path(scratch))
             if not last_is_an_ancestor:
                 raise StepFailed(
                     f"the last tested commit {last}, from {state_file}, is not an ancestor of "

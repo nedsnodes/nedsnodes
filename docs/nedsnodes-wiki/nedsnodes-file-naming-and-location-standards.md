@@ -1,17 +1,17 @@
 # File naming and location standards
 
-The naming and location standards for this project's files. Where a tool this project did not write, such as Claude Code, Git or GitHub, fixes a file's name or location, we follow the tool. These standards cover every other file in the repository. Where a skill or a program names the files it writes differently, this page still sets the pattern, and the migration of GHI [Rationalize the repository layout: group components by owning system under nn-systems/](https://github.com/nedschorus/nedschorus/issues/224) brings each into line. Until it does, a file that a skill's or a program's code reads stays where that code reads it. `docs/nedsnodes-wiki/nedsnodes-how-to-choose-a-name-for-files-code-and-glossary-terms.md` says how to choose the words of every name, file names included, and CLAUDE.md points there; this page gives the patterns and locations for each kind of file.
+The naming and location standards for this project's files. Where a tool this project did not write, such as Claude Code, Git or GitHub, fixes a file's name or location, we follow the tool. These standards cover every other file in the repository. Where a skill or a program names the files it writes differently, this page still sets the pattern, and the migration of GHI [Rationalize the repository layout: group components by owning system under nn-systems/](https://github.com/nedsnodes/nedsnodes/issues/224) brings each into line. Until it does, a file that a skill's or a program's code reads stays where that code reads it. `docs/nedsnodes-wiki/nedsnodes-how-to-choose-a-name-for-files-code-and-glossary-terms.md` says how to choose the words of every name, file names included, and CLAUDE.md points there; this page gives the patterns and locations for each kind of file.
 
 ## Terms this page uses
 
 `docs/nedsnodes-wiki/nedsnodes-glossary.md` defines the project-terms. `.claude/skills/skills-glossary.md`, `docs/design-to-main/design-to-main-glossary.md` and `nn-systems/main-gatekeeper/main-gatekeeper-glossary.md` define the system-terms of the skills, of design-to-main and of the main-gatekeeper. We avoid spaces in directory and file names, using a hyphen, `-`, instead.
 
 - **stem**: a filename without its extension.
-- **suffix**: the closing part of a filename stem that marks the file's kind, written with its leading hyphen and without the extension, such as `-draft`, `-test-design` or `-hack`; a stem need not have one.
+- **suffix**: the closing part of a filename stem that marks the file's kind, written with its leading hyphen or dot and without the extension, such as `-draft` or `-hack`; a design's `.<kind>.design`, a test-design's `.<kind>.test-design` and a design-contract's `.<kind>.contract` take dots; a stem need not have one.
 
 ## Desired locations or file names for various components
 
-The MD-skills agent-seat moves each file on main that is not where, or not named as, this page says, under GHI [Rationalize the repository layout: group components by owning system under nn-systems/](https://github.com/nedschorus/nedschorus/issues/224), one system per pull request, repointing in the same commit every citation in the repository. A new file goes where this page says. A system gets its own directory under `nn-systems/` in the pull request that adds its first production code; test code alone does not earn one.
+The MD-skills agent-seat moves each file on main that is not where, or not named as, this page says, under GHI [Rationalize the repository layout: group components by owning system under nn-systems/](https://github.com/nedsnodes/nedsnodes/issues/224), one system per pull request, repointing in the same commit every citation in the repository. A new file goes where this page says. A system gets its own directory under `nn-systems/` in the pull request that adds its first production code; test code alone does not earn one.
 
 A file in a queue directory is named as it will be in its final location, apart from the issue number a GHI-MD gains when its GHI is filed. A GHI-MD moves to its final location through the ghi-write-tool once its cold read is done; any other file moves to it by `git mv` in a pull request once the user approves it.
 
@@ -24,9 +24,9 @@ A file in a queue directory is named as it will be in its final location, apart 
 - **Tests, test-designs, design-contracts**
   - **Location:** a test goes in a `tests/` subdirectory when the code sits in a directory of its own, such as `nn-systems/main-gatekeeper/tests/` or `scripts/design-to-main/tests/`; beside the script it tests when the script sits loose in `scripts/` or `.claude/guard-hooks/`, for example `scripts/dangling-path-citation-check-test.py`; a program in `nn-systems/general-tools/` has its test in `nn-systems/general-tools/tests/`.
   - **Test file names:** `<name of the program tested>-test.<extension>`, for example `scripts/dangling-path-citation-check-test.py`; when one program has several test files, see "Name a test file after what it tests" in `docs/nedsnodes-wiki/nedsnodes-how-to-choose-a-name-for-files-code-and-glossary-terms.md`
-  - **Test-design name:** its design's name with `-design.md` replaced by `-test-design.md`
+  - **Test-design name:** its design's name with `.design.md` replaced by `.test-design.md`
   - **Test-design location:** beside its design
-  - **Design-contract Name:** its design's name with `-design.md` replaced by `-contract.md`, beside its design
+  - **Design-contract Name:** its design's name with `.design.md` replaced by `.contract.md`, beside its design
 - **agent-instructions: instructions, initial-agent-instructions and prompts a program appends**
   - **Location:** `docs/agents/` when more than one system uses them, otherwise their system's directory; pending approval, `docs/agents/queue/`
   - **Naming:** `<subject>-instructions.md`; for initial-agent-instructions, `<subject>-first-prompt.md`; for a prompt a program appends, `<subject>-prompt.md`.
@@ -38,7 +38,7 @@ A file in a queue directory is named as it will be in its final location, apart 
   - **Naming:** `<issue number>-<multi-part-name>.md`
 - **Design document, including a GHI-MD that is a design**
   - **Location:** Before its GHI is filed, `docs/issues/queue/`. Once its GHI is filed, `docs/issues/`, where it is refined in place until its code lands; from then it is revised only to fix a flaw found in it, and only after human review, and each merge appends a `**Pinned to what landed:** commit [<sha>]` line naming its commit. When its GHI closes, the design moves, with its test-design and design-contract where it has them, to the `docs/` subdirectory of the directory its code is in, `nn-systems/<system-name>/docs/` or `nn-systems/general-tools/docs/`, and the GHI's link is updated.
-  - **Naming:** `<multi-part-name>-design.md` before its GHI is filed; `<issue number>-<multi-part-name>-design.md` once it is filed; `<multi-part-name>-design.md` again once it moves to its code's `docs/`. The `-design` suffix stays in all three, though not every GHI has a design.
+  - **Naming:** `<multi-part-name>.<kind>.design.md` before its GHI is filed; `<issue number>-<multi-part-name>.<kind>.design.md` once it is filed; `<multi-part-name>.<kind>.design.md` again once it moves to its code's `docs/`. The `.<kind>.design` ending stays in all three, though not every GHI has a design. A design's name ends `.tool.design.md` for one program or `.system.design.md` for a system, before its GHI is filed, once it is filed, and once it moves beside its code.
 - **Other system or subsystem MDs**
   - **Location:** `nn-systems/<system-name>/docs/`, beside the system's `tests/`. A subsystem, which has a subdirectory of its system's directory, keeps its MDs in that subdirectory's `docs/`. A skill keeps only its `SKILL.md` in `.claude/skills/<skill name>/`; the rest of it lives in `nn-systems/skills/<skill name>/`, its MDs other than its prompts in that directory's `docs/`. A document that belongs to no one system stays in the top-level `docs/`, unless it is a design or data for a program in `nn-systems/general-tools/`, which keeps it in that directory's `docs/`.
   - **Naming:** `<system-name>-<subject>.md`; for a skill, `<skill name>-<subject>.md`
@@ -59,11 +59,11 @@ The user reviews each change to these files that `docs/nedsnodes-wiki/nedsnodes-
 
 - every MD file in `docs/agents/` and `docs/nedsnodes-wiki/`;
 - every MD file under `nn-systems/skills/`;
-- every design, a file whose name ends `-design.md`, except a test-design;
+- every design, a file whose name ends `.design.md`;
 - every file of standing instructions, whose name ends `-prompt.md` or `-instructions.md`;
 - `CLAUDE.md`, any `CLAUDE.local.md`, and everything under `.claude/` except its working space: `worktrees/`, `jobs/` and `handoffs/`.
 
-The list does not reach the places for documents pending approval, where agents write them freely: any `queue/` directory, such as `docs/agents/queue/`, `docs/issues/queue/` or `docs/nedsnodes-wiki/queue/`, `nn-queue/`, and `docs/drafts/`. Test-designs and design-contracts are not on the list, wherever they sit, `nn-systems/skills/` included: design-to-main brings them to the user. Nor are the frozen copies inside `cold-read-records/`, `md-review-records/` and `sanity-check-records/`. `.claude/guard-hooks/instruction-file-guard.py` enforces the list for an agent's file-editing tools; a shell command, `git mv` or a program is not checked.
+The list does not reach the places for documents pending approval, where agents write them freely: any `queue/` directory, such as `docs/agents/queue/`, `docs/issues/queue/` or `docs/nedsnodes-wiki/queue/`, and `docs/drafts/`. Test-designs and design-contracts are not on the list, wherever they sit, `nn-systems/skills/` included: design-to-main brings them to the user. Nor are the frozen copies inside `cold-read-records/`, `md-review-records/` and `sanity-check-records/`. `.claude/guard-hooks/instruction-file-guard.py` enforces the list for an agent's file-editing tools; a shell command, `git mv` or a program is not checked.
 
 ## Filename suffixes
 

@@ -1,4 +1,4 @@
-# nedschorus
+# nedsnodes
 
 A system in which one human and a small number of AI agents build and improve the software-development system they themselves run on.
 
@@ -29,7 +29,7 @@ Two kinds of agent, each defined in the glossary, `docs/nedsnodes-wiki/nedsnodes
 | `docs/nedsnodes-wiki/` | Standing knowledge, kept current (Obsidian vault). |
 | `docs/issues/<n>-<slug>.md` | Working documents, one per GitHub issue, disposed when the issue closes. |
 | `~/.claude/handoffs/` | Session handoffs, one file per agent-seat, on each machine only and never committed. |
-| `nn-queue/` | User-requested notes awaiting their initial walk — verbatim, unreviewed, 90-day TTL; dispersed to durable homes at the walk. |
+| `nn-queue/` | Notes the user requested in July and August 2026, all walked; takes no new notes |
 | `docs/nedsnodes-wiki/queue/`, `docs/issues/queue/` | Destination-rooted queues: wiki-bound doctrine and GHI-MD-bound documents awaiting the user's drain (promote / edit / demote / drop). |
 | `nn-systems/` | The project's built systems, one directory each with its program, design document and tests: `handoff/` (session reincarnation, the handoff-supervisor and the handoff writer) and `main-gatekeeper/` (the program meant to be the only way a change reaches main, dormant until activated). |
 | Issues labeled `queue-drain-candidate` | Issues awaiting the user's drain — same format as every issue, walkable; no work ever waits on one, and nothing requiring the user's admission takes effect without it. |

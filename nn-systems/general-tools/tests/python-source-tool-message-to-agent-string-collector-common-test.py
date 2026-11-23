@@ -643,11 +643,11 @@ found = texts_as_agent_reads_them(
     '    raise SystemExit(f"This checkout is on {on}, not {quoted}: {NOTHING_CHANGED_LINE}\\n"\n'
     '                     "Run git worktree add <a new directory> {quoted}.\\n"\n'
     '                     + "".join(changed) + f"{len(changed)} change(s), stash@{{<n>}}.")\n')
-check("text as the agent reads it: an f-string field and a + chain operand become <source>, a module constant "
+check("text as the agent reads it: an f-string field and a + chain operand become <filled in: source>, unlike <a new directory>, which the message asks the agent to fill in; a module constant "
       "its value, with no Python quote, prefix or doubled brace",
-      found[-1:] == ["This checkout is on <on>, not <quoted>: Nothing was changed.\n"
+      found[-1:] == ["This checkout is on <filled in: on>, not <filled in: quoted>: Nothing was changed.\n"
                 "Run git worktree add <a new directory> {quoted}.\n"
-                "<''.join(changed)><len(changed)> change(s), stash@{<n>}."], found)
+                "<filled in: ''.join(changed)><filled in: len(changed)> change(s), stash@{<n>}."], found)
 
 found = texts_as_agent_reads_them(
     'HEAD_LINE = "head " + f"{NAME}"\n'
@@ -658,9 +658,9 @@ found = texts_as_agent_reads_them(
     '    print("plain {path}" + SEPARATOR)\n')
 check("text as the agent reads it: a module constant built with + resolves, through another constant in an f-string "
       "field; a field with a conversion or format spec, or a constant that is no string literal, f-string or + of "
-      "those, stays <source>",
-      found[-2:] == ["head text; <HEAD_LINE>; <HEAD_LINE>; <SEPARATOR>; <path>",
-                     "plain {path}<SEPARATOR>"], found)
+      "those, stays <filled in: source>",
+      found[-2:] == ["head text; <filled in: HEAD_LINE>; <filled in: HEAD_LINE>; <filled in: SEPARATOR>; <filled in: path>",
+                     "plain {path}<filled in: SEPARATOR>"], found)
 
 for case_name, source in (
         ("a constant naming itself after an import", 'from labels import A\nA = f"more {A}"\nprint(f"x {A}")\n'),
@@ -671,10 +671,10 @@ for case_name, source in (
         found = texts_as_agent_reads_them(source)
     except RecursionError as error:
         found = error
-    check(f"text as the agent reads it: {case_name} renders, the name being expanded staying <source>",
+    check(f"text as the agent reads it: {case_name} renders, the name being expanded staying <filled in: source>",
           isinstance(found, list) and len(found) == 1 and found[0].startswith("x ") and "<" in found[0], found)
 check("text as the agent reads it: two constants naming each other stop at the first name repeated",
-      texts_as_agent_reads_them('A = f"a {B}"\nB = f"b {A}"\nprint(f"x {A}")\n') == ["x a b <A>"])
+      texts_as_agent_reads_them('A = f"a {B}"\nB = f"b {A}"\nprint(f"x {A}")\n') == ["x a b <filled in: A>"])
 
 found = texts_as_agent_reads_them(
     'message = "default"\n'
@@ -694,9 +694,9 @@ found = texts_as_agent_reads_them(
     '        print(f"Method: {message}")\n'
     'print(f"Top: {message}")\n')
 check("text as the agent reads it: a module constant whose name the file also binds elsewhere, as a parameter, a "
-      "local, a global declaration or a class body's name, stays <source> everywhere, module level included",
-      found == ["Stopped: <message>", "Local: <message>", "other", "Global: <message>", "Class: <message>",
-                "Method: <message>", "Top: <message>"], found)
+      "local, a global declaration or a class body's name, stays <filled in: source> everywhere, module level included",
+      found == ["Stopped: <filled in: message>", "Local: <filled in: message>", "other", "Global: <filled in: message>", "Class: <filled in: message>",
+                "Method: <filled in: message>", "Top: <filled in: message>"], found)
 
 found = texts_as_agent_reads_them(
     'LABEL = "module"\n'
@@ -706,7 +706,7 @@ found = texts_as_agent_reads_them(
     '        global LABEL\n'
     '        print(f"Inner: {LABEL}")\n')
 check("text as the agent reads it: an inner function's global declaration of a constant an outer function rebinds "
-      "leaves it <source>", found == ["Inner: <LABEL>"], found)
+      "leaves it <filled in: source>", found == ["Inner: <filled in: LABEL>"], found)
 
 found = texts_as_agent_reads_them(
     'NOTE = "module"\n'
@@ -720,8 +720,8 @@ found = texts_as_agent_reads_them(
     'N = "module"\n'
     'def listing(xs):\n'
     '    print([f"L: {N}" for N in xs])\n')
-check("text as the agent reads it: a comprehension's target named as a module constant leaves it <source>",
-      found == ["L: <N>"], found)
+check("text as the agent reads it: a comprehension's target named as a module constant leaves it <filled in: source>",
+      found == ["L: <filled in: N>"], found)
 
 found = texts_as_agent_reads_them(
     'DETAIL = "now"\n'
@@ -732,7 +732,7 @@ found = texts_as_agent_reads_them(
     '    print(json.dumps({"reason": STOP}))\n'
     '    print(json.dumps({"reason": OTHER}))\n')
 check("text as the agent reads it: a module constant given as a hook output's value renders the constants it names, "
-      "except one the file binds elsewhere", found == ["stop now", "other <SHADOWED>"], found)
+      "except one the file binds elsewhere", found == ["stop now", "other <filled in: SHADOWED>"], found)
 
 for case_name, binding in (("a for loop's target", "for NAME in items:\n    pass\n"),
                            ("a del statement", "del NAME\n"),
@@ -749,8 +749,8 @@ for case_name, binding in (("a for loop's target", "for NAME in items:\n    pass
                            ("a ParamSpec type parameter", "def first[**NAME](items):\n    pass\n"),
                            ("a TypeVarTuple type parameter", "def first[*NAME](items):\n    pass\n")):
     found = texts_as_agent_reads_them(f'NAME = "module"\n{binding}print(f"x {{NAME}}")\n')
-    check(f"text as the agent reads it: a module constant also bound by {case_name} stays <source>",
-          found == ["x <NAME>"], found)
+    check(f"text as the agent reads it: a module constant also bound by {case_name} stays <filled in: source>",
+          found == ["x <filled in: NAME>"], found)
 
 check("source that does not parse yields no entries", texts('print("unclosed\n') == [])
 check("no source yields no entries", texts(None) == [])

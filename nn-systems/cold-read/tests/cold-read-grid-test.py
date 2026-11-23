@@ -28,7 +28,7 @@ WHAT IS PINNED HERE.
 
   - A failed cell is retried once, with the same model, and no cell is
     special (user-ruled 2026-09-11; the design is
-    nn-systems/cold-read/cold-read-grid-cell-failure-handling-design.md, whose
+    nn-systems/cold-read/cold-read-grid-cell-failure-handling.tool.design.md, whose
     section 8 lists the cases below). The first failure prints RETRYING:
     with the attempt's cause and keeps the attempt-1 log; a retry that
     lands prints saved: and its log is deleted; a retry that fails prints
@@ -61,7 +61,7 @@ WHAT IS PINNED HERE.
     at the effort the grid pins, which the stub reads off its own command
     line; the agy cell runs inside the fixture's pass-through stand-in for
     the sandbox program, bwrap or sandbox-exec, so this suite runs inside
-    the nc-test-sandbox, where the real bwrap cannot start.
+    the nn-test-sandbox, where the real bwrap cannot start.
 
   - The model's echoed words are not the cell's status. The cell re-emits its
     agent-binary's stderr into the log the grid lifts from, and the Codex CLI
@@ -147,6 +147,7 @@ import importlib.util
 import inspect
 import io
 import json
+import re
 import os
 import shlex
 import shutil
@@ -352,6 +353,10 @@ if effort_log:
             effort = argument.split("=", 1)[1]
     with open(effort_log, "a", encoding="utf-8") as handle:
         handle.write(f"{given.name} {effort}\n")
+for written_path in filter(None, os.environ.get(
+        "COLD_READ_GRID_TEST_STUB_WRITE_PATHS_BEFORE_SLEEPING", "").split(",")):
+    with open(written_path, "a", encoding="utf-8") as handle:
+        handle.write("A reviewer's write outside its report, made before it was stopped.\n")
 sleep_seconds = float(os.environ.get("COLD_READ_GRID_TEST_STUB_SLEEP_SECONDS") or 0)
 fast_fragment = os.environ.get("COLD_READ_GRID_TEST_STUB_FAST_REPORT_NAME_FRAGMENT")
 if sleep_seconds and not (fast_fragment and fast_fragment in given.name):
@@ -686,11 +691,13 @@ try:
 
     repository = build_scratch_repository(scratch, "checkout-target-moves-mid-run")
     slow_stubs = scratch / "stub-bin-target-moves-mid-run"
+    note_left_by_stopped_cells = "notes-left-before-the-frozen-copy-moved.md"
     started = time.monotonic()
     result = run_grid(repository, slow_stubs, {
         "COLD_READ_GRID_TEST_STUB_SLEEP_SECONDS": "120",
         "COLD_READ_GRID_TEST_STUB_FAST_REPORT_NAME_FRAGMENT": "codex-hunt-second-strongest-model",
-        "COLD_READ_GRID_TEST_STUB_EDIT_GIVEN_TARGET": "1"})
+        "COLD_READ_GRID_TEST_STUB_EDIT_GIVEN_TARGET": "1",
+        "COLD_READ_GRID_TEST_STUB_WRITE_PATHS_BEFORE_SLEEPING": str(repository / note_left_by_stopped_cells)})
     elapsed = time.monotonic() - started
     check("a frozen copy moved mid-run stops the run long before the readers finish",
           elapsed < 60, f"{elapsed:.0f} s; stdout={result.stdout!r}")
@@ -739,32 +746,23 @@ try:
     check("no stopped reviewer or its launcher is left running",
           processes_mentioning(str(slow_stubs), str(repository)) == [],
           processes_mentioning(str(slow_stubs), str(repository)))
-    # A stopped cell never reaches its stray-write check, which runs after the
-    # model exits; without a line saying so the run reads as checked and
-    # clean (nedschorus#167, and PR 699's review).
-    unchecked_lines = [line for line in result.stdout.splitlines()
-                       if line.startswith("WRITE CHECK DID NOT RUN:")]
-    # A third stop allows no new run, so the stopped cell's line must not assume one.
-    check("the not-checked line does not assume a new run follows",
-          unchecked_lines != [] and not any("new run" in line for line in unchecked_lines),
-          repr(unchecked_lines))
-    check("every stopped cell is named as not checked for stray writes",
-          all(any(line.startswith(f"WRITE CHECK DID NOT RUN: {name}.md — ")
-                  for line in unchecked_lines)
+    # A stopped cell never reaches its own stray-write check, so the grid checks for it.
+    # The edit to the frozen copy is under the gitignored record, so the check reports
+    # only the note the cells wrote outside their reports.
+    check("every stopped cell is named as stopped",
+          all(f"{name}.md: stopped before it finished" in result.stdout
               for name in ("claude-hunt-deep", "claude-hunt-second-strongest-model",
                            "claude-terminology-deep", "codex-hunt-deep",
                            "codex-terminology-deep")),
-          repr(unchecked_lines))
-    check("each not-checked line names its stopped cell and opens a sentence with a capital",
-          unchecked_lines != [] and all(
-              line.split(" — ", 1)[1].startswith(
-                  f"The {line.split(': ', 1)[1].split('.md', 1)[0]} cell was stopped")
-              for line in unchecked_lines),
-          repr(unchecked_lines))
-    check("the not-checked line says the missing check is not a clean result, in cell-common's words",
-          unchecked_lines != []
-          and all(cell_common.COLD_READ_CELL_STRAY_WRITE_CHECK_SKIPPED_IS_NOT_A_CLEAN_RESULT_PHRASE in line for line in unchecked_lines),
-          repr(unchecked_lines))
+          repr(result.stdout))
+    # The cell that finished ran its own check and reports the note in its own line too.
+    check("the grid's check ran for the cells stopped when the frozen copy moved, and lists only "
+          "their write outside the record",
+          "WRITE CHECK DID NOT RUN" not in result.stdout
+          and [line.split(" ", 3)[2] for line in result.stdout.splitlines()
+               if line.startswith("STRAY WRITE:") and " changed after the cells launched. " in line]
+          == [note_left_by_stopped_cells],
+          repr(result.stdout))
 
     # --- A frozen copy that moves while reviewers have written but not exited
     # Five cells write their reports and hang; the sixth edits the copy and
@@ -790,14 +788,11 @@ try:
           record_directory is not None
           and not any((record_directory / f"{name}.md").exists() for name in hung_cells),
           sorted(path.name for path in record_directory.glob("*.md")) if record_directory else None)
-    unchecked_lines = [line for line in result.stdout.splitlines()
-                       if line.startswith("WRITE CHECK DID NOT RUN:")]
-    check("each stopped cell's not-checked line says its unfinished report is deleted",
-          all(any(line.startswith(f"WRITE CHECK DID NOT RUN: {name}.md — ")
-                  and line.endswith("; the unfinished report it had written is deleted")
-                  for line in unchecked_lines)
+    check("each stopped cell's line says its unfinished report is deleted",
+          all(f"{name}.md: stopped before it finished; the unfinished report it had written is deleted."
+              in result.stdout.splitlines()
               for name in hung_cells),
-          repr(unchecked_lines))
+          repr(result.stdout))
     check("no cell stopped mid-report or its launcher is left running",
           processes_mentioning(str(hung_stubs), str(repository)) == [],
           processes_mentioning(str(hung_stubs), str(repository)))
@@ -839,7 +834,7 @@ try:
           and "Stopped before finishing" not in result.stdout, repr(result.stdout))
 
     # --- Every failure case below, in the design's terms ---------------------
-    # nn-systems/cold-read/cold-read-grid-cell-failure-handling-design.md, section
+    # nn-systems/cold-read/cold-read-grid-cell-failure-handling.tool.design.md, section
     # 8. The real limit texts (section 4) are the fixtures: the lines of the
     # kept logs it cites, and the 2026-09-18 logged-out capture on ned-box.
     WEEKLY_LIMIT_LINE = "You've hit your weekly limit · resets Nov 7, 3am (America/Los_Angeles)"
@@ -1117,14 +1112,64 @@ try:
           elapsed < stub_reading_seconds and result.returncode == 1
           and lines_opening(result, "saved:") == [] and "No report landed in" in result.stdout,
           f"elapsed {elapsed:.1f}s, exit {result.returncode}; stdout={result.stdout!r}")
-    check("a timed-out cell says its write check did not run, and no Tell the user line",
-          len(lines_opening(result, "WRITE CHECK DID NOT RUN:")) == 8
+    check("the grid checks for the timed-out cells, finds nothing, and prints no Tell the user line",
+          lines_opening(result, "WRITE CHECK DID NOT RUN:") == []
+          and lines_opening(result, "STRAY WRITE:") == []
           and "Tell the user:" not in result.stdout, repr(result.stdout))
     time.sleep(stub_reading_seconds + 1 - elapsed if elapsed < stub_reading_seconds else 0)
     record_directory = record_directory_of(repository)
     check("the stopped stubs never wrote their reports",
           sorted(path.name for path in record_directory.glob("*.md")) == ["cold-read-reference-check.md"],
           sorted(path.name for path in record_directory.glob("*.md")))
+
+    # --- Stopped cells that wrote outside their reports ------------------------
+    # Every cell writes two files before it is stopped: a new file, and a committed one
+    # unchanged before the run. A file already untracked before the run stays untouched, so
+    # it withholds no undo command. The grid lists each written file once, with the undo
+    # command its kind allows.
+    repository = build_scratch_repository(scratch, "checkout-stopped-cells-stray-writes")
+    new_file = "notes-a-reviewer-left.md"
+    already_untracked = "already-untracked-before-the-run.md"
+    (repository / already_untracked).write_text("The agent's own draft.\n", encoding="utf-8")
+    result = run_grid(repository, stubs, {
+        "COLD_READ_GRID_TEST_STUB_SLEEP_SECONDS": str(stub_reading_seconds),
+        "COLD_READ_GRID_CELL_ATTEMPT_TIMEOUT_SECONDS": "2",
+        "COLD_READ_GRID_TEST_STUB_WRITE_PATHS_BEFORE_SLEEPING": ",".join(
+            str(repository / name) for name in (new_file, TARGET_RELATIVE_PATH))})
+    stray_lines = lines_opening(result, "STRAY WRITE:")
+    check("each path the stopped cells changed is listed once, and nothing says the check did not run",
+          sorted(line.split(" ", 3)[2] for line in stray_lines)
+          == sorted([new_file, TARGET_RELATIVE_PATH])
+          and lines_opening(result, "WRITE CHECK DID NOT RUN:") == [],
+          repr(result.stdout))
+    # The commands name the repository in full, so they hit the same file from any directory.
+    resolved_repository = repository.resolve()
+    check("a new file gets a delete command naming its absolute path",
+          any(line.startswith(f"STRAY WRITE: {new_file} ")
+              and f"`rm -r -- {shlex.quote(str(resolved_repository / new_file))}`" in line
+              for line in stray_lines), repr(stray_lines))
+    check("a committed file gets a restore command run in the repository",
+          any(line.startswith(f"STRAY WRITE: {TARGET_RELATIVE_PATH} ")
+              and f"`git -C {shlex.quote(str(resolved_repository))} restore --staged --worktree -- "
+                  f"{TARGET_RELATIVE_PATH}`" in line
+              for line in stray_lines), repr(stray_lines))
+    time.sleep(stub_reading_seconds)
+
+    # --- Stopped cells, and no snapshot to check them against -----------------
+    # GIT_DIR points at nothing, so the grid's own snapshot fails as well as each cell's.
+    repository = build_scratch_repository(scratch, "checkout-stopped-cells-no-snapshot")
+    result = run_grid(repository, stubs, {
+        "GIT_DIR": str(scratch / "no-such-git-directory"),
+        "COLD_READ_GRID_TEST_STUB_SLEEP_SECONDS": str(stub_reading_seconds),
+        "COLD_READ_GRID_CELL_ATTEMPT_TIMEOUT_SECONDS": "2"})
+    unchecked_lines = lines_opening(result, "WRITE CHECK DID NOT RUN:")
+    check("with no snapshot, every stopped cell says no check ran, why, and that it is not a clean result",
+          len(unchecked_lines) == 8 and all(
+              "its snapshot of the working tree before the cells launched failed" in line
+              and cell_common.COLD_READ_CELL_STRAY_WRITE_CHECK_SKIPPED_IS_NOT_A_CLEAN_RESULT_PHRASE in line
+              for line in unchecked_lines),
+          repr(unchecked_lines))
+    time.sleep(stub_reading_seconds)
 
     # --- A cell that writes its report and then hangs is stopped, report deleted
     hang_seconds = 30
@@ -1390,7 +1435,7 @@ try:
         "exactly one prompt asks it": len(question_4_prompts) == 1,
         "the template pieces in order": holds_in_order(question_4_prompt, template_pieces),
         # The grid names the resolved path, as its saved line does; the
-        # nc-test-sandbox's TMPDIR is a symlink, so the two spellings differ there.
+        # nn-test-sandbox's TMPDIR is a symlink, so the two spellings differ there.
         f"the report path {question_4_report.resolve()}":
             str(question_4_report.resolve()) in question_4_prompt,
         "'is a frozen copy of'": "is a frozen copy of" in question_4_prompt,
@@ -1475,7 +1520,7 @@ try:
           f"exit {result.returncode}; stdout={result.stdout!r}")
     check("the closing text gives the account limit as why Question 4 was not answered",
           "Question 4, What should be code, was not answered: account-limit — weekly limit · resets "
-          f"Nov 7, 3am (America/Los_Angeles) (log: " in result.stdout
+          "Nov 7, 3am (America/Los_Angeles) (log: " in result.stdout
           and f"{QUESTION_4_REPORT_NAME}.stderr.log). The other reports do not depend on it: "
           "go on without its answer." in result.stdout, repr(result.stdout))
 
@@ -1593,6 +1638,279 @@ try:
         "cold_read_grid_under_test", SYSTEM_DIRECTORY / "cold-read-grid.py")
     grid_module = importlib.util.module_from_spec(grid_spec)
     grid_spec.loader.exec_module(grid_module)
+
+    def failing_working_tree_state():
+        raise grid_module.cell_common.WriteDetectorUnavailable("injected git status failure")
+
+    real_working_tree_state = grid_module.cell_common.working_tree_state
+    grid_module.cell_common.working_tree_state = failing_working_tree_state
+    try:
+        lines = grid_module.stopped_cells_write_check_lines(
+            [scratch / "claude-hunt-deep.md"], set(), None, set())
+    finally:
+        grid_module.cell_common.working_tree_state = real_working_tree_state
+    check("a git status that fails at check time is reported as no check, with its error",
+          len(lines) == 1 and lines[0].startswith("WRITE CHECK DID NOT RUN: claude-hunt-deep.md — ")
+          and "git status failed when it checked (injected git status failure)" in lines[0],
+          repr(lines))
+
+    # A stopped cell that moves a file the agent had already edited: restoring or deleting the
+    # destination would delete it, and the agent's edits with it. Git pairs the move as a
+    # rename only for a `git mv` of similar content, and a cell may re-create the old name,
+    # so each kind of move is checked.
+    committed_lines = [f"Committed line {number}.\n" for number in range(20)]
+    lightly_edited = "".join(committed_lines[:19]) + "The agent's own uncommitted line.\n"
+    much_edited = "".join(f"The agent's own uncommitted line {number}.\n" for number in range(20))
+    # (case, the agent's edit, whether it is staged, how the cell moves it, whether it re-creates the old name)
+    for case, agent_edit, staged, plain_mv, re_create in (
+            ("git-mv-paired-as-a-rename", lightly_edited, False, False, False),
+            ("git-mv-of-a-much-edited-staged-file", much_edited, True, False, False),
+            ("plain-mv", lightly_edited, False, True, False),
+            ("git-mv-then-the-old-name-re-created", lightly_edited, False, False, True),
+            ("plain-mv-then-the-old-name-re-created", lightly_edited, False, True, True)):
+        repository_of_case = (scratch / f"checkout-stopped-cell-moves-an-edited-file-{case}").resolve()
+        repository_of_case.mkdir()
+
+        def git(*arguments):
+            return subprocess.run(["git", "-C", str(repository_of_case), "-c", "user.name=grid test",
+                                   "-c", "user.email=grid-test@example.invalid", *arguments],
+                                  check=True, capture_output=True, text=True).stdout
+
+        git("init", "--quiet")
+        (repository_of_case / "agent-draft.md").write_text("".join(committed_lines), encoding="utf-8")
+        git("add", "agent-draft.md")
+        git("commit", "--quiet", "-m", "seed")
+        (repository_of_case / "agent-draft.md").write_text(agent_edit, encoding="utf-8")
+        if staged:
+            git("add", "agent-draft.md")
+        with mock.patch.object(grid_module.cell_common, "REPO_ROOT", repository_of_case):
+            baseline_of_case = grid_module.cell_common.working_tree_state()
+            if plain_mv:
+                (repository_of_case / "agent-draft.md").rename(repository_of_case / "moved-by-a-reviewer.md")
+            else:
+                git("mv", "agent-draft.md", "moved-by-a-reviewer.md")
+            if re_create:
+                (repository_of_case / "agent-draft.md").write_text("A new file under the old name.\n",
+                                                                     encoding="utf-8")
+            status_of_case = git("status", "--porcelain")
+            reported_of_case = set()
+            lines_of_case = grid_module.stopped_cells_write_check_lines(
+                [scratch / "claude-hunt-deep.md"], baseline_of_case, None, reported_of_case)
+            (repository_of_case / "moved-by-a-reviewer.md").write_text("A later write.\n", encoding="utf-8")
+            later_lines_of_case = grid_module.stopped_cells_write_check_lines(
+                [scratch / "codex-hunt-deep.md"], baseline_of_case, None, reported_of_case)
+        check(f"{case}: git pairs the move as a rename only where the case says so",
+              ("R" in status_of_case) == (case in ("git-mv-paired-as-a-rename",
+                                                   "git-mv-then-the-old-name-re-created")),
+              repr(status_of_case))
+        destination_lines = [line for line in lines_of_case
+                             if line.startswith("STRAY WRITE: moved-by-a-reviewer.md ")]
+        check(f"{case}: a file moved from one the agent had edited gets no undo command, and the "
+              "edited file is named",
+              len(destination_lines) == 1 and "No undo command is given" in destination_lines[0]
+              and "has changed or gone since: agent-draft.md." in destination_lines[0]
+              and "restore" not in destination_lines[0] and "rm -r" not in destination_lines[0],
+              repr(lines_of_case))
+        check(f"{case}: a path already listed is not listed again when later cells are stopped",
+              later_lines_of_case == [], repr(later_lines_of_case))
+
+    # A stopped cell that moves a file the agent had created before launch, untracked or staged
+    # as new: the old name leaves git status altogether, so only the launch snapshot shows that
+    # the agent's file is gone, and the destination must get no undo command.
+    for case, staged_new in (("untracked-source-plain-mv", False), ("staged-new-source-git-mv", True)):
+        created_repository = (scratch / f"checkout-stopped-cell-moves-a-created-file-{case}").resolve()
+        created_repository.mkdir()
+
+        def created_git(*arguments):
+            return subprocess.run(["git", "-C", str(created_repository), "-c", "user.name=grid test",
+                                   "-c", "user.email=grid-test@example.invalid", *arguments],
+                                  check=True, capture_output=True, text=True).stdout
+
+        created_git("init", "--quiet")
+        (created_repository / "seed.md").write_text("Seed.\n", encoding="utf-8")
+        created_git("add", "seed.md")
+        created_git("commit", "--quiet", "-m", "seed")
+        (created_repository / "agent-new.md").write_text("The agent's new file.\n", encoding="utf-8")
+        if staged_new:
+            created_git("add", "agent-new.md")
+        with mock.patch.object(grid_module.cell_common, "REPO_ROOT", created_repository):
+            created_baseline = grid_module.cell_common.working_tree_state()
+            if staged_new:
+                created_git("mv", "agent-new.md", "moved-by-a-reviewer.md")
+            else:
+                (created_repository / "agent-new.md").rename(created_repository / "moved-by-a-reviewer.md")
+            created_status = created_git("status", "--porcelain", "--untracked-files=all")
+            created_lines = grid_module.stopped_cells_write_check_lines(
+                [scratch / "claude-hunt-deep.md"], created_baseline, None, set())
+        check(f"{case}: the agent's created file has left git status",
+              "agent-new.md" not in created_status and "moved-by-a-reviewer.md" in created_status,
+              repr(created_status))
+        created_destination_lines = [line for line in created_lines
+                                     if line.startswith("STRAY WRITE: moved-by-a-reviewer.md ")]
+        check(f"{case}: a file moved from one the agent created before launch gets no undo command",
+              len(created_destination_lines) == 1
+              and "has changed or gone since: agent-new.md." in created_destination_lines[0]
+              and "restore" not in created_destination_lines[0]
+              and "rm -r" not in created_destination_lines[0],
+              repr(created_lines))
+
+    # A file the agent had already deleted before launch, and has not touched since, holds no
+    # edits a stray write could carry away, so a reviewer's new file still gets its undo command.
+    deleted_repository = (scratch / "checkout-stopped-cell-writes-beside-a-deletion").resolve()
+    deleted_repository.mkdir()
+    subprocess.run(["git", "-C", str(deleted_repository), "init", "--quiet"], check=True)
+    (deleted_repository / "agent-deleted.md").write_text("Committed text.\n", encoding="utf-8")
+    subprocess.run(["git", "-C", str(deleted_repository), "add", "agent-deleted.md"], check=True)
+    subprocess.run(["git", "-C", str(deleted_repository), "-c", "user.name=grid test",
+                    "-c", "user.email=grid-test@example.invalid", "commit", "--quiet", "-m", "seed"],
+                   check=True)
+    (deleted_repository / "agent-deleted.md").unlink()
+    with mock.patch.object(grid_module.cell_common, "REPO_ROOT", deleted_repository):
+        deleted_baseline = grid_module.cell_common.working_tree_state()
+        (deleted_repository / "written-by-a-reviewer.md").write_text("Stray.\n", encoding="utf-8")
+        deleted_lines = grid_module.stopped_cells_write_check_lines(
+            [scratch / "claude-hunt-deep.md"], deleted_baseline, None, set())
+    check("a file deleted before launch and untouched since does not withhold another path's undo",
+          len(deleted_lines) == 1 and "rm -r -- " in deleted_lines[0], repr(deleted_lines))
+
+    # A cell that writes to a file the agent had already changed: that file gets no undo
+    # command, since one would also undo the agent's changes, and nor does any other path
+    # the cell wrote, since the agent's changes may have been moved to it.
+    edited_repository = (scratch / "checkout-stopped-cell-writes-to-an-edited-file").resolve()
+    edited_repository.mkdir()
+    subprocess.run(["git", "-C", str(edited_repository), "init", "--quiet"], check=True)
+    (edited_repository / "agent-draft.md").write_text("The agent's own draft.\n", encoding="utf-8")
+    with mock.patch.object(grid_module.cell_common, "REPO_ROOT", edited_repository):
+        edited_baseline = grid_module.cell_common.working_tree_state()
+        (edited_repository / "agent-draft.md").write_text("A reviewer's rewrite.\n", encoding="utf-8")
+        (edited_repository / "written-by-a-reviewer.md").write_text("Stray.\n", encoding="utf-8")
+        edited_lines = grid_module.stopped_cells_write_check_lines(
+            [scratch / "claude-hunt-deep.md"], edited_baseline, None, set())
+    edited_file_lines = [line for line in edited_lines if line.startswith("STRAY WRITE: agent-draft.md ")]
+    other_lines = [line for line in edited_lines if line.startswith("STRAY WRITE: written-by-a-reviewer.md ")]
+    check("a file already changed before the run gets no undo command",
+          len(edited_file_lines) == 1 and "so no undo command is given" in edited_file_lines[0]
+          and "rm -r" not in edited_file_lines[0] and "restore" not in edited_file_lines[0],
+          repr(edited_lines))
+    check("a file untracked before the run is to be read itself, with no git diff, which would print nothing",
+          len(edited_file_lines) == 1 and "Read agent-draft.md itself, which git does not track," in edited_file_lines[0]
+          and "diff" not in edited_file_lines[0], repr(edited_lines))
+    check("once a file already changed before the run has changed again, no other path gets an undo command",
+          len(other_lines) == 1 and "has changed or gone since: agent-draft.md." in other_lines[0]
+          and "rm -r" not in other_lines[0] and "restore" not in other_lines[0],
+          repr(edited_lines))
+    # While an already-changed file has changed, a stopped cell that moves a clean committed file
+    # leaves its old name gone and its new name present; each line must fit its own path.
+    clean_move_repository = (scratch / "checkout-stopped-cell-moves-a-clean-file-beside-an-edit").resolve()
+    clean_move_repository.mkdir()
+
+    def clean_move_git(*arguments):
+        return subprocess.run(["git", "-C", str(clean_move_repository), "-c", "user.name=grid test",
+                               "-c", "user.email=grid-test@example.invalid", *arguments],
+                              check=True, capture_output=True, text=True).stdout
+
+    clean_move_git("init", "--quiet")
+    (clean_move_repository / "agent-draft.md").write_text("Committed.\n", encoding="utf-8")
+    (clean_move_repository / "clean.md").write_text("Clean.\n", encoding="utf-8")
+    clean_move_git("add", "agent-draft.md", "clean.md")
+    clean_move_git("commit", "--quiet", "-m", "seed")
+    (clean_move_repository / "agent-draft.md").write_text("The agent's own edit.\n", encoding="utf-8")
+    with mock.patch.object(grid_module.cell_common, "REPO_ROOT", clean_move_repository):
+        clean_move_baseline = grid_module.cell_common.working_tree_state()
+        (clean_move_repository / "agent-draft.md").write_text("A reviewer's rewrite.\n", encoding="utf-8")
+        (clean_move_repository / "clean.md").rename(clean_move_repository / "moved-by-a-reviewer.md")
+        clean_move_lines = grid_module.stopped_cells_write_check_lines(
+            [scratch / "claude-hunt-deep.md"], clean_move_baseline, None, set())
+    gone_lines = [line for line in clean_move_lines if line.startswith("STRAY WRITE: clean.md ")]
+    moved_to_lines = [line for line in clean_move_lines if line.startswith("STRAY WRITE: moved-by-a-reviewer.md ")]
+    check("while an already-changed file has changed, a path that is gone is named as gone, with the "
+          "diff that shows what it held, and is not to be read",
+          len(gone_lines) == 1 and "has changed or gone since: agent-draft.md," in gone_lines[0]
+          and "clean.md is gone; `git -C " in gone_lines[0] and "diff HEAD -- clean.md`" in gone_lines[0]
+          and "Read clean.md" not in gone_lines[0]
+          and "The index may still hold the moved changes under clean.md, and an undo would discard them; "
+              "`git -C " in gone_lines[0]
+          and "diff --cached -- clean.md` shows any copy the index holds. Ask the user before you restore "
+              "clean.md," in gone_lines[0]
+          and "rm -r" not in gone_lines[0] and "restore --staged" not in gone_lines[0],
+          repr(clean_move_lines))
+    check("while an already-changed file has changed, a path that exists is named as where the "
+          "changes may have moved",
+          len(moved_to_lines) == 1
+          and "may have moved those changes into moved-by-a-reviewer.md" in moved_to_lines[0]
+          and "Read moved-by-a-reviewer.md against" in moved_to_lines[0]
+          and "rm -r" not in moved_to_lines[0] and "restore" not in moved_to_lines[0],
+          repr(clean_move_lines))
+    # A stopped cell that removes a path with `git mv` or `git rm` stages the removal, so a diff
+    # of the working tree against the index shows nothing; the message's diff must still show it.
+    # A cell can also stage the edited file's text under a path and then delete the path, which
+    # leaves the moved changes only in the index, where an undo of the gone path would discard them.
+    for case, remove in (("git mv", lambda: clean_move_git("mv", "clean.md", "staged-move-by-a-reviewer.md")),
+                         ("git rm", lambda: clean_move_git("rm", "--quiet", "clean.md")),
+                         ("staged copy of the edited file", lambda: (
+                             (clean_move_repository / "clean.md").write_text("The agent's own edit.\n", encoding="utf-8"),
+                             clean_move_git("add", "clean.md"), (clean_move_repository / "clean.md").unlink()))):
+        clean_move_git("reset", "--quiet", "--hard")
+        clean_move_git("clean", "--quiet", "-f")
+        (clean_move_repository / "agent-draft.md").write_text("The agent's own edit.\n", encoding="utf-8")
+        with mock.patch.object(grid_module.cell_common, "REPO_ROOT", clean_move_repository):
+            staged_baseline = grid_module.cell_common.working_tree_state()
+            (clean_move_repository / "agent-draft.md").write_text("A reviewer's rewrite.\n", encoding="utf-8")
+            remove()
+            staged_lines = grid_module.stopped_cells_write_check_lines(
+                [scratch / "claude-hunt-deep.md"], staged_baseline, None, set())
+        staged_gone_lines = [line for line in staged_lines if line.startswith("STRAY WRITE: clean.md ")]
+        diff_commands = re.findall(r"`(git -C [^`]* diff [^`]*)`", staged_gone_lines[0]) if staged_gone_lines else []
+        shown_by = [subprocess.run(shlex.split(command), check=True, capture_output=True, text=True).stdout
+                    for command in diff_commands]
+        shown = shown_by[0] if len(diff_commands) == 2 and " diff HEAD -- " in diff_commands[0] else ""
+        index_copy_shown = shown_by[1] if len(diff_commands) == 2 and " diff --cached -- " in diff_commands[1] else ""
+        check(f"{case}: a path a stopped cell removed with a staged change is named as gone, and the diff "
+              "the line gives shows what it held",
+              len(staged_gone_lines) == 1 and "-Clean." in shown
+              and "an undo would discard them" in staged_gone_lines[0]
+              and ("+The agent's own edit." in index_copy_shown) == (case == "staged copy of the edited file"),
+              repr(staged_lines) + "\n" + shown + "\n" + index_copy_shown)
+    # A tracked file the agent had already changed: the diffs the line gives must together show a
+    # cell's edit that is staged, and a cell's write of the HEAD text over a staged-and-edited file,
+    # which leaves the working tree equal to HEAD.
+    for case, agent_staged_text, agent_unstaged_text, cell_write, shown_text in (
+            ("a cell stages its edit to an edited file", None, "The agent's own edit.\n",
+             "A reviewer's staged edit.\n", "+A reviewer's staged edit."),
+            ("a cell writes the HEAD text over a staged-and-edited file", "The agent's staged edit.\n",
+             "The agent's staged edit, then edited again.\n", "Committed.\n", "+Committed.")):
+        already_changed_repository = (scratch / f"checkout-already-changed-{case.replace(' ', '-')}").resolve()
+        already_changed_repository.mkdir()
+
+        def already_changed_git(*arguments):
+            return subprocess.run(["git", "-C", str(already_changed_repository), "-c", "user.name=grid test",
+                                   "-c", "user.email=grid-test@example.invalid", *arguments],
+                                  check=True, capture_output=True, text=True).stdout
+
+        already_changed_git("init", "--quiet")
+        (already_changed_repository / "agent-draft.md").write_text("Committed.\n", encoding="utf-8")
+        already_changed_git("add", "agent-draft.md")
+        already_changed_git("commit", "--quiet", "-m", "seed")
+        if agent_staged_text is not None:
+            (already_changed_repository / "agent-draft.md").write_text(agent_staged_text, encoding="utf-8")
+            already_changed_git("add", "agent-draft.md")
+        (already_changed_repository / "agent-draft.md").write_text(agent_unstaged_text, encoding="utf-8")
+        with mock.patch.object(grid_module.cell_common, "REPO_ROOT", already_changed_repository):
+            already_changed_baseline = grid_module.cell_common.working_tree_state()
+            (already_changed_repository / "agent-draft.md").write_text(cell_write, encoding="utf-8")
+            if agent_staged_text is None:
+                already_changed_git("add", "agent-draft.md")
+            already_changed_lines = grid_module.stopped_cells_write_check_lines(
+                [scratch / "claude-hunt-deep.md"], already_changed_baseline, None, set())
+        already_changed_commands = (re.findall(r"`(git -C [^`]* diff [^`]*)`", already_changed_lines[0])
+                                    if len(already_changed_lines) == 1 else [])
+        already_changed_shown = "".join(
+            subprocess.run(shlex.split(command), check=True, capture_output=True, text=True).stdout
+            for command in already_changed_commands)
+        check(f"{case}: the diffs the line gives show it",
+              len(already_changed_lines) == 1 and "so no undo command is given" in already_changed_lines[0]
+              and shown_text in already_changed_shown,
+              repr(already_changed_lines) + "\n" + already_changed_shown)
     attempt = grid_module.start_attempt(
         [sys.executable, "-c", "import time; time.sleep(120)"],
         scratch / "report.md", 1, scratch / "cell.stderr.log")
@@ -2602,7 +2920,7 @@ try:
               and "refusing cold-read-full-run" not in result.stderr,
               f"exit {result.returncode}; stdout={result.stdout!r}; stderr={result.stderr!r}")
 
-    # A change merged from an nc-topic-branch lands at the merge, not at the
+    # A change merged from an nn-topic-branch lands at the merge, not at the
     # topic's commit: runs between the two reviewed that change and do not count.
     repository = build_scratch_repository(scratch, "full-run-count-merged-topic")
     git_in = lambda *arguments, when=None: subprocess.run(

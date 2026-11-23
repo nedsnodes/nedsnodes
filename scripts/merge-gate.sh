@@ -10,6 +10,7 @@
 # open issue in this repository, which merge-lane-2 sends the author.
 #
 #   scripts/merge-gate.sh <pr-number> <expected-head-sha> <reviewed-since-iso8601>
+#   scripts/merge-gate.sh --print-new-activity-count-after-reviewed-since-bound <pr-number>
 #
 # EXIT CODES. 0 the merge may proceed; 1 the gate REFUSES, a named reason on
 # stderr; 2 the gate COULD NOT RUN -- bad invocation, missing jq or gh,
@@ -132,9 +133,6 @@
 # rebuild's. Recorded so the next reader knows it was seen and left.
 set -u
 
-REPO=nedsnodes/nedsnodes
-# GitHub redirects the repository's old name, and descriptions written before the rename still link with it.
-OLD_REPOSITORY=nedschorus/nedschorus
 MERGE_ACCOUNT=ned-review-merge
 TOKEN_FILE=$HOME/.config/nedsnodes/$MERGE_ACCOUNT.token
 
@@ -149,33 +147,68 @@ TOKEN_ONLY_MERGE_ACCOUNT="The gate reads GitHub only as the merge account, $MERG
 TOKEN_TELL_THE_USER="Tell the user this message: only the user can restore the token."
 
 if [ $# -eq 1 ] && { [ "$1" = --help ] || [ "$1" = -h ]; }; then
-  echo "usage: scripts/merge-gate.sh <pull request number> <the nc-head-commit, all 40 characters> <reviewed-since: ISO 8601 time>"
+  echo "usage: scripts/merge-gate.sh <pull request number> <the nn-head-commit, all 40 characters> <reviewed-since: ISO 8601 time>"
   echo
   echo "Decides whether a pull request may merge: reads it from GitHub as the merge account"
   echo "$MERGE_ACCOUNT and exits 0 only when every requirement is met, printing a merge"
   echo "command pinned to the commit the latest approving review covered."
   echo "Exit codes: 0 the merge may proceed; 1 the gate refuses, with the reason on stderr;"
   echo "2 the gate could not run: bad invocation, missing jq or gh, unreadable token, or a failed read."
+  echo
+  echo "usage: scripts/merge-gate.sh --print-new-activity-count-after-reviewed-since-bound <pull request number>"
+  echo
+  echo "Prints how many inline comments, issue comments and reviews the gate's activity check finds"
+  echo "after the latest reviewed-since it accepts: the later of the pin and $MERGE_ACCOUNT's latest review."
+  echo "Exit codes: 0 the count is printed; 2 the gate could not count."
   exit 0
 fi
-[ $# -eq 3 ] || cannot "merge-gate.sh takes exactly three arguments and was given $#." \
-  "Call it as: scripts/merge-gate.sh <pull request number> <the nc-head-commit, all 40 characters> <reviewed-since: the submitted_at of your latest review as the merge account, or of the pin if that is later>"
-PR=$1; EXPECTED=$2; SINCE=$3
+# The posting program, scripts/merge-lane-pull-request-reviewer-review-post-and-read-back.py, runs this
+# mode to decide whether a review with no verdict answers the activity check below: it is the same check,
+# with reviewed-since at the bound that check accepts at most.
+NEW_ACTIVITY_COUNT_OPTION=--print-new-activity-count-after-reviewed-since-bound
+if [ $# -eq 2 ] && [ "$1" = "$NEW_ACTIVITY_COUNT_OPTION" ]; then
+  PR=$2
+  case "$PR" in
+    *[!0-9]*|"") cannot "$NEW_ACTIVITY_COUNT_OPTION takes a pull request number and was given: $PR" \
+      "Call it as: scripts/merge-gate.sh $NEW_ACTIVITY_COUNT_OPTION <pull request number>" ;;
+  esac
+else
+  [ $# -eq 3 ] || cannot "merge-gate.sh takes exactly three arguments and was given $#." \
+  "Call it as: scripts/merge-gate.sh <pull request number> <the nn-head-commit, all 40 characters> <reviewed-since: the submitted_at of your latest review as the merge account, or of the pin if that is later>"
+  PR=$1; EXPECTED=$2; SINCE=$3
 
-NO_SANDBOX_SUITES_PROGRAM="$(dirname "${BASH_SOURCE[0]}")/no-sandbox-test-suites-run-on-main-in-a-quiet-gap.py"
-if ! python3 "$NO_SANDBOX_SUITES_PROGRAM" --print-merge-gate-notice-of-last-failed-or-stopped-run --clone "$(dirname "${BASH_SOURCE[0]}")/.." >&2; then
-  printf 'NO-SANDBOX TEST SUITES ON MAIN: %s --print-merge-gate-notice-of-last-failed-or-stopped-run failed; its error is just above this line. The gate goes on; tell reboot-test, which owns that program.\n' "$NO_SANDBOX_SUITES_PROGRAM" >&2
+  NO_SANDBOX_SUITES_PROGRAM="$(dirname "${BASH_SOURCE[0]}")/no-sandbox-test-suites-run-on-main-in-a-quiet-gap.py"
+  if ! python3 "$NO_SANDBOX_SUITES_PROGRAM" --print-merge-gate-notice-of-last-failed-or-stopped-run --clone "$(dirname "${BASH_SOURCE[0]}")/.." >&2; then
+    printf 'NO-SANDBOX TEST SUITES ON MAIN: %s --print-merge-gate-notice-of-last-failed-or-stopped-run failed; its error is just above this line. The gate goes on; tell reboot-test, which owns that program.\n' "$NO_SANDBOX_SUITES_PROGRAM" >&2
+  fi
 fi
 
 command -v jq >/dev/null 2>&1 || cannot "jq is not on PATH. Put jq on PATH, then rerun the gate." \
   "If jq is not installed on this machine, tell the user this message."
 command -v gh >/dev/null 2>&1 || cannot "gh is not on PATH. Put gh on PATH, then rerun the gate." \
   "If gh is not installed on this machine, tell the user this message."
+# The old name is read too: GitHub redirects it, and descriptions written before the rename still link with it.
+REPOSITORY_NAMES_MODULE="$(dirname "${BASH_SOURCE[0]}")/../nn-systems/general-tools/github-repository-name-and-name-before-project-rename-common.py"
+REPOSITORY_NAMES_UNREADABLE="could not read the repository's names, REPOSITORY and OLD_REPOSITORY, from $REPOSITORY_NAMES_MODULE"
+repository_names=$(python3 -c '
+import importlib.util, sys
+spec = importlib.util.spec_from_file_location("repository_names", sys.argv[1])
+module = importlib.util.module_from_spec(spec)
+spec.loader.exec_module(module)
+print(module.REPOSITORY, module.OLD_REPOSITORY)' "$REPOSITORY_NAMES_MODULE") \
+  || cannot "$REPOSITORY_NAMES_UNREADABLE; python3's error is just above this line." \
+    "Fix the module or restore it from main, then run the gate again."
+read -r REPO OLD_REPOSITORY extra_name <<<"$repository_names"
+[ -n "$OLD_REPOSITORY" ] && [ -z "$extra_name" ] \
+  || cannot "$REPOSITORY_NAMES_UNREADABLE: it printed \`$repository_names\`, not two names separated by a space." \
+    "Fix the module or restore it from main, then run the gate again."
 DESCRIPTION_DEFECT_LINE_READER="$(dirname "${BASH_SOURCE[0]}")/pull-request-description-defect-line-root-cause-status-and-follow-up-link-reader.py"
+VERDICT_REVIEW_POSTING_PROGRAM_MARKS_CHECK_PROGRAM_PATH="$(dirname "${BASH_SOURCE[0]}")/merge-gate-approval-or-changes-request-review-has-review-posting-program-marks-check.py"
 
+if [ "$1" != "$NEW_ACTIVITY_COUNT_OPTION" ]; then
 # An abbreviated or malformed EXPECTED used to refuse as "head moved", naming the
 # wrong cause: the head had not moved, the caller had passed a short sha.
-FULL_HASH_LINE="Pass the nc-head-commit's full hash in lower case, as gh pr view $PR --json headRefOid --jq .headRefOid prints it, then run the gate again."
+FULL_HASH_LINE="Pass the nn-head-commit's full hash in lower case, as gh pr view $PR --json headRefOid --jq .headRefOid prints it, then run the gate again."
 case "$EXPECTED" in
   *[!0-9a-f]*|"") cannot "expected-head-sha is not a full 40-character hex sha: $EXPECTED" "$FULL_HASH_LINE" ;;
 esac
@@ -189,6 +222,7 @@ case "$SINCE" in
 esac
 # The right shape can still be no real time, such as month 13.
 jq -n --arg since "$SINCE" '$since | fromdateiso8601' >/dev/null 2>&1 || cannot "$SINCE_FORM" "$SINCE_FORM_LINE"
+fi
 
 # export's own status masked cat's, so a missing token file was swallowed and
 # GH_TOKEN was set to the empty string -- which gh treats as unset, falling back
@@ -199,96 +233,39 @@ token=$(cat "$TOKEN_FILE" 2>/dev/null)
 [ -n "$token" ] || cannot "the token file $TOKEN_FILE is empty" "$TOKEN_ONLY_MERGE_ACCOUNT" "$TOKEN_TELL_THE_USER"
 export GH_TOKEN="$token"
 
-state=$(gh pr view "$PR" --repo "$REPO" --json headRefOid,mergeStateStatus,reviewDecision,isDraft)
-[ $? -eq 0 ] || cannot "could not read pull request $PR's state; any error gh printed is just above this line." \
-  "If gh's error says the pull request was not found, check the number you passed, then run the gate again." \
-  "Otherwise run the gate again once; if it fails the same way, tell the user this message and gh's error."
-
-# Unchecked, an unparsable state read the head as empty and refused as "head moved".
-STATE_UNPARSABLE="could not parse pull request $PR's state"
-head=$(jq -r .headRefOid <<<"$state")             || cannot "$STATE_UNPARSABLE" "$JQ_ERROR_ABOVE" "$RERUN_ONCE_JQ"
-merge_state=$(jq -r .mergeStateStatus <<<"$state") || cannot "$STATE_UNPARSABLE" "$JQ_ERROR_ABOVE" "$RERUN_ONCE_JQ"
-decision=$(jq -r .reviewDecision <<<"$state")      || cannot "$STATE_UNPARSABLE" "$JQ_ERROR_ABOVE" "$RERUN_ONCE_JQ"
-draft=$(jq -r .isDraft <<<"$state")                || cannot "$STATE_UNPARSABLE" "$JQ_ERROR_ABOVE" "$RERUN_ONCE_JQ"
-
-# The authoritative commit is the one the newest approving review was recorded
-# against -- never $head, and never $EXPECTED, both of which are what someone
-# BELIEVES was reviewed. Paginated, because an approval at index 32 was invisible
-# and refused as "no APPROVED review found". Not piped: the exit status must be
-# this call's.
+# The functions' bodies keep the gate's own indentation, so merge-gate-test.py's mutations find each line.
+read_review_channel() {
 reviews_raw=$(gh api "repos/$REPO/pulls/$PR/reviews" --paginate)
 [ $? -eq 0 ] || cannot "could not read the reviews of pull request $PR; any error gh printed is just above this line." "$RERUN_ONCE_GH"
+}
 
+read_latest_approval() {
 approval=$(jq -s -c \
   '[.[][] | select(.state == "APPROVED")]
    | sort_by(.submitted_at) | last // empty' <<<"$reviews_raw")
 [ $? -eq 0 ] || cannot "could not parse the review channel" "$JQ_ERROR_ABOVE" "$RERUN_ONCE_JQ"
-[ -n "$approval" ] || fail "no APPROVED review found; the gate prints a merge command only for a commit an approving review covers." \
-  "If the nc-head-commit has not been reviewed yet, commission its review, and run the gate again once the nc-head-commit is approved." \
-  "If its review found a defect, do not merge until the defect is fixed and the new nc-head-commit is approved." \
-  "If its review found no defect, approve the nc-head-commit as an account other than the pull request's author: the merge account, or mac-claude when the merge account opened the pull request. Then run the gate again."
+}
 
+read_approval_fields() {
 APPROVAL_UNPARSABLE="could not parse the approving review"
 approved_sha=$(jq -r '.commit_id' <<<"$approval")    || cannot "$APPROVAL_UNPARSABLE" "$JQ_ERROR_ABOVE" "$RERUN_ONCE_JQ"
 approval_id=$(jq -r '.id' <<<"$approval")            || cannot "$APPROVAL_UNPARSABLE" "$JQ_ERROR_ABOVE" "$RERUN_ONCE_JQ"
 approval_at=$(jq -r '.submitted_at' <<<"$approval")  || cannot "$APPROVAL_UNPARSABLE" "$JQ_ERROR_ABOVE" "$RERUN_ONCE_JQ"
 approver=$(jq -r '.user.login' <<<"$approval")       || cannot "$APPROVAL_UNPARSABLE" "$JQ_ERROR_ABOVE" "$RERUN_ONCE_JQ"
-[ -n "$approved_sha" ] && [ "$approved_sha" != "null" ] || fail "the approving review https://github.com/$REPO/pull/$PR#pullrequestreview-$approval_id records no commit_id, so the gate cannot tell which commit it approved." \
-  "Do not merge. Tell the user this message."
+}
 
-# "Since now" made every activity check below a no-op (F2). A PENDING review has
-# no submitted_at and is left out of the bound.
+# The latest time the activity check accepts as reviewed-since: the later of the pin and the merge
+# account's own latest review.
+read_reviewed_since_bound() {
 bound_at=$(jq -s -r --arg merge_account "$MERGE_ACCOUNT" --arg approved "$approval_at" \
   '[$approved] + [.[][] | select(.user.login == $merge_account and .submitted_at != null)
                           | .submitted_at]
    | max_by(fromdateiso8601)' <<<"$reviews_raw")
 [ $? -eq 0 ] || cannot "could not parse the review channel" "$JQ_ERROR_ABOVE" "$RERUN_ONCE_JQ"
-since_ok=$(jq -n --arg since "$SINCE" --arg bound "$bound_at" \
-  '($since | fromdateiso8601) <= ($bound | fromdateiso8601)')
-[ $? -eq 0 ] || cannot "could not compare reviewed-since against $bound_at" "$JQ_ERROR_ABOVE" "$RERUN_ONCE_JQ"
-[ "$since_ok" = "true" ] || fail "reviewed-since $SINCE is later than $bound_at, the later of the pin and the merge account's own latest review; the gate accepts a reviewed-since only up to a review that records someone read the pull request." \
-  "Run the gate again with a reviewed-since no later than $bound_at." \
-  "If you have read the pull request after $bound_at, post a review as the merge account saying so, then run the gate again with that review's submitted_at."
+}
 
-[ "$head" = "$EXPECTED" ] || fail "head moved: you passed $EXPECTED, and the nc-head-commit is now $head." \
-  "If an approving review covers $head, run the gate again with $head as the expected nc-head-commit and a reviewed-since from after you read that review." \
-  "Otherwise, have $head reviewed and approved, then run the gate again the same way."
-# Merging past this would land code no approval covered.
-[ "$approved_sha" = "$head" ] || fail "the approval covers $approved_sha but the nc-head-commit is now $head." \
-  "Have $head reviewed, and approved by an account other than the pull request's author, then run the gate again."
-[ "$draft" = "false" ]    || fail "pull request is a draft pull request, which its author has marked as not ready to merge." \
-  "Ask the pull request's author whether it is ready, through the pull request's agent-seat or on the pull request." \
-  "Until the author marks it ready for review, do not merge it; then run the gate again."
-DECISION_REFUSED="reviewDecision is $decision, not APPROVED, so GitHub does not count this pull request as approved."
-case "$decision" in
-  APPROVED) : ;;
-  CHANGES_REQUESTED) fail "$DECISION_REFUSED" \
-    "A review requesting changes still stands." \
-    "If its findings have been fixed, or answered with a reason that shows they do not hold, dismiss that review with a reason naming the fix or the answer, then run the gate again." \
-    "Otherwise, do not merge." ;;
-  REVIEW_REQUIRED) fail "$DECISION_REFUSED" \
-    "GitHub's rules on main require an approving review it has not counted: get one, then run the gate again." ;;
-  *) fail "$DECISION_REFUSED" \
-    "Read the pull request on GitHub; if it shows no reason a merge is refused, tell the user this message." ;;
-esac
-# scripts/merge-lane-pull-request-merge-through-merge-gate-with-stacked-pull-request-retarget.py retries while the output holds "mergeStateStatus is UNKNOWN":
-# the first line of each refusal below must keep that text.
-case "$merge_state" in
-  CLEAN|UNSTABLE|HAS_HOOKS) : ;;
-  UNKNOWN) fail "mergeStateStatus is $merge_state" \
-    "UNKNOWN: GitHub has not computed it, or the pull request is already merged or closed. If the pull request is open, run the gate again in a minute; if it still reads UNKNOWN five minutes later, tell the user this message." ;;
-  DIRTY) fail "mergeStateStatus is $merge_state" \
-    "DIRTY: the branch conflicts with main. Tell the pull request's author; the author clears the conflict as CLAUDE.md says, and the new nc-head-commit then needs its own approving review." ;;
-  BEHIND) fail "mergeStateStatus is $merge_state" \
-    "BEHIND: the branch is behind main. Tell the user this message." ;;
-  BLOCKED) fail "mergeStateStatus is $merge_state" \
-    "BLOCKED: a branch rule on main blocks the merge, such as a required check that failed or is still running. Read the pull request's checks on GitHub: if one is running, run the gate again when it finishes; if one failed, tell the pull request's author; if you find no cause, tell the user this message." ;;
-  *) fail "mergeStateStatus is $merge_state" \
-    "For any other value, read the pull request on GitHub; if you find no cause, tell the user this message." ;;
-esac
-
-# Both comment channels, by their LATEST timestamp -- NOT by commit_id, which
-# GitHub remaps to the new head and which therefore proves nothing about age.
+# Counts what was posted or edited after SINCE, on each channel, into inline, issue and reviews.
+count_channel_activity_since() {
 inline_raw=$(gh api "repos/$REPO/pulls/$PR/comments" --paginate)
 [ $? -eq 0 ] || cannot "could not read the inline comments of pull request $PR; any error gh printed is just above this line." "$RERUN_ONCE_GH"
 issue_raw=$(gh api "repos/$REPO/issues/$PR/comments" --paginate)
@@ -324,10 +301,168 @@ issue=$(jq -s --arg since "$SINCE" \
 reviews=$(jq -s --arg since "$SINCE" --argjson approval_id "$approval_id" \
   '[.[][] | select(.id != $approval_id and (.submitted_at | fromdateiso8601) > ($since | fromdateiso8601))] | length' <<<"$reviews_raw")
 [ $? -eq 0 ] || cannot "could not parse the review channel" "$JQ_ERROR_ABOVE" "$RERUN_ONCE_JQ"
+}
+
+if [ "$1" = "$NEW_ACTIVITY_COUNT_OPTION" ]; then
+  read_review_channel
+  read_latest_approval
+  if [ -n "$approval" ]; then
+    read_approval_fields
+  else
+    # With no pin, only the merge account's own reviews bound reviewed-since, and with none of
+    # those either, everything on the pull request is new.
+    approval_id=0; approval_at=1970-01-01T00:00:00Z
+  fi
+  read_reviewed_since_bound
+  SINCE=$bound_at
+  count_channel_activity_since
+  echo $((inline + issue + reviews))
+  exit 0
+fi
+
+state=$(gh pr view "$PR" --repo "$REPO" --json headRefOid,mergeStateStatus,reviewDecision,isDraft)
+[ $? -eq 0 ] || cannot "could not read pull request $PR's state; any error gh printed is just above this line." \
+  "If gh's error says the pull request was not found, check the number you passed, then run the gate again." \
+  "Otherwise run the gate again once; if it fails the same way, tell the user this message and gh's error."
+
+# Unchecked, an unparsable state read the head as empty and refused as "head moved".
+STATE_UNPARSABLE="could not parse pull request $PR's state"
+head=$(jq -r .headRefOid <<<"$state")             || cannot "$STATE_UNPARSABLE" "$JQ_ERROR_ABOVE" "$RERUN_ONCE_JQ"
+merge_state=$(jq -r .mergeStateStatus <<<"$state") || cannot "$STATE_UNPARSABLE" "$JQ_ERROR_ABOVE" "$RERUN_ONCE_JQ"
+decision=$(jq -r .reviewDecision <<<"$state")      || cannot "$STATE_UNPARSABLE" "$JQ_ERROR_ABOVE" "$RERUN_ONCE_JQ"
+draft=$(jq -r .isDraft <<<"$state")                || cannot "$STATE_UNPARSABLE" "$JQ_ERROR_ABOVE" "$RERUN_ONCE_JQ"
+
+# The authoritative commit is the one the newest approving review was recorded
+# against -- never $head, and never $EXPECTED, both of which are what someone
+# BELIEVES was reviewed. Paginated, because an approval at index 32 was invisible
+# and refused as "no APPROVED review found". Not piped: the exit status must be
+# this call's.
+read_review_channel
+
+read_latest_approval
+[ -n "$approval" ] || fail "no APPROVED review found; the gate prints a merge command only for a commit an approving review covers." \
+  "If the nn-head-commit has not been reviewed yet, commission its review, and run the gate again once the nn-head-commit is approved." \
+  "If its review found a defect, do not merge until the defect is fixed and the new nn-head-commit is approved." \
+  "If its review found no defect, approve the nn-head-commit as an account other than the pull request's author: the merge account, or mac-claude when the merge account opened the pull request. Then run the gate again."
+
+read_approval_fields
+[ -n "$approved_sha" ] && [ "$approved_sha" != "null" ] || fail "the approving review https://github.com/$REPO/pull/$PR#pullrequestreview-$approval_id records no commit_id, so the gate cannot tell which commit it approved." \
+  "Do not merge. Tell the user this message."
+
+# Read from the review GitHub holds, so it catches a verdict however it was posted.
+verdict_review=$(jq -s -c --arg merge_account "$MERGE_ACCOUNT" \
+  '[.[][] | select(.user.login == $merge_account and (.state == "APPROVED" or .state == "CHANGES_REQUESTED"))]
+   | sort_by(.submitted_at) | last // empty' <<<"$reviews_raw")
+[ $? -eq 0 ] || cannot "could not parse the review channel" "$JQ_ERROR_ABOVE" "$RERUN_ONCE_JQ"
+if [ -n "$verdict_review" ]; then
+  VERDICT_REVIEW_UNPARSABLE="could not parse $MERGE_ACCOUNT's latest approving or changes-requesting review"
+  verdict_review_id=$(jq -r '.id' <<<"$verdict_review")       || cannot "$VERDICT_REVIEW_UNPARSABLE" "$JQ_ERROR_ABOVE" "$RERUN_ONCE_JQ"
+  verdict_review_state=$(jq -r '.state' <<<"$verdict_review") || cannot "$VERDICT_REVIEW_UNPARSABLE" "$JQ_ERROR_ABOVE" "$RERUN_ONCE_JQ"
+  verdict_review_commit=$(jq -r '.commit_id' <<<"$verdict_review") || cannot "$VERDICT_REVIEW_UNPARSABLE" "$JQ_ERROR_ABOVE" "$RERUN_ONCE_JQ"
+  verdict_review_comments='[]'
+  # An approval's marks are all in its body; only a request for changes carries marked comments.
+  if [ "$verdict_review_state" = "CHANGES_REQUESTED" ]; then
+    verdict_review_comments_raw=$(gh api "repos/$REPO/pulls/$PR/reviews/$verdict_review_id/comments" --paginate)
+    [ $? -eq 0 ] || cannot "could not read the inline comments of review $verdict_review_id on pull request $PR; any error gh printed is just above this line." "$RERUN_ONCE_GH"
+    verdict_review_comments=$(jq -s -c 'add // []' <<<"$verdict_review_comments_raw")
+    [ $? -eq 0 ] || cannot "could not parse the inline comments of review $verdict_review_id" "$JQ_ERROR_ABOVE" "$RERUN_ONCE_JQ"
+  fi
+  marks_check_input=$(jq -n -c --argjson review "$verdict_review" --argjson comments "$verdict_review_comments" \
+    '{review: $review, comments: $comments}')
+  [ $? -eq 0 ] || cannot "$VERDICT_REVIEW_UNPARSABLE" "$JQ_ERROR_ABOVE" "$RERUN_ONCE_JQ"
+  marks_missing=$(python3 "$VERDICT_REVIEW_POSTING_PROGRAM_MARKS_CHECK_PROGRAM_PATH" <<<"$marks_check_input")
+  marks_check_status=$?
+  case "$marks_check_status" in
+    0) : ;;
+    1) if [ "$verdict_review_state" = "APPROVED" ]; then
+         unread="scripts/pull-request-follow-up-request-after-merge-finding-answers-and-next-step.py cannot read its non-blocking findings to send the author after the merge"
+       else
+         unread="scripts/pull-request-fix-round-author-brief-from-blocking-findings-and-one-commit-every-finding-answered-check.py cannot read its blocking findings to brief the author's fix-round"
+       fi
+       marks_refused="$MERGE_ACCOUNT's latest review with a verdict, https://github.com/$REPO/pull/$PR#pullrequestreview-$verdict_review_id ($verdict_review_state), lacks the marks scripts/merge-lane-pull-request-reviewer-review-post-and-read-back.py writes: $marks_missing."
+       marks_unread="It was posted some other way, such as by hand with gh pr review, so $unread."
+       marks_finding_category="Give each inline comment the finding_category merge-lane-2 judges it to have, one of must-fix-now, fix-next, fix-in-maintenance or file-for-later: must-fix-now only for a finding that blocks the merge, since the posting program posts a review with a must-fix-now comment as a request for changes and refuses an approval that has one."
+       marks_rerun="run the gate again: scripts/merge-gate.sh $PR $head <submitted_at>, where submitted_at is what gh api repos/$REPO/pulls/$PR/reviews/<id> --jq .submitted_at prints for the review id the posting program's success line names."
+       # The posting program records a review on the --head-commit it is given, so reposting an older
+       # commit's verdict on the head would let the stale-approval check below pass unreviewed commits.
+       if [ "$verdict_review_commit" = "$head" ]; then
+         fail "$marks_refused" "$marks_unread" \
+           "Write that review's verdict, body and inline comments, if it has any, into a review file for the posting program, in the form the docstring at the top of scripts/merge-lane-pull-request-reviewer-review-post-and-read-back.py describes for --github-account $MERGE_ACCOUNT." \
+           "$marks_finding_category A comment posted by hand carries no category on GitHub, so decide each one; keep the verdict that review gave." \
+           "Post it with: python3 scripts/merge-lane-pull-request-reviewer-review-post-and-read-back.py --pull-request $PR --head-commit $verdict_review_commit --github-account $MERGE_ACCOUNT <review file>" \
+           "Leave the unmarked review at https://github.com/$REPO/pull/$PR#pullrequestreview-$verdict_review_id on GitHub as it is: the gate reads only $MERGE_ACCOUNT's latest review with a verdict, which the review you post becomes." \
+           "Then $marks_rerun"
+       else
+         fail "$marks_refused" "$marks_unread" \
+           "That review covers $verdict_review_commit, and the nn-head-commit is now $head, so do not post its verdict again: a review posted now is recorded on $head, which no one has reviewed." \
+           "Leave the unmarked review on GitHub as it is: the review of $head that you post becomes the one the gate reads." \
+           "merge-lane-2 commissions a new review of $head itself, as its seat-brief says for every pull request, starting with: scripts/pull-request-review-plan.py --pull-request $PR" \
+           "When that review is done, write merge-lane-2's verdict, body and the reviewers' findings into a review file for the posting program, in the form the docstring at the top of scripts/merge-lane-pull-request-reviewer-review-post-and-read-back.py describes for --github-account $MERGE_ACCOUNT." \
+           "$marks_finding_category" \
+           "Post it with: python3 scripts/merge-lane-pull-request-reviewer-review-post-and-read-back.py --pull-request $PR --head-commit $head --github-account $MERGE_ACCOUNT <review file>" \
+           "When that review requests changes, the author's fix-round comes next, so do not run the gate until a later review approves." \
+           "When it approves, $marks_rerun"
+       fi ;;
+    *) cannot "python3 $VERDICT_REVIEW_POSTING_PROGRAM_MARKS_CHECK_PROGRAM_PATH exited $marks_check_status when the gate gave it review $verdict_review_id, so the gate cannot tell whether that review carries the posting program's marks; any error it printed is just above this line." \
+         "Do not run the gate again, do not merge pull request $PR another way, and do not repair that program or python3 yourself." \
+         "Send this whole message, with the error printed above it, to the agent-seat reboot-test, which owns that program, with SendMessage; run the gate again when reboot-test says the program is fixed." ;;
+  esac
+fi
+
+# "Since now" made every activity check below a no-op (F2). A PENDING review has
+# no submitted_at and is left out of the bound.
+read_reviewed_since_bound
+since_ok=$(jq -n --arg since "$SINCE" --arg bound "$bound_at" \
+  '($since | fromdateiso8601) <= ($bound | fromdateiso8601)')
+[ $? -eq 0 ] || cannot "could not compare reviewed-since against $bound_at" "$JQ_ERROR_ABOVE" "$RERUN_ONCE_JQ"
+[ "$since_ok" = "true" ] || fail "reviewed-since $SINCE is later than $bound_at, the later of the pin and the merge account's own latest review; the gate accepts a reviewed-since only up to a review that records someone read the pull request." \
+  "Run the gate again with a reviewed-since no later than $bound_at." \
+  "If you have read the pull request after $bound_at, post a review as the merge account saying so, then run the gate again with that review's submitted_at."
+
+[ "$head" = "$EXPECTED" ] || fail "head moved: you passed $EXPECTED, and the nn-head-commit is now $head." \
+  "If an approving review covers $head, run the gate again with $head as the expected nn-head-commit and a reviewed-since from after you read that review." \
+  "Otherwise, have $head reviewed and approved, then run the gate again the same way."
+# Merging past this would land code no approval covered.
+[ "$approved_sha" = "$head" ] || fail "the approval covers $approved_sha but the nn-head-commit is now $head." \
+  "Have $head reviewed, and approved by an account other than the pull request's author, then run the gate again."
+[ "$draft" = "false" ]    || fail "pull request is a draft pull request, which its author has marked as not ready to merge." \
+  "Ask the pull request's author whether it is ready, through the pull request's agent-seat or on the pull request." \
+  "Until the author marks it ready for review, do not merge it; then run the gate again."
+DECISION_REFUSED="reviewDecision is $decision, not APPROVED, so GitHub does not count this pull request as approved."
+case "$decision" in
+  APPROVED) : ;;
+  CHANGES_REQUESTED) fail "$DECISION_REFUSED" \
+    "A review requesting changes still stands." \
+    "If its findings have been fixed, or answered with a reason that shows they do not hold, dismiss that review with a reason naming the fix or the answer, then run the gate again." \
+    "Otherwise, do not merge." ;;
+  REVIEW_REQUIRED) fail "$DECISION_REFUSED" \
+    "GitHub's rules on main require an approving review it has not counted: get one, then run the gate again." ;;
+  *) fail "$DECISION_REFUSED" \
+    "Read the pull request on GitHub; if it shows no reason a merge is refused, tell the user this message." ;;
+esac
+# scripts/merge-lane-pull-request-merge-through-merge-gate-with-stacked-pull-request-retarget.py retries while the output holds "mergeStateStatus is UNKNOWN":
+# the first line of each refusal below must keep that text.
+case "$merge_state" in
+  CLEAN|UNSTABLE|HAS_HOOKS) : ;;
+  UNKNOWN) fail "mergeStateStatus is $merge_state" \
+    "UNKNOWN: GitHub has not computed it, or the pull request is already merged or closed. If the pull request is open, run the gate again in a minute; if it still reads UNKNOWN five minutes later, tell the user this message." ;;
+  DIRTY) fail "mergeStateStatus is $merge_state" \
+    "DIRTY: the branch conflicts with main. Tell the pull request's author; the author clears the conflict as CLAUDE.md says, and the new nn-head-commit then needs its own approving review." ;;
+  BEHIND) fail "mergeStateStatus is $merge_state" \
+    "BEHIND: the branch is behind main. Tell the user this message." ;;
+  BLOCKED) fail "mergeStateStatus is $merge_state" \
+    "BLOCKED: a branch rule on main blocks the merge, such as a required check that failed or is still running. Read the pull request's checks on GitHub: if one is running, run the gate again when it finishes; if one failed, tell the pull request's author; if you find no cause, tell the user this message." ;;
+  *) fail "mergeStateStatus is $merge_state" \
+    "For any other value, read the pull request on GitHub; if you find no cause, tell the user this message." ;;
+esac
+
+# Both comment channels, by their LATEST timestamp -- NOT by commit_id, which
+# GitHub remaps to the new head and which therefore proves nothing about age.
+count_channel_activity_since
 
 NEW_ACTIVITY_READ="Read everything posted or edited since $SINCE: the inline comments, the issue comments and the reviews."
-NEW_ACTIVITY_FINDING="If any raises a finding, do not merge until the finding is fixed, or answered with a reason that shows it does not hold; a fix moves the nc-head-commit, which then needs its own approving review."
-NEW_ACTIVITY_RECORD="When nothing is left open, post a review as the merge account saying what you read, check that nothing was posted between your reading and that review; if something was, read it and repeat from the first line. Then run the gate again with the review's submitted_at as reviewed-since."
+NEW_ACTIVITY_FINDING="If any raises a finding, do not merge until the finding is fixed, or answered with a reason that shows it does not hold; a fix moves the nn-head-commit, which then needs its own approving review."
+NEW_ACTIVITY_RECORD="When nothing is left open, post a review as the merge account saying what you read, with a review file holding only {\"body\": <what you read>} and the command python3 scripts/merge-lane-pull-request-reviewer-review-post-and-read-back.py --pull-request $PR --head-commit $head --github-account $MERGE_ACCOUNT <review file>. Check that nothing was posted between your reading and that review; if something was, read it and repeat from the first line. Then run the gate again with the review's submitted_at as reviewed-since."
 [ "$inline" -eq 0 ]  || fail "$inline inline comment(s) posted or edited since $SINCE -- read them before merging" \
   "$NEW_ACTIVITY_READ" "$NEW_ACTIVITY_FINDING" "$NEW_ACTIVITY_RECORD"
 [ "$issue" -eq 0 ]   || fail "$issue issue comment(s) posted or edited since $SINCE -- read them before merging" \

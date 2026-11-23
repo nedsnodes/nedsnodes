@@ -2,7 +2,7 @@
 """Tests for work-snapshots: the hook, the shared module, the cleaner's step,
 and the handoff-supervisor's first-prompt list.
 
-Design: nn-systems/handoff/handoff-uncommitted-work-snapshots-across-crashes-design.md;
+Design: nn-systems/handoff/handoff-uncommitted-work-snapshots-across-crashes.tool.design.md;
 each section below is one bullet of its "How it will be tested".
 
 Every case works in a scratch clone with the programs copied into it, so the
@@ -62,14 +62,19 @@ LOG_STORE_WRITER_MODULE_RELATIVE = Path(
 NED_BOX_HOME_CONSTANTS_MODULE_RELATIVE = Path(
     "nn-systems/general-tools/ned-box-home-directory-and-its-mac-mount-point-path-constants-common.py")
 # The cleaner reads the review checkouts directory from the merge-lane helpers' common module,
-# which loads the test runner, which loads the git-redirecting variables module and the attendance check.
+# which loads the repository-name module and the test runner, which loads the git-redirecting
+# variables module, the attendance check and the project-rename path names.
 MERGE_LANE_COMMON_MODULE_RELATIVE = Path(
     "scripts/merge-lane-pull-request-helpers-common-options-paths-and-token.py")
+REPOSITORY_NAME_MODULE_RELATIVE = Path(
+    "nn-systems/general-tools/github-repository-name-and-name-before-project-rename-common.py")
 TEST_RUNNER_RELATIVE = Path("scripts/run-all-test-suites.py")
 GIT_REDIRECTING_REMOVAL_MODULE_RELATIVE = Path(
     "nn-systems/general-tools/git-redirecting-environment-variables-removal-common.py")
 ATTENDANCE_CHECK_MODULE_RELATIVE = Path(
     "nn-systems/general-tools/agent-session-unattended-by-user-check-common.py")
+PROJECT_RENAME_PATH_NAMES_MODULE_RELATIVE = Path(
+    "scripts/project-rename-path-names-before-and-after-common.py")
 
 # The cleaner's --remove run below would otherwise append to the real log-store's log of removals.
 _removals_log_directory = tempfile.mkdtemp(prefix="uncommitted-work-snapshots-test-removals-log-")
@@ -162,8 +167,9 @@ def new_clone():
                      GIT_OUTPUT_MODULE_RELATIVE, TASK_WRITE_MODULE_RELATIVE, TASK_FILE_REWRITE_MODULE_RELATIVE,
                      NEXT_STEP_LINES_MODULE_RELATIVE,
                      LOG_STORE_WRITER_MODULE_RELATIVE, NED_BOX_HOME_CONSTANTS_MODULE_RELATIVE,
-                     MERGE_LANE_COMMON_MODULE_RELATIVE, TEST_RUNNER_RELATIVE,
-                     GIT_REDIRECTING_REMOVAL_MODULE_RELATIVE, ATTENDANCE_CHECK_MODULE_RELATIVE):
+                     MERGE_LANE_COMMON_MODULE_RELATIVE, REPOSITORY_NAME_MODULE_RELATIVE, TEST_RUNNER_RELATIVE,
+                     GIT_REDIRECTING_REMOVAL_MODULE_RELATIVE, ATTENDANCE_CHECK_MODULE_RELATIVE,
+                     PROJECT_RENAME_PATH_NAMES_MODULE_RELATIVE):
         (main / relative).parent.mkdir(parents=True, exist_ok=True)
         shutil.copy2(REPOSITORY_ROOT / relative, main / relative)
     (main / "tracked.txt").write_text("one\n")
@@ -609,7 +615,6 @@ def test_other_repository_is_untouched():
 
 
 def test_names_read_from_git_are_the_files_as_stored():
-    name = "changed files and repository discovery read git's output as stored, in any locale"
     main = new_clone()
     (main / "café notes.md").write_text("new\n")
     git(main, "add", "-A")
@@ -1039,7 +1044,7 @@ def test_restore_a_subset():
               and ref in task.get("description", "") and str(target) in task.get("description", ""),
               f"restore opens the restored branch's task, naming its restore commit, {where}", task)
         holding = first_prompt_list.tasks_holding("seat-five", restore_task_list())
-        check(holding.holders(branch) and holding.holders(target)
+        check(holding.holds(branch) and holding.holds(target)
               and not holding.unreadable,
               f"the first prompt's list reads the task restore opens as holding its branch and "
               f"worktree, so it does not list them, {where}", task)
@@ -1298,7 +1303,7 @@ def test_restore_step_failures():
     failing_case("whose git worktree add wrote another agent-seat's owner file, saying the hook "
                  "that ran is the clone's own copy",
                  worktree_add_writes_another_seats_owner_file,
-                 f", which is the same as ")
+                 ", which is the same as ")
 
     def an_older_clone_copy_of_the_hook(main):
         undo = worktree_add_writes_another_seats_owner_file(main)
@@ -1308,7 +1313,7 @@ def test_restore_step_failures():
     failing_case("whose git worktree add wrote another agent-seat's owner file through a hook that "
                  "is not the clone's own copy, saying so",
                  an_older_clone_copy_of_the_hook,
-                 f", which is not the same as ")
+                 ", which is not the same as ")
 
     real_run_git = snapshots.run_git
 

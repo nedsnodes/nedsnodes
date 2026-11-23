@@ -155,7 +155,7 @@ def parse_arguments(argv):
                              "fills them in from origin; a head or main the file does name "
                              "must be origin's commit for that field")
     parser.add_argument("--head-commit-reviewed-before",
-                        help="for a fix-round, the nc-head-commit reviewed before; the Codex "
+                        help="for a fix-round, the nn-head-commit reviewed before; the Codex "
                              "review runs from it instead of from the merge base")
     common.add_directory_options(parser, "briefs/, cx/, hr/, claude-reviews/ and tripwire-bin/")
     return common.resolve_path_options(parser.parse_args(argv))
@@ -345,9 +345,9 @@ def main(argv=None):
                     instruction=f"If the commit is right, fetch it into {checkout} and run "
                                 f"this again.\n"
                                 f"If the commit is wrong, run this again with "
-                                f"--head-commit-reviewed-before set to the nc-head-commit that "
+                                f"--head-commit-reviewed-before set to the nn-head-commit that "
                                 f"was reviewed before.")
-            base, base_kind = head_reviewed_before, "nc-head-commit reviewed before"
+            base, base_kind = head_reviewed_before, "nn-head-commit reviewed before"
         else:
             base, base_kind = git(checkout, "merge-base", main_commit, head_commit), "merge base"
         try:
@@ -434,7 +434,7 @@ def main(argv=None):
                    CLAUDE_REVIEWER_STEP: outputs / "claude-reviews" / f"pr{number}-{head_commit}*"}
         def what_to_do(position, step, step_arguments):
             """One step's line: its exit code, and its records or its command."""
-            exit_code = failure.exit_codes[position]
+            exit_code = failure.exit_codes[position]  # noqa: F821 runs only inside the except, while failure is bound
             command = shlex.join(step_command(step, arguments, step_arguments))
             if exit_code != 0 and step == CLAUDE_REVIEWER_STEP:
                 # The posting script can exit nonzero after a successful post, when its

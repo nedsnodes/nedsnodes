@@ -55,7 +55,7 @@ RAN_FILE_VARIABLE = "RUN_ALL_TEST_SUITES_TEST_RAN_FILE"
 # Every fixture run behaves as it does inside a full run, whose signal sandbox sets this:
 # its suites run unconfined, sharing the scratch directory's ran.txt, under the run.lock
 # this file reads. Run on its own on Linux, a fixture run would otherwise give each fixture
-# suite an nc-test-sandbox, whose private writes ran.txt never sees. The nc-test-sandbox itself is
+# suite an nn-test-sandbox, whose private writes ran.txt never sees. The nn-test-sandbox itself is
 # tested in run-all-test-suites-signal-sandbox-test.py and
 # run-all-test-suites-machine-wide-test-suite-admission-test.py.
 os.environ["RUN_ALL_TEST_SUITES_INSIDE_SIGNAL_SANDBOX"] = "1"
@@ -78,12 +78,12 @@ def check(case_name, condition, detail=""):
 def linux_only_cases_run_here(cases):
     """True on Linux; elsewhere prints why the cases are skipped and returns False.
 
-    Every case that builds or inspects an nc-test-sandbox, runs bwrap or reads /proc goes
+    Every case that builds or inspects an nn-test-sandbox, runs bwrap or reads /proc goes
     through this, since only Linux has them.
     """
     if sys.platform.startswith("linux"):
         return True
-    print(f"SKIP  {cases}: nc-test-sandboxes, bwrap and /proc exist only on Linux")
+    print(f"SKIP  {cases}: nn-test-sandboxes, bwrap and /proc exist only on Linux")
     return False
 
 
@@ -2333,7 +2333,7 @@ with tempfile.TemporaryDirectory() as scratch:
 
 # A suite a cause outside this repository stopped, such as claude's usage limit, is NOT RUN,
 # not FAIL, and names the cause; a failing case in the same run still fails the run.
-OUTSIDE_CAUSE_EXIT = module.NC_TEST_SUITE_EXIT_CODE_FOR_NOT_RUN_BECAUSE_A_CAUSE_OUTSIDE_THIS_REPOSITORY_STOPPED_ITS_CASES
+OUTSIDE_CAUSE_EXIT = module.NN_TEST_SUITE_EXIT_CODE_FOR_NOT_RUN_BECAUSE_A_CAUSE_OUTSIDE_THIS_REPOSITORY_STOPPED_ITS_CASES
 STOPPED_BY_WEEKLY_LIMIT = ("print('PASS  a case that needs no claude')\n"
                            "print(\"NOT RUN: the trial; claude stopped: account-limit — weekly limit · "
                            "resets Nov 16, 8pm (America/Los_Angeles)\")\n"
@@ -3781,7 +3781,7 @@ with tempfile.TemporaryDirectory() as scratch:
           and "not run to the end — stopped by SIGTERM" in stopped_output,
           (stub_pids, runner_process.returncode, stopped_output))
 
-# A suite outside an nc-test-sandbox whose grandchild starts a session of its own, which the
+# A suite outside an nn-test-sandbox whose grandchild starts a session of its own, which the
 # suite's process group does not hold. The grandchild writes outlived-its-tmpdir when it sees
 # the suite's TMPDIR removed while it still runs; it ends then, once this test no longer runs,
 # or after 60 s, so a kill that misses it leaves nothing running.
@@ -4218,7 +4218,7 @@ with tempfile.TemporaryDirectory() as scratch:
 
 with tempfile.TemporaryDirectory() as scratch:
     temp = pathlib.Path(scratch)
-    prefix = module.SUITE_OUTSIDE_NC_TEST_SANDBOX_TEMPORARY_DIRECTORY_PREFIX
+    prefix = module.SUITE_OUTSIDE_NN_TEST_SANDBOX_TEMPORARY_DIRECTORY_PREFIX
     left_by_killed_runner = temp / f"{prefix}ab_cd123"
     still_in_use = temp / f"{prefix}xy_z9876"
     not_mkdtemp_shaped = temp / f"{prefix}another-program"
@@ -4789,6 +4789,93 @@ with tempfile.TemporaryDirectory() as scratch:
           "and killed before the group is",
           signalled[-2:] == [("kill", 205, signal.SIGKILL), ("killpg", 200, signal.SIGKILL)]
           and still_running == [], (signalled, still_running))
+
+# A checkout committed before runs read a list from it: the nightly mutation pass tests such
+# checkouts with main's module.
+def checkout_runner_source(declarations):
+    """A checkout's scripts/run-all-test-suites.py holding each list the runner reads: the
+    declaration given for a name, none for a name given None, else the runner's own list."""
+    return "".join(
+        declarations[name] or "" if name in declarations
+        else f"{name} = {module.SUITE_SANDBOX_LISTS_OF_THIS_PROGRAM[name]!r}\n"
+        for name in module.SUITE_SANDBOX_LIST_NAMES_READ_FROM_CHECKOUT_UNDER_TEST)
+
+
+def lists_read_from_checkout_whose_runner_is(source):
+    with tempfile.TemporaryDirectory() as scratch:
+        checkout = pathlib.Path(scratch)
+        (checkout / "scripts").mkdir()
+        (checkout / "scripts" / "run-all-test-suites.py").write_text(source, encoding="utf-8")
+        try:
+            return module.suite_sandbox_lists_read_from_checkout_under_test(checkout)[0]
+        except module.CouldNotRun as refusal:
+            return refusal
+
+
+REAL_CLAUDE = "SUITES_THAT_RUN_THE_REAL_CLAUDE_CLI"
+own_real_claude_list = module.SUITE_SANDBOX_LISTS_OF_THIS_PROGRAM[REAL_CLAUDE]
+own_real_claude_suite = "nn-systems/general-tools/tests/agent-seat-worktree-create-with-owner-file-claude-code-worktree-create-hook-real-claude-code-test.py"
+older_checkout_sources = (
+    ("assigns the real-claude list the set it was before it became a dict",
+     checkout_runner_source({REAL_CLAUDE: "SUITES_THAT_RUN_THE_REAL_CLAUDE_CLI = {\n    "
+                                           "\"scripts/an-older-real-claude-test.py\",\n}\n"})),
+    *((f"has no {name} list", checkout_runner_source({name: None}))
+      for name in module.SUITE_SANDBOX_LIST_NAMES_READ_FROM_CHECKOUT_UNDER_TEST),
+)
+check("the runner's own real-claude list names the trial against the installed Claude Code, "
+      "which the cases below look for under its path from before the project rename",
+      own_real_claude_suite in own_real_claude_list, own_real_claude_list)
+for how, source in older_checkout_sources:
+    name = REAL_CLAUDE if "real-claude" in how else how.split()[2]
+    lists = lists_read_from_checkout_whose_runner_is(source)
+    check(f"a checkout whose scripts/run-all-test-suites.py {how} is read without a "
+          f"refusal, and gets the runner's own {name} list",
+          isinstance(lists, dict)
+          and lists[name].items() >= module.SUITE_SANDBOX_LISTS_OF_THIS_PROGRAM[name].items(),
+          lists)
+    if name == REAL_CLAUDE:
+        check(f"a checkout whose scripts/run-all-test-suites.py {how} also gets each suite of "
+              f"the runner's real-claude list under its path from before the project rename, as "
+              f"a checkout from before the rename names it",
+              isinstance(lists, dict)
+              and lists[name].get(own_real_claude_suite.replace("nn-systems/", "nc-systems/"))
+              == own_real_claude_list[own_real_claude_suite],
+              lists)
+
+# The report's source line names this program for each list it supplied, so it does not name
+# only a file that lacks the list the run used.
+with tempfile.TemporaryDirectory() as scratch:
+    checkout = pathlib.Path(scratch)
+    (checkout / "scripts").mkdir()
+    lists_file = checkout / "scripts" / "run-all-test-suites.py"
+    lists_file.write_text(checkout_runner_source({REAL_CLAUDE: None}), encoding="utf-8")
+    _, lacking_source = module.suite_sandbox_lists_read_from_checkout_under_test(checkout)
+    lists_file.write_text(checkout_runner_source({}), encoding="utf-8")
+    _, whole_source = module.suite_sandbox_lists_read_from_checkout_under_test(checkout)
+check("when the checkout lacks one list, the lists' source names the checkout's file and this "
+      "program for that list",
+      lacking_source == (f"{lists_file}, and in {pathlib.Path(module.__file__).resolve()} for "
+                         f"{REAL_CLAUDE}, which the checkout lacks or assigns a set"),
+      lacking_source)
+check("when the checkout has every list, the lists' source is the checkout's file alone",
+      whole_source == str(lists_file), whole_source)
+
+# A current checkout's list that this program cannot read is refused, not taken for an older
+# checkout's missing list.
+annotated = lists_read_from_checkout_whose_runner_is(checkout_runner_source({
+    REAL_CLAUDE:
+        'SUITES_THAT_RUN_THE_REAL_CLAUDE_CLI: dict = {"scripts/the-checkouts-own-test.py": "its reason"}\n'}))
+check("a checkout that assigns the real-claude list with a type annotation gets its own list",
+      isinstance(annotated, dict)
+      and annotated[REAL_CLAUDE] == {"scripts/the-checkouts-own-test.py": "its reason"}, annotated)
+for how, replacement in (
+        ("binds the real-claude list by unpacking", "SUITES_THAT_RUN_THE_REAL_CLAUDE_CLI, _ = {}, {}\n"),
+        ("assigns the real-claude list something not literal", "SUITES_THAT_RUN_THE_REAL_CLAUDE_CLI = dict()\n")):
+    refused = lists_read_from_checkout_whose_runner_is(
+        checkout_runner_source({REAL_CLAUDE: replacement}))
+    check(f"a checkout that {how} is refused, naming the list, rather than given the runner's "
+          f"own list",
+          isinstance(refused, module.CouldNotRun) and REAL_CLAUDE in str(refused), refused)
 
 print()
 # The count is printed so a short run is visible on sight: a run that ends

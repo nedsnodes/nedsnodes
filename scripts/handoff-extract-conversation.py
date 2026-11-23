@@ -2,7 +2,7 @@
 """Extract the two-voice dialog from a Claude Code session transcript.
 
 The handoff system's dialog carrier (specification:
-nn-systems/handoff/handoff-design.md). A retiring session names a
+nn-systems/handoff/handoff.system.design.md). A retiring session names a
 boundary; the supervisor runs this after killing that session, and the
 extracted markdown becomes the successor's context.
 
@@ -545,30 +545,33 @@ def render_turn(turn) -> list:
     return lines + [turn["text"] or "(no text)", ""]
 
 
-def render_extraction(turns, report: ExtractionReport) -> str:
-    lines = [
-        f"# Session dialog — {report.session_id}",
-        "",
-        f"Boundary: {report.boundary_note}",
-        f"Turns carried: {len(turns)} of {report.total_turns} "
-        f"({word_count(turns)} words). Turn counts are dialog only — "
-        f"harness-injected records and their acknowledgements are filtered out.",
-    ]
-
-    if report.turns_left_behind:
-        lines.append(
-            f"Earlier in this session, and NOT below: {report.turns_left_behind} turns."
-        )
+def render_extraction_diagnostics(turns, report: ExtractionReport) -> list:
+    """Return the lines about how the tail was read and cut, which main prints on stderr, not in the tail."""
+    lines = ["Turn counts are dialog only — harness-injected records and their acknowledgements are filtered out."]
     trimmed_at_end = report.total_turns - report.turns_left_behind - len(turns)
     if trimmed_at_end > 0:
         lines.append(
             f"Trimmed from the end: {trimmed_at_end} short agent turn(s) — "
             f"fragments from the session's last moments before the handoff."
         )
-
     skipped = ", ".join(f"{count} {name}" for name, count in report.skip_counts.items() if count)
     if skipped:
         lines.append(f"Records skipped while reading: {skipped}.")
+    return lines
+
+
+def render_extraction(turns, report: ExtractionReport) -> str:
+    lines = [
+        f"# Session dialog — {report.session_id}",
+        "",
+        f"Boundary: {report.boundary_note}",
+        f"Turns carried: {len(turns)} of {report.total_turns} ({word_count(turns)} words).",
+    ]
+
+    if report.turns_left_behind:
+        lines.append(
+            f"Earlier in this session, and NOT below: {report.turns_left_behind} turns."
+        )
     # The tail holds no subagent turn, so a tracker-failure note is carried here, where the successor reads it.
     lines += [note["text"] for note in report.left_out_notes]
 
@@ -728,6 +731,9 @@ def main(argv=None) -> int:
         skip_counts=skip_counts,
         left_out_notes=turns_left_out_notes(turns),
     )
+
+    for line in render_extraction_diagnostics(selected, report):
+        print(f"handoff-extract-conversation: {line}", file=sys.stderr)
 
     if arguments.output:
         output_path = Path(arguments.output).expanduser()
