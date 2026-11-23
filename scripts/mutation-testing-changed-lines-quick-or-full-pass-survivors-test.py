@@ -1023,6 +1023,21 @@ def run_recorded_mutant_killed_check_cases():
     check("a recorded mutant whose two hunks overlap only through context lines is applied",
           context_verdict is None and context_mutated == "x\nA\nB\nc\n",
           (context_verdict, context_mutated))
+    # The second hunk's place lies inside the first hunk's leading context, and its write adds
+    # a line: the first hunk's replaced line must still be written where the source had it.
+    apply_at_places = survivors.source_with_recorded_mutant_applied_at_places
+    leading_places = [(0, ["c1", "c2", "c3", "r"], ["c1", "c2", "c3", "R"]),
+                      (1, ["c2", "c3"], ["X", "Y", "c3"])]
+    leading_mutated = apply_at_places(["c1", "c2", "c3", "r", "z"], leading_places)
+    check("a hunk whose place lies inside another hunk's leading context, and whose write "
+          "changes the line count, leaves the other hunk's replaced line where it was",
+          leading_mutated == "c1\nX\nY\nc3\nR\nz", leading_mutated)
+    # The mirror: the earlier place's replaced line comes after the later place's.
+    mirror_places = [(0, ["x", "a", "b"], ["x", "a", "B"]), (1, ["a"], ["A1", "A2"])]
+    mirror_mutated = apply_at_places(["x", "a", "b"], mirror_places)
+    check("hunks are written in reverse order of their replaced lines' start, not of their "
+          "places",
+          mirror_mutated == "x\nA1\nA2\nB", mirror_mutated)
     # Both hunks replace the same line `b`, so applying both cannot make the mutant.
     overlap_source = "x\na\nb\nc\n"
     overlap_hunks = [(1, ["a", "b", "c"], ["a", "B", "c"]), (5, ["b", "c"], ["b2", "c"])]

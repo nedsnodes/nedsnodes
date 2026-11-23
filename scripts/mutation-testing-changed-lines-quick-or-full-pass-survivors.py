@@ -1679,9 +1679,15 @@ def source_with_recorded_mutant_applied_at_places(lines, places):
     """The source with each hunk's replaced lines replaced at its place; its context lines
     stay as the source has them, a `# pragma: no mutate` comment included."""
     lines = list(lines)
-    for at, old, new in sorted(places, key=lambda place: place[0], reverse=True):
+    # Last replaced span first, so a write that changes the line count cannot shift one still
+    # to come; a hunk's place can lie inside another's leading context, so order by the
+    # replaced span's start, not the place.
+    spans = []
+    for at, old, new in places:
         start, end = hunk_shared_context_line_counts(old, new)
-        lines[at + start:at + len(old) - end] = new[start:len(new) - end]
+        spans.append((at + start, at + len(old) - end, new[start:len(new) - end]))
+    for first, after, replacement in sorted(spans, key=lambda span: span[0], reverse=True):
+        lines[first:after] = replacement
     return "\n".join(lines)
 
 
