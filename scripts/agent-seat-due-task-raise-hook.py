@@ -1056,7 +1056,7 @@ def next_action_prompt_lines(payload: dict, tasks: dict, directory: Path, state:
         return None
     walk_directory = top / walk_finder.WALK_DIRECTORY
     if walk_finder.unclosed_approval_walks_including_paused(
-            walk_directory, checker.markdown_parser_parsing_each_text_once(walk_finder)):
+            walk_directory, walk_finder.markdown_parser()):
         return None
     handoff = _load_module_by_path("handoff_context_threshold_hook", HANDOFF_THRESHOLD_HOOK_FILE)
     if (handoff.handoff_asked_marker_path(session_id).exists()
