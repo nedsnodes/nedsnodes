@@ -739,6 +739,24 @@ seat.state_path.parent.unlink()
 check("pull request closed without merging, state writable again: raised",
       "closed without merging" in (context_of(seat.run()) or ""))
 
+seat = Seat()
+seat.task("131", metadata={"prerequisites": [{"pr_merged": MERGED_PR}]})
+seat.task("132", metadata={"prerequisites": [{"pr_merged": 160}]})
+seat.respond({"pr:160": {"state": "CLOSED", "title": "T", "url": "https://x/160"}})
+seat.state_path.parent.parent.mkdir(parents=True)
+seat.state_path.parent.write_text("a file where the state directory should be")
+result = seat.run()
+check("one task due and one closed without merging, state cannot be written: both counted",
+      reported(result, "could not be written, and so 2 due task(s) were not raised at this "
+                       "stop"), result)
+
+seat = Seat()
+seat.task("133", metadata={"prerequisites": [{"pr_merged": 161}]})
+seat.respond({"pr:161": {"state": "ANOTHER", "title": "T", "url": "https://x/161"}})
+result = seat.run()
+check("a pull request state that sorts before CLOSED is not closed without merging",
+      silent(result), result)
+
 # --- malformed input ----------------------------------------------------------------
 seat = Seat()
 (seat.task_directory / "60.json").write_text("{ this is not json")
