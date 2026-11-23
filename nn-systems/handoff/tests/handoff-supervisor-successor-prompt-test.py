@@ -986,9 +986,11 @@ def run_launch_time_git_sync_cases(workspace: Path):
         Path("/tmp/dialog-0002.md"),
         {"written-at": "2026-11-22T09:00:00Z", "next-step": "finish the supervisor"},
         launch_time_git_sync_report=report)
-    check("a refused fast-forward whose error holds a success phrase stays in the successor's prompt",
+    check("a refused fast-forward whose error holds a success phrase stays in the successor's prompt, "
+          "and git's outcome, not the phrase, says the checkout is not at main",
           report.startswith("launch-time-git-sync: main left as is — ")
-          and supervisor.LAUNCH_TIME_GIT_SYNC_REPORT_PHRASE_CURRENT_WITH_MAIN in report
+          and " is current with main" in report
+          and not getattr(report, "checkout_is_at_main_commit", False)
           and report in phrase_prompt, phrase_prompt)
 
     # Bring the branch level, then put it one behind, for the diverged case.
