@@ -121,6 +121,12 @@ def check(case_name, condition, detail=""):
 
 
 def end_started_processes():
+    """SIGKILL every process the suite started, by process ID.
+
+    Not handled: a started process that has ended and been reaped, whose process ID another
+    process takes before this runs, is killed in its place; that needs ned-box's 4194304 process
+    IDs to wrap around within one run.
+    """
     for process_id in started_process_ids:
         with contextlib.suppress(OSError):
             os.kill(process_id, signal.SIGCONT)
