@@ -901,10 +901,10 @@ for label, command, cwd, expected in (
         ("an absolute -C after cd", "cd /x && git -C /r worktree remove A", "/x",
          ({Path("/r/.claude/worktrees/A"): False}, None)),
         ("a relative -C after cd", "cd /x && git -C r worktree remove A", "/",
-         (None, "the command changes directory, and the -C directory r is relative")),
-        ("a -C where git lists no worktrees", "git -C /x worktree remove A", "/r",
-         (None, "git could not list the worktrees of the repository the removal runs in: `git worktree list` exited "
-                "128: fatal: not a git repository"))):
+         (None, "the command changes directory, and the -C directory r is a relative path")),
+        ("a -C where git lists no worktrees", "git -C x worktree remove A", "/r",
+         (None, "git could not list the worktrees in /r/x, the directory the removal runs in: `git worktree list` "
+                "exited 128: fatal: not a git repository"))):
     check(f"a removal with {label} gives {expected}",
           hook.worktrees_removed_or_unresolved_reason(command, cwd, worktrees_listed_in_r_alone) == expected,
           hook.worktrees_removed_or_unresolved_reason(command, cwd, worktrees_listed_in_r_alone))

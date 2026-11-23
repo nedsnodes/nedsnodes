@@ -537,10 +537,11 @@ def worktrees_removed_or_unresolved_reason(command, cwd, worktrees_of, outer_com
         if reason is not None:
             return None, reason
         if directory and changes_directory and not os.path.isabs(directory):
-            return None, f"the command changes directory, and the -C directory {directory} is relative"
+            return None, f"the command changes directory, and the -C directory {directory} is a relative path"
         worktrees, reason = worktrees_of(os.path.join(cwd, directory))
         if worktrees is None:
-            return None, f"git could not list the worktrees of the repository the removal runs in: {reason}"
+            return None, (f"git could not list the worktrees in {os.path.join(cwd, directory)}, the directory the "
+                          f"removal runs in: {reason}")
         worktree = worktree_named_by_path_suffix(argument, worktrees)
         if worktree is None:
             if changes_directory and not os.path.isabs(path):
