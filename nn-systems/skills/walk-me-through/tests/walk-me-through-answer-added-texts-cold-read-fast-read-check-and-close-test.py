@@ -6713,6 +6713,51 @@ def stopped_by_sigterm(*_):
     raise SystemExit(1)  # So main()'s finally removes the suite's scratch directory.
 
 
+def walk_copies(root):
+    return sorted((root / WALK_NAME).glob("*.md")) if (root / WALK_NAME).is_dir() else []
+
+
+def test_each_run_saves_a_changed_walk_document_once_and_keeps_the_newest_twenty():
+    case = Case()
+    root = case.root / "walk-document-copies"
+    document = case.minutes.with_name(f"{WALK_NAME}.md")
+    flags = ("--walk-document-copies-directory", str(root))
+    first_text = document.read_bytes()
+    case.run("check", *flags)
+    check("a run saves the walk-document", [path.read_bytes() for path in walk_copies(root)] == [first_text])
+    before = walk_copies(root)
+    case.run("check", *flags)
+    check("a run with the document unchanged saves no copy", walk_copies(root) == before)
+    (root / WALK_NAME / "2000-01-01T00-00-00.000000Z.md").write_bytes(b"oldest")
+    for number in range(1, 21):
+        (root / WALK_NAME / f"2000-01-02T00-00-{number:02}.000000Z.md").write_bytes(b"old")
+    changed = first_text + b"\nchanged\n"
+    document.write_bytes(changed)
+    case.run("check", *flags)
+    kept = walk_copies(root)
+    check("only the newest 20 copies are kept", len(kept) == 20, str(len(kept)))
+    check("the oldest copy is the one removed", not (root / WALK_NAME / "2000-01-01T00-00-00.000000Z.md").exists())
+    check("the changed document is the newest copy", kept[-1].read_bytes() == changed)
+    check("no temporary file is left", not list((root / WALK_NAME).glob("*.tmp")))
+
+
+def test_a_copy_that_cannot_be_saved_is_reported_and_the_answer_is_still_recorded():
+    case = Case()
+    blocked = case.root / "a-file-where-the-copies-directory-would-go"
+    blocked.write_text("")
+    result = case.run("check", "--walk-document-copies-directory", str(blocked))
+    check("the failed copy is reported", "FAILED: no timestamped copy" in result.stderr, described(result))
+    check("a failed copy exits 2 when the step succeeded", result.returncode == 2, described(result))
+    check("the answer is still recorded", "the user answered" in case.minutes.read_text(), case.minutes.read_text())
+
+
+def test_a_run_pointed_at_other_records_writes_no_copy_without_being_told_where():
+    case = Case()
+    result = case.run("check")
+    check("the run succeeds with no copy", result.returncode == 0, described(result))
+    check("no copy folder appears in the case", not list(case.root.rglob("walk-document-copies")))
+
+
 def main():
     signal.signal(signal.SIGTERM, stopped_by_sigterm)
     try:
