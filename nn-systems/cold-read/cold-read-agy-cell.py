@@ -119,8 +119,9 @@ call; the login draws on the user's subscription. agy's login lives under
 GEMINI_API_KEY from agy's environment, so that a key the caller holds cannot
 move agy's calls onto per-call billing. It also removes GH_TOKEN and
 GITHUB_TOKEN, which an agent-seat's supervisor sets to the agent-seat's own
-GitHub token, so agy gets no GitHub token from its caller. On the Mac the sandbox leaves the keychain readable, so a
-gh login stored there still works inside it. When agy finds no login, it prints
+GitHub token; it leaves GH_ENTERPRISE_TOKEN and GITHUB_ENTERPRISE_TOKEN, which
+gh also reads, in place. On the Mac the sandbox leaves the keychain readable
+and denies ~/.config/gh. When agy finds no login, it prints
 a line starting with AGY_MISSING_GOOGLE_LOGIN_STDERR_LINE_PREFIX, waits a
 minute for a login that cannot come headless, and exits 1; the cell's cause
 line is then logged-out, saying how to log agy in.
