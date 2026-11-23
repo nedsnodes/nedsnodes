@@ -324,10 +324,14 @@ STRAY_WRITE_NO_UNDO_MAY_HOLD_MOVED_CHANGES = (
 STRAY_WRITE_NO_UNDO_GONE_WHILE_CHANGES_MAY_HAVE_MOVED = (
     "No undo command is given for any path, because a file with uncommitted changes from before "
     "the cells launched has changed or gone since: {touched}, and a stopped cell may have moved "
-    "those changes. {path} is gone; `git -C {repository} diff HEAD -- {path}` shows what it held. "
+    "those changes. {path} is gone; {what_it_held} "
     "The index may still hold the moved changes under {path}, and an undo would discard them; "
     "`git -C {repository} diff --cached -- {path}` shows any copy the index holds. Ask the user before you "
     "restore {path}, and about any change you did not make.")
+GONE_PATH_AT_HEAD_WHAT_IT_HELD = "`git -C {repository} diff HEAD -- {path}` shows what it held."
+# A path staged as new, renamed or copied and then deleted is not at HEAD, so
+# `diff HEAD` prints nothing for it; only the index holds its text.
+GONE_PATH_NOT_AT_HEAD_WHAT_IT_HELD = "it was never committed, so only the index holds what it held."
 STOPPED_CELL_LINE = "{report}: stopped before it finished{deleted}."
 WORKING_TREE_SNAPSHOT_NOT_TAKEN_REASON = "its snapshot of the working tree before the cells launched failed ({error})"
 WORKING_TREE_CHECK_FAILED_REASON = "git status failed when it checked ({error})"
@@ -1001,6 +1005,7 @@ def stopped_cells_write_check_lines(stopped_report_paths: list, baseline,
                 + STOPPED_CELL_WRITE_CHECK_LINE.format(cell=cell_name_of(path), reason=reason)
                 for path in stopped_report_paths]
     untracked = {entry.path for entry in entries if entry.code == "??"}
+    not_at_head = {entry.path for entry in entries if entry.code[0] in "ARC"}
     changed_before = {name for name, _ in baseline}
     # Read from the launch side: a pre-launch path that is now different, gone or out
     # of git status is in no current entry, and an undo could delete what it held.
@@ -1024,6 +1029,9 @@ def stopped_cells_write_check_lines(stopped_report_paths: list, baseline,
         lines.append(STOPPED_CELLS_STRAY_WRITE_LINE.format(
             path=name, cells=cells, undo=undo.format(
                 path=shlex.quote(name), repository=repository, what_to_read=what_to_read,
+                what_it_held=(GONE_PATH_NOT_AT_HEAD_WHAT_IT_HELD if name in not_at_head
+                              else GONE_PATH_AT_HEAD_WHAT_IT_HELD).format(
+                    path=shlex.quote(name), repository=repository),
                 absolute_path=shlex.quote(str(cell_common.REPO_ROOT / name)),
                 touched=", ".join(shlex.quote(name) for name in touched))))
     return lines

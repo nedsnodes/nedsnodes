@@ -1871,6 +1871,29 @@ try:
               and "an undo would discard them" in staged_gone_lines[0]
               and ("+The agent's own edit." in index_copy_shown) == (case == "staged copy of the edited file"),
               repr(staged_lines) + "\n" + shown + "\n" + index_copy_shown)
+    # A stopped cell that stages a new file and then deletes it leaves a path that is not at HEAD,
+    # where `diff HEAD` prints nothing; only the index copy shows what it held.
+    clean_move_git("reset", "--quiet", "--hard")
+    clean_move_git("clean", "--quiet", "-f")
+    (clean_move_repository / "agent-draft.md").write_text("The agent's own edit.\n", encoding="utf-8")
+    with mock.patch.object(grid_module.cell_common, "REPO_ROOT", clean_move_repository):
+        added_baseline = grid_module.cell_common.working_tree_state()
+        (clean_move_repository / "agent-draft.md").write_text("A reviewer's rewrite.\n", encoding="utf-8")
+        (clean_move_repository / "staged-new-by-a-reviewer.md").write_text("Staged new.\n", encoding="utf-8")
+        clean_move_git("add", "staged-new-by-a-reviewer.md")
+        (clean_move_repository / "staged-new-by-a-reviewer.md").unlink()
+        added_lines = grid_module.stopped_cells_write_check_lines(
+            [scratch / "claude-hunt-deep.md"], added_baseline, None, set())
+    added_gone_lines = [line for line in added_lines if line.startswith("STRAY WRITE: staged-new-by-a-reviewer.md ")]
+    added_diff_commands = re.findall(r"`(git -C [^`]* diff [^`]*)`", added_gone_lines[0]) if added_gone_lines else []
+    added_shown = [subprocess.run(shlex.split(command), check=True, capture_output=True, text=True).stdout
+                   for command in added_diff_commands]
+    check("a path a stopped cell staged as new and then deleted is named as never committed, and the one "
+          "diff the line gives shows what it held",
+          len(added_gone_lines) == 1 and "staged-new-by-a-reviewer.md is gone; it was never committed" in added_gone_lines[0]
+          and len(added_diff_commands) == 1 and " diff --cached -- " in added_diff_commands[0]
+          and "+Staged new." in added_shown[0],
+          repr(added_lines) + "\n" + "\n".join(added_shown))
     # A tracked file the agent had already changed: the diffs the line gives must together show a
     # cell's edit that is staged, and a cell's write of the HEAD text over a staged-and-edited file,
     # which leaves the working tree equal to HEAD.
