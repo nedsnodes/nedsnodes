@@ -808,10 +808,56 @@ def run_cases_on_ned_box(workspace: Path):
           "own ref, runs the runner at main's newest commit, and leaves origin/main as it was",
           result.code == 0 and call.get("commit") == fixture.commit_of_main
           and fixture_git(racing, "rev-parse", "refs/remotes/origin/main") == origin_main_before
-          and fixture_git(racing, "rev-parse",
-                          program.SCHEDULED_FULL_TEST_RUN_FETCHED_MAIN_REF)
-          == fixture.commit_of_main
           and not (racing / ".git" / "FETCH_HEAD").exists(), repr(result))
+    check("the run deletes the ref it fetched main into when it ends",
+          subprocess.run(["git", "-C", str(racing), "for-each-ref",
+                          "refs/scheduled-full-test-run-of-main/"],
+                         capture_output=True, text=True).stdout == "", repr(result))
+
+    real_git_for_fetch_arguments = program.git
+    fetch_calls = []
+
+    def git_recording_fetches(clone, *arguments):
+        if arguments[:1] == ("fetch",):
+            fetch_calls.append(arguments)
+        return real_git_for_fetch_arguments(clone, *arguments)
+
+    program.git = git_recording_fetches
+    try:
+        result = fixture.run()
+    finally:
+        program.git = real_git_for_fetch_arguments
+    check("the fetch passes --no-tags, so it takes no tag's lock another fetch may hold",
+          result.code == 0 and len(fetch_calls) == 1 and "--no-tags" in fetch_calls[0],
+          repr(fetch_calls))
+
+    # --- A hand run with another --temporary-directory overlaps this run --------------
+    # It holds another lock, so nothing stops its fetch landing between this run's fetch and
+    # its rev-parse; it is played by writing the clone's older commit into the ref it would use.
+    other_temporary = workspace / "another-temporary-directory"
+    other_directory = (other_temporary.resolve()
+                       / program.SCHEDULED_FULL_TEST_RUN_DIRECTORY_NAME)
+    ref_of_other_run = (program.main_fetch_destination_git_ref_name(other_directory)
+                        if hasattr(program, "main_fetch_destination_git_ref_name")
+                        else "refs/scheduled-full-test-run-of-main/main")
+    real_git_for_overlap = program.git
+
+    def another_run_fetches_after_this_ones_fetch(clone, *arguments):
+        completed = real_git_for_overlap(clone, *arguments)
+        if arguments[:1] == ("fetch",):
+            real_git_for_overlap(clone, "update-ref", ref_of_other_run,
+                                 fixture.commit_the_clone_was_made_at)
+        return completed
+
+    program.git = another_run_fetches_after_this_ones_fetch
+    try:
+        result = fixture.run()
+    finally:
+        program.git = real_git_for_overlap
+    call = result.runner_calls[0] if result.runner_calls else {}
+    check("a run with another --temporary-directory that fetches between this run's fetch and "
+          "its rev-parse does not change the commit this run tests",
+          result.code == 0 and call.get("commit") == fixture.commit_of_main, repr(result))
 
     real_git = program.git
 
