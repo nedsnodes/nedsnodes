@@ -48,7 +48,8 @@ The program an agent uses to hand Codex a task. It always:
 
 Options that widen what Codex may do, each off by default:
   --writable-root <folder>  let Codex write in this folder as well as the
-                          checkout, with --sandbox workspace-write; repeatable;
+                          checkout; refused without --sandbox workspace-write;
+                          repeatable;
   --outside-git-checkout  let -C name a folder that is not a git checkout.
 
   --prefetch-github '<gh arguments>'  run `gh <gh arguments>` in the -C
@@ -201,7 +202,8 @@ def build_argument_parser() -> argparse.ArgumentParser:
                         help="keep Codex's commands off the network and take away its "
                              "web search tool")
     parser.add_argument("--writable-root", action="append", default=[], metavar="FOLDER",
-                        help="a folder Codex may write in besides the checkout; repeatable")
+                        help="a folder Codex may write in besides the checkout; refused without "
+                             "--sandbox workspace-write; repeatable")
     parser.add_argument("--outside-git-checkout", action="store_true",
                         help="let -C name a folder that is not a git checkout")
     parser.add_argument("--deadline-minutes", type=float,
@@ -580,6 +582,8 @@ def main(argv=None) -> int:
             "accept --add-dir.\n"
             "To resume without extra writable folders, omit --writable-root.\n"
             "To start a new task with extra writable folders, omit --resume.")
+    if args.writable_root and args.sandbox != "workspace-write":
+        parser.error("--writable-root requires --sandbox workspace-write")
     for gh_arguments in args.prefetch_github:
         quoting_error = prefetch_quoting_error(gh_arguments)
         if quoting_error:

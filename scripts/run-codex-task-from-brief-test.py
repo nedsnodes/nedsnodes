@@ -357,6 +357,17 @@ try:
           and report.read_text() == "an existing report\n",
           f"exit {completed.returncode}, stderr {completed.stderr!r}")
 
+    for options in ((), ("--sandbox", "read-only")):
+        completed, report, _ = run("report", "--writable-root", str(extra_root_one),
+                                   "--prefetch-github", "pr view 1", *options)
+        check(f"--writable-root without --sandbox workspace-write is refused before Codex, "
+              f"prefetch or report removal {options!r}",
+              completed.returncode == 2
+              and "--writable-root requires --sandbox workspace-write" in completed.stderr
+              and not arguments_file.exists() and not gh_log.exists()
+              and report.read_text() == "an existing report\n",
+              f"exit {completed.returncode}, stderr {completed.stderr!r}")
+
     help_text = subprocess.run([sys.executable, str(PROGRAM), "--help"], capture_output=True,
                                text=True, check=False).stdout
     check("the usage line names every option",
