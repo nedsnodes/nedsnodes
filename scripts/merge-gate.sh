@@ -133,9 +133,6 @@
 # rebuild's. Recorded so the next reader knows it was seen and left.
 set -u
 
-REPO=nedsnodes/nedsnodes
-# GitHub redirects the repository's old name, and descriptions written before the rename still link with it.
-OLD_REPOSITORY=nedschorus/nedschorus
 MERGE_ACCOUNT=ned-review-merge
 TOKEN_FILE=$HOME/.config/nedsnodes/$MERGE_ACCOUNT.token
 
@@ -190,6 +187,21 @@ command -v jq >/dev/null 2>&1 || cannot "jq is not on PATH. Put jq on PATH, then
   "If jq is not installed on this machine, tell the user this message."
 command -v gh >/dev/null 2>&1 || cannot "gh is not on PATH. Put gh on PATH, then rerun the gate." \
   "If gh is not installed on this machine, tell the user this message."
+# The old name is read too: GitHub redirects it, and descriptions written before the rename still link with it.
+REPOSITORY_NAMES_MODULE="$(dirname "${BASH_SOURCE[0]}")/../nn-systems/general-tools/github-repository-name-and-name-before-project-rename-common.py"
+REPOSITORY_NAMES_UNREADABLE="could not read the repository's names, REPOSITORY and OLD_REPOSITORY, from $REPOSITORY_NAMES_MODULE"
+repository_names=$(python3 -c '
+import importlib.util, sys
+spec = importlib.util.spec_from_file_location("repository_names", sys.argv[1])
+module = importlib.util.module_from_spec(spec)
+spec.loader.exec_module(module)
+print(module.REPOSITORY, module.OLD_REPOSITORY)' "$REPOSITORY_NAMES_MODULE") \
+  || cannot "$REPOSITORY_NAMES_UNREADABLE; python3's error is just above this line." \
+    "Fix the module or restore it from main, then run the gate again."
+read -r REPO OLD_REPOSITORY extra_name <<<"$repository_names"
+[ -n "$OLD_REPOSITORY" ] && [ -z "$extra_name" ] \
+  || cannot "$REPOSITORY_NAMES_UNREADABLE: it printed \`$repository_names\`, not two names separated by a space." \
+    "Fix the module or restore it from main, then run the gate again."
 DESCRIPTION_DEFECT_LINE_READER="$(dirname "${BASH_SOURCE[0]}")/pull-request-description-defect-line-root-cause-status-and-follow-up-link-reader.py"
 VERDICT_REVIEW_POSTING_PROGRAM_MARKS_CHECK_PROGRAM_PATH="$(dirname "${BASH_SOURCE[0]}")/merge-gate-approval-or-changes-request-review-has-review-posting-program-marks-check.py"
 

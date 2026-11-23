@@ -147,6 +147,7 @@ import importlib.util
 import inspect
 import io
 import json
+import re
 import os
 import shlex
 import shutil
@@ -1791,6 +1792,9 @@ try:
           len(edited_file_lines) == 1 and "so no undo command is given" in edited_file_lines[0]
           and "rm -r" not in edited_file_lines[0] and "restore" not in edited_file_lines[0],
           repr(edited_lines))
+    check("a file untracked before the run is to be read itself, with no git diff, which would print nothing",
+          len(edited_file_lines) == 1 and "Read agent-draft.md itself, which git does not track," in edited_file_lines[0]
+          and "diff" not in edited_file_lines[0], repr(edited_lines))
     check("once a file already changed before the run has changed again, no other path gets an undo command",
           len(other_lines) == 1 and "has changed or gone since: agent-draft.md." in other_lines[0]
           and "rm -r" not in other_lines[0] and "restore" not in other_lines[0],
@@ -1822,8 +1826,12 @@ try:
     check("while an already-changed file has changed, a path that is gone is named as gone, with the "
           "diff that shows what it held, and is not to be read",
           len(gone_lines) == 1 and "has changed or gone since: agent-draft.md," in gone_lines[0]
-          and "clean.md is gone; `git -C " in gone_lines[0] and "diff -- clean.md`" in gone_lines[0]
+          and "clean.md is gone; `git -C " in gone_lines[0] and "diff HEAD -- clean.md`" in gone_lines[0]
           and "Read clean.md" not in gone_lines[0]
+          and "The index may still hold the moved changes under clean.md, and an undo would discard them; "
+              "`git -C " in gone_lines[0]
+          and "diff --cached -- clean.md` shows any copy the index holds. Ask the user before you restore "
+              "clean.md," in gone_lines[0]
           and "rm -r" not in gone_lines[0] and "restore --staged" not in gone_lines[0],
           repr(clean_move_lines))
     check("while an already-changed file has changed, a path that exists is named as where the "
@@ -1833,6 +1841,76 @@ try:
           and "Read moved-by-a-reviewer.md against" in moved_to_lines[0]
           and "rm -r" not in moved_to_lines[0] and "restore" not in moved_to_lines[0],
           repr(clean_move_lines))
+    # A stopped cell that removes a path with `git mv` or `git rm` stages the removal, so a diff
+    # of the working tree against the index shows nothing; the message's diff must still show it.
+    # A cell can also stage the edited file's text under a path and then delete the path, which
+    # leaves the moved changes only in the index, where an undo of the gone path would discard them.
+    for case, remove in (("git mv", lambda: clean_move_git("mv", "clean.md", "staged-move-by-a-reviewer.md")),
+                         ("git rm", lambda: clean_move_git("rm", "--quiet", "clean.md")),
+                         ("staged copy of the edited file", lambda: (
+                             (clean_move_repository / "clean.md").write_text("The agent's own edit.\n", encoding="utf-8"),
+                             clean_move_git("add", "clean.md"), (clean_move_repository / "clean.md").unlink()))):
+        clean_move_git("reset", "--quiet", "--hard")
+        clean_move_git("clean", "--quiet", "-f")
+        (clean_move_repository / "agent-draft.md").write_text("The agent's own edit.\n", encoding="utf-8")
+        with mock.patch.object(grid_module.cell_common, "REPO_ROOT", clean_move_repository):
+            staged_baseline = grid_module.cell_common.working_tree_state()
+            (clean_move_repository / "agent-draft.md").write_text("A reviewer's rewrite.\n", encoding="utf-8")
+            remove()
+            staged_lines = grid_module.stopped_cells_write_check_lines(
+                [scratch / "claude-hunt-deep.md"], staged_baseline, None, set())
+        staged_gone_lines = [line for line in staged_lines if line.startswith("STRAY WRITE: clean.md ")]
+        diff_commands = re.findall(r"`(git -C [^`]* diff [^`]*)`", staged_gone_lines[0]) if staged_gone_lines else []
+        shown_by = [subprocess.run(shlex.split(command), check=True, capture_output=True, text=True).stdout
+                    for command in diff_commands]
+        shown = shown_by[0] if len(diff_commands) == 2 and " diff HEAD -- " in diff_commands[0] else ""
+        index_copy_shown = shown_by[1] if len(diff_commands) == 2 and " diff --cached -- " in diff_commands[1] else ""
+        check(f"{case}: a path a stopped cell removed with a staged change is named as gone, and the diff "
+              "the line gives shows what it held",
+              len(staged_gone_lines) == 1 and "-Clean." in shown
+              and "an undo would discard them" in staged_gone_lines[0]
+              and ("+The agent's own edit." in index_copy_shown) == (case == "staged copy of the edited file"),
+              repr(staged_lines) + "\n" + shown + "\n" + index_copy_shown)
+    # A tracked file the agent had already changed: the diffs the line gives must together show a
+    # cell's edit that is staged, and a cell's write of the HEAD text over a staged-and-edited file,
+    # which leaves the working tree equal to HEAD.
+    for case, agent_staged_text, agent_unstaged_text, cell_write, shown_text in (
+            ("a cell stages its edit to an edited file", None, "The agent's own edit.\n",
+             "A reviewer's staged edit.\n", "+A reviewer's staged edit."),
+            ("a cell writes the HEAD text over a staged-and-edited file", "The agent's staged edit.\n",
+             "The agent's staged edit, then edited again.\n", "Committed.\n", "+Committed.")):
+        already_changed_repository = (scratch / f"checkout-already-changed-{case.replace(' ', '-')}").resolve()
+        already_changed_repository.mkdir()
+
+        def already_changed_git(*arguments):
+            return subprocess.run(["git", "-C", str(already_changed_repository), "-c", "user.name=grid test",
+                                   "-c", "user.email=grid-test@example.invalid", *arguments],
+                                  check=True, capture_output=True, text=True).stdout
+
+        already_changed_git("init", "--quiet")
+        (already_changed_repository / "agent-draft.md").write_text("Committed.\n", encoding="utf-8")
+        already_changed_git("add", "agent-draft.md")
+        already_changed_git("commit", "--quiet", "-m", "seed")
+        if agent_staged_text is not None:
+            (already_changed_repository / "agent-draft.md").write_text(agent_staged_text, encoding="utf-8")
+            already_changed_git("add", "agent-draft.md")
+        (already_changed_repository / "agent-draft.md").write_text(agent_unstaged_text, encoding="utf-8")
+        with mock.patch.object(grid_module.cell_common, "REPO_ROOT", already_changed_repository):
+            already_changed_baseline = grid_module.cell_common.working_tree_state()
+            (already_changed_repository / "agent-draft.md").write_text(cell_write, encoding="utf-8")
+            if agent_staged_text is None:
+                already_changed_git("add", "agent-draft.md")
+            already_changed_lines = grid_module.stopped_cells_write_check_lines(
+                [scratch / "claude-hunt-deep.md"], already_changed_baseline, None, set())
+        already_changed_commands = (re.findall(r"`(git -C [^`]* diff [^`]*)`", already_changed_lines[0])
+                                    if len(already_changed_lines) == 1 else [])
+        already_changed_shown = "".join(
+            subprocess.run(shlex.split(command), check=True, capture_output=True, text=True).stdout
+            for command in already_changed_commands)
+        check(f"{case}: the diffs the line gives show it",
+              len(already_changed_lines) == 1 and "so no undo command is given" in already_changed_lines[0]
+              and shown_text in already_changed_shown,
+              repr(already_changed_lines) + "\n" + already_changed_shown)
     attempt = grid_module.start_attempt(
         [sys.executable, "-c", "import time; time.sleep(120)"],
         scratch / "report.md", 1, scratch / "cell.stderr.log")

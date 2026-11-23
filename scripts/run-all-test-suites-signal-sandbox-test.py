@@ -439,7 +439,8 @@ if linux_only_cases_run_here("the report's sandbox lines"):
             ("is not UTF-8", b"\xff\n", "is not UTF-8 text (UnicodeDecodeError"),
             ("is not valid Python", "SUITES_RUN_WITHOUT_ANY_SANDBOX = {\n",
              "is not valid Python"),
-            ("lacks one list", "SUITES_RUN_WITHOUT_ANY_SANDBOX = {}\n"
+            ("binds a list by unpacking", "SUITES_RUN_WITHOUT_ANY_SANDBOX = {}\n"
+             "SUITES_GIVEN_A_COPY_ON_WRITE_OVERLAY_OF_THE_REPOSITORY_GIT_DIRECTORY, _ = {}, 0\n"
              "SUITES_THAT_RUN_THE_REAL_CLAUDE_CLI = {}\n"
              "SUITES_WHOSE_TEST_SANDBOX_SHARES_THE_MACHINE_NETWORK = {}\n",
              "does not assign "
@@ -508,6 +509,55 @@ if linux_only_cases_run_here("the report's sandbox lines"):
                           "stop and tell the user" in completed.stderr
                       and "chmod" not in completed.stderr and "mv " not in completed.stderr,
                       completed.stderr[-1200:])
+
+        # An older checkout's runner lacks a list a later runner reads; the run gets this
+        # runner's own list for it and runs the suites. The suite is one that list names, so
+        # the case fails if the run applied an empty list instead.
+        overlay_suite = next(iter(
+            runner.SUITES_GIVEN_A_COPY_ON_WRITE_OVERLAY_OF_THE_REPOSITORY_GIT_DIRECTORY))
+        recording_bin = scratch / "recording-bin"
+        recording_bin.mkdir()
+        bwrap_arguments_log = scratch / "bwrap-arguments.log"
+        (recording_bin / "bwrap").write_text(
+            (fake_bin / "bwrap").read_text().replace(
+                "status_fd=\n",
+                f"status_fd=\nprintf '%s\\0' \"$@\" >> {shlex.quote(str(bwrap_arguments_log))}\n"
+                "printf '\\n' >> " + shlex.quote(str(bwrap_arguments_log)) + "\n", 1))
+        (recording_bin / "bwrap").chmod(0o755)
+        lacking = scratch / "lacks one list"
+        lacking.mkdir()
+        repository = scratch_checkout(lacking, [overlay_suite])
+        (repository / "scripts").mkdir(exist_ok=True)
+        (repository / "scripts" / "run-all-test-suites.py").write_text(
+            "SUITES_RUN_WITHOUT_ANY_SANDBOX = {}\n"
+            "SUITES_THAT_RUN_THE_REAL_CLAUDE_CLI = {}\n"
+            "SUITES_WHOSE_TEST_SANDBOX_SHARES_THE_MACHINE_NETWORK = {}\n")
+        subprocess.run(["git", "-C", str(repository), "add", "-A"], check=True)
+        subprocess.run(["git", "-C", str(repository), "-c", "user.name=t", "-c",
+                        "user.email=t@t", "commit", "-qm", "lacks one list"], check=True)
+        completed, report = run_runner(
+            lacking, repository, f"{recording_bin}{os.pathsep}{os.environ.get('PATH', '')}")
+        suite_runs = [line.split("\0") for line in
+                      (bwrap_arguments_log.read_text().splitlines()
+                       if bwrap_arguments_log.exists() else [])
+                      if overlay_suite in line]
+        git_directory = os.path.realpath(repository / ".git")
+        check("when the checkout's scripts/run-all-test-suites.py lacks one list, the run takes "
+              "this runner's own list for it, so a suite that list names gets a copy-on-write "
+              "overlay of the git directory, and runs the suites, exit 0",
+              completed.returncode == 0
+              and "does not assign" not in completed.stderr
+              and (lacking / "logs" / (overlay_suite.replace("/", "__") + ".log")).exists()
+              and len(suite_runs) == 1
+              and any(suite_runs[0][index:index + 2] == ["--tmp-overlay", git_directory]
+                      for index in range(len(suite_runs[0]))),
+              (completed.returncode, completed.stderr[-600:], report[-600:], suite_runs))
+        check("when the checkout's scripts/run-all-test-suites.py lacks one list, the report "
+              "names this runner as the source of that list",
+              (f"{runner.SUITE_SANDBOX_LISTS_SOURCE_LINE_PREFIX}"
+               f"{repository / 'scripts' / 'run-all-test-suites.py'}, and in {RUNNER_PATH} for "
+               f"SUITES_GIVEN_A_COPY_ON_WRITE_OVERLAY_OF_THE_REPOSITORY_GIT_DIRECTORY, which the "
+               f"checkout lacks or assigns a set\n") in report, report[-1200:])
 
         try:
             runner.checkout_top_directory(str(repository / "scripts"))

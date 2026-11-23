@@ -21,7 +21,14 @@ the gate, the retargets, the merge and every other gh call use one token.
 import importlib.util
 from pathlib import Path
 
-REPOSITORY = "nedsnodes/nedsnodes"
+# merge-gate.sh reads the same module, so the merge command it prints and the
+# one this program compares it with name the same repository.
+_repository_names_spec = importlib.util.spec_from_file_location(
+    "repository_names", Path(__file__).resolve().parents[1] / "nn-systems" / "general-tools"
+    / "github-repository-name-and-name-before-project-rename-common.py")
+_repository_names = importlib.util.module_from_spec(_repository_names_spec)
+_repository_names_spec.loader.exec_module(_repository_names)
+REPOSITORY = _repository_names.REPOSITORY
 DEFAULT_MERGE_LANE_WORKTREES_AND_OUTPUTS_DIRECTORY = Path(
     "/home/nedlern/nedsnodes-logs/seats/merge-lane-2/merge-helpers")
 REVIEW_WORKTREES_DIRECTORY_UNDER_HOME = Path(".cache") / "merge-lane-review-worktrees"

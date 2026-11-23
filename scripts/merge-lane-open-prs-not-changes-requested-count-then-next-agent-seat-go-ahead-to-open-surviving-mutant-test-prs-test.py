@@ -17,6 +17,7 @@ import io
 import json
 import os
 import shutil
+import subprocess
 import sys
 import tempfile
 from pathlib import Path
@@ -27,6 +28,7 @@ _spec = importlib.util.spec_from_file_location("surviving_mutant_test_prs_go_ahe
 program = importlib.util.module_from_spec(_spec)
 _spec.loader.exec_module(program)
 
+MERGE_ACCOUNT = "ned-review-merge"
 SEATS = ["reboot-test", "MD-skills", "agent-instructions-editor", "merge-lane-2"]
 
 FAKE_GH = r'''#!/usr/bin/env python3
@@ -51,12 +53,13 @@ def check(name, condition, detail=""):
             print("      " + str(detail).replace("\n", "\n      "))
 
 
-def pull_request(number, draft=False, reviews=()):
+def pull_request(number, draft=False, reviews=(), author="mac-claude"):
     """reviews: (state, on) or (state, on, body), oldest first; on is "head", "older" or
-    "deleted-commit"."""
+    "deleted-commit". author None is a deleted account, as GitHub returns it."""
     head = f"{number:040x}"
     commits = {"head": {"oid": head}, "older": {"oid": "f" * 40}, "deleted-commit": None}
     return {"number": number, "isDraft": draft, "headRefOid": head,
+            "author": {"login": author} if author else None,
             "reviews": {"nodes": [{"state": state, "commit": commits[on],
                                    "body": rest[0] if rest else ""}
                                   for state, on, *rest in reviews]}}
@@ -181,11 +184,15 @@ def cases(root):
           and case.prompts[0]["schema"] == program.idle_sweep.SEND_ANSWER_SCHEMA
           and case.prompts[0]["working_directory"]
               == case.state / program.SENDER_WORKING_DIRECTORY_NAME, case.prompts)
-    check("gh reads every page of the open pull requests with the merge account's reviews",
+    query = next((argument for argument in case.gh_calls()[0] if argument.startswith("query="))
+                 if case.gh_calls() else None, "")
+    check("gh reads every page of the open pull requests with each one's author and the merge "
+          "account's reviews, each review with its body, which holds a COMMENT verdict",
           case.gh_calls() and case.gh_calls()[0][:4] == ["api", "graphql", "--paginate",
                                                          "--slurp"]
-          and any('reviews(author: "ned-review-merge"' in argument
-                  for argument in case.gh_calls()[0]), case.gh_calls())
+          and 'reviews(author: "ned-review-merge", last: 100) { nodes { state body commit { oid } } }'
+              in query
+          and "headRefOid author { login }" in query, case.gh_calls())
     case.sender_answers(("sent", "MD-skills"))
     code, output = case.run()
     check("once one is released, the next run releases the next agent-seat in the file's order",
@@ -219,8 +226,8 @@ def cases(root):
     case = Case(root, "eleven")
     case.gh_answer(pages([pull_request(number) for number in range(1, 12)]))
     code, output = case.run()
-    check("11 counted open pull requests name no agent-seat and print the count, exit 1",
-          code == 1 and "RELEASE" not in output and case.prompts == []
+    check("11 counted open pull requests name no agent-seat and print the count, exit 3",
+          code == 3 and "RELEASE" not in output and case.prompts == []
           and output.startswith("11 open pull requests that are not drafts"),
           f"exit {code}\n{output}")
 
@@ -236,26 +243,35 @@ def cases(root):
              pull_request(11, reviews=[("APPROVED", "head"), ("CHANGES_REQUESTED", "head")]),
              False),
             ("own-sent-back-as-comment",
-             pull_request(11, reviews=[("COMMENTED", "head", SENT_BACK_AS_COMMENT)]), False),
+             pull_request(11, reviews=[("COMMENTED", "head", SENT_BACK_AS_COMMENT)],
+                          author=MERGE_ACCOUNT), False),
             ("own-sent-back-then-approved-as-comments",
              pull_request(11, reviews=[("COMMENTED", "head", SENT_BACK_AS_COMMENT),
-                                       ("COMMENTED", "head", APPROVED_AS_COMMENT)]), True),
+                                       ("COMMENTED", "head", APPROVED_AS_COMMENT)],
+                          author=MERGE_ACCOUNT), True),
             ("own-sent-back-then-comment-without-verdict",
              pull_request(11, reviews=[("COMMENTED", "head", SENT_BACK_AS_COMMENT),
-                                       ("COMMENTED", "head", NO_VERDICT_COMMENT)]), False),
+                                       ("COMMENTED", "head", NO_VERDICT_COMMENT)],
+                          author=MERGE_ACCOUNT), False),
             ("own-sent-back-on-an-older-commit",
              pull_request(11, reviews=[("COMMENTED", "older", SENT_BACK_AS_COMMENT),
-                                       ("COMMENTED", "head", NO_VERDICT_COMMENT)]), True),
+                                       ("COMMENTED", "head", NO_VERDICT_COMMENT)],
+                          author=MERGE_ACCOUNT), True),
             ("approved-then-comment-opening-with-REQUEST_CHANGES",
              pull_request(11, reviews=[("APPROVED", "head"),
-                                       ("COMMENTED", "head", SENT_BACK_AS_COMMENT)]), True)):
+                                       ("COMMENTED", "head", SENT_BACK_AS_COMMENT)]), True),
+            ("another-author's-only-comment-opening-with-REQUEST_CHANGES",
+             pull_request(11, reviews=[("COMMENTED", "head", SENT_BACK_AS_COMMENT)]), True),
+            ("deleted-author's-only-comment-opening-with-REQUEST_CHANGES",
+             pull_request(11, reviews=[("COMMENTED", "head", SENT_BACK_AS_COMMENT)],
+                          author=None), True)):
         case = Case(root, name)
         case.gh_answer(pages(ten_counted + [eleventh]))
         case.sender_answers(("sent", "reboot-test"))
         code, output = case.run()
         check(f"beside 10 counted pull requests, a {name} pull request "
               f"{'is counted, so none is released' if counted else 'is not counted'}",
-              (code == 1 and output.startswith("11 open pull requests")) if counted
+              (code == 3 and output.startswith("11 open pull requests")) if counted
               else (code == 0 and "\n10 open pull requests" in output),
               f"exit {code}\n{output}")
 
@@ -277,14 +293,14 @@ def cases(root):
           "approval or request for changes on its head commit is a request for changes; one on "
           "an older commit, or on a commit GitHub no longer has, does not leave it out, and a "
           "later COMMENTED review does not bring it back",
-          code == 1 and output.startswith("15 open pull requests"), f"exit {code}\n{output}")
+          code == 3 and output.startswith("15 open pull requests"), f"exit {code}\n{output}")
 
     case = Case(root, "all-released",
                 released="".join(json.dumps({"agent_seat": seat}) + "\n" for seat in SEATS))
     case.gh_answer(pages(ten_counted))
     code, output = case.run()
-    check("when every listed agent-seat is recorded as released, none is named, exit 1",
-          code == 1 and "RELEASE" not in output and "already recorded as released" in output,
+    check("when every listed agent-seat is recorded as released, none is named, exit 3",
+          code == 3 and "RELEASE" not in output and "already recorded as released" in output,
           f"exit {code}\n{output}")
 
     case = Case(root, "gh-fails")
@@ -300,6 +316,18 @@ def cases(root):
     check("gh output not in the shape read exits 2",
           code == 2 and "not in the shape this program reads" in output,
           f"exit {code}\n{output}")
+
+    without_state = [pull_request(number) for number in range(1, 11)]
+    without_state[0]["reviews"]["nodes"].append({"commit": {"oid": without_state[0]["headRefOid"]},
+                                                 "body": ""})
+    case = Case(root, "review-without-state")
+    case.gh_answer(pages(without_state))
+    case.sender_answers(("sent", "reboot-test"))
+    code, output = case.run()
+    check("a review on the head commit without a state exits 2, the count being unknown, and "
+          "releases no agent-seat",
+          code == 2 and "not in the shape this program reads" in output and "RELEASED" not in output
+          and case.released() == [] and not case.prompts, f"exit {code}\n{output}")
 
     case = Case(root, "no-seats-file", seats=None)
     case.gh_answer(pages(ten_counted))
@@ -339,6 +367,19 @@ def cases(root):
     check("an exception nothing caught exits 2, not Python's 1",
           code == 2 and "the program crashed: ZeroDivisionError" in output,
           f"exit {code}\n{output}")
+
+    # A copy with none of the modules it loads beside it crashes before main() runs.
+    alone = root / "loaded-module-missing"
+    alone.mkdir()
+    shutil.copy(PROGRAM, alone / PROGRAM.name)
+    crashed = subprocess.run([sys.executable, str(alone / PROGRAM.name),
+                              "--state-directory", str(alone)],
+                             capture_output=True, text=True, stdin=subprocess.DEVNULL)
+    check("a crash before main() runs exits with a status other than the one that means no "
+          "agent-seat is due, so the merge script reports it",
+          crashed.returncode not in (program.EXIT_RELEASED, program.EXIT_NONE_DUE)
+          and "FileNotFoundError" in crashed.stderr,
+          f"exit {crashed.returncode}\n{crashed.stderr[-500:]}")
 
 
 if __name__ == "__main__":

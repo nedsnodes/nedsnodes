@@ -67,6 +67,7 @@ WHAT IS PINNED HERE.
     launcher refuses, exit 64, and never starts agy.
 
   - The Google login. A GEMINI_API_KEY the caller set never reaches agy,
+    nor does a GH_TOKEN or GITHUB_TOKEN,
     and a key file at .config/nedsnodes/gemini-api.key in the scratch home
     is not read. When agy prints what the real agy prints with no login, the
     cell exits 1 and its cause line is logged-out, saying how to log agy in.
@@ -151,7 +152,8 @@ SHORT_CHAT_REMARK = "I have written the report to the path you gave me.\n"
 # "near_miss" writes the report one directory away from where it was asked,
 # "stdout" is the model's chat text, "dump_argv" and "dump_prompt" are paths
 # to record what the stub was launched with, "dump_key" is a path to record
-# GEMINI_API_KEY as agy received it (null when absent), "hang_writing_child_pid_to" is a path
+# GEMINI_API_KEY as agy received it (null when absent), "dump_github_tokens" is a path to
+# record GH_TOKEN and GITHUB_TOKEN as agy received them, "hang_writing_child_pid_to" is a path
 # to append the pid of a child the stub starts before both sleep past any
 # deadline a case sets, "exit_leaving_child_writing_pid_to" is a path to
 # append the pid of a child the stub starts, which keeps the stub's stdout
@@ -212,6 +214,9 @@ if "read_paths" in step:
 if "dump_key" in step:
     pathlib.Path(step["dump_key"]).write_text(
         json.dumps(os.environ.get("GEMINI_API_KEY")), encoding="utf-8")
+if "dump_github_tokens" in step:
+    pathlib.Path(step["dump_github_tokens"]).write_text(json.dumps(
+        [os.environ.get("GH_TOKEN"), os.environ.get("GITHUB_TOKEN")]), encoding="utf-8")
 if "dump_record_directory_descriptor_count" in step:
     record_directory = os.stat(report_path.parent)
     count = 0
@@ -331,12 +336,17 @@ def scratch_home_for(stub_directory):
 
 
 def run_agy_cell(repository, stub_directory, plan, report_path, *arguments,
-                 tier="fast", path_override=None, gemini_api_key=None, pass_fds=()):
+                 tier="fast", path_override=None, gemini_api_key=None, pass_fds=(),
+                 github_token=None):
     install_stub_agy(stub_directory)
     environment = dict(os.environ)
     environment.pop("GEMINI_API_KEY", None)
     if gemini_api_key is not None:
         environment["GEMINI_API_KEY"] = gemini_api_key
+    for name in ("GH_TOKEN", "GITHUB_TOKEN"):
+        environment.pop(name, None)
+        if github_token is not None:
+            environment[name] = github_token
     environment["HOME"] = str(scratch_home_for(stub_directory))
     environment["PATH"] = (path_override if path_override is not None else
                            path_with_stub_agy_first(stub_directory, environment))
@@ -738,6 +748,19 @@ with tempfile.TemporaryDirectory() as scratch:
               f"exit {result.returncode}; key={received_key(key_dump)!r}; "
               f"stderr={result.stderr!r}")
     gemini_api_key_file.unlink()
+
+    repository = build_scratch_repository(scratch)
+    report = report_path_for(repository, "github-token-from-caller")
+    tokens_dump = scratch / "github-token-from-caller-tokens.json"
+    result = run_agy_cell(repository, stubs,
+                          {"*": {"report": "STUB AGY REVIEW\n",
+                                 "dump_github_tokens": str(tokens_dump)}},
+                          report, github_token="test-github-token-from-caller")
+    received_tokens = (json.loads(tokens_dump.read_text(encoding="utf-8"))
+                       if tokens_dump.is_file() else "NOT RUN")
+    check("github-token-from-caller: the cell exits 0 and agy is given no GH_TOKEN or GITHUB_TOKEN",
+          result.returncode == 0 and received_tokens == [None, None],
+          f"exit {result.returncode}; tokens={received_tokens!r}; stderr={result.stderr!r}")
 
     # What the real agy 1.4.7 printed on ned-box with ~/.gemini hidden; the URL is shortened.
     agy_logged_out_stderr = (

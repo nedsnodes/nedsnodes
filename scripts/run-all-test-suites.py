@@ -62,12 +62,18 @@ Usage:
   --also-leave-out-suites-whose-recorded-inputs-in-read-only-directory-match-checkout DIR
                 with --only-suites-whose-recorded-inputs-changed-since, a
                 second directory of recordings that this run reads and never
-                writes: a suite selected because its recording in
-                --recorded-inputs-directory is missing or stale is left out
-                when its recording in DIR would leave it out by the same
-                rules; one whose recording there shows an input the change
-                differs in stays selected. DIR never selects a suite. A DIR
-                that is missing or cannot be read holds no recording.
+                writes: a suite selected by its recording in
+                --recorded-inputs-directory is left out when its recording
+                in DIR would leave it out by the same rules, unless the
+                first recording shows an input the change differs in. So a
+                recording there that is missing, of an older format, of a
+                run that failed or skipped cases, or of other copies of the
+                files is settled by DIR. DIR never selects a suite. A DIR
+                that is missing or cannot be read holds no recording. The
+                run refuses, exit 2, when DIR is where it saves recordings,
+                or, with --record-inputs-with-strace, where it saves the
+                lists of files only strace saw, unless given
+                --leave-recorded-inputs-and-failure-history-unchanged.
                 merge-lane-2's head
                 test runs give as DIR the default --recorded-inputs-directory,
                 where the after-merge test run saves each suite's recording
@@ -907,6 +913,14 @@ _attendance_check = importlib.util.module_from_spec(_attendance_check_spec)
 _attendance_check_spec.loader.exec_module(_attendance_check)
 AGENT_SESSION_ATTENDANCE_ENVIRONMENT_VARIABLES = _attendance_check.AGENT_SESSION_ATTENDANCE_ENVIRONMENT_VARIABLES
 
+_path_names_spec = importlib.util.spec_from_file_location(
+    "project_rename_path_names_before_and_after_common",
+    Path(__file__).resolve().with_name("project-rename-path-names-before-and-after-common.py"))
+_path_names = importlib.util.module_from_spec(_path_names_spec)
+_path_names_spec.loader.exec_module(_path_names)
+convert_file_path_after_project_rename_to_path_before = (
+    _path_names.convert_file_path_after_project_rename_to_path_before)
+
 # Suites run as the same account as every agent-seat, so a stray kill(-1) or
 # killpg from a suite reaches all of them. In its own PID namespace a suite can
 # signal only the processes it started. Children of bwrap cannot start bwrap
@@ -1072,11 +1086,6 @@ SUITE_SANDBOX_LIST_NAMES_READ_FROM_CHECKOUT_UNDER_TEST = (
     "SUITES_THAT_RUN_THE_REAL_CLAUDE_CLI",
     "SUITES_GIVEN_A_COPY_ON_WRITE_OVERLAY_OF_THE_REPOSITORY_GIT_DIRECTORY",
     "SUITES_WHOSE_TEST_SANDBOX_SHARES_THE_MACHINE_NETWORK")
-# A checkout committed before a run read this list from it lacks the list, or assigns it the
-# set it was then, as the nightly mutation pass's checkouts do; such a checkout gets this
-# program's own list.
-SUITE_SANDBOX_LIST_NAMES_OLDER_CHECKOUTS_LACK_OR_ASSIGN_A_SET = (
-    "SUITES_THAT_RUN_THE_REAL_CLAUDE_CLI",)
 SUITE_SANDBOX_LISTS_SOURCE_LINE_PREFIX = "which sandbox each suite runs in, from the lists in "
 SUITE_SANDBOX_LISTS_OF_THIS_PROGRAM = {
     name: dict(globals()[name]) for name in SUITE_SANDBOX_LIST_NAMES_READ_FROM_CHECKOUT_UNDER_TEST}
@@ -1911,17 +1920,37 @@ def suite_sandbox_lists_read_from_checkout_under_test(top):
             f"this run tests, then rerun the command you ran.")
     found = {}
     for node in tree.body:
-        if (isinstance(node, ast.Assign) and len(node.targets) == 1
-                and isinstance(node.targets[0], ast.Name)
-                and node.targets[0].id in SUITE_SANDBOX_LIST_NAMES_READ_FROM_CHECKOUT_UNDER_TEST):
+        if isinstance(node, ast.Assign) and len(node.targets) == 1:
+            target, value = node.targets[0], node.value
+        elif isinstance(node, ast.AnnAssign) and node.value is not None:
+            target, value = node.target, node.value
+        else:
+            target = value = None
+        if (isinstance(target, ast.Name)
+                and target.id in SUITE_SANDBOX_LIST_NAMES_READ_FROM_CHECKOUT_UNDER_TEST):
             try:
-                found[node.targets[0].id] = ast.literal_eval(node.value)
+                found[target.id] = ast.literal_eval(value)
             except (ValueError, TypeError, SyntaxError, RecursionError):
-                found[node.targets[0].id] = None
-    for name in SUITE_SANDBOX_LIST_NAMES_OLDER_CHECKOUTS_LACK_OR_ASSIGN_A_SET:
+                found[target.id] = None
+            continue
+        # A list bound any other way is the checkout's own but cannot be read, so it is
+        # refused below rather than taken for an older checkout's missing list.
+        for bound in ast.walk(node):
+            if (isinstance(bound, ast.Name) and isinstance(bound.ctx, ast.Store)
+                    and bound.id in SUITE_SANDBOX_LIST_NAMES_READ_FROM_CHECKOUT_UNDER_TEST):
+                found.setdefault(bound.id, None)
+    # A checkout committed before a run read a list from it lacks the list, or assigns it the
+    # set it was then, as the nightly mutation pass's checkouts do. It gets this program's own
+    # list, with each suite also under the path it had before the project rename, since such a
+    # checkout may predate the rename.
+    supplied_by_this_program = []
+    for name in SUITE_SANDBOX_LIST_NAMES_READ_FROM_CHECKOUT_UNDER_TEST:
         if name not in found or isinstance(found[name], set):
-            found[name] = dict(SUITE_SANDBOX_LISTS_OF_THIS_PROGRAM[name])
-    unreadable =[name for name in SUITE_SANDBOX_LIST_NAMES_READ_FROM_CHECKOUT_UNDER_TEST
+            supplied_by_this_program.append(name)
+            own = SUITE_SANDBOX_LISTS_OF_THIS_PROGRAM[name]
+            found[name] = {**{convert_file_path_after_project_rename_to_path_before(suite): reason
+                              for suite, reason in own.items()}, **own}
+    unreadable = [name for name in SUITE_SANDBOX_LIST_NAMES_READ_FROM_CHECKOUT_UNDER_TEST
                   if not isinstance(found.get(name), dict)]
     if unreadable:
         raise CouldNotRun(
@@ -1930,6 +1959,10 @@ def suite_sandbox_lists_read_from_checkout_under_test(top):
             f"level, so which sandbox each suite runs in is unknown.\n"
             f"In {source_file}, assign each of {', '.join(unreadable)} once, at the top level, "
             f"a dict written out literally, then rerun the command you ran.")
+    if supplied_by_this_program:
+        return found, (f"{source_file}, and in {Path(__file__).resolve()} for "
+                       f"{', '.join(supplied_by_this_program)}, which the checkout lacks or "
+                       f"assigns a set")
     return found, str(source_file)
 
 
@@ -4217,6 +4250,61 @@ def recordings_directory_for(given, top):
     return Path(given).expanduser() / min(roots.stdout.split())[:16]
 
 
+def same_directory(first, second):
+    """Whether two paths name one directory, as a case-insensitive volume or a symlink may hide."""
+    try:
+        return first.samefile(second)
+    except OSError:
+        # A path that does not exist yet is compared as spelled once resolved.
+        return first.resolve() == second.resolve()
+
+
+def refuse_read_only_recordings_directory_this_run_writes(read_only_dir, saved_recordings_dir,
+                                                         files_only_strace_saw_dir, arguments,
+                                                         strace):
+    """Raise CouldNotRun when the directory this run only reads is one it writes to.
+
+    strace is strace_usable()'s answer for this run: without it no strace list is written."""
+    if read_only_dir is None or arguments.leave_records_unchanged:
+        return
+    save_given = arguments.save_recorded_inputs_to_directory is not None
+    written = [(saved_recordings_dir,
+                "it saves the recordings of the suites it runs there, because "
+                + ("--save-recorded-inputs-to-directory names it" if save_given else
+                   "--recorded-inputs-directory, given or by default, names it and "
+                   "--save-recorded-inputs-to-directory is not given"),
+                "--save-recorded-inputs-to-directory", save_given)]
+    if strace is not None:
+        written.append((files_only_strace_saw_dir,
+                        ("it saves the lists of files only strace saw there, because "
+                         "--suite-files-only-strace-saw-lists-directory names it and "
+                         "--record-inputs-with-strace is given"),
+                        "--suite-files-only-strace-saw-lists-directory", True))
+    overlaps = [(how, flag, given) for directory, how, flag, given in written
+                if same_directory(directory, read_only_dir)]
+    if overlaps:
+        flags = " and ".join(f"{flag} <directory> {'changed' if given else 'added'}"
+                             for _, flag, given in overlaps)
+        raise CouldNotRun(
+            f"{PROGRAM}: not run — this run must only read the recordings in the directory "
+            f"given to --also-leave-out-suites-whose-recorded-inputs-in-read-only-directory-"
+            f"match-checkout, {read_only_dir.parent}, but as given it would also write to "
+            f"that directory: "
+            f"{'; and '.join(how for how, _, _ in overlaps)}. The recordings there must stay "
+            f"as the run that saved them left them, because the runs that select by them "
+            f"rely on that.\n"
+            f"If this run is to record the inputs of the suites it runs: run the same command "
+            f"again with {flags}, where <directory> is one no other run saves to or selects "
+            f"by.\n"
+            f"If this run is to record nothing, and add nothing to the test-case failure "
+            f"history: run the same command again with "
+            f"--leave-recorded-inputs-and-failure-history-unchanged added.\n"
+            f"If {read_only_dir.parent} was given to "
+            f"--also-leave-out-suites-whose-recorded-inputs-in-read-only-directory-match-"
+            f"checkout by mistake: run the same command again with the directory you meant "
+            f"given to that flag, or without that flag.")
+
+
 def recording_file_for(recordings_dir, suite):
     return recordings_dir / (suite.replace("/", "__") + ".json")
 
@@ -4774,10 +4862,10 @@ def suites_selected_since(top, suites, recordings, commit, differ, files_only_st
                           read_only_recordings, read_only_directory):
     """[(suite, selected, why)] for every suite, in order; differ is files_that_differ_since's.
 
-    A suite selected because its recording in recordings is missing or stale is left out
-    when its recording in read_only_recordings, read from read_only_directory, would leave it
-    out; one whose recording there shows an input the change differs in stays selected, and
-    read_only_recordings never select a suite."""
+    A suite its recording in recordings selects is left out when its recording in
+    read_only_recordings, read from read_only_directory, would leave it out, unless its
+    recording in recordings shows an input the change differs in; read_only_recordings never
+    select a suite."""
     everything = [path for path in sorted(differ)
                   if any(path == prefix or (prefix.endswith("/") and path.startswith(prefix))
                          for prefix in EVERY_SUITE_RUNS_WHEN_THESE_CHANGE)]
@@ -4794,12 +4882,11 @@ def suites_selected_since(top, suites, recordings, commit, differ, files_only_st
         files_only_strace_saw = files_only_strace_saw_by_suite.get(suite)
         selected, why = selection_reason(suite, recording, checkout, commit,
                                          files_only_strace_saw)
-        shows_a_changed_input = (
-            isinstance(recording, dict)
-            and recording.get("format") == RECORDED_INPUTS_FORMAT_VERSION
-            and changed_input_reason_or_none(suite, recording, checkout,
-                                             files_only_strace_saw) is not None)
-        if selected and read_only_checkout is not None and not shows_a_changed_input:
+        if selected and read_only_checkout is not None and not (
+                isinstance(recording, dict)
+                and recording.get("format") == RECORDED_INPUTS_FORMAT_VERSION
+                and changed_input_reason_or_none(suite, recording, checkout,
+                                                 files_only_strace_saw) is not None):
             selected_by_read_only, why_read_only = selection_reason(
                 suite, read_only_recordings.get(suite), read_only_checkout, commit,
                 files_only_strace_saw)
@@ -5155,6 +5242,11 @@ def main(argv=None, platform=None):
             read_only_recordings_dir = (
                 recordings_directory_for(arguments.read_only_recorded_inputs_directory, top)
                 if arguments.read_only_recorded_inputs_directory is not None else None)
+            strace = (strace_usable() if arguments.record_inputs_with_strace
+                      and not arguments.leave_records_unchanged else None)
+            refuse_read_only_recordings_directory_this_run_writes(
+                read_only_recordings_dir, saved_recordings_dir, files_only_strace_saw_dir,
+                arguments, strace)
         except CouldNotRun as refusal:
             print(refusal, file=sys.stderr)
             return EXIT_COULD_NOT_RUN
@@ -5205,7 +5297,6 @@ def main(argv=None, platform=None):
         if arguments.leave_records_unchanged:
             strace = recorder = None
         else:
-            strace = strace_usable() if arguments.record_inputs_with_strace else None
             recording_dir = log_dir / "recorded-inputs"
             recording_dir.mkdir(parents=True, exist_ok=True)
             recorder = (install_python_input_recorder(log_dir), recording_dir, strace)

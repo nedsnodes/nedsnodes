@@ -788,6 +788,31 @@ def run_cases_on_ned_box(workspace: Path):
     check("a failed fetch leaves no worktree", fixture.worktree_is_gone(cut_off),
           fixture_git(cut_off, "worktree", "list"))
 
+    # --- Another job's fetch in the same clone holds refs/remotes/origin/main ----------
+    # git's own lock file stands for that fetch; a fetch that updates origin/main fails on it.
+    racing = workspace / "a-clone-another-fetch-is-updating"
+    fixture_git(workspace, "clone", "-q", str(fixture.origin), str(racing))
+    # Behind origin, so a fetch that updates origin/main must take its lock.
+    fixture_git(racing, "update-ref", "refs/remotes/origin/main",
+                fixture.commit_the_clone_was_made_at)
+    origin_main_before = fixture.commit_the_clone_was_made_at
+    held = racing / ".git" / "refs" / "remotes" / "origin" / "main.lock"
+    held.parent.mkdir(parents=True, exist_ok=True)
+    held.write_text("", encoding="utf-8")
+    try:
+        result = fixture.run(clone=racing)
+    finally:
+        held.unlink()
+    call = result.runner_calls[0] if result.runner_calls else {}
+    check("while another fetch holds refs/remotes/origin/main, the run fetches main into its "
+          "own ref, runs the runner at main's newest commit, and leaves origin/main as it was",
+          result.code == 0 and call.get("commit") == fixture.commit_of_main
+          and fixture_git(racing, "rev-parse", "refs/remotes/origin/main") == origin_main_before
+          and fixture_git(racing, "rev-parse",
+                          program.SCHEDULED_FULL_TEST_RUN_FETCHED_MAIN_REF)
+          == fixture.commit_of_main
+          and not (racing / ".git" / "FETCH_HEAD").exists(), repr(result))
+
     real_git = program.git
 
     def fetch_fails_after_its_from_line(clone, *arguments):

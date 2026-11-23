@@ -180,7 +180,7 @@ sys.exit(answer[1])
 GO_AHEAD_COUNT_ONLY = ("12 open pull requests that are not drafts wait for merge-lane-2 to review "
                        "or merge them. ... The count is over 10, the most at which merge-lane-2's "
                        "queue is quiet, so no agent-seat holding mutant-test tasks is released; "
-                       "fake go-ahead\n", 1)
+                       "fake go-ahead\n", 3)
 RUNNER_PASSED_SUMMARY ="SUMMARY: 1 passed, 0 failed, 1 total; fake runner"
 RUNNER_FAILED = ("PASS scripts/some-test.py (1s)\n"
                  "FAIL scripts/broken-test.py exit 1 (2s)\n"
@@ -612,6 +612,7 @@ def main():
             "import os\nos.kill(os.getpid(), 9)\n"))
         for name, answer, before, code in (
                 ("go-ahead-could-not-tell", ("could not tell: gh failed\n", 2), None, 2),
+                ("go-ahead-crashed", ("Traceback (most recent call last):\n", 1), None, 1),
                 ("go-ahead-killed", ("", 0), killed, -9)):
             exit_code, output, _, _, _ = run_case(
                 scratch, name, [(GATE_PASSED, 0)], default_routes(STACKED_AND_NOT),

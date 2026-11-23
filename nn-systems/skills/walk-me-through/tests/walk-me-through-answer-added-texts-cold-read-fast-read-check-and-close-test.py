@@ -311,6 +311,11 @@ class Case:
             preexec_fn=stop_signal_dispositions)
 
 
+def check_command_for(case, *words):
+    """The check command, with these flags and values, that the program prints for case's walk."""
+    return shlex.join(["python3", str(PROGRAM), "check", *words, "--cwd", str(case.checkout.resolve())])
+
+
 def case_paths(case):
     """The flags Case.run adds, for running a command the program printed against this case."""
     return ["--cwd", str(case.checkout), "--cold-read-records", str(case.records),
@@ -485,6 +490,13 @@ UNREADABLE_MARK_CASES = (
      ["- line 5: `#new` has no text after it on its line."]),
     ("a mark with an empty quotation", '#new ""\n',
      ["- line 5: `#new` has no text after it on its line."]),
+    ("a mark with only a `The new text:` label, which the short-answer hook does not read as text",
+     "#new The new text:\n\n> A note\n> says why.\n",
+     ["- line 5: `#new` has no text after it on its line. The mark's line with its text joined onto it: "
+      "#new A note says why."]),
+    ("a mark with only a bold `The new text:` label", "#new_if_d **The new text:**\n\n> A note\n> says why.\n",
+     ["- line 5: `#new_if_d` has no text after it on its line. The mark's line with its text joined onto it: "
+      "#new_if_d A note says why."]),
     ("a `#new_if_d` mark with no text, on an A answer", "#new_if_d\n\n> A note\n> says why.\n\nThe end.\n",
      ["- line 5: `#new_if_d` has no text after it on its line. The mark's line with its text joined onto it: "
       "#new_if_d A note says why."]),
@@ -548,7 +560,7 @@ def test_a_mark_whose_text_would_not_be_read_whole_is_refused_by_check_writing_n
               result.returncode == 1 and result.stdout == ""
               and lines[0].startswith(FAILURE_PREFIX + "check: nothing written: item 3 of 9 in the walk-document ")
               and [line for line in lines if line.startswith("- line ")] == problem_lines
-              and f"Then run `python3 {PROGRAM} check --obvious --user-reply-as-typed a` again." in lines
+              and f"Then run `{check_command_for(case, '--obvious', '--user-reply-as-typed', 'a')}` again." in lines
               and "Fix the marks from the last listed to the first, so that the line numbers above stay right." in lines
               and case.minutes.read_text() == before and case.calls.read_text() == ""
               and not case.counts_log.exists(), described(result))
@@ -1565,7 +1577,8 @@ def test_a_failed_fast_read_stops_the_check():
           result.returncode == 1
           and result.stdout.split("\n")[0] == "FAILED: the stand-in cold-read-cell failed twice"
           and "The item stays waiting" in result.stdout
-          and "close.py check --obvious --user-reply-as-typed a` again" in result.stdout, described(result))
+          and f"{check_command_for(case, '--obvious', '--user-reply-as-typed', 'a')}` again" in result.stdout,
+          described(result))
     check("after a FAILED fast read the minutes do not record the answer", case.minutes.read_text() == before,
           case.minutes.read_text())
     check("after a FAILED fast read the scratch directory is removed",
@@ -1574,7 +1587,8 @@ def test_a_failed_fast_read_stops_the_check():
         case = Case()
         result = case.run("check", *flags, mode="failed")
         check(f"after a FAILED fast read, the rerun command keeps {' '.join(flags)}",
-              result.returncode == 1 and f"close.py check {' '.join(flags)} --user-reply-as-typed a` again" in result.stdout,
+              result.returncode == 1
+              and f"{check_command_for(case, *flags, '--user-reply-as-typed', 'a')}` again" in result.stdout,
               described(result))
 
 
@@ -2281,7 +2295,7 @@ def test_status_lines_end_at_the_first_line_that_is_not_one():
     case.minutes.write_text("# Minutes\n\nitem 4 of 9: the user answered approved (2026-10-23 10:00), which makes its "
                             "change. Fast reads:\n- the status line\nA note.\n- a later bullet\n"
                             "#next_to_present item 4 of 9\n")
-    _, _, statuses, _ = program.last_answer(walk_finder, case.minutes, walk_finder.markdown_parser())
+    _, _, statuses, _ = program.last_answer(walk_finder, case.minutes, walk_finder.markdown_parser(), case.checkout)
     check("the answer's status lines stop at the first line that is not a status line",
           statuses == ["the status line"], repr(statuses))
 
@@ -3590,7 +3604,7 @@ def test_an_item_with_no_case_against_line_is_refused_writing_nothing():
         result = case.run("check", *flags)
         check(f"check {' '.join(flags) or '(A)'} on an item with no `#case_against` line is refused, writing nothing",
               result.returncode == 1 and "item 3 of 9" in result.stderr and "has no `#case_against` line" in result.stderr
-              and f"check{''.join(' ' + flag for flag in flags)} --user-reply-as-typed a` again." in result.stderr
+              and f"{check_command_for(case, *flags, '--user-reply-as-typed', 'a')}` again." in result.stderr
               and case.minutes.read_text() == before and case.calls.read_text() == "", described(result))
     for flags in (("--option", "2"), ("--option", "3")):
         case = Case(document=document)
@@ -3692,8 +3706,8 @@ Nothing to decide.
 """
 
 
-def not_asked_case(next_to_present, files=None):
-    case = Case(next_to_present=next_to_present, document=NOT_ASKED_DOCUMENT)
+def not_asked_case(next_to_present, files=None, root_name_suffix=""):
+    case = Case(next_to_present=next_to_present, document=NOT_ASKED_DOCUMENT, root_name_suffix=root_name_suffix)
     defaults = {"docs/poems/index.md": "The poems: poem-list.\n", "tools/counter.py": "count = 0\n",
                 "tools/counter-test.py": "import counter\n", "tools/old_reader.py": "def old_reader(): pass\n",
                 "tools/main.py": "from old_reader import old_reader\n",
@@ -3854,7 +3868,7 @@ def refused_as_rated_none(case, *problems):
     result = case.run("check", "--not-asked", "none")
     return (result.returncode == 1 and "cannot be settled without asking the user as case against none, because:"
             in result.stderr and all(problem in result.stderr for problem in problems)
-            and "check --not-asked none` again" in result.stderr
+            and f"{check_command_for(case, '--not-asked', 'none')}` again" in result.stderr
             and case.minutes.read_text() == before and case.calls.read_text() == "", described(result))
 
 
@@ -3990,7 +4004,8 @@ def test_an_item_of_no_kind_rated_weak_settled_as_alters_earlier_approved_text_o
               in result.stderr
           and "or the case against names anything besides the user's earlier word-for-word approval of the text the "
               "change alters, present item 1 of 3" in result.stderr
-          and "check --not-asked weak-alters-earlier-approved-text-only` again" in result.stderr
+          and f"{check_command_for(case, '--not-asked', 'weak-alters-earlier-approved-text-only')}` again"
+              in result.stderr
           and case.minutes.read_text() == before, described(result))
 
 
@@ -4004,8 +4019,8 @@ def test_not_asked_none_for_an_item_of_no_kind_rated_weak_writes_nothing_and_giv
           and "item 1 of 3's `#case_against` line rates the case against weak, and `--not-asked none` is only for an "
               "item of no kind rated none" in result.stderr
           and "This is not a refusal of item 1 of 3" in result.stderr
-          and "check --not-asked weak-cost-only`" in result.stderr
-          and "check --not-asked weak-alters-earlier-approved-text-only`" in result.stderr
+          and f"{check_command_for(case, '--not-asked', 'weak-cost-only')}`" in result.stderr
+          and f"{check_command_for(case, '--not-asked', 'weak-alters-earlier-approved-text-only')}`" in result.stderr
           and "If the case against names anything else, present item 1 of 3 to the user" in result.stderr
           and case.minutes.read_text() == before and case.calls.read_text() == "", described(result))
 
@@ -4019,7 +4034,7 @@ def test_a_weak_ground_value_for_an_item_of_no_kind_rated_none_writes_nothing_an
               result.returncode == 1
               and f"item 1 of 3's `#case_against` line rates the case against none, and `--not-asked {value}` is "
                   "only for an item of no kind rated weak" in result.stderr
-              and "check --not-asked none`" in result.stderr
+              and f"{check_command_for(case, '--not-asked', 'none')}`" in result.stderr
               and case.minutes.read_text() == before and case.calls.read_text() == "", described(result))
 
 
@@ -4161,8 +4176,8 @@ def test_a_rename_is_refused_unless_a_glossary_lists_the_new_name_and_no_untouch
                                                                                       "the new name"))
 
 
-def not_asked_case_with_line(next_to_present, old_line, new_line, files=None):
-    case = not_asked_case(next_to_present, files)
+def not_asked_case_with_line(next_to_present, old_line, new_line, files=None, root_name_suffix=""):
+    case = not_asked_case(next_to_present, files, root_name_suffix)
     (case.checkout / "docs" / "walk" / f"{WALK_NAME}.md").write_text(NOT_ASKED_DOCUMENT.replace(old_line, new_line))
     return case
 
@@ -4224,9 +4239,9 @@ def test_a_rename_to_a_name_with_spaces_or_to_a_glossary_term_with_an_alias_sett
 RENAME_LINE = "#not_asked_rename poem-list poem-index"
 
 
-def kind_6_case(evidence, files=None, touches=None):
+def kind_6_case(evidence, files=None, touches=None, root_name_suffix=""):
     """Item 4 of the fixture made a kind 6 item: its rename line replaced by the evidence lines given."""
-    case = not_asked_case_with_line("item 4 of 7", RENAME_LINE, evidence, files)
+    case = not_asked_case_with_line("item 4 of 7", RENAME_LINE, evidence, files, root_name_suffix)
     if touches is not None:
         document = (case.checkout / "docs" / "walk" / f"{WALK_NAME}.md").read_text()
         (case.checkout / "docs" / "walk" / f"{WALK_NAME}.md").write_text(
@@ -4298,12 +4313,12 @@ def test_kind_6_is_refused_unless_markdown_prose_outside_a_glossary_gets_a_liste
                    "rates the case against medium"))
 
 
-def kind_7_case(touches, files=None, evidence="", untracked=()):
+def kind_7_case(touches, files=None, evidence="", untracked=(), root_name_suffix=""):
     """Item 4 of the fixture made a kind 7 item: its rename line replaced by the evidence given, touching the files
     named; the fixture's docs/poems-glossary.md stands for a system glossary. Every glossary file is added to git's
     index, since kind 7 accepts only glossaries git tracks, except those named in untracked."""
     files = {"docs/nedsnodes-wiki/nedsnodes-glossary.md": "- **poem** — a poem.\n", **(files or {})}
-    case = kind_6_case(evidence, files, touches)
+    case = kind_6_case(evidence, files, touches, root_name_suffix)
     tracked = [path.relative_to(case.checkout).as_posix() for path in case.checkout.rglob("*-glossary.md")]
     subprocess.run(["git", "-C", str(case.checkout), "add", "--", *(path for path in tracked if path not in untracked)],
                    check=True)
@@ -4372,39 +4387,87 @@ def walk_document_spelling_touches(case, placeholder, replacement):
     document.write_text(document.read_text().replace(placeholder, replacement))
 
 
-def test_kind_7_reports_a_git_ls_files_that_fails_and_writes_nothing():
-    case = kind_7_case("docs/poems-glossary.md")
+# A checkout path holding a space shows whether a printed command quotes it for the shell.
+SPACED_ROOT_NAME_SUFFIX = " with a space"
+
+
+def check_and_its_printed_retry_run_outside_the_checkout(case, flags, environment=None):
+    """Run check with flags, then the check command it printed, as printed, both from another checkout with no
+    walk, so that a printed command that does not name case's checkout with --cwd, quoted for the shell, finds no
+    walk. Return (the first result, the printed command, the retry's result)."""
+    elsewhere = case.root / "another checkout"
+    elsewhere.mkdir(exist_ok=True)
+    subprocess.run(["git", "init", "-q", str(elsewhere)], check=True)
+    environment = dict(environment or os.environ, STAND_IN_CALLS=str(case.calls),
+                       STAND_IN_ARGUMENTS=str(case.fast_read_arguments), STAND_IN_RECORDS=str(case.records),
+                       TMPDIR=str(case.temporary_directory))
+    paths_but_cwd = case_paths(case)[2:]
+    result = subprocess.run([sys.executable, str(PROGRAM), "check", *flags, "--cwd", str(case.checkout),
+                             *paths_but_cwd], capture_output=True, text=True, env=environment, cwd=elsewhere)
+    printed = re.search(r"`(python3 \S+ check [^`]*)`", result.stderr)
+    if printed is None:
+        return result, None, None
+    retry = subprocess.run(["bash", "-c", printed[1] + " " + shlex.join(paths_but_cwd)], capture_output=True,
+                           text=True, env=environment, cwd=elsewhere)
+    return result, printed[1], retry
+
+
+def stubbed_git_failing_on(case, subcommand):
+    """An environment whose PATH finds first a git that fails with exit 128 when given subcommand."""
     stub = case.root / "stub-bin"
     stub.mkdir()
     real_git = shutil.which("git")
-    (stub / "git").write_text(f"#!/bin/sh\nfor argument in \"$@\"; do [ \"$argument\" = ls-files ] && "
-                              f"{{ echo 'fatal: stub ls-files failure' >&2; exit 128; }}; done\nexec {real_git} \"$@\"\n")
+    (stub / "git").write_text(f"#!/bin/sh\nfor argument in \"$@\"; do [ \"$argument\" = {subcommand} ] && "
+                              f"{{ echo 'fatal: stub {subcommand} failure' >&2; exit 128; }}; done\n"
+                              f"exec {real_git} \"$@\"\n")
     (stub / "git").chmod(0o755)
+    return dict(os.environ, PATH=f"{stub}:{os.environ['PATH']}")
+
+
+def test_kind_7_reports_a_git_ls_files_that_fails_and_writes_nothing():
+    case = kind_7_case("docs/poems-glossary.md", root_name_suffix=SPACED_ROOT_NAME_SUFFIX)
     before = case.minutes.read_text()
-    result = case.run("check", "--not-asked", "7", environment=dict(os.environ, PATH=f"{stub}:{os.environ['PATH']}"))
+    result, printed, retry = check_and_its_printed_retry_run_outside_the_checkout(
+        case, ["--not-asked", "7"], stubbed_git_failing_on(case, "ls-files"))
     check("kind 7 fails the check when `git ls-files` fails, naming git's error, writing nothing",
-          result.returncode == 1 and "fatal: stub ls-files failure" in result.stdout + result.stderr
+          result.returncode == 1 and "fatal: stub ls-files failure" in result.stderr
           and case.minutes.read_text() == before, described(result))
+    check("the retry command kind 7 prints when `git ls-files` fails, run as printed from another directory, "
+          "checks the walk's checkout, whose path holds a space",
+          retry is not None and retry.returncode == 1 and "fatal: stub ls-files failure" in retry.stderr
+          and "while checking item 4 of 7's evidence" in retry.stderr and case.minutes.read_text() == before,
+          f"printed {printed!r}; " + (described(retry) if retry else described(result)))
 
 
 def test_a_git_grep_that_fails_is_reported_and_writes_nothing():
-    case = not_asked_case("item 3 of 7")
-    stub = case.root / "stub-bin"
-    stub.mkdir()
-    real_git = shutil.which("git")
-    (stub / "git").write_text(f"#!/bin/sh\nfor argument in \"$@\"; do [ \"$argument\" = grep ] && "
-                              f"{{ echo 'fatal: stub grep failure' >&2; exit 128; }}; done\nexec {real_git} \"$@\"\n")
-    (stub / "git").chmod(0o755)
+    case = not_asked_case("item 3 of 7", root_name_suffix=SPACED_ROOT_NAME_SUFFIX)
     before = case.minutes.read_text()
-    environment = dict(os.environ, PATH=f"{stub}:{os.environ['PATH']}", STAND_IN_CALLS=str(case.calls),
-                       STAND_IN_ARGUMENTS=str(case.fast_read_arguments), STAND_IN_RECORDS=str(case.records))
-    result = subprocess.run([sys.executable, str(PROGRAM), "check", "--not-asked", "3", "--cwd", str(case.checkout),
-                             "--cold-read-records", str(case.records), "--fast-read-program", str(case.stand_in),
-                             "--counts-log", str(case.counts_log)],
-                            capture_output=True, text=True, env=environment, cwd=case.checkout)
+    result, printed, retry = check_and_its_printed_retry_run_outside_the_checkout(
+        case, ["--not-asked", "3"], stubbed_git_failing_on(case, "grep"))
     check("a `git grep` that exits with neither 0 nor 1 fails the check, naming the error, writing nothing",
           result.returncode == 1 and "`git grep` failed with exit 128" in result.stderr
           and "fatal: stub grep failure" in result.stderr and case.minutes.read_text() == before, described(result))
+    check("the retry command printed when `git grep` fails, run as printed from another directory, checks the "
+          "walk's checkout, whose path holds a space",
+          retry is not None and retry.returncode == 1 and "`git grep` failed with exit 128" in retry.stderr
+          and "while checking item 3 of 7's evidence" in retry.stderr and case.minutes.read_text() == before,
+          f"printed {printed!r}; " + (described(retry) if retry else described(result)))
+
+
+def test_a_not_asked_refusal_prints_a_retry_command_that_checks_the_walks_checkout():
+    case = kind_7_case("docs/poems/index.md", root_name_suffix=SPACED_ROOT_NAME_SUFFIX)
+    before = case.minutes.read_text()
+    result, printed, retry = check_and_its_printed_retry_run_outside_the_checkout(case, ["--not-asked", "7"])
+    refusal = "cannot be settled without asking the user as kind 7, because:"
+    check("kind 7 is refused from another directory when it touches a file that is not a glossary",
+          result.returncode == 1 and refusal in result.stderr and case.minutes.read_text() == before,
+          described(result))
+    check("the retry command a `--not-asked` refusal prints, run as printed from another directory, checks the "
+          "walk's checkout, whose path holds a space",
+          retry is not None and retry.returncode == 1 and refusal in retry.stderr
+          and "`#not_asked_touches` names docs/poems/index.md, which is not a system glossary" in retry.stderr
+          and case.minutes.read_text() == before,
+          f"printed {printed!r}; " + (described(retry) if retry else described(result)))
 
 
 def test_an_item_an_earlier_ruling_decides_is_fast_read_recorded_and_not_shown():
@@ -4526,7 +4589,7 @@ def test_now_over_later_takes_no_reply_no_other_answer_and_its_rerun_command_rep
     unrated = Case(document=NOW_OVER_LATER_DOCUMENT.replace("#case_against weak:", "#case_against:"))
     rerun = unrated.run("check", NOW_OVER_LATER)
     check("a refusal's rerun command repeats --now-over-later-already-decided, not the citation it supplies",
-          rerun.returncode == 1 and f"check {NOW_OVER_LATER}` again" in rerun.stderr
+          rerun.returncode == 1 and f"{check_command_for(unrated, NOW_OVER_LATER)}` again" in rerun.stderr
           and "--already-decided" not in rerun.stderr.replace(NOW_OVER_LATER, ""), described(rerun))
 
 
@@ -4665,7 +4728,9 @@ def test_the_check_rerun_a_failed_fast_read_names_repeats_the_already_decided_ci
     case = Case()
     result = case.run("check", "--already-decided", "walk x's minutes, item 3", mode="failed")
     check("a failed fast read under --already-decided tells the agent to rerun check with the citation quoted",
-          result.returncode == 1 and "check --already-decided 'walk x'\"'\"'s minutes, item 3'` again" in result.stdout,
+          result.returncode == 1
+          and f"{check_command_for(case, '--already-decided', 'walk x' + chr(39) + 's minutes, item 3')}` again"
+          in result.stdout,
           described(result))
 
 
@@ -4701,7 +4766,7 @@ def test_a_navigation_word_alone_is_refused_as_an_answer_writing_nothing():
                   result.returncode == 1 and case.minutes.read_text() == before
                   and "is a navigation word alone, which does not approve, disapprove or defer item 4 of 9"
                       in result.stderr
-                  and f"check --moved-on-no-decision --user-reply-as-typed {shlex.quote(' '.join(reply.split()))}`"
+                  and f"{check_command_for(case, '--moved-on-no-decision', '--user-reply-as-typed', ' '.join(reply.split()))}`"
                       in result.stderr
                   and case.calls.read_text() == "", described(result))
 
@@ -4768,13 +4833,13 @@ def test_moving_on_is_refused_writing_nothing_while_the_item_holds_a_recommendat
               in checked.stderr
               and "If the user's reply already answers item 3 of 3, do not ask him again" in checked.stderr
               and "If it does not, ask him to answer item 3 of 3" in checked.stderr
-              and all(f"{answer}: python3 " in checked.stderr and f"check{flag} --user-reply-as-typed REPLY"
-                      in checked.stderr
-                      for answer, flag in (("A", ""), ("AO", " --obvious"), ("Aa", " --after-advisor"),
-                                           ("D", " --disapproved"), ("Z", " --deferred")))
-              and "check --option 2 --user-reply-as-typed REPLY" in checked.stderr
-              and "check --option 3 --user-reply-as-typed REPLY" in checked.stderr
-              and "check --part-answer 1=A --part-answer 2=D --user-reply-as-typed REPLY" in checked.stderr,
+              and all(f"{answer}: {check_command_for(case, *flags)} --user-reply-as-typed REPLY" in checked.stderr
+                      for answer, flags in (("A", ()), ("AO", ("--obvious",)), ("Aa", ("--after-advisor",)),
+                                            ("D", ("--disapproved",)), ("Z", ("--deferred",))))
+              and f"{check_command_for(case, '--option', '2')} --user-reply-as-typed REPLY" in checked.stderr
+              and f"{check_command_for(case, '--option', '3')} --user-reply-as-typed REPLY" in checked.stderr
+              and f"{check_command_for(case, '--part-answer', '1=A', '--part-answer', '2=D')} --user-reply-as-typed "
+                  "REPLY" in checked.stderr,
               described(checked))
 
 
@@ -4816,7 +4881,8 @@ def test_moving_on_is_refused_when_a_comment_opening_inside_a_tag_hides_a_recomm
               checked.returncode == 1 and case.minutes.read_text() == before
               and 'but recommends "change the sentence" once a `<!--` inside an HTML tag opens no comment'
               in checked.stderr
-              and "check --moved-on-no-decision --user-reply-as-typed next` again." in checked.stderr,
+              and f"{check_command_for(case, '--moved-on-no-decision', '--user-reply-as-typed', 'next')}` again."
+              in checked.stderr,
               described(checked))
         deferred_case = Case(next_to_present="item 1.2 of 2", document=plain.format(line=line))
         deferred_case.minutes.write_text("# Minutes\n\n#next_to_present item 1.2 of 2\n")
@@ -4908,7 +4974,8 @@ def test_a_check_without_the_users_reply_is_refused_writing_nothing():
         check(f"check --obvious with the reply {reply!r} is refused, writing nothing, and says how to give it",
               result.returncode == 1 and case.minutes.read_text() == before
               and "check was given no --user-reply-as-typed" in result.stderr
-              and "check --obvious --user-reply-as-typed <his reply>`" in result.stderr, described(result))
+              and f"{check_command_for(case, '--obvious')} --user-reply-as-typed <his reply>`" in result.stderr,
+              described(result))
 
 
 # Each answer flag that takes a reply, with the values it is given. --not-asked, --already-decided,
@@ -4935,18 +5002,21 @@ def test_the_rerun_command_a_refusal_prints_keeps_the_answer_flag():
         case = Case()
         result = case.run("check", flag, *values, reply=None)
         check(f"check {flags} with no reply is refused with a rerun command that keeps {flag}",
-              result.returncode == 1 and f"check {flags} --user-reply-as-typed <his reply>`" in result.stderr,
+              result.returncode == 1
+              and f"{check_command_for(case, flag, *values)} --user-reply-as-typed <his reply>`" in result.stderr,
               described(result))
         case = Case(document=unrated)
         result = case.run("check", flag, *values)
         check(f"check {flags} on a `#case_against` line with no rating is refused with a rerun command that keeps "
-              f"{flag}", result.returncode == 1 and f"check {flags} --user-reply-as-typed a` again." in result.stderr,
+              f"{flag}", result.returncode == 1
+              and f"{check_command_for(case, flag, *values, '--user-reply-as-typed', 'a')}` again." in result.stderr,
               described(result))
     case = Case(document=unrated)
     result = case.run("check", "--moved-on", "the item was withdrawn")
     check("check --moved-on on a `#case_against` line with no rating is refused with a rerun command that keeps "
           "--moved-on and its reason",
-          result.returncode == 1 and "check --moved-on 'the item was withdrawn'` again." in result.stderr,
+          result.returncode == 1
+          and f"{check_command_for(case, '--moved-on', 'the item was withdrawn')}` again." in result.stderr,
           described(result))
 
 
@@ -6561,7 +6631,7 @@ def test_bump_refuses_an_item_no_heading_has_or_one_already_shown_writing_nothin
     missing = case.run("check", "--bump", "four", reply="bump four")
     check("check --bump refuses a title no item heading has, naming an unshown item to bump instead",
           missing.returncode == 1 and "no item heading in the walk-document" in missing.stderr
-          and "`four`" in missing.stderr and 'check --bump \\"two\\"' in missing.stderr.replace('"', '\\"'),
+          and "`four`" in missing.stderr and f"`{check_command_for(case, '--bump', 'two')}`" in missing.stderr,
           described(missing))
     shown = case.run("check", "--bump", "one", reply="bump one")
     check("check --bump refuses the waiting item, which has been shown and is not decided",
@@ -6585,7 +6655,7 @@ def test_bump_refuses_while_the_last_answer_has_no_close_line_writing_nothing():
           and "hold the user's answer to item 1 of 9, which check wrote and close has not yet recorded" in bumped.stderr
           and f"Run `python3 {PROGRAM} close --cwd {top}` first and do what it prints, except reading and presenting "
               "the item it names next: in place of that, run "
-              f"`python3 {PROGRAM} check --bump three --cwd {top} --user-reply-as-typed 'bump three'` and do what it "
+              f"`{check_command_for(case, '--bump', 'three', '--user-reply-as-typed', 'bump three')}` and do what it "
               "prints" in bumped.stderr,
           described(answered) + described(bumped))
     check("a check --bump refused between check and close writes nothing",

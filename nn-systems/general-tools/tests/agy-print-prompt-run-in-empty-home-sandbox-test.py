@@ -19,7 +19,7 @@ and a stub agy stands in for the real one.
     its stdout passed through and its arguments as the program built them;
     it runs as the sandbox's agy with only .gemini in its home, in the empty
     /tmp/agy-working-directory, with no agy on PATH and the caller's stdin not
-    reaching it, and a GEMINI_API_KEY the caller set does not reach it, while
+    reaching it, and a GEMINI_API_KEY, GH_TOKEN or GITHUB_TOKEN the caller set does not reach it, while
     other variables do.
   - Without --model the program refuses, exit 2.
   - Run in this process with sys.platform set, the program hands agy a fresh
@@ -100,7 +100,8 @@ def read_only_mount_points(mountinfo: str) -> set:
 
 def run_program(home, path, *arguments, extra_environment=None):
     environment = {**os.environ, "HOME": str(home), "PATH": path,
-                   "GEMINI_API_KEY": "caller-key", "AAA_CALLER_VARIABLE": "kept-a",
+                   "GEMINI_API_KEY": "caller-key", "GH_TOKEN": "caller-gh-token",
+                   "GITHUB_TOKEN": "caller-github-token", "AAA_CALLER_VARIABLE": "kept-a",
                    "ZZZ_CALLER_VARIABLE": "kept-z", **(extra_environment or {})}
     return subprocess.run([sys.executable, str(SCRIPT_PATH), *arguments],
                           input="caller-stdin", capture_output=True, text=True,
@@ -110,13 +111,13 @@ def run_program(home, path, *arguments, extra_environment=None):
 # What the echoing stub agy prints, field by field: its arguments, then what it
 # sees of its key, the caller's variables, its own path, its home, its working
 # directory, PATH and stdin.
-ECHOING_AGY_BODY = ('printf "%s|" "$@" "key=${GEMINI_API_KEY-unset}" '
+ECHOING_AGY_BODY = ('printf "%s|" "$@" "key=${GEMINI_API_KEY-unset}${GH_TOKEN-unset}${GITHUB_TOKEN-unset}" '
                     '"${AAA_CALLER_VARIABLE-unset}" "${ZZZ_CALLER_VARIABLE-unset}" "$0" '
                     '"$(ls -A "$HOME" | tr "\\n" " ")" "cwd=$(pwd)" '
                     '"cwd-entries=$(ls -A)" "agy-on-path=$(command -v agy || echo none)" '
                     '"stdin=$(cat)"\n')
 ECHOED_FIELDS = ["--model", "gemini-x", "--output-format", "text", "--print", "say hi",
-                 "key=unset", "kept-a", "kept-z", program.AGY_PATH_INSIDE_SANDBOX,
+                 "key=unsetunsetunset", "kept-a", "kept-z", program.AGY_PATH_INSIDE_SANDBOX,
                  ".gemini ", "cwd=/tmp/agy-working-directory", "cwd-entries=",
                  "agy-on-path=none", "stdin=", ""]
 # The fields only the real bwrap makes true: agy's own path is the bind's
@@ -196,7 +197,7 @@ def cases_with_the_stand_in_sandbox(root, home):
                          extra_environment={"FAKE_SANDBOX_PROGRAM_ARGV_LOG": str(argv_log)})
     fields = result.stdout.split("|")
     check("agy succeeding: stdout passed through, arguments as built, no "
-          "GEMINI_API_KEY but every other variable, in "
+          "GEMINI_API_KEY, GH_TOKEN or GITHUB_TOKEN but every other variable, in "
           "/tmp/agy-working-directory, with agy off PATH and stdin closed, exit 0",
           result.returncode == 0 and len(fields) == len(ECHOED_FIELDS)
           and all(field == expected for index, (field, expected)
@@ -219,34 +220,55 @@ def cases_with_the_stand_in_sandbox(root, home):
           repr((result.returncode, result.stdout, result.stderr)))
 
 
-def working_directory_given_to_agy_run(platform):
+class StubGeminiLauncher:
+    """Stands in for the Gemini launcher: a fixed macOS prefix, and an environment
+    filter that removes one more variable than the real one, so a case can tell
+    that the program uses the launcher's filter."""
+
+    EXTRA_REMOVED_VARIABLE = "AGY_PRINT_PROMPT_TEST_VARIABLE_THE_SHARED_FILTER_REMOVES"
+
+    @staticmethod
+    def credential_sandbox_prefix():
+        return ["sandbox-exec"]
+
+    @staticmethod
+    def agy_environment_copy_without_gemini_api_key_or_github_token(environment):
+        return {name: value for name, value in environment.items()
+                if name != StubGeminiLauncher.EXTRA_REMOVED_VARIABLE}
+
+
+def agy_run_with_stubs(platform):
     """Run main() in this process as if sys.platform were platform, with which(),
-    the macOS sandbox prefix and subprocess.run stubbed, and return the cwd the
-    program handed subprocess.run, with whether that directory existed then."""
+    the Gemini launcher and subprocess.run stubbed, and return the exit code, the
+    cwd the program handed subprocess.run with whether that directory existed then,
+    and the environment it handed subprocess.run."""
     seen = {}
 
     def fake_run(command, **keywords):
         seen["cwd"] = keywords.get("cwd")
         seen["existed"] = seen["cwd"] is not None and os.path.isdir(seen["cwd"])
+        seen["env"] = keywords.get("env")
         return subprocess.CompletedProcess(command, 0)
 
     saved = (sys.platform, sys.argv, program.shutil.which, program.subprocess.run,
-             program.launcher_credential_sandbox_prefix)
+             program.load_cold_read_skill_agy_cell_launcher_program_module)
     sys.platform = platform
     sys.argv = [str(SCRIPT_PATH), "--model", "m", "prompt"]
     program.shutil.which = lambda name: f"/stub/{name}"
     program.subprocess.run = fake_run
-    program.launcher_credential_sandbox_prefix = lambda: ["sandbox-exec"]
+    program.load_cold_read_skill_agy_cell_launcher_program_module = lambda: StubGeminiLauncher
+    os.environ[StubGeminiLauncher.EXTRA_REMOVED_VARIABLE] = "x"
     try:
         exit_code = program.main()
     finally:
         (sys.platform, sys.argv, program.shutil.which, program.subprocess.run,
-         program.launcher_credential_sandbox_prefix) = saved
-    return exit_code, seen.get("cwd"), seen.get("existed")
+         program.load_cold_read_skill_agy_cell_launcher_program_module) = saved
+        del os.environ[StubGeminiLauncher.EXTRA_REMOVED_VARIABLE]
+    return exit_code, seen.get("cwd"), seen.get("existed"), seen.get("env")
 
 
 def working_directory_cases():
-    exit_code, cwd, existed = working_directory_given_to_agy_run("darwin")
+    exit_code, cwd, existed, environment = agy_run_with_stubs("darwin")
     check("on macOS agy runs in a fresh agy-working-directory- temporary directory",
           exit_code == 0 and cwd is not None and existed
           and pathlib.Path(cwd).name.startswith("agy-working-directory-"),
@@ -254,10 +276,16 @@ def working_directory_cases():
     # cygwin sorts before darwin and linux after it, so between them they tell
     # == from <= and >=.
     for platform in ("linux", "cygwin"):
-        exit_code, cwd, existed = working_directory_given_to_agy_run(platform)
+        exit_code, cwd, existed, environment = agy_run_with_stubs(platform)
         check(f"on {platform} agy gets no temporary working directory, since bwrap's "
               "--chdir sets it",
               exit_code == 0 and cwd is None, repr((exit_code, cwd, existed)))
+        check(f"on {platform} agy's environment comes from the Gemini launcher's filter, "
+              "so a variable added to that filter does not reach agy",
+              environment is not None
+              and StubGeminiLauncher.EXTRA_REMOVED_VARIABLE not in environment
+              and environment.get("PATH") == os.environ.get("PATH"),
+              repr(sorted(environment or {})))
 
 
 def main() -> int:

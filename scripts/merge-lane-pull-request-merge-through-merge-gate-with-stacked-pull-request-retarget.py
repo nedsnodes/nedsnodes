@@ -157,8 +157,8 @@ MERGE_GATE_DOCUMENTED_EXITS = (0, 1, 2)
 MERGE_GATE = Path("scripts") / "merge-gate.sh"
 SURVIVING_MUTANT_TEST_PRS_GO_AHEAD_PROGRAM = Path(__file__).resolve().with_name(
     "merge-lane-open-prs-not-changes-requested-count-then-next-agent-seat-go-ahead-to-open-surviving-mutant-test-prs.py")
-# 0 named an agent-seat to release, 1 named none.
-SURVIVING_MUTANT_TEST_PRS_GO_AHEAD_ANSWERS = (0, 1)
+# 0 named an agent-seat to release, 3 named none; 1, Python's status for a crash, is not an answer.
+SURVIVING_MUTANT_TEST_PRS_GO_AHEAD_ANSWERS = (0, 3)
 
 
 def parse_arguments(argv):

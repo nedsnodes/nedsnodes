@@ -806,8 +806,7 @@ def own_lines_of_unit(text, parser, lines, unit, openings, own=None, keep_setext
     body, covered = (["", *lines[first + 1:heading_end]] if heading_end > first + 1 else []), heading_end
     for start, stop in sorted(ranges):
         if max(start, covered) < stop:
-            # Lines that go on straight from the heading's own lines stay one run with them, as in the walk-document.
-            body += [*([] if body and max(start, covered) == heading_end else [""]), *lines[max(start, covered):stop]]
+            body += ["", *lines[max(start, covered):stop]]
         covered = max(covered, stop)
     return body
 

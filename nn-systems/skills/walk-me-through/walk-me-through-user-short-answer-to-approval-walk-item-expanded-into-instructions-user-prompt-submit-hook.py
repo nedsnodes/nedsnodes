@@ -159,10 +159,15 @@ message dropped a `#new` mark or put "If you approve, the new text:" before
 the text; any other words before them, such as "Do not", send the line to
 the model. A unit is a paragraph, a visible
 HTML block, or a whole list or quotation, since a bare `#new` can introduce
-one; a unit inside the block right below a paragraph ending in a colon has
-that paragraph's words before its own, since a lead-in on its own line, such
-as "If you disapprove, the new text:", says what the block below it means.
-A `The new text:` just after a `#new` or `#new_if_d` mark is not part of the
+one. A paragraph or heading ending in a colon is a lead-in, since a lead-in
+on its own line, such as "If you disapprove, the new text:", says what the
+text it introduces means: a heading introduces its section, a list item's
+last paragraph the items after it in its list, and any other paragraph the
+block right below it, past any HTML comment. A unit, and each
+decision-bearing line of both texts, has the words of each lead-in
+introducing it before its own, so `> #new X` shown below "If you
+disapprove, the new text:" is not the item's `#new X`. A `The new text:`,
+bold or not, just after a `#new` or `#new_if_d` mark is not part of the
 line's text, so the line passes shown as the question Stop hook shows it. Lines passing that second way must be units in the item's order, each
 unit below the last, so that a `#new` and a `#new_if_d` text swapped in a
 message that dropped both marks do not pass. Words found elsewhere in the
@@ -542,8 +547,15 @@ DECISION_LINES_CHANGED_REASON = (
     "after `Recommendation:`, and, in an item with parts, the text after each `Part N.`. A line passes when a line of "
     "the same kind in the message holds the same words, ignoring punctuation, letter case and the marks `#new`, "
     "`#new_if_d`, `#case_against` and `[advisor]`, or, for a line other than a recommendation or an alternative that "
-    "the message shows without its mark, when a paragraph, list or quotation of the message ends with those words; "
-    "for any other line a model judges whether the message's line of the same kind in the same place, or else its "
+    "the message shows without its mark, when a paragraph, list or quotation of the message holds those words and no "
+    "others, alone or after the words its kind may carry, \"If you approve, the new text:\", \"If you disapprove, the "
+    "new text:\" or \"Case against\", on its first line or as a paragraph of their own above it, each such "
+    "paragraph, list or quotation below the one before. In either text, any other words ending in a colon above a "
+    "line, as a "
+    "paragraph right above its block or a heading over its section, count as part of the line, since such a lead-in, "
+    "as \"Do not adopt the following:\", can reverse what follows it; such a line passes with no model call only under the same "
+    "lead-in. "
+    "For any other line a model judges whether the message's line of the same kind in the same place, or else its "
     "closest paragraph, means the same, and for a line the message showed that the item no longer has, whether the "
     "item's closest paragraph still says it, so a change made only for clarity passes, and so does any change outside "
     "those lines, such as in the explanation or an example.")
@@ -613,8 +625,9 @@ UNMARKED_LINE_NAMES_NEEDING_THE_MODEL = ("`Recommendation:` line", "`The alterna
 LEAD_INS_BEFORE_A_LINE_SHOWN_WITHOUT_ITS_MARK = {"`#new` line": "If you approve, the new text:",
                                                  "`#new_if_d` line": "If you disapprove, the new text:",
                                                  "`#case_against` line": "Case against"}
-# A `The new text:` just after a `#new` or `#new_if_d` mark labels the text that follows; it is not part of it.
-NEW_TEXT_LABEL = re.compile(r"^the\s+new\s+text:\s*", re.I)
+# A `The new text:` just after a `#new` or `#new_if_d` mark labels the text that follows; it is not part of it. In a
+# source line the label may be bold or italic, as `**The new text:**`.
+NEW_TEXT_LABEL = re.compile(r"^[*_]*the\s+new\s+text[*_]*:[*_]*\s*", re.I)
 # The list and quotation marks that can open a Markdown source line.
 LINE_MARKS = re.compile(r"^\s*(?:(?:[-+*>]|\d+[.)])\s+)+")
 # Words in a message paragraph that show it carries the same kind of line, for pairing a line the message changed.
@@ -1045,7 +1058,9 @@ CONTAINER_BLOCK_TYPES = ("blockquote_open", "bullet_list_open", "ordered_list_op
 # lines: the block's rendered lines, as text_as_shown_squeezed gives each; following: the words of the block that
 # follows a paragraph at its own level, such as a `>` quote, a list or the next paragraph, as shown_words gives them,
 # or "" when none follows or the block is HTML; span: its first line and the line after its last.
-RenderedBlock = collections.namedtuple("RenderedBlock", "lines following span following_span")
+RenderedBlock = collections.namedtuple("RenderedBlock", "lines following span")
+# first, last: the first line a lead-in ending in a colon introduces and the line after the last; words: its words.
+LeadIn = collections.namedtuple("LeadIn", "first last words")
 
 
 def text_as_shown_squeezed(text):
@@ -1072,6 +1087,66 @@ def shown_words(markdown, parser, env=None):
     return text_as_shown_squeezed("".join(pieces))
 
 
+def html_block_lines_as_shown(token):
+    """An html_block token's non-blank lines with its comments and tags taken out, as text_as_shown_squeezed gives
+    each, as the check-and-close program's new_marks() reads a `#new` line inside a `<div>`."""
+    visible = re.sub(r"<[^>]*>", " ", re.sub(r"<!--.*?(?:-->|$)", " ", token.content, flags=re.S))
+    return [text_as_shown_squeezed(line) for line in visible.split("\n") if line.strip()]
+
+
+def next_shown_block(tokens, index):
+    """The index of the token opening the block that starts at tokens[index], past any HTML block that shows
+    nothing, such as a comment; None when a container closes first or the text ends."""
+    for place in range(index, len(tokens)):
+        if tokens[place].type == "html_block" and not html_block_lines_as_shown(tokens[place]):
+            continue
+        return place if tokens[place].nesting >= 0 and tokens[place].map else None
+    return None
+
+
+def lead_ins(markdown, parser, env):
+    """[LeadIn] for each paragraph or heading of markdown whose words end in a colon, in order, so outermost first,
+    since such a lead-in, as "If you disapprove, the new text:" or "Do not adopt any of the following:", can reverse
+    what it introduces. A heading introduces its section, up to the next heading of its level or above; a list
+    item's last paragraph introduces the items after it in its list; any other paragraph introduces the block right
+    below it."""
+    text = load_walk_finder().approval_walk_text_with_approval_walk_item_hashtag_lines_removed(markdown)
+    tokens = parser.parse(text, env)
+    found = []
+    for index, token in enumerate(tokens):
+        if token.type != "inline" or tokens[index - 1].type not in ("paragraph_open", "heading_open"):
+            continue
+        opener = tokens[index - 1]
+        words = text_as_shown_squeezed("".join(" " if child.type in ("softbreak", "hardbreak") else child.content
+                                               for child in token.children
+                                               if child.type in (*RENDERED_CHILD_TYPES, "softbreak", "hardbreak")))
+        if not words.endswith(":"):
+            continue
+        if opener.type == "heading_open":
+            last = next((later.map[0] for later in tokens[index:] if later.type == "heading_open"
+                         and later.map and later.tag <= opener.tag), len(text.split("\n")))
+            found.append(LeadIn(opener.map[1], last, words))
+            continue
+        after = index + 2  # past the inline token and its paragraph_close
+        if after + 1 < len(tokens) and tokens[after].type == "list_item_close" \
+                and tokens[after + 1].type == "list_item_open":
+            parent = next(earlier for earlier in reversed(tokens[:index]) if earlier.level == tokens[after].level - 1
+                          and earlier.type in ("bullet_list_open", "ordered_list_open"))
+            found.append(LeadIn(tokens[after + 1].map[0], parent.map[1], words))
+            continue
+        block_start = next_shown_block(tokens, after)
+        if block_start is not None:
+            found.append(LeadIn(*tokens[block_start].map, words))
+    return found
+
+
+def with_lead_ins(first, last, found, text):
+    """text with the words of each of found's lead-ins introducing the lines first to last before it, outermost
+    first; text alone when it has no words."""
+    words = [lead_in.words for lead_in in found if lead_in.first <= first and last <= lead_in.last]
+    return " ".join([*words, text]) if comparable_words(text) else text
+
+
 def rendered_blocks(markdown, parser, env):
     """[RenderedBlock] for each paragraph and visible HTML block of markdown, list items' and quotations' included,
     in order; headings and code are neither. An HTML block's lines are read with its comments and tags taken out,
@@ -1082,10 +1157,9 @@ def rendered_blocks(markdown, parser, env):
     blocks = []
     for index, token in enumerate(tokens):
         if token.type == "html_block":
-            visible = re.sub(r"<[^>]*>", " ", re.sub(r"<!--.*?(?:-->|$)", " ", token.content, flags=re.S))
-            lines = [text_as_shown_squeezed(line) for line in visible.split("\n") if line.strip()]
+            lines = html_block_lines_as_shown(token)
             if lines:
-                blocks.append(RenderedBlock(lines, "", token.map, None))
+                blocks.append(RenderedBlock(lines, "", token.map))
             continue
         if token.type != "inline" or tokens[index - 1].type != "paragraph_open":
             continue
@@ -1095,34 +1169,29 @@ def rendered_blocks(markdown, parser, env):
                 lines.append([])
             elif child.type in RENDERED_CHILD_TYPES:
                 lines[-1].append(child.content)
-        following, following_span = "", None
-        block_start = index + 2  # past the inline token and its paragraph_close
-        if block_start < len(tokens) and tokens[block_start].nesting >= 0 and tokens[block_start].map:
-            following_span = tuple(tokens[block_start].map)
-            following = shown_words("\n".join(source_lines[slice(*following_span)]), parser, env)
+        following = ""
+        block_start = next_shown_block(tokens, index + 2)  # past the inline token and its paragraph_close
+        if block_start is not None:
+            following = shown_words("\n".join(source_lines[slice(*tokens[block_start].map)]), parser, env)
         blocks.append(RenderedBlock([text_as_shown_squeezed("".join(line)) for line in lines], following,
-                                    tokens[index - 1].map, following_span))
+                                    tokens[index - 1].map))
     return blocks
 
 
 def shown_units(markdown, parser, env):
     """[(first line, line after the last, words)] for each unit of markdown a decision-bearing line can be compared
     with, in order of first line: each of rendered_blocks' blocks, its lines joined, and each list and quotation
-    whole, as shown_words gives it, since a bare `#new` mark's text can be a whole list or quotation. A unit inside
-    the block right below a paragraph ending in a colon starts at that paragraph and has its words first, outermost
-    first, since such a paragraph, as "If you disapprove, the new text:" or "Do not adopt any of the following:",
-    can reverse what the block says. A unit holding ANSWER_LETTERS_TEXT, a closing line, or no words is left out."""
+    whole, as shown_words gives it, since a bare `#new` mark's text can be a whole list or quotation. A unit has the
+    words of each of lead_ins' lead-ins introducing it first, and keeps its own first line, so that each unit below
+    one lead-in is below the one before it. A unit holding ANSWER_LETTERS_TEXT, a closing line, or no words is left
+    out."""
     text = load_walk_finder().approval_walk_text_with_approval_walk_item_hashtag_lines_removed(markdown)
     source_lines = text.split("\n")
-    blocks = rendered_blocks(markdown, parser, env)
-    units = [(*block.span, " ".join(block.lines)) for block in blocks]
+    units = [(*block.span, " ".join(block.lines)) for block in rendered_blocks(markdown, parser, env)]
     units += [(*token.map, shown_words("\n".join(source_lines[slice(*token.map)]), parser, env))
               for token in parser.parse(text, env) if token.map and token.type in CONTAINER_BLOCK_TYPES]
-    lead_ins = sorted((block.following_span, block.span[0], " ".join(block.lines)) for block in blocks
-                      if block.following_span and block.lines and block.lines[-1].endswith(":"))
-    for (start, end), lead_in_start, lead_in in reversed(lead_ins):  # innermost first, so the outermost ends first
-        units = [(min(first, lead_in_start), last, f"{lead_in} {words}") if start <= first and last <= end
-                 else (first, last, words) for first, last, words in units]
+    found = lead_ins(markdown, parser, env)
+    units = [(first, last, with_lead_ins(first, last, found, words)) for first, last, words in units]
     return sorted(unit for unit in units if ANSWER_LETTERS_TEXT not in unit[2] and comparable_words(unit[2]))
 
 
@@ -1148,10 +1217,15 @@ def new_text_as_shown(line):
 def decision_bearing_lines(body, parser, env, has_parts):
     """[(the line's name, as a refusal names it; its decision-bearing text; the words of the unit, of shown_units'
     units, that holds it, which a refusal quotes as the user saw it)] for the item body's Markdown, as the module
-    docstring's AN ANSWER TO A VERSION THE USER MAY NOT HAVE SEEN says, read line by line as rendered."""
+    docstring's AN ANSWER TO A VERSION THE USER MAY NOT HAVE SEEN says, read line by line as rendered. A text and its
+    unit have the words of each of lead_ins' lead-ins introducing the line's block first, so that `> #new X` shown
+    below "If you disapprove, the new text:" is not the same line as the item's `#new X`."""
     found = []
+    blocks_lead_ins = lead_ins(body, parser, env)
     for block in rendered_blocks(body, parser, env):
-        unit = " ".join(block.lines)
+        def led_in(text, block=block):
+            return with_lead_ins(*block.span, blocks_lead_ins, text)
+        unit = led_in(" ".join(block.lines))
         for index, line in enumerate(block.lines):
             line = re.sub(r"\[advisor\]", " ", line, flags=re.I).strip()
             mark = DECISION_MARK.match(line)
@@ -1160,25 +1234,25 @@ def decision_bearing_lines(body, parser, env, has_parts):
             if mark and not comparable_words(mark_text) and mark[1].lower() in BARE_MARKS_INTRODUCING_A_BLOCK:
                 # A bare mark's text is what it introduces: the rest of its paragraph, or else the block below it.
                 rest = " ".join(block.lines[index + 1:])
-                text = rest if comparable_words(rest) else block.following
+                text = led_in(rest if comparable_words(rest) else block.following)
                 found.append((f"`{mark[1].lower()}` line", text, text))
                 break
             if mark:
                 # A mark typed `#NEW` is the same kind of line as `#new`.
-                found.append((f"`{mark[1].lower()}` line", mark_text, unit))
+                found.append((f"`{mark[1].lower()}` line", led_in(mark_text), unit))
             elif part:
                 # A part's `#new` or `#new_if_d` mark names the line's kind, as check reads the mark, so a part
                 # shown with the other mark is no line of the same kind and its words alone do not pass.
                 part_mark = DECISION_MARK.match(part[2])
                 marked = (f" {part_mark[1].lower()}" if part_mark
                           and part_mark[1].lower() in BARE_MARKS_INTRODUCING_A_BLOCK else "")
-                found.append((f"`{part[1]}.{marked}` line", part[2], unit))
+                found.append((f"`{part[1]}.{marked}` line", led_in(part[2]), unit))
             else:
                 labels = list(DECISION_LABEL.finditer(line))
                 for label, next_label in zip(labels, [*labels[1:], None]):
                     name = DECISION_LABEL_NAMES[label[1].lower()]
-                    found.append((f"`{name}:` line", line[label.end():next_label.start() if next_label else None],
-                                  unit))
+                    found.append((f"`{name}:` line",
+                                  led_in(line[label.end():next_label.start() if next_label else None]), unit))
     return [(name, text.strip(), unit) for name, text, unit in found if comparable_words(text)]
 
 
@@ -1378,18 +1452,19 @@ def opens_another_item(words, heading):
     """Whether a message's heading or closing line, as item_openings_as_shown gives it, opens an item other than the
     one heading names, as ITEM_OPENING_AS_SHOWN reads it: such a line ends the text shown for heading's
     item, so that another item's lines in the same message are not taken for its own. A sub-step of heading's item,
-    and an item inside heading's range, are its own."""
+    an item inside heading's range, and a heading that names one of those among other items, as `Items 3.1 and 4.1`
+    does for item 4, are its own."""
     opening = ITEM_OPENING_AS_SHOWN.match(words)
     own = ITEM_OPENING_AS_SHOWN.match(heading)
     if not opening or not own:
         return False
     own_numbers = [own[1], *re.findall(r"\d+(?:\.\d+)*", own[2])]
-    number = opening[1]
-    if any(number == mine or number.startswith(f"{mine}.") for mine in own_numbers):
+    numbers = [opening[1], *re.findall(r"\d+(?:\.\d+)*", opening[2])]
+    if any(number == mine or number.startswith(f"{mine}.") for number in numbers for mine in own_numbers):
         return False
     if re.search(r"\bto\b", own[2]):
         low, high = int(own_numbers[0].split(".")[0]), int(own_numbers[-1].split(".")[0])
-        return not low <= int(number.split(".")[0]) <= high
+        return not any(low <= int(number.split(".")[0]) <= high for number in numbers)
     return True
 
 

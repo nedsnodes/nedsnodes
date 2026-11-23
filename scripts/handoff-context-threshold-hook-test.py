@@ -1652,7 +1652,7 @@ with tempfile.TemporaryDirectory() as workspace:
               " work to your task list"
               in hook.NEW_WORK_DURING_HANDOFF_DEFERRAL_INSTRUCTION,
               hook.NEW_WORK_DURING_HANDOFF_DEFERRAL_INSTRUCTION)
-        # The removed instruction had the agent name a background Bash task by hand when it started before the deferral; the writer now lists each one whatever its launch time.
+        # Whether the agent names a background Bash task by hand depends on whether the writer can list it, not on when the task started.
         check("the instruction on new work does not tell the agent to name a background Bash task"
               " started before the deferral in the next-step file",
               "started before the deferral" not in hook.NEW_WORK_DURING_HANDOFF_DEFERRAL_INSTRUCTION

@@ -117,7 +117,10 @@ AGY USES THE USER'S GOOGLE LOGIN, NOT A GEMINI API KEY. A key is billed per
 call; the login draws on the user's subscription. agy's login lives under
 ~/.gemini/, which the sandbox leaves readable. This program removes
 GEMINI_API_KEY from agy's environment, so that a key the caller holds cannot
-move agy's calls onto per-call billing. When agy finds no login, it prints
+move agy's calls onto per-call billing. It also removes GH_TOKEN and
+GITHUB_TOKEN, which an agent-seat's supervisor sets to the agent-seat's own
+GitHub token, so agy gets no GitHub token from its caller. On the Mac the sandbox leaves the keychain readable, so a
+gh login stored there still works inside it. When agy finds no login, it prints
 a line starting with AGY_MISSING_GOOGLE_LOGIN_STDERR_LINE_PREFIX, waits a
 minute for a login that cannot come headless, and exits 1; the cell's cause
 line is then logged-out, saying how to log agy in.
@@ -199,9 +202,13 @@ def agy_stream_json_stdout_line_final_result_event_parse_to_exit_code_and_respon
     return exit_code, str(result.get("response") or "")
 
 
-def agy_environment_copy_without_gemini_api_key(environment) -> dict:
-    """Return a copy of environment without GEMINI_API_KEY."""
-    return {name: value for name, value in environment.items() if name != "GEMINI_API_KEY"}
+AGY_ENVIRONMENT_REMOVED_VARIABLES = ("GEMINI_API_KEY", "GH_TOKEN", "GITHUB_TOKEN")
+
+
+def agy_environment_copy_without_gemini_api_key_or_github_token(environment) -> dict:
+    """Return a copy of environment without AGY_ENVIRONMENT_REMOVED_VARIABLES."""
+    return {name: value for name, value in environment.items()
+            if name not in AGY_ENVIRONMENT_REMOVED_VARIABLES}
 
 
 def logged_out_failure_texts(model: str) -> list:
@@ -301,7 +308,7 @@ def main() -> int:
         invocation_builder=invocation_builder,
         recover_report_from_stdout=stdout_is_a_review,
         recognised_failure_texts_for_model=logged_out_failure_texts,
-        child_environment=agy_environment_copy_without_gemini_api_key(os.environ),
+        child_environment=agy_environment_copy_without_gemini_api_key_or_github_token(os.environ),
         per_model_run_timeout_seconds=COLD_READ_AGY_CELL_PER_MODEL_RUN_KILL_AFTER_SECONDS,
         parse_agent_binary_final_result_from_stdout_line=agy_stream_json_stdout_line_final_result_event_parse_to_exit_code_and_response_or_none,
         report_wait_after_result_line_seconds=COLD_READ_AGY_CELL_WAIT_FOR_REPORT_FILE_AFTER_AGY_STDOUT_RESULT_LINE_BEFORE_PROCESS_GROUP_KILL_SECONDS,
