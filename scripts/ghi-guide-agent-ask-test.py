@@ -931,10 +931,9 @@ try:
           "; when no issue bears on the topic, `issues` is empty and a note says so."
           in ghi_ask.COLD_START_PROMPT_TEMPLATE, ghi_ask.COLD_START_PROMPT_TEMPLATE[-2500:])
     check("the cold-start prompt answers a correction with the kind of the reply it corrects",
-          "answer with the corrected reply, of the kind you gave: a corrected reading list, "
-          "kind `reading-list` as in form 1, or a corrected verdict, kind `verdict` as in form 2."
+          "and answer with the corrected reply the notice asks for."
           in ghi_ask.COLD_START_PROMPT_TEMPLATE
-          and "the kind of the reply it corrects for form 3"
+          and "the kind the notice asks for in form 3"
           in ghi_ask.GHI_GUIDE_AGENT_ANSWER_JSON_SCHEMA_PROPERTIES["kind"]["description"],
           ghi_ask.COLD_START_PROMPT_TEMPLATE[-2500:])
     check("the start-up prompt allows gh only for a link repair's issue edit, takes the issue's text from the mirror, and "
@@ -1392,7 +1391,7 @@ with tempfile.TemporaryDirectory() as temporary:
     # The draft-verdict schema allows no reading list, so a notice asking for
     # one leaves the recheck no answer it can give.
     check("the drift notice after a verdict asks for a corrected verdict, not a reading list",
-          verdict_corrected_calls[2][0].endswith("Superseded-by: link, and give a corrected verdict.")
+          verdict_corrected_calls[2][0].endswith("Superseded-by: link, and give a corrected verdict that cites no closed GHI.")
           and "reading list" not in verdict_corrected_calls[2][0], verdict_corrected_calls)
     check("a drift recheck after a verdict that cites only open GHIs is the final answer",
           answer == corrected_verdict and closed_on == {} and error is None,
