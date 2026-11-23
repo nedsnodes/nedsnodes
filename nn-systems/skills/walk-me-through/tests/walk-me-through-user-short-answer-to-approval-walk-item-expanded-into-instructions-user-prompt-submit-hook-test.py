@@ -2495,6 +2495,17 @@ def test_the_items_own_sub_step_heading_does_not_end_its_shown_text():
           counted(lines) and not case.model_calls(), f"lines {lines!r}")
 
 
+def test_a_sub_step_heading_shared_with_an_earlier_item_does_not_end_its_shown_text():
+    for form, heading in (("an ATX", "### Items 3.1 and 4.1 of 9: shared defaults"),
+                          ("a setext", "Items 3.1 and 4.1 of 9: shared defaults\n---")):
+        shown = DECISION_ITEM.replace("#new Hide", f"{heading}\n\n#new Hide")
+        case = decision_case(model="changed")
+        lines = case.lines("a", case.transcript(f"{shown}\n\n{ITEM_4_CLOSING_LINE}"))
+        check(f"an answer counts with no model call when {form} sub-step heading that names an earlier item first, "
+              "then this item, comes before its decision lines",
+              counted(lines) and not case.model_calls(), f"lines {lines!r}")
+
+
 def test_a_recommendation_or_alternative_shown_without_its_label_goes_to_the_model():
     swapped = (DECISION_ITEM.replace("The alternative: add the filter.", "leave the filter out.")
                .replace("**Recommendation: leave the filter out.**", "add the filter."))

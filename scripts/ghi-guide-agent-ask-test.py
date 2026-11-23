@@ -732,6 +732,87 @@ finally:
     patch("run_claude", run_claude_orig)
 
 
+# --- main(): a failed ask's reason reaches stderr on one line ---------------
+# scripts/ghi-issue-write.py reports the last stderr line of a failed ask, or
+# the line holding the not-usable opening, so the whole reason must be on it.
+MULTI_LINE_GH_STDERR = "HTTP 502: Bad Gateway\n  (https://api.github.com/graphql)\n"
+MULTI_LINE_CLAUDE_ERROR = "claude exited 1: Invalid API key\n  Please run claude auth login"
+
+
+def main_failing(seat, extra_arguments=()):
+    """main() against an explicit seat. Returns (exit code, stderr lines that
+    are not blank)."""
+    err = io.StringIO()
+    with contextlib.redirect_stdout(io.StringIO()), contextlib.redirect_stderr(err):
+        exit_code = ghi_ask.main(["q", "--seat-dir", str(seat), "--repo", "x/y",
+                                  *extra_arguments])
+    return exit_code, [line for line in err.getvalue().splitlines() if line.strip()]
+
+
+mirror_orig = ghi_ask.mirror_refresh.refresh
+run_claude_orig = ghi_ask.run_claude
+try:
+    with tempfile.TemporaryDirectory() as temporary:
+        root = Path(temporary)
+
+        seat_full = root / "seat-full-refresh-fails"
+        seat_full.mkdir()
+        fake_refresh_queue([([], {}, MULTI_LINE_GH_STDERR)])
+        fake_claude_queue([])
+        exit_code, lines = main_failing(seat_full)
+        check("a cold-start mirror refresh failing with multi-line gh stderr reaches stderr on one line",
+              exit_code == 1 and lines[-1] ==
+              "ghi-guide-agent-ask: mirror refresh (full, for cold-start) failed: "
+              "HTTP 502: Bad Gateway (https://api.github.com/graphql)", lines)
+
+        seat_delta = root / "seat-delta-refresh-fails"
+        seat_delta.mkdir()
+        (seat_delta / ghi_ask.STATE_FILE_NAME).write_text(json.dumps(
+            {ghi_ask.GHI_GUIDE_AGENT_SESSION_ID_STATE_KEY: "sess-D",
+             "closes_since_birth": 0, "recent_matches": []}), encoding="utf-8")
+        fake_refresh_queue([([], {}, MULTI_LINE_GH_STDERR)])
+        fake_claude_queue([])
+        exit_code, lines = main_failing(seat_delta)
+        check("a resuming ask's mirror refresh failing with multi-line gh stderr reaches stderr on one line",
+              exit_code == 1 and lines[-1] ==
+              "ghi-guide-agent-ask: mirror refresh failed: "
+              "HTTP 502: Bad Gateway (https://api.github.com/graphql)", lines)
+
+        seat_turn = root / "seat-turn-fails"
+        seat_turn.mkdir()
+        fake_refresh_queue([([1], {"1": issue(1)}, None)])
+        fake_claude_queue([({"session_id": "sess-T", "result": "(ack)"}, None),
+                           (None, MULTI_LINE_CLAUDE_ERROR)])
+        exit_code, lines = main_failing(seat_turn)
+        check("a claude turn failing with a multi-line error reaches stderr on one line",
+              exit_code == 1 and lines[-1] ==
+              "ghi-guide-agent-ask: ghi-guide-agent ask failed: "
+              "claude exited 1: Invalid API key Please run claude auth login", lines)
+
+        seat_not_usable = root / "seat-not-usable"
+        seat_not_usable.mkdir()
+        fake_refresh_queue([([13], {"13": issue(13, state="CLOSED",
+                                                closed_at="2026-08-08T00:00:00Z")}, None)])
+        fake_claude_queue([
+            ({"session_id": "sess-U", "result": "(ack)"}, None),
+            ({"session_id": "sess-U", "structured_output":
+              {"kind": "verdict", "verdict": "too-similar", "issues": [13]}}, None),
+            (None, MULTI_LINE_CLAUDE_ERROR),
+        ])
+        exit_code, lines = main_failing(seat_not_usable, ["--request-form", "draft-verdict"])
+        check("an unusable answer's multi-line reason reaches stderr on its not-usable line, "
+              "and the fallback instruction stays on the line after it",
+              exit_code == 1 and lines[-2].startswith(
+                  "ghi-guide-agent-ask: " + ghi_ask.GHI_GUIDE_AGENT_ANSWER_NOT_USABLE_MESSAGE_OPENING)
+              and lines[-2].endswith(
+                  "the turn failed: claude exited 1: Invalid API key Please run claude auth login")
+              and lines[-1] == ghi_ask.GHI_GUIDE_AGENT_ANSWER_NOT_USABLE_CALLER_FALLBACK_LADDER_INSTRUCTION_STDERR_LINE,
+              lines)
+finally:
+    patch_module_function(ghi_ask.mirror_refresh, "refresh", mirror_orig)
+    patch("run_claude", run_claude_orig)
+
+
 # --- main(): the two boundary answers reach the caller as errors ----------
 # User-ruled 2026-09-29 (walk SKILL-ghi-write-2026-09-29-4, item 1 revised):
 # the two boundary replies are not passed through on stdout with exit 0.
@@ -1002,21 +1083,6 @@ try:
         result, error = run_claude_real("q", None, seat, 5, {})
         check("run_claude: exit 1 without JSON keeps the exit-code message",
               result is None and error == "claude exited 1: boom", (result, error))
-
-        # ghi-issue-write.py reports one stderr line of a failed ask, and every
-        # turn's failure, cold-start, first turn or recheck, comes from here.
-        for case_name, completed in [
-                ("run_claude: a multi-line result error comes back on one line",
-                 FakeCompletedProcess(1, json.dumps(
-                     {"is_error": True, "result": "Invalid API key\n  Please run claude auth login"}))),
-                ("run_claude: a multi-line stderr without JSON comes back on one line",
-                 FakeCompletedProcess(1, "", stderr="Invalid API key\n  Please run claude auth login\n"))]:
-            ghi_ask.subprocess.run = fake_subprocess_run_returning(completed)
-            result, error = run_claude_real("q", None, seat, 5, {})
-            check(case_name,
-                  result is None and "\n" not in error
-                  and error.startswith("claude exited 1: Invalid API key Please run claude auth login"),
-                  (result, error))
 
         ghi_ask.subprocess.run = fake_subprocess_run_returning(
             FakeCompletedProcess(0, json.dumps({"is_error": True, "result": "rate limited"})))
@@ -1343,10 +1409,7 @@ with tempfile.TemporaryDirectory() as temporary:
              "names no issue it is too similar to"),
             ("a drift recheck after a verdict that cites the closed GHI again fails the ask",
              ({"session_id": "sess-W", "structured_output": first_verdict}, None),
-             "the rechecked verdict still cites a closed GHI"),
-            ("a drift recheck whose turn fails keeps the turn's failure in the not-usable message",
-             (None, "claude exited 1: Invalid API key Please run claude auth login"),
-             "the turn failed: claude exited 1: Invalid API key Please run claude auth login")]:
+             "the rechecked verdict still cites a closed GHI")]:
         seat_verdict_recheck = root / ("seat-" + case_name.replace(" ", "-")[:60])
         seat_verdict_recheck.mkdir()
         fake_refresh_queue([([13], {"13": issue(13, state="CLOSED",
@@ -1728,11 +1791,36 @@ import subprocess as _remote_subprocess
 _REPOSITORY_ROOT = SCRIPT_PATH.resolve().parent.parent
 
 
+def _files_the_ask_script_loads():
+    """The ask script and every repository .py file it loads, followed through
+    the files those load in turn, so each fixture copies these and not the
+    whole tree, which run-all-test-suites.py would record as this suite's inputs."""
+    by_name = {}
+    for directory in ("scripts", "nn-systems"):
+        for walked, subdirectories, names in os.walk(_REPOSITORY_ROOT / directory):
+            subdirectories[:] = [name for name in subdirectories if name != "__pycache__"]
+            for name in names:
+                if name.endswith(".py") and not name.endswith("-test.py"):
+                    by_name.setdefault(name, []).append(Path(walked) / name)
+    loaded, waiting = set(), [SCRIPT_PATH.resolve()]
+    while waiting:
+        path = waiting.pop()
+        if path in loaded:
+            continue
+        loaded.add(path)
+        for name in re.findall(r"[\"']([\w.-]+\.py)[\"']", path.read_text(encoding="utf-8")):
+            waiting.extend(by_name.get(name, []))
+    return sorted(path.relative_to(_REPOSITORY_ROOT) for path in loaded)
+
+
+_ASK_SCRIPT_AND_WHAT_IT_LOADS = _files_the_ask_script_loads()
+
+
 def _seat_whose_copy_predates_print_answer_json(root):
     origin = root / "origin"
-    for directory in ("scripts", "nn-systems"):
-        _shutil.copytree(_REPOSITORY_ROOT / directory, origin / directory,
-                         ignore=_shutil.ignore_patterns("__pycache__", "tests", "*-test.py"))
+    for relative in _ASK_SCRIPT_AND_WHAT_IT_LOADS:
+        (origin / relative).parent.mkdir(parents=True, exist_ok=True)
+        _shutil.copy2(_REPOSITORY_ROOT / relative, origin / relative)
     script = origin / "scripts" / "ghi-guide-agent-ask.py"
     new_text = script.read_text(encoding="utf-8")
     script.write_text(new_text.replace('"--print-answer-json"', '"--flag-not-yet-added"'),
@@ -1767,8 +1855,10 @@ remote_command_with_new_flag = ghi_ask.build_remote_command("q", False, "x/y", F
 
 with tempfile.TemporaryDirectory() as temporary:
     origin, seat, environment = _seat_whose_copy_predates_print_answer_json(Path(temporary))
-    fast_forward_line = ("python3 -c " + shlex.quote(
-        ghi_ask.GHI_GUIDE_AGENT_HOME_FAST_FORWARD_TO_ORIGIN_MAIN_SSH_PYTHON_SOURCE) + " </dev/null\n")
+    fast_forward_line = ("if python3 -c " + shlex.quote(
+        ghi_ask.GHI_GUIDE_AGENT_HOME_FAST_FORWARD_TO_ORIGIN_MAIN_SSH_PYTHON_SOURCE) + "; then\n"
+        f"  export {ghi_ask.GHI_GUIDE_AGENT_HOME_FAST_FORWARD_TO_ORIGIN_MAIN_ALREADY_TRIED_ENVIRONMENT_VARIABLE}=1\n"
+        "fi\n")
     without_fast_forward_line = remote_command_with_new_flag.replace(fast_forward_line, "")
     check("the test removes the fast-forward line from the remote command",
           without_fast_forward_line != remote_command_with_new_flag, remote_command_with_new_flag)
@@ -1830,6 +1920,70 @@ with tempfile.TemporaryDirectory() as temporary:
           piped.stdout == "the whole question\n"
           and "refreshed the seat checkout 1 commit(s)" in piped.stderr,
           (piped.stdout, piped.stderr))
+
+
+def _environment_whose_git_logs_each_fetch(root, environment):
+    real_git = _shutil.which("git")
+    log = root / "git-fetches"
+    logging_bin = root / "logging-bin"
+    logging_bin.mkdir()
+    (logging_bin / "git").write_text(
+        f'#!/bin/sh\ncase " $* " in *" fetch "*) echo fetch >> {shlex.quote(str(log))} ;; esac\n'
+        f'exec {shlex.quote(real_git)} "$@"\n', encoding="utf-8")
+    (logging_bin / "git").chmod(0o755)
+    return log, {**environment, "PATH": f"{logging_bin}{os.pathsep}{environment['PATH']}"}
+
+
+with tempfile.TemporaryDirectory() as temporary:
+    origin, seat, environment = _seat_whose_copy_predates_print_answer_json(Path(temporary))
+    _git(["merge", "-q", "--ff-only", "origin/main"], seat)
+    _git(["checkout", "-q", "--detach"], seat)
+    log, logging_environment = _environment_whose_git_logs_each_fetch(Path(temporary), environment)
+    once = _run_remote_command(ghi_ask.build_remote_command("q", False, "x/y"), logging_environment)
+    fetches = log.read_text(encoding="utf-8").count("fetch") if log.exists() else 0
+    check("over ssh, the seat checkout is fetched once: the ask does not fetch again after "
+          "the fast-forward line has, which could spend 60 of its seconds",
+          fetches == 1 and "ghi-guide-agent-ask: mirror refresh" in once.stderr,
+          (fetches, once.stderr))
+
+with tempfile.TemporaryDirectory() as temporary:
+    origin, seat, environment = _seat_whose_copy_predates_print_answer_json(Path(temporary))
+    _git(["merge", "-q", "--ff-only", "origin/main"], seat)
+    _git(["checkout", "-q", "--detach"], seat)
+    log, logging_environment = _environment_whose_git_logs_each_fetch(Path(temporary), environment)
+    failing_line = ghi_ask.build_remote_command("q", False, "x/y").replace(
+        "ask.fast_forward_seat_checkout(seat)", "ask.name_no_copy_has(seat)")
+    fell_through = _run_remote_command(failing_line, logging_environment)
+    fetches = log.read_text(encoding="utf-8").count("fetch") if log.exists() else 0
+    check("when the fast-forward line fails before fetching, the ask fetches the seat "
+          "checkout itself",
+          fetches == 1 and "ghi-guide-agent-ask: mirror refresh" in fell_through.stderr,
+          (fetches, fell_through.stderr))
+
+with tempfile.TemporaryDirectory() as temporary:
+    origin, seat, environment = _seat_whose_copy_predates_print_answer_json(Path(temporary))
+    fast_forward_line_alone = ["python3", "-c",
+                               ghi_ask.GHI_GUIDE_AGENT_HOME_FAST_FORWARD_TO_ORIGIN_MAIN_SSH_PYTHON_SOURCE]
+    with open(seat / ghi_ask.LOCK_FILE_NAME, "a+") as held_lock:
+        fcntl.flock(held_lock.fileno(), fcntl.LOCK_EX)
+        while_held = _remote_subprocess.run(fast_forward_line_alone, cwd=seat, capture_output=True,
+                                            text=True, env=environment, check=False, timeout=300)
+    once_free = _remote_subprocess.run(fast_forward_line_alone, cwd=seat, capture_output=True,
+                                       text=True, env=environment, check=False, timeout=300)
+    check("the fast-forward line exits nonzero when another ask holds the lock and it did not "
+          "try, so that ask is not told the seat was already fetched, and exits 0 once it tried",
+          while_held.returncode != 0 and once_free.returncode == 0,
+          (while_held.returncode, while_held.stderr, once_free.returncode, once_free.stderr))
+
+with tempfile.TemporaryDirectory() as temporary:
+    origin, seat, environment = _seat_whose_copy_predates_print_answer_json(Path(temporary))
+    (seat / ghi_ask.LOCK_FILE_NAME).mkdir()
+    unusable = _run_remote_command(ghi_ask.build_remote_command("q", False, "x/y"), environment)
+    check("when the agent-home's state lock cannot be opened, the remote command reports it "
+          "once, in the ask's one line, with no traceback, and exits nonzero",
+          unusable.stderr.count("is not usable") == 1 and "Traceback" not in unusable.stderr
+          and unusable.returncode != 0,
+          (unusable.returncode, unusable.stderr))
 
 
 # --- the seat directory, state file and state key, unpatched ----------------

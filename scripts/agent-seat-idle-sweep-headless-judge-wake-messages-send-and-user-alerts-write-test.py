@@ -1767,14 +1767,39 @@ machine.script({"answer": {"sentences": [{"index": 0, "backed": True, "reason": 
                usage_limit_exit_with_transcript(RESET_IN_AN_HOUR))
 machine.run(16)
 calls_before_reset = machine.claude_calls()
+checked_before_reset = machine.events("checked")
 machine.script()
 code, _ = machine.run(90)
 check("every sentence judged backed, then an escalation sender at a usage limit: the sentences and "
       "the check are logged, so no second judge is started after the reset",
       code == 0 and ANNOUNCED in [event["sentence"] for event in machine.events("sentence_checked")]
+      and any(event["rule"] == 2 for event in checked_before_reset)
       and len(machine.events("headless_usage_limit_pause")) == 1 and len(calls_before_reset) == 2
       and not machine.claude_calls(),
-      (code, machine.events("sentence_checked"), calls_before_reset, machine.claude_calls()))
+      (code, machine.events("sentence_checked"), checked_before_reset, calls_before_reset,
+       machine.claude_calls()))
+
+machine = Machine()
+machine.seat("alpha", [user("go"), assistant(PROMISE), turn_end()])
+machine.script(sent_ok())
+machine.run(0)
+machine.append("alpha", cross_session("You promised", at(0.5)),
+               assistant(f"{SECOND_PROMISE} {ANNOUNCED}", at(9)), turn_end(at(9)))
+machine.script({"answer": {"sentences": [{"index": 0, "backed": True, "reason": "a test runs"}]}},
+               usage_limit_exit_with_transcript(RESET_IN_AN_HOUR))
+machine.run(16)
+checked_sentences_before_reset = [event["sentence"] for event in machine.events("sentence_checked")]
+machine.script(sent_ok())
+code, _ = machine.run(90)
+sent = machine.events("message_sent")
+check("one sentence judged backed and a promise unbacked, then an escalation sender at a usage "
+      "limit: the backed sentence is logged, so after the reset no second judge runs and the "
+      "promise message names only the promise",
+      code == 0 and ANNOUNCED in checked_sentences_before_reset
+      and SECOND_PROMISE not in checked_sentences_before_reset
+      and [event["step"] for event in sent] == ["nudge", "nudge"]
+      and "after lunch" in sent[-1]["text"] and "PR 1633" not in sent[-1]["text"],
+      (code, checked_sentences_before_reset, sent, machine.claude_calls()))
 
 machine = Machine()
 machine.seat("alpha", [user("go"), assistant(PROMISE), turn_end()])
