@@ -135,6 +135,8 @@ directory = os.environ["MERGE_LANE_MERGE_TEST_DIRECTORY"]
 with open(os.path.join(directory, "runner-calls.log"), "a") as log:
     log.write(json.dumps({"argv": sys.argv[1:], "cwd": os.getcwd()}) + "\n")
 answer = os.path.join(directory, "runner")
+if "--only-suites-named" in sys.argv and os.path.exists(answer + "-rerun.out"):
+    answer += "-rerun"
 if os.path.exists(answer + ".out"):
     sys.stdout.write(open(answer + ".out").read())
     sys.stdout.flush()
@@ -545,6 +547,194 @@ def blob_of(directory, suite):
     return subprocess.run(["git", "-C", str(directory / "origin-seed"), "rev-parse",
                            f"HEAD:{suite}"], capture_output=True, text=True,
                           env=GIT_ENVIRONMENT, check=True).stdout.strip()
+
+
+def failed_suites_record_file(directory):
+    return (directory / "home" / ".local" / "state" / "nedsnodes"
+            / "failed-after-merge-test-suites-on-main.json")
+
+
+def failed_suites_record_written(directory, suite="scripts/broken-test.py"):
+    record = failed_suites_record_file(directory)
+    record.parent.mkdir(parents=True, exist_ok=True)
+    record.write_text(json.dumps({suite: {
+        "commit": "b46d47c2bdbe0000000000000000000000000000", "pull_request": "9",
+        "log": "/logs/old.log", "failed_at": "2026-11-20T17:18:00Z",
+        "repair_task_agent_seat": "author-seat", "repair_task_id": 3}}))
+
+
+def failed_suites_record_of(directory):
+    return json.loads(failed_suites_record_file(directory).read_text())
+
+
+def author_seat_made(directory):
+    task_list = directory / "home" / ".claude" / "tasks" / "nedsnodes-author-seat-tasks"
+    task_list.mkdir(parents=True)
+    (directory / "home" / "agents" / "author-seat").mkdir(parents=True)
+    return task_list
+
+
+def failed_suites_kept_in_view_cases(scratch):
+    broken_on_origin = {"scripts/broken-test.py": "raise SystemExit(1)\n"}
+    saved_author = program.merged_branch_author
+    program.merged_branch_author = lambda *_: "author-seat"
+    try:
+        exit_code, output, _, _, _ = run_case(
+            scratch, "failed-suite-new", [(GATE_PASSED, 0)], default_routes([]),
+            runner_answer=(RUNNER_FAILED, 1), before_the_program_runs=author_seat_made)
+        directory = scratch / "failed-suite-new"
+        task_files = list((directory / "home" / ".claude" / "tasks"
+                           / "nedsnodes-author-seat-tasks").glob("*.json"))
+        task = json.loads(task_files[0].read_text()) if len(task_files) == 1 else {}
+        record = failed_suites_record_of(directory)
+        check("a newly failed suite joins the record and gets one repair task on its author's list",
+              exit_code == 3 and list(record) == ["scripts/broken-test.py"]
+              and record["scripts/broken-test.py"]["log"] == "/logs/broken-test.py.log"
+              and record["scripts/broken-test.py"]["repair_task_agent_seat"] == "author-seat"
+              and "scripts/broken-test.py" in task.get("description", "")
+              and f"Repair task #{task.get('id')} is on author-seat's task list" in output,
+              f"exit {exit_code}\n{output}\n{record}\n{task}")
+
+        def recorded_with_author(directory):
+            author_seat_made(directory)
+            failed_suites_record_written(directory)
+
+        exit_code, output, _, _, _ = run_case(
+            scratch, "failed-suite-known", [(GATE_PASSED, 0)], default_routes([]),
+            runner_answer=(RUNNER_FAILED, 1), before_the_program_runs=recorded_with_author)
+        directory = scratch / "failed-suite-known"
+        check("a merge that fails only a recorded suite exits 0, with a notice and no second task",
+              exit_code == 0 and "STOP" not in output
+              and "failed only suites already on the failed suites record" in output
+              and failed_suites_record_of(directory)["scripts/broken-test.py"]["repair_task_id"] == 3
+              and not list((directory / "home" / ".claude" / "tasks"
+                            / "nedsnodes-author-seat-tasks").glob("*.json")),
+              f"exit {exit_code}\n{output}")
+
+        def recorded_and_rerun(rerun_output, rerun_exit):
+            def prepare(directory):
+                failed_suites_record_written(directory)
+                (directory / "runner-rerun.out").write_text(rerun_output)
+                (directory / "runner-rerun.exit").write_text(str(rerun_exit))
+            return prepare
+
+        exit_code, output, _, _, _ = run_case(
+            scratch, "failed-suite-rerun-passes", [(GATE_PASSED, 0)], default_routes([]),
+            origin_files=broken_on_origin, before_the_program_runs=recorded_and_rerun(
+                "PASS scripts/broken-test.py (1s)\nSUMMARY: 1 passed, 0 failed, 1 total\n", 0))
+        calls = runner_calls(scratch, "failed-suite-rerun-passes")
+        check("a recorded suite the selective run left out is run by name, and leaves the record "
+              "when it passes",
+              exit_code == 0 and failed_suites_record_of(scratch / "failed-suite-rerun-passes") == {}
+              and len(calls) == 2 and "--only-suites-named" in calls[1]["argv"]
+              and "scripts/broken-test.py" in calls[1]["argv"]
+              and "--leave-recorded-inputs-and-failure-history-unchanged" in calls[1]["argv"]
+              and "scripts/broken-test.py left the failed suites record: it passed" in output,
+              f"exit {exit_code}\n{output}\n{calls}")
+
+        exit_code, output, _, _, _ = run_case(
+            scratch, "failed-suite-rerun-fails", [(GATE_PASSED, 0)], default_routes([]),
+            origin_files=broken_on_origin, before_the_program_runs=recorded_and_rerun(
+                "FAIL scripts/broken-test.py exit 1 (1s)\nSUMMARY: 0 passed, 1 failed, 1 total\n", 1))
+        check("a recorded suite that fails its rerun stays on the record, and the merge exits 0",
+              exit_code == 0 and "scripts/broken-test.py" in failed_suites_record_of(
+                  scratch / "failed-suite-rerun-fails")
+              and "FAILED TEST SUITES ON MAIN" in output, f"exit {exit_code}\n{output}")
+
+        exit_code, output, _, _, _ = run_case(
+            scratch, "failed-suite-rerun-could-not-run", [(GATE_PASSED, 0)], default_routes([]),
+            origin_files=broken_on_origin, before_the_program_runs=recorded_and_rerun(
+                "PASS scripts/broken-test.py (1s)\nrunner could not finish\n", 2))
+        check("a rerun with no verdict exits 3, and keeps the suite even if a PASS line was printed",
+              exit_code == 3 and "could not be run again" in output
+              and "scripts/broken-test.py" in failed_suites_record_of(
+                  scratch / "failed-suite-rerun-could-not-run"),
+              f"exit {exit_code}\n{output}")
+
+        exit_code, output, _, _, _ = run_case(
+            scratch, "failed-suite-deleted", [(GATE_PASSED, 0)], default_routes([]),
+            before_the_program_runs=failed_suites_record_written)
+        calls = runner_calls(scratch, "failed-suite-deleted")
+        check("a recorded suite git no longer lists leaves the record without a rerun",
+              exit_code == 0 and failed_suites_record_of(scratch / "failed-suite-deleted") == {}
+              and len(calls) == 1
+              and "left the failed suites record: git no longer lists it" in output,
+              f"exit {exit_code}\n{output}\n{calls}")
+
+        exit_code, output, _, _, _ = run_case(
+            scratch, "failed-suite-ls-files-fails", [(GATE_PASSED, 0)], default_routes([]),
+            git_fails_after_merge_on=(" ls-files -- scripts/broken-test.py", "exit 1"),
+            before_the_program_runs=failed_suites_record_written)
+        check("a git failure listing the recorded suites exits 3 and keeps them",
+              exit_code == 3 and "the recorded failed suites were not run again" in output
+              and "fake git failed" in output
+              and "scripts/broken-test.py" in failed_suites_record_of(
+                  scratch / "failed-suite-ls-files-fails"), f"exit {exit_code}\n{output}")
+
+        def unreadable(directory):
+            record = failed_suites_record_file(directory)
+            record.parent.mkdir(parents=True)
+            record.write_text("not json")
+
+        exit_code, output, _, _, _ = run_case(
+            scratch, "failed-suite-record-unreadable", [(GATE_PASSED, 0)], default_routes([]),
+            before_the_program_runs=unreadable)
+        check("an unreadable record exits 3, naming the file, and leaves it as it was",
+              exit_code == 3 and "the failed suites record was not updated: could not read" in output
+              and failed_suites_record_file(
+                  scratch / "failed-suite-record-unreadable").read_text() == "not json",
+              f"exit {exit_code}\n{output}")
+
+        def lock_blocked(directory):
+            record = failed_suites_record_file(directory)
+            record.parent.mkdir(parents=True)
+            record.with_name(record.name + ".lock").mkdir()
+
+        exit_code, output, _, _, _ = run_case(
+            scratch, "failed-suite-record-not-written", [(GATE_PASSED, 0)], default_routes([]),
+            before_the_program_runs=lock_blocked)
+        check("a record that cannot be written exits 3, and says so",
+              exit_code == 3 and "the failed suites record was not updated: could not write" in output,
+              f"exit {exit_code}\n{output}")
+
+        saved_write = program.task_write.agent_seat_task_list_new_pending_task_write
+
+        def task_write_fails(*_):
+            raise OSError("disk full")
+
+        program.task_write.agent_seat_task_list_new_pending_task_write = task_write_fails
+        try:
+            exit_code, output, _, _, _ = run_case(
+                scratch, "failed-suite-task-not-written", [(GATE_PASSED, 0)], default_routes([]),
+                runner_answer=(RUNNER_FAILED, 1), before_the_program_runs=author_seat_made)
+        finally:
+            program.task_write.agent_seat_task_list_new_pending_task_write = saved_write
+        record = failed_suites_record_of(scratch / "failed-suite-task-not-written")
+        check("a repair task that cannot be written exits 3, tells the user, and keeps the suite",
+              exit_code == 3 and "the repair task could not be written" in output
+              and "disk full" in output and "Ask the user:" in output
+              and record["scripts/broken-test.py"]["repair_task_id"] is None,
+              f"exit {exit_code}\n{output}\n{record}")
+    finally:
+        program.merged_branch_author = saved_author
+
+    author_repository = scratch / "author-repository"
+    author_repository.mkdir()
+    git("init", "-q", "-b", "main", cwd=author_repository)
+    git("-c", "user.name=main-author", "-c", "user.email=m@example.invalid", "commit", "-q",
+        "--allow-empty", "-m", "base", cwd=author_repository)
+    git("checkout", "-q", "-b", "topic", cwd=author_repository)
+    git("commit", "-q", "--author=branch-author <b@example.invalid>",
+        "--allow-empty", "-m", "work", cwd=author_repository)
+    git("checkout", "-q", "main", cwd=author_repository)
+    git("-c", "user.name=main-author", "-c", "user.email=m@example.invalid", "commit", "-q",
+        "--allow-empty", "-m", "moved", cwd=author_repository)
+    git("-c", "user.name=github", "-c", "user.email=g@example.invalid", "merge", "-q",
+        "--no-ff", "-m", "Merge", "topic", cwd=author_repository)
+    check("the author is the merged branch's last commit's, not the merge commit's",
+          program.merged_branch_author(author_repository, "HEAD", GIT_ENVIRONMENT) == "branch-author")
+    check("a commit with no second parent has no branch author",
+          program.merged_branch_author(author_repository, "HEAD~1", GIT_ENVIRONMENT) is None)
 
 
 def main():
@@ -1314,11 +1504,13 @@ def main():
               and "FAIL scripts/broken-test.py exit 1 — log /logs/broken-test.py.log" in output
               and "SUMMARY: 1 passed, 1 failed" in output
               and "STOP: merged, but the test run of main at" in output and "exited 1" in output
-              and ("Tell the pull request's author, and the user, this message as printed, from "
-                   "its STOP line through this line, with the FAIL and NOT RUN suite lines "
-                   "printed above it, if any.")
+              and ("No repair task was opened: the merged branch's author, unknown, has no task "
+                   "list or no checkout on this machine. Nobody is assigned to fix main.\n"
+                   "Ask the user: \"Main fails scripts/broken-test.py after pull request 10")
               in output
               and not merge_commit_worktree.exists(), f"exit {exit_code}\n{output}")
+
+        failed_suites_kept_in_view_cases(scratch)
 
         exit_code, output, _, _, _ = run_case(
             scratch, "after-merge-could-not-run", [(GATE_PASSED, 0)],
