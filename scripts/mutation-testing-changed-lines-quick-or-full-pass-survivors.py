@@ -1276,10 +1276,10 @@ def cosmic_ray_sessions_made_for_every_file_and_mutant_job_ids_to_run_chosen(
     """Make and filter the kept session of each file that has none, before any baseline, so
     that every mutant of the change is in a session however few this run reaches. Return, for
     each file, the job ids of the mutants this run may run: every mutant with no result, as
-    None, or, with MUTANTS_RUN_AT_MOST_SHARED_EVENLY_AMONG_CHANGED_FILES_FLAG, those with no
-    result among the mutants chosen. The mutants are chosen from all that the filters did not
-    skip, with or without a result, so a later run with the same number chooses the same ones
-    and runs none of them twice."""
+    None, or, with MUTANTS_RUN_AT_MOST_SHARED_EVENLY_AMONG_CHANGED_FILES_FLAG, mutants with no
+    result chosen up to that number less the results the sessions already hold, so the
+    sessions never hold more results than that number however often the run is resumed."""
+    at_most = arguments.mutants_run_at_most_shared_evenly_among_changed_files
     mutants_of_file = {}
     for path, suites in files_and_suites:
         config, session, _ = cosmic_ray_config_written_and_session_path_of_one_file(
@@ -1293,16 +1293,19 @@ def cosmic_ray_sessions_made_for_every_file_and_mutant_job_ids_to_run_chosen(
             cosmic_ray_session_kept_from_an_earlier_run_mutants_skipped(
                 path, session, head, worktree, environment,
                 arguments.mutants_with_no_result_in_kept_cosmic_ray_sessions_marked_skipped_when_head_commit_before_cutoff)
-        mutants_of_file[path] = cosmic_ray_session_mutants_not_skipped_by_filters(path, session)
-    at_most = arguments.mutants_run_at_most_shared_evenly_among_changed_files
+        mutants_of_file[path] = (None if at_most is None else
+                                 cosmic_ray_session_mutants_not_skipped_by_filters(path, session))
     if at_most is None:
         return dict.fromkeys(mutants_of_file)
+    judged = sum(has_result for mutants in mutants_of_file.values()
+                 for _, has_result in mutants.values())
+    waiting_of_file = {path: {mutant: job_id for mutant, (job_id, has_result) in mutants.items()
+                              if not has_result}
+                       for path, mutants in mutants_of_file.items()}
     job_ids_to_run = {path: [] for path in mutants_of_file}
     for path, mutant in mutants_chosen_one_per_file_in_turn_in_order_seeded_by_head(
-            mutants_of_file, head, at_most):
-        job_id, has_result = mutants_of_file[path][mutant]
-        if not has_result:
-            job_ids_to_run[path].append(job_id)
+            waiting_of_file, head, max(0, at_most - judged)):
+        job_ids_to_run[path].append(waiting_of_file[path][mutant])
     return job_ids_to_run
 
 

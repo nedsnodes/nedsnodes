@@ -1924,6 +1924,39 @@ def run_mutants_run_at_most_and_no_mutant_started_after_unix_time_cases():
               f"rc={completed.returncode} asked_for={asked_for} five={five} "
               f"err={completed.stderr}")
 
+        # The waiting mutant last in the head's order gets a result outside any chosen batch, as
+        # when a session made before one mutant per changed line is pruned and the order of
+        # what is left changes: 6 results, and 7 chosen from all 8 would run 2 more.
+        mutants_of_file = {}
+        for session in sessions.glob("*.sqlite"):
+            connection = sqlite3.connect(session)
+            path, = connection.execute("SELECT DISTINCT module_path FROM mutation_specs").fetchone()
+            connection.close()
+            mutants_of_file[path] = script.cosmic_ray_session_mutants_not_skipped_by_filters(
+                path, session)
+        last_path, last_mutant = script.mutants_chosen_one_per_file_in_turn_in_order_seeded_by_head(
+            mutants_of_file, head, 8)[-1]
+        last_job_id, last_has_result = mutants_of_file[last_path][last_mutant]
+        for session in sessions.glob("*.sqlite"):
+            connection = sqlite3.connect(session)
+            with connection:
+                connection.execute("INSERT INTO work_results (job_id, worker_outcome, output, "
+                                   "test_outcome, diff) SELECT job_id, 'NORMAL', ?, 'KILLED', "
+                                   "NULL FROM work_items WHERE job_id = ?",
+                                   (SUITE_FAILED_RUNNER_OUTPUT, last_job_id))
+            connection.close()
+        completed, written = run_limited(repository, control, base, head, venv, sessions,
+                                         at_most_flag, "7")
+        asked_for = [job_id for c in calls(control) if c["tool"] == "python"
+                     for job_id in c["arguments"][4].split(",")]
+        check("results the sessions hold outside the mutants a number chooses count against it: "
+              "with 6 results, at most 7 runs one more mutant",
+              not last_has_result and completed.returncode == 1 and len(asked_for) == 1
+              and len(mutants_with_a_result_in_kept_sessions(sessions)) == 7
+              and written["mutants_not_run_count"] == 1,
+              f"rc={completed.returncode} asked_for={asked_for} out={completed.stdout} "
+              f"err={completed.stderr}")
+
         future = repr(time.time() + 3600)
         completed, written = run_limited(repository, control, base, head, venv, sessions,
                                          stop_flag, future)
@@ -2130,12 +2163,12 @@ def run_one_mutant_per_changed_line_and_kept_sessions_of_heads_before_cutoff_cas
                                           stop_flag, future, *([backlog_flag] if backlog else []))
             by_line = kept_session_mutants_by_line(sessions)
             ran = [c for c in calls(control) if c["tool"] == "python"]
-            backlog = [output for mutants in by_line.values() for _, _, output in mutants
-                       if output == before_cutoff]
+            marked_backlog = [output for mutants in by_line.values() for _, _, output in mutants
+                              if output == before_cutoff]
             if skipped:
                 check("its kept session, a run later: the waiting mutant is marked skipped as of "
                       "a head committed before the cutoff, none runs, and none is left not run",
-                      completed.returncode == 0 and not ran and len(backlog) == 1
+                      completed.returncode == 0 and not ran and len(marked_backlog) == 1
                       and written["mutants_not_run_count"] == 0
                       and "1 killed, 0 survived, 0 errored, 0 not run" in completed.stdout,
                       f"rc={completed.returncode} ran={ran} by_line={by_line} "
@@ -2144,7 +2177,7 @@ def run_one_mutant_per_changed_line_and_kept_sessions_of_heads_before_cutoff_cas
                 check(f"a head committed {cutoff - committed} s before the cutoff, "
                       f"{'given' if backlog else 'without'} the backlog flag: its kept "
                       f"session's waiting mutant runs",
-                      completed.returncode == 0 and len(ran) == 1 and not backlog
+                      completed.returncode == 0 and len(ran) == 1 and not marked_backlog
                       and "2 killed, 0 survived, 0 errored, 0 not run" in completed.stdout,
                       f"rc={completed.returncode} ran={ran} by_line={by_line} "
                       f"out={completed.stdout} err={completed.stderr}")
@@ -2231,14 +2264,18 @@ def run_one_mutant_per_changed_line_and_kept_sessions_of_heads_before_cutoff_cas
         venv, control = fake_venv(scratch_name, plan)
         sessions = Path(scratch_name) / "sessions"
         run_full(repository, control, base, head, venv, sessions, at_most_flag, "1")
+        # A trigger, not a read-only mode: a user such as root writes past mode bits.
         for session in sessions.glob("*.sqlite"):
-            session.chmod(0o444)
+            connection = sqlite3.connect(session)
+            connection.execute("CREATE TRIGGER refused BEFORE INSERT ON work_results "
+                               "BEGIN SELECT RAISE(ABORT, 'refused by this test'); END")
+            connection.close()
         completed, written = run_full(repository, control, base, head, venv, sessions,
                                       stop_flag, future, backlog_flag)
         check("a kept session whose waiting mutants cannot be marked skipped: exit 2, naming "
               "the session and the error, the command to run again, and the worktree removed",
               completed.returncode == 2 and written is None
-              and "cannot be written (OperationalError: attempt to write a readonly database)"
+              and "cannot be written (IntegrityError: refused by this test)"
               in completed.stderr
               and "Then run the same command again:\n  python3 " in completed.stderr
               and len(worktrees_of(repository)) == 1,
