@@ -1043,6 +1043,22 @@ check("rule 2: a failed send from a later run does not answer an earlier run's p
       "task calls do not settle the wait on the newer sentences alone",
       not machine.events("wait_ended"), machine.events())
 
+# A first promise send failed, and a later run was interrupted during its own send.
+machine = promise_sent_on_rule_five_wait(PROMISE_SEND_FAILS)
+machine.append("alpha", user("and", at(7.5)), assistant(OTHER_PROMISE, at(8)), turn_end(at(8)))
+machine.script(PROMISE_SEND_FAILS)
+machine.run(14)
+log_lines = machine.log.read_text().splitlines()
+last_failure = max(index for index, line in enumerate(log_lines)
+                   if json.loads(line).get("event") == "promise_message_send_failed")
+machine.log.write_text("".join(line + "\n" for index, line in enumerate(log_lines)
+                               if index != last_failure))
+machine.append("alpha", *recorded_task(927, 15))
+machine.script()
+machine.run(21)
+check("rule 2: a task for the first failed promise does not end the wait while a later run's send "
+      "has no outcome", not machine.events("wait_ended"), machine.events())
+
 # Every promise message on a rule 5 wait failed, and the agent-seat recorded the task.
 machine = promise_sent_on_rule_five_wait(PROMISE_SEND_FAILS)
 machine.append("alpha", *recorded_task(927, 8))

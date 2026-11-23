@@ -209,6 +209,7 @@ PROMISE_MESSAGE = "promise_message"
 PROMISE_MESSAGES = "promise_messages"
 # An event logged when a rule 2 message's send on an open wait failed, carrying its text and the
 # sentences it names, since no message_sent or promise_message event holds them.
+PROMISE_MESSAGE_SEND_STARTED = "promise_message_send_started"
 PROMISE_MESSAGE_SEND_FAILED = "promise_message_send_failed"
 # On an open wait: the rule 2 messages whose send on it failed, [{"at", "failed_at", "kinds",
 # "sentences", "text"}]. "at" is when the send started, which settlement compares task calls with.
@@ -392,7 +393,7 @@ class SweepLog:
         # step.
         owed, owed_by = False, None
         for event in self.of_seat(seat, "wait_step", "wait_ended", PROMISE_MESSAGE,
-                                  PROMISE_MESSAGE_SEND_FAILED):
+                                  PROMISE_MESSAGE_SEND_STARTED, PROMISE_MESSAGE_SEND_FAILED):
             invocation = event.get("agent_seat_idle_sweep_invocation_started_at")
             if event["event"] == "wait_ended":
                 wait, owed = None, False
@@ -407,6 +408,11 @@ class SweepLog:
                         "kinds": set(event["kinds"]), "sentences": event["sentences"],
                         "text": event["text"]})
                 owed = False
+            elif event["event"] == PROMISE_MESSAGE_SEND_STARTED:
+                if wait is not None:
+                    if owed:
+                        wait[PROMISE_MESSAGES] = None
+                    owed, owed_by = True, invocation
             elif event["event"] == PROMISE_MESSAGE:
                 if wait is None:
                     continue
@@ -430,6 +436,9 @@ class SweepLog:
                 owed, owed_by = True, invocation
             elif wait is not None:
                 wait[event["step"]] = event["at"]
+        # A step still awaiting its outcome holds sentences that settlement cannot know.
+        if wait is not None and owed:
+            wait[PROMISE_MESSAGES] = None
         return wait
 
     def last_judge_answer(self, seat):
@@ -1054,7 +1063,9 @@ class Sweep:
                 # The promise step is logged whether or not the send succeeds: its sentences are
                 # already logged as checked, so only the wait's escalation and user-alert can
                 # still report the promise, and they read a failed message from its own event.
-                if PROMISE not in wait:
+                if PROMISE in wait:
+                    self.record({"event": PROMISE_MESSAGE_SEND_STARTED, "agent_seat": seat})
+                else:
                     self.record({"event": "wait_step", "agent_seat": seat, "step": PROMISE})
                 sent = self.send(seat, verdict, promise_text, NUDGE, failure_event={
                     "event": PROMISE_MESSAGE_SEND_FAILED, "agent_seat": seat,
