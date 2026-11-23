@@ -732,6 +732,87 @@ finally:
     patch("run_claude", run_claude_orig)
 
 
+# --- main(): a failed ask's reason reaches stderr on one line ---------------
+# scripts/ghi-issue-write.py reports the last stderr line of a failed ask, or
+# the line holding the not-usable opening, so the whole reason must be on it.
+MULTI_LINE_GH_STDERR = "HTTP 502: Bad Gateway\n  (https://api.github.com/graphql)\n"
+MULTI_LINE_CLAUDE_ERROR = "claude exited 1: Invalid API key\n  Please run claude auth login"
+
+
+def main_failing(seat, extra_arguments=()):
+    """main() against an explicit seat. Returns (exit code, stderr lines that
+    are not blank)."""
+    err = io.StringIO()
+    with contextlib.redirect_stdout(io.StringIO()), contextlib.redirect_stderr(err):
+        exit_code = ghi_ask.main(["q", "--seat-dir", str(seat), "--repo", "x/y",
+                                  *extra_arguments])
+    return exit_code, [line for line in err.getvalue().splitlines() if line.strip()]
+
+
+mirror_orig = ghi_ask.mirror_refresh.refresh
+run_claude_orig = ghi_ask.run_claude
+try:
+    with tempfile.TemporaryDirectory() as temporary:
+        root = Path(temporary)
+
+        seat_full = root / "seat-full-refresh-fails"
+        seat_full.mkdir()
+        fake_refresh_queue([([], {}, MULTI_LINE_GH_STDERR)])
+        fake_claude_queue([])
+        exit_code, lines = main_failing(seat_full)
+        check("a cold-start mirror refresh failing with multi-line gh stderr reaches stderr on one line",
+              exit_code == 1 and lines[-1] ==
+              "ghi-guide-agent-ask: mirror refresh (full, for cold-start) failed: "
+              "HTTP 502: Bad Gateway (https://api.github.com/graphql)", lines)
+
+        seat_delta = root / "seat-delta-refresh-fails"
+        seat_delta.mkdir()
+        (seat_delta / ghi_ask.STATE_FILE_NAME).write_text(json.dumps(
+            {ghi_ask.GHI_GUIDE_AGENT_SESSION_ID_STATE_KEY: "sess-D",
+             "closes_since_birth": 0, "recent_matches": []}), encoding="utf-8")
+        fake_refresh_queue([([], {}, MULTI_LINE_GH_STDERR)])
+        fake_claude_queue([])
+        exit_code, lines = main_failing(seat_delta)
+        check("a resuming ask's mirror refresh failing with multi-line gh stderr reaches stderr on one line",
+              exit_code == 1 and lines[-1] ==
+              "ghi-guide-agent-ask: mirror refresh failed: "
+              "HTTP 502: Bad Gateway (https://api.github.com/graphql)", lines)
+
+        seat_turn = root / "seat-turn-fails"
+        seat_turn.mkdir()
+        fake_refresh_queue([([1], {"1": issue(1)}, None)])
+        fake_claude_queue([({"session_id": "sess-T", "result": "(ack)"}, None),
+                           (None, MULTI_LINE_CLAUDE_ERROR)])
+        exit_code, lines = main_failing(seat_turn)
+        check("a claude turn failing with a multi-line error reaches stderr on one line",
+              exit_code == 1 and lines[-1] ==
+              "ghi-guide-agent-ask: ghi-guide-agent ask failed: "
+              "claude exited 1: Invalid API key Please run claude auth login", lines)
+
+        seat_not_usable = root / "seat-not-usable"
+        seat_not_usable.mkdir()
+        fake_refresh_queue([([13], {"13": issue(13, state="CLOSED",
+                                                closed_at="2026-08-08T00:00:00Z")}, None)])
+        fake_claude_queue([
+            ({"session_id": "sess-U", "result": "(ack)"}, None),
+            ({"session_id": "sess-U", "structured_output":
+              {"kind": "verdict", "verdict": "too-similar", "issues": [13]}}, None),
+            (None, MULTI_LINE_CLAUDE_ERROR),
+        ])
+        exit_code, lines = main_failing(seat_not_usable, ["--request-form", "draft-verdict"])
+        check("an unusable answer's multi-line reason reaches stderr on its not-usable line, "
+              "and the fallback instruction stays on the line after it",
+              exit_code == 1 and lines[-2].startswith(
+                  "ghi-guide-agent-ask: " + ghi_ask.GHI_GUIDE_AGENT_ANSWER_NOT_USABLE_MESSAGE_OPENING)
+              and lines[-2].endswith(
+                  "the turn failed: claude exited 1: Invalid API key Please run claude auth login")
+              and lines[-1] == ghi_ask.GHI_GUIDE_AGENT_ANSWER_NOT_USABLE_CALLER_FALLBACK_LADDER_INSTRUCTION_STDERR_LINE,
+              lines)
+finally:
+    patch_module_function(ghi_ask.mirror_refresh, "refresh", mirror_orig)
+    patch("run_claude", run_claude_orig)
+
+
 # --- main(): the two boundary answers reach the caller as errors ----------
 # User-ruled 2026-09-29 (walk SKILL-ghi-write-2026-09-29-4, item 1 revised):
 # the two boundary replies are not passed through on stdout with exit 0.
@@ -1002,21 +1083,6 @@ try:
         result, error = run_claude_real("q", None, seat, 5, {})
         check("run_claude: exit 1 without JSON keeps the exit-code message",
               result is None and error == "claude exited 1: boom", (result, error))
-
-        # ghi-issue-write.py reports one stderr line of a failed ask, and every
-        # turn's failure, cold-start, first turn or recheck, comes from here.
-        for case_name, completed in [
-                ("run_claude: a multi-line result error comes back on one line",
-                 FakeCompletedProcess(1, json.dumps(
-                     {"is_error": True, "result": "Invalid API key\n  Please run claude auth login"}))),
-                ("run_claude: a multi-line stderr without JSON comes back on one line",
-                 FakeCompletedProcess(1, "", stderr="Invalid API key\n  Please run claude auth login\n"))]:
-            ghi_ask.subprocess.run = fake_subprocess_run_returning(completed)
-            result, error = run_claude_real("q", None, seat, 5, {})
-            check(case_name,
-                  result is None and "\n" not in error
-                  and error.startswith("claude exited 1: Invalid API key Please run claude auth login"),
-                  (result, error))
 
         ghi_ask.subprocess.run = fake_subprocess_run_returning(
             FakeCompletedProcess(0, json.dumps({"is_error": True, "result": "rate limited"})))
@@ -1343,10 +1409,7 @@ with tempfile.TemporaryDirectory() as temporary:
              "names no issue it is too similar to"),
             ("a drift recheck after a verdict that cites the closed GHI again fails the ask",
              ({"session_id": "sess-W", "structured_output": first_verdict}, None),
-             "the rechecked verdict still cites a closed GHI"),
-            ("a drift recheck whose turn fails keeps the turn's failure in the not-usable message",
-             (None, "claude exited 1: Invalid API key Please run claude auth login"),
-             "the turn failed: claude exited 1: Invalid API key Please run claude auth login")]:
+             "the rechecked verdict still cites a closed GHI")]:
         seat_verdict_recheck = root / ("seat-" + case_name.replace(" ", "-")[:60])
         seat_verdict_recheck.mkdir()
         fake_refresh_queue([([13], {"13": issue(13, state="CLOSED",
