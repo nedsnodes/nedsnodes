@@ -144,6 +144,46 @@ except SystemExit as error:
 check("a guard's own exit, such as a refusal's 2, passes through unchanged", exit_code == 2,
       exit_code)
 
+# --- traceback is loaded only on the crash path ---
+
+# A fresh interpreter, because this suite's own imports may already have loaded traceback.
+LOAD_MODULE_SOURCE = (
+    "import importlib.util\n"
+    "import sys\n"
+    "spec = importlib.util.spec_from_file_location(\n"
+    f"    'guard_hook_crash_fail_open_with_notice_common', {str(MODULE_PATH)!r})\n"
+    "crash_notice = importlib.util.module_from_spec(spec)\n"
+    "spec.loader.exec_module(crash_notice)\n")
+result = subprocess.run(
+    [sys.executable, "-c", LOAD_MODULE_SOURCE + "print('traceback' in sys.modules)"],
+    capture_output=True, text=True, timeout=60)
+check("importing the module in a fresh interpreter leaves traceback out of sys.modules",
+      result.returncode == 0 and result.stdout.strip() == "False",
+      (result.returncode, result.stdout, result.stderr))
+
+crash_results = []
+with tempfile.TemporaryDirectory() as temporary_directory:
+    crashing_guard = Path(temporary_directory) / "crashing-guard.py"
+    # Both first lines keep the raise on line 10, so the two notices can be compared whole.
+    for first_line in ("import traceback", ""):
+        crashing_guard.write_text(
+            first_line + "\n" + LOAD_MODULE_SOURCE
+            + "with crash_notice.guard_hook_crash_fail_open_with_notice_context_manager(\n"
+              "        '/x/.claude/guard-hooks/some-guard.py', True):\n"
+              "    raise ValueError('injected value')\n", encoding="utf-8")
+        crash_results.append(subprocess.run([sys.executable, str(crashing_guard)],
+                                            capture_output=True, text=True, timeout=60))
+loaded_before_crash, loaded_on_crash_path = crash_results
+crash_notices = notices_of(loaded_on_crash_path.stdout)
+check("a crash prints the same notice whether traceback was loaded before it or only on the "
+      "crash path, and the notice names the line raised at",
+      all(result.returncode == 0 and result.stderr == "" for result in crash_results)
+      and loaded_on_crash_path.stdout == loaded_before_crash.stdout
+      and crash_notices is not None
+      and all("ValueError: injected value, at crashing-guard.py:10" in notice
+              for notice in crash_notices),
+      [(result.returncode, result.stdout, result.stderr) for result in crash_results])
+
 # --- each guard, crashed for real ---
 
 with tempfile.TemporaryDirectory() as temporary_directory:
