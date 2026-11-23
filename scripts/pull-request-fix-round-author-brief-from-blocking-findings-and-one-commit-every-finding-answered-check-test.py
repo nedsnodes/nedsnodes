@@ -1994,7 +1994,7 @@ def move_cases(root, _repository, _base, _frozen_head):
           and git(repository, "merge-base", "HEAD", "origin/main") == git(repository, "rev-parse", "origin/main")
           and (repository / "moved.py").read_text() == "moved\n"
           and (repository / "partly.txt").read_text() == PARTLY_MAIN, out + err)
-    check("move-start: sets the answers file aside, out of the new topic branch's worktree", not answers.exists(), err)
+    check("move-start: leaves the answers file in place", answers.read_text() == ANSWERS_TEXT, err)
     code, out, err = run(root, repository, routes, "--move-change-to-own-pull-request-cut-new-topic-branch", "another-branch")
     check("move-start: refuses a second move while one is under way", code == 1 and "already under way" in err, err)
     git(repository, "switch", "-q", "main")
@@ -2076,114 +2076,62 @@ def move_cases(root, _repository, _base, _frozen_head):
               and f"but {forgot[:12]} still holds" in err
               and ("partly.txt" not in err if expected == "moved.py" else "moved.py" not in err), out + err)
 
-    # The second move needs an answers file to set aside, and the rounds above can leave none in the worktree.
     answers.write_text(ANSWERS_TEXT)
     code, out, err = run(root, repository, routes, "--move-change-to-own-pull-request-cut-new-topic-branch", "second-moved-change-topic-branch")
-    check("move-start: a second move in the same worktree sets the answers file aside again",
-          code == 0 and not answers.exists()
-          and (repository / ".git" / "fix-round-answers-set-aside" / ANSWERS_NAME).read_text() == ANSWERS_TEXT
+    check("move-start: a second move in the same worktree leaves the answers file in place",
+          code == 0 and answers.read_text() == ANSWERS_TEXT
           and git(repository, "branch", "--show-current") == "second-moved-change-topic-branch", out + err)
     code, out, err = run(root, repository, routes, *finish)
     check("move-finish: refuses a new topic branch that holds no change", code == 1 and "nothing to move" in err, err)
 
 
 def move_keeps_answers_cases(root, _repository, _base, _frozen_head):
-    repository, frozen_head = move_repository(root)
-    answers = repository / ANSWERS_NAME
-    git_directory = Path(git(repository, "rev-parse", "--absolute-git-dir"))
-    set_aside = git_directory / "fix-round-answers-set-aside" / ANSWERS_NAME
-    kept_directory = git_directory / "fix-round-answers-kept-copies"
-    body = root / "description.md"
-    body.write_text("Moves the timeout change.\n")
-    routes = move_routes(frozen_head, body)
-    cut = ("--move-change-to-own-pull-request-cut-new-topic-branch", NEW_BRANCH, "moved.py")
-    set_aside.parent.mkdir()
-    set_aside.write_text("1. An answer an earlier move set aside.\n")
-    answers.write_text(ANSWERS_TEXT)
-    kept_directory.write_text("a file where the directory of copies goes")
-    code, out, err = run(root, repository, routes, *cut)
-    check("move-start: when no copy of the set-aside answers can be made, exit 2, still on the pull request's branch, "
-          "both answers files unchanged",
-          code == 2 and f"could not keep a copy of {set_aside}" in err
-          and git(repository, "branch", "--show-current") == BRANCH and answers.read_text() == ANSWERS_TEXT
-          and set_aside.read_text() == "1. An answer an earlier move set aside.\n", out + err)
-    kept_directory.unlink()
-    code, out, err = run(root, repository, routes, *cut)
-    check("move-start: answers already set aside are in a copy before this round's answers replace them",
-          code == 0 and set_aside.read_text() == ANSWERS_TEXT
-          and [path.read_text() for path in kept_directory.iterdir()] == ["1. An answer an earlier move set aside.\n"],
-          out + err)
-    (repository / "partly.txt").write_text(PARTLY_MOVED_ONLY)
-    hook = Path(git(repository, "rev-parse", "--path-format=absolute", "--git-path", "hooks")) / "pre-push"
-    hook.parent.mkdir(exist_ok=True)
-    hook.write_text(f"#!/bin/sh\nprintf '1. Written during the push.\\n' > {shlex.quote(str(answers))}\n")
-    hook.chmod(0o755)
-    code, out, err = run(root, repository, routes, "--move-change-to-own-pull-request-finish", "--title", "Move it",
-                         "--body-file", str(body))
-    check("move-finish: an answers file written during the move is in a copy before the set-aside file comes back",
-          code == 0 and answers.read_text() == ANSWERS_TEXT
-          and "1. Written during the push.\n" in [path.read_text() for path in kept_directory.iterdir()], out + err)
-
-
-def move_finish_answers_moves_cases(root, _repository, _base, _frozen_head):
     body = root / "description.md"
     body.write_text("Moves the timeout change.\n")
     finish = ("--move-change-to-own-pull-request-finish", "--title", "Move it", "--body-file", str(body))
 
-    def started(name, answers_text):
+    def started(name):
         directory = root / name
         directory.mkdir()
         repository, frozen_head = move_repository(directory)
-        answers = repository / ANSWERS_NAME
-        if answers_text is None:
-            answers.unlink(missing_ok=True)
-        else:
-            answers.write_text(answers_text)
         routes = move_routes(frozen_head, body)
         code, out, err = run(root, repository, routes, "--move-change-to-own-pull-request-cut-new-topic-branch",
                              NEW_BRANCH, "moved.py")
-        check(f"move-finish setup {name}: the move starts", code == 0, out + err)
+        check(f"move keeps answers setup {name}: the move starts", code == 0, out + err)
         (repository / "partly.txt").write_text(PARTLY_MOVED_ONLY)
-        git_directory = Path(git(repository, "rev-parse", "--absolute-git-dir"))
-        return repository, answers, routes, git_directory / "fix-round-answers-set-aside" / ANSWERS_NAME, \
-            git_directory / "fix-round-answers-kept-copies"
+        return repository, repository / ANSWERS_NAME, routes
 
-    repository, answers, routes, set_aside, kept_directory = started("no-set-aside", None)
-    answers.write_text("1. Written during the move.\n")
-    code, out, err = run(root, repository, routes, *finish)
-    check("move-finish: with nothing set aside, the program carries the answers file past the commit and brings it back",
-          code == 0 and answers.read_text() == "1. Written during the move.\n" and not set_aside.exists()
-          and ANSWERS_NAME not in git(repository, "show", "--name-only", "--format=", "origin/" + NEW_BRANCH),
-          out + err)
+    def committed(repository):
+        return git(repository, "show", "--name-only", "--format=", "origin/" + NEW_BRANCH).split()
 
-    repository, answers, routes, set_aside, kept_directory = started("both", ANSWERS_TEXT)
-    answers.write_text("1. Written during the move.\n")
-    code, out, err = run(root, repository, routes, *finish)
-    kept = list(kept_directory.iterdir())
-    check("move-finish: a file written beside set-aside answers is in a copy the program names, and the answers return",
-          code == 0 and answers.read_text() == ANSWERS_TEXT and len(kept) == 1
-          and kept[0].read_text() == "1. Written during the move.\n" and str(kept[0]) in out, out + err)
-
-    repository, answers, routes, set_aside, kept_directory = started("during-push", ANSWERS_TEXT)
+    repository, answers, routes = started("not-ignored")
     hook = Path(git(repository, "rev-parse", "--path-format=absolute", "--git-path", "hooks")) / "pre-push"
     hook.parent.mkdir(exist_ok=True)
     hook.write_text(f"#!/bin/sh\nprintf '1. Written during the push.\\n' > {shlex.quote(str(answers))}\n")
     hook.chmod(0o755)
     code, out, err = run(root, repository, routes, *finish)
-    kept = list(kept_directory.iterdir())
-    check("move-finish: the success output names the copy of a file written during the push",
-          code == 0 and answers.read_text() == ANSWERS_TEXT and len(kept) == 1 and str(kept[0]) in out, out + err)
+    check("move-finish: with the answers file not ignored, the commit leaves it out and text written during the "
+          "push stays in it", code == 0 and ANSWERS_NAME not in committed(repository)
+          and answers.read_text() == "1. Written during the push.\n", out + err)
 
-    repository, answers, routes, set_aside, kept_directory = started("no-copy", ANSWERS_TEXT)
-    kept_directory.write_text("a file where the directory of copies goes")
-    hook = Path(git(repository, "rev-parse", "--path-format=absolute", "--git-path", "hooks")) / "pre-push"
-    hook.parent.mkdir(exist_ok=True)
-    hook.write_text(f"#!/bin/sh\nprintf '1. Written during the push.\\n' > {shlex.quote(str(answers))}\n")
-    hook.chmod(0o755)
+    repository, answers, routes = started("ignored")
+    (repository / ".gitignore").write_text("fix-round-answers-pull-request-*.md\n")
     code, out, err = run(root, repository, routes, *finish)
-    check("move-finish: when no copy can be made, both answers files stay whole and the output names both",
-          code == 0 and answers.read_text() == "1. Written during the push.\n"
-          and set_aside.read_text() == ANSWERS_TEXT and str(set_aside) in out and str(answers) in out, out + err)
+    check("move-finish: with the answers file ignored, staging succeeds and the commit leaves it out",
+          code == 0 and ANSWERS_NAME not in committed(repository) and ".gitignore" in committed(repository)
+          and answers.read_text() == ANSWERS_TEXT, out + err)
+
+    directory = root / "tracked"
+    directory.mkdir()
+    repository, frozen_head = move_repository(directory)
+    git(repository, "add", "-f", ANSWERS_NAME)
+    git(repository, "commit", "-q", "-m", "round that carries the answers file")
+    state_file = repository / ".git" / "fix-round-move-to-own-pull-request.json"
+    code, out, err = run(root, repository, move_routes(frozen_head, body),
+                         "--move-change-to-own-pull-request-cut-new-topic-branch", NEW_BRANCH, "moved.py")
+    check("move-start: refuses, exit 1, when HEAD tracks the answers file, staying on the branch with no move recorded",
+          code == 1 and f"tracks the answers file {ANSWERS_NAME}" in err and not state_file.exists()
+          and git(repository, "branch", "--show-current") == BRANCH, out + err)
 
 
 def answers_write_failure_cases(root, _repository, _base, _frozen_head):
@@ -2208,7 +2156,7 @@ def answers_write_failure_cases(root, _repository, _base, _frozen_head):
         resource.setrlimit(resource.RLIMIT_FSIZE, limit)
     check("answers kept: a copy that fails part way leaves no partial copy, and the answers file is whole",
           failed and answers.read_text() == text and not list(kept_directory.iterdir())
-          and [path.name for path in directory.iterdir() if path.name.endswith(".incomplete")] == [], str(failed))
+          and sorted(path.name for path in directory.iterdir()) == ["answers.md", "kept"], str(failed))
     small = "1. Short.\n"
     answers.write_text(small)
     limit = resource.getrlimit(resource.RLIMIT_FSIZE)
@@ -2223,7 +2171,23 @@ def answers_write_failure_cases(root, _repository, _base, _frozen_head):
         resource.setrlimit(resource.RLIMIT_FSIZE, limit)
     check("answers kept: a new answers file that fails part way leaves the old file whole and no temporary file",
           failed and answers.read_text() == small
-          and not [path for path in directory.iterdir() if path.name.endswith(".incomplete")], str(failed))
+          and sorted(path.name for path in directory.iterdir()) == ["answers.md", "kept"], str(failed))
+    (directory / "answers.md.incomplete").mkdir()
+    made = []
+    real_mkstemp = program.tempfile.mkstemp
+
+    def recording_mkstemp(**arguments):
+        made.append(arguments)
+        return real_mkstemp(**arguments)
+
+    program.tempfile.mkstemp = recording_mkstemp
+    try:
+        program.answers_file_with_one_line_per_finding_write(answers, 2, kept_directory)
+    finally:
+        program.tempfile.mkstemp = real_mkstemp
+    check("answers kept: the write goes through a unique file named so the ignore line covers it, beside the answers",
+          answers.read_text() == "1. \n2. \n"
+          and {"prefix": "answers-", "suffix": ".md", "dir": directory} in made, str(made))
 
 
 def move_failure_after_push_cases(root, _repository, _base, _frozen_head):
@@ -3150,7 +3114,6 @@ case("stated count position", stated_count_position_cases)
 case("moved into body", moved_into_body_cases)
 case("replaces", replaces_cases)
 case("move keeps answers", move_keeps_answers_cases)
-case("move finish answers moves", move_finish_answers_moves_cases)
 case("answers write failure", answers_write_failure_cases)
 case("move push time limit", move_push_time_limit_case)
 case("moved change git apply cannot start", moved_change_git_apply_cannot_start_case)

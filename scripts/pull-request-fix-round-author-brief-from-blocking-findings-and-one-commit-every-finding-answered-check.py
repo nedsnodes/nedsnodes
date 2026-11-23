@@ -127,13 +127,14 @@ unless one already names the round's latest changes-requested review.
 --move-change-to-own-pull-request-cut-new-topic-branch and --move-change-to-own-pull-request-finish carry a
 change the round moves out of the pull request to a new topic branch, in the same worktree. The first runs on
 the pull request's branch after the round's commit, with a clean worktree apart from the answers file: it
-switches to NEW_TOPIC_BRANCH cut from origin/main and copies each PATH from the frozen-head, and only then
-records the move in MOVE_STATE_FILE_NAME in the git directory and moves the answers file there, so a failed
-switch or copy leaves nothing recorded and the answers file in place. The second refuses while an answers
-file or the description file is in the worktree, stages every change, runs the nn-test-suites as the pull
+refuses when HEAD tracks the answers file, because the switch back would replace text written during the move.
+It switches to NEW_TOPIC_BRANCH cut from origin/main and copies each PATH from the frozen-head, and only then
+records the move in MOVE_STATE_FILE_NAME in the git directory, so a failed switch or copy leaves nothing
+recorded. The answers file stays in the worktree throughout. The second refuses while the description file is
+in the worktree, stages every change but the answers file, runs the nn-test-suites as the pull
 request ready command runs them, commits,
 pushes with the pre-push hook's time limit, opens the pull request with gh pr create, switches back,
-restores the answers file, deletes the local NEW_TOPIC_BRANCH and checks that it is gone. A failure after
+deletes the local NEW_TOPIC_BRANCH and checks that it is gone. A failure after
 the commit undoes nothing and prints the commit, the steps done and the steps still to do, which are
 done by hand. A run on NEW_TOPIC_BRANCH refuses when the branch already holds a commit beside origin/main,
 and says how to undo it, keeping its changes, so that a new run tests and commits them again. Whatever git
@@ -155,7 +156,6 @@ import json
 import os
 import re
 import shlex
-import shutil
 import subprocess
 import sys
 import tempfile
@@ -263,9 +263,6 @@ LSOF_TIMEOUT_SECONDS = 30
 MOVE_STATE_FILE_NAME = "fix-round-move-to-own-pull-request.json"
 # Written by the run before the push and read by the run after it, which runs no suite.
 PULL_REQUEST_FIX_ROUND_CHECK_TEST_SUITES_ALSO_FAILING_AT_FROZEN_HEAD_RECORD_FILE_NAME = "pull-request-fix-round-check-test-suites-also-failing-at-frozen-head-record.json"
-# The answers file waits in the git directory while the new topic branch is checked out, so no commit
-# or check made there can pick it up.
-ANSWERS_SET_ASIDE_DIRECTORY_NAME = "fix-round-answers-set-aside"
 ANSWERS_KEPT_COPIES_DIRECTORY_NAME = "fix-round-answers-kept-copies"
 # What gh pr view prints on stderr for a number or URL that names no pull request.
 PULL_REQUEST_NOT_FOUND_MARKER = "Could not resolve to a PullRequest"
@@ -862,13 +859,15 @@ def answers_file_with_one_line_per_finding_write(path, finding_count, kept_copie
     writes the answer after it, and return the new copy of the text it held, or None."""
     try:
         kept = answers_file_text_kept_in_new_copy(path, kept_copies_directory)
-        # A write that fails part way must leave the answers file whole.
-        incomplete = path.with_name(f"{path.name}.incomplete")
+        # A write that fails part way must leave the answers file whole, and overlapping runs must not share a
+        # temporary file. The name matches .gitignore's answers-file pattern, for a file a killed run leaves.
+        descriptor, temporary = tempfile.mkstemp(prefix=f"{path.stem}-", suffix=".md", dir=path.parent)
         try:
-            incomplete.write_text("".join(f"{index}. \n" for index in range(1, finding_count + 1)))
-            os.replace(incomplete, path)
+            with os.fdopen(descriptor, "w") as new_file:
+                new_file.write("".join(f"{index}. \n" for index in range(1, finding_count + 1)))
+            os.replace(temporary, path)
         except OSError:
-            incomplete.unlink(missing_ok=True)
+            os.unlink(temporary)
             raise
     except OSError as error:
         raise StepFailed(f"could not write the answers file {path}: {error}") from None
@@ -1578,8 +1577,12 @@ def move_start(number, reviewer_login, new_branch, whole_file_paths):
     if missing:
         raise Refused(f"The frozen-head {frozen_head[:12]} has no file {', '.join(missing)}.\n"
                       "Name each path as the frozen-head holds it, relative to the worktree's root, and run this again.")
-    root = worktree_root()
     answers_name = ANSWERS_FILE_NAME_FORMAT.format(number=number)
+    if file_exists_at("HEAD", answers_name):
+        raise Refused(f"{pull_request_branch} tracks the answers file {answers_name}, so switching back after the "
+                      "move would replace any text written in it meanwhile.\n"
+                      f"Remove it from the round's commit with git rm --cached {answers_name} and "
+                      "git commit --amend, then run this again.")
     changed = [entry for entry in git_output.nul_separated_fields(
                    git(["status", "--porcelain", "-z", "--untracked-files=all"]))
                if entry[3:] != answers_name]
@@ -1587,23 +1590,10 @@ def move_start(number, reviewer_login, new_branch, whole_file_paths):
         raise Refused(f"This worktree has changes outside the round's commit: {', '.join(changed)}.\n"
                       "Put each one in the round's commit, or remove it, and run this again; the new topic "
                       "branch must start with nothing but the moved change.")
-    answers = root / answers_name
-    set_aside = state_path.parent / ANSWERS_SET_ASIDE_DIRECTORY_NAME / answers_name
-    if answers.exists():
-        try:
-            kept = answers_file_text_kept_in_new_copy(set_aside, state_path.parent / ANSWERS_KEPT_COPIES_DIRECTORY_NAME)
-        except OSError as error:
-            raise StepFailed(f"could not keep a copy of {set_aside} before replacing it: {error}") from None
-        if kept:
-            print(f"Answers an earlier move left in {set_aside} are now in {kept}.")
     git(["switch", "-q", "--no-overwrite-ignore", "-c", new_branch, "origin/main"])
     if whole_file_paths:
         git(["checkout", frozen_head, "--", *whole_file_paths])
-    state_path.write_text(json.dumps({"new_branch": new_branch, "return_branch": pull_request_branch,
-                                      "answers": str(answers), "set_aside": str(set_aside)}))
-    if answers.exists():
-        set_aside.parent.mkdir(exist_ok=True)
-        shutil.move(answers, set_aside)
+    state_path.write_text(json.dumps({"new_branch": new_branch, "return_branch": pull_request_branch}))
     print(f"On {new_branch}, cut from origin/main, with {len(whole_file_paths)} whole file(s) copied from the "
           f"frozen-head {frozen_head[:12]}.\n"
           "Make by hand the moved part of each file that is only partly moved, and leave it uncommitted: the "
@@ -1622,7 +1612,6 @@ def move_finish(number, reviewer_login, title, body_file):
                       "<new topic branch> [<path> ...]")
     state = json.loads(state_path.read_text())
     new_branch, return_branch = state["new_branch"], state["return_branch"]
-    answers, set_aside = Path(state["answers"]), Path(state["set_aside"])
     if current_branch() != new_branch:
         raise Refused(f"--move-change-to-own-pull-request-finish runs on {new_branch}, which "
                       "--move-change-to-own-pull-request-cut-new-topic-branch made, but this worktree is on "
@@ -1632,7 +1621,8 @@ def move_finish(number, reviewer_login, title, body_file):
     if Path(body_file).resolve().is_relative_to(root):
         raise Refused(f"The description file {body_file} is inside this worktree, so the commit would carry it.\n"
                       "Move it outside the worktree and run this again.")
-    kept_copies_directory = state_path.parent / ANSWERS_KEPT_COPIES_DIRECTORY_NAME
+    answers_name = ANSWERS_FILE_NAME_FORMAT.format(number=number)
+    answers = root / answers_name
     if git(["rev-list", "--count", "origin/main..HEAD"]).strip() != "0":  # pragma: no mutate, a count has no leading zero, so `>` matches every count but "0" as `!=` does, and so does `is not`, as CPython keeps one "0" string
         head = git(["rev-parse", "HEAD"]).strip()
         base = git(["merge-base", "HEAD", "origin/main"]).strip()
@@ -1642,20 +1632,10 @@ def move_finish(number, reviewer_login, title, body_file):
                       "to do that its message listed, instead of running it again.\n"
                       f"Otherwise undo the commit, keeping its changes staged, with git reset --soft {base}, then "
                       "run this again: it runs the tests and commits the moved change.")
-    if answers.exists():
-        try:
-            if set_aside.exists():
-                kept = answers_file_text_kept_in_new_copy(answers, kept_copies_directory)
-                answers.unlink()
-                if kept:
-                    print(f"{answers} was written during this move, so this program moved its text to {kept}, "
-                          f"and the round's answers in {set_aside} come back when the move ends.")
-            else:
-                set_aside.parent.mkdir(exist_ok=True)
-                shutil.move(answers, set_aside)
-        except OSError as error:
-            raise StepFailed(f"could not keep the answers file {answers} out of the commit: {error}") from None
     git(["add", "-A"])
+    # After git add, because naming an ignored file in add's pathspec makes it exit 1. A whole-file PATH can
+    # replace .gitignore with a version that does not ignore the answers file.
+    git(["rm", "-q", "--cached", "--ignore-unmatch", "--", f":(top){answers_name}"])
     if not git(["diff", "--cached", "--name-only"]).strip():
         raise Refused(f"{new_branch} holds no change beside origin/main, so there is nothing to move.\n"
                       "Bring the moved change onto it, by hand or by naming whole files to "
@@ -1692,20 +1672,6 @@ def move_finish(number, reviewer_login, title, body_file):
         created["url"] = gh(["pr", "create", "--base", "main", "--head", new_branch, "--title", title,
                              "--body-file", body_file]).strip().splitlines()[-1]
 
-    def restore_answers():
-        if not set_aside.exists():
-            return
-        try:
-            kept = answers_file_text_kept_in_new_copy(answers, kept_copies_directory)
-        except OSError as error:
-            print(f"The round's answers stay in {set_aside}, because {answers} holds other text and no copy of it "
-                  f"could be made: {error}. Read both files, and put each answer you need in {answers}.")
-            return
-        shutil.move(set_aside, answers)
-        if kept:
-            print(f"{answers} was written during this move, so this program moved its text to {kept} before "
-                  "bringing the round's answers back.")
-
     def delete_branch():
         git(["branch", "-D", new_branch])
         if local_branch_exists(new_branch):
@@ -1715,8 +1681,6 @@ def move_finish(number, reviewer_login, title, body_file):
              (f"open its pull request with gh pr create --base main --head {new_branch}, if gh pr list --head "
               f"{new_branch} shows none", open_pull_request),
              (f"git switch {return_branch}", lambda: git(["switch", "-q", return_branch])),
-             (f"move {set_aside} back to {answers} if it is there, first moving any file at {answers} to a new name in "
-              f"{kept_copies_directory}", restore_answers),
              (f"git branch -D {new_branch}", delete_branch),
              (f"delete {state_path}", state_path.unlink)]
     def labelled_hook_output():
