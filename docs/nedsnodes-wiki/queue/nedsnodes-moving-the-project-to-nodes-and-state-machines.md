@@ -112,20 +112,13 @@ A counter is data the state-machine-run keeps. No counter node is needed (item 1
     "ask-user": {
       "kind": "user",
       "conversation": "user-facing-agent-inside-state-machine-node",
-      "next": {
-        "answered": {
-          "to": "write",
-          "loop": {"counter": "user-questions", "limit": 3, "at_limit": "end:stopped"}
-        },
-        "stop": "end:stopped",
-        "interrupted": "end:stopped"
-      }
+      "next": {"answered": "write", "stop": "end:stopped", "interrupted": "end:stopped"}
     }
   }
 }
 ```
 
-The `agent` field names an agent that stays the same across the state-machine-run's rounds, so `write` resumes the same writer (section 7). The runner adds one to a loop's counter each time that output state occurs, and goes to `at_limit` when the count reaches the limit, so this example does at most two cold reads. A `cpc-node` has no program to print `--schema`, so its entry in the machine file declares `idempotent`.
+The `agent` field names an agent that stays the same across the state-machine-run's rounds, so `write` resumes the same writer (section 7). The runner adds one to a loop's counter each time that output state occurs, and goes to `at_limit` when the count reaches the limit, so this example does at most two cold reads.
 
 **Data between nodes.** `start` takes the state-machine-run's input as JSON. A node's input on stdin is the previous node's output, unless its `input` field names an earlier node's output. A `machine` node passes its input to the child and returns the child's last output. A `parallel` node's output is one JSON object keyed by branch name. Any node may set `timeout_seconds`, and a node past its timeout ends in `timed-out`.
 
