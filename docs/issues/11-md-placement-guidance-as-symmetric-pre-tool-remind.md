@@ -11,7 +11,7 @@ Boss-requested notes were landing in arbitrary peer-local paths or not being wri
 
 ## Boss-directed design (2026-07-22, build deferred to a later boss pick)
 
-- **Mechanism: a pre-tool hook on MD writes, symmetric across both runtimes.** Claude side: a PreToolUse hook on Write/Edit of `*.md` outside the approved homes. Codex side: the same shape — Codex supports PreToolUse hooks and the old fleet already runs them (`features.hooks=true`, worktree-guard precedent, observed live 2026-07-22). The instruction-file route (an AGENTS.md/template line) was considered and rejected by the boss in favor of the hook.
+- **Mechanism: a pre-tool hook on MD writes, symmetric across Claude Code and Codex.** Claude side: a PreToolUse hook on Write/Edit of `*.md` outside the approved homes. Codex side: the same shape — Codex supports PreToolUse hooks and the old fleet already runs them (`features.hooks=true`, worktree-guard precedent, observed live 2026-07-22). The instruction-file route (an AGENTS.md/template line) was considered and rejected by the boss in favor of the hook.
 - **Strength: remind, not block** — MD creation is overwhelmingly legitimate (handoffs, drafts, staging files), so a block would be a false-positive machine; the hook surfaces the approved-homes list, asks the agent to place deliberately, and proceeds.
 - **Single-source path list:** the approved homes live in one conf file every hook reads. For nedsnodes the approved homes are the charter README's "Where things live" table; check-in-time enforcement already exists separately at the git-gatekeeper (subsystem hygiene check).
 - **Known limit, accepted:** a write-hook cannot catch a note that was never written; the queue's request-is-not-done-until-the-file-exists check covers that failure mode.

@@ -491,7 +491,7 @@ When the search program exits 1, because a place could not be searched or was se
 
 ### Structured output, weekly: programs that parse an agent's prose
 
-A program that reads an agent's free-text answer with regular expressions or prefixes breaks when the agent words its answer differently. The three runtimes the project uses can each constrain an agent's final answer to a schema: `claude -p --json-schema`, `codex exec --output-schema`, and `agy --json-schema`.
+A program that reads an agent's free-text answer with regular expressions or prefixes breaks when the agent words its answer differently. The three agent-binaries the project uses can each constrain an agent's final answer to a schema: `claude -p --json-schema`, `codex exec --output-schema`, and `agy --json-schema`.
 
 What it reads: the repository at main, new systems in particular, meaning programs added since the last run; and the last run's list of candidates.
 
