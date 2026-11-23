@@ -281,7 +281,7 @@ The user has no "strong opinions" on order beyond easy parts first. Each step is
 6. Where is the state-machine-run's record kept: a JSONL file in the log-store on ned-box, which a Mac state-machine-run needs ned-box to reach; under the git common directory with a copy shipped to the log-store; or GHI 2505's one store, with the JSONL as a log beside it?
 7. When a detached task passes its wait-limit, does the machine keep waiting, stop and rerun the task, or ask the user?
 8. Does a transition need general guards on state-machine-run data, or are loop limits enough until a real machine needs more?
-9. Are contract input and output validations exempt from `CLAUDE.md`'s two conditions for a guard? Item 4 treats them as "rejecting malformed input", and the user has not decided the point directly.
+9. The runner's schema check rests on the user's approval of item 4; no node adds its own validation, and `CLAUDE.md`'s two conditions for a guard stay as they are.
 10. Should the code-prompt-code bullet of `CLAUDE.md` name its two kinds, cpc-tool and cpc-node?
 11. Should create-GHI and edit-GHI write their own rerun task, reversing the user-ruling of 2026-10-10?
 12. Did the user's remark "The code prompt code, it seems like it's just adding some formalism" point at the term? Items 10.1 and 10.2 have since kept and extended the term.
