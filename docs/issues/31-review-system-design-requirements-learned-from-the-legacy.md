@@ -18,7 +18,7 @@ These are the cheap, directly-checkable facts about an approval artifact. The le
 
 ## Part 2 — what a gate cannot check, and the structural lever instead
 
-A gate cannot verify that the reviewer understood the change, exercised hidden behaviors, or did a good job — and should not claim to; there is no obsessive-rechecking regress, because the gate verifies form and provenance, not content or judgment. The only lever on review quality is structural: the author and the checker are different parties, and for consequential changes different kinds of party — the two AI runtimes miss different things, and cross-runtime diversity was the one reliable decorrelator in the commissioned multi-agent research.
+A gate cannot verify that the reviewer understood the change, exercised hidden behaviors, or did a good job — and should not claim to; there is no obsessive-rechecking regress, because the gate verifies form and provenance, not content or judgment. The only lever on review quality is structural: the author and the checker are different parties, and for consequential changes different kinds of party — the two AI runtimes miss different things, and cross-agent-binary diversity was the one reliable decorrelator in the commissioned multi-agent research.
 
 ## Part 3 — represent expectations that change after an approval
 
@@ -30,12 +30,12 @@ If the review system has states (on-hold, blocked, approved), each needs a legit
 
 ## Part 5 — the identity and versioning model (boss-ruled 2026-07-27)
 
-- **Agent-authored changes are identified by session id** — assigned by the harness, unique, not settable by the identified party. A new or cleared context is a new session id (verified against documentation); persistence of the id across context compaction is believed true in both runtimes but is an UNVERIFIED premise — run the cheap probe (compact a scratch session, compare ids) before building on it. Record the runtime alongside the id.
-- **A cleared context is a legitimately independent checker** against anchoring bias — it cannot see its own authoring reasoning. Cross-runtime review remains the stronger requirement for consequential changes, because same-model blind spots survive a context clear.
+- **Agent-authored changes are identified by session id** — assigned by the harness, unique, not settable by the identified party. A new or cleared context is a new session id (verified against documentation); persistence of the id across context compaction is believed true in both runtimes but is an UNVERIFIED premise — run the cheap probe (compact a scratch session, compare ids) before building on it. Record the agent-binary alongside the id.
+- **A cleared context is a legitimately independent checker** against anchoring bias — it cannot see its own authoring reasoning. Cross-agent-binary review remains the stronger requirement for consequential changes, because same-model blind spots survive a context clear.
 - **Human-authored changes:** one human exists; a constant name suffices until that changes.
 - **Files:** identified by content SHA (the git-gatekeeper's content-digest identity already implements this).
 - **External tools and platforms** (OS, Python, git, the database, libraries): not tracked — too many, and compatibility is not the code writer's job. Record an environment detail only where a specific attestation's validity turns on it.
-- **Custom long-running components** (daemons, the communications layer): versioned, with the version askable at runtime — the component can report what version it is. (Legacy specimen: the two runtime fleets ran different communication timeouts for six days because a launcher silently overrode a server default and nothing could be asked what version it was running.)
+- **Custom long-running components** (daemons, the communications layer): versioned, with the version askable at runtime — the component can report what version it is. (Legacy specimen: the two agent-binary fleets ran different communication timeouts for six days because a launcher silently overrode a server default and nothing could be asked what version it was running.)
 
 ## Review classes are an allowlist (boss-approved 2026-07-31)
 
@@ -43,12 +43,12 @@ If the review system has states (on-hold, blocked, approved), each needs a legit
 - **Everything outside the allowlist checks in freely.** No review, no fail-closed escalation into a heavy class. Mechanical checks still apply to everything (the secret scan runs on every check-in regardless of path; the quality gate's checks fire where they apply). Rationale: a review nobody knows how to perform is theater, and the harmless-by-landing majority — records, backups, logs, media — lands as backup, which is part of what the repository is for.
 - **Capability-by-landing types are allowlist members from day one.** The few types where landing itself grants execution or changes tool behavior (CI workflow files, consumed tool configs) are understood classes with procedures, never residents of "unknown."
 - **Novelty gets visibility, not review.** The first occurrence of a never-before-seen file type produces one flag line at the walk — remind-tier, non-blocking — so the allowlist grows when something new deserves a procedure.
-- **Motivating specimen (credit: code-reviewer, nedlern, 2026-07-28):** the legacy classifier had no records tier, so byte-preserved walk ledgers (`tasks/sessions/*.md`) fell through to the heaviest class ("non-doc, or unknown path; fail closed") and cost two full dual-runtime review legs during wind-down. Their design input — "a path-based classifier with no records tier costs two full legs on a walk ledger" — generalized to this allowlist requirement at the 2026-07-31 walk.
+- **Motivating specimen (credit: code-reviewer, nedlern, 2026-07-28):** the legacy classifier had no records tier, so byte-preserved walk ledgers (`tasks/sessions/*.md`) fell through to the heaviest class ("non-doc, or unknown path; fail closed") and cost two full dual-agent-binary review legs during wind-down. Their design input — "a path-based classifier with no records tier costs two full legs on a walk ledger" — generalized to this allowlist requirement at the 2026-07-31 walk.
 
 ## Relations
 
 - The git-gatekeeper's dormant review-evidence growth point is where Part 1 attaches when a class is gated: https://github.com/nedsnodes/nedsnodes/issues/3
-- The multi-agent research behind the cross-runtime lever: https://github.com/nedsnodes/nedsnodes/issues/26
+- The multi-agent research behind the cross-agent-binary lever: https://github.com/nedsnodes/nedsnodes/issues/26
 
 ## Close condition
 

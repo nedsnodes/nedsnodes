@@ -4,7 +4,7 @@ issue: "[Mutual oversight: agents watch each other's session transcripts, both r
 
 # Mutual oversight: agents watch each other's session transcripts, both runtimes — capability record + lean build candidate
 
-Boss-named capability ("mutual oversight" — his replacement for "spying"), boss-directed GHI 2026-07-29, filed by new-vp (nedlern session b6241858). Capability record plus build candidate: **agents watch each other's session transcripts, in both runtime directions**, so one agent can follow another's work in near-real time without the human ferrying content between sessions.
+Boss-named capability ("mutual oversight" — his replacement for "spying"), boss-directed GHI 2026-07-29, filed by new-vp (nedlern session b6241858). Capability record plus build candidate: **agents watch each other's session transcripts, in both agent-binary directions**, so one agent can follow another's work in near-real time without the human ferrying content between sessions.
 
 ## What is proven today (all evidence verified on disk before filing)
 
@@ -22,7 +22,7 @@ A Codex-side monitor: file-change detection (watchexec, established OSS) → sav
 - Research report (machine-local session artifact, verified 11.9KB): `/Users/el/Projects/nedlern-sonnet/cvp/tasks/sessions/cvp-cross-agent-jsonl-monitor-research-2026-07-29.md` — **re-home this file if this GHI outlives the legacy worktrees**; it is not repository-committed.
 - Wake-canary evidence (verified): `/Users/el/Projects/nedlern-sonnet/cvp/tasks/sessions/cvp-monitor-wake-canary-2026-07-28.md`
 - Official docs cited by the research: Claude Code Monitor tool — https://code.claude.com/docs/en/tools-reference#monitor-tool ; Codex App Server — https://learn.chatgpt.com/docs/app-server ; watchexec — https://github.com/watchexec/watchexec
-- Research: cvp (Codex runtime), 2026-07-29, boss-directed, relayed and verified by new-vp. Related: the session-lifecycle observations on GHI [Runtime-behavior research bundle: instruction compression + deliberate scrub, instruction precedence, output styles, context clearing, names reviewer, memory maintenance](https://github.com/nedschorus/nedschorus/issues/29) (transcript identity and store keying) and the comms-bridge/companion design surfaces this capability may partially subsume.
+- Research: cvp (Codex), 2026-07-29, boss-directed, relayed and verified by new-vp. Related: the session-lifecycle observations on GHI [Runtime-behavior research bundle: instruction compression + deliberate scrub, instruction precedence, output styles, context clearing, names reviewer, memory maintenance](https://github.com/nedschorus/nedschorus/issues/29) (transcript identity and store keying) and the comms-bridge/companion design surfaces this capability may partially subsume.
 
 ## Outcome
 

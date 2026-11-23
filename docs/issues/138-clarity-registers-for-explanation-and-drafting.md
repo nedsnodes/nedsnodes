@@ -54,8 +54,8 @@ Grounding observation (2026-08-22): when the user asks a question, the answering
    CLAUDE.md rule). CLAUDE.md's stale same-rule-in-AGENTS.md parenthetical
    dropped in the same commit. The dissolved duplicate content was verified
    present in CLAUDE.md first; the bullet-copy half of the recommendation became
-   moot. Actors: any agent drafting instruction text (the bullet); the Codex
-   runtime, which reads AGENTS.md (the pointer).*
+   moot. Actors: any agent drafting instruction text (the bullet); Codex,
+   which reads AGENTS.md (the pointer).*
 6. Routing: the drafting register into md-write's commissioned build (founding plan
    step 1; ghi-write's unbuilt sibling); "draft-md" rejected as a name collision.
    *processed 2026-08-22 → REVISED by the user, reversing the presented routing:
