@@ -296,19 +296,27 @@ GHI_GUIDE_AGENT_ANSWER_FIELDS_EACH_KIND_NEEDS = {
 GHI_GUIDE_AGENT_ANSWER_OPTIONAL_FIELDS_EACH_KIND_MAY_GIVE = {
     GHI_GUIDE_AGENT_ANSWER_KIND_READING_LIST: ("notes",),
 }
-# The answer kinds each --request-form allows. No program sends form 4, a link
-# repair, so no request form allows `repair`.
+# Each --request-form's opening sentence, from design § Prompts, and the answer
+# kinds it allows, in one table, so that no form can have one without the
+# other. No program sends form 4, a link repair, so no request form allows
+# `repair`.
 GHI_GUIDE_AGENT_REQUEST_FORM_VALUE_ASKING_FOR_READING_LIST = "reading-list"
 GHI_GUIDE_AGENT_REQUEST_FORM_VALUE_ASKING_FOR_VERDICT_ON_DRAFT_ISSUE = "draft-verdict"
-GHI_GUIDE_AGENT_ANSWER_KINDS_EACH_REQUEST_FORM_ALLOWS = {
+_REQUEST_FORM_OPENING_SENTENCE_AND_ANSWER_KINDS = {
     GHI_GUIDE_AGENT_REQUEST_FORM_VALUE_ASKING_FOR_READING_LIST: (
-        GHI_GUIDE_AGENT_ANSWER_KIND_READING_LIST, GHI_GUIDE_AGENT_ANSWER_KIND_NOT_ABOUT_ISSUES,
-        GHI_GUIDE_AGENT_ANSWER_KIND_ASK_USER_ABOUT_RULING),
+        "You are asked for a reading list.",
+        (GHI_GUIDE_AGENT_ANSWER_KIND_READING_LIST, GHI_GUIDE_AGENT_ANSWER_KIND_NOT_ABOUT_ISSUES,
+         GHI_GUIDE_AGENT_ANSWER_KIND_ASK_USER_ABOUT_RULING)),
     # scripts/ghi-issue-write.py's adjudication, whose question is always a
     # draft GHI-MD and so is always about issues.
     GHI_GUIDE_AGENT_REQUEST_FORM_VALUE_ASKING_FOR_VERDICT_ON_DRAFT_ISSUE: (
-        GHI_GUIDE_AGENT_ANSWER_KIND_VERDICT, GHI_GUIDE_AGENT_ANSWER_KIND_ASK_USER_ABOUT_RULING),
+        "You are shown a draft issue — its title and its GHI-MD — and asked "
+        "whether the corpus already covers it.",
+        (GHI_GUIDE_AGENT_ANSWER_KIND_VERDICT, GHI_GUIDE_AGENT_ANSWER_KIND_ASK_USER_ABOUT_RULING)),
 }
+GHI_GUIDE_AGENT_ANSWER_KINDS_EACH_REQUEST_FORM_ALLOWS = {
+    request_form: answer_kinds
+    for request_form, (_opening_sentence, answer_kinds) in _REQUEST_FORM_OPENING_SENTENCE_AND_ANSWER_KINDS.items()}
 
 
 def ghi_guide_agent_answer_json_schema_build_for_kinds(kinds) -> dict:
@@ -373,15 +381,6 @@ GHI_GUIDE_AGENT_ASK_PROMPT_SENTENCE_ASKING_THE_AGENT_TO_NAME_ISSUES_WHOSE_DESIGN
     "something the plan should reuse instead of building its own.")
 
 
-GHI_GUIDE_AGENT_ASK_PROMPT_OPENING_SENTENCE_FOR_EACH_REQUEST_FORM = {
-    GHI_GUIDE_AGENT_REQUEST_FORM_VALUE_ASKING_FOR_READING_LIST:
-        "You are asked for a reading list.",
-    GHI_GUIDE_AGENT_REQUEST_FORM_VALUE_ASKING_FOR_VERDICT_ON_DRAFT_ISSUE:
-        "You are shown a draft issue — its title and its GHI-MD — and asked "
-        "whether the corpus already covers it.",
-}
-
-
 def compose_resume_ask_prompt(question: str, include_closed: bool, changed_numbers,
                               is_resume: bool, *, request_form: str) -> str:
     """§ Prompts: Resume ask prompt for a reading-list request, § Adjudication
@@ -397,7 +396,8 @@ def compose_resume_ask_prompt(question: str, include_closed: bool, changed_numbe
             "Re-read them in the mirror before answering"
             + (" — an entry may have moved to issues-closed.md." if reading_list else ".")
         )
-    parts.append(f"{GHI_GUIDE_AGENT_ASK_PROMPT_OPENING_SENTENCE_FOR_EACH_REQUEST_FORM[request_form]} {question}")
+    opening_sentence, _answer_kinds = _REQUEST_FORM_OPENING_SENTENCE_AND_ANSWER_KINDS[request_form]
+    parts.append(f"{opening_sentence} {question}")
     if reading_list:
         parts.append(GHI_GUIDE_AGENT_ASK_PROMPT_SENTENCE_ASKING_THE_AGENT_TO_NAME_ISSUES_WHOSE_DESIGN_A_PLAN_SHOULD_REUSE)
     if include_closed:
