@@ -22,6 +22,7 @@ import shlex
 import sys
 import tempfile
 from pathlib import Path
+from unittest import mock
 
 # Before anything runs git: a run started with GIT_DIR set, or with another
 # variable that redirects git, must still build this suite's scratch
@@ -129,19 +130,6 @@ def design_prompt_lines(section):
     return quoted
 
 
-@contextlib.contextmanager
-def patch_environment(name, value):
-    earlier = os.environ.get(name)
-    os.environ[name] = value
-    try:
-        yield
-    finally:
-        if earlier is None:
-            os.environ.pop(name, None)
-        else:
-            os.environ[name] = earlier
-
-
 def reading_list(*numbers, notes=()):
     """ghi-guide-agent's structured_output for a reading list."""
     return {"kind": "reading-list", "issues": list(numbers), "notes": list(notes)}
@@ -237,31 +225,66 @@ with tempfile.TemporaryDirectory() as temporary:
 
     resume_ask = design_prompt_lines("Resume ask prompt")
     adjudication = design_prompt_lines("Adjudication request")
-    reading_list_opening, plan_reuse = resume_ask[1], resume_ask[2]
+
+    def reading_list_prompt_from_design(is_resume, include_closed):
+        only_on_resume = "<only on resume, and only when the refresh changed entries:> "
+        only_with_closed = "<only with --include-closed:> "
+        kept = []
+        for line in resume_ask:
+            if line.startswith(only_on_resume) and not is_resume:
+                continue
+            if line.startswith(only_with_closed):
+                if not include_closed:
+                    continue
+                line = line[len(only_with_closed):]
+            kept.append(design_slots_filled(line))
+        return "\n\n".join(kept)
+
     whole_ask_prompt_each_request_form_and_resume = {
-        ("reading-list", True): "\n\n".join(
-            design_slots_filled(line) for line in (resume_ask[0], reading_list_opening, plan_reuse)),
-        ("reading-list", False): "\n\n".join(
-            design_slots_filled(line) for line in (reading_list_opening, plan_reuse)),
-        ("draft-verdict", True): design_slots_filled(adjudication[0]) + "\n\n"
+        ("draft-verdict", True, False): design_slots_filled(adjudication[0]) + "\n\n"
             + adjudication[1] + " " + question,
-        ("draft-verdict", False): adjudication[1] + " " + question,
+        ("draft-verdict", False, False): adjudication[1] + " " + question,
     }
+    for is_resume in (False, True):
+        for include_closed in (False, True):
+            whole_ask_prompt_each_request_form_and_resume[
+                ("reading-list", is_resume, include_closed)
+            ] = reading_list_prompt_from_design(is_resume, include_closed)
     cold_start = design_prompt_lines("Cold-start prompt")
-    # Lines of § Cold-start prompt the cold-start turn carries whole, and parts
-    # of lines whose rest the JSON replies change.
-    cold_start_whole_line_openings = (
-        "You run inside a checkout", "- issues-open.md", "- <question-files-path>")
-    cold_start_line_parts = (
-        "Answer from these files only: never read issue state from GitHub",
+    # Every line of § Cold-start prompt is carried whole, except that of each
+    # line holding one of these parts only the part is: the rest is the design's
+    # text-reply wording, which the JSON replies replace.
+    cold_start_parts_of_lines_with_text_reply_wording = (
+        "1. **You are asked for a reading list**: what should an agent read "
+        "before it files or edits an issue on some topic.",
         "2. **You are shown a draft issue** — its title and its GHI-MD — and "
-        "asked whether the corpus already covers it.")
+        "asked whether the corpus already covers it. When the draft is an edit "
+        "of an existing issue, the request names that issue: leave it out of "
+        "the comparison.",
+        "3. **You are told a fact that corrects your last reply** — an issue you "
+        "cited has closed — and asked to redo that one judgment. The fact is "
+        "already established by script from the refreshed mirror: do not "
+        "question or verify it; re-read the named entry in issues-closed.md, "
+        "including any",
+        "4. **You are asked to repair a link** — a cross-reference the "
+        "maintenance sweep found broken. The request states the defect; repair "
+        "exactly that link and nothing else. Issue edits go through gh as "
+        "normal; document-side changes are landed through "
+        "`scripts/ghi-issue-write.py`, whose pull request merge-lane-2 reviews "
+        "and merges; never push to main yourself.",
+        "- Asked a question about anything beyond the issue corpus — the wiki, "
+        "the code, anything else —",
+        "- Whether an old ruling still binds is never yours to judge.",
+        "A question beyond the corpus gets not-about-issues even when it "
+        "touches a ruling.")
     question_files_directory = str(root / "question-files")
-    for request_form, structured_output in (
-            ("reading-list", reading_list(5)),
-            ("draft-verdict", {"kind": "verdict", "verdict": "unrelated", "issues": []})):
+    for request_form, include_closed, structured_output in (
+            ("reading-list", False, reading_list(5)),
+            ("reading-list", True, reading_list(5)),
+            ("draft-verdict", False, {"kind": "verdict", "verdict": "unrelated", "issues": []})):
         for is_resume in (False, True):
-            seat_whole = root / f"seat-whole-{request_form}-resume-{is_resume}"
+            seat_whole = root / (f"seat-whole-{request_form}-resume-{is_resume}"
+                                 f"-closed-{include_closed}")
             seat_whole.mkdir()
             if is_resume:
                 ghi_ask.save_state(seat_whole / ghi_ask.STATE_FILE_NAME,
@@ -275,14 +298,15 @@ with tempfile.TemporaryDirectory() as temporary:
                 whole_calls = fake_claude_queue([
                     ({"session_id": "sess-W", "result": "(ack)"}, None),
                     ({"session_id": "sess-W", "structured_output": structured_output}, None)])
-            with patch_environment(
-                    ghi_ask.ghi_issue_write.GHI_GUIDE_AGENT_LOG_STORE_DIRECTORY_VARIABLE,
-                    question_files_directory):
-                answer, closed_on, error = ghi_ask.ask(question, False, seat_whole,
+            with mock.patch.dict(os.environ, {
+                    ghi_ask.ghi_issue_write.GHI_GUIDE_AGENT_LOG_STORE_DIRECTORY_VARIABLE:
+                    question_files_directory}):
+                answer, closed_on, error = ghi_ask.ask(question, include_closed, seat_whole,
                                                        "x/y", request_form=request_form)
-            expected = whole_ask_prompt_each_request_form_and_resume[(request_form, is_resume)]
-            check(f"a {request_form} ask's whole prompt (resume={is_resume}) is "
-                  "its design section's text",
+            expected = whole_ask_prompt_each_request_form_and_resume[
+                (request_form, is_resume, include_closed)]
+            check(f"a {request_form} ask's whole prompt (resume={is_resume}, "
+                  f"include_closed={include_closed}) is its design section's text",
                   error is None and whole_calls[-1][0] == expected,
                   (error, whole_calls[-1][0], expected))
             if not is_resume:
@@ -290,21 +314,20 @@ with tempfile.TemporaryDirectory() as temporary:
                 mirror_path = str(seat_whole / ghi_ask.mirror_refresh.DEFAULT_MIRROR_DIR)
                 filled = [design_slots_filled(line, mirror_path, question_files_directory)
                           for line in cold_start]
-                openings = tuple(design_slots_filled(opening, mirror_path, question_files_directory)
-                                 for opening in cold_start_whole_line_openings)
-                wanted = [line for line in filled if line.startswith(openings)]
-                wanted += [part for part in cold_start_line_parts
-                           if any(part in line for line in filled)]
+                wanted = [next((part for part in cold_start_parts_of_lines_with_text_reply_wording
+                                if part in line), line) for line in filled]
                 missing = [line for line in wanted if line not in cold_start_prompt]
-                check(f"a {request_form} ask's cold-start turn carries § Cold-start "
-                      "prompt's mirror paragraph, issues-open.md bullet and "
-                      "question-files bullet whole, its GitHub sentence and form 2 "
-                      "opening, with both slots filled, the question files' slot "
+                parts_the_design_lacks = [
+                    part for part in cold_start_parts_of_lines_with_text_reply_wording
+                    if part not in wanted]
+                check(f"a {request_form} ask's cold-start turn carries every line of "
+                      "§ Cold-start prompt whole, apart from each line's text-reply "
+                      "wording, with both slots filled, the question files' slot "
                       "with the directory the write tool's log-store resolver gives",
-                      len(wanted) == len(cold_start_whole_line_openings) + len(cold_start_line_parts)
-                      and not missing and "{" not in cold_start_prompt
+                      not missing and not parts_the_design_lacks
+                      and "{" not in cold_start_prompt
                       and "-path>" not in cold_start_prompt,
-                      (wanted, missing, cold_start_prompt[:3000]))
+                      (missing, parts_the_design_lacks, cold_start_prompt[:3000]))
 
     # --- reincarnation: closes-since-birth over threshold forces a cold start ----
     seat3 = root / "seat3"
