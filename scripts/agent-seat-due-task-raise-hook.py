@@ -47,7 +47,8 @@ yet numbered. A walk-document that
 does not exist, or that holds no item with the heading, or more than one, is
 a fault the hook names as it names an unreadable list: the walk-document
 holds the item before its heading can be named, so its absence means a wrong
-path. The files are read on this machine only, with no cache.
+path. The files are read on this machine only, and each hook execution reads
+them afresh; only its parse of a text it has already parsed is reused.
 
 An open task (status pending or in_progress) is raised when its
 prerequisites are met, and only when every task in its blockedBy is
@@ -456,8 +457,28 @@ def walk_finder_and_answer_program():
     return _walk_modules
 
 
-def approval_walk_item_decided_or_problem(condition: dict) -> dict:
-    """{"met": bool}, with "problem", a clause saying why, when the item cannot be found."""
+class MarkdownParserParsingEachTextOnce:
+    """A markdown parser that parses each distinct text once; callers must not change its tokens.
+
+    Keyed by the text itself, so a file that changes is parsed anew."""
+
+    def __init__(self, parser):
+        self._parser = parser
+        self._tokens_by_text = {}
+
+    def parse(self, text):
+        if text not in self._tokens_by_text:
+            self._tokens_by_text[text] = self._parser.parse(text)
+        return self._tokens_by_text[text]
+
+    def __getattr__(self, name):
+        return getattr(self._parser, name)
+
+
+def approval_walk_item_decided_or_problem(condition: dict, checker=None) -> dict:
+    """{"met": bool}, with "problem", a clause saying why, when the item cannot be found.
+
+    With `checker`, parses through the parser it keeps for this execution."""
     walk_finder, answer_program = walk_finder_and_answer_program()
     minutes = Path(condition[WALK_MINUTES_FIELD])
     document = minutes.with_name(minutes.name[:-len(WALK_MINUTES_SUFFIX)] + ".md")
@@ -469,7 +490,8 @@ def approval_walk_item_decided_or_problem(condition: dict) -> dict:
         # means a wrong path, which would otherwise hold the task in silence for good.
         return {"met": False, "problem": f"the walk-document {document}, which the walk-minutes "
                                          f"path {minutes} names, does not exist"}
-    parser = walk_finder.markdown_parser()
+    parser = (walk_finder.markdown_parser() if checker is None
+              else checker.markdown_parser_parsing_each_text_once(walk_finder))
     lines = document_text.split("\n")
     title = answer_program.heading_title(walk_finder, heading)
     units = walk_finder.item_unit_spans(document_text, parser)
@@ -488,7 +510,7 @@ def approval_walk_item_decided_or_problem(condition: dict) -> dict:
 
 def condition_answer(kind: str, condition, checker) -> dict:
     if kind == APPROVAL_WALK_ITEM_KIND:
-        return approval_walk_item_decided_or_problem(condition)
+        return approval_walk_item_decided_or_problem(condition, checker)
     return checker.answer(kind, condition)
 
 
@@ -558,6 +580,14 @@ class GitHubConditionChecker:
         self.changed = False
         self.gh_failures = []
         self.conditions_skipped_for_budget = []
+        self._markdown_parser_parsing_each_text_once = None
+
+    def markdown_parser_parsing_each_text_once(self, walk_finder) -> MarkdownParserParsingEachTextOnce:
+        """The one parser of this checker, and so of this execution, built on first use."""
+        if self._markdown_parser_parsing_each_text_once is None:
+            self._markdown_parser_parsing_each_text_once = MarkdownParserParsingEachTextOnce(
+                walk_finder.markdown_parser())
+        return self._markdown_parser_parsing_each_text_once
 
     def answer(self, kind: str, number: int) -> dict:
         answer = self.cached_or_fresh_answer(kind, number)

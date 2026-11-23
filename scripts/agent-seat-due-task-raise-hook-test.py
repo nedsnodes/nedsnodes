@@ -1466,6 +1466,50 @@ unheld, held = hook.unheld_and_held_tasks(hook.read_tasks(seat.task_directory),
 check("approval-walk item not decided: the next-action list counts the task held",
       unheld == ["79"] and held == 1, (unheld, held))
 
+
+def hook_run_recording_each_parsed_text(seat):
+    """The output of one in-process hook run, and every text any markdown parser parsed in it."""
+    parser_class = type(hook.walk_finder_and_answer_program()[0].markdown_parser())
+    real_parse = parser_class.parse
+    parsed = []
+
+    def recording_parse(self, text, *arguments, **keywords):
+        parsed.append(text)
+        return real_parse(self, text, *arguments, **keywords)
+
+    parser_class.parse = recording_parse
+    try:
+        return hook_run_in_process(seat), parsed
+    finally:
+        parser_class.parse = real_parse
+
+
+seat = WalkSeat()
+seat.waiting_task("130", ITEM_1, subject="Decided")
+seat.waiting_task("131", "The `restore` task finds its commit", subject="Undecided")
+seat.waiting_task("132", "What this walk decided", subject="Also undecided")
+seat.minutes_say("item 1 of 3: approved; every text the change adds has had a fast read. <accepted>")
+output, parsed = hook_run_recording_each_parsed_text(seat)
+check("three conditions on one walk-document: the document is parsed exactly once",
+      parsed.count(WALK_DOCUMENT) == 1, parsed.count(WALK_DOCUMENT))
+check("three conditions on one walk-document: only the decided item's task is raised",
+      output is not None and 'task 130 \\"Decided\\"' in output and "ndecided" not in output, output)
+check("three conditions on one walk-document: each answer equals one computed with its own parse",
+      [hook.approval_walk_item_decided_or_problem({hook.WALK_MINUTES_FIELD: str(seat.minutes),
+                                                   hook.ITEM_HEADING_FIELD: heading})["met"]
+       for heading in (ITEM_1, "The `restore` task finds its commit", "What this walk decided")]
+      == [True, False, False])
+
+seat = WalkSeat()
+seat.waiting_task("133", ITEM_1)
+seat.minutes_say("item 1 of 3: deferred; it moves to just before the summary item. <open>")
+first_output = hook_run_in_process(seat)
+seat.document.write_text(WALK_DOCUMENT.replace(ITEM_1, "A heading the task does not name"))
+second_output = hook_run_in_process(seat) or ""
+check("walk-document changed between two hook runs: the second run reads the changed file",
+      first_output is None and "holds no item heading that reads" in second_output,
+      (first_output, second_output))
+
 # --- an approval record: a ready pending task is started by a forked subagent ----
 APPROVAL = "walk item 5, approved 2026-10-26"
 
