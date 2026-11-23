@@ -903,7 +903,7 @@ for label, command, cwd, expected in (
         ("a relative -C after cd", "cd /x && git -C r worktree remove A", "/",
          (None, "the command changes directory, and the -C directory r is a relative path")),
         ("a -C where git lists no worktrees", "git -C x worktree remove A", "/r",
-         (None, "git could not list the worktrees in /r/x, the directory the removal runs in: `git worktree list` "
+         (None, "git could not list the worktrees of the directory the removal runs in: `git worktree list` "
                 "exited 128: fatal: not a git repository"))):
     check(f"a removal with {label} gives {expected}",
           hook.worktrees_removed_or_unresolved_reason(command, cwd, worktrees_listed_in_r_alone) == expected,
@@ -1007,19 +1007,22 @@ for name, label, cwd_of, directory_of in (
           and not store_holds_cold_read_record_of("addedfirst"), (code, output, stderr))
 
 # A leading ~ in the path a `git worktree add` adds at, and in a -C directory, is expanded as bash expands it.
-home_environment = dict(os.environ, HOME=str(_scratch))
-tilde_checkout, tilde_worktree = checkout_with_worktree("tildeadd")
-code, output, stderr = run_hook_process(
-    "git worktree add -q --detach ~/tildeadd/added && git worktree remove ~/tildeadd/added", tilde_checkout,
-    home_environment)
+# In-process, because a hook process given this HOME cannot find the shell parser installed under the real one.
+tilde_add_checkout, _ = checkout_with_worktree("tildeadd")
+tilde_dash_c_checkout, tilde_dash_c_worktree = checkout_with_worktree("tildedashc")
+real_home = os.environ["HOME"]
+os.environ["HOME"] = str(_scratch)
+try:
+    tilde_add_result = run_hook(payload_for(
+        "git worktree add -q --detach ~/tildeadd/added && git worktree remove ~/tildeadd/added", tilde_add_checkout))
+    tilde_dash_c_result = run_hook(payload_for(
+        f"git -C ~/tildedashc/checkout worktree remove {tilde_dash_c_worktree.name}", outside_any_repository))
+finally:
+    os.environ["HOME"] = real_home
 check("removing the worktree the same command adds first at a path with a leading ~ ships no other worktree's "
-      "records", code == 0 and output is None and not store_holds_cold_read_record_of("tildeadd"),
-      (code, output, stderr))
-tilde_checkout, tilde_worktree = checkout_with_worktree("tildedashc")
-code, output, stderr = run_hook_process(
-    f"git -C ~/tildedashc/checkout worktree remove {tilde_worktree.name}", outside_any_repository, home_environment)
+      "records", tilde_add_result == (0, None) and not store_holds_cold_read_record_of("tildeadd"), tilde_add_result)
 check("a removal with -C into a directory with a leading ~ ships the records of the worktree it names",
-      code == 0 and output is None and store_holds_cold_read_record_of("tildedashc"), (code, output, stderr))
+      tilde_dash_c_result == (0, None) and store_holds_cold_read_record_of("tildedashc"), tilde_dash_c_result)
 
 # A removal with -C whose worktree a record is being written in is deferred, with the waiter run from the main
 # checkout of the repository -C names.
