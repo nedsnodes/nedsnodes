@@ -276,7 +276,7 @@ def main():
                   ["7", head_commit, main_commit, *directory_options],
                   [str(filled_in_file), *directory_options],
                   ["7", merge_base, *directory_options],
-                  ["7", *directory_options],
+                  ["7", "--head-commit", head_commit, *directory_options],
                   ["7", "7a", head_commit, *directory_options]], detail)
         filled_in = json.loads(filled_in_file.read_text()) if filled_in_file.exists() else None
         check("the filled-in copy is the entry with origin's full head and main added",
@@ -382,7 +382,8 @@ def main():
                   and all(other in completed.stdout for other in others)
                   and "never met the other steps" not in completed.stdout
                   and completed.stdout.count("nothing was merged.") == 1, detail)
-            expected_arguments = {3: ["7", merge_base], 4: ["7"], 5: ["7", "7a", head_commit]}
+            expected_arguments = {3: ["7", merge_base], 4: ["7", "--head-commit", head_commit],
+                                  5: ["7", "7a", head_commit]}
             rerun_line = (f"  step {position}: "
                           + shlex.join([sys.executable, str(checkout / "scripts" / step),
                                         *expected_arguments[position], *directory_options]))
@@ -527,7 +528,7 @@ def main():
                   f"{helpers / 'cx' / ('pr7-' + merge_base[:8])}, and do not run it again\n"
                   in stderr
               and f"  step 4 exited 3: run it alone, with the same commits, to see its "
-                  f"message: {shlex.join([sys.executable, str(checkout / 'scripts' / STEPS[3]), '7', *directory_options])}\n"
+                  f"message: {shlex.join([sys.executable, str(checkout / 'scripts' / STEPS[3]), '7', '--head-commit', head_commit, *directory_options])}\n"
                   in stderr
               and f"  step 5 exited 0: read its records in "
                   f"{helpers / 'claude-reviews' / ('pr7-' + head_commit)}*, and do not run it "

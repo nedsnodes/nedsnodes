@@ -3,9 +3,17 @@
 
 Usage:
   scripts/merge-lane-pull-request-head-test-run-on-merged-worktree.py <pull request number>...
-      [--merge-lane-worktrees-and-outputs-directory DIR] [--merge-lane-review-worktrees-directory DIR] [--review-tools-worktree-at-main DIR]
+      [--head-commit COMMIT] [--merge-lane-worktrees-and-outputs-directory DIR] [--merge-lane-review-worktrees-directory DIR] [--review-tools-worktree-at-main DIR]
 
-For each pull request in turn, runs --review-tools-worktree-at-main's
+For each pull request in turn, first rebuilds pr<n>-merged, with
+--review-tools-worktree-at-main's
+scripts/merge-lane-pull-request-head-and-merged-worktrees-rebuild.py, from the
+commit that worktree has checked out and the pull request's head on origin, or
+--head-commit, which a caller reviewing one fixed head passes and which takes
+one pull request. pr<n>-head is left as it is, because reviewers may be reading
+it. When the rebuild fails, that pull request's tests do not run.
+
+Then runs --review-tools-worktree-at-main's
 scripts/pull-request-head-test-run.py, not the pull request's, so a pull
 request cannot pass by changing its runner. It tests pr<n>-merged under the
 review worktrees directory and, under the worktrees and outputs directory,
@@ -26,11 +34,11 @@ nothing here retries.
 
 Prints one line per pull request with the run's exit code and SUMMARY line.
 Exit codes: 0 every run exited 0 and every copy of its stderr was written;
-otherwise the code set by the first pull request that failed: 2 when a copy
-of its run's stderr could not be written, even when the run exited nonzero,
-else its run's exit code; 2 also when tripwire-bin/ or
---review-tools-worktree-at-main's scripts/pull-request-head-test-run.py is
-missing, before any run.
+otherwise the code set by the first pull request that failed: 2 when its
+pr<n>-merged could not be rebuilt, or a copy of its run's stderr could not be
+written, even when the run exited nonzero, else its run's exit code; 2 also,
+before any run, when tripwire-bin/ or either program named above is missing
+from --review-tools-worktree-at-main, or git cannot read that worktree's commit.
 """
 
 import argparse
@@ -42,6 +50,7 @@ import sys
 from pathlib import Path
 
 HEAD_TEST_RUNNER = Path("scripts") / "pull-request-head-test-run.py"
+MERGED_WORKTREE_REBUILD = Path("scripts") / "merge-lane-pull-request-head-and-merged-worktrees-rebuild.py"
 
 _common_spec = importlib.util.spec_from_file_location(
     "merge_lane_pull_request_helpers_common", Path(__file__).resolve().with_name(
@@ -57,8 +66,39 @@ def parse_arguments(argv):
                     "pull request, with its outputs under the worktrees and outputs directory.")
     parser.add_argument("pull_requests", type=int, nargs="+", metavar="pull_request",
                         help="a pull request's number")
+    parser.add_argument("--head-commit",
+                        help="the head to merge, instead of the pull request's head on origin; "
+                             "takes one pull request")
     common.add_directory_options(parser, "hr/ and tripwire-bin/")
-    return common.resolve_path_options(parser.parse_args(argv))
+    arguments = parser.parse_args(argv)
+    if arguments.head_commit and len(arguments.pull_requests) != 1:
+        parser.error("--head-commit takes exactly one pull request; run this program once for "
+                     "each pull request, or leave --head-commit out")
+    return common.resolve_path_options(arguments)
+
+
+def merged_worktree_rebuild_failure(arguments, number, main_commit, environment):
+    """Rebuild pr<n>-merged; return None, or what failed."""
+    tools = arguments.review_tools_worktree_at_main
+    head = arguments.head_commit
+    if head is None:
+        read = subprocess.run(
+            ["git", "-C", str(tools), "ls-remote", "--exit-code", "origin",
+             f"refs/pull/{number}/head"],
+            capture_output=True, text=True, env=environment, stdin=subprocess.DEVNULL)
+        if read.returncode != 0:
+            return (f"git ls-remote could not read refs/pull/{number}/head from origin "
+                    f"(exit {read.returncode}): {read.stderr.strip()}\n"
+                    f"Check the pull request number, then run this again.")
+        head = read.stdout.split()[0]
+    rebuild = subprocess.run(
+        [sys.executable, str(tools / MERGED_WORKTREE_REBUILD), str(number), head, main_commit,
+         "--merged-worktree-only", *common.directory_options_argv(arguments)],
+        stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True, errors="replace",
+        env=environment, stdin=subprocess.DEVNULL)
+    if rebuild.returncode != 0:
+        return f"{MERGED_WORKTREE_REBUILD.name} exited {rebuild.returncode}:\n{rebuild.stdout.strip()}"
+    return None
 
 
 def main(argv=None):
@@ -72,15 +112,33 @@ def main(argv=None):
               f"Restore {tripwire} with a claude and a codex that exit 1, or pass the "
               f"--merge-lane-worktrees-and-outputs-directory that holds it.")
         return 2
-    missing = common.review_tool_missing_message(arguments, HEAD_TEST_RUNNER)
-    if missing:
-        print(f"not run: {missing}")
-        return 2
+    for tool in (HEAD_TEST_RUNNER, MERGED_WORKTREE_REBUILD):
+        missing = common.review_tool_missing_message(arguments, tool)
+        if missing:
+            print(f"not run: {missing}")
+            return 2
     environment = run_all_test_suites.environment_without_git_redirecting_variables()
     environment["PATH"] = f"{tripwire}{os.pathsep}{environment.get('PATH', '')}"
+    main_read = subprocess.run(
+        ["git", "-C", str(review_tools_worktree), "rev-parse", "--verify", "HEAD^{commit}"],
+        capture_output=True, text=True, env=environment, stdin=subprocess.DEVNULL)
+    if main_read.returncode != 0:
+        print(f"not run: git cannot read the commit checked out in {review_tools_worktree}: "
+              f"{main_read.stderr.strip()}\n"
+              f"Pass a --review-tools-worktree-at-main that is a checkout at main.")
+        return 2
+    main_commit = main_read.stdout.strip()
 
     first_failure = 0
     for number in arguments.pull_requests:
+        failure = merged_worktree_rebuild_failure(arguments, number, main_commit, environment)
+        if failure is not None:
+            print(f"PR {number} head test run: not run, because pr{number}-merged could not be "
+                  f"rebuilt on main {main_commit[:12]}, so no suite ran for this pull request.\n"
+                  f"{failure}", flush=True)
+            if first_failure == 0:
+                first_failure = 2
+            continue
         log_store = common.pull_request_head_test_run_log_store_root_directory(arguments, number)
         outputs = log_store.parent
         log_store.mkdir(parents=True, exist_ok=True)
