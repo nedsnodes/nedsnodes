@@ -56,7 +56,7 @@ WHAT IS PINNED HERE.
 
   - The read is seven cells: the defect-hunt pass on both tiers of both
     agent-binaries, the terminology pass (user-ruled 2026-09-05) on the
-    `deep` tier of both, and the defect-hunt pass on agy, on Gemini Argon at
+    `deep` tier of both, and the defect-hunt pass on agy, on Gemini Neon at
     high. The terminology cells and the agy cell run
     at the effort the grid pins, which the stub reads off its own command
     line; the agy cell runs inside the fixture's pass-through stand-in for
@@ -749,7 +749,7 @@ try:
     check("the closing text names the six cells still reading as stopped",
           all(name in stopped_line for name in (
               "claude-hunt-deep", "claude-hunt-second-strongest-model", "claude-terminology-deep",
-              "codex-hunt-deep", "codex-terminology-deep", "agy-hunt-gemini-4-argon-high")), repr(stopped_line))
+              "codex-hunt-deep", "codex-terminology-deep", "agy-hunt-gemini-4-neon-high")), repr(stopped_line))
     saved_lines = [line for line in result.stdout.splitlines() if line.startswith("saved:")]
     check("no cell that was still reading lands",
           all("codex-hunt-second-strongest-model" in line for line in saved_lines), repr(saved_lines))
@@ -1375,30 +1375,30 @@ try:
                   for stamp in terminology_stamps),
           repr(terminology_stamps))
 
-    # --- The agy cell is a defect-hunt on Gemini Argon at high ---------------
+    # --- The agy cell is a defect-hunt on Gemini Neon at high ---------------
     # agy serves only the fast tier, so the grid gives the model and effort.
-    agy_report = record_directory / "agy-hunt-gemini-4-argon-high.md" if record_directory else None
+    agy_report = record_directory / "agy-hunt-gemini-4-neon-high.md" if record_directory else None
     agy_stamp = (agy_report.read_text(encoding="utf-8").splitlines()[0]
                  if agy_report and agy_report.is_file() else "")
-    check("the agy cell runs defect-hunt on gemini-4-argon-high at high, tier fast",
-          agy_stamp.startswith("<!-- provenance: runtime=agy model=gemini-4-argon-high ")
+    check("the agy cell runs defect-hunt on gemini-4-neon-high at high, tier fast",
+          agy_stamp.startswith("<!-- provenance: runtime=agy model=gemini-4-neon-high ")
           and "effort=high cell=defect-hunt tier=fast " in agy_stamp
-          and effort_by_report.get("agy-hunt-gemini-4-argon-high.md") == "high",
+          and effort_by_report.get("agy-hunt-gemini-4-neon-high.md") == "high",
           f"stamp={agy_stamp!r}; efforts={effort_by_report!r}")
 
     # --- The agy cell fails both attempts: the other six stand ---------------
     repository = build_scratch_repository(scratch, "checkout-agy-cell-absent")
     result = run_grid(repository, stubs, {"COLD_READ_GRID_TEST_STUB_FAILURE_PLAN": json.dumps(
-        [{"fragment": "agy-hunt-gemini-4-argon-high.md", "attempts": 2}])})
+        [{"fragment": "agy-hunt-gemini-4-neon-high.md", "attempts": 2}])})
     check("an absent agy cell is RETRYING then FAILED from agy's own cause line",
           len(lines_opening(result, "RETRYING:")) == 1
-          and any(line.startswith("FAILED (exit 1): agy-hunt-gemini-4-argon-high — exit-1 — ")
+          and any(line.startswith("FAILED (exit 1): agy-hunt-gemini-4-neon-high — exit-1 — ")
                   for line in lines_opening(result, "FAILED")),
           repr(result.stdout))
     check("an absent agy cell leaves six of seven landed, exit 1",
           result.returncode == 1 and len(reviews_saved_lines(result)) == 6
           and "6 of 7 reports landed in" in result.stdout
-          and any(line.startswith("- agy-hunt-gemini-4-argon-high: exit-1 — ")
+          and any(line.startswith("- agy-hunt-gemini-4-neon-high: exit-1 — ")
                   for line in result.stdout.splitlines()),
           f"exit {result.returncode}; stdout={result.stdout!r}")
 
@@ -2916,7 +2916,7 @@ try:
            for runtime in ("claude", "codex")
            for pass_token, tier in (("hunt", "deep"), ("hunt", "second-strongest-model"),
                                     ("terminology", "deep"))]
-        + ["agy-hunt-gemini-4-argon-high.md"])
+        + ["agy-hunt-gemini-4-neon-high.md"])
     check("the set holds the seven cells, the Question 4 cell, the reference-integrity pre-pass and the stop marker",
           written_names == expected_names, written_names)
 
@@ -3022,7 +3022,7 @@ try:
     repository = build_scratch_repository(scratch, "full-run-count-agy-report-only")
     for day in ("2026-09-01", "2026-09-02", "2026-09-03"):
         seed_log_store_record(repository, f"cold-read-grid-test-target-{day}",
-                              ["agy-hunt-gemini-4-argon-high.md", "reference-check.md"])
+                              ["agy-hunt-gemini-4-neon-high.md", "reference-check.md"])
     result = run_grid(repository, stubs / "full-run-count-agy-report-only")
     check("runs whose only report is the agy cell's count toward the three",
           result.returncode == 2 and "refusing cold-read-full-run 4" in result.stderr,
