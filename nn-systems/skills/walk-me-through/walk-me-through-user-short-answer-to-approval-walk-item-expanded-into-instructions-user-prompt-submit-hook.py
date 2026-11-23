@@ -1425,7 +1425,7 @@ def message_copy_of_item(heading_line, message_heading_line, after_heading, numb
     walk_finder = load_walk_finder()
     parser = walk_finder.markdown_parser()
     opening = parser.parse(f"{message_heading_line}\n{after_heading}", {})
-    words = re.sub(r"^ {0,3}#{1,6}(?:[ \t]+|$)", "", heading_line, count=1)
+    words = re.sub(r"^ {0,3}#{1,6}(?:[ \t]+|$)", "", heading_line)
     if not (opening and opening[0].type == "heading_open" and opening[0].map[0] == 0):
         # Below a plain or bold title, the finder would read a `## Explanation` heading as an unnumbered item of its
         # own; under a `#` heading it is the item's sub-heading. last_showing_message already ends after_heading at
