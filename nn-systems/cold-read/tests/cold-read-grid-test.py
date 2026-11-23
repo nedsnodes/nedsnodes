@@ -1848,7 +1848,9 @@ try:
         def run(*arguments):
             return subprocess.run(["git", "-C", str(repository), "-c", "user.name=grid test",
                                    "-c", "user.email=grid-test@example.invalid", *arguments],
-                                  capture_output=True, text=True)
+                                  capture_output=True, text=True,
+                                  # A developer's merge.default or merge.renames would change the conflicts built here.
+                                  env={**os.environ, "GIT_CONFIG_GLOBAL": os.devnull, "GIT_CONFIG_SYSTEM": os.devnull})
         run("init", "--quiet", "--initial-branch=main")
         (repository / "tracked.md").write_text("Committed.\n", encoding="utf-8")
         run("add", "tracked.md")
@@ -1900,17 +1902,21 @@ try:
     (glob_repository / "chapter1.md").write_text("The agent's own edit.\n", encoding="utf-8")
     with mock.patch.object(grid_module.cell_common, "REPO_ROOT", glob_repository):
         glob_baseline = grid_module.cell_common.working_tree_state()
-        glob_git("rm", "--cached", "--quiet", "chapter[1].md")
+        glob_sibling_index_entry = glob_git("--literal-pathspecs", "ls-files", "--stage", "--", "chapter1.md").stdout
+        glob_git("--literal-pathspecs", "rm", "--cached", "--quiet", "--", "chapter[1].md")
         (glob_repository / "chapter[1].md").write_text("A reviewer's rewrite.\n", encoding="utf-8")
         glob_lines = grid_module.stopped_cells_write_check_lines(
             [scratch / "claude-hunt-deep.md"], glob_baseline, None, set())
     glob_commands = commands_in_line(glob_lines[0]) if glob_lines else []
     if len(glob_commands) == 1:
         subprocess.run(shlex.split(glob_commands[0]), capture_output=True, text=True)
-    check("the undo given for a path with a glob character restores that path and keeps another file's edits",
-          len(glob_commands) == 1
+    check("the undo given for a path with a glob character restores that path and keeps another file's edits "
+          "and index entry",
+          len(glob_commands) == 1 and glob_sibling_index_entry != ""
           and (glob_repository / "chapter[1].md").read_text(encoding="utf-8") == "Committed.\n"
-          and (glob_repository / "chapter1.md").read_text(encoding="utf-8") == "The agent's own edit.\n",
+          and (glob_repository / "chapter1.md").read_text(encoding="utf-8") == "The agent's own edit.\n"
+          and glob_git("--literal-pathspecs", "ls-files", "--stage", "--", "chapter1.md").stdout
+          == glob_sibling_index_entry,
           repr(glob_lines))
 
     # The fallback message's restore command, run as printed on a path with a glob character.
@@ -1956,6 +1962,22 @@ try:
                   for neighbor in ("dont", "wont.md", "cant", "shant.md")),
           repr(fallback_commands))
 
+    # A leading dash must reach both fallback commands as a path, not as an option.
+    dash_repository, dash_git = repository_with_committed_file("fallback-undo-of-a-dash-named-file")
+    (dash_repository / "-tracked.md").write_text("Committed.\n", encoding="utf-8")
+    dash_git("add", "--", "-tracked.md")
+    dash_git("commit", "--quiet", "-m", "dash-named file")
+    (dash_repository / "-tracked.md").write_text("A reviewer's rewrite.\n", encoding="utf-8")
+    (dash_repository / "-dash.md").write_text("A reviewer's notes.\n", encoding="utf-8")
+    for command in fallback_commands:
+        dash_path = "-dash.md" if command.startswith("rm ") else "-tracked.md"
+        subprocess.run(["bash", "-c", command.replace("<path>", shlex.quote(dash_path))],
+                       cwd=dash_repository, capture_output=True, text=True)
+    check("the fallback message's undo commands act on a path that starts with a dash",
+          len(fallback_commands) == 2 and not (dash_repository / "-dash.md").exists()
+          and (dash_repository / "-tracked.md").read_text(encoding="utf-8") == "Committed.\n",
+          repr(fallback_commands))
+
     # A conflict with a missing side: both diffs can print only `* Unmerged path`.
     for missing_side_code, written in (("DD", "A reviewer's write.\n"), ("DU", "Incoming.\n")):
         missing_repository, missing_git = repository_with_committed_file(
@@ -1986,6 +2008,15 @@ try:
               missing_status.startswith(missing_side_code)
               and f"{missing_repository / 'tracked.md'}, the copy on disk" in missing_line,
               repr((missing_status, missing_lines)))
+        with mock.patch.object(grid_module.cell_common, "REPO_ROOT", missing_repository):
+            deleted_baseline = grid_module.cell_common.working_tree_state()
+            (missing_repository / "tracked.md").unlink()
+            deleted_lines = grid_module.stopped_cells_write_check_lines(
+                [scratch / "claude-hunt-deep.md"], deleted_baseline, None, set())
+        deleted_line = next((line for line in deleted_lines if line.startswith("STRAY WRITE: tracked.md ")), "")
+        check(f"a {missing_side_code} conflict path a cell deleted is reported as gone, with no copy on disk to read",
+              "the file is now gone from disk" in deleted_line and "the copy on disk" not in deleted_line,
+              repr(deleted_lines))
 
     # An already-conflicted file overwritten with either side: each side's diff shows the other's loss.
     conflict_repository, conflict_git = repository_with_committed_file("checkout-stopped-cell-overwrites-a-conflict")

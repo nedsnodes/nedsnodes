@@ -326,6 +326,10 @@ STRAY_WRITE_ALREADY_CHANGED_UNMERGED_READ = (
     "both `git -C {repository} diff --ours -- {path}` and `git -C {repository} diff --theirs -- {path}`, "
     "the file against each side of its unresolved merge conflict, and {absolute_path}, the copy on "
     "disk, because those diffs show nothing against a side the conflict does not have,")
+STRAY_WRITE_ALREADY_CHANGED_UNMERGED_GONE_READ = (
+    "both `git -C {repository} diff --ours -- {path}` and `git -C {repository} diff --theirs -- {path}`, "
+    "the file against each side of its unresolved merge conflict, knowing that the file is now gone "
+    "from disk and those diffs may show nothing of what it held,")
 GIT_STATUS_UNMERGED_CODES = frozenset({"DD", "AU", "UD", "UA", "DU", "AA", "UU"})
 # A cell can move an already-edited file without git pairing the move as a rename (a plain
 # `mv`, or a `git mv` of a much-edited file), can re-create the old name afterwards, and can
@@ -1039,7 +1043,10 @@ def stopped_cells_write_check_lines(stopped_report_paths: list, baseline,
                 else STRAY_WRITE_UNDO_TRACKED)
         codes = status_codes_by_path.get(name, set())
         absolute_path = shlex.quote(str(cell_common.REPO_ROOT / name))
-        what_to_read = (STRAY_WRITE_ALREADY_CHANGED_UNMERGED_READ if codes & GIT_STATUS_UNMERGED_CODES
+        unmerged_read = (STRAY_WRITE_ALREADY_CHANGED_UNMERGED_READ
+                         if os.path.lexists(cell_common.REPO_ROOT / name)
+                         else STRAY_WRITE_ALREADY_CHANGED_UNMERGED_GONE_READ)
+        what_to_read = (unmerged_read if codes & GIT_STATUS_UNMERGED_CODES
                         else STRAY_WRITE_ALREADY_CHANGED_UNTRACKED_READ if name in untracked
                         else STRAY_WRITE_ALREADY_CHANGED_STAGED_DELETION_READ if "??" in codes
                         else STRAY_WRITE_ALREADY_CHANGED_TRACKED_READ).format(
