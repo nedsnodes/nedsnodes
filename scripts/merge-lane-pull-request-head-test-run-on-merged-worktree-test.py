@@ -412,6 +412,19 @@ def main():
               completed.returncode == 2 and calls == []
               and "pull-request-head-test-run.py is missing" in completed.stdout,
               f"exit {completed.returncode}\n{completed.stdout}{completed.stderr}")
+
+        not_a_checkout = scratch / "holds-both-programs-but-is-not-a-git-checkout"
+        (not_a_checkout / "scripts").mkdir(parents=True)
+        (not_a_checkout / "scripts" / "pull-request-head-test-run.py").write_text(
+            FAKE_HEAD_TEST_RUN)
+        (not_a_checkout / "scripts" / REBUILD_PROGRAM.name).symlink_to(REBUILD_PROGRAM)
+        completed, calls = run_program(scratch, helpers, {}, "7", review_tools=not_a_checkout)
+        check("a review tools worktree that holds both programs but is not a git checkout "
+              "exits 2 before any run, naming the commit git could not read",
+              completed.returncode == 2 and calls == []
+              and f"not run: git cannot read the commit checked out in {not_a_checkout}"
+              in completed.stdout,
+              f"exit {completed.returncode}\n{completed.stdout}{completed.stderr}")
     finally:
         shutil.rmtree(scratch, ignore_errors=True)
 

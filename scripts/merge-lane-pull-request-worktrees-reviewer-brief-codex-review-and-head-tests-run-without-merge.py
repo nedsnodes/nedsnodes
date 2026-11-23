@@ -52,7 +52,9 @@ is, and each line of steps 3 to 5 prefixed with its step's number, as in
 "step 4 of 5 | ", because their lines interleave. When one of steps 3 to 5
 fails, the output names each step that failed with its exit code, says what
 each other step did, and gives each failed step's own command, with the same
-commits, for running that step alone: running this program again would run
+commits, except that step 4 alone merges the same head onto the commit
+--review-tools-worktree-at-main then has checked out, for running that step
+alone: running this program again would run
 the other steps again, and post a second Claude review. If this program is
 interrupted while steps run, it stops them: steps 3 and 4 get SIGKILL, and step
 5 gets SIGTERM, so that it stops the Claude reviewer before any review is
@@ -245,6 +247,12 @@ def brief_specification_disagreement(checkout, specifications, number, head, mai
                 f"--head-commit-reviewed-before is {head_reviewed_before}",
                 FILE_OR_FLAG_INSTRUCTION)
     return None
+
+
+def head_test_run_rerun_main_commit_note(arguments):
+    return (f"it merges the same head onto the commit {arguments.review_tools_worktree_at_main} "
+            f"has checked out when it runs, so once that worktree has moved it tests a different "
+            f"main from the reviewer brief's merged tree")
 
 
 def step_command(step, arguments, step_arguments):
@@ -444,6 +452,9 @@ def main(argv=None):
                         f"if it shows a posted review or cannot tell, check the pull request's "
                         f"reviews on GitHub; run the step alone, with the same commits, only "
                         f"when no review of it is posted: {command}")
+            if exit_code != 0 and step == HEAD_TEST_RUN_STEP:
+                return (f"step {position} exited {exit_code}: run it alone, to see its message; "
+                        f"{head_test_run_rerun_main_commit_note(arguments)}: {command}")
             if exit_code != 0:
                 return (f"step {position} exited {exit_code}: run it alone, with the same "
                         f"commits, to see its message: {command}")
@@ -479,12 +490,17 @@ def main(argv=None):
         rerun_commands = "\n".join(
             f"  step {position}: {shlex.join(step_command(step, arguments, step_arguments))}"
             for position, step, step_arguments in at_the_same_time if position in failed)
+        which_commits = ("the command uses the same commits"
+                         if not any(position in failed and step == HEAD_TEST_RUN_STEP
+                                    for position, step, _ in at_the_same_time)
+                         else f"each command uses the same commits, except that step 4's: "
+                              f"{head_test_run_rerun_main_commit_note(arguments)}")
         print(f"PR {number}: {'; '.join(what_it_did(position) for position in (3, 4, 5))}; "
               f"nothing was merged.\n"
               f"Act on each failed step's own message, in the lines above that start "
               f"\"step <n> of {len(STEPS)} | \".\n"
               f"If such a message says to run its step again, run that step alone with its "
-              f"command below, not this program: the command uses the same commits, and the "
+              f"command below, not this program: {which_commits}, and the "
               f"steps that exited 0 do not run again, so no second Claude review is posted:\n"
               f"{rerun_commands}", flush=True)
         return 1

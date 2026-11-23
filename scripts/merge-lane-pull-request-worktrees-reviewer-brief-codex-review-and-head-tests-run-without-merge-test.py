@@ -401,6 +401,12 @@ def main():
               and f"PR 7: step 3 exited 0; step 4, {STEPS[3]}, exited 5; step 5 was skipped; "
                   f"nothing was merged." in completed.stdout,
               f"exit {completed.returncode}\n{completed.stdout}{completed.stderr}\n{calls}")
+        check("a failed step 4 says its rerun merges onto the commit the review tools worktree "
+              "then has checked out, not that it uses the same commits",
+              f"each command uses the same commits, except that step 4's: it merges the same "
+              f"head onto the commit {checkout} has checked out when it runs" in completed.stdout
+              and "the command uses the same commits" not in completed.stdout,
+              f"exit {completed.returncode}\n{completed.stdout}{completed.stderr}")
 
         completed, calls, _ = run_program(
             scratch, checkout, helpers, [first_round], environment_changes={
@@ -527,8 +533,10 @@ def main():
               and f"  step 3 exited 0: read its records in "
                   f"{helpers / 'cx' / ('pr7-' + merge_base[:8])}, and do not run it again\n"
                   in stderr
-              and f"  step 4 exited 3: run it alone, with the same commits, to see its "
-                  f"message: {shlex.join([sys.executable, str(checkout / 'scripts' / STEPS[3]), '7', '--head-commit', head_commit, *directory_options])}\n"
+              and f"  step 4 exited 3: run it alone, to see its message; it merges the same "
+                  f"head onto the commit {checkout} has checked out when it runs, so once that "
+                  f"worktree has moved it tests a different main from the reviewer brief's "
+                  f"merged tree: {shlex.join([sys.executable, str(checkout / 'scripts' / STEPS[3]), '7', '--head-commit', head_commit, *directory_options])}\n"
                   in stderr
               and f"  step 5 exited 0: read its records in "
                   f"{helpers / 'claude-reviews' / ('pr7-' + head_commit)}*, and do not run it "

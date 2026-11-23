@@ -15,7 +15,8 @@ reading it.
 Git runs in --review-tools-worktree-at-main. Every worktree of one repository shares its
 objects, so the fetched nn-head-commit is visible to the new worktrees.
 
-Exit codes: 0 both worktrees made; 1 a git step failed, or the head conflicts
+Exit codes: 0 both worktrees made, or pr<n>-merged alone with
+--merged-worktree-only; 1 a git step failed, or the head conflicts
 with main, named on stdout.
 """
 
