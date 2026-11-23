@@ -1396,6 +1396,73 @@ def test_silent_during_an_emergency_stop():
                    case.run(environment_extra={"NEDSNODES_EMERGENCY_STOP_FOLDER": str(stop_folder)}), "`Item 2 of 9`")
 
 
+NO_DECISION_SUB_STEP_DOCUMENT = """# A walk
+
+## Item 4 of 9: a filter
+
+### Item 4.1 of 9: What a filter does
+
+A filter hides old rows.
+
+[No decision here; type N or next to continue.](https://claude.ai/artifact/p41)
+
+### Item 4.2 of 9: The choice
+
+Recommendation: leave the filter out.
+
+## Item 5 of 9: the next item
+
+Recommendation: do the next thing.
+"""
+NO_DECISION_LINE = "[No decision here; type N or next to continue.](https://claude.ai/artifact/p41)"
+NO_DECISION_PAGES = ("#item_page item 4.1 of 9 https://claude.ai/artifact/p41\n"
+                     "#item_page item 4.2 of 9 https://claude.ai/artifact/p42\n")
+
+
+def test_a_no_decision_sub_step_gets_only_the_next_line():
+    case = Case()
+    case.walk_files(minutes="#next_to_present item 4.1 of 9.", document=NO_DECISION_SUB_STEP_DOCUMENT,
+                    pages=NO_DECISION_PAGES)
+    case.reply("Recorded.\n\n[Item 4.1 of 9, What a filter does](https://claude.ai/artifact/p41) · " + LETTERS)
+    result = case.run()
+    check_reminded("an A, D and M closing line on a no-decision sub-step is sent back", result, NO_DECISION_LINE)
+    check("the refusal for a no-decision sub-step offers no A, D or M",
+          "A approve" not in (blocked_reason(result) or "A approve"), blocked_reason(result))
+    case.reply("Recorded.\n\n" + NO_DECISION_LINE)
+    check_silent("the line the refusal printed passes when it ends the reply", case.run())
+    failed = Case()
+    failed.walk_files(minutes="#next_to_present item 4.1 of 9.", document=NO_DECISION_SUB_STEP_DOCUMENT,
+                      pages="#item_page item 4.1 of 9 publish failed: the Artifact tool timed out\n")
+    failed.reply("Recorded.")
+    reason = blocked_reason(failed.run()) or ""
+    check("a no-decision sub-step whose publish failed is given the line without a link",
+          "\nNo decision here; type N or next to continue." in reason and "A approve" not in reason, reason)
+    unpublished = Case()
+    unpublished.walk_files(minutes="#next_to_present item 4.1 of 9.", document=NO_DECISION_SUB_STEP_DOCUMENT, pages="")
+    unpublished.reply("Recorded.")
+    reason = blocked_reason(unpublished.run()) or ""
+    check("an unpublished no-decision sub-step is given the line with a place for its link",
+          "[No decision here; type N or next to continue.](<page link>)" in reason and "A approve" not in reason, reason)
+
+
+def test_a_sub_step_that_asks_a_decision_keeps_a_d_and_m():
+    case = Case()
+    case.walk_files(minutes="#next_to_present item 4.2 of 9.", document=NO_DECISION_SUB_STEP_DOCUMENT,
+                    pages=NO_DECISION_PAGES)
+    case.reply("Recorded.")
+    check_reminded("the sub-step with a recommendation keeps its A, D and M line", case.run(),
+                   "[Item 4.2 of 9, The choice](https://claude.ai/artifact/p42) · " + LETTERS)
+    with_recommendation = NO_DECISION_SUB_STEP_DOCUMENT.replace(
+        "A filter hides old rows.", "A filter hides old rows.\n\nRecommendation: keep it.")
+    contradictory = Case()
+    contradictory.walk_files(minutes="#next_to_present item 4.1 of 9.", document=with_recommendation,
+                             pages=NO_DECISION_PAGES)
+    contradictory.reply("Recorded.")
+    check_reminded("a sub-step with both a recommendation and the no-decision line keeps A, D and M, since check "
+                   "refuses to move on from it", contradictory.run(),
+                   "[Item 4.1 of 9, What a filter does](https://claude.ai/artifact/p41) · " + LETTERS)
+
+
 def main():
     try:
         for name, function in sorted(globals().items()):
