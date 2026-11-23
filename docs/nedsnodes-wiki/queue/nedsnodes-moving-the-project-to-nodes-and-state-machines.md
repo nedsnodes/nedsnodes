@@ -275,7 +275,7 @@ The user has no "strong opinions" on order beyond easy parts first. Each step is
 
 1. Does the JSON field stay `termination`, as approved item 3 shows, or become `output_state`, after the term "output state" approved in item 6.3?
 2. Which comes first after the runner: background work, as item 67 approved, or approval-walks, which the user said on 2026-11-23 "we could do" first?
-3. Do you approve python-jsonschema 4.26.0 as the one JSON Schema library, replacing `answer_problems()`? The alternative is Pydantic with a second validator for schema documents (section 5.1).
+3. The project's one JSON Schema library is python-jsonschema 4.26.0, pinned, with `types-jsonschema` for mypy.
 4. After a state-machine-run exits to wait, what calls the later `next`: the agent that owns the state-machine-run, a hook, or a scheduled job?
 5. If a resumed `claude -p` agent does not show in Remote Control, how does the user reach an agent inside a node?
 6. Each state-machine-run's record is one JSONL file in the log-store on ned-box; a state-machine-run on the Mac waits while ned-box cannot be reached.
