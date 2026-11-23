@@ -1577,6 +1577,11 @@ def move_start(number, reviewer_login, new_branch, whole_file_paths):
                       "branch must start with nothing but the moved change.")
     answers = root / answers_name
     set_aside = state_path.parent / ANSWERS_SET_ASIDE_DIRECTORY_NAME / answers_name
+    if answers.exists():
+        try:
+            answers_file_text_kept_in_new_copy(set_aside, state_path.parent / ANSWERS_KEPT_COPIES_DIRECTORY_NAME)
+        except OSError as error:
+            raise StepFailed(f"could not keep a copy of {set_aside} before replacing it: {error}") from None
     git(["switch", "-q", "--no-overwrite-ignore", "-c", new_branch, "origin/main"])
     if whole_file_paths:
         git(["checkout", frozen_head, "--", *whole_file_paths])
@@ -1584,7 +1589,6 @@ def move_start(number, reviewer_login, new_branch, whole_file_paths):
                                       "answers": str(answers), "set_aside": str(set_aside)}))
     if answers.exists():
         set_aside.parent.mkdir(exist_ok=True)
-        answers_file_text_kept_in_new_copy(set_aside, state_path.parent / ANSWERS_KEPT_COPIES_DIRECTORY_NAME)
         shutil.move(answers, set_aside)
     print(f"On {new_branch}, cut from origin/main, with {len(whole_file_paths)} whole file(s) copied from the "
           f"frozen-head {frozen_head[:12]}.\n"

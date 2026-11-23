@@ -938,10 +938,35 @@ def stopped_round_cases(root, repository, made, frozen_head, dated_routes, submi
           "names, its arguments copied from its line, where its cd goes, prints the brief",
           line == f"cd {made} && python3 scripts/{PROGRAM.name} {NUMBER}" and code == 0
           and answers.read_text() == "1. \n2. \n", line + err + out)
+    kept_directory = Path(git(made, "rev-parse", "--absolute-git-dir")) / "fix-round-answers-kept-copies"
+    shutil.rmtree(kept_directory, ignore_errors=True)
     write_answers(GOOD_ANSWERS, -60)
     code, out, err = run(root, repository, dated_routes)
     check("stopped round: with no fix-round commit, an answers file written before the review is replaced by the brief",
           code == 0 and answers.read_text() == "1. \n2. \n", err + out)
+    kept_copies = {path: path.read_text() for path in kept_directory.iterdir()}
+    check("answers kept: the file the brief replaced is in a new copy that the brief names",
+          list(kept_copies.values()) == [GOOD_ANSWERS] and f"copied it unchanged to {next(iter(kept_copies))}" in out,
+          f"{kept_copies}\n{out}")
+    partial = "1. Fixed the lookup.\n2. \n"
+    write_answers(partial, 60)
+    code, out, err = run(root, repository, dated_routes)
+    new_copies = [path for path in kept_directory.iterdir() if path not in kept_copies]
+    check("answers kept: a partly answered file written after the review is in a second copy, the first unchanged",
+          code == 0 and answers.read_text() == "1. \n2. \n" and [path.read_text() for path in new_copies] == [partial]
+          and all(path.read_text() == text for path, text in kept_copies.items()), err + out)
+    count = len(list(kept_directory.iterdir()))
+    code, out, err = run(root, repository, dated_routes)
+    check("answers kept: a file holding only numbered blank lines gets no copy and no line in the brief",
+          code == 0 and len(list(kept_directory.iterdir())) == count and "copied it unchanged" not in out, err + out)
+    shutil.rmtree(kept_directory)
+    kept_directory.write_text("a file where the directory of copies goes")
+    write_answers(partial, 60)
+    code, out, err = run(root, repository, dated_routes)
+    check("answers kept: when no copy can be made, the brief fails with exit 2 and leaves the answers file as it was",
+          code == 2 and out == "" and f"could not write the answers file {answers}" in err
+          and answers.read_text() == partial, err + out)
+    kept_directory.unlink()
     answers.unlink()
     answers.mkdir()
     os.utime(answers, (submitted_seconds - 60, submitted_seconds - 60))
@@ -2067,6 +2092,44 @@ def move_cases(root, _repository, _base, _frozen_head):
     check("move-finish: refuses a new topic branch that holds no change", code == 1 and "nothing to move" in err, err)
 
 
+def move_keeps_answers_cases(root, _repository, _base, _frozen_head):
+    repository, frozen_head = move_repository(root)
+    answers = repository / ANSWERS_NAME
+    git_directory = Path(git(repository, "rev-parse", "--absolute-git-dir"))
+    set_aside = git_directory / "fix-round-answers-set-aside" / ANSWERS_NAME
+    kept_directory = git_directory / "fix-round-answers-kept-copies"
+    body = root / "description.md"
+    body.write_text("Moves the timeout change.\n")
+    routes = move_routes(frozen_head, body)
+    cut = ("--move-change-to-own-pull-request-cut-new-topic-branch", NEW_BRANCH, "moved.py")
+    set_aside.parent.mkdir()
+    set_aside.write_text("1. An answer an earlier move set aside.\n")
+    answers.write_text(ANSWERS_TEXT)
+    kept_directory.write_text("a file where the directory of copies goes")
+    code, out, err = run(root, repository, routes, *cut)
+    check("move-start: when no copy of the set-aside answers can be made, exit 2, still on the pull request's branch, "
+          "both answers files unchanged",
+          code == 2 and f"could not keep a copy of {set_aside}" in err
+          and git(repository, "branch", "--show-current") == BRANCH and answers.read_text() == ANSWERS_TEXT
+          and set_aside.read_text() == "1. An answer an earlier move set aside.\n", out + err)
+    kept_directory.unlink()
+    code, out, err = run(root, repository, routes, *cut)
+    check("move-start: answers already set aside are in a copy before this round's answers replace them",
+          code == 0 and set_aside.read_text() == ANSWERS_TEXT
+          and [path.read_text() for path in kept_directory.iterdir()] == ["1. An answer an earlier move set aside.\n"],
+          out + err)
+    (repository / "partly.txt").write_text(PARTLY_MOVED_ONLY)
+    hook = Path(git(repository, "rev-parse", "--path-format=absolute", "--git-path", "hooks")) / "pre-push"
+    hook.parent.mkdir(exist_ok=True)
+    hook.write_text(f"#!/bin/sh\nprintf '1. Written during the push.\\n' > {shlex.quote(str(answers))}\n")
+    hook.chmod(0o755)
+    code, out, err = run(root, repository, routes, "--move-change-to-own-pull-request-finish", "--title", "Move it",
+                         "--body-file", str(body))
+    check("move-finish: an answers file written during the move is in a copy before the set-aside file comes back",
+          code == 0 and answers.read_text() == ANSWERS_TEXT
+          and "1. Written during the push.\n" in [path.read_text() for path in kept_directory.iterdir()], out + err)
+
+
 def move_failure_after_push_cases(root, _repository, _base, _frozen_head):
     for name, extra, create, expected in (
             ("the local branch survives git branch -D", True, None, "left the branch in place"),
@@ -2990,6 +3053,7 @@ case("rounds on one head", rounds_on_one_head_cases)
 case("stated count position", stated_count_position_cases)
 case("moved into body", moved_into_body_cases)
 case("replaces", replaces_cases)
+case("move keeps answers", move_keeps_answers_cases)
 case("move push time limit", move_push_time_limit_case)
 case("moved change git apply cannot start", moved_change_git_apply_cannot_start_case)
 print(f"{'FAILED' if failures else 'PASSED'}: {len(failures)} failed")
