@@ -67,8 +67,10 @@ commit on top of the frozen-head and the answers file, written after the round's
 has an entry for every finding, the refusal says to finish the round with --check. Refuse too when HEAD is
 the frozen-head and that answers file has an entry for every finding: the refusal says to finish the round
 with --check, or, when the answers describe fixes, whose commit was reset away, to delete the answers file
-and run this again; this program cannot tell the two apart. Otherwise write the answers file with a line
-"<n>. " per finding, replacing any file there, and print the brief:
+and run this again; this program cannot tell the two apart. Otherwise give the answers file a line "<n>. "
+per finding: a file written after every review of the round was submitted keeps every line and gains a line
+for each finding that has none, and any other file is replaced, because a later review of the round can
+renumber the findings. Then print the brief:
 the frozen-head, ADVISOR_FIX_ROUND_INSTRUCTION when the round's number is ADVISOR_FIX_ROUND_NUMBER and on
 no other, each blocking finding word for word, then each nit word for word, numbered on from the blocking
 findings, to fix in the same round, how to dispatch the fix-round subagent, a fork without Claude Code's
@@ -212,6 +214,7 @@ ROUND_RECORD_FORMAT = ("Fix-round answered without a commit: frozen-head {frozen
 ROUND_RECORD_PATTERN = re.compile(r"Fix-round answered without a commit: frozen-head ([0-9a-f]+), "
                                   r"reviews (\d+(?: \d+)*)\.")
 ANSWER_START_PATTERN = re.compile(r"^(\d+)\.\s+(\S.*)$")
+ANSWER_OR_UNANSWERED_LINE_NUMBER_PATTERN = re.compile(r"^(\d+)\.(?:\s|$)")
 MOVED_TO_PULL_REQUEST_PREFIX = "Moved to pull request "
 MOVED_TO_PULL_REQUEST_PREFIX_PATTERN = re.compile(
     re.escape(MOVED_TO_PULL_REQUEST_PREFIX.rstrip()) + r"\b", re.IGNORECASE)
@@ -685,6 +688,12 @@ def finding_place(comment):
     return place
 
 
+def latest_submitted_at_of_reviews(reviews):
+    """The latest submitted_at of reviews, or None when GitHub gives one of them none."""
+    submitted = [review.get("submitted_at") for review in reviews]
+    return max(submitted, key=review_submitted_timestamp) if all(submitted) else None
+
+
 def round_facts(number, reviewer_login):
     url, head, branch, description, author = pull_request(number)
     anchor, reviews, recorded, own_round_number = round_reviews(number, author, reviewer_login)
@@ -705,7 +714,8 @@ def round_facts(number, reviewer_login):
         nits = without_reposts(nits + carried_nits)
     return (url, head, branch, review_links(latest_first(anchor, reviews)), frozen_head,
             findings, nits, fix_round_number,
-            None if recorded else [review.get("id") for review in reviews], anchor.get("submitted_at"))
+            None if recorded else [review.get("id") for review in reviews], anchor.get("submitted_at"),
+            latest_submitted_at_of_reviews(latest_first(anchor, reviews)))
 
 
 def conflict_check_report(number):
@@ -816,25 +826,38 @@ def review_submitted_timestamp(review_submitted_at):
     return datetime.datetime.fromisoformat(review_submitted_at.replace("Z", "+00:00")).timestamp()
 
 
-def answers_file_answers_every_finding_of_round(path, finding_count, review_submitted_at):
-    """Whether the answers file at path was written after the round's review was submitted and has an entry for
-    every finding; a review GitHub gives no submitted_at leaves the file's round unknown, so False."""
+def answers_file_text_of_round(path, review_submitted_at):
+    """The text of the answers file at path if it was written at or after review_submitted_at, else None; with no
+    review_submitted_at the file's round is unknown, so None."""
     if not review_submitted_at or not path.exists():
-        return False
+        return None
     try:
         if path.stat().st_mtime < review_submitted_timestamp(review_submitted_at):
-            return False
-        entries, _repeated = answer_entries(path.read_text())
+            return None
+        return path.read_text()
     except (OSError, UnicodeDecodeError) as error:
         raise StepFailed(f"could not read the answers file {path}: {error}") from None
-    return set(range(1, finding_count + 1)) <= entries.keys()
 
 
-def answers_file_with_one_line_per_finding_write(path, finding_count):
-    """Write the answers file with a line "<n>. " per finding, which read_answers reads as no entry until the agent
-    writes the answer after it."""
+def answers_file_answers_every_finding_of_round(path, finding_count, review_submitted_at):
+    """Whether the answers file at path is of this round and has an entry for every finding."""
+    text = answers_file_text_of_round(path, review_submitted_at)
+    return text is not None and set(range(1, finding_count + 1)) <= answer_entries(text)[0].keys()
+
+
+def answers_file_with_one_line_per_finding_write(path, finding_count, latest_review_submitted_at):
+    """Give the answers file a line "<n>. " per finding, which read_answers reads as no entry until the agent writes
+    the answer after it. A file written after the round's latest review keeps every line. Any other file is replaced:
+    adding to it would refresh its mtime and let an earlier round's answers pass
+    refuse_answers_written_before_review, and a later review of the round can renumber the findings it answers."""
+    kept = answers_file_text_of_round(path, latest_review_submitted_at) or ""
+    numbered = {int(match.group(1)) for match in map(ANSWER_OR_UNANSWERED_LINE_NUMBER_PATTERN.match, kept.splitlines())
+                if match}
+    added = "".join(f"{index}. \n" for index in range(1, finding_count + 1) if index not in numbered)
+    separator = "\n" if added and kept and not kept.endswith("\n") else ""
     try:
-        path.write_text("".join(f"{index}. \n" for index in range(1, finding_count + 1)))
+        with path.open("a" if kept else "w") as answers_file:
+            answers_file.write(separator + added)
     except OSError as error:
         raise StepFailed(f"could not write the answers file {path}: {error}") from None
 
@@ -906,7 +929,8 @@ def topic_worktree_at_frozen_head(number, reviewer_login, branch, frozen_head, f
 
 def print_brief(number, reviewer_login):
     (url, head, branch, review_link, frozen_head, findings, nits,
-     fix_round_number, _unrecorded_review_ids, review_submitted_at) = round_facts(number, reviewer_login)
+     fix_round_number, _unrecorded_review_ids, review_submitted_at,
+     latest_review_submitted_at) = round_facts(number, reviewer_login)
     if head != frozen_head:
         pushed_from = topic_worktree_of_branch(branch)
         wait = ("Wait for merge-lane-2's review of the new head, and run this again if it "
@@ -927,7 +951,7 @@ def print_brief(number, reviewer_login):
     worktree = topic_worktree_at_frozen_head(number, reviewer_login, branch, frozen_head, len(findings) + len(nits),
                                              review_submitted_at)
     answers_path = worktree / ANSWERS_FILE_NAME_FORMAT.format(number=number)
-    answers_file_with_one_line_per_finding_write(answers_path, len(findings) + len(nits))
+    answers_file_with_one_line_per_finding_write(answers_path, len(findings) + len(nits), latest_review_submitted_at)
     lines = [
         f"Fix-round brief for pull request {url}",
         f"Frozen-head: {frozen_head}",
@@ -1403,7 +1427,8 @@ def check_round(number, reviewer_login, answers_path, commit_name,
                 confirm_dispatching_agent_checked_new_shared_names,
                 overview_claim_check_report_directory):
     (url, _github_head, branch, review_link, frozen_head, blocking, nits,
-     _fix_round_number, unrecorded_review_ids, review_submitted_at) = round_facts(number, reviewer_login)
+     _fix_round_number, unrecorded_review_ids, review_submitted_at,
+     _latest_review_submitted_at) = round_facts(number, reviewer_login)
     findings = blocking + nits
     answers_path = answers_path or default_answers_path(number)
     refuse_outside_topic_worktree(number, reviewer_login, branch)
@@ -1513,7 +1538,8 @@ def local_branch_exists(branch):
 
 def move_start(number, reviewer_login, new_branch, whole_file_paths):
     (_url, _head, pull_request_branch, _review_link, frozen_head, _findings, _nits,
-     _fix_round_number, _unrecorded_review_ids, _review_submitted_at) = round_facts(number, reviewer_login)
+     _fix_round_number, _unrecorded_review_ids, _review_submitted_at,
+     _latest_review_submitted_at) = round_facts(number, reviewer_login)
     state_path = move_state_path()
     if state_path.exists():
         state = json.loads(state_path.read_text())

@@ -15,6 +15,7 @@ import datetime
 import importlib.util
 import json
 import os
+import re
 import shlex
 import shutil
 import subprocess
@@ -942,6 +943,45 @@ def stopped_round_cases(root, repository, made, frozen_head, dated_routes, submi
     code, out, err = run(root, repository, dated_routes)
     check("stopped round: with no fix-round commit, an answers file written before the review is replaced by the brief",
           code == 0 and answers.read_text() == "1. \n2. \n", err + out)
+    for text, expected, why in (
+            ("1. Finding 1 does not hold, because of X.\n2. \n", "1. Finding 1 does not hold, because of X.\n2. \n",
+             "one answer and one blank line"),
+            ("1. Fixed,\n   on two lines.\n\n2. \n", "1. Fixed,\n   on two lines.\n\n2. \n", "a multi-line answer"),
+            ("1. Fixed.\n", "1. Fixed.\n2. \n", "no line for a finding"),
+            ("1. Fixed.", "1. Fixed.\n2. \n", "no line for a finding and no final newline"),
+            ("2. Fixed.\n", "2. Fixed.\n1. \n", "only the later finding answered")):
+        write_answers(text, 60)
+        code, out, err = run(root, repository, dated_routes)
+        check(f"stopped round: reopening the brief on this round's answers file with {why} keeps every answer and "
+              "adds a line only for a finding that has none",
+              code == 0 and answers.read_text() == expected, repr(answers.read_text()) + err + out)
+    anchor = json.loads(dated_routes[REVIEWS]["stdout"].splitlines()[0])
+    addendum = review(state="COMMENTED", commit_id=frozen_head, review_id=12, body="COMMENT")
+    addendum_comments = comments_route(12, [comment("hook.py", "**Blocks.** A finding the addendum adds.", comment_id=10)])
+    dated_addendum = dict(addendum, submitted_at="2026-11-11T12:02:00Z")
+    for reviews, seconds_after_review, expected, why in (
+            ([anchor, dated_addendum], 60, "1. \n2. \n3. \n",
+             "written before a later review of the round, which can renumber the findings, is replaced"),
+            ([anchor, dated_addendum], 180, "1. Fixed.\n2. \n3. \n",
+             "written after the round's later review keeps its answer and gains the new finding's line"),
+            ([anchor, addendum], 180, "1. \n2. \n3. \n",
+             "beside a later review with no submitted_at is replaced")):
+        write_answers("1. Fixed.\n2. \n", seconds_after_review)
+        code, out, err = run(root, repository, dict(dated_routes, **{REVIEWS: {"stdout": lines(reviews)}},
+                                                    **addendum_comments))
+        check(f"stopped round: a partial answers file {why}",
+              code == 0 and answers.read_text() == expected, repr(answers.read_text()) + err + out)
+    extra_entry = "1. Fixed.\n2. Fixed.\n3. An entry for a finding this round does not have.\n"
+    write_answers(extra_entry, 60)
+    code, out, err = run(root, repository, dated_routes)
+    check("stopped round: an answers file with every finding answered and an extra entry still refuses the brief and "
+          "is left as it was",
+          code == 1 and "wrote every answer" in err and answers.read_text() == extra_entry, err + out)
+    write_answers("1. Fixed.\n", 60)
+    load_program().answers_file_with_one_line_per_finding_write(answers, 3, None)
+    check("stopped round: an answers file whose round is unknown, because the review has no submitted_at, is replaced "
+          "with a line for each of three findings",
+          answers.read_text() == "1. \n2. \n3. \n", repr(answers.read_text()))
     answers.unlink()
     answers.mkdir()
     os.utime(answers, (submitted_seconds - 60, submitted_seconds - 60))
@@ -2667,6 +2707,15 @@ def nit_cases(root, repository, base, frozen_head):
           "are not part of this round, apart from the nits listed above" in out, out)
     check("nits: step 2 says a nit needs no test",
           "with a test that fails without the fix; a nit needs no test." in out, out)
+
+    second_nit = comment("nit.txt", "**fix-in-maintenance, nit** nit.txt misspells a second name.", line=21,
+                         comment_id=9)
+    code, out, err = run(root, repository, routes_for(frozen_head, [review(commit_id=frozen_head)],
+                                                      comments=[*BLOCKING_COMMENTS, nit, second_nit]))
+    answers_path = re.search(r"Fill in the answers file (\S+),", out)
+    check("nits: with two blocking findings and two nits, the answers file has a line for each of the four",
+          code == 0 and answers_path is not None
+          and Path(answers_path.group(1)).read_text() == "1. \n2. \n3. \n4. \n", err + out)
 
     code, out, err = run(root, repository, routes_for(frozen_head, [review(commit_id=frozen_head)]))
     check("nits: a round with no nit prints no nit heading", code == 0 and "Nits to fix" not in out, err + out)
