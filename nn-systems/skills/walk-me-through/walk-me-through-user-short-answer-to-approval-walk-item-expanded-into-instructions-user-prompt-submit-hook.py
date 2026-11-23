@@ -220,6 +220,7 @@ docs/nedsnodes-wiki/nedsnodes-how-to-write-a-tool-message-to-agent-such-as-a-hoo
 """
 import collections
 import difflib
+import functools
 import importlib.util
 import json
 import os
@@ -660,6 +661,7 @@ RECOMMENDATION_UNKNOWN_LINE = (
     "what he wants done before acting on {answer_letter}.")
 
 
+@functools.cache
 def load_walk_finder():
     spec = importlib.util.spec_from_file_location(
         "walk_me_through_approval_walk_minutes_and_walk_document_item_finder_common", WALK_FINDER_FILE)
@@ -1435,16 +1437,18 @@ def item_openings_as_shown(tokens, parser, env):
             yield token.map[0], words
 
 
+@functools.cache
 def item_numbers_an_opening_names(words):
     """The item numbers of a message's heading or closing line, as shown_words gives it, with every range expanded:
-    `Item 5: ...`, `Items 3.1, 3.2 & 4.1: ...`, `Item 5, ...` or `Item 5` alone. None when words open no item, as
-    `Item 5 fixes a path`, a mention, does; [] for a list the walk finder calls an unusable range."""
+    the numbers of the walk finder's ITEM_LABEL_WITHOUT_COUNT, as in `Item 5: ...`, `Items 3.1, 3.2 & 4.1 - ...`,
+    `Item 5, ...` or `Item 5` alone. None when words open no item, as `Item 5 fixes a path`, a mention, does; [] for a
+    list the walk finder calls an unusable range."""
     walk_finder = load_walk_finder()
-    opening = re.match(rf"^Items?\s+({walk_finder.NUMBER_LIST})\s*(?:[:,]|$)", words)
+    opening = walk_finder.ITEM_LABEL_WITHOUT_COUNT.match(words)
     if not opening:
         return None
     try:
-        return walk_finder.expand_numbers(opening[1])
+        return walk_finder.expand_numbers(opening["numbers"] or opening["plural_numbers"])
     except walk_finder.UnusableRange:
         return []
 

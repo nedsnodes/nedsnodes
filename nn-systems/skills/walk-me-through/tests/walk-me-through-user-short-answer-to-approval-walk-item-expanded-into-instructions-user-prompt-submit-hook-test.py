@@ -2498,7 +2498,8 @@ def test_the_items_own_sub_step_heading_does_not_end_its_shown_text():
 def test_a_sub_step_heading_shared_with_an_earlier_item_does_not_end_its_shown_text():
     for form, heading in (("an ATX", "### Items 3.1 and 4.1 of 9: shared defaults"),
                           ("a setext", "Items 3.1 and 4.1 of 9: shared defaults\n---"),
-                          ("a comma and ampersand list", "### Items 3.1, 3.2 & 4.1 of 9: shared defaults")):
+                          ("a comma and ampersand list", "### Items 3.1, 3.2 & 4.1 of 9: shared defaults"),
+                          ("a dash after its list", "### Items 3.1, 3.2 & 4.1 of 9 — Shared defaults")):
         shown = DECISION_ITEM.replace("#new Hide", f"{heading}\n\n#new Hide")
         case = decision_case(model="changed")
         lines = case.lines("a", case.transcript(f"{shown}\n\n{ITEM_4_CLOSING_LINE}"))
@@ -2517,9 +2518,19 @@ def test_a_heading_opens_another_item_by_the_expanded_numbers_of_a_dotted_range(
             ("Item 11.2: a sub-step", "Items 10 to 12: grouped", False),
             ("Item 13: the next item", "Items 10 to 12: grouped", True),
             ("Items 5.1 to 6.2: a range across items", "Item 4: a filter", True),
-            ("Item 5 fixes a path", "Item 4: a filter", False)):
+            ("Item 5 fixes a path", "Item 4: a filter", False),
+            ("Items 3.1, 3.2 & 4.1 — Shared defaults", "Item 4: a filter", False),
+            ("Items 3.1, 3.2 & 5.1 — Shared defaults", "Item 4: a filter", True),
+            ("Item 5 — the next item", "Item 4: a filter", True)):
         check(f"`{words}` below `{heading}` {'opens another item' if expected else 'does not open another item'}",
               hook.opens_another_item(words, heading) is expected, hook.opens_another_item(words, heading))
+
+
+def test_the_walk_finder_module_is_executed_once_however_many_headings_are_read():
+    hook = load_short_answer_hook_for_test()
+    first = hook.load_walk_finder()
+    hook.opens_another_item("Item 5: the next item", "Item 4: a filter")
+    check("the hook reuses the walk finder module it loaded", hook.load_walk_finder() is first)
 
 
 def test_a_recommendation_or_alternative_shown_without_its_label_goes_to_the_model():
