@@ -834,17 +834,33 @@ def run_cases_on_ned_box(workspace: Path):
     # --- A hand run with another --temporary-directory overlaps this run --------------
     # It holds another lock, so nothing stops its fetch landing between this run's fetch and
     # its rev-parse; it is played by writing the clone's older commit into the ref it would use.
+    # The other run's ref is read from the fetch that run really makes, so the case still
+    # fails if both runs come to share one ref.
     other_temporary = workspace / "another-temporary-directory"
-    other_directory = (other_temporary.resolve()
-                       / program.SCHEDULED_FULL_TEST_RUN_DIRECTORY_NAME)
-    ref_of_other_run = (program.scheduled_full_test_run_main_fetch_destination_git_ref_name_for_temporary_directory(other_directory)
-                        if hasattr(program, "scheduled_full_test_run_main_fetch_destination_git_ref_name_for_temporary_directory")
-                        else "refs/scheduled-full-test-run-of-main/main")
+    other_temporary.mkdir()
     real_git_for_overlap = program.git
+    other_run_fetches = []
+
+    def git_recording_the_other_runs_fetch(clone, *arguments):
+        if arguments[:1] == ("fetch",):
+            other_run_fetches.append(arguments)
+        return real_git_for_overlap(clone, *arguments)
+
+    program.git = git_recording_the_other_runs_fetch
+    try:
+        other_result = fixture.run(extra_arguments=("--temporary-directory", str(other_temporary)))
+    finally:
+        program.git = real_git_for_overlap
+    refspecs_of_other_run = [argument for argument in (other_run_fetches or [()])[0]
+                             if argument.startswith("+refs/heads/main:")]
+    ref_of_other_run = (refspecs_of_other_run[0].split(":", 1)[1]
+                        if other_result.code == 0 and len(refspecs_of_other_run) == 1 else None)
+    check("a run with another --temporary-directory fetches main into one ref of its own",
+          ref_of_other_run is not None, (repr(other_result), other_run_fetches))
 
     def another_run_fetches_after_this_ones_fetch(clone, *arguments):
         completed = real_git_for_overlap(clone, *arguments)
-        if arguments[:1] == ("fetch",):
+        if arguments[:1] == ("fetch",) and ref_of_other_run is not None:
             real_git_for_overlap(clone, "update-ref", ref_of_other_run,
                                  fixture.commit_the_clone_was_made_at)
         return completed
