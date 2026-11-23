@@ -961,18 +961,16 @@ def stopped_round_cases(root, repository, made, frozen_head, dated_routes, submi
     addendum = review(state="COMMENTED", commit_id=frozen_head, review_id=12, body="COMMENT")
     addendum_comments = comments_route(12, [comment("hook.py", "**Blocks.** A finding the addendum adds.", comment_id=10)])
     dated_addendum = dict(addendum, submitted_at="2026-11-11T12:02:00Z")
-    for reviews, seconds_after_review, expected, why in (
-            ([anchor, dated_addendum], 60, "1. \n2. \n3. \n",
-             "written before a later review of the round, which can renumber the findings, is replaced"),
-            ([anchor, dated_addendum], 180, "1. \n2. \n3. \n",
-             "written after a later review that added a finding, for the findings before it, is replaced"),
-            ([anchor, addendum], 180, "1. \n2. \n3. \n",
-             "beside a later review with no submitted_at is replaced")):
+    for reviews, seconds_after_review, why in (
+            ([anchor, dated_addendum], 60, "written before a later review of the round, which can renumber the findings"),
+            ([anchor, dated_addendum], 180, "written after a later review that added a finding, for the findings before it"),
+            ([anchor, addendum], 180, "beside a later review with no submitted_at")):
         write_answers("1. Fixed.\n2. \n", seconds_after_review)
         code, out, err = run(root, repository, dict(dated_routes, **{REVIEWS: {"stdout": lines(reviews)}},
                                                     **addendum_comments))
-        check(f"stopped round: a partial answers file {why}",
-              code == 0 and answers.read_text() == expected, repr(answers.read_text()) + err + out)
+        check(f"stopped round: a partial answers file {why} is refused, naming it, and left as it was",
+              code == 1 and out == "" and f"answers file {answers} holds answers, and no record" in err
+              and answers.read_text() == "1. Fixed.\n2. \n", repr(answers.read_text()) + err + out)
     answers.unlink()
     code, out, err = run(root, repository, dated_routes)
     answers.write_text("1. Fixed.\n2. \n")
@@ -984,8 +982,49 @@ def stopped_round_cases(root, repository, made, frozen_head, dated_routes, submi
         answers, [BLOCKING_COMMENTS[2], BLOCKING_COMMENTS[0]])
     os.utime(answers, (submitted_seconds + 60, submitted_seconds + 60))
     code, out, err = run(root, repository, dated_routes)
-    check("stopped round: answers recorded for the same findings in another order are replaced, however new the file",
+    check("stopped round: answers recorded for the same findings in another order are refused and left as they were",
+          code == 1 and "no record shows" in err and answers.read_text() == "1. Fixed.\n2. \n",
+          repr(answers.read_text()) + err + out)
+    program = load_program()
+    record = program.answers_file_round_findings_record_path(answers)
+    reworded = dict(BLOCKING_COMMENTS[2], body=BLOCKING_COMMENTS[2]["body"] + " Reworded.")
+
+    def answers_with_record(text, seconds_after_review, recorded_findings):
+        answers.write_text(text)
+        record.unlink(missing_ok=True)
+        if recorded_findings is not None:
+            program.answers_file_round_findings_identity_digest_write_to_git_directory(answers, recorded_findings)
+        os.utime(answers, (submitted_seconds + seconds_after_review, submitted_seconds + seconds_after_review))
+
+    round_findings = [BLOCKING_COMMENTS[0], BLOCKING_COMMENTS[2]]
+    for text, seconds_after_review, recorded_findings, why in (
+            ("1. Fixed one.\n2. Fixed two.\n", 60, None, "every answer and no record"),
+            ("1. Fixed one.\n2. \n", 60, None, "a partial answer and no record"),
+            ("Notes with no number.\n", 60, None, "text outside any numbered entry and no record"),
+            ("1. Fixed one.\n2. \n", 60, [BLOCKING_COMMENTS[0], reworded], "a record of a reworded finding"),
+            ("1. Fixed one.\n2. \n", 0, [BLOCKING_COMMENTS[2], BLOCKING_COMMENTS[0]],
+             "a record of other findings, written in the second of the review")):
+        answers_with_record(text, seconds_after_review, recorded_findings)
+        code, out, err = run(root, repository, dated_routes)
+        check(f"stopped round: an answers file with {why} is refused, exit 1, saying each way on, and left as it was",
+              code == 1 and out == "" and f"answers file {answers} holds answers, and no record" in err
+              and "If a fix-round subagent is still working there, wait for it to finish" in err
+              and f"cd {made} && python3 scripts/{PROGRAM.name} {NUMBER} --check\n" in err
+              and f"delete {answers}, then run this command:\ncd {made} && python3 scripts/{PROGRAM.name} {NUMBER}" in err
+              and answers.read_text() == text, repr(answers.read_text()) + err + out)
+    answers_with_record("1. \n2. \n", 60, None)
+    code, out, err = run(root, repository, dated_routes)
+    check("stopped round: a file of only blank numbered lines with no record holds no answer, so the brief replaces it "
+          "and records the round", code == 0 and answers.read_text() == "1. \n2. \n"
+          and record.read_text() == program.round_findings_identity(round_findings), err + out)
+    answers_with_record("1. An earlier round's answer.\n", -60, [BLOCKING_COMMENTS[2], BLOCKING_COMMENTS[0]])
+    code, out, err = run(root, repository, dated_routes)
+    check("stopped round: an earlier round's answers, older than this round's review, are replaced",
           code == 0 and answers.read_text() == "1. \n2. \n", repr(answers.read_text()) + err + out)
+    answers_with_record("1. Fixed one.\n2. \n", 0, round_findings)
+    code, out, err = run(root, repository, dated_routes)
+    check("stopped round: answers recorded for these findings, written in the second of the review, are kept",
+          code == 0 and answers.read_text() == "1. Fixed one.\n2. \n", repr(answers.read_text()) + err + out)
     extra_entry = "1. Fixed.\n2. Fixed.\n3. An entry for a finding this round does not have.\n"
     write_answers(extra_entry, 60)
     code, out, err = run(root, repository, dated_routes)
@@ -993,10 +1032,11 @@ def stopped_round_cases(root, repository, made, frozen_head, dated_routes, submi
           "is left as it was",
           code == 1 and "wrote every answer" in err and answers.read_text() == extra_entry, err + out)
     write_answers("1. Fixed.\n", 60)
-    load_program().answers_file_with_one_line_per_finding_write(answers, BLOCKING_COMMENTS, None)
-    check("stopped round: an answers file whose round is unknown, because the review has no submitted_at, is replaced "
-          "with a line for each of three findings",
-          answers.read_text() == "1. \n2. \n3. \n", repr(answers.read_text()))
+    no_submitted_at = routes_for(frozen_head, [review(commit_id=frozen_head)])
+    code, out, err = run(root, repository, no_submitted_at)
+    check("stopped round: answers whose round is unknown, because the review has no submitted_at, are refused and left "
+          "as they were", code == 1 and "no record shows" in err and answers.read_text() == "1. Fixed.\n",
+          repr(answers.read_text()) + err + out)
     answers.unlink()
     answers.mkdir()
     os.utime(answers, (submitted_seconds - 60, submitted_seconds - 60))
@@ -1094,7 +1134,11 @@ def topic_worktree_cases(root, repository, base, frozen_head):
           git(made, "diff", "--cached", "--name-only") == "" and git(made, "status", "--porcelain") == "",
           git(made, "status", "--porcelain", "--ignored"))
 
-    code, out, err = run(root, repository, routes)
+    earlier_review_at = "2026-11-11T12:00:00Z"
+    earlier_seconds = datetime.datetime.fromisoformat(earlier_review_at.replace("Z", "+00:00")).timestamp() - 60
+    os.utime(made / ANSWERS_NAME, (earlier_seconds, earlier_seconds))
+    code, out, err = run(root, repository, routes_for(frozen_head, [dict(review(commit_id=frozen_head),
+                                                                         submitted_at=earlier_review_at)]))
     check("topic-worktree: an ignored answers file an earlier round left does not stop the brief", code == 0, err)
     (made / "stray.txt").write_text("stray\n")
     code, out, err = run(root, repository, routes)
@@ -2731,6 +2775,15 @@ def nit_cases(root, repository, base, frozen_head):
     check("nits: with two blocking findings and two nits, the answers file has a line for each of the four",
           code == 0 and answers_path is not None
           and Path(answers_path.group(1)).read_text() == "1. \n2. \n3. \n4. \n", err + out)
+    nit_routes = routes_for(frozen_head, [dict(review(commit_id=frozen_head), submitted_at="2026-11-11T12:00:00Z")],
+                            comments=[*BLOCKING_COMMENTS, nit, second_nit])
+    Path(answers_path.group(1)).write_text("1. \n2. \n3. \n4. \n")
+    code, out, err = run(root, repository, nit_routes)
+    Path(answers_path.group(1)).write_text("1. \n2. \n3. Fixed the nit.\n4. \n")
+    code, out, err = run(root, repository, nit_routes)
+    check("nits: the round's record covers its nits, so an answer to a nit is kept when the brief runs again",
+          code == 0 and Path(answers_path.group(1)).read_text() == "1. \n2. \n3. Fixed the nit.\n4. \n", err + out)
+    Path(answers_path.group(1)).unlink()
 
     code, out, err = run(root, repository, routes_for(frozen_head, [review(commit_id=frozen_head)]))
     check("nits: a round with no nit prints no nit heading", code == 0 and "Nits to fix" not in out, err + out)

@@ -68,9 +68,10 @@ has an entry for every finding, the refusal says to finish the round with --chec
 the frozen-head and that answers file has an entry for every finding: the refusal says to finish the round
 with --check, or, when the answers describe fixes, whose commit was reset away, to delete the answers file
 and run this again; this program cannot tell the two apart. Otherwise give the answers file a line "<n>. "
-per finding: a file written after every review of the round was submitted keeps every line and gains a line
-for each finding that has none, and any other file is replaced, because a later review of the round can
-renumber the findings. Then print the brief:
+per finding: a file recorded as written for exactly these findings keeps every line and gains a line for
+each finding that has none. A file older than the round's review, or holding no answer, is replaced. Refuse
+any other file, whose answers may be numbered for other findings and which git cannot restore, leaving it as
+it was. Then print the brief:
 the frozen-head, ADVISOR_FIX_ROUND_INSTRUCTION when the round's number is ADVISOR_FIX_ROUND_NUMBER and on
 no other, each blocking finding word for word, then each nit word for word, numbered on from the blocking
 findings, to fix in the same round, how to dispatch the fix-round subagent, a fork without Claude Code's
@@ -216,6 +217,7 @@ ROUND_RECORD_PATTERN = re.compile(r"Fix-round answered without a commit: frozen-
                                   r"reviews (\d+(?: \d+)*)\.")
 ANSWER_START_PATTERN = re.compile(r"^(\d+)\.\s+(\S.*)$")
 ANSWER_OR_UNANSWERED_LINE_NUMBER_PATTERN = re.compile(r"^(\d+)\.(?:\s|$)")
+UNANSWERED_LINE_PATTERN = re.compile(r"\d+\.")
 MOVED_TO_PULL_REQUEST_PREFIX = "Moved to pull request "
 MOVED_TO_PULL_REQUEST_PREFIX_PATTERN = re.compile(
     re.escape(MOVED_TO_PULL_REQUEST_PREFIX.rstrip()) + r"\b", re.IGNORECASE)
@@ -860,11 +862,24 @@ def answers_file_answers_every_finding_of_round(path, findings, review_submitted
     return text is not None and set(range(1, len(findings) + 1)) <= answer_entries(text)[0].keys()
 
 
+def answers_file_holds_answers_not_tied_to_round(path, findings, review_submitted_at):
+    """Whether the file at path holds any text but blank "<n>. " lines, is not recorded as written for exactly these
+    findings, and is not older than the round's review, which would make it an earlier round's."""
+    if not path.exists() or answers_file_text_of_round(path, review_submitted_at, findings) is not None:
+        return False
+    try:
+        if review_submitted_at and path.stat().st_mtime < review_submitted_timestamp(review_submitted_at):
+            return False
+        text = path.read_text()
+    except (OSError, UnicodeDecodeError) as error:
+        raise StepFailed(f"could not read the answers file {path}: {error}") from None
+    return any(line.strip() and not UNANSWERED_LINE_PATTERN.fullmatch(line.strip()) for line in text.splitlines())
+
+
 def answers_file_with_one_line_per_finding_write(path, findings, review_submitted_at):
     """Give the answers file a line "<n>. " per finding, which read_answers reads as no entry until the agent writes
-    the answer after it. A file written for exactly these findings keeps every line. Any other file is replaced,
-    because its answers are numbered for other findings, and adding to it would refresh its mtime and let them pass
-    refuse_answers_written_before_review."""
+    the answer after it. A file written for exactly these findings keeps every line. Any other file is replaced, so
+    the caller first refuses one that answers_file_holds_answers_not_tied_to_round finds."""
     kept = answers_file_text_of_round(path, review_submitted_at, findings) or ""
     numbered = {int(match.group(1)) for match in map(ANSWER_OR_UNANSWERED_LINE_NUMBER_PATTERN.match, kept.splitlines())
                 if match}
@@ -917,6 +932,16 @@ def topic_worktree_at_frozen_head(number, reviewer_login, branch, frozen_head, r
                           "If the answers describe fixes, which means the fix-round commit was reset away, or if you "
                           f"mean to start the round again: delete {answers}, then run this command:\n"
                           f"{rerun}\n" + finish)
+        if answers_file_holds_answers_not_tied_to_round(answers, round_findings, review_submitted_at):
+            raise Refused(f"Pull request {number}'s answers file {answers} holds answers, and no record shows they "
+                          "are numbered for this round's findings, so the brief left it as it was; git cannot "
+                          "restore this file.\n"
+                          "If a fix-round subagent is still working there, wait for it to finish, then run this "
+                          "again.\n"
+                          "If each entry answers the finding of that number in this round's brief, finish the round "
+                          f"with this command:\ncd {quoted} && {program_command(number, reviewer_login, '--check')}\n"
+                          "Otherwise copy any answer you still need to a file outside this worktree, delete "
+                          f"{answers}, then run this command:\n{rerun}")
         return worktree
     if (git([*in_worktree, "rev-list", "--parents", "-n", "1", head]).split()[1:] == [frozen_head]
             and answers_file_answers_every_finding_of_round(answers, round_findings, review_submitted_at)):
