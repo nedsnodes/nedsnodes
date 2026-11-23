@@ -1152,6 +1152,27 @@ def run_first_pass_and_second_pass_cases():
               "no job failure task, unlike the same merge in the first pass",
               result == (True, None), result)
 
+        # Only the failure message of a second pass merge shows its hand-run command.
+        state_with_both_waiting()
+        fixture.plan_file.write_text(json.dumps({f"{newer} second pass": {"exit": 5}}))
+        os.environ[PLAN_VARIABLE] = str(fixture.plan_file)
+        try:
+            with tempfile.TemporaryDirectory() as second_pass_scratch:
+                job.test_one_merge(
+                    arguments, fixture.state_json(), fixture.state / job.STATE_FILE_NAME, newer,
+                    [], "the record", Path(second_pass_scratch), 100.0, 1.0)
+            failure = None
+        except job.StepFailed as error:
+            failure = str(error)
+        finally:
+            del os.environ[PLAN_VARIABLE]
+        check("the hand-run command a second pass merge's failure gives marks skipped the "
+              "waiting mutants of a head committed before the cutoff, and sets no time after "
+              "which no mutant starts",
+              failure is not None
+              and job.mutation_testing.MUTANTS_WITH_NO_RESULT_IN_KEPT_COSMIC_RAY_SESSIONS_MARKED_SKIPPED_WHEN_HEAD_COMMIT_BEFORE_CUTOFF_COMMAND_LINE_FLAG
+              in failure and "--no-mutant-started-after-unix-time" not in failure, failure)
+
         state_with_both_waiting()
         completed = fixture.run(
             {}, "--scheduled-jobs-on-each-machine-json-file",
