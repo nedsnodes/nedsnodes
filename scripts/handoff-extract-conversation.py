@@ -380,12 +380,14 @@ CONVERSATION_TAIL_QUEUED_USER_MESSAGES_NEVER_READ_BY_AGENT_INTRODUCTION = (
     "Queued before the handoff and never read by your predecessor; "
     "treat each message from here to the end as a reply to the dialog above."
 )
-# Another agent's message and a harness notification open with a tag; a paste the user queued does too.
-QUEUED_TEXT_OF_THE_USER_TAG_OPENINGS = ("<pasted_content",)
+QUEUED_TEXT_OF_ANOTHER_SENDER_TAG_OPENINGS = ("<task-notification", "<cross-session-message", "<agent-message")
+PEER_MESSAGE_TAG_OPENINGS = ("<cross-session-message", "<agent-message")
+DELIVERED_PEER_MESSAGE_FIRST_LINE = "Another Claude session sent a message:"
+QUEUE_REMOVE_REASONS_THAT_DELIVER_TO_AGENT = ("absorbed_mid_turn", "delivered_to_agent")
 
 
 def texts_shown_to_agent(record) -> list:
-    """Return each form in which a record shows the agent queued text: a prompt, its typed slash command, or an absorbed attachment."""
+    """Return each form in which a record shows the agent queued text: a prompt, its typed slash command or shell command, or an absorbed attachment."""
     if not isinstance(record, dict) or record.get("isSidechain"):
         return []
     if record.get("type") == "attachment":
@@ -398,19 +400,30 @@ def texts_shown_to_agent(record) -> list:
         return []
     content = (record.get("message") or {}).get("content")
     if isinstance(content, str):
-        return [content.strip(), typed_slash_command(content.strip(), record) or ""]
+        text = content.strip()
+        shell_command = re.fullmatch(r"<bash-input>(.*)</bash-input>", text, re.S)
+        return [text, typed_slash_command(text, record) or "", shell_command.group(1).strip() if shell_command else ""]
     return [joined_text_blocks(content).strip()]
 
 
-def claude_code_session_transcript_queued_user_messages_never_read_by_agent(transcript_path: Path) -> list:
-    """Return, in the order typed, the user's queued messages that no later record shows the agent reading.
+def shown_text_is_queued_text(shown: str, queued: str) -> bool:
+    """Match exactly, so that `A` is not read in any text containing it; a peer message may carry the harness's wrapper."""
+    if shown == queued:
+        return True
+    return (queued.startswith(PEER_MESSAGE_TAG_OPENINGS)
+            and f"{shown}\n".startswith(f"{DELIVERED_PEER_MESSAGE_FIRST_LINE}\n{queued}\n"))
 
-    A queue-operation "enqueue" adds a message; "remove" takes the first with its content away; "popAll"
-    returns every message to the input box; "dequeue", which names no content, takes the message that a
-    user record before the next agent record shows, or else the oldest. A later record showing a message's
-    exact text also counts as reading it. Messages opening with a tag are left out, except a paste.
-    """
-    records = []
+
+def first_pending_position_shown(pending: list, shown_forms: list):
+    for position, queued in enumerate(pending):
+        if any(shown_text_is_queued_text(shown, queued) for shown in shown_forms):
+            return position
+    return None
+
+
+def queue_events_of_transcript(transcript_path: Path) -> list:
+    """Return queue operations as dicts, each record's shown texts as a list, and one None per run of agent records."""
+    events = []
     with transcript_path.open("rb") as handle:
         for raw_line in handle:
             if len(raw_line) > MAXIMUM_RECORD_BYTES:
@@ -419,33 +432,68 @@ def claude_code_session_transcript_queued_user_messages_never_read_by_agent(tran
                 record = json.loads(raw_line)
             except (json.JSONDecodeError, UnicodeDecodeError):
                 continue
-            if isinstance(record, dict) and not record.get("isSidechain"):
-                records.append(record)
+            if not isinstance(record, dict) or record.get("isSidechain"):
+                continue
+            if record.get("type") == "queue-operation":
+                events.append({key: record.get(key) for key in ("operation", "content", "reason")})
+            elif record.get("type") == "assistant":
+                if events and events[-1] is not None:
+                    events.append(None)
+            else:
+                shown_forms = [text for text in texts_shown_to_agent(record) if text]
+                if shown_forms:
+                    events.append(shown_forms)
+    return events
 
+
+def claim_delivery_record(events: list, operation_index: int, claimed: set, queued_texts: list):
+    """Claim the first unclaimed record before the next agent record that shows a queued text; return that text's position."""
+    for position, queued in enumerate(queued_texts):
+        for index in range(operation_index + 1, len(events)):
+            event = events[index]
+            if event is None:
+                break
+            if isinstance(event, list) and index not in claimed and first_pending_position_shown([queued], event) is not None:
+                claimed.add(index)
+                return position
+    return None
+
+
+def claude_code_session_transcript_queued_user_messages_never_read_by_agent(transcript_path: Path) -> list:
+    """Return, in the order typed, the user's queued messages that no later record shows the agent reading.
+
+    A queue-operation "enqueue" adds a message; "remove" takes the first with its content away; "popAll"
+    returns every message to the input box; "dequeue", which names no content, takes the message that a
+    user record before the next agent record shows, or else the oldest. The record that delivers a dequeue
+    or a delivering remove removes no second copy; any other record showing a message removes one copy.
+    Messages from another sender's known tag are left out.
+    """
+    events = queue_events_of_transcript(transcript_path)
     pending = []
-    for index, record in enumerate(records):
-        if record.get("type") == "queue-operation":
-            operation = record.get("operation")
-            content = record.get("content")
-            if operation == "enqueue" and isinstance(content, str) and content.strip():
-                pending.append(content.strip())
-            elif operation == "remove" and isinstance(content, str) and content.strip() in pending:
-                pending.remove(content.strip())
-            elif operation == "popAll":
-                pending = []
-            elif operation == "dequeue" and pending:
-                shown = []
-                for later in records[index + 1:]:
-                    if later.get("type") == "assistant":
-                        break
-                    shown += texts_shown_to_agent(later)
-                pending.pop(next((position for position, text in enumerate(pending) if text in shown), 0))
+    claimed = set()
+    for index, event in enumerate(events):
+        if event is None:
             continue
-        for text in texts_shown_to_agent(record):
-            if text in pending:
-                pending.remove(text)
-    return [text for text in pending
-            if not text.startswith("<") or text.startswith(QUEUED_TEXT_OF_THE_USER_TAG_OPENINGS)]
+        if isinstance(event, list):
+            if index not in claimed:
+                position = first_pending_position_shown(pending, event)
+                if position is not None:
+                    del pending[position]
+            continue
+        operation = event["operation"]
+        content = event["content"].strip() if isinstance(event["content"], str) else ""
+        if operation == "enqueue" and content:
+            pending.append(content)
+        elif operation == "remove" and content in pending:
+            pending.remove(content)
+            if event["reason"] in QUEUE_REMOVE_REASONS_THAT_DELIVER_TO_AGENT:
+                claim_delivery_record(events, index, claimed, [content])
+        elif operation == "popAll":
+            pending = []
+        elif operation == "dequeue" and pending:
+            position = claim_delivery_record(events, index, claimed, pending)
+            del pending[position or 0]
+    return [text for text in pending if not text.startswith(QUEUED_TEXT_OF_ANOTHER_SENDER_TAG_OPENINGS)]
 
 
 def first_line_of(text: str) -> str:
@@ -465,11 +513,12 @@ def subagent_turn_count(turns) -> int:
     return sum(1 for turn in turns if turn["voice"] == SUBAGENT_VOICE) - len(turns_left_out_notes(turns))
 
 
-def select_tail_clearing_floor(turns, minimum_words: int = MINIMUM_DIALOG_WORDS):
+def select_tail_clearing_floor(turns, minimum_words: int = MINIMUM_DIALOG_WORDS, keep_short_final_agent_turns: bool = False):
     """Return (selected_turns, start_index) for a tail clearing the word floor at a user prompt."""
-    # Short final assistant turns may be fragments cut off by the retiring session's termination.
+    # Short final assistant turns may be fragments cut off by the retiring session's termination,
+    # but an unread reply may answer one, such as `A` to a short approval question.
     end = len(turns)
-    while (end > 0 and turns[end - 1]["voice"] == "assistant"
+    while (not keep_short_final_agent_turns and end > 0 and turns[end - 1]["voice"] == "assistant"
            and len(turns[end - 1]["text"].split()) <= MAXIMUM_ACKNOWLEDGEMENT_WORDS):
         end -= 1
     if end == 0:
@@ -772,6 +821,7 @@ def main(argv=None) -> int:
                 f"(skipped: {skip_counts}) — refusing to write an empty extraction"
             )
 
+        queued_user_messages = claude_code_session_transcript_queued_user_messages_never_read_by_agent(transcript_path)
         if arguments.boundary_quote:
             selected, start_index, quoted_index = select_turns_from_boundary(
                 dialog, arguments.boundary_quote, arguments.minimum_words
@@ -790,7 +840,8 @@ def main(argv=None) -> int:
             selected = dialog[start_index:]
             boundary_note = f"final {len(selected)} turns (explicit turn count)"
         else:
-            selected, start_index = select_tail_clearing_floor(dialog, arguments.minimum_words)
+            selected, start_index = select_tail_clearing_floor(
+                dialog, arguments.minimum_words, keep_short_final_agent_turns=bool(queued_user_messages))
             boundary_note = (
                 f"the tail of the conversation clearing {arguments.minimum_words} words, "
                 f"opening at the user prompt on turn {start_index + 1}"
@@ -811,7 +862,7 @@ def main(argv=None) -> int:
         total_turns=len(dialog),
         skip_counts=skip_counts,
         left_out_notes=turns_left_out_notes(turns),
-        queued_user_messages_never_read_by_agent=claude_code_session_transcript_queued_user_messages_never_read_by_agent(transcript_path),
+        queued_user_messages_never_read_by_agent=queued_user_messages,
     )
 
     for line in render_extraction_diagnostics(selected, report):

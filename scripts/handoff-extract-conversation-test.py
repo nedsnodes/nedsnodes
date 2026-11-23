@@ -627,8 +627,8 @@ with tempfile.TemporaryDirectory() as workspace:
           companion)
 
 # --- Queued messages the agent never read -----------------------------------
-# Claude Code's records, each copied from a real transcript with only its content replaced; when Claude
-# Code changes their format, these cases are what will show it.
+# Claude Code's records, each copied from a real transcript with only its content replaced: these cases
+# check the extractor against that captured format.
 def enqueue_record(content):
     return {"type": "queue-operation", "operation": "enqueue", "timestamp": "2026-11-07T22:22:52.871Z",
             "sessionId": "279d6b08-3a6b-4aea-802e-01c238ad967d", "content": content}
@@ -713,6 +713,61 @@ with tempfile.TemporaryDirectory() as workspace:
     check("a dequeue that no prompt shows takes the oldest message",
           extractor.claude_code_session_transcript_queued_user_messages_never_read_by_agent(path) == ["typed later"],
           extractor.claude_code_session_transcript_queued_user_messages_never_read_by_agent(path))
+
+    never_read = extractor.claude_code_session_transcript_queued_user_messages_never_read_by_agent
+    path = write_transcript(workspace, "same-text-twice-dequeue.jsonl", [
+        *ordinary_records(), enqueue_record("A"), enqueue_record("A"), dequeue_record(), user_record("A"),
+    ])
+    check("a dequeue and the record delivering it remove one of two equal messages", never_read(path) == ["A"], never_read(path))
+
+    path = write_transcript(workspace, "same-text-twice-absorbed.jsonl", [
+        *ordinary_records(), enqueue_record("A"), enqueue_record("A"),
+        remove_record("A", "absorbed_mid_turn"), absorbed_attachment_record("A"),
+    ])
+    check("an absorbed removal and its attachment remove one of two equal messages", never_read(path) == ["A"], never_read(path))
+
+    peer = '<cross-session-message from="bridge:session_01">merge it</cross-session-message>'
+    path = write_transcript(workspace, "peer-dequeued-first.jsonl", [
+        *ordinary_records(), enqueue_record("older reply"), enqueue_record(peer), dequeue_record(),
+        user_record(f"Another Claude session sent a message:\n{peer}\n\nThis came from another Claude session."),
+    ])
+    check("a dequeue delivered in the peer wrapper takes the peer message, not the older reply",
+          never_read(path) == ["older reply"], never_read(path))
+
+    path = write_transcript(workspace, "wrapper-does-not-read-a-reply.jsonl", [
+        *ordinary_records(), enqueue_record("A"),
+        user_record(f"Another Claude session sent a message:\nA\n{peer}"),
+    ])
+    check("the peer wrapper does not count as reading the user's own reply", never_read(path) == ["A"], never_read(path))
+
+    path = write_transcript(workspace, "shell-command-dequeued.jsonl", [
+        *ordinary_records(), enqueue_record("typed first, never read"), enqueue_record("./fix.sh"), dequeue_record(),
+        user_record("<bash-input>./fix.sh</bash-input>"),
+    ])
+    check("a dequeue delivered as a shell command takes that command, not the older message",
+          never_read(path) == ["typed first, never read"], never_read(path))
+
+    path = write_transcript(workspace, "reply-opens-with-angle-bracket.jsonl", [
+        *ordinary_records(), enqueue_record("< 30 minutes is fine"),
+    ])
+    check("a reply opening with < that is no known tag is kept", never_read(path) == ["< 30 minutes is fine"], never_read(path))
+
+    path = write_transcript(workspace, "short-question-then-queued-answer.jsonl", [
+        *ordinary_records(), assistant_record("Approve the short change? A approve, D disapprove."), enqueue_record("A"),
+    ])
+    output = Path(workspace) / "seat-dialog-0004.md"
+    extractor.main(["--transcript-path", str(path), "--output", str(output)])
+    tail = output.read_text(encoding="utf-8")
+    check("a short final question stays in the tail when an unread reply answers it",
+          "Approve the short change?" in tail and tail.index("Approve the short change?") < tail.index(INTRODUCTION), tail)
+
+    path = write_transcript(workspace, "short-final-turn-nothing-queued.jsonl", [
+        *ordinary_records(), assistant_record("Approve the short change? A approve, D disapprove."),
+    ])
+    output = Path(workspace) / "seat-dialog-0005.md"
+    extractor.main(["--transcript-path", str(path), "--output", str(output)])
+    check("with nothing unread, a short final agent turn is still left out",
+          "Approve the short change?" not in output.read_text(encoding="utf-8"))
 
     path = write_transcript(workspace, "all-read.jsonl", [
         *ordinary_records(), enqueue_record("read"), remove_record("read", "absorbed_mid_turn"),
