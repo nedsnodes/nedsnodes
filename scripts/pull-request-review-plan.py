@@ -3,7 +3,8 @@
 
 Rule 1: tiers follow content. Tests, fenced Markdown code, and Python changes
 limited to docstrings, comments and tool-message-to-agent strings get codex-review-and-head-tests-tier.
-A tool-message-to-agent string is one that tool_message_to_agent_string_nodes_in_source finds;
+A tool-message-to-agent string is one that tool_message_to_agent_string_nodes_in_source,
+in nn-systems/general-tools/python-source-tool-message-to-agent-string-collector-common.py, finds;
 any other string, such as a regular expression, a command's argument or a path,
 carries behaviour, so a change to it is a behaviour change.
 Python behaviour changes and other code get claude-and-codex-review-and-head-tests-tier. Prose gets
@@ -55,7 +56,7 @@ print(stopped_line(...)) does. Test files are those ending in
 expected message is not handed to an agent. F-string
 placeholders survive in the listing. Beside each listed string is its
 cold-read-fast-read command, whose target file holds the string's new text as
-the agent reads it, with each placeholder shown as <its source>, or as its value
+the agent reads it, with each placeholder shown as <filled in: its source>, or as its value
 when it names a module-level string constant, as the collector's
 text_as_agent_reads_it_with_placeholder_stand_ins says; --json gives that text
 as new_text_as_agent_reads_it_with_placeholder_stand_ins. The
@@ -94,7 +95,7 @@ needs-approval label, with needs_user_approval set in --json, including an added
 prompt and one the plan lists with no old text, such as a prompt moved into
 another string.
 
-Rule 4: a pull request that adds or changes an nc-architecture-overview, a
+Rule 4: a pull request that adds or changes an nn-architecture-overview, a
 file at the path scripts/architecture-overview-path-template-and-checked-against-commit-reader-common.py
 gives for a directory under nn-systems/ at the head, is refused, with exit 1
 and no plan, until the newest claim-check report for the overview's text at
@@ -476,10 +477,16 @@ def passes_its_text_up(child, parent):
             or (isinstance(parent, ast.IfExp) and child is not parent.test))
 
 
+STR_METHODS_THAT_RETURN_THE_TEXT = frozenset({
+    "format", "strip", "lstrip", "rstrip", "upper", "lower", "casefold", "title", "capitalize",
+    "replace", "center", "ljust", "rjust", "removeprefix", "removesuffix"})
+
+
 def nearest_call_prints_its_argument(node, parents, helper_printers):
     """True when node's text reaches, unchanged, a statement or the argument of a printing call or
-    helper printer, or the exception a raise statement builds. A method called on the text, as
-    .format is, passes its result on up. The collector also counts a string inside any call nested
+    helper printer, or the exception a raise statement builds. A str method that returns the text,
+    as .format does, passes its result on up; one such as .startswith or .count turns the text into
+    a value it steers, as a comparison does. The collector also counts a string inside any call nested
     in a printed argument, such as the pattern in print(re.sub("a", "b", text)), but such a string
     steers the call, not the text; and one inside a comparison, as in print(x == "yes") or
     print(x == "yes".upper()), which prints only a Boolean."""
@@ -490,6 +497,7 @@ def nearest_call_prints_its_argument(node, parents, helper_printers):
             child, parent = parent, parents.get(parent)
         call = parents.get(parent)
         if not (isinstance(parent, ast.Attribute) and parent.value is child
+                and parent.attr in STR_METHODS_THAT_RETURN_THE_TEXT
                 and isinstance(call, ast.Call) and call.func is parent):
             break
         child, parent = call, parents.get(call)
@@ -949,11 +957,11 @@ def merged_tree_against_origin_main(repository, head):
 
 
 def changed_architecture_overview_paths_and_systems(repository, head, changed_files):
-    """(path, system) for each nc-architecture-overview the pull request adds or
+    """(path, system) for each nn-architecture-overview the pull request adds or
     changes whose system has a directory under nn-systems/ at head."""
     overviews = []
     for entry in changed_files:
-        system = overview_claim_check.nc_architecture_overview_described_system_name_from_page_path(entry["path"])
+        system = overview_claim_check.nn_architecture_overview_described_system_name_from_page_path(entry["path"])
         if entry["status"] == "D" or system is None:
             continue
         if not git_result_or_refuse(repository, "ls-tree", "-d", "--name-only", head, f"nn-systems/{system}").stdout.strip():
@@ -982,7 +990,7 @@ def path_is_architecture_overview_described_code(path, system, component_paths):
 
 
 def architecture_overview_checked_against_commit_problems(repository, head, changed_files):
-    """For each nc-architecture-overview the pull request adds or changes, why
+    """For each nn-architecture-overview the pull request adds or changes, why
     its **Checked against:** commit does not hold the code the overview
     describes at head; an empty list lets the plan go on."""
     problems = []
@@ -1030,7 +1038,7 @@ def architecture_overview_checked_against_commit_refusal_message_lines_one_per_o
 
 
 def architecture_overview_checked_against_commit_refusal_message(number, head, problems):
-    lines = [f"pull request {number} adds or changes {len(problems)} nc-architecture-overview(s) whose "
+    lines = [f"pull request {number} adds or changes {len(problems)} nn-architecture-overview(s) whose "
              "**Checked against:** commit does not hold the code the overview describes at "
              f"head {head[:12]}, so no plan was computed. The claim check read the code at that commit, so its "
              "report does not cover the code this pull request would merge."]
@@ -1050,7 +1058,7 @@ def architecture_overview_checked_against_commit_refusal_message(number, head, p
 
 
 def architecture_overview_claim_check_shortfalls(repository, head, changed_files, report_directory):
-    """For each nc-architecture-overview the pull request adds or changes, the
+    """For each nn-architecture-overview the pull request adds or changes, the
     newest claim-check report for the overview's text at head, when that report
     shows a must-fix claim remaining, or is missing or malformed; an empty list
     lets the plan go on."""
@@ -1078,7 +1086,7 @@ def architecture_overview_claim_check_refusal_message_lines_one_per_overview(sho
 
 
 def architecture_overview_claim_check_refusal_message(number, head, shortfalls, report_directory):
-    lines = [f"pull request {number} adds or changes {len(shortfalls)} nc-architecture-overview(s), and for each one "
+    lines = [f"pull request {number} adds or changes {len(shortfalls)} nn-architecture-overview(s), and for each one "
              f"listed below no claim-check report on the overview's text at head {head[:12]} shows that no "
              "must-fix claim remains, so no plan was computed."]
     lines.extend(architecture_overview_claim_check_refusal_message_lines_one_per_overview(shortfalls, report_directory))

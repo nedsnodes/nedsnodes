@@ -3,17 +3,20 @@
 
 Usage:
   scripts/merge-lane-pull-request-head-and-merged-worktrees-rebuild.py <pull request number>
-      <nc-head-commit> <main commit> [--merge-lane-worktrees-and-outputs-directory DIR] [--merge-lane-review-worktrees-directory DIR] [--review-tools-worktree-at-main DIR]
+      <nn-head-commit> <main commit> [--merged-worktree-only] [--merge-lane-worktrees-and-outputs-directory DIR] [--merge-lane-review-worktrees-directory DIR] [--review-tools-worktree-at-main DIR]
 
 Fetches the pull request's head from origin, then makes pr<n>-head at the
-nc-head-commit and pr<n>-merged at the main commit with the nc-head-commit merged
+nn-head-commit and pr<n>-merged at the main commit with the nn-head-commit merged
 in, as merge-lane-2, always with a merge commit. A worktree already at either
-path is removed first, with any changes in it.
+path is removed first, with any changes in it. --merged-worktree-only makes
+pr<n>-merged alone and leaves pr<n>-head as it is, because reviewers may be
+reading it.
 
 Git runs in --review-tools-worktree-at-main. Every worktree of one repository shares its
-objects, so the fetched nc-head-commit is visible to the new worktrees.
+objects, so the fetched nn-head-commit is visible to the new worktrees.
 
-Exit codes: 0 both worktrees made; 1 a git step failed, or the head conflicts
+Exit codes: 0 both worktrees made, or pr<n>-merged alone with
+--merged-worktree-only; 1 a git step failed, or the head conflicts
 with main, named on stdout.
 """
 
@@ -49,11 +52,13 @@ class HeadConflictsWithMain(Exception):
 
 def parse_arguments(argv):
     parser = argparse.ArgumentParser(
-        description="Make pr<n>-head at a pull request's nc-head-commit and pr<n>-merged "
+        description="Make pr<n>-head at a pull request's nn-head-commit and pr<n>-merged "
                     "at that head merged onto main, both detached.")
     parser.add_argument("pull_request", type=int, help="the pull request's number")
-    parser.add_argument("head_commit", help="the pull request's nc-head-commit")
-    parser.add_argument("main_commit", help="the main commit to merge the nc-head-commit onto")
+    parser.add_argument("head_commit", help="the pull request's nn-head-commit")
+    parser.add_argument("main_commit", help="the main commit to merge the nn-head-commit onto")
+    parser.add_argument("--merged-worktree-only", action="store_true",
+                        help="rebuild pr<n>-merged and leave pr<n>-head as it is")
     common.add_directory_options(parser, "nothing this program uses")
     return common.resolve_path_options(parser.parse_args(argv))
 
@@ -76,15 +81,20 @@ def main(argv=None):
     head_worktree = common.pull_request_head_worktree(arguments, number)
     merged_worktree = common.pull_request_merged_worktree(arguments, number)
     try:
-        git(checkout, "fetch", "-q", "origin", f"pull/{number}/head")
-        for worktree in (head_worktree, merged_worktree):
+        # A review pipeline sharing this checkout reads FETCH_HEAD after its own fetch.
+        git(checkout, "fetch", "-q", "--no-write-fetch-head", "origin",
+            f"pull/{number}/head")
+        rebuilt = ((merged_worktree,) if arguments.merged_worktree_only
+                   else (head_worktree, merged_worktree))
+        for worktree in rebuilt:
             if worktree.exists():
                 git(checkout, "worktree", "remove", "--force", str(worktree))
-        git(checkout, "worktree", "add", "-q", "--detach", str(head_worktree),
-            arguments.head_commit)
+        if not arguments.merged_worktree_only:
+            git(checkout, "worktree", "add", "-q", "--detach", str(head_worktree),
+                arguments.head_commit)
         git(checkout, "worktree", "add", "-q", "--detach", str(merged_worktree),
             arguments.main_commit)
-        head_full = git(head_worktree, "rev-parse", "HEAD")
+        head_full = git(checkout, "rev-parse", "--verify", f"{arguments.head_commit}^{{commit}}")
         try:
             git(merged_worktree, *MERGE_COMMIT_IDENTITY, "merge", "-q", "--no-edit", "--no-ff",
                 arguments.head_commit)
@@ -95,7 +105,7 @@ def main(argv=None):
                 raise
             git(merged_worktree, "merge", "--abort")
             raise HeadConflictsWithMain(", ".join(conflicted))
-        head_short = git(head_worktree, "rev-parse", "--short", "HEAD")
+        head_short = git(checkout, "rev-parse", "--short", head_full)
         merged_short = git(merged_worktree, "rev-parse", "--short", "HEAD")
         merged_tree = git(merged_worktree, "rev-parse", "HEAD^{tree}")
     except HeadConflictsWithMain as conflict:
@@ -103,7 +113,7 @@ def main(argv=None):
               f"with main {arguments.main_commit[:8]} in: {conflict}\n"
               f"The pull request's author clears a conflict with main, not merge-lane-2 and "
               f"not the user.\n"
-              f"Confirm it from {checkout}, which holds the nc-head-commit because this "
+              f"Confirm it from {checkout}, which holds the nn-head-commit because this "
               f"program just fetched it there:\n"
               f"cd {checkout} && python3 scripts/branch-conflict-check.py --head {head_full} "
               f"--pull-request {number}\n"

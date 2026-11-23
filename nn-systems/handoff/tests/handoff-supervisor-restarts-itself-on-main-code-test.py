@@ -68,6 +68,8 @@ class ProcessReplaced(BaseException):
 
 
 class StubIgnitionPlan:
+    next_step = ""
+
     def compose(self, launch_time_git_sync_report, overview_refresh_due=(), memory_review_due=(),
                 branch_state_instruction="", waiting_approval_walk_item=()):
         return "SUCCESSOR PROMPT"

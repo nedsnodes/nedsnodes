@@ -145,6 +145,7 @@ NO_SANDBOX_SUITES_PROGRAM = Path(__file__).with_name("no-sandbox-test-suites-run
 VERDICT_REVIEW_POSTING_PROGRAM_MARKS_CHECK_PROGRAM_PATH = Path(__file__).resolve().with_name("merge-gate-approval-or-changes-request-review-has-review-posting-program-marks-check.py")
 GIT_REDIRECTING_ENVIRONMENT_COMMON = Path("nn-systems/general-tools/git-redirecting-environment-variables-removal-common.py")
 GIT_MACHINE_READABLE_OUTPUT_COMMON = Path("nn-systems/general-tools/git-machine-readable-output-runner-and-parser-common.py")
+REPOSITORY_NAMES_COMMON = Path("nn-systems/general-tools/github-repository-name-and-name-before-project-rename-common.py")
 FIXTURES = Path(__file__).with_name("merge-gate-test-captured-github-responses")
 BASH = shutil.which("bash")
 TEST_TOKEN = "merge-gate-test-token-not-a-credential"
@@ -368,7 +369,7 @@ def gate_copy(text):
     shutil.copyfile(DESCRIPTION_DEFECT_LINE_READER, directory / DESCRIPTION_DEFECT_LINE_READER.name)
     shutil.copyfile(NO_SANDBOX_SUITES_PROGRAM, directory / NO_SANDBOX_SUITES_PROGRAM.name)
     (top / GIT_REDIRECTING_ENVIRONMENT_COMMON).parent.mkdir(parents=True)
-    for common in (GIT_REDIRECTING_ENVIRONMENT_COMMON, GIT_MACHINE_READABLE_OUTPUT_COMMON):
+    for common in (GIT_REDIRECTING_ENVIRONMENT_COMMON, GIT_MACHINE_READABLE_OUTPUT_COMMON, REPOSITORY_NAMES_COMMON):
         shutil.copyfile(Path(__file__).resolve().parent.parent / common, top / common)
     # A link, not a copy: the check loads the posting program and its modules from its own resolved directory.
     (directory / VERDICT_REVIEW_POSTING_PROGRAM_MARKS_CHECK_PROGRAM_PATH.name).symlink_to(VERDICT_REVIEW_POSTING_PROGRAM_MARKS_CHECK_PROGRAM_PATH)
@@ -482,7 +483,7 @@ TOKEN_LINES = (
 NEW_ACTIVITY_LINES = (
     "the inline comments, the issue comments and the reviews.\n",
     "\nIf any raises a finding, do not merge until the finding is fixed, or answered with a reason "
-    "that shows it does not hold; a fix moves the nc-head-commit, which then needs its own approving review.\n",
+    "that shows it does not hold; a fix moves the nn-head-commit, which then needs its own approving review.\n",
     "\nWhen nothing is left open, post a review as the merge account saying what you read, with a review "
     "file holding only {\"body\": <what you read>} and the command python3 "
     "scripts/merge-lane-pull-request-reviewer-review-post-and-read-back.py --pull-request ",
@@ -492,7 +493,7 @@ NEW_ACTIVITY_LINES = (
 
 
 def full_hash_line(pr):
-    return (f"\nPass the nc-head-commit's full hash in lower case, as gh pr view {pr} --json headRefOid "
+    return (f"\nPass the nn-head-commit's full hash in lower case, as gh pr view {pr} --json headRefOid "
             "--jq .headRefOid prints it, then run the gate again.\n")
 
 
@@ -1006,7 +1007,7 @@ def case_d0_wrong_argument_count(gate):
                    arguments=[BASE_PR, BASE_HEAD])
     return could_not_run_before_gh(
         run, "GATE COULD NOT RUN: merge-gate.sh takes exactly three arguments and was given 2.\n",
-        "\nCall it as: scripts/merge-gate.sh <pull request number> <the nc-head-commit, all 40 "
+        "\nCall it as: scripts/merge-gate.sh <pull request number> <the nn-head-commit, all 40 "
         "characters> <reviewed-since: the submitted_at of your latest review as the merge account, "
         "or of the pin if that is later>\n"), run.summary()
 
@@ -1033,11 +1034,11 @@ def case_e1_no_approval(gate):
         run, "636",
         "GATE REFUSED (#636): no APPROVED review found; the gate prints a merge command only for a "
         "commit an approving review covers.\n",
-        "\nIf the nc-head-commit has not been reviewed yet, commission its review, and run the gate "
-        "again once the nc-head-commit is approved.\n",
+        "\nIf the nn-head-commit has not been reviewed yet, commission its review, and run the gate "
+        "again once the nn-head-commit is approved.\n",
         "\nIf its review found a defect, do not merge until the defect is fixed and the new "
-        "nc-head-commit is approved.\n",
-        "\nIf its review found no defect, approve the nc-head-commit as an account other than the pull "
+        "nn-head-commit is approved.\n",
+        "\nIf its review found no defect, approve the nn-head-commit as an account other than the pull "
         "request's author: the merge account, or mac-claude when the merge account opened the pull "
         "request. Then run the gate again.\n"), run.summary()
 
@@ -1047,9 +1048,9 @@ def case_e2_head_moved(gate):
     run = run_gate(gate, BASE_PR, other, BASE_APPROVAL["submitted_at"], base_routes())
     return refused_with(
         run, BASE_PR,
-        f"head moved: you passed {other}, and the nc-head-commit is now {BASE_HEAD}.\n",
+        f"head moved: you passed {other}, and the nn-head-commit is now {BASE_HEAD}.\n",
         f"\nIf an approving review covers {BASE_HEAD}, run the gate again with {BASE_HEAD} as the "
-        "expected nc-head-commit and a reviewed-since from after you read that review.\n",
+        "expected nn-head-commit and a reviewed-since from after you read that review.\n",
         f"\nOtherwise, have {BASE_HEAD} reviewed and approved, then run the gate again the same way.\n"
     ), run.summary()
 
@@ -1065,7 +1066,7 @@ def case_e3_approval_covers_another_commit(gate):
     head = captured_value("nedschorus-nedschorus-636-pr-view-state.json", "headRefOid")
     run = run_gate(gate, "636", head, pin["submitted_at"], routes)
     return refused_with(
-        run, "636", f"the approval covers {pin['commit_id']} but the nc-head-commit is now {head}.\n",
+        run, "636", f"the approval covers {pin['commit_id']} but the nn-head-commit is now {head}.\n",
         f"\nHave {head} reviewed, and approved by an account other than the pull request's author, "
         "then run the gate again.\n"), run.summary()
 
@@ -1112,7 +1113,7 @@ MERGE_STATE_LINES = {
                "closed. If the pull request is open, run the gate again in a minute; if it still "
                "reads UNKNOWN five minutes later, tell the user this message.",
     "DIRTY": "DIRTY: the branch conflicts with main. Tell the pull request's author; the author "
-             "clears the conflict as CLAUDE.md says, and the new nc-head-commit then needs its own "
+             "clears the conflict as CLAUDE.md says, and the new nn-head-commit then needs its own "
              "approving review.",
     "BLOCKED": "BLOCKED: a branch rule on main blocks the merge, such as a required check that "
                "failed or is still running. Read the pull request's checks on GitHub: if one is "
@@ -1472,6 +1473,49 @@ def case_follow_up_open_issue_in_another_repository_not_printed(gate):
         link_route("open issue", "repos/cli/cli/issues/1154"))
 
 
+def gate_copy_with_repository_names_module(gate, module_text):
+    copy = gate_copy(gate.read_text())
+    (copy.parent.parent / REPOSITORY_NAMES_COMMON).write_text(module_text)
+    return copy
+
+
+def case_repository_names_come_from_the_shared_module(gate):
+    # Names the gate's own text does not hold, so only a gate that reads the module counts both as this repository.
+    copy = gate_copy_with_repository_names_module(
+        gate, 'REPOSITORY = "renamed-owner/renamed-repository"\nOLD_REPOSITORY = "earlier-owner/earlier-repository"\n')
+    current_link = "https://github.com/renamed-owner/renamed-repository/issues/2078"
+    old_link = "https://github.com/earlier-owner/earlier-repository/issues/1154"
+    current = f"#root_cause_not_fixed a second cause stays. #follow_up {current_link}"
+    old = f"#root_cause_not_fixed the harness drops the variable. #follow_up {old_link}"
+    run = description_with_lines_run(
+        copy, [current, old],
+        [link_route("open issue", "repos/renamed-owner/renamed-repository/issues/2078"),
+         link_route("open issue", "repos/earlier-owner/earlier-repository/issues/1154")])
+    return (passed_pinned_to(run, BASE_PR, BASE_APPROVAL["commit_id"])
+            and "--repo renamed-owner/renamed-repository --merge" in run.stdout
+            and run.stdout.endswith(f"\n  {current_link} from the line `{current}`\n"
+                                    f"  {old_link} from the line `{old}`\n")), run.summary()
+
+
+def case_repository_names_module_failing_stops_the_gate(gate):
+    copy = gate_copy_with_repository_names_module(gate, "raise SystemExit(3)\n")
+    run = run_gate(copy, BASE_PR, BASE_HEAD, BASE_APPROVAL["submitted_at"], base_routes())
+    return could_not_run_before_gh(
+        run, "GATE COULD NOT RUN: could not read the repository's names, REPOSITORY and OLD_REPOSITORY, from ",
+        "github-repository-name-and-name-before-project-rename-common.py; python3's error is just above this line.\n"
+        "Fix the module or restore it from main, then run the gate again.\n"), run.summary()
+
+
+def case_repository_names_module_printing_one_name_stops_the_gate(gate):
+    copy = gate_copy_with_repository_names_module(
+        gate, 'REPOSITORY = "nedsnodes/nedsnodes"\nOLD_REPOSITORY = ""\n')
+    run = run_gate(copy, BASE_PR, BASE_HEAD, BASE_APPROVAL["submitted_at"], base_routes())
+    return could_not_run_before_gh(
+        run, "github-repository-name-and-name-before-project-rename-common.py: it printed "
+        "`nedsnodes/nedsnodes `, not two names separated by a space.\n"
+        "Fix the module or restore it from main, then run the gate again.\n"), run.summary()
+
+
 def case_follow_up_issue_closed_as_not_planned(gate):
     return abandoned_link_refused(
         gate, NOT_FIXED_WITH_FOLLOW_UP, FOLLOW_UP_LINK, link_route("issue closed as not planned"),
@@ -1754,6 +1798,14 @@ def case_marks_hand_typed_approval_refused(gate):
         "non-blocking findings to send the author after the merge.\n",
         "\nPost it with: python3 scripts/merge-lane-pull-request-reviewer-review-post-and-read-back.py "
         f"--pull-request 3881 --head-commit {approval['commit_id']} --github-account ned-review-merge <review file>\n",
+        "\nGive each inline comment the finding_category merge-lane-2 judges it to have, one of must-fix-now, "
+        "fix-next, fix-in-maintenance or file-for-later: must-fix-now only for a finding that blocks the merge, "
+        "since the posting program posts a review with a must-fix-now comment as a request for changes and refuses "
+        "an approval that has one. A comment posted by hand carries no category on GitHub, so decide each one; keep "
+        "the verdict that review gave.\n",
+        "\nLeave the unmarked review at https://github.com/nedsnodes/nedsnodes/pull/3881#pullrequestreview-5950181743 "
+        "on GitHub as it is: the gate reads only ned-review-merge's latest review with a verdict, which the review "
+        "you post becomes.\n",
         f"\nThen run the gate again: scripts/merge-gate.sh 3881 {approval['commit_id']} <submitted_at>, "), run.summary()
 
 
@@ -1767,11 +1819,18 @@ def case_marks_hand_typed_approval_of_older_commit_asks_for_review_of_head(gate)
     passed = refused_with(
         run, "3881",
         "https://github.com/nedsnodes/nedsnodes/pull/3881#pullrequestreview-5950181743 (APPROVED), lacks the marks",
-        f"\nThat review covers {approval['commit_id']}, and the nc-head-commit is now {LATER_HEAD}, so do not post "
+        f"\nThat review covers {approval['commit_id']}, and the nn-head-commit is now {LATER_HEAD}, so do not post "
         f"its verdict again: a review posted now is recorded on {LATER_HEAD}, which no one has reviewed.\n",
-        f"\nHave {LATER_HEAD} reviewed, and post that review with: python3 "
-        "scripts/merge-lane-pull-request-reviewer-review-post-and-read-back.py --pull-request 3881 "
-        f"--head-commit {LATER_HEAD} --github-account ned-review-merge <review file>\n")
+        f"\nmerge-lane-2 commissions a new review of {LATER_HEAD} itself, as its seat-brief says for every pull "
+        "request, starting with: scripts/pull-request-review-plan.py --pull-request 3881\n",
+        "\nWhen that review is done, write merge-lane-2's verdict, body and the reviewers' findings into a review file",
+        "\nLeave the unmarked review on GitHub as it is: the review of " + LATER_HEAD + " that you post becomes the one "
+        "the gate reads.\n",
+        "\nPost it with: python3 scripts/merge-lane-pull-request-reviewer-review-post-and-read-back.py --pull-request 3881 "
+        f"--head-commit {LATER_HEAD} --github-account ned-review-merge <review file>\n",
+        "\nWhen that review requests changes, the author's fix-round comes next, so do not run the gate until a later "
+        "review approves.\n",
+        f"\nWhen it approves, run the gate again: scripts/merge-gate.sh 3881 {LATER_HEAD} <submitted_at>, ")
     return passed and f"--head-commit {approval['commit_id']}" not in run.stdout + run.stderr, run.summary()
 
 
@@ -1971,6 +2030,12 @@ CASES = [
      case_follow_up_two_open_issues_printed_in_order_owner_in_capitals),
     ("H8 a #follow_up link to an open issue in another repository passes and is not printed",
      case_follow_up_open_issue_in_another_repository_not_printed),
+    ("NAMES links under both names the repository-names module holds count as this repository, and the merge command names the current one",
+     case_repository_names_come_from_the_shared_module),
+    ("NAMES a repository-names module that fails could not run, exit 2, no gh call",
+     case_repository_names_module_failing_stops_the_gate),
+    ("NAMES a repository-names module that prints one name could not run, exit 2, no gh call",
+     case_repository_names_module_printing_one_name_stops_the_gate),
     ("H2 captured PR 1360's not-fixed line without #follow_up refuses",
      case_follow_up_captured_not_fixed_line_without_it),
     ("H2 captured PR 1298's not-fixed line without #follow_up refuses beside its root-cause line",
@@ -2039,6 +2104,16 @@ TOKEN_BLOCK = (
 SINCE_REAL_TIME_CHECK = """jq -n --arg since "$SINCE" '$since | fromdateiso8601' >/dev/null 2>&1 || cannot"""
 
 MUTATIONS = [
+    ("the repository's names written into the gate instead of read from the module",
+     [('read -r REPO OLD_REPOSITORY extra_name <<<"$repository_names"',
+       'REPO=nedsnodes/nedsnodes OLD_REPOSITORY=nedschorus/nedschorus extra_name=')],
+     [case_repository_names_come_from_the_shared_module]),
+    ("a failing repository-names module not stopping the gate",
+     [('  || cannot "$REPOSITORY_NAMES_UNREADABLE; python3', '  || : "$REPOSITORY_NAMES_UNREADABLE; python3')],
+     [case_repository_names_module_failing_stops_the_gate]),
+    ("one name from the repository-names module accepted",
+     [('[ -n "$OLD_REPOSITORY" ] && [ -z "$extra_name" ]', 'true')],
+     [case_repository_names_module_printing_one_name_stops_the_gate]),
     ("the new-activity count mode counting from the start of the pull request, not the bound",
      [("  SINCE=$bound_at\n", "  SINCE=1970-01-01T00:00:00Z\n")],
      [case_new_activity_count_matches_the_gates_refusal]),

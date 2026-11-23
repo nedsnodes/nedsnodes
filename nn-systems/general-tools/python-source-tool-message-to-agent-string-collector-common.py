@@ -32,7 +32,7 @@ pieces with each f-string field or non-literal + operand replaced by the literal
 strings its value may carry, space-separated, so {'up' if ok else 'down'} gives up down, while
 {name}, a subscript's key and a format spec give nothing; a plain string's braces stay as
 written. It also holds text_as_agent_reads_it_with_placeholder_stand_ins, the message as the
-agent reads it, with each placeholder shown as <its source>, or as its value when it names a module-level string constant whose one assignment is the only binding of that
+agent reads it, with each placeholder shown as <filled in: its source>, or as its value when it names a module-level string constant whose one assignment is the only binding of that
 name anywhere in the file, as module_level_string_values_whose_name_the_file_binds_only_once says.
 A message held in a local name is found when its own function's body binds the name, with =, an annotation or +=, to a
 non-empty string literal, an f-string, a + chain holding a string literal, a string literal
@@ -211,12 +211,18 @@ def placeholder_sources_of_string_node(node):
     return tuple(sources)
 
 
+# A value the program fills in at run time is marked as such, because a bare <source> reads the same as a
+# placeholder the message asks the agent to fill in, such as <branch name>.
+def run_time_value_stand_in(source):
+    return "<filled in: " + source + ">"
+
+
 def render_string_node_text_as_agent_reads_it_with_placeholder_stand_ins(node, module_string_values,
                                                                        names_being_expanded=frozenset()):
     """The text as the agent reads it, without Python's quotes and prefixes: a name that
     module_string_values maps, given as a + operand or an f-string field with no conversion or format
     spec, becomes its value, rendered the same way; any other f-string field or non-literal operand
-    becomes <its source>, as {path} becomes <path>. So does a name whose value is being expanded
+    becomes run_time_value_stand_in of its source, as {path} becomes <filled in: path>. So does a name whose value is being expanded
     already, so that two constants naming each other end. module_string_values holds only the names
     module_level_string_values_whose_name_the_file_binds_only_once keeps, so where a name stands in
     the file never changes what it renders as."""
@@ -229,14 +235,14 @@ def render_string_node_text_as_agent_reads_it_with_placeholder_stand_ins(node, m
         return "".join(part.value if isinstance(part, ast.Constant)
                        else render(part.value)
                        if part.conversion == -1 and part.format_spec is None
-                       else "<" + ast.unparse(part.value) + ">"
+                       else run_time_value_stand_in(ast.unparse(part.value))
                        for part in node.values)
     if is_addition_chain_holding_string_literal(node):
         return "".join(render(operand) for operand in addition_chain_operands(node))
     if isinstance(node, ast.Name) and node.id in module_string_values and node.id not in names_being_expanded:
         return render_string_node_text_as_agent_reads_it_with_placeholder_stand_ins(
             module_string_values[node.id], module_string_values, names_being_expanded | {node.id})
-    return "<" + ast.unparse(node) + ">"
+    return run_time_value_stand_in(ast.unparse(node))
 
 
 def literal_text_of_string_node(node):
@@ -844,7 +850,7 @@ def module_level_string_values_whose_name_the_file_binds_only_once(tree, module_
     """The module constants whose one module-level assignment is the only binding of their name
     anywhere in the file, so a placeholder naming one means that constant wherever it stands. A
     name a function also binds, takes as a parameter, declares global or loops over keeps its
-    <source> stand-in, which may hide a value Python would use, but never shows a wrong one."""
+    <filled in: source> stand-in, which may hide a value Python would use, but never shows a wrong one."""
     counts = binding_count_of_each_name_anywhere_in_the_file(tree)
     return {name: value for name, value in module_string_values.items() if counts.get(name) == 1}
 

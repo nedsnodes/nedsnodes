@@ -1,21 +1,18 @@
 #!/usr/bin/env python3
-"""Write a user-alert naming each file named *.token or .env in the home directory that the Linux sandboxes leave readable.
+"""Write a user-alert naming each file named *.token or .env in the home directory that ned-box's list of credential files leaves out.
 
     python3 <this file>
 
-On Linux the sandboxes of the Codex and agy cold-read-cells deny a reviewer program only the folders
-CREDENTIAL_DIRECTORIES lists and the login files REVIEWER_PROGRAM_LOGIN_FILES lists, both in
-nn-systems/cold-read/cold-read-cell-common.py. The Codex cell's sandbox denies Codex's own login file too,
-while the agy cell's sandbox leaves agy's own login files readable. They do not deny by the two name patterns of
-CREDENTIAL_FILE_NAME_PATTERNS, `*.token` and `.env`; only the macOS sandboxes and the Claude cell's
-Read(//**/<pattern>) rule do. A file with such a name anywhere else under the home directory is therefore
-readable to the Codex and agy reviewer programs. This program walks the home directory, read from HOME,
-skipping the folders CREDENTIAL_DIRECTORIES lists and the log-store (~/nedsnodes-logs, whose test leftovers match the patterns but
-hold no credential), and when it finds such a file writes one user-alert naming every one found, through
+On Linux the sandboxes of the cold-read-cells and of the Codex and Gemini task programs deny a reviewer program
+only the files CREDENTIAL_FILES_ON_NED_BOX and REVIEWER_PROGRAM_LOGIN_FILES list, by exact path, both in
+nn-systems/cold-read/cold-read-cell-common.py. A credential file added later is readable until it is added to that
+list. This program walks the home directory, read from HOME, skipping the log-store (~/nedsnodes-logs, whose test
+leftovers match the patterns but hold no credential), and when it finds a file named by a pattern of
+CREDENTIAL_FILE_NAME_PATTERNS, `*.token` or `.env`, that neither list names and IGNORED_FILES does not name, writes
+one user-alert naming every one found, through
 nn-systems/general-tools/user-alerts-pending-and-claimed-files-write-claim-release-and-delete-common.py.
-It keeps no state, so the alert comes again each day until the file is moved into a folder
-CREDENTIAL_DIRECTORIES lists or deleted, or its folder is added to CREDENTIAL_DIRECTORIES; a file directly
-in the home folder can only be moved or deleted.
+It keeps no state, so the alert comes again each day until the file is added to CREDENTIAL_FILES_ON_NED_BOX or
+IGNORED_FILES, or deleted.
 
 It runs once a day on ned-box, from the table nn-systems/general-tools/scheduled-jobs-on-each-machine.json,
 which nn-systems/general-tools/install-scheduled-jobs-on-this-machine.py installs as this cron line:
@@ -56,19 +53,23 @@ user_alerts = _load(
 THIS_PROGRAM = "nn-systems/cold-read/cold-read-cell-credential-files-outside-denied-directories-daily-check-user-alert-write.py"
 FOUND_TITLE = "A credential file on ned-box is readable to the cold-read-cells' reviewer programs"
 FOUND_ACTION = (
-    "An agent on ned-box can, after asking the user which: add the file's folder to CREDENTIAL_DIRECTORIES in "
-    "nn-systems/cold-read/cold-read-cell-common.py in a pull request, if the file holds a credential that must stay "
-    "there; or move the file into a folder already listed. A file directly in the home folder can only be moved. "
-    "Only the user can say whether the file holds a credential.")
+    "Only the user can say whether the file holds a credential. An agent on ned-box asks him, then, if it does, adds "
+    "the file's path to CREDENTIAL_FILES_ON_NED_BOX in nn-systems/cold-read/cold-read-cell-common.py in a pull request, "
+    "or deletes the file if he says to; if it does not, adds the path to IGNORED_FILES in "
+    f"{THIS_PROGRAM} in a pull request.")
 NAME_PATTERNS = " or ".join(cell_common.CREDENTIAL_FILE_NAME_PATTERNS)
 FAILED_TITLE = "The daily search of ned-box for credential files the cold-read-cells can read failed"
 FAILED_ACTION = (
     f"An agent on ned-box can run python3 {THIS_PROGRAM} by hand, read the error it prints, and fix its cause; "
-    "until then a new credential file outside CREDENTIAL_DIRECTORIES goes unreported.")
+    "until then a new credential file missing from CREDENTIAL_FILES_ON_NED_BOX goes unreported.")
+# Files named like credentials that the user does not count as credentials to protect, relative to the home folder.
+IGNORED_FILES = (".steam/steam.token",)
 
 
-def skipped_directories(home):
-    return {Path(directory) for directory in cell_common.CREDENTIAL_DIRECTORIES} | {home / "nedsnodes-logs"}
+def listed_or_ignored_files(home):
+    return ({Path(path) for path in cell_common.CREDENTIAL_FILES_ON_NED_BOX}
+            | {Path(path) for path in cell_common.reviewer_program_login_files()}
+            | {home / path for path in IGNORED_FILES})
 
 
 def _raise_unless_unreadable_or_gone(error):
@@ -77,14 +78,15 @@ def _raise_unless_unreadable_or_gone(error):
         raise error
 
 
-def credential_files_outside_denied_directories(home):
-    """Every file under home whose name matches CREDENTIAL_FILE_NAME_PATTERNS and that no skipped directory holds."""
-    skipped = skipped_directories(home)
+def credential_named_files_missing_from_the_list(home):
+    """Every file under home outside the log-store whose name matches CREDENTIAL_FILE_NAME_PATTERNS, unlisted."""
+    known = listed_or_ignored_files(home)
     found = []
     for directory, subdirectories, files in os.walk(home, onerror=_raise_unless_unreadable_or_gone):
-        subdirectories[:] = [name for name in subdirectories if Path(directory) / name not in skipped]
+        subdirectories[:] = [name for name in subdirectories if Path(directory) / name != home / "nedsnodes-logs"]
         found += [Path(directory) / name for name in files
-                  if any(fnmatch.fnmatchcase(name, pattern) for pattern in cell_common.CREDENTIAL_FILE_NAME_PATTERNS)]
+                  if any(fnmatch.fnmatchcase(name, pattern) for pattern in cell_common.CREDENTIAL_FILE_NAME_PATTERNS)
+                  and Path(directory) / name not in known]
     return sorted(found)
 
 
@@ -92,9 +94,9 @@ def main(argv=None):
     argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter).parse_args(argv)
     home = Path.home()
     try:
-        found = credential_files_outside_denied_directories(home)
+        found = credential_named_files_missing_from_the_list(home)
     except OSError as error:
-        text = (f"The search of {home} for files named {NAME_PATTERNS} outside CREDENTIAL_DIRECTORIES ended "
+        text = (f"The search of {home} for files named {NAME_PATTERNS} missing from CREDENTIAL_FILES_ON_NED_BOX ended "
                 f"before it had looked everywhere: {error!r}")
         print(text, file=sys.stderr)
         try:
@@ -104,12 +106,12 @@ def main(argv=None):
                   f"{alert_error!r}", file=sys.stderr)
         return 1
     if not found:
-        print(f"The search found no file named {NAME_PATTERNS} under {home} outside the folders CREDENTIAL_DIRECTORIES "
-              f"lists in nn-systems/cold-read/cold-read-cell-common.py and outside the log-store {home / 'nedsnodes-logs'}.")
+        print(f"The search found no file named {NAME_PATTERNS} under {home} that CREDENTIAL_FILES_ON_NED_BOX in "
+              f"nn-systems/cold-read/cold-read-cell-common.py leaves out, outside the log-store {home / 'nedsnodes-logs'}.")
         return 0
-    text = (f"Each file below is named {NAME_PATTERNS} and lies in no folder that CREDENTIAL_DIRECTORIES lists in "
-            "nn-systems/cold-read/cold-read-cell-common.py, so on Linux the Codex and agy programs that the "
-            "cold-read-cells start can read it:\n"
+    text = (f"Each file below is named {NAME_PATTERNS} and is missing from CREDENTIAL_FILES_ON_NED_BOX in "
+            "nn-systems/cold-read/cold-read-cell-common.py, so on ned-box the Claude, Codex and agy programs that "
+            "the cold-read-cells and task programs start can read it:\n"
             + "\n".join(str(path) for path in found))
     print(text)
     try:
