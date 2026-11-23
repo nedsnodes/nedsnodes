@@ -422,6 +422,22 @@ def main():
               and "--head-commit" in completed.stderr,
               f"exit {completed.returncode}\n{completed.stdout}{completed.stderr}")
 
+        git_calls_log = scratch / "git-calls.log"
+        git_logger = helpers / "tripwire-bin" / "git"
+        git_logger.write_text(f'#!/bin/sh\nprintf "%s\\n" "$*" >> {shlex.quote(str(git_calls_log))}\n'
+                              f'exec {shlex.quote(shutil.which("git"))} "$@"\n')
+        git_logger.chmod(0o755)
+        for option in ("--head-commit", "--main-commit"):
+            git_calls_log.unlink(missing_ok=True)
+            completed, calls = run_program(scratch, helpers, {}, "7", option, "")
+            git_calls = git_calls_log.read_text() if git_calls_log.exists() else ""
+            check(f"an empty {option} exits 2 with no suite run and no git call",
+                  completed.returncode == 2 and calls == [] and git_calls == ""
+                  and option in completed.stderr,
+                  f"exit {completed.returncode}, {len(calls)} run(s), git calls: {git_calls!r}\n"
+                  f"{completed.stdout}{completed.stderr}")
+        git_logger.unlink()
+
         git(author, "checkout", "-q", "main")
         commit_file(author, "conflict.txt", "from main\n")
         git(author, "push", "-q", str(scratch / "origin.git"), "main:refs/heads/main")

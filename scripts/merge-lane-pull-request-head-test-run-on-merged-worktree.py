@@ -67,16 +67,25 @@ _common_spec.loader.exec_module(common)
 run_all_test_suites = common.run_all_test_suites
 
 
+def commit_option_value(value):
+    # A caller's empty shell variable must not fall back to origin's newest commit.
+    if not value:
+        raise argparse.ArgumentTypeError(
+            "is empty, so it names no commit and no suite ran.\n"
+            "Pass the commit's hash, or leave the option out to use origin's newest commit.")
+    return value
+
+
 def parse_arguments(argv):
     parser = argparse.ArgumentParser(
         description="Run main's pull-request-head-test-run.py on pr<n>-merged for each "
                     "pull request, with its outputs under the worktrees and outputs directory.")
     parser.add_argument("pull_requests", type=int, nargs="+", metavar="pull_request",
                         help="a pull request's number")
-    parser.add_argument("--head-commit",
+    parser.add_argument("--head-commit", type=commit_option_value,
                         help="the head to merge, instead of the pull request's head on origin; "
                              "takes one pull request")
-    parser.add_argument("--main-commit",
+    parser.add_argument("--main-commit", type=commit_option_value,
                         help="the main commit to merge onto, instead of main's newest commit "
                              "on origin")
     common.add_directory_options(parser, "hr/ and tripwire-bin/")
