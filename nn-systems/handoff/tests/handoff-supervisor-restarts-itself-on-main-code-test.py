@@ -4,7 +4,8 @@ fast-forwards its own checkout to origin/main and replaces its process with a
 fresh start of itself from there, by os.execv.
 
 Covered: where the restart sits in the cycle; that an ask-user-before-restart handoff is
-not restarted on; that a checkout which cannot fast-forward, or an os.execv
+not restarted on; that a checkout which cannot fast-forward, even when git's error quotes
+the words of an on-main report, or an os.execv
 that raises or returns, leaves the supervisor running its loaded code and tells the
 successor why; that a reference-checkout which cannot fast-forward is put back on
 main by the back-on-main program, run by the supervisor itself, after which the
@@ -61,6 +62,12 @@ StubLaunchedSession = fixture.StubLaunchedSession
 supervisor_names_replaced = fixture.supervisor_names_replaced
 
 RESTART_FLAG = "--started-by-handoff-supervisor-restarting-itself-on-main-code"
+
+
+def at_main(text: str):
+    """A launch-time-git-sync report of a checkout git found at origin/main's commit."""
+    return supervisor.LaunchTimeGitSyncReport(text, checkout_has_main_after_a_fetch=True,
+                                              checkout_is_at_main_commit=True)
 
 
 class ProcessReplaced(BaseException):
@@ -144,10 +151,10 @@ def supervise_one_handoff(workspace: Path, case: str, own_checkout_sync_report: 
 
 def run_restart_placement_cases(workspace: Path):
     for case, report in (
-            ("fastforwarded", "launch-time-git-sync: main fast-forwarded to main (abc1234)"),
-            ("current", "launch-time-git-sync: main is current with main"),
-            ("fastforwardedunreadtip", "launch-time-git-sync: main fast-forwarded to main (its new "
-             "commit could not be read: x)\nnext step lines")):
+            ("fastforwarded", at_main("launch-time-git-sync: main fast-forwarded to main (abc1234)")),
+            ("current", at_main("launch-time-git-sync: main is current with main")),
+            ("fastforwardedunreadtip", at_main("launch-time-git-sync: main fast-forwarded to main (its new "
+             "commit could not be read: x)\nnext step lines"))):
         run = supervise_one_handoff(workspace, case, report)
         check(f"RESTART ({case}): after the stop and the worktree cleanup, before the carry-over, "
               "the process is replaced",
@@ -268,7 +275,7 @@ def supervise_one_handoff_from_the_reference_checkout(workspace: Path, case: str
         reference_checkout_back_on_main_success_line_build=(
             program.reference_checkout_back_on_main_success_line_build))
     reports = iter(["launch-time-git-sync: main left as is — 2 uncommitted tracked change(s)",
-                    "launch-time-git-sync: main is current with main"])
+                    at_main("launch-time-git-sync: main is current with main")])
     with supervisor_names_replaced(REFERENCE_CHECKOUT=supervisor.REPOSITORY_ROOT,
                                    reference_checkout_back_on_main=stub_program):
         run = supervise_one_handoff(workspace, case, reports, exec_raises=exec_raises)
@@ -342,13 +349,19 @@ def run_restart_failure_cases(workspace: Path):
             ("behindandahead",
              "launch-time-git-sync: seat-branch is 3 ahead of main and 4 behind",
              None, False, "launch-time-git-sync: seat-branch is 3 ahead of main and 4 behind"),
+            ("giterrorholdsonmainwords",
+             "launch-time-git-sync: main left as is — error: Your local changes to "
+             "'notes/main is current with main' would be overwritten by merge",
+             None, False,
+             "launch-time-git-sync: main left as is — error: Your local changes to "
+             "'notes/main is current with main' would be overwritten by merge"),
             ("gitfailure",
              "launch-time-git-sync: main left as is — git failed\nRerun it; if it fails, stop.",
              None, False, "launch-time-git-sync: main left as is — git failed"),
-            ("execraises", "launch-time-git-sync: main is current with main",
+            ("execraises", at_main("launch-time-git-sync: main is current with main"),
              PermissionError(13, "Permission denied"), False,
              "os.execv failed: PermissionError: [Errno 13] Permission denied"),
-            ("execreturns", "launch-time-git-sync: main is current with main", None, True,
+            ("execreturns", at_main("launch-time-git-sync: main is current with main"), None, True,
              "os.execv returned without replacing the process")):
         run = supervise_one_handoff(workspace, case, report, exec_raises=exec_raises,
                                     exec_returns=exec_returns)
@@ -410,7 +423,7 @@ def run_restarted_process_cases(workspace: Path):
     def sync(directory):
         if Path(directory) == supervisor.REPOSITORY_ROOT:
             events.append("sync own checkout")
-            return "launch-time-git-sync: main is current with main"
+            return at_main("launch-time-git-sync: main is current with main")
         return "launch-time-git-sync: stubbed"
 
     def replace(arguments):

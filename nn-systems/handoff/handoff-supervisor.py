@@ -1557,19 +1557,16 @@ def run_git_here(arguments: list, working_directory: Path, timeout: int = 60):
         return subprocess.CompletedProcess(arguments, 1, "", f"{type(error).__name__}: {error}")
 
 
-# The handoff-supervisor restarts itself on main's code only after a report holding one of these.
-LAUNCH_TIME_GIT_SYNC_REPORT_PHRASE_CURRENT_WITH_MAIN = " is current with main"
-LAUNCH_TIME_GIT_SYNC_REPORT_PHRASE_FAST_FORWARDED_TO_MAIN = " fast-forwarded to main"
-
-
 class LaunchTimeGitSyncReport(str):
     """A launch-time-git-sync report's text, with the sync's outcome beside it: whether the fetch
-    of origin succeeded and the checkout then held all of main. A plain str report has no such
-    outcome, so it counts as not holding main."""
+    of origin succeeded and the checkout then held all of main, and whether the checkout's commit
+    is now origin/main's. A plain str report has no such outcome, so it counts as neither."""
 
-    def __new__(cls, text: str, checkout_has_main_after_a_fetch: bool):
+    def __new__(cls, text: str, checkout_has_main_after_a_fetch: bool,
+                checkout_is_at_main_commit: bool = False):
         report = super().__new__(cls, text)
         report.checkout_has_main_after_a_fetch = checkout_has_main_after_a_fetch
+        report.checkout_is_at_main_commit = checkout_is_at_main_commit
         return report
 
 
@@ -1652,8 +1649,9 @@ def launch_time_git_sync(working_directory: Path) -> str:
             ahead = answer(["rev-list", "--count", "origin/main..HEAD"], 30)
             if ahead == "0":
                 return LaunchTimeGitSyncReport(
-                    f"launch-time-git-sync: {branch}{LAUNCH_TIME_GIT_SYNC_REPORT_PHRASE_CURRENT_WITH_MAIN}{fetch_note}",
-                    checkout_has_main_after_a_fetch=fetched.returncode == 0)
+                    f"launch-time-git-sync: {branch} is current with main{fetch_note}",
+                    checkout_has_main_after_a_fetch=fetched.returncode == 0,
+                    checkout_is_at_main_commit=True)
             return LaunchTimeGitSyncReport(
                 f"launch-time-git-sync: {branch} is {ahead} commit(s) ahead of main and has all of "
                 f"it — nothing to pull{fetch_note}",
@@ -1677,11 +1675,13 @@ def launch_time_git_sync(working_directory: Path) -> str:
     try:
         tip = answer(["rev-parse", "--short", "HEAD"], 15)
     except git.GitCommandFailed as error:
-        return (f"launch-time-git-sync: {branch}{LAUNCH_TIME_GIT_SYNC_REPORT_PHRASE_FAST_FORWARDED_TO_MAIN} (its new commit could not be "
-                f"read: {error}){fetch_note}\n{launch_time_git_sync_git_failure_next_steps(error)}")
+        return LaunchTimeGitSyncReport(
+            f"launch-time-git-sync: {branch} fast-forwarded to main (its new commit could not be "
+            f"read: {error}){fetch_note}\n{launch_time_git_sync_git_failure_next_steps(error)}",
+            checkout_has_main_after_a_fetch=False, checkout_is_at_main_commit=True)
     return LaunchTimeGitSyncReport(
-        f"launch-time-git-sync: {branch}{LAUNCH_TIME_GIT_SYNC_REPORT_PHRASE_FAST_FORWARDED_TO_MAIN} ({tip}){fetch_note}",
-        checkout_has_main_after_a_fetch=fetched.returncode == 0)
+        f"launch-time-git-sync: {branch} fast-forwarded to main ({tip}){fetch_note}",
+        checkout_has_main_after_a_fetch=fetched.returncode == 0, checkout_is_at_main_commit=True)
 
 
 class OverviewCheckGitFailure(Exception):
@@ -2646,11 +2646,9 @@ def launch_time_git_sync_of_own_checkout_first_line_if_not_on_main() -> str:
     first line of the launch-time-git-sync's report, which says why not."""
     report = launch_time_git_sync(REPOSITORY_ROOT)
     print(f"handoff-supervisor: its own checkout {REPOSITORY_ROOT}: {report}")
-    first_line = report.splitlines()[0]
-    if (LAUNCH_TIME_GIT_SYNC_REPORT_PHRASE_FAST_FORWARDED_TO_MAIN in first_line
-            or LAUNCH_TIME_GIT_SYNC_REPORT_PHRASE_CURRENT_WITH_MAIN in first_line):
+    if getattr(report, "checkout_is_at_main_commit", False):
         return ""
-    return first_line
+    return report.splitlines()[0]
 
 
 def handoff_supervisor_not_restarted_notice_and_console_line(
