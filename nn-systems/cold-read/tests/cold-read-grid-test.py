@@ -476,11 +476,12 @@ runpy.run_path(grid, run_name="__main__")
 
 def run_grid(repository, stub_directory, environment_overrides=None,
              target_relative_path=TARGET_RELATIVE_PATH, extra_arguments=(),
-             current_directory=None, launcher_arguments_before_grid=None):
+             current_directory=None, launcher_arguments_before_grid=None, timeout_seconds=None):
     """The grid in `repository` as a subprocess, run from `current_directory`,
     by default `repository`. `launcher_arguments_before_grid`, when given, is
     (launcher file, report count, jump seconds) for
-    GRID_WITH_CLOCK_JUMPED_ONCE_REPORTS_EXIST."""
+    GRID_WITH_CLOCK_JUMPED_ONCE_REPORTS_EXIST. Past `timeout_seconds` the grid is
+    killed and subprocess.TimeoutExpired raised; its cells keep running."""
     stub_directory.mkdir(parents=True, exist_ok=True)
     for runtime_name in ("claude", "codex", "agy"):
         stub = stub_directory / runtime_name
@@ -512,7 +513,7 @@ def run_grid(repository, stub_directory, environment_overrides=None,
            else [str(repository / "nn-systems" / "cold-read" / "cold-read-grid.py")]),
          "--target", target_relative_path, *extra_arguments],
         capture_output=True, text=True, check=False, env=environment,
-        cwd=current_directory or repository,
+        cwd=current_directory or repository, timeout=timeout_seconds,
     )
 
 
@@ -721,6 +722,11 @@ try:
                                  capture_output=True, text=True, check=False).stdout
         return [line.strip() for line in listing.splitlines()
                 if any(fragment in line for fragment in fragments)]
+
+    def kill_processes_mentioning(*fragments):
+        for line in processes_mentioning(*fragments):
+            with contextlib.suppress(ProcessLookupError):
+                os.kill(int(line.split()[0]), signal.SIGKILL)
 
     repository = build_scratch_repository(scratch, "checkout-target-moves-mid-run")
     slow_stubs = scratch / "stub-bin-target-moves-mid-run"
@@ -1130,12 +1136,17 @@ try:
     stub_reading_seconds = 8
     repository = build_scratch_repository(scratch, "checkout-attempts-timed-out")
     finished_reading_markers = scratch / "timed-out-stubs-finished-reading-markers"
+    timed_out_stubs = scratch / "stub-bin-attempts-timed-out"
     started = time.monotonic()
-    result = run_grid(repository, stubs, {
+    result = run_grid(repository, timed_out_stubs, {
         "COLD_READ_GRID_TEST_STUB_SLEEP_SECONDS": str(stub_reading_seconds),
         "COLD_READ_GRID_TEST_STUB_FINISHED_READING_MARKER_DIRECTORY": str(finished_reading_markers),
         "COLD_READ_GRID_CELL_ATTEMPT_TIMEOUT_SECONDS": "2"})
     elapsed = time.monotonic() - started
+    # Read before anything else: a stub the grid left running could still write its marker later.
+    left_running = processes_mentioning(str(timed_out_stubs), str(repository))
+    finished_before_the_grid_returned = sorted(path.name for path in finished_reading_markers.glob("*"))
+    kill_processes_mentioning(str(timed_out_stubs), str(repository))
     failed_lines = lines_opening(result, "FAILED")
     check("every attempt past the limit, the Question 4 cell's included, is FAILED as timed out, "
           "with no RETRYING line",
@@ -1151,14 +1162,13 @@ try:
           lines_opening(result, "WRITE CHECK DID NOT RUN:") == []
           and lines_opening(result, "STRAY WRITE:") == []
           and "Tell the user:" not in result.stdout, repr(result.stdout))
-    time.sleep(stub_reading_seconds + 1 - elapsed if elapsed < stub_reading_seconds else 0)
     record_directory = record_directory_of(repository)
     check("the stopped stubs never wrote their reports",
           sorted(path.name for path in record_directory.glob("*.md")) == ["cold-read-reference-check.md"],
           sorted(path.name for path in record_directory.glob("*.md")))
     check("the grid stopped every timed-out stub instead of waiting for it to finish",
-          not finished_reading_markers.exists() or not any(finished_reading_markers.iterdir()),
-          sorted(path.name for path in finished_reading_markers.glob("*")))
+          finished_before_the_grid_returned == [], finished_before_the_grid_returned)
+    check("no timed-out stub or its launcher is left running", left_running == [], left_running)
 
     # --- Stopped cells that wrote outside their reports ------------------------
     # Every cell writes two files before it is stopped: a new file, and a committed one
@@ -1211,18 +1221,32 @@ try:
 
     # --- A cell that writes its report and then hangs is stopped, report deleted
     # The clock jumps only once all eight have written, so no stub may exit before the last
-    # writes, however loaded the machine. This bound also ends the case if the grid never stops them.
-    hang_seconds = 600
+    # writes, however loaded the machine: each hangs until stopped. The deadline is this
+    # driver's, and short of a 600-second suite limit, so a grid that never stops them fails here.
+    hang_seconds = 86400
+    grid_deadline_seconds = 240
     repository = build_scratch_repository(scratch, "checkout-wrote-then-hung")
+    hung_after_writing_stubs = scratch / "stub-bin-wrote-then-hung"
     attempt_limit_seconds = 3600
     clock_launcher = scratch / "grid-with-clock-jumped-once-reports-exist.py"
     clock_launcher.write_text(GRID_WITH_CLOCK_JUMPED_ONCE_REPORTS_EXIST, encoding="utf-8")
     started = time.monotonic()
-    result = run_grid(repository, stubs, {
-        "COLD_READ_GRID_TEST_STUB_HANG_AFTER_WRITING_REPORT_SECONDS": str(hang_seconds),
-        "COLD_READ_GRID_CELL_ATTEMPT_TIMEOUT_SECONDS": str(attempt_limit_seconds)},
-        launcher_arguments_before_grid=(clock_launcher, 8, attempt_limit_seconds))
+    try:
+        result = run_grid(repository, hung_after_writing_stubs, {
+            "COLD_READ_GRID_TEST_STUB_HANG_AFTER_WRITING_REPORT_SECONDS": str(hang_seconds),
+            "COLD_READ_GRID_CELL_ATTEMPT_TIMEOUT_SECONDS": str(attempt_limit_seconds)},
+            launcher_arguments_before_grid=(clock_launcher, 8, attempt_limit_seconds),
+            timeout_seconds=grid_deadline_seconds)
+    except subprocess.TimeoutExpired as expired:
+        result = subprocess.CompletedProcess(
+            expired.cmd, -signal.SIGKILL, f"the grid had not returned after {grid_deadline_seconds} s", "")
+    finally:
+        left_running = processes_mentioning(str(hung_after_writing_stubs), str(repository))
+        kill_processes_mentioning(str(hung_after_writing_stubs), str(repository))
     elapsed = time.monotonic() - started
+    check("the grid returned and left no hung stub or launcher running",
+          result.returncode != -signal.SIGKILL and left_running == [],
+          f"exit {result.returncode}; still running: {left_running}")
     failed_lines = lines_opening(result, "FAILED")
     check("a timed-out cell that had written its report: FAILED says the unfinished report is deleted",
           lines_opening(result, "saved:") == []
