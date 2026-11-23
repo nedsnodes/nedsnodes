@@ -180,8 +180,14 @@ line of the message's copy that no current line took is a line the item
 dropped, such as a third part removed after the item was shown, and is
 paired with the item's unit most like it; a line below the place the item's
 last line took is not, since the item's copy has ended there and the
-agent's own words begin. Every
-pair of the answer goes to the
+agent's own words begin. When every
+line of an item that does not pass is a `Recommendation:` or `Part N.` line,
+each with a text on both sides, the revision left the item's `#case_against`,
+`The alternative:`, `#new` and `#new_if_d` lines as the user saw them, none
+added or removed, so the answer counts with no model call, and the text,
+after the answer's lines, names each line the revision changed and tells the
+agent to tell the user in one line, as the walk-me-through skill says. Every
+other pair of the answer goes to the
 model MODEL in one headless `claude -p` call, run with every hook disabled, no
 tools and no session file, which judges whether the line's meaning changed, or
 for a dropped line whether the item still says it; a
@@ -206,7 +212,12 @@ same sentence from the other place, so the model sees identical texts and
 the answer counts. The message's copy of the item ends at the item's
 closing line, so a decision-bearing line the agent wrote of its own
 between the item's text and its closing line is read as one the item
-dropped, and goes to the model.
+dropped, and goes to the model, or, for a `Recommendation:` line among
+otherwise unchanged lines, is named as one the revision dropped. An item
+with no `#case_against`, `The alternative:`, `#new` or `#new_if_d` line, or
+whose `Part N.` lines carry its change, counts an answer with its
+recommendation or parts changed unseen, as the walk-me-through skill's rule
+has it.
 
 WHEN READING THE WALK STATE FAILS, such as a minutes file that is not UTF-8,
 the first line says so and why, and the text gives the answer's lines both for
@@ -556,7 +567,9 @@ DECISION_LINES_CHANGED_REASON = (
     "For any other line a model judges whether the message's line of the same kind in the same place, or else its "
     "closest paragraph, means the same, and for a line the message showed that the item no longer has, whether the "
     "item's closest paragraph still says it, so a change made only for clarity passes, and so does any change outside "
-    "those lines, such as in the explanation or an example.")
+    "those lines, such as in the explanation or an example. When the `#case_against`, `The alternative:`, `#new` and "
+    "`#new_if_d` lines all pass, none added or removed, the answer counts with no model call, whatever the "
+    "recommendation and parts now say.")
 DECISION_LINE_MEANING_CHANGED_REASON = (
     "Its {line} now reads \"{current}\", and the model judged that this means something other than what the message "
     "showed, \"{shown}\": {why}")
@@ -577,6 +590,21 @@ DECISION_LINE_CHECK_FAILED_REASON = (
     "Its {line} now reads \"{current}\", in other words than the message's \"{shown}\", and the hook's `claude -p` "
     "call that has a model judge whether that changes the meaning failed, so the hook cannot tell whether the user saw "
     "what he answered: {why}. Showing the item's current text unchanged lets his next answer pass with no model call.")
+# Lines a revision may not change unseen: while the item's lines of these kinds keep the words the user was shown,
+# none added or removed, his answer counts with no model call, as the walk-me-through skill says.
+LINE_NAMES_A_REVISION_MAY_NOT_CHANGE_UNSEEN = ("`#case_against` line", "`The alternative:` line", "`#new` line",
+                                               "`#new_if_d` line")
+REVISED_ITEM_ANSWER_COUNTED_LINES = (
+    "[rule walk-me-through-short-answer-to-revised-item-counted-with-unchanged-case-against-alternative-and-new-lines] "
+    "{item} was revised after your last message that showed it, written at {timestamp}, and the hook counted the "
+    "answer with no model call, because the revision left the item's `#case_against` line, `The alternative:` line "
+    "and `#new` and `#new_if_d` lines, none of them added or removed, with the words that message showed. "
+    "The revision changed: {changes}.",
+    "In your next message, tell the user in one line which lines the revision changed, so that he can have his "
+    "answer reversed.",
+)
+REVISED_LINE_CHANGED = "its {line} now reads \"{current}\", where the message showed \"{shown}\""
+REVISED_LINE_DROPPED = "the message showed a {line}, \"{shown}\", which the item no longer has"
 # The longest a message paragraph is quoted in a refusal; the whole item is handed over below it anyway.
 SHOWN_QUOTE_LIMIT = 300
 MODEL = "claude-haiku-5-5"
@@ -1504,14 +1532,16 @@ def model_judgement(pairs, timeout_seconds=MODEL_TIMEOUT_SECONDS):
 
 
 def unseen_item_lines(answer, walk, transcript_path):
-    """The lines that refuse the answer when it gives A, AO, Aa or D to a waiting item that no message showed, or
+    """(The lines that refuse the answer when it gives A, AO, Aa or D to a waiting item that no message showed, or
     whose decision-bearing lines the agent's last message showing it does not show as the walk-document now has them,
-    or when that cannot be checked; [] otherwise."""
+    or when that cannot be checked, else []; the lines naming what a revision changed in each item whose answer
+    counts with no model call because the revision left the lines LINE_NAMES_A_REVISION_MAY_NOT_CHANGE_UNSEEN names
+    as shown, else [])."""
     numbers = checked_item_numbers(answer, walk)
     if not numbers:
-        return []
+        return [], []
     parser = shown_text_parser(load_walk_finder())
-    reasons, misses = {}, {}
+    reasons, misses, revisions = {}, {}, {}
     for number in numbers:
         item = item_name(number, walk)
         text = walk.shown_texts.get(number)
@@ -1523,7 +1553,7 @@ def unseen_item_lines(answer, walk, transcript_path):
             closing = closing_line(number, walk)
             return [line.format(item=item, problem=problem, where=where,
                                 closing_line=f"this closing line: {closing}" if closing else CLOSING_LINE_NAMED)
-                    for line in ITEM_TEXT_UNREADABLE_LINES]
+                    for line in ITEM_TEXT_UNREADABLE_LINES], []
         heading_line, _, body = text.partition("\n")
         env = {}
         parser.parse(text, env)
@@ -1531,13 +1561,13 @@ def unseen_item_lines(answer, walk, transcript_path):
         heading = shown_words(heading_line, parser, env)
         if not transcript_path:
             return [line.format(path=NO_TRANSCRIPT_PATH, item=item, error="no transcript_path",
-                                remedy=NO_TRANSCRIPT_PATH_REMEDY) for line in TRANSCRIPT_UNREADABLE_LINES]
+                                remedy=NO_TRANSCRIPT_PATH_REMEDY) for line in TRANSCRIPT_UNREADABLE_LINES], []
         try:
             shown = last_showing_message(transcript_path, heading, parser, walk.references)
         except (OSError, ValueError) as error:
             remedy = next(text for kind, text in TRANSCRIPT_REMEDIES if isinstance(error, kind))
             return [line.format(path=transcript_path, item=item, error=repr(error),
-                                remedy=remedy.format(path=transcript_path)) for line in TRANSCRIPT_UNREADABLE_LINES]
+                                remedy=remedy.format(path=transcript_path)) for line in TRANSCRIPT_UNREADABLE_LINES], []
         if shown is None:
             reasons[number] = NEVER_SHOWN_REASON.format(item=item)
             continue
@@ -1549,7 +1579,11 @@ def unseen_item_lines(answer, walk, transcript_path):
         checks = decision_line_checks(decision_bearing_lines(body, parser, env, has_parts),
                                       decision_bearing_lines(copy, parser, message_env, has_parts),
                                       shown_units(copy, parser, message_env), shown_units(body, parser, env))
-        if checks:
+        # A pair with no text on one side is a line the hook cannot compare, never one the revision left unchanged.
+        if checks and all(None not in check and check[0] not in LINE_NAMES_A_REVISION_MAY_NOT_CHANGE_UNSEEN
+                          for check in checks):
+            revisions[number] = (timestamp, checks)
+        elif checks:
             misses[number] = (timestamp, checks)
     pairs = [check for _, checks in misses.values() for check in checks if None not in check]
     verdicts, failure = model_judgement(pairs) if pairs else ([], None)
@@ -1582,7 +1616,17 @@ def unseen_item_lines(answer, walk, transcript_path):
         if number in reasons:
             lines += [line.format(item=item_name(number, walk), reason=reasons[number], text=walk.shown_texts[number])
                       for line in ITEM_NOT_SHOWN_LINES]
-    return lines
+    if lines:
+        return lines, []
+    counted = []
+    for number, (timestamp, checks) in revisions.items():
+        changes = "; ".join(
+            (REVISED_LINE_DROPPED if dropped else REVISED_LINE_CHANGED).format(
+                line=name, current=current, shown=text_quoted_shortened(shown) if not dropped else shown)
+            for name, shown, current, dropped in checks)
+        counted += [line.format(item=item_name(number, walk), timestamp=timestamp, changes=changes)
+                    for line in REVISED_ITEM_ANSWER_COUNTED_LINES]
+    return [], counted
 
 
 def text_quoted_shortened(text):
@@ -1616,12 +1660,12 @@ def output_for(payload):
         walk, walk_error = None, error
     if named_item_missing(answer, walk, walk_error):
         return None
-    refusal = unseen_item_lines(answer, walk, payload.get("transcript_path"))
+    refusal, revised = unseen_item_lines(answer, walk, payload.get("transcript_path"))
     if refusal:
         context = "\n".join([ITEM_NOT_SHOWN_OPENING_LINE.format(answer=answer["answer"], item=walk.item, walk=walk.name),
                              *refusal])
         return {"hookSpecificOutput": {"hookEventName": "UserPromptSubmit", "additionalContext": context}}
-    context = context_for(answer, walk, walk_error)
+    context = "\n".join([context_for(answer, walk, walk_error), *revised])
     if walk is not None or walk_error is not None:
         context += "\n" + USER_REPLY_LINE.format(reply=shlex.quote(" ".join(payload["prompt"].split())))
     return {"hookSpecificOutput": {"hookEventName": "UserPromptSubmit", "additionalContext": context}}
