@@ -146,7 +146,8 @@ check("a guard's own exit, such as a refusal's 2, passes through unchanged", exi
 
 # --- traceback is loaded only on the crash path ---
 
-# A fresh interpreter, because this suite's own imports may already have loaded traceback.
+# A fresh interpreter, because this suite's own imports may already have loaded traceback; -I -S
+# because a sitecustomize.py or .pth file could load it at startup.
 LOAD_MODULE_SOURCE = (
     "import importlib.util\n"
     "import sys\n"
@@ -155,7 +156,7 @@ LOAD_MODULE_SOURCE = (
     "crash_notice = importlib.util.module_from_spec(spec)\n"
     "spec.loader.exec_module(crash_notice)\n")
 result = subprocess.run(
-    [sys.executable, "-c", LOAD_MODULE_SOURCE + "print('traceback' in sys.modules)"],
+    [sys.executable, "-I", "-S", "-c", LOAD_MODULE_SOURCE + "print('traceback' in sys.modules)"],
     capture_output=True, text=True, timeout=60)
 check("importing the module in a fresh interpreter leaves traceback out of sys.modules",
       result.returncode == 0 and result.stdout.strip() == "False",
@@ -171,7 +172,7 @@ with tempfile.TemporaryDirectory() as temporary_directory:
             + "with crash_notice.guard_hook_crash_fail_open_with_notice_context_manager(\n"
               "        '/x/.claude/guard-hooks/some-guard.py', True):\n"
               "    raise ValueError('injected value')\n", encoding="utf-8")
-        crash_results.append(subprocess.run([sys.executable, str(crashing_guard)],
+        crash_results.append(subprocess.run([sys.executable, "-I", "-S", str(crashing_guard)],
                                             capture_output=True, text=True, timeout=60))
 loaded_before_crash, loaded_on_crash_path = crash_results
 crash_notices = notices_of(loaded_on_crash_path.stdout)
