@@ -717,6 +717,8 @@ check("rule 5: a message whose sender exits nonzero asks about nothing",
       [event["running_work_asked_about"] for event in machine.events("judge_answer")] == [[]]
       and any("claude exited 1" in event["problem"] for event in machine.events("headless_failed")),
       machine.events())
+check("rule 5: the nudge's wait step records rule 5",
+      [event["rule"] for event in machine.events("wait_step")] == [5], machine.events("wait_step"))
 
 # The send succeeded, but to a stale agent-session of the same name, so the transcript the delivery
 # check reads never holds the message.
