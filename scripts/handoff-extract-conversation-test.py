@@ -691,9 +691,10 @@ with tempfile.TemporaryDirectory() as workspace:
     output = Path(workspace) / "seat-dialog-0002.md"
     exit_code = extractor.main(["--transcript-path", str(path), "--output", str(output)])
     tail = output.read_text(encoding="utf-8")
-    check("the tail ends with one User turn: the line, then each unread message",
-          exit_code == 0 and tail.split("\n---\n")[1].rstrip().endswith(
-              f"## User\n\n{INTRODUCTION}\n\nA\n\n<pasted_content id=\"28f2\">\nwhat the user pasted\n"
+    check("each unread message stays where it was typed: A before the agent turn after it, the rest at the end",
+          exit_code == 0 and f"## User\n\n{INTRODUCTION}\n\nA\n\n## Agent\n\nan agent turn that has not read the queue" in tail
+          and tail.split("\n---\n")[1].rstrip().endswith(
+              f"## User\n\n{INTRODUCTION}\n\n<pasted_content id=\"28f2\">\nwhat the user pasted\n"
               f"</pasted_content>\n\nand a second thought"), tail)
 
     path = write_transcript(workspace, "dequeue-takes-the-later.jsonl", [
@@ -760,6 +761,48 @@ with tempfile.TemporaryDirectory() as workspace:
     tail = output.read_text(encoding="utf-8")
     check("a short final question stays in the tail when an unread reply answers it",
           "Approve the short change?" in tail and tail.index("Approve the short change?") < tail.index(INTRODUCTION), tail)
+
+    path = write_transcript(workspace, "reply-queued-before-short-question.jsonl", [
+        *ordinary_records(), assistant_record("Long item 1 question: approve the first change?"), enqueue_record("A"),
+        assistant_record("Approve item 2?"),
+    ])
+    output = Path(workspace) / "seat-dialog-0006.md"
+    extractor.main(["--transcript-path", str(path), "--output", str(output)])
+    tail = output.read_text(encoding="utf-8")
+    check("a reply queued before a short question is shown before it, after the question it answers",
+          tail.index("Long item 1 question") < tail.index(INTRODUCTION) < tail.index("Approve item 2?"), tail)
+
+    path = write_transcript(workspace, "removal-without-display-then-equal-notification.jsonl", [
+        *ordinary_records(), enqueue_record("human reply"), enqueue_record("N"),
+        remove_record("N", "delivered_to_agent"), enqueue_record("N"), dequeue_record(), user_record("N"),
+    ])
+    check("a delivering removal with no display does not claim a later equal message's display",
+          never_read(path) == ["human reply"], never_read(path))
+
+    path = write_transcript(workspace, "two-absorbed-before-their-attachments.jsonl", [
+        *ordinary_records(), enqueue_record("A"), enqueue_record("B"), enqueue_record("B"),
+        remove_record("A", "absorbed_mid_turn"), remove_record("B", "absorbed_mid_turn"),
+        absorbed_attachment_record("A"), absorbed_attachment_record("B"),
+    ])
+    check("a removal still claims its display past another removal", never_read(path) == ["B"], never_read(path))
+
+    hop_peer = '<cross-session-message from="s" hop-chain="abc" from-name="x" from-mode="prompting">\nbody\n</cross-session-message>'
+    delivered_peer = '<cross-session-message from="s" from-name="x" from-mode="prompting">\nbody\n</cross-session-message>'
+    path = write_transcript(workspace, "peer-delivered-without-hop-chain.jsonl", [
+        *ordinary_records(), enqueue_record("human reply"), enqueue_record(hop_peer), dequeue_record(),
+        user_record(f"Another Claude session sent a message:\n{delivered_peer}\n\nThis came from another Claude session."),
+        assistant_record("handled"),
+    ])
+    check("a peer message delivered without hop-chain is the one dequeued, not the older reply",
+          never_read(path) == ["human reply"], never_read(path))
+
+    other_peer = '<cross-session-message from="s" from-name="x" from-mode="prompting">\nanother body\n</cross-session-message>'
+    path = write_transcript(workspace, "different-peer-body-does-not-match.jsonl", [
+        *ordinary_records(), enqueue_record(hop_peer),
+        user_record(f"Another Claude session sent a message:\n{other_peer}\n"),
+    ])
+    check("a delivered peer message with another body does not read the queued one",
+          extractor.shown_text_is_queued_text(f"Another Claude session sent a message:\n{other_peer}\n", hop_peer) is False)
 
     path = write_transcript(workspace, "short-final-turn-nothing-queued.jsonl", [
         *ordinary_records(), assistant_record("Approve the short change? A approve, D disapprove."),

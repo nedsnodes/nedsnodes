@@ -32,8 +32,9 @@ the subagents' own records (isSidechain), and harness-injected pseudo-prompts wi
 short agent acknowledgements that answer them — none of which the successor
 needs and all of which are large.
 
-The conversation-tail ends with one more User turn when the user queued
-messages the agent never read before the session was stopped, as
+The conversation-tail carries a User turn, at the place in the dialog where the
+user typed them, for messages the user queued that the agent never read before
+the session was stopped, as
 claude_code_session_transcript_queued_user_messages_never_read_by_agent says; the complete dialog does not carry it.
 
 Kept as a third voice, Subagent: for each subagent the session dispatched,
@@ -159,7 +160,8 @@ def read_dialog_turns(transcript_path: Path, drop_acknowledgements=True,
                       include_subagent_tasks_and_reports=False):
     """Return (turns, skip_counts), counting malformed and oversized records as skipped.
 
-    Each turn holds its voice, its text and its record's timestamp ("" when the record has none).
+    Each turn holds its voice, its text and its record's timestamp ("" when the record has none); a user or
+    agent turn also holds its record's transcript line index.
     With drop_acknowledgements False, every agent message is kept, a short one after a
     notification included, so a reader attributing a user's reply sees the message it followed.
     With include_subagent_tasks_and_reports True, the turns also carry each subagent's tasks and reports,
@@ -218,6 +220,7 @@ def read_dialog_turns(transcript_path: Path, drop_acknowledgements=True,
                 following_injected_record = False
         elif turn["voice"] == "user":
             turn["timestamp"] = record.get("timestamp") or ""
+            turn["line_index"] = index
             if turn["text"].startswith(INJECTED_TEXT_PREFIXES):
                 skip_counts["injected"] += 1
                 following_injected_record = True
@@ -235,6 +238,7 @@ def read_dialog_turns(transcript_path: Path, drop_acknowledgements=True,
                 interrupted_since_queued = False
         else:
             turn["timestamp"] = record.get("timestamp") or ""
+            turn["line_index"] = index
             # Once the tracker fails, no record can show it carried a report, so a short reply may answer one: keep it.
             if (drop_acknowledgements and following_injected_record and tracker_failure is None
                     and len(turn["text"].split()) <= MAXIMUM_ACKNOWLEDGEMENT_WORDS):
@@ -377,8 +381,8 @@ def typed_slash_command(text: str, record):
 
 
 CONVERSATION_TAIL_QUEUED_USER_MESSAGES_NEVER_READ_BY_AGENT_INTRODUCTION = (
-    "Queued before the handoff and never read by your predecessor; "
-    "treat each message from here to the end as a reply to the dialog above."
+    "Queued before the handoff and never read by your predecessor, whose turns below were written without it; "
+    "treat each message of this turn as a reply to the dialog above it."
 )
 QUEUED_TEXT_OF_ANOTHER_SENDER_TAG_OPENINGS = ("<task-notification", "<cross-session-message", "<agent-message")
 PEER_MESSAGE_TAG_OPENINGS = ("<cross-session-message", "<agent-message")
@@ -406,12 +410,22 @@ def texts_shown_to_agent(record) -> list:
     return [joined_text_blocks(content).strip()]
 
 
+def peer_message_without_hop_chain(message: str) -> str:
+    return re.sub(r'\A(<[^>]*?) hop-chain="[^"]*"', r"\1", message)
+
+
 def shown_text_is_queued_text(shown: str, queued: str) -> bool:
-    """Match exactly, so that `A` is not read in any text containing it; a peer message may carry the harness's wrapper."""
+    """Match exactly, so that `A` is not read in any text containing it.
+
+    Claude Code delivers a peer message under a first line, with advice after it and without its hop-chain attribute.
+    """
     if shown == queued:
         return True
-    return (queued.startswith(PEER_MESSAGE_TAG_OPENINGS)
-            and f"{shown}\n".startswith(f"{DELIVERED_PEER_MESSAGE_FIRST_LINE}\n{queued}\n"))
+    first_line = f"{DELIVERED_PEER_MESSAGE_FIRST_LINE}\n"
+    if not queued.startswith(PEER_MESSAGE_TAG_OPENINGS) or not shown.startswith(first_line):
+        return False
+    delivered = peer_message_without_hop_chain(shown[len(first_line):])
+    return f"{delivered}\n".startswith(f"{peer_message_without_hop_chain(queued)}\n")
 
 
 def first_pending_position_shown(pending: list, shown_forms: list):
@@ -422,10 +436,10 @@ def first_pending_position_shown(pending: list, shown_forms: list):
 
 
 def queue_events_of_transcript(transcript_path: Path) -> list:
-    """Return queue operations as dicts, each record's shown texts as a list, and one None per run of agent records."""
+    """Return queue operations as dicts with their line index, each record's shown texts as a list, and one None per run of agent records."""
     events = []
     with transcript_path.open("rb") as handle:
-        for raw_line in handle:
+        for line_index, raw_line in enumerate(handle):
             if len(raw_line) > MAXIMUM_RECORD_BYTES:
                 continue
             try:
@@ -435,7 +449,8 @@ def queue_events_of_transcript(transcript_path: Path) -> list:
             if not isinstance(record, dict) or record.get("isSidechain"):
                 continue
             if record.get("type") == "queue-operation":
-                events.append({key: record.get(key) for key in ("operation", "content", "reason")})
+                events.append({**{key: record.get(key) for key in ("operation", "content", "reason")},
+                               "line_index": line_index})
             elif record.get("type") == "assistant":
                 if events and events[-1] is not None:
                     events.append(None)
@@ -446,12 +461,25 @@ def queue_events_of_transcript(transcript_path: Path) -> list:
     return events
 
 
-def claim_delivery_record(events: list, operation_index: int, claimed: set, queued_texts: list):
-    """Claim the first unclaimed record before the next agent record that shows a queued text; return that text's position."""
+def queue_operation_may_own_later_display_of(event, queued: str) -> bool:
+    if not isinstance(event, dict):
+        return False
+    return event["operation"] in ("dequeue", "popAll") or (
+        event["operation"] == "enqueue" and isinstance(event["content"], str) and event["content"].strip() == queued)
+
+
+def claim_delivery_record(events: list, operation_index: int, claimed: set, queued_texts: list,
+                          stop_at_operation_that_may_own_the_display: bool = False):
+    """Claim the first unclaimed record before the next agent record that shows a queued text; return that text's position.
+
+    A delivering remove may have no display record of its own, so its claim stops where a later operation may own the display.
+    """
     for position, queued in enumerate(queued_texts):
         for index in range(operation_index + 1, len(events)):
             event = events[index]
             if event is None:
+                break
+            if stop_at_operation_that_may_own_the_display and queue_operation_may_own_later_display_of(event, queued):
                 break
             if isinstance(event, list) and index not in claimed and first_pending_position_shown([queued], event) is not None:
                 claimed.add(index)
@@ -460,16 +488,23 @@ def claim_delivery_record(events: list, operation_index: int, claimed: set, queu
 
 
 def claude_code_session_transcript_queued_user_messages_never_read_by_agent(transcript_path: Path) -> list:
+    """Return, in the order typed, the text of each message unread_queued_user_messages_with_enqueue_lines returns."""
+    return [message["text"] for message in unread_queued_user_messages_with_enqueue_lines(transcript_path)]
+
+
+def unread_queued_user_messages_with_enqueue_lines(transcript_path: Path) -> list:
     """Return, in the order typed, the user's queued messages that no later record shows the agent reading.
 
     A queue-operation "enqueue" adds a message; "remove" takes the first with its content away; "popAll"
     returns every message to the input box; "dequeue", which names no content, takes the message that a
     user record before the next agent record shows, or else the oldest. The record that delivers a dequeue
     or a delivering remove removes no second copy; any other record showing a message removes one copy.
-    Messages from another sender's known tag are left out.
+    Messages from another sender's known tag are left out. Each is a dict of its text and its enqueue's
+    transcript line index, which keeps its place among the dialog turns.
     """
     events = queue_events_of_transcript(transcript_path)
     pending = []
+    enqueue_lines = []
     claimed = set()
     for index, event in enumerate(events):
         if event is None:
@@ -478,22 +513,26 @@ def claude_code_session_transcript_queued_user_messages_never_read_by_agent(tran
             if index not in claimed:
                 position = first_pending_position_shown(pending, event)
                 if position is not None:
-                    del pending[position]
+                    del pending[position], enqueue_lines[position]
             continue
         operation = event["operation"]
         content = event["content"].strip() if isinstance(event["content"], str) else ""
         if operation == "enqueue" and content:
             pending.append(content)
+            enqueue_lines.append(event["line_index"])
         elif operation == "remove" and content in pending:
-            pending.remove(content)
+            position = pending.index(content)
+            del pending[position], enqueue_lines[position]
             if event["reason"] in QUEUE_REMOVE_REASONS_THAT_DELIVER_TO_AGENT:
-                claim_delivery_record(events, index, claimed, [content])
+                claim_delivery_record(events, index, claimed, [content],
+                                      stop_at_operation_that_may_own_the_display=True)
         elif operation == "popAll":
-            pending = []
+            pending, enqueue_lines = [], []
         elif operation == "dequeue" and pending:
-            position = claim_delivery_record(events, index, claimed, pending)
-            del pending[position or 0]
-    return [text for text in pending if not text.startswith(QUEUED_TEXT_OF_ANOTHER_SENDER_TAG_OPENINGS)]
+            position = claim_delivery_record(events, index, claimed, pending) or 0
+            del pending[position], enqueue_lines[position]
+    return [{"text": text, "enqueue_line": line} for text, line in zip(pending, enqueue_lines)
+            if not text.startswith(QUEUED_TEXT_OF_ANOTHER_SENDER_TAG_OPENINGS)]
 
 
 def first_line_of(text: str) -> str:
@@ -703,17 +742,27 @@ def render_extraction(turns, report: ExtractionReport) -> str:
 
     lines += ["", "---", ""]
 
+    unread = list(report.queued_user_messages_never_read_by_agent)
     for turn in turns:
+        typed_before_turn = [message for message in unread if message["enqueue_line"] < turn.get("line_index", -1)]
+        lines += rendered_unread_queued_messages(typed_before_turn)
+        unread = unread[len(typed_before_turn):]
         lines += render_turn(turn)
-    if report.queued_user_messages_never_read_by_agent:
-        lines += ["## User", "", CONVERSATION_TAIL_QUEUED_USER_MESSAGES_NEVER_READ_BY_AGENT_INTRODUCTION, ""]
-        for message in report.queued_user_messages_never_read_by_agent:
-            lines += [message, ""]
+    lines += rendered_unread_queued_messages(unread)
 
     lines += ["---", "", "Need more than this?"]
     lines += render_pointers(report)
     lines.append("")
     return "\n".join(lines)
+
+
+def rendered_unread_queued_messages(messages: list) -> list:
+    if not messages:
+        return []
+    lines = ["## User", "", CONVERSATION_TAIL_QUEUED_USER_MESSAGES_NEVER_READ_BY_AGENT_INTRODUCTION, ""]
+    for message in messages:
+        lines += [message["text"], ""]
+    return lines
 
 
 def render_companion(turns, report: ExtractionReport) -> str:
@@ -821,7 +870,7 @@ def main(argv=None) -> int:
                 f"(skipped: {skip_counts}) — refusing to write an empty extraction"
             )
 
-        queued_user_messages = claude_code_session_transcript_queued_user_messages_never_read_by_agent(transcript_path)
+        queued_user_messages = unread_queued_user_messages_with_enqueue_lines(transcript_path)
         if arguments.boundary_quote:
             selected, start_index, quoted_index = select_turns_from_boundary(
                 dialog, arguments.boundary_quote, arguments.minimum_words
