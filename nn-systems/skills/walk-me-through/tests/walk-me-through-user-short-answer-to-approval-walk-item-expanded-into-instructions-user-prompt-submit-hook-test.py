@@ -172,9 +172,10 @@ class Case:
         path.write_text("".join(json.dumps(line) + "\n" for line in lines))
         return path
 
-    def run(self, prompt=None, stdin_text=None, transcript_path=None):
+    def run(self, prompt=None, stdin_text=None, transcript_path=None, process_cwd=None):
         """Run the hook. With no transcript_path, the transcript's one agent message shows the whole walk-document as
-        it now stands, so the hook's check that the user saw the waiting item passes."""
+        it now stands, so the hook's check that the user saw the waiting item passes. process_cwd, by default the
+        checkout, is the directory the hook process starts in, apart from the payload's cwd."""
         if transcript_path is None:
             document = self.walk / f"{WALK_NAME}.md"
             transcript_path = self.transcript(document.read_text() if document.is_file() else "")
@@ -183,7 +184,7 @@ class Case:
         return subprocess.run(
             [sys.executable, str(HOOK_SCRIPT)],
             input=json.dumps(payload) if stdin_text is None else stdin_text,
-            capture_output=True, text=True, cwd=self.checkout,
+            capture_output=True, text=True, cwd=self.checkout if process_cwd is None else process_cwd,
             env={**os.environ, "PATH": self.path, "FAKE_CLAUDE_MODE": self.model,
                  "FAKE_CLAUDE_CALLS": str(self.calls)})
 
@@ -3221,6 +3222,10 @@ def test_bump_on_an_open_walk_runs_check_bump_with_the_title_and_without_a_walk_
           and "check --bump 'the code proposals' --user-reply-as-typed 'Bump the code proposals'" in context
           and str(HOOK_SCRIPT.parent / "walk-me-through-answer-added-texts-cold-read-fast-read-check-and-close.py")
           in context,
+          f"exit {result.returncode}, stdout {result.stdout!r}, stderr {result.stderr!r}")
+    result = case.run("Bump the code proposals", process_cwd=Case().checkout)
+    check("bump finds the approval-walk by the payload's cwd, not the directory the hook process starts in",
+          result.returncode == 0 and f"before item 4 of 9 of approval-walk {WALK_NAME}" in result.stdout,
           f"exit {result.returncode}, stdout {result.stdout!r}, stderr {result.stderr!r}")
     result = Case().run("bump the code proposals")
     check("bump with no approval-walk open prints nothing",
