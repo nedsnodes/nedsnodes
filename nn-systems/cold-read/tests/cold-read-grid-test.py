@@ -1177,7 +1177,7 @@ try:
               for line in stray_lines), repr(stray_lines))
     check("a committed file gets a restore command run in the repository",
           any(line.startswith(f"STRAY WRITE: {TARGET_RELATIVE_PATH} ")
-              and f"`git -C {shlex.quote(str(resolved_repository))} restore --staged --worktree -- "
+              and f"`git -C {shlex.quote(str(resolved_repository))} --literal-pathspecs restore --staged --worktree -- "
                   f"{TARGET_RELATIVE_PATH}`" in line
               for line in stray_lines), repr(stray_lines))
     time.sleep(stub_reading_seconds)
@@ -1878,7 +1878,29 @@ try:
           and (clean_removed_repository / "tracked.md").read_text(encoding="utf-8") == "Committed.\n"
           and clean_removed_git("status", "--porcelain").stdout == "", repr(clean_removed_lines))
 
-    # An already-conflicted file overwritten with the incoming side: only a diff against HEAD shows it.
+    # A glob character in a path must not widen the undo to a file with uncommitted edits.
+    glob_repository, glob_git = repository_with_committed_file("checkout-stopped-cell-unstages-a-glob-named-file")
+    (glob_repository / "chapter[1].md").write_text("Committed.\n", encoding="utf-8")
+    (glob_repository / "chapter1.md").write_text("Committed.\n", encoding="utf-8")
+    glob_git("add", "chapter[1].md", "chapter1.md")
+    glob_git("commit", "--quiet", "-m", "chapters")
+    (glob_repository / "chapter1.md").write_text("The agent's own edit.\n", encoding="utf-8")
+    with mock.patch.object(grid_module.cell_common, "REPO_ROOT", glob_repository):
+        glob_baseline = grid_module.cell_common.working_tree_state()
+        glob_git("rm", "--cached", "--quiet", "chapter[1].md")
+        (glob_repository / "chapter[1].md").write_text("A reviewer's rewrite.\n", encoding="utf-8")
+        glob_lines = grid_module.stopped_cells_write_check_lines(
+            [scratch / "claude-hunt-deep.md"], glob_baseline, None, set())
+    glob_commands = commands_in_line(glob_lines[0]) if glob_lines else []
+    if len(glob_commands) == 1:
+        subprocess.run(shlex.split(glob_commands[0]), capture_output=True, text=True)
+    check("the undo given for a path with a glob character restores that path and keeps another file's edits",
+          len(glob_commands) == 1
+          and (glob_repository / "chapter[1].md").read_text(encoding="utf-8") == "Committed.\n"
+          and (glob_repository / "chapter1.md").read_text(encoding="utf-8") == "The agent's own edit.\n",
+          repr(glob_lines))
+
+    # An already-conflicted file overwritten with either side: each side's diff shows the other's loss.
     conflict_repository, conflict_git = repository_with_committed_file("checkout-stopped-cell-overwrites-a-conflict")
     conflict_git("checkout", "--quiet", "-b", "incoming")
     (conflict_repository / "tracked.md").write_text("Incoming.\n", encoding="utf-8")
@@ -1886,18 +1908,23 @@ try:
     conflict_git("checkout", "--quiet", "main")
     (conflict_repository / "tracked.md").write_text("Ours.\n", encoding="utf-8")
     conflict_git("commit", "--quiet", "-am", "ours")
-    conflict_git("merge", "incoming")
-    with mock.patch.object(grid_module.cell_common, "REPO_ROOT", conflict_repository):
-        conflict_baseline = grid_module.cell_common.working_tree_state()
-        (conflict_repository / "tracked.md").write_text("Incoming.\n", encoding="utf-8")
-        conflict_lines = grid_module.stopped_cells_write_check_lines(
-            [scratch / "claude-hunt-deep.md"], conflict_baseline, None, set())
-    conflict_commands = commands_in_line(conflict_lines[0]) if conflict_lines else []
-    conflict_shown = subprocess.run(shlex.split(conflict_commands[0]), capture_output=True,
-                                    text=True).stdout if len(conflict_commands) == 1 else ""
-    check("an unmerged path overwritten with one side is given the diff against HEAD, which shows the overwrite",
-          len(conflict_commands) == 1 and " diff HEAD -- " in conflict_commands[0]
-          and "-Ours." in conflict_shown and "+Incoming." in conflict_shown, repr(conflict_lines))
+    conflict_git("merge", "--no-ff", "incoming")
+    conflict_markers = (conflict_repository / "tracked.md").read_text(encoding="utf-8")
+    for written, other in (("Incoming.", "Ours."), ("Ours.", "Incoming.")):
+        (conflict_repository / "tracked.md").write_text(conflict_markers, encoding="utf-8")
+        with mock.patch.object(grid_module.cell_common, "REPO_ROOT", conflict_repository):
+            conflict_baseline = grid_module.cell_common.working_tree_state()
+            (conflict_repository / "tracked.md").write_text(f"{written}\n", encoding="utf-8")
+            conflict_lines = grid_module.stopped_cells_write_check_lines(
+                [scratch / "claude-hunt-deep.md"], conflict_baseline, None, set())
+        conflict_commands = commands_in_line(conflict_lines[0]) if conflict_lines else []
+        conflict_shown = "".join(subprocess.run(shlex.split(command), capture_output=True, text=True).stdout
+                                 for command in conflict_commands)
+        check(f"an unmerged path overwritten with the side {written} is given a diff against each side, "
+              "which together show the overwrite",
+              len(conflict_commands) == 2 and " diff --ours -- " in conflict_commands[0]
+              and " diff --theirs -- " in conflict_commands[1]
+              and f"-{other}" in conflict_shown and f"+{written}" in conflict_shown, repr(conflict_lines))
     check("once a file already changed before the run has changed again, no other path gets an undo command",
           len(other_lines) == 1 and "has changed or gone since: agent-draft.md." in other_lines[0]
           and "rm -r" not in other_lines[0] and "restore" not in other_lines[0],

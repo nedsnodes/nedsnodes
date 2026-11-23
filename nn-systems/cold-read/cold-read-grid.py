@@ -316,10 +316,11 @@ STRAY_WRITE_ALREADY_CHANGED_UNTRACKED_READ = "{absolute_path} itself, which git 
 STRAY_WRITE_ALREADY_CHANGED_STAGED_DELETION_READ = (
     "both `git -C {repository} diff --cached -- {path}`, its staged deletion, and "
     "{absolute_path}, the copy on disk, which git does not track,")
-# For an unmerged path `diff --cached` prints only that it is unmerged, and the combined diff
-# can omit every hunk of a file overwritten with one side.
+# For an unmerged path `diff --cached` prints only that it is unmerged, the combined diff can
+# omit every hunk of a file overwritten with one side, and `diff HEAD` is empty for the HEAD side.
 STRAY_WRITE_ALREADY_CHANGED_UNMERGED_READ = (
-    "`git -C {repository} diff HEAD -- {path}`, since it has an unresolved merge conflict,")
+    "both `git -C {repository} diff --ours -- {path}` and `git -C {repository} diff --theirs -- {path}`, "
+    "the file against each side of its unresolved merge conflict,")
 GIT_STATUS_UNMERGED_CODES = frozenset({"DD", "AU", "UD", "UA", "DU", "AA", "UU"})
 # A cell can move an already-edited file without git pairing the move as a rename (a plain
 # `mv`, or a `git mv` of a much-edited file), can re-create the old name afterwards, and can
@@ -1018,7 +1019,8 @@ def stopped_cells_write_check_lines(stopped_report_paths: list, baseline,
     # of git status is in no current entry, and an undo could delete what it held.
     touched = sorted({name for name, _ in baseline - current})
     cells = ", ".join(cell_name_of(path) for path in stopped_report_paths)
-    repository = shlex.quote(str(cell_common.REPO_ROOT))
+    # Without --literal-pathspecs, a restore of `chapter[1].md` also discards edits to `chapter1.md`.
+    repository = f"{shlex.quote(str(cell_common.REPO_ROOT))} --literal-pathspecs"
     lines = []
     for name in changed:
         if name in already_reported:
