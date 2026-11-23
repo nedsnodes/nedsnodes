@@ -57,6 +57,8 @@ GH_TIMEOUT_SECONDS = 60.0
 GIT_TIMEOUT_SECONDS = 30.0
 # git worktree add checks out the whole tree.
 SCRATCH_WORKTREE_GIT_TIMEOUT_SECONDS = 300.0
+TEST_RUNNER_MACHINE_LOCK_WAIT_ARGUMENTS = ["--wait-for-lock-seconds",
+                                           f"{test_suite_runner.MACHINE_LOCK_WAIT_SECONDS_SUGGESTED:g}"]
 GH_PR_VIEW_NOT_JSON_OUTPUT_ERROR_EXCERPT_CHARACTERS = 300
 TEST_RUNNER_EXIT_SOME_SUITE_FAILED = 1
 GIT_MERGE_BASE_IS_ANCESTOR_NO = 1
@@ -125,8 +127,8 @@ def test_run_status_in_scratch_worktree(commit, merge_base, runner, output, retr
                     SCRATCH_WORKTREE_GIT_TIMEOUT_SECONDS,
                     "making the scratch worktree the test suites run in", retry)
         try:
-            command = [*selective_test_run_command(checkout, merge_base), "--wait-for-lock-seconds",
-                       f"{test_suite_runner.MACHINE_LOCK_WAIT_SECONDS_SUGGESTED:g}"]
+            command = [*selective_test_run_command(checkout, merge_base),
+                       *TEST_RUNNER_MACHINE_LOCK_WAIT_ARGUMENTS]
             output.write(MESSAGE_PREFIX + f"running, in a scratch worktree of {commit[:12]}, "
                          + " ".join(command[1:]) + "\n")
             output.flush()
