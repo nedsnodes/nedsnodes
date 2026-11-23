@@ -5,4 +5,5 @@ Standard terms of software engineering and of other computing fields, such as op
 - **canonical location** — the one place where a document or fact is kept and updated; another document that needs that document or fact links to that place instead of copying it.
 - **flaky test** — a test that gives different results on the same inputs while the code under test does not change. In design-to-main, the arbitrator (`docs/design-to-main/design-to-main-state-machine.system.design.md` §6.5) gives the narrower verdict `flaky-test`, which routes to `test-writing`, only when the implementation's own results do not vary.
 - **outage** — something agents or the user rely on that does not work.
+- **point fix** — a change that fixes only the case in front of the author and leaves the root cause in place. Also fix the root cause, except as `CLAUDE.md` allows.
 - **workaround** — code that copes with a cause instead of removing it.

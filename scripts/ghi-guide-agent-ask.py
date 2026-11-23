@@ -451,11 +451,13 @@ OPEN_ISSUES_ONLY_INCLUDE_CLOSED_HINT_MESSAGE = (
 # The failure when ghi-guide-agent answered but the answer cannot be used.
 # scripts/ghi-issue-write.py finds the line by this opening, which it copies.
 GHI_GUIDE_AGENT_ANSWER_NOT_USABLE_MESSAGE_OPENING = "ghi-guide-agent's answer is not usable:"
-GHI_GUIDE_AGENT_ANSWER_NOT_USABLE_MESSAGE_TEMPLATE = (
-    GHI_GUIDE_AGENT_ANSWER_NOT_USABLE_MESSAGE_OPENING + " {problem}\n"
+GHI_GUIDE_AGENT_ANSWER_NOT_USABLE_CALLER_FALLBACK_LADDER_INSTRUCTION_STDERR_LINE = (
     "If you are filing or editing a GHI, go on down the ask's fallback ladder in "
     ".claude/skills/ghi-write/SKILL.md; for any other ask, go on without "
     "ghi-guide-agent's answer.")
+GHI_GUIDE_AGENT_ANSWER_NOT_USABLE_MESSAGE_TEMPLATE = (
+    GHI_GUIDE_AGENT_ANSWER_NOT_USABLE_MESSAGE_OPENING + " {problem}\n"
+    + GHI_GUIDE_AGENT_ANSWER_NOT_USABLE_CALLER_FALLBACK_LADDER_INSTRUCTION_STDERR_LINE)
 
 
 def ghi_guide_agent_answer_extract_and_schema_check_from_claude_result(result: dict, kinds):
@@ -745,13 +747,10 @@ def run_claude(prompt: str, resume_session_id, seat_dir: Path, timeout_seconds: 
             message = f"claude exited {completed.returncode}: {detail}"
         if LOGGED_OUT_PATTERN.search(detail):
             message += LOGGED_OUT_REMEDY
-        # On one line: ghi-issue-write.py reports one stderr line of a failed
-        # ask, and claude's error, such as its logged-out message, can span several.
-        return None, " ".join(line.strip() for line in message.splitlines() if line.strip())
+        return None, message
     if result is None:
         return None, f"claude produced no parseable result: {completed.stdout[:500]!r}"
     return result, None
-
 
 
 def ask(question: str, include_closed: bool, seat_dir: Path, repo: str,
@@ -920,7 +919,9 @@ def _ask_within_lock(question, include_closed, seat_dir, repo, projects_root,
     # Only under the lock. A contended run holds no lock and publishes into a
     # throwaway mirror precisely so it cannot disturb the holder; swapping the
     # checkout's files beneath the holder's running claude would undo that.
-    if locked:
+    # Over ssh the line before this run has already fetched under the lock;
+    # a second fetch could spend 60 of the ask's seconds on nothing.
+    if locked and not os.environ.get(GHI_GUIDE_AGENT_HOME_FAST_FORWARD_TO_ORIGIN_MAIN_ALREADY_TRIED_ENVIRONMENT_VARIABLE):
         refresh_line = fast_forward_seat_checkout(seat_dir)
         if refresh_line:
             print(refresh_line, file=sys.stderr)
@@ -975,7 +976,7 @@ def _ask_within_lock(question, include_closed, seat_dir, repo, projects_root,
         # stated location (PR #143 review, P3).
         cold_start_text = COLD_START_PROMPT_TEMPLATE.format(
             mirror_path=full_result["mirror_dir"],
-            question_files_path=ghi_issue_write.GHI_GUIDE_AGENT_LOG_STORE_DIRECTORY)
+            question_files_path=ghi_issue_write.ghi_guide_agent_log_store()[1])
         # The cold-start turn asks nothing, so its structured_output is not read.
         cold_reply, error = turn(cold_start_text, None)
         if cold_reply is None:
@@ -1044,10 +1045,17 @@ def _ask_within_lock(question, include_closed, seat_dir, repo, projects_root,
 # script is main's before it parses the flags the caller sends; a copy older
 # than a flag would otherwise reject it at argparse and never reach its own
 # fast-forward. It uses no flag, because a stale copy would reject that too:
-# it calls state_lock, LOCK_FILE_NAME and fast_forward_seat_checkout by name
+# it calls state_lock, LOCK_FILE_NAME, SeatDirectoryUnusable and
+# fast_forward_seat_checkout by name
 # in whatever copy the seat holds. Renaming any of them makes this line fail
 # and fall through to the ask, whose own fast-forward then updates the seat,
 # unless the same change also adds a flag the caller sends.
+#
+# It exits 0 only when it ran the fast-forward, so the shell then tells the
+# ask, through an environment variable a stale copy ignores rather than a flag
+# it would reject, not to fetch a second time. An unusable seat directory exits
+# quietly: the ask reports it in its own one line.
+GHI_GUIDE_AGENT_HOME_FAST_FORWARD_TO_ORIGIN_MAIN_ALREADY_TRIED_ENVIRONMENT_VARIABLE = "GHI_GUIDE_AGENT_HOME_FAST_FORWARD_TO_ORIGIN_MAIN_ALREADY_TRIED"
 GHI_GUIDE_AGENT_HOME_FAST_FORWARD_TO_ORIGIN_MAIN_SSH_PYTHON_SOURCE = "\n".join([
     "import importlib.util, sys",
     "from pathlib import Path",
@@ -1055,10 +1063,14 @@ GHI_GUIDE_AGENT_HOME_FAST_FORWARD_TO_ORIGIN_MAIN_SSH_PYTHON_SOURCE = "\n".join([
     "ask = importlib.util.module_from_spec(spec)",
     "spec.loader.exec_module(ask)",
     "seat = Path.cwd()",
-    "with ask.state_lock(seat / ask.LOCK_FILE_NAME) as locked:",
-    "    line = ask.fast_forward_seat_checkout(seat) if locked else ''",
+    "try:",
+    "    with ask.state_lock(seat / ask.LOCK_FILE_NAME) as locked:",
+    "        line = ask.fast_forward_seat_checkout(seat) if locked else None",
+    "except ask.SeatDirectoryUnusable:",
+    "    line = None",
     "if line:",
     "    print(line, file=sys.stderr)",
+    "sys.exit(0 if line is not None else 3)",
 ])
 
 
@@ -1108,16 +1120,33 @@ def build_remote_command(question: str, include_closed: bool, repo: str,
         ' — bootstrap it (a checkout of this repository at that path), then retry" >&2',
         '  exit 1',
         '}',
-        # No `&&`: a failed fast-forward prints its line and the ask runs on, as
-        # fast_forward_seat_checkout's docstring requires. </dev/null leaves
-        # stdin unread for the ask's --question-file /dev/stdin.
-        "python3 -c " + shlex.quote(GHI_GUIDE_AGENT_HOME_FAST_FORWARD_TO_ORIGIN_MAIN_SSH_PYTHON_SOURCE) + " </dev/null",
+        # Not `&&`: a failed fast-forward prints its line and the ask runs on, as
+        # fast_forward_seat_checkout's docstring requires.
+        "if python3 -c " + shlex.quote(GHI_GUIDE_AGENT_HOME_FAST_FORWARD_TO_ORIGIN_MAIN_SSH_PYTHON_SOURCE) + "; then",
+        f"  export {GHI_GUIDE_AGENT_HOME_FAST_FORWARD_TO_ORIGIN_MAIN_ALREADY_TRIED_ENVIRONMENT_VARIABLE}=1",
+        "fi",
         invocation,
     ])
 
 
 def running_on_ned_box() -> bool:
     return socket.gethostname().split(".")[0] == NED_BOX_HOSTNAME
+
+
+def ask_failure_print_to_stderr_on_one_line(text: str) -> None:
+    """Print a failed ask's reason as one stderr line, whichever step failed.
+
+    scripts/ghi-issue-write.py reports one stderr line of a failed ask, and a
+    reason can carry another program's multi-line output, such as gh's stderr
+    or claude's logged-out message. An unusable answer's fallback instruction
+    stays on a line of its own after it, because ghi-issue-write.py finds the
+    not-usable line by its opening."""
+    fallback = "\n" + GHI_GUIDE_AGENT_ANSWER_NOT_USABLE_CALLER_FALLBACK_LADDER_INSTRUCTION_STDERR_LINE
+    keeps_fallback = text.endswith(fallback)
+    if keeps_fallback:
+        text = text[:-len(fallback)]
+    one_line = " ".join(line.strip() for line in text.splitlines() if line.strip())
+    print(one_line + (fallback if keeps_fallback else ""), file=sys.stderr)
 
 
 def main(argv=None) -> int:
@@ -1153,8 +1182,8 @@ def main(argv=None) -> int:
         try:
             question = Path(arguments.question_file).read_text(encoding="utf-8")
         except (OSError, UnicodeDecodeError) as error:
-            print(f"ghi-guide-agent-ask: could not read the question file: {error}",
-                  file=sys.stderr)
+            ask_failure_print_to_stderr_on_one_line(
+                f"ghi-guide-agent-ask: could not read the question file: {error}")
             return 1
 
     if arguments.seat_dir is not None:
@@ -1176,38 +1205,38 @@ def main(argv=None) -> int:
                     input=question if question_on_stdin else None,
                 )
             except subprocess.TimeoutExpired:
-                print(f"ghi-guide-agent-ask: the ssh call to {AGENT_BOX} did not finish "
-                      f"within {SSH_TIMEOUT_SECONDS}s, so this script stopped it; "
-                      f"that alone does not show {AGENT_BOX} is down.", file=sys.stderr)
+                ask_failure_print_to_stderr_on_one_line(
+                    f"ghi-guide-agent-ask: the ssh call to {AGENT_BOX} did not finish "
+                    f"within {SSH_TIMEOUT_SECONDS}s, so this script stopped it; "
+                    f"that alone does not show {AGENT_BOX} is down.")
                 return 1
             except OSError as error:
-                print(f"ghi-guide-agent-ask: could not start ssh to {AGENT_BOX}: {error}",
-                      file=sys.stderr)
+                ask_failure_print_to_stderr_on_one_line(
+                    f"ghi-guide-agent-ask: could not start ssh to {AGENT_BOX}: {error}")
                 return 1
             sys.stdout.write(completed.stdout)
             sys.stderr.write(completed.stderr)
             return completed.returncode
 
     if not seat_dir.is_dir():
-        # One line, because scripts/ghi-issue-write.py reports only the last stderr line.
-        print(f"ghi-guide-agent-ask: the ask failed: ghi-guide-agent's agent-home "
-              f"{seat_dir} does not exist on {NED_BOX_HOSTNAME}, and the ask runs inside it. "
-              f"Create it, from either machine, with `ssh nedlern@{NED_BOX_HOSTNAME} "
-              f"'git -C ~/Projects/nedsnodes worktree add --detach {seat_dir} origin/main && "
-              f"touch \"$(git -C {seat_dir} rev-parse --absolute-git-dir)/agent-home-marker\"'`, "
-              f"which makes it an agent-home resting at origin/main; then run the command that "
-              f"printed this message again, unchanged, once. If the agent-home cannot be "
-              f"created, or the second ask fails too: when you are filing or editing a GHI, "
-              f"go on down the ask's fallback ladder in .claude/skills/ghi-write/SKILL.md; "
-              f"for any other ask, go on without ghi-guide-agent's answer, and tell the user that "
-              f"ghi-guide-agent cannot answer until its agent-home exists on ned-box.",
-              file=sys.stderr)
+        ask_failure_print_to_stderr_on_one_line(
+            f"ghi-guide-agent-ask: the ask failed: ghi-guide-agent's agent-home "
+            f"{seat_dir} does not exist on {NED_BOX_HOSTNAME}, and the ask runs inside it. "
+            f"Create it, from either machine, with `ssh nedlern@{NED_BOX_HOSTNAME} "
+            f"'git -C ~/Projects/nedsnodes worktree add --detach {seat_dir} origin/main && "
+            f"touch \"$(git -C {seat_dir} rev-parse --absolute-git-dir)/agent-home-marker\"'`, "
+            f"which makes it an agent-home resting at origin/main; then run the command that "
+            f"printed this message again, unchanged, once. If the agent-home cannot be "
+            f"created, or the second ask fails too: when you are filing or editing a GHI, "
+            f"go on down the ask's fallback ladder in .claude/skills/ghi-write/SKILL.md; "
+            f"for any other ask, go on without ghi-guide-agent's answer, and tell the user that "
+            f"ghi-guide-agent cannot answer until its agent-home exists on ned-box.")
         return 1
 
     answer, closed_on, error = ask(question, arguments.include_closed, seat_dir,
                                    arguments.repo, request_form=arguments.request_form)
     if answer is None:
-        print(f"ghi-guide-agent-ask: {error}", file=sys.stderr)
+        ask_failure_print_to_stderr_on_one_line(f"ghi-guide-agent-ask: {error}")
         return 1
     stdout_text, stderr_text, exit_code = ghi_guide_agent_answer_render_as_caller_stdout_stderr_and_exit_code(
         answer, closed_on)

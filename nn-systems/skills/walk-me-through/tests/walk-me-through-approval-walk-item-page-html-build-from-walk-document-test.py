@@ -1,8 +1,9 @@
 #!/usr/bin/env python3
 """Cases for the program that builds an approval-walk item's HTML page from its walk-document.
 
-Each case runs the program as a subprocess on a scratch walk-document, except the missing-parser case, which loads
-the program and makes its parser module raise. Prints one line per case and exits non-zero if any case fails.
+Each case runs the program as a subprocess on a scratch walk-document, except three that load modules: the
+missing-parser case, which makes the program's parser module raise, the `#item_page` reader case, and the
+whole_item_links case. Prints one line per case and exits non-zero if any case fails.
 """
 import importlib.util
 import shlex
@@ -151,6 +152,13 @@ def run_unit_cases(scratch):
     check("an item under a setext heading it shares keeps the heading's further line, which the hook must see",
           result.returncode == 0 and "to one file" in page and "drops a sentence" in page
           and "fixes a path" not in page, page)
+    indented_further_line_above_indented_code = ("# A walk\n\nItems 5 and 6 of 9: two small corrections\n"
+                                                 "    further line\n===\n    code line\n\n"
+                                                 "Item 6: drops a sentence.\n")
+    result, page = built(scratch, "5", document=indented_further_line_above_indented_code)
+    check("an item's page keeps two blank lines, the underline's and the one that opens each run of lines, between a "
+          "shared setext heading's indented further line and the indented code right below the underline",
+          result.returncode == 0 and "further line\n\n\ncode line" in page, page)
     result, page = built(scratch, "6")
     check("an item that shares a heading keeps its own lines under that heading",
           result.returncode == 0 and "<h1>Items 5 and 6 of 9: two small corrections</h1>" in page
@@ -595,6 +603,25 @@ def run_item_page_line_reader_cases():
                     ("63", walk_finder.ITEM_PAGE_PUBLISH_FAILED, None)], lines)
 
 
+def run_whole_item_links_case():
+    specification = importlib.util.spec_from_file_location("item_page_builder", PROGRAM)
+    builder = importlib.util.module_from_spec(specification)
+    specification.loader.exec_module(builder)
+    walk_finder, parser_module = builder.walk_finder_and_parser_module()
+    # The reader takes any run of non-space characters as a link, so links sort both below and above
+    # ITEM_PAGE_PUBLISH_FAILED; only an inequality test keeps the ones above it.
+    lines = walk_finder.approval_walk_item_page_link_lines_oldest_first_from_walk_minutes(
+        "#item_page item 2 of 9 https://claude.ai/artifact/Item2\n"
+        "#item_page item 3 of 9 publish failed: the Artifact tool timed out\n"
+        "#item_page item 5 of 9 www.example.com/item5\n"
+        "#item_page item 5.1 of 9 https://claude.ai/artifact/SubStep51\n"
+        "#item_page item 7 of 9 publish failed: the Artifact tool timed out\n", parser_module.markdown_parser())
+    links = builder.whole_item_links(lines, walk_finder)
+    check("whole_item_links keeps every whole item's link, one sorting above `publish failed` included, "
+          "and drops failed publishes and sub-steps",
+          links == {2: "https://claude.ai/artifact/Item2", 5: "www.example.com/item5"}, links)
+
+
 with tempfile.TemporaryDirectory() as temporary_directory:
     scratch = Path(temporary_directory)
     run_page_cases(scratch)
@@ -605,6 +632,7 @@ with tempfile.TemporaryDirectory() as temporary_directory:
     run_parser_missing_case(scratch)
     run_page_link_cases(scratch)
     run_item_page_line_reader_cases()
+    run_whole_item_links_case()
 
 if failures:
     print(f"\n{len(failures)} case(s) failed")

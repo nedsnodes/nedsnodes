@@ -28,11 +28,13 @@ Each invocation, under a lock that keeps two from overlapping:
    has already named, since the sweep asks once about each; when something runs and all of it is
    such work, the judge is not asked. A wait whose rule 2 messages named only
    promises to act after an event and hold sentences ends when the agent-seat has recorded, after each
-   message, one task per sentence it named, each with a TaskCreate or TaskUpdate call whose result
+   message, one task per sentence it and the later messages named, a message whose send failed
+   included, each with a TaskCreate or TaskUpdate call whose result
    succeeded and that sets `metadata.prerequisites` or `addBlockedBy`. A message starts a wait, unless a wait is
    already open: 15 minutes later, if the agent-seat is idle, code sends the escalation, which
-   quotes the message that opened the wait, and 15 minutes after that writes the user a
-   user-alert, once.
+   quotes the message that opened the wait and each rule 2 message whose send on the open wait
+   failed, and 15 minutes after that writes the user a user-alert, once, which names the sentences
+   of those failed messages too.
 
 Every message to an agent-seat goes through Sweep.send_wake_message, which ends it with
 DO_NOT_REPLY_SENTENCE: the headless agent-session that sends it reads no reply, and may still
@@ -165,6 +167,8 @@ DO_NOT_REPLY_SENTENCE = "Do not reply to this message: the idle sweep sent it, a
 ESCALATION_TEXT = ("You've given this {minutes} minutes, please check; if not sure, hand off. At "
                    "{nudge_time} the idle sweep wrote this, which you have not acted on:\n\n"
                    "{quoted_nudge}")
+FAILED_PROMISE_ESCALATION_TEXT = ("\n\nAt {time} the idle sweep tried to send you this too, and the "
+                                  "send failed:\n\n{quoted_text}")
 LIMIT_WAKE_TEXT = ("The usage limit that stopped you has ended: {why}. Carry on with the work the "
                    "limit stopped.")
 LIMIT_ENDED_BY_RESET = "its reset time has passed"
@@ -203,6 +207,11 @@ PROMISE_MESSAGE = "promise_message"
 # On an open wait: the rule 2 messages sent on it, [{"at", "kinds", "sentences"}], or None when one
 # of them was sent by a version of this program that logged no sentences for it.
 PROMISE_MESSAGES = "promise_messages"
+# An event logged when a rule 2 message's send on an open wait failed, carrying its text and the
+# sentences it names, since no message_sent or promise_message event holds them.
+PROMISE_MESSAGE_SEND_FAILED = "promise_message_send_failed"
+# On an open wait: the rule 2 messages whose send on it failed, [{"at", "kinds", "sentences", "text"}].
+FAILED_PROMISE_MESSAGES = "failed_promise_messages"
 
 SEND_ANSWER_SCHEMA = {"type": "object", "required": ["sent", "reason"],
                       "properties": {"sent": {"type": "boolean"}, "reason": {"type": "string"}}}
@@ -303,9 +312,10 @@ it, or by a task to build one together with a proposal to the user; a memory nev
 - A hold, such as "I'll hold", is backed by a task whose prerequisites name what releases the hold.
 
 Judge each sentence by the rule of the kind the JSON gives it, because the message that names an \
-unbacked sentence is worded for that kind; a sentence that, read whole, declines or puts off an \
-action instead of promising one, such as "ned-box's load is near 22, so I'm starting nothing else \
-for now", leaves nothing undone: it is backed.
+unbacked sentence is worded for that kind; a sentence that, read whole, only declines an action \
+and commits the agent-seat to nothing later, such as "ned-box's load is near 22, so I'm starting \
+nothing else for now", leaves nothing undone: it is backed. A hold or a promise to act after an \
+event puts off an action until something happens; judge it by its own rule above.
 
 The tool calls the agent-seat made from the earliest sentence's turn on are in the JSON below, with \
 the tasks they created or updated and the files they changed; so are its open tasks that have \
@@ -381,10 +391,17 @@ class SweepLog:
         # Whether a PROMISE step awaits its PROMISE_MESSAGE, and the invocation that logged the
         # step.
         owed, owed_by = False, None
-        for event in self.of_seat(seat, "wait_step", "wait_ended", PROMISE_MESSAGE):
+        for event in self.of_seat(seat, "wait_step", "wait_ended", PROMISE_MESSAGE,
+                                  PROMISE_MESSAGE_SEND_FAILED):
             invocation = event.get("agent_seat_idle_sweep_invocation_started_at")
             if event["event"] == "wait_ended":
                 wait, owed = None, False
+            elif event["event"] == PROMISE_MESSAGE_SEND_FAILED:
+                if wait is not None:
+                    wait[FAILED_PROMISE_MESSAGES].append({
+                        "at": event["at"], "kinds": set(event["kinds"]),
+                        "sentences": event["sentences"], "text": event["text"]})
+                owed = False
             elif event["event"] == PROMISE_MESSAGE:
                 if wait is None:
                     continue
@@ -399,7 +416,8 @@ class SweepLog:
                 if event["step"] == NUDGE:
                     wait = {"session_id": event["session_id"],
                             "first_idle_at": event["first_idle_at"], NUDGE: event["at"],
-                            "nudge_text": event["text"], PROMISE_MESSAGES: []}
+                            "nudge_text": event["text"], PROMISE_MESSAGES: [],
+                            FAILED_PROMISE_MESSAGES: []}
                     owed = False
                     if event.get("rule") != 2:
                         continue
@@ -499,6 +517,10 @@ def agent_seat_idle_sweep_invocation_started_at(event):
 def seconds_between(earlier, later):
     earlier = parse_time(earlier) if isinstance(earlier, str) else earlier
     return (later - earlier).total_seconds()
+
+
+def quoted(text):
+    return "\n".join(f"> {line}" for line in text.split("\n"))
 
 
 def task_calls_settling_promise_messages(promise_messages, task_calls):
@@ -948,13 +970,17 @@ class Sweep:
             self.end_wait(seat, "it made a tool call after the nudge")
             wait = None
         if wait and wait[PROMISE_MESSAGES]:
+            # A failed message's sentences must be backed too, so that a call backing an earlier
+            # promise does not end the wait before the escalation and the user-alert report them.
+            messages = sorted(wait[PROMISE_MESSAGES] + wait[FAILED_PROMISE_MESSAGES],
+                              key=lambda message: parse_time(message["at"]))
             settling_calls = task_calls_settling_promise_messages(
-                wait[PROMISE_MESSAGES],
+                messages,
                 verdict.get(
                     fields.SUCCESSFUL_TASK_TOOL_CALLS_SETTING_PREREQUISITES_OR_BLOCKED_BY) or [])
             if settling_calls is not None:
                 self.end_wait(seat, "it recorded what a task waits on after the promise message",
-                              sentences=[sentence for message in wait[PROMISE_MESSAGES]
+                              sentences=[sentence for message in messages
                                          for sentence in message["sentences"]],
                               task_calls=settling_calls)
                 wait = None
@@ -974,7 +1000,7 @@ class Sweep:
                 # The check is not logged, so that the next read after the reset still holds the
                 # sentences the judge could not judge.
                 return
-            promise_text, promise_kinds, promise_sentences = promise or (None, None, None)
+            promise_text, promise_kinds, promise_sentences, promise_records = promise or (None, None, None, ())
             fallback = verdict.get(fields.IF_EVERY_SENTENCE_BACKED)
             if outcome == "all backed" and fallback is not None:
                 rule, text = fallback[fields.RULE], fallback.get(fields.TEXT)
@@ -991,10 +1017,15 @@ class Sweep:
             self.due_step(seat, verdict, wait)
         paused = self.headless_usage_limit_pause_holds()
         # An escalation stopped at a usage limit can start the pause after the sentences were
-        # judged. When it holds back their promise message, neither they nor the check are logged,
-        # so that after the reset they are judged again and the message is sent; otherwise they are
-        # logged, so that a second judge cannot answer differently about the same sentences.
-        if judged_sentences and not (paused and promise_text):
+        # judged. When it holds back their promise message, the unbacked sentences and the check
+        # are not logged, so that after the reset they are judged again and the message is sent.
+        # Every other sentence checked is logged, so that a second judge cannot answer
+        # differently about it and add a wrong line to that message.
+        if judged_sentences and paused and promise_text:
+            unbacked_keys = {(item["record_uuid"], item["sentence"]) for item in promise_records}
+            self.sentences_checked(seat, [item for item in sentences_checked
+                                          if (item["record_uuid"], item["sentence"]) not in unbacked_keys])
+        elif judged_sentences:
             self.sentences_checked(seat, sentences_checked)
             self.checked(seat, verdict, transcript_read_at, check_is_new)
         if paused:
@@ -1012,8 +1043,7 @@ class Sweep:
             else:
                 # The promise step is logged whether or not the send succeeds: its sentences are
                 # already logged as checked, so only the wait's escalation and user-alert can
-                # still report the promise. The promise_message is logged only once sent, since
-                # no later message quotes it.
+                # still report the promise, and they read a failed message from its own event.
                 if PROMISE not in wait:
                     self.record({"event": "wait_step", "agent_seat": seat, "step": PROMISE})
                 sent = self.send(seat, verdict, promise_text, NUDGE)
@@ -1021,6 +1051,10 @@ class Sweep:
                     self.record({"event": PROMISE_MESSAGE, "agent_seat": seat,
                                  "kinds": promise_kinds, "sentences": promise_sentences,
                                  "send_started_at": sent["send_started_at"]})
+                else:
+                    self.record({"event": PROMISE_MESSAGE_SEND_FAILED, "agent_seat": seat,
+                                 "kinds": promise_kinds, "sentences": promise_sentences,
+                                 "text": promise_text})
         elif not wait:
             self.nudge(seat, verdict, rule, text, stretch)
 
@@ -1039,6 +1073,7 @@ class Sweep:
         if TELL_USER in wait:
             return
         minutes = int(seconds_between(wait["first_idle_at"] or wait[NUDGE], self.now) // 60)
+        failed = wait[FAILED_PROMISE_MESSAGES]
         if ESCALATE in wait:
             if seconds_between(wait[ESCALATE], self.now) >= WAIT_STEP_SECONDS:
                 self.record({"event": "wait_step", "agent_seat": seat, "step": TELL_USER})
@@ -1047,7 +1082,12 @@ class Sweep:
                            f"The idle sweep found {seat} idle with something to do, messaged it "
                            f"at {wait[NUDGE]} and escalated at {wait[ESCALATE]}, and it is idle "
                            f"again. Its transcript is {verdict[fields.TRANSCRIPT_PATH]}. The idle "
-                           "sweep sends it nothing more until it spends tokens and goes idle again.",
+                           "sweep sends it nothing more until it spends tokens and goes idle again."
+                           + "".join(f" At {message['at']} the idle sweep failed to send it a "
+                                     "message naming these sentences of its own, which only the "
+                                     "escalation quoted: "
+                                     + " ".join(f'"{sentence}"' for sentence in message["sentences"])
+                                     for message in failed),
                            f"An agent on ned-box can read {seat}'s transcript and its tmux session "
                            f"{seat} to see why it stopped, and message it with SendMessage; the "
                            "user may want to look at it himself.", failure=False)
@@ -1056,7 +1096,11 @@ class Sweep:
                 and not self.headless_usage_limit_pause_holds()):
             text = ESCALATION_TEXT.format(
                 minutes=minutes, nudge_time=parse_time(wait[NUDGE]).strftime("%Y-%m-%d %H:%MZ"),
-                quoted_nudge="\n".join(f"> {line}" for line in wait["nudge_text"].split("\n")))
+                quoted_nudge=quoted(wait["nudge_text"])) + "".join(
+                    FAILED_PROMISE_ESCALATION_TEXT.format(
+                        time=parse_time(message["at"]).strftime("%Y-%m-%d %H:%MZ"),
+                        quoted_text=quoted(message["text"]))
+                    for message in failed)
             self.record({"event": "wait_step", "agent_seat": seat, "step": ESCALATE, "text": text})
             self.send(seat, verdict, text, ESCALATE)
 
@@ -1160,10 +1204,11 @@ class Sweep:
     def sentences(self, seat, verdict):
         """Rule 2: judge what code could not settle, and word one message naming every unbacked
         sentence. Returns ("unbacked", (the message, the sorted kinds of the sentences it names,
-        those sentences), the sentences checked), ("failed", None, []), ("paused", None, []) or
-        ("all backed", None, the sentences checked). The caller logs the sentences checked, so that
-        a pause a later launch starts leaves them to be judged after the reset; a judge stopped by
-        the pause logs none, and a failed judge logs them all."""
+        those sentences, their records), the sentences checked), ("failed", None, []), ("paused", None, []) or
+        ("all backed", None, the sentences checked). The caller logs the sentences checked, except,
+        when a pause a later launch starts holds back the promise message, the unbacked ones, which
+        are judged again after the reset; a judge stopped by the pause logs none, and a failed judge
+        logs them all."""
         checked = self.log.checked_sentences(seat)
         new_by_code_reading = fields.verdict_sentences_grouped_by_code_reading(
             item for item in verdict.get(fields.SENTENCES, [])
@@ -1206,7 +1251,7 @@ class Sweep:
             sentence=item["sentence"],
             minutes=int(seconds_between(item["time"], self.now) // 60) if item["time"] else "some")
             for item in unbacked), sorted({item["kind"] for item in unbacked}),
-            [item["sentence"] for item in unbacked]), new
+            [item["sentence"] for item in unbacked], unbacked), new
 
     def sentences_checked(self, seat, items):
         for item in items:

@@ -47,7 +47,8 @@ yet numbered. A walk-document that
 does not exist, or that holds no item with the heading, or more than one, is
 a fault the hook names as it names an unreadable list: the walk-document
 holds the item before its heading can be named, so its absence means a wrong
-path. The files are read on this machine only, with no cache.
+path. The files are read on this machine only, and each hook execution reads
+them afresh; only its parse of a text it has already parsed is reused.
 
 An open task (status pending or in_progress) is raised when its
 prerequisites are met, and only when every task in its blockedBy is
@@ -456,8 +457,25 @@ def walk_finder_and_answer_program():
     return _walk_modules
 
 
-def approval_walk_item_decided_or_problem(condition: dict) -> dict:
-    """{"met": bool}, with "problem", a clause saying why, when the item cannot be found."""
+class MarkdownParserParsingEachTextOnce:
+    """A markdown parser that parses each distinct text once; callers must not change its tokens.
+
+    Keyed by the text itself, so a file that changes is parsed anew."""
+
+    def __init__(self, parser):
+        self._parser = parser
+        self._tokens_by_text = {}
+
+    def parse(self, text):
+        if text not in self._tokens_by_text:
+            self._tokens_by_text[text] = self._parser.parse(text)
+        return self._tokens_by_text[text]
+
+
+def approval_walk_item_decided_or_problem(condition: dict, checker=None) -> dict:
+    """{"met": bool}, with "problem", a clause saying why, when the item cannot be found.
+
+    With `checker`, parses through the parser it keeps for this execution."""
     walk_finder, answer_program = walk_finder_and_answer_program()
     minutes = Path(condition[WALK_MINUTES_FIELD])
     document = minutes.with_name(minutes.name[:-len(WALK_MINUTES_SUFFIX)] + ".md")
@@ -469,7 +487,8 @@ def approval_walk_item_decided_or_problem(condition: dict) -> dict:
         # means a wrong path, which would otherwise hold the task in silence for good.
         return {"met": False, "problem": f"the walk-document {document}, which the walk-minutes "
                                          f"path {minutes} names, does not exist"}
-    parser = walk_finder.markdown_parser()
+    parser = (walk_finder.markdown_parser() if checker is None
+              else checker.markdown_parser_parsing_each_text_once(walk_finder))
     lines = document_text.split("\n")
     title = answer_program.heading_title(walk_finder, heading)
     units = walk_finder.item_unit_spans(document_text, parser)
@@ -488,7 +507,7 @@ def approval_walk_item_decided_or_problem(condition: dict) -> dict:
 
 def condition_answer(kind: str, condition, checker) -> dict:
     if kind == APPROVAL_WALK_ITEM_KIND:
-        return approval_walk_item_decided_or_problem(condition)
+        return approval_walk_item_decided_or_problem(condition, checker)
     return checker.answer(kind, condition)
 
 
@@ -558,6 +577,14 @@ class GitHubConditionChecker:
         self.changed = False
         self.gh_failures = []
         self.conditions_skipped_for_budget = []
+        self._markdown_parser_parsing_each_text_once = None
+
+    def markdown_parser_parsing_each_text_once(self, walk_finder) -> MarkdownParserParsingEachTextOnce:
+        """The one parser of this checker, and so of this execution, built on first use."""
+        if self._markdown_parser_parsing_each_text_once is None:
+            self._markdown_parser_parsing_each_text_once = MarkdownParserParsingEachTextOnce(
+                walk_finder.markdown_parser())
+        return self._markdown_parser_parsing_each_text_once
 
     def answer(self, kind: str, number: int) -> dict:
         answer = self.cached_or_fresh_answer(kind, number)
@@ -684,8 +711,9 @@ def budget_skipped_task_lines(tasks: dict, skipped_conditions, raised: dict) -> 
     without merging; then the instructions, or nothing when there is no such task.
 
     Not handled: a pull request with an old closed-without-merging record that was reopened and
-    merged since. Its task is left out here even when the budget skipped it, so this run neither
-    raises it nor names it; the next run that asks GitHub raises it."""
+    merged since. Its task gets no line here even when the budget skipped the pull request; a
+    later run that asks GitHub sees the merge, and raises the task once its other prerequisites
+    and blockers allow."""
     skipped = set(skipped_conditions)
     lines = []
     for task_id in sorted(tasks, key=lambda text: (len(text), text)):
@@ -947,8 +975,9 @@ def unheld_and_held_tasks(tasks: dict, directory: Path, checker,
     A task whose record shows its prerequisites raised as met is not asked about again, so in a
     Stop run every gh question for a task no blockedBy holds is one `due_task_lines` asked first,
     before its held tasks spent the budget, and is answered from the cache, except one the budget
-    skipped there: that one is not cached, and with the budget spent it is skipped again here and
-    its task counted as held.
+    skipped there: that one is not cached, and with the budget spent its task is counted as held,
+    whether evaluation stops at an earlier unmet prerequisite or reaches that question and skips
+    it again.
 
     Not handled: a task raised as met stays listed as unheld when what its prerequisites name
     changes afterwards, such as the walk-document of an `approval_walk_item_decided` being

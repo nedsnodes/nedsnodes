@@ -108,6 +108,8 @@ NO_WALK_MEANINGS = {
     "later": "Z means defer: postpone your last question or proposal and record it as a task.",
     "R": "R asks to see your last question or proposal again: show it in full",
     "E": "E means explain: run the explain skill, ",
+    "M": "M asks for more responses: the user wants to see every response he can give your last question",
+    "more responses": "More responses asks for more responses: the user wants to see every response",
     "approved": "Approved means approve: the user agrees with your last recommendation or proposal.",
     "approve": "Approve means approve: the user agrees with your last recommendation or proposal.",
     "approve as obvious": "AO means approve as obvious: the user agrees with your last recommendation",
@@ -413,6 +415,41 @@ def test_o_with_a_condition_or_more_text():
               and any(line.startswith("O asks for other options") for line in lines), f"lines {lines!r}")
 
 
+MORE_RESPONSES = "AO approve as obvious · Aa approve after an advisor check · Z defer · E explain · O other options"
+
+
+def test_m_shows_the_responses_the_closing_line_leaves_out_and_records_nothing():
+    case = Case(next_to_present="item 4 of 9")
+    for prompt in ("m", "M.", "more responses"):
+        lines = case.lines(prompt)
+        check(f"{prompt!r} on an open walk hands the agent the responses the closing line leaves out",
+              lines is not None
+              and lines[1].endswith("asks for more responses: the user is not answering item 4 of 9 yet, and wants "
+                                    "to see the responses its closing line leaves out.")
+              and lines[2].endswith(": " + MORE_RESPONSES)
+              and not any(" check" in line and "--" in line for line in lines[:3]), f"lines {lines!r}")
+    lines = Case().lines("m")
+    check("M with no approval-walk shows every response but M, A and D included, since no closing line shows them",
+          lines is not None and lines[-1].endswith(": A approve · AO approve as obvious · Aa approve after an advisor "
+                                                   "check · D disapprove · Z defer · E explain · O other options"),
+          f"lines {lines!r}")
+    for prompt in ("m", "more responses"):
+        result = case.run(prompt)
+        check(f"{prompt!r} on an open walk gets no line about running the check step",
+              result.returncode == 0 and result.stdout and "--user-reply-as-typed" not in result.stdout
+              and "check step" not in result.stdout, f"stdout {result.stdout!r}")
+    for prompt in ("more responses 4", "more responses item 4", "More responses 4."):
+        lines = case.lines(prompt)
+        check(f"{prompt!r} is not read as a numbered answer, so nothing tells the agent to record it",
+              lines is None or not any("check step" in line or "--user-reply-as-typed" in line
+                                       or line.startswith("The answer gives each item") for line in lines),
+              f"lines {lines!r}")
+    check("every response is on the closing line or in M's list, once",
+          sorted((LETTERS_AFTER_LINK + " · " + MORE_RESPONSES).split(" · "))
+          == sorted(["A approve", "AO approve as obvious", "Aa approve after an advisor check", "D disapprove",
+                     "Z defer", "E explain", "O other options", "M more responses"]))
+
+
 def test_o2_and_o3_approve_an_option_through_the_check_step():
     case = Case(next_to_present="item 4 of 9")
     for prompt, option in (("o2", "2"), ("O3.", "3")):
@@ -656,8 +693,7 @@ def test_r_on_an_open_walk_goes_to_the_agent_and_does_not_block():
 
 PAGE_1 = "https://claude.ai/artifact/PageOfItem4Old"
 PAGE_2 = "https://claude.ai/artifact/PageOfItem4New"
-LETTERS_AFTER_LINK = ("A approve · AO approve as obvious · Aa approve after an advisor check · D disapprove · "
-                      "Z defer · E explain · O other options")
+LETTERS_AFTER_LINK = "A approve · D disapprove · M more responses"
 
 
 def page_line(answer, item, closing_line):
@@ -1844,8 +1880,8 @@ The alternative: every hook also writes a log line with the rule ID, agent-seat 
 
 Recommendation: ask the agent-seat reboot-test, which owns the Bash guards, to add rule IDs to every hook's messages, other agent-seats' hooks included, and to build the weekly count as a GHI 1058 job, in one pull request.
 
-[Item 47.2 of 68, The change](https://claude.ai/artifact/SXzwJaGtf7sXGpYVsH1eDr) · A approve · AO approve as obvious · Aa approve after an advisor check · D disapprove · Z defer · E explain · O other options"""
-ITEM_47_2_CLOSING_LINE = """[Item 47.2 of 68, The change](https://claude.ai/artifact/SXzwJaGtf7sXGpYVsH1eDr) · A approve · AO approve as obvious · Aa approve after an advisor check · D disapprove · Z defer · E explain · O other options"""
+[Item 47.2 of 68, The change](https://claude.ai/artifact/SXzwJaGtf7sXGpYVsH1eDr) · A approve · D disapprove · M more responses"""
+ITEM_47_2_CLOSING_LINE = """[Item 47.2 of 68, The change](https://claude.ai/artifact/SXzwJaGtf7sXGpYVsH1eDr) · A approve · D disapprove · M more responses"""
 
 
 def item_47_2_lines(prompt, shown_item):
@@ -2493,6 +2529,44 @@ def test_the_items_own_sub_step_heading_does_not_end_its_shown_text():
     lines = case.lines("a", case.transcript(f"{shown}\n\n{ITEM_4_CLOSING_LINE}"))
     check("an answer counts with no model call when the item's own sub-step heading comes before its decision lines",
           counted(lines) and not case.model_calls(), f"lines {lines!r}")
+
+
+def test_a_sub_step_heading_shared_with_an_earlier_item_does_not_end_its_shown_text():
+    for form, heading in (("an ATX", "### Items 3.1 and 4.1 of 9: shared defaults"),
+                          ("a setext", "Items 3.1 and 4.1 of 9: shared defaults\n---"),
+                          ("a comma and ampersand list", "### Items 3.1, 3.2 & 4.1 of 9: shared defaults"),
+                          ("a dash after its list", "### Items 3.1, 3.2 & 4.1 of 9 — Shared defaults")):
+        shown = DECISION_ITEM.replace("#new Hide", f"{heading}\n\n#new Hide")
+        case = decision_case(model="changed")
+        lines = case.lines("a", case.transcript(f"{shown}\n\n{ITEM_4_CLOSING_LINE}"))
+        check(f"an answer counts with no model call when {form} sub-step heading that names an earlier item first, "
+              "then this item, comes before its decision lines",
+              counted(lines) and not case.model_calls(), f"lines {lines!r}")
+
+
+def test_a_heading_opens_another_item_by_the_expanded_numbers_of_a_dotted_range():
+    hook = load_short_answer_hook_for_test()
+    for words, heading, expected in (
+            ("Items 5.1 and 4.4: other decisions", "Items 4.1 to 4.3: grouped", True),
+            ("Item 4.4: the next part", "Items 4.1 to 4.3: grouped", True),
+            ("Items 5.1 and 4.2: other decisions", "Items 4.1 to 4.3: grouped", False),
+            ("Item 4.2.1: a sub-step", "Items 4.1 to 4.3: grouped", False),
+            ("Item 11.2: a sub-step", "Items 10 to 12: grouped", False),
+            ("Item 13: the next item", "Items 10 to 12: grouped", True),
+            ("Items 5.1 to 6.2: a range across items", "Item 4: a filter", True),
+            ("Item 5 fixes a path", "Item 4: a filter", False),
+            ("Items 3.1, 3.2 & 4.1 — Shared defaults", "Item 4: a filter", False),
+            ("Items 3.1, 3.2 & 5.1 — Shared defaults", "Item 4: a filter", True),
+            ("Item 5 — the next item", "Item 4: a filter", True)):
+        check(f"`{words}` below `{heading}` {'opens another item' if expected else 'does not open another item'}",
+              hook.opens_another_item(words, heading) is expected, hook.opens_another_item(words, heading))
+
+
+def test_the_walk_finder_module_is_executed_once_however_many_headings_are_read():
+    hook = load_short_answer_hook_for_test()
+    first = hook.load_walk_finder()
+    hook.opens_another_item("Item 5: the next item", "Item 4: a filter")
+    check("the hook reuses the walk finder module it loaded", hook.load_walk_finder() is first)
 
 
 def test_a_recommendation_or_alternative_shown_without_its_label_goes_to_the_model():
