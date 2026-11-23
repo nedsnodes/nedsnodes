@@ -919,7 +919,9 @@ def _ask_within_lock(question, include_closed, seat_dir, repo, projects_root,
     # Only under the lock. A contended run holds no lock and publishes into a
     # throwaway mirror precisely so it cannot disturb the holder; swapping the
     # checkout's files beneath the holder's running claude would undo that.
-    if locked:
+    # Over ssh the line before this run has already fetched under the lock;
+    # a second fetch could spend 60 of the ask's seconds on nothing.
+    if locked and not os.environ.get(GHI_GUIDE_AGENT_HOME_FAST_FORWARD_TO_ORIGIN_MAIN_ALREADY_TRIED_ENVIRONMENT_VARIABLE):
         refresh_line = fast_forward_seat_checkout(seat_dir)
         if refresh_line:
             print(refresh_line, file=sys.stderr)
@@ -1043,10 +1045,17 @@ def _ask_within_lock(question, include_closed, seat_dir, repo, projects_root,
 # script is main's before it parses the flags the caller sends; a copy older
 # than a flag would otherwise reject it at argparse and never reach its own
 # fast-forward. It uses no flag, because a stale copy would reject that too:
-# it calls state_lock, LOCK_FILE_NAME and fast_forward_seat_checkout by name
+# it calls state_lock, LOCK_FILE_NAME, SeatDirectoryUnusable and
+# fast_forward_seat_checkout by name
 # in whatever copy the seat holds. Renaming any of them makes this line fail
 # and fall through to the ask, whose own fast-forward then updates the seat,
 # unless the same change also adds a flag the caller sends.
+#
+# It exits 0 only when it ran the fast-forward, so the shell then tells the
+# ask, through an environment variable a stale copy ignores rather than a flag
+# it would reject, not to fetch a second time. An unusable seat directory exits
+# quietly: the ask reports it in its own one line.
+GHI_GUIDE_AGENT_HOME_FAST_FORWARD_TO_ORIGIN_MAIN_ALREADY_TRIED_ENVIRONMENT_VARIABLE = "GHI_GUIDE_AGENT_HOME_FAST_FORWARD_TO_ORIGIN_MAIN_ALREADY_TRIED"
 GHI_GUIDE_AGENT_HOME_FAST_FORWARD_TO_ORIGIN_MAIN_SSH_PYTHON_SOURCE = "\n".join([
     "import importlib.util, sys",
     "from pathlib import Path",
@@ -1054,10 +1063,14 @@ GHI_GUIDE_AGENT_HOME_FAST_FORWARD_TO_ORIGIN_MAIN_SSH_PYTHON_SOURCE = "\n".join([
     "ask = importlib.util.module_from_spec(spec)",
     "spec.loader.exec_module(ask)",
     "seat = Path.cwd()",
-    "with ask.state_lock(seat / ask.LOCK_FILE_NAME) as locked:",
-    "    line = ask.fast_forward_seat_checkout(seat) if locked else ''",
+    "try:",
+    "    with ask.state_lock(seat / ask.LOCK_FILE_NAME) as locked:",
+    "        line = ask.fast_forward_seat_checkout(seat) if locked else None",
+    "except ask.SeatDirectoryUnusable:",
+    "    line = None",
     "if line:",
     "    print(line, file=sys.stderr)",
+    "sys.exit(0 if line is not None else 3)",
 ])
 
 
@@ -1107,10 +1120,11 @@ def build_remote_command(question: str, include_closed: bool, repo: str,
         ' — bootstrap it (a checkout of this repository at that path), then retry" >&2',
         '  exit 1',
         '}',
-        # No `&&`: a failed fast-forward prints its line and the ask runs on, as
-        # fast_forward_seat_checkout's docstring requires. </dev/null leaves
-        # stdin unread for the ask's --question-file /dev/stdin.
-        "python3 -c " + shlex.quote(GHI_GUIDE_AGENT_HOME_FAST_FORWARD_TO_ORIGIN_MAIN_SSH_PYTHON_SOURCE) + " </dev/null",
+        # Not `&&`: a failed fast-forward prints its line and the ask runs on, as
+        # fast_forward_seat_checkout's docstring requires.
+        "if python3 -c " + shlex.quote(GHI_GUIDE_AGENT_HOME_FAST_FORWARD_TO_ORIGIN_MAIN_SSH_PYTHON_SOURCE) + "; then",
+        f"  export {GHI_GUIDE_AGENT_HOME_FAST_FORWARD_TO_ORIGIN_MAIN_ALREADY_TRIED_ENVIRONMENT_VARIABLE}=1",
+        "fi",
         invocation,
     ])
 
