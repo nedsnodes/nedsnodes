@@ -60,6 +60,11 @@
           },
           {
             "type": "command",
+            "command": "python3 \"$CLAUDE_PROJECT_DIR\"/nn-systems/skills/walk-me-through/walk-me-through-user-message-not-only-an-answer-copied-to-walk-minutes-user-prompt-submit-hook.py",
+            "timeout": 10
+          },
+          {
+            "type": "command",
             "command": "python3 \"$CLAUDE_PROJECT_DIR\"/nn-systems/skills/walk-me-through/walk-me-through-pending-user-alerts-claim-and-insert-as-approval-walk-items-user-prompt-submit-hook.py",
             "timeout": 10
           },
@@ -126,6 +131,11 @@
             "type": "command",
             "command": "python3 \"$CLAUDE_PROJECT_DIR\"/nn-systems/skills/walk-me-through/walk-me-through-agent-question-to-user-outside-approval-walk-items-refusal-stop-hook.py",
             "timeout": 60
+          },
+          {
+            "type": "command",
+            "command": "python3 \"$CLAUDE_PROJECT_DIR\"/nn-systems/skills/walk-me-through/walk-me-through-user-message-copied-to-walk-minutes-without-recorded-outcome-turn-end-refusal-stop-hook.py",
+            "timeout": 30
           }
         ]
       }

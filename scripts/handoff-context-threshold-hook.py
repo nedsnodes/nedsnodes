@@ -8,7 +8,10 @@ Below --ceiling-used-percentage, by the same count, it defers instead, saving th
 shows a running subagent, workflow or background shell task younger than its kind's wait-limit,
 from BACKGROUND_TASK_WAIT_LIMIT_MINUTES_BY_KIND, or while a
 transcript it reads launch records from cannot be read, since it then cannot tell what runs.
-With no background_tasks list it counts nothing as running.
+With no background_tasks list it counts nothing as running. Below the ceiling it also holds the
+request, with no marker and no notice of its own, while the open approval-walk's walk-minutes hold
+a copied user message with no outcome, since the walk-me-through Stop hook for those lines tells
+the agent what to add. An `open` outcome is an outcome, so it holds nothing.
 
 The post-compaction hook deletes only <session>-handoff-asked, so while <session>-handoff-deferred
 exists the hook still fires below the threshold once the awaited work has finished; it then
@@ -68,6 +71,12 @@ HANDOFF_DIRECTORY = Path.home() / ".claude" / "handoffs"
 HANDOFF_ASKED_MARKER_SUFFIX = "-handoff-asked"
 
 
+WALK_FINDER_FILE = (Path(__file__).resolve().parents[1] / "nn-systems" / "skills" / "walk-me-through"
+                    / "walk-me-through-approval-walk-minutes-and-walk-document-item-finder-common.py")
+ATTENDANCE_CHECK_FILE = (Path(__file__).resolve().parents[1] / "nn-systems" / "general-tools"
+                         / "agent-session-unattended-by-user-check-common.py")
+
+
 def handoff_asked_marker_path(session_id: str) -> Path:
     # Read HANDOFF_DIRECTORY at call time so tests can redirect marker writes.
     return HANDOFF_DIRECTORY / f"{session_id}{HANDOFF_ASKED_MARKER_SUFFIX}"
@@ -108,6 +117,13 @@ SHARE_WITH_COMPACTION_DROPPED = (
 HANDOFF_INSTRUCTION = (
     "[rule handoff-context-threshold-reached-run-handoff] This session has used {share} of its context window, which has "
     "reached the reincarnation threshold. Run the /handoff skill now."
+)
+
+HANDOFF_THRESHOLD_HOOK_INSTRUCTION_ADDED_WHEN_WALK_ME_THROUGH_APPROVAL_WALK_FILES_UNREADABLE_LINE = (
+    "The threshold-hook could not read the approval-walk files in this checkout ({problem}), so it did not delay this "
+    "session-handoff for a copied user message with no outcome. If docs/walk/ holds an open approval-walk, or you "
+    "cannot tell, first write any change agreed with the user that its walk-document, docs/walk/<name>.md, does not "
+    "yet hold into that file. Then run the /handoff skill."
 )
 
 MODEL_ID_NOT_IN_CONTEXT_WINDOW_TABLE_LINE = (
@@ -990,6 +1006,45 @@ def awaited_work_still_in_flight(marker, flight: WorkInFlight) -> bool:
                        for task_id in flight.background_task_ids))
 
 
+def load_module_by_path(name, path):
+    specification = importlib.util.spec_from_file_location(name, path)
+    module = importlib.util.module_from_spec(specification)
+    specification.loader.exec_module(module)
+    return module
+
+
+def checkout_of_directory_holds_walk_minutes(directory: Path) -> bool:
+    for candidate in (directory, *directory.parents):
+        if (candidate / ".git").exists():
+            return any((candidate / "docs" / "walk").glob("*-minutes.md"))
+    return False
+
+
+def handoff_deferral_check_whether_open_approval_walk_has_user_message_copied_to_walk_minutes_without_valid_outcome(cwd) -> bool:
+    """Whether the open approval-walk of cwd's checkout has a copied user message with no outcome. An agent-session
+    no user attends cannot be answered by him, so it holds nothing."""
+    if not cwd or load_module_by_path("agent_session_unattended_by_user_check_common",
+                                      ATTENDANCE_CHECK_FILE).agent_session_unattended_by_user(os.environ):
+        return False
+    # The walk finder's patterns need Python 3.11 and the Mac's python3 is 3.9, so a checkout with no walk-minutes
+    # must not load it, or every handoff there would report an unreadable walk.
+    if not checkout_of_directory_holds_walk_minutes(Path(cwd)):
+        return False
+    walk_finder = load_module_by_path("walk_me_through_approval_walk_minutes_and_walk_document_item_finder_common",
+                                      WALK_FINDER_FILE)
+    top = walk_finder.checkout_top(Path(cwd))
+    if top is None or not (top / walk_finder.WALK_DIRECTORY).is_dir():
+        return False
+    parser = walk_finder.markdown_parser()
+    walk = walk_finder.open_walk(top / walk_finder.WALK_DIRECTORY, parser)
+    if walk is None:
+        return False
+    minutes = walk[0]
+    document = minutes.with_name(minutes.name[:-len(walk_finder.MINUTES_SUFFIX)] + ".md")
+    return bool(walk_finder.approval_walk_user_message_lines_copied_to_walk_minutes_without_valid_outcome_find(
+        minutes.read_text(encoding="utf-8"), document, parser))
+
+
 def defer(session_id, used, share, flight, arguments, unreadable_marker_problem=None,
           now=None) -> int:
     """Save the work in flight as the work to wait for, and tell the agent the handoff is deferred."""
@@ -1074,6 +1129,7 @@ def main(argv=None) -> int:
     if fired_marker.exists():
         return 0
 
+    walk_minutes_problem = None
     # Reincarnation kills in-process work; defer below the ceiling so work can finish.
     if used < arguments.ceiling_used_percentage:
         # An incomplete scan is not an all-clear; defer only as far as the context ceiling.
@@ -1099,6 +1155,12 @@ def main(argv=None) -> int:
         elif not count_is_known or flight:
             return defer(session_id, used, share, flight, arguments, unreadable_marker_problem)
 
+        try:
+            if handoff_deferral_check_whether_open_approval_walk_has_user_message_copied_to_walk_minutes_without_valid_outcome(payload.get("cwd")):
+                return 0
+        except Exception as problem:  # noqa: BLE001 - no walk fault may keep the session-handoff from firing
+            walk_minutes_problem = problem
+
     try:
         # A failed marker write would repeat the handoff request every turn.
         HANDOFF_DIRECTORY.mkdir(parents=True, exist_ok=True)
@@ -1107,6 +1169,8 @@ def main(argv=None) -> int:
         pass
 
     print(HANDOFF_INSTRUCTION.format(share=share), file=sys.stderr)
+    if walk_minutes_problem is not None:
+        print(HANDOFF_THRESHOLD_HOOK_INSTRUCTION_ADDED_WHEN_WALK_ME_THROUGH_APPROVAL_WALK_FILES_UNREADABLE_LINE.format(problem=repr(walk_minutes_problem)), file=sys.stderr)
     if background_tasks_list_is_missing:
         print(BACKGROUND_TASKS_LIST_MISSING_SENTENCE.format(
                   claude_version=claude_version_or_why_unread()),

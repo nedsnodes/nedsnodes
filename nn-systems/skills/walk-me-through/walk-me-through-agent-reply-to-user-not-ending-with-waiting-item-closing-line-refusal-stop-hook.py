@@ -18,7 +18,7 @@ his own prompt, typed, queued or a slash command. A turn started by another
 agent-seat's message, a background-task notice, a coordinator's message or a
 scheduled prompt shows and blocks nothing, so a walk left open while the agent
 does other work is not sent back over every report, and the minutes,
-which change only when he answers, are not checked then. Claude Code records
+whose waiting item changes only when he answers, are not checked then. Claude Code records
 on each turn's opening prompt a `turnOrigin`, `human` for his own; the last
 user record carrying one names the current turn's origin, because a message
 that arrives while the agent works carries none. A prompt he types while the

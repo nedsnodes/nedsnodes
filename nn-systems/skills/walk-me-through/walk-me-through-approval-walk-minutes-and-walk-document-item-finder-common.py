@@ -1,9 +1,9 @@
 #!/usr/bin/env python3
 """Find the open approval-walk and its waiting items: the walk-minutes' last
 `#next_to_present` line, and the units of the walk-document that hold the
-items it names. The walk-me-through Stop hook, the short-answer
-UserPromptSubmit hook and the check program load this module by path, so all
-three read the walk files the same way.
+items it names. The walk-me-through hooks, the check program and the
+threshold-hook load this module by path, so all read the walk files the same
+way.
 
 THE OPEN APPROVAL-WALK. The walk-me-through skill keeps a `#next_to_present`
 line in each walk's docs/walk/<name>-minutes.md. The marker is found anywhere
@@ -139,9 +139,23 @@ line a sub-step that asks for no decision ends with, `[No decision here; type
 N or next to continue.](<page link>)`, alone on its line, or, for a sub-step
 whose publish failed, the same line without its link.
 
+COPIED USER MESSAGES. While an approval-walk is open, the copy hook writes each
+message the user typed that is not only an answer into the walk-minutes as
+`#user_message_copied <id> <UTC time> <running count> baseline <digest>: <his
+words in a code span>`. The agent records what became of it with a line of its
+own, `#user_message_outcome <id> changed`, `no change` or `open`; the newest
+such line for an id counts. The digest is the first 16 hexadecimal digits of
+the SHA-256 of the waiting items' text as shown to the user, with whitespace
+squeezed and each `of M` and deferred note taken out, so that adding an item
+or deferring one is no change; `none` when the walk-document held no such item.
+`changed` counts only while the item's digest now differs from the baseline, so
+an item since removed counts as changed. Neither line opens with an item's
+running count, so neither is an answer line or a line that decides an item.
+
 Tool-messages-to-agent follow
 docs/nedsnodes-wiki/nedsnodes-how-to-write-a-tool-message-to-agent-such-as-a-hook-refusal-or-script-error.md.
 """
+import hashlib
 import importlib.util
 import os
 import re
@@ -216,6 +230,14 @@ ITEM_PAGE_LINE_PATTERN = re.compile(
 ITEM_PAGE_NOTE_VERSION = re.compile(r"\bversion[ \t]+(\d+)", re.I)
 # A link has no space in it, so no link can equal this value.
 ITEM_PAGE_PUBLISH_FAILED = "publish failed"
+# A navigation word moves the walk on and says nothing else.
+NAVIGATION_WORD_ALONE = re.compile(r"^(?:next|n|continue|go)[.!]*$", re.I)
+USER_MESSAGE_COPIED_LINE = re.compile(
+    r"^#user_message_copied (?P<id>\d+) (?P<time>\d{4}-\d\d-\d\dT\d\d:\d\d:\d\dZ) (?P<item>items? .+?) "
+    r"baseline (?P<baseline>[0-9a-f]{16}|none): (?P<words>.+)$")
+USER_MESSAGE_OUTCOME_CHANGED = "changed"
+USER_MESSAGE_OUTCOME_LINE = re.compile(r"^#user_message_outcome (?P<id>\d+) (?P<outcome>changed|no change|open)[ \t]*$")
+USER_MESSAGE_NO_ITEM_BASELINE = "none"
 NOT_A_FORM_PROBLEM = (
     "does not open with an item in one of the forms `item N of M`, `item N.K of M`, "
     "`items N and P of M` or `items N to P of M`")
@@ -957,3 +979,52 @@ def waiting_item_units(document, value, numbers, total, parser, all_units=None):
             f"`## Item 4 of 9: revised <the point>`.")
     shown_total = total if total is not None else approval_walk_item_total_shown_and_waiting_counted_from_walk_document(all_units)
     return shown_total, [unit for unit in all_units if unit in chosen]
+
+
+def approval_walk_items_text_as_shown_to_user_digest(document, item_count, parser):
+    """The digest the module docstring's COPIED USER MESSAGES describes, of the items the running count item_count
+    names in the walk-document, or USER_MESSAGE_NO_ITEM_BASELINE when it holds no such item."""
+    text = document.read_text(encoding="utf-8")
+    units = item_unit_spans(text, parser)
+    try:
+        numbers, total = parse_items(item_count)
+        _, chosen = waiting_item_units(document, item_count, numbers, total, parser, units)
+    except UnusableRange:
+        return USER_MESSAGE_NO_ITEM_BASELINE
+    shown = [approval_walk_item_heading_with_deferred_note_removed(approval_walk_item_text_as_shown_to_user(
+                 text, parser, units, next(unit for unit in chosen if number in unit[0]), number))
+             for number in numbers]
+    squeezed = " ".join(approval_walk_text_with_running_count_totals_removed("\n".join(shown)).split())
+    return hashlib.sha256(squeezed.encode("utf-8")).hexdigest()[:16]
+
+
+def approval_walk_minutes_user_message_copied_line_build(minutes_text, value, document, message, moment, parser):
+    """The `#user_message_copied` line for message, the walk's `#next_to_present` value naming the waiting items.
+    Raise UnusableRange when the value names no item."""
+    count = VALUE_COUNT.match(value)
+    if not count:
+        raise UnusableRange(NOT_A_FORM_PROBLEM)
+    copied_ids = [int(match["id"]) for match in map(USER_MESSAGE_COPIED_LINE.match, prose_lines(minutes_text, parser))
+                  if match]
+    baseline = approval_walk_items_text_as_shown_to_user_digest(document, count[0], parser)
+    return (f"#user_message_copied {max(copied_ids, default=0) + 1} {moment.strftime('%Y-%m-%dT%H:%M:%SZ')} "
+            f"{count[0]} baseline {baseline}: {text_wrapped_as_markdown_code_span(message)}")
+
+
+def approval_walk_user_message_lines_copied_to_walk_minutes_without_valid_outcome_find(minutes_text, document, parser):
+    """Return [(id, time, running count, his words in their code span, whether the newest outcome says `changed`
+    while the item's text still has its baseline digest)] for each copied line with no outcome that counts."""
+    lines = prose_lines(minutes_text, parser)
+    outcomes = {match["id"]: match["outcome"] for match in map(USER_MESSAGE_OUTCOME_LINE.match, lines) if match}
+    digests = {}
+    missing = []
+    for match in filter(None, map(USER_MESSAGE_COPIED_LINE.match, lines)):
+        outcome = outcomes.get(match["id"])
+        unchanged = False
+        if outcome == USER_MESSAGE_OUTCOME_CHANGED:
+            if match["item"] not in digests:
+                digests[match["item"]] = approval_walk_items_text_as_shown_to_user_digest(document, match["item"], parser)
+            unchanged = digests[match["item"]] == match["baseline"]
+        if outcome is None or unchanged:
+            missing.append((match["id"], match["time"], match["item"], match["words"], unchanged))
+    return missing

@@ -598,7 +598,6 @@ OBVIOUS_HASHTAG = " #approved_obvious"
 AFTER_ADVISOR_HASHTAG = " #approved_after_advisor"
 APPROVED, DISAPPROVED, DEFERRED, MOVED_ON = "approved", "disapproved", "deferred", "moved on, no decision"
 ALREADY_DECIDED_PREFIX, MOVED_ON_PREFIX = "already decided by ", "moved on, no decision: "
-NAVIGATION_WORD_ALONE = re.compile(r"^(?:next|n|continue|go)[.!]*$", re.I)
 OUTCOMES = {APPROVED: "<accepted>", DISAPPROVED: "<rejected>"}
 PART_WORDS = {"A": APPROVED, "AO": APPROVED + OBVIOUS_HASHTAG, "D": DISAPPROVED}
 PART_ARGUMENT = re.compile(r"^(\d+)=(ao|a|d)$", re.I)
@@ -2130,7 +2129,7 @@ def check(arguments):
         raise Failure(USER_WORDS_NOT_ASKED.format(flag=not_shown_flag))
     if not not_shown_flag and not words:
         raise Failure(USER_WORDS_MISSING.format(command=check_command_with_cwd(top, *check_words(arguments))))
-    if NAVIGATION_WORD_ALONE.match(words) and not arguments.moved_on_no_decision:
+    if walk_finder.NAVIGATION_WORD_ALONE.match(words) and not arguments.moved_on_no_decision:
         raise Failure(NAVIGATION_WORD_REFUSED.format(words=words, item=item,
                                                      answered=answered_word(arguments, walk_finder),
                                                      command=moved_on_no_decision_command))
