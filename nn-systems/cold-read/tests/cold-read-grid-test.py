@@ -449,11 +449,31 @@ def write_target(repository, relative_path):
     return target
 
 
+# Runs the grid with its clock jumped past any attempt time limit once the record holds
+# this many nonempty reports, so a limit cannot expire before a slow cell has written.
+GRID_WITH_CLOCK_JUMPED_ONCE_REPORTS_EXIST = r'''import pathlib, runpy, sys, time
+grid, records, report_count, jump_seconds = sys.argv[1:5]
+real_monotonic = time.monotonic
+jumped = False
+def monotonic():
+    global jumped
+    jumped = jumped or sum(path.stat().st_size > 0 for path in pathlib.Path(records).glob("*/*.md")
+                           if path.name != "cold-read-reference-check.md") >= int(report_count)
+    return real_monotonic() + (float(jump_seconds) if jumped else 0)
+time.monotonic = monotonic
+sys.argv = [grid, *sys.argv[5:]]
+sys.path.insert(0, str(pathlib.Path(grid).parent))
+runpy.run_path(grid, run_name="__main__")
+'''
+
+
 def run_grid(repository, stub_directory, environment_overrides=None,
              target_relative_path=TARGET_RELATIVE_PATH, extra_arguments=(),
-             current_directory=None):
+             current_directory=None, launcher_arguments_before_grid=None):
     """The grid in `repository` as a subprocess, run from `current_directory`,
-    by default `repository`."""
+    by default `repository`. `launcher_arguments_before_grid`, when given, is
+    (launcher file, report count, jump seconds) for
+    GRID_WITH_CLOCK_JUMPED_ONCE_REPORTS_EXIST."""
     stub_directory.mkdir(parents=True, exist_ok=True)
     for runtime_name in ("claude", "codex", "agy"):
         stub = stub_directory / runtime_name
@@ -476,7 +496,13 @@ def run_grid(repository, stub_directory, environment_overrides=None,
         repository.parent / "stub-attempt-counts" / repository.name / str(time.time_ns()))
     environment.update(environment_overrides or {})
     return subprocess.run(
-        [sys.executable, str(repository / "nn-systems" / "cold-read" / "cold-read-grid.py"),
+        [sys.executable,
+         *([str(launcher_arguments_before_grid[0]),
+            str(repository / "nn-systems" / "cold-read" / "cold-read-grid.py"),
+            str(repository / "cold-read-records"),
+            str(launcher_arguments_before_grid[1]), str(launcher_arguments_before_grid[2])]
+           if launcher_arguments_before_grid
+           else [str(repository / "nn-systems" / "cold-read" / "cold-read-grid.py")]),
          "--target", target_relative_path, *extra_arguments],
         capture_output=True, text=True, check=False, env=environment,
         cwd=current_directory or repository,
@@ -1108,8 +1134,9 @@ try:
           and all(" — timed-out — timed out after 4 hours (stderr kept: " in line
                   for line in failed_lines),
           repr(result.stdout))
+    # A stub left to finish would have landed its report, so no saved line shows each was stopped.
     check("the run ends before the stubs would have finished, none landed, exit 1",
-          elapsed < stub_reading_seconds and result.returncode == 1
+          result.returncode == 1
           and lines_opening(result, "saved:") == [] and "No report landed in" in result.stdout,
           f"elapsed {elapsed:.1f}s, exit {result.returncode}; stdout={result.stdout!r}")
     check("the grid checks for the timed-out cells, finds nothing, and prints no Tell the user line",
@@ -1174,14 +1201,18 @@ try:
     # --- A cell that writes its report and then hangs is stopped, report deleted
     hang_seconds = 30
     repository = build_scratch_repository(scratch, "checkout-wrote-then-hung")
+    attempt_limit_seconds = 3600
+    clock_launcher = scratch / "grid-with-clock-jumped-once-reports-exist.py"
+    clock_launcher.write_text(GRID_WITH_CLOCK_JUMPED_ONCE_REPORTS_EXIST, encoding="utf-8")
     started = time.monotonic()
     result = run_grid(repository, stubs, {
         "COLD_READ_GRID_TEST_STUB_HANG_AFTER_WRITING_REPORT_SECONDS": str(hang_seconds),
-        "COLD_READ_GRID_CELL_ATTEMPT_TIMEOUT_SECONDS": "3"})
+        "COLD_READ_GRID_CELL_ATTEMPT_TIMEOUT_SECONDS": str(attempt_limit_seconds)},
+        launcher_arguments_before_grid=(clock_launcher, 8, attempt_limit_seconds))
     elapsed = time.monotonic() - started
     failed_lines = lines_opening(result, "FAILED")
     check("a timed-out cell that had written its report: FAILED says the unfinished report is deleted",
-          elapsed < hang_seconds and lines_opening(result, "saved:") == []
+          lines_opening(result, "saved:") == []
           and len(failed_lines) == 8
           and all(" — timed-out — timed out after 4 hours (stderr kept: " in line
                   and line.endswith(".stderr.log); the unfinished report it had written is deleted")
