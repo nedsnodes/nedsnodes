@@ -175,13 +175,15 @@ case against weak, alters earlier approved text only`.
 --already-decided refuses, writing nothing, a USER_RULING found only in
 walk-minutes or a handoff dialog and dated more than RULING_DAYS_APPLIED, 90,
 days before today, since the walk-me-through skill applies such a ruling only
-that long. A citation naming a standing document, as STANDING_DOCUMENT_NAMED
-finds one, such as a GHI-MD, `CLAUDE.md`, a page in `docs/nedsnodes-wiki/` or a
-design, is taken at any age. Any other citation's ruling is dated by the latest
-YYYY-MM-DD date in it that is not part of a name, so the date in
-`foo-2026-10-14-minutes.md` is not read; a citation holding no such date is
-refused too, because its age cannot be told. The now-over-later citation the
-program supplies is not checked, since the program itself records that ruling.
+that long. A citation that names a standing document with a line or section
+in it, as STANDING_DOCUMENT_PLACE_CITED finds one, such as `GHI-MD 2118 line 63`,
+is taken at any age; a standing document only mentioned, or named inside a
+quotation, does not count. Any other citation's ruling is dated by the earliest
+YYYY-MM-DD date in it that is not part of a name, since dates after the ruling's,
+such as a merge's, often follow it; the date in `foo-2026-10-14-minutes.md` is
+not read. A citation holding no such date is refused too, because its age cannot
+be told. Today is the local date. The now-over-later citation the program
+supplies is not checked, since the program itself records that ruling.
 
 `--now-over-later-already-decided` is --already-decided with the citation
 supplied by the program, NOW_OVER_LATER_USER_RULING_CITATION, the user-ruling
@@ -1156,27 +1158,31 @@ ITEM_READ_NOT_RUN = ("{item}: no new cold-read-fast-read: your changes since its
                      "number, path, file or program name, link, or line holding \"Recommendation:\", "
                      "\"The alternative:\" or `#case_against`.")
 RULING_DAYS_APPLIED = 90
-STANDING_DOCUMENT_NAMED = re.compile(
-    r"GHI-MD|\bGHI\s+\d+|docs/issues/|CLAUDE\.md|AGENTS\.md|docs/nedsnodes-wiki/|-design\.md|-instructions\.md"
-    r"|SKILL\.md")
+STANDING_DOCUMENT_PLACE_CITED = re.compile(
+    r"(?:GHI-MD\s*\d+|[\w./-]*(?:CLAUDE|AGENTS|SKILL)\.md|docs/nedsnodes-wiki/[\w./&-]+|docs/issues/[\w./-]+"
+    r"|[\w./-]*design\.md|[\w./-]+-instructions\.md)`?(?:'s)?,?\s+(?:at\s+)?(?:lines?\s+\d+|section\b)")
+# A standing document named inside the user's quoted words is not what the citation cites.
+QUOTATION = re.compile(r'"[^"]*"|“[^”]*”')
 # A date glued to a hyphen, a letter or a slash is part of a name, such as a walk-minutes file's.
 RULING_DATE = re.compile(r"(?<![\w./-])(\d{4}-\d\d-\d\d)(?=T\d|[^\w-]|$)")
 RULING_TOO_OLD = (
     "nothing written: --already-decided was refused for {item}, because its citation {citation} names no standing "
-    "document, such as a GHI-MD, `CLAUDE.md`, a page in `docs/nedsnodes-wiki/` or a design, and its ruling is dated "
-    "{date}, {days} days before today; the walk-me-through skill applies a ruling found only in walk-minutes or a "
+    "document with a line or section in it, such as `GHI-MD 2118 line 63`, and the earliest date in it, {date}, is "
+    "{days} days before today; the walk-me-through skill applies a ruling found only in walk-minutes or a "
     "handoff dialog for {limit} days.\n"
     "If the ruling bears on {item}, quote it in the item with its date, show the item to the user, ask whether the "
     "ruling still holds, and run check with the flag for his answer.\n"
-    "If a standing document records the same ruling, run check again citing that document.")
+    "If a standing document records the same ruling, run check again citing that document and the line or section "
+    "that records it.")
 RULING_UNDATED = (
     "nothing written: --already-decided was refused for {item}, because its citation {citation} names no standing "
-    "document, such as a GHI-MD, `CLAUDE.md`, a page in `docs/nedsnodes-wiki/` or a design, and holds no date written "
+    "document with a line or section in it, such as `GHI-MD 2118 line 63`, and holds no date written "
     "YYYY-MM-DD outside a name, so its age cannot be told; the walk-me-through skill applies a ruling found only in "
     "walk-minutes or a handoff dialog for {limit} days.\n"
     "If the ruling is in walk-minutes or a handoff dialog, add the date the user gave it to the citation, as in "
     "\"(2026-11-20)\", and run check again.\n"
-    "If a standing document records the same ruling, run check again citing that document.")
+    "If a standing document records the same ruling, run check again citing that document and the line or section "
+    "that records it.")
 NOW_OVER_LATER_FLAG = "--now-over-later-already-decided"
 NOW_OVER_LATER_USER_RULING_CITATION = (
     "the user-ruling at line 361 of nedlern@ned-box:/home/nedlern/agents/cold-read-improvement/docs/walk/"
@@ -2120,9 +2126,9 @@ def now_over_later_problems(walk_finder, minutes, value, numbers, total, parser)
 
 
 def refuse_a_ruling_found_only_in_walk_minutes_or_a_handoff_dialog_and_too_old(citation, item, walk_finder):
-    """Raise Failure for an --already-decided citation that names no standing document and whose ruling is older
-    than RULING_DAYS_APPLIED days, or has no date this function can read."""
-    if STANDING_DOCUMENT_NAMED.search(citation):
+    """Raise Failure for an --already-decided citation that cites no place in a standing document and whose ruling
+    is older than RULING_DAYS_APPLIED days, or has no date this function can read."""
+    if STANDING_DOCUMENT_PLACE_CITED.search(QUOTATION.sub("", citation)):
         return
     dates = []
     for text in RULING_DATE.findall(citation):
@@ -2131,10 +2137,10 @@ def refuse_a_ruling_found_only_in_walk_minutes_or_a_handoff_dialog_and_too_old(c
     spanned = walk_finder.text_wrapped_as_markdown_code_span(citation)
     if not dates:
         raise Failure(RULING_UNDATED.format(item=item, citation=spanned, limit=RULING_DAYS_APPLIED))
-    latest = max(dates)
-    days = (datetime.date.today() - latest).days
+    earliest = min(dates)
+    days = (datetime.date.today() - earliest).days
     if days > RULING_DAYS_APPLIED:
-        raise Failure(RULING_TOO_OLD.format(item=item, citation=spanned, date=latest.isoformat(), days=days,
+        raise Failure(RULING_TOO_OLD.format(item=item, citation=spanned, date=earliest.isoformat(), days=days,
                                             limit=RULING_DAYS_APPLIED))
 
 
@@ -3758,8 +3764,9 @@ def main(argv=None):
                         help="check: the answer was O2 or O3, approving the item's \"Option N\" paragraph")
     answer.add_argument("--already-decided", metavar="USER_RULING",
                         help="check: not shown, since an earlier user-ruling decides the item as it recommends; "
-                             "USER_RULING cites it; refused when it names no standing document, such as a GHI-MD, and "
-                             "its ruling's YYYY-MM-DD date is missing or more than 90 days before today")
+                             "USER_RULING cites it; refused when it cites no line or section of a standing document, such "
+                             "as a GHI-MD, and its earliest YYYY-MM-DD date is missing or more than 90 days before "
+                             "today")
     answer.add_argument(NOW_OVER_LATER_FLAG, action="store_true",
                         help="check: not shown, since its only choice is whether to build something now or later "
                              "and it recommends now; records it as already decided by the user's answer to item 42 "

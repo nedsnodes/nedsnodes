@@ -4420,7 +4420,7 @@ def test_an_item_an_earlier_ruling_decides_is_fast_read_recorded_and_not_shown()
     check("check --already-decided fast-reads the `#new` texts, as A does, and writes a not-asked answer line",
           checked.returncode == 0 and case.calls.read_text() == NEW_TEXTS
           and re.search(r"\nitem 3 of 9: settled without asking the user, already decided by `walk x's minutes, item 3 "
-                        rf"\({RECENT_RULING_DATE}\)` #case_against_weak \(\d{4}-\d\d-\d\d \d\d:\d\dZ\), which makes its change\. Fast reads:\n",
+                        rf"\({RECENT_RULING_DATE}\)` #case_against_weak \(\d{{4}}-\d\d-\d\d \d\d:\d\dZ\), which makes its change\. Fast reads:\n",
                         case.minutes.read_text()) is not None, described(checked))
     closed = case.run("close")
     lines = closed.stdout.rstrip("\n").split("\n")
@@ -4453,9 +4453,26 @@ def test_already_decided_refuses_a_ruling_from_walk_minutes_over_90_days_old_wri
           result.returncode == 1 and case.minutes.read_text() == before and case.calls.read_text() == ""
           and lines[0].startswith(FAILURE_PREFIX + "check: nothing written: --already-decided was refused for item 3 "
                                   "of 9, because its citation ")
-          and f"its ruling is dated {old}, 91 days before today;" in lines[0]
+          and f"the earliest date in it, {old}, is 91 days before today;" in lines[0]
           and lines[1].startswith("If the ruling bears on item 3 of 9, quote it in the item with its date")
           and lines[2].startswith("If a standing document records the same ruling,"), described(result))
+
+
+def test_already_decided_dates_a_ruling_by_its_earliest_date_and_ignores_a_standing_document_only_mentioned():
+    for citation, why in (
+            (f"item 5 of walk y, approved {days_ago(120)}; built by PR 3131, merged {days_ago(3)}",
+             "a ruling 120 days old followed by a recent merge date"),
+            (f"walk y's minutes line 20, the user {days_ago(120)}: \"Revising GHI-MD 1121 line 4\"",
+             "a ruling 120 days old whose quoted words name a GHI-MD line"),
+            (f"walk y's minutes line 20, the user {days_ago(120)}, as code by CLAUDE.md's code-prompt-code rule",
+             "a ruling 120 days old that mentions CLAUDE.md with no line or section")):
+        case = Case(next_to_present="item 3 of 9")
+        before = case.minutes.read_text()
+        result = case.run("check", "--already-decided", citation)
+        check(f"check --already-decided refuses {why}, writing nothing",
+              result.returncode == 1 and case.minutes.read_text() == before
+              and f"the earliest date in it, {days_ago(120)}, is 120 days before today;" in result.stderr,
+              described(result))
 
 
 def test_already_decided_refuses_a_citation_with_no_readable_date_writing_nothing():
@@ -4472,7 +4489,8 @@ def test_already_decided_refuses_a_citation_with_no_readable_date_writing_nothin
 def test_already_decided_takes_a_ruling_90_days_old_and_a_standing_document_at_any_age():
     for citation, why in ((f"walk x's minutes, item 3, approved {days_ago(90)}T02:33:42Z", "dated 90 days ago"),
                           (f"GHI-MD 2118 line 63, the user {days_ago(400)}", "in a GHI-MD, dated 400 days ago"),
-                          (f"CLAUDE.md, as the user ruled {days_ago(400)}", "in CLAUDE.md, dated 400 days ago")):
+                          (f"`docs/nedsnodes-wiki/nedsnodes-glossary.md` line 12, the user {days_ago(400)}",
+                           "at a line of a wiki page, dated 400 days ago")):
         case = Case(next_to_present="item 3 of 9")
         checked = case.run("check", "--already-decided", citation)
         check(f"check --already-decided takes a ruling {why}",
