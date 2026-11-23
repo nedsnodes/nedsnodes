@@ -232,11 +232,14 @@ reason it gets that sandbox: SUITES_RUN_WITHOUT_ANY_SANDBOX,
 SUITES_GIVEN_A_COPY_ON_WRITE_OVERLAY_OF_THE_REPOSITORY_GIT_DIRECTORY (suites
 whose sandbox gets a writable copy-on-write overlay of the repository's git
 directory) and SUITES_WHOSE_TEST_SANDBOX_SHARES_THE_MACHINE_NETWORK (suites
-whose sandbox keeps the machine's network). The three are read from the
-scripts/run-all-test-suites.py of the checkout whose suites the run tests,
-parsed and never run, and from this file for each list that checkout lacks;
-the report names each file that supplied a list. A run refuses, exit 2, when that file does not
-assign each of the three a literal dict.
+whose sandbox keeps the machine's network). A fourth dict,
+SUITES_THAT_RUN_THE_REAL_CLAUDE_CLI, names the suites
+--leave-out-suites-that-run-the-real-claude-cli leaves out. The four are read
+from the scripts/run-all-test-suites.py of the checkout whose suites the run
+tests, parsed and never run. A list that file lacks, or assigns the set it
+was before it became a dict, as an older checkout does, is taken from this
+file instead; the report names each file that supplied a list. A run refuses, exit 2, when that file binds one of the four any other
+way, such as to a dict not written out literally.
 A suite bwrap reports as exiting 128+N is reported as killed by signal N;
 sandbox-exec replaces itself with the suite, so a suite's exit passes through.
 
@@ -1961,8 +1964,8 @@ def suite_sandbox_lists_read_from_checkout_under_test(top):
             f"In {source_file}, assign each of {', '.join(unreadable)} once, at the top level, "
             f"a dict written out literally, then rerun the command you ran.")
     if len(supplied_by_this_program) == len(SUITE_SANDBOX_LIST_NAMES_READ_FROM_CHECKOUT_UNDER_TEST):
-        return found, (f"{Path(__file__).resolve()}, since {source_file} lacks every list or "
-                       f"assigns each a set")
+        return found, (f"{Path(__file__).resolve()}, since {source_file} supplies none of the "
+                       f"lists, lacking each or assigning it a set")
     if supplied_by_this_program:
         return found, (f"{source_file}, and in {Path(__file__).resolve()} for "
                        f"{', '.join(supplied_by_this_program)}, which the checkout lacks or "
