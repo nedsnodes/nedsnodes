@@ -160,6 +160,7 @@ def main():
                   "--checkout", str(review_worktrees_directory(helpers) / "pr7-merged"),
                   "--log-store-root", str(helpers / "hr" / "pr7" / "log-store"),
                   "--temporary-directory", str(helpers / "hr" / "pr7" / "tmp"),
+                  "--since", git(review_tools, "rev-parse", "origin/main"),
                   "--recorded-inputs-directory", str(helpers / "hr" / "store"),
                   "--save-recorded-inputs-to-directory",
                   str(helpers / "hr" / "pr7" / "recorded-inputs"),
@@ -249,6 +250,8 @@ def main():
                   ("When you need the lost stderr, run the head test run for PR 9 again with "
                    "this command, from any directory: " + shlex.join([
                        sys.executable, str(PROGRAM.resolve()), "9",
+                       "--head-commit", git(author, "rev-parse", "topic"),
+                       "--main-commit", git(review_tools, "rev-parse", "origin/main"),
                        "--merge-lane-worktrees-and-outputs-directory", str(helpers.resolve()),
                        "--merge-lane-review-worktrees-directory", str(review_worktrees_directory(helpers).resolve()),
                        "--review-tools-worktree-at-main",
@@ -362,6 +365,9 @@ def main():
               and git(merged, "rev-parse", "HEAD^1") == main_fix
               and git(review_tools, "rev-parse", "HEAD") == pinned_main
               and f"; tested on main {main_fix[:12]}\n" in completed.stdout_naming_main, detail)
+        check("a direct run selects suites against the origin main it merged onto",
+              calls and calls[0]["argv"][calls[0]["argv"].index("--since") + 1] == main_fix,
+              json.dumps(calls))
         check("a direct run's fetches of main and of the head leave FETCH_HEAD as it was",
               (review_tools / ".git" / "FETCH_HEAD").read_text() == fetch_head_before, detail)
         completed, calls = run_program(scratch, helpers, {}, "7", "--main-commit", pinned_main)
@@ -370,6 +376,18 @@ def main():
               completed.returncode == 0 and git(merged, "rev-parse", "HEAD^1") == pinned_main
               and not calls[0]["holds_main_fix"]
               and f"; tested on main {pinned_main[:12]}\n" in completed.stdout_naming_main, detail)
+        check("--main-commit is also the commit suites are selected against, so a change "
+              "between it and a newer tracking ref is not left out of selection",
+              calls and calls[0]["argv"][calls[0]["argv"].index("--since") + 1] == pinned_main,
+              json.dumps(calls))
+        if Path("/dev/full").exists():
+            completed, calls = run_program(scratch, helpers, {}, "9", "--main-commit", pinned_main)
+            check("the lost-stderr rerun command of a pinned run names the same main and head, "
+                  "although origin's main is newer",
+                  shlex.join(["--head-commit", git(review_worktrees_directory(helpers) / "pr9-merged",
+                                                   "rev-parse", "HEAD^2"),
+                              "--main-commit", pinned_main]) in completed.stdout,
+                  f"exit {completed.returncode}\n{completed.stdout}{completed.stderr}")
         completed, calls = run_program(scratch, helpers, {}, "7", "--main-commit", "no-such-commit")
         check("a --main-commit that names no commit exits 2 before any run",
               completed.returncode == 2 and calls == []

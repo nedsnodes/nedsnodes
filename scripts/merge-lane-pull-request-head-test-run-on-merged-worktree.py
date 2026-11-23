@@ -9,7 +9,9 @@ For each pull request in turn, first rebuilds pr<n>-merged, with
 --review-tools-worktree-at-main's
 scripts/merge-lane-pull-request-head-and-merged-worktrees-rebuild.py, from main
 and the pull request's head. Main is --main-commit, which a caller reviewing
-one pinned main passes, or else main's newest commit on origin. The head is the
+one pinned main passes, or else main's newest commit on origin, read once: the
+merge, the selection of suites and any rerun command printed all use that one
+commit. The head is the
 pull request's head on origin, or --head-commit, which a caller reviewing one
 fixed head passes and which takes one pull request. pr<n>-head is left as it
 is, because reviewers may be reading it. When the rebuild fails, that pull
@@ -102,20 +104,24 @@ def main_commit_to_test(arguments, environment):
     return completed.stdout.strip(), None
 
 
-def merged_worktree_rebuild_failure(arguments, number, main_commit, environment):
+def head_commit_to_test(arguments, number, environment):
+    """Return (the pull request's head commit, None), or (None, what failed)."""
+    if arguments.head_commit:
+        return arguments.head_commit, None
+    read = subprocess.run(
+        ["git", "-C", str(arguments.review_tools_worktree_at_main), "ls-remote", "--exit-code",
+         "origin", f"refs/pull/{number}/head"],
+        capture_output=True, text=True, env=environment, stdin=subprocess.DEVNULL)
+    if read.returncode != 0:
+        return None, (f"git ls-remote could not read refs/pull/{number}/head from origin "
+                      f"(exit {read.returncode}): {read.stderr.strip()}\n"
+                      f"Check the pull request number, then run this again.")
+    return read.stdout.split()[0], None
+
+
+def merged_worktree_rebuild_failure(arguments, number, head, main_commit, environment):
     """Rebuild pr<n>-merged; return None, or what failed."""
     tools = arguments.review_tools_worktree_at_main
-    head = arguments.head_commit
-    if head is None:
-        read = subprocess.run(
-            ["git", "-C", str(tools), "ls-remote", "--exit-code", "origin",
-             f"refs/pull/{number}/head"],
-            capture_output=True, text=True, env=environment, stdin=subprocess.DEVNULL)
-        if read.returncode != 0:
-            return (f"git ls-remote could not read refs/pull/{number}/head from origin "
-                    f"(exit {read.returncode}): {read.stderr.strip()}\n"
-                    f"Check the pull request number, then run this again.")
-        head = read.stdout.split()[0]
     rebuild = subprocess.run(
         [sys.executable, str(tools / MERGED_WORKTREE_REBUILD), str(number), head, main_commit,
          "--merged-worktree-only", *common.directory_options_argv(arguments)],
@@ -153,7 +159,10 @@ def main(argv=None):
 
     first_failure = 0
     for number in arguments.pull_requests:
-        failure = merged_worktree_rebuild_failure(arguments, number, main_commit, environment)
+        head_commit, failure = head_commit_to_test(arguments, number, environment)
+        if failure is None:
+            failure = merged_worktree_rebuild_failure(arguments, number, head_commit,
+                                                      main_commit, environment)
         if failure is not None:
             print(f"PR {number} head test run: not run, because pr{number}-merged could not be "
                   f"rebuilt on main {main_commit[:12]}, so no suite ran for this pull request.\n"
@@ -171,6 +180,7 @@ def main(argv=None):
                  "--checkout", str(common.pull_request_merged_worktree(arguments, number)),
                  "--log-store-root", str(log_store),
                  "--temporary-directory", str(outputs / "tmp"),
+                 "--since", main_commit,
                  "--recorded-inputs-directory",
                  str(common.merge_lane_head_test_run_recorded_inputs_store_directory(arguments)),
                  "--save-recorded-inputs-to-directory",
@@ -208,6 +218,7 @@ def main(argv=None):
             completed = subprocess.CompletedProcess(run.args, run.wait())
         rerun = shlex.join([
             sys.executable, str(Path(__file__).resolve()), str(number),
+            "--head-commit", head_commit, "--main-commit", main_commit,
             *common.directory_options_argv(arguments)])
         for name, failure in copy_failures.items():
             # Only the copy to this program's own stderr failed, so the file has every line.

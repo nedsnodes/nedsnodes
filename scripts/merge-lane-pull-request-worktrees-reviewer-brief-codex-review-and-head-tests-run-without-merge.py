@@ -53,8 +53,7 @@ is, and each line of steps 3 to 5 prefixed with its step's number, as in
 "step 4 of 5 | ", because their lines interleave. When one of steps 3 to 5
 fails, the output names each step that failed with its exit code, says what
 each other step did, and gives each failed step's own command, with the same
-commits, except that step 4 alone merges the same head onto the commit
---review-tools-worktree-at-main then has checked out, for running that step
+commits, for running that step
 alone: running this program again would run
 the other steps again, and post a second Claude review. If this program is
 interrupted while steps run, it stops them: steps 3 and 4 get SIGKILL, and step
