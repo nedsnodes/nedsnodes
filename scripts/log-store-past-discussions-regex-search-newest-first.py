@@ -394,9 +394,9 @@ def excerpt(text, start):
 
 def ripgrep_command(arguments_before_pattern, pattern, paths):
     ripgrep = os.environ.get(RIPGREP_OVERRIDE) or "rg"
-    # A shipment's staging directory, in walk/ or cold-read-records/, copies files the store already
-    # holds, and its shipment may remove it while ripgrep walks it. The trailing slash keeps a file
-    # of the same name in the search.
+    # A shipment's staging directory, in walk/ or cold-read-records/, is not the published record,
+    # and its shipment may remove it while ripgrep walks it. The trailing slash keeps a file of the
+    # same name in the search.
     skip_staging = f"!{record_shipper.STAGING_DIRECTORY_PREFIX}*/"
     return [ripgrep, "--no-ignore", "--hidden", "--ignore-case", "--glob", skip_staging,
             *arguments_before_pattern,
