@@ -251,7 +251,7 @@ the diff does not apply at the head and whether origin/main has those lines
 cannot be told (there is no local origin/main, git cannot read the file there,
 or the lines appear there more than once and some copy has one of
 the diff's non-blank context lines beside it), two of the diff's hunks are found at
-places whose lines overlap, some copies of the lines it replaces end with a
+places whose replaced lines overlap, some copies of the lines it replaces end with a
 `# pragma: no mutate` comment and others do not, so that the lines appear more
 than once at the head when that comment is ignored but only once when it is
 not, or the runner judged no suite with the mutant applied, as when a suite ran
@@ -1658,9 +1658,12 @@ def recorded_mutant_places_reading_pragma_as_absent(lines, hunks):
 
 
 def recorded_mutant_hunk_places_overlap(places):
-    """True when two hunks were found at places whose lines overlap: each place is found in
-    the unmutated source, so applying both would make neither hunk's change as recorded."""
-    spans = sorted((at, at + len(old)) for at, old, _ in places)
+    """True when two hunks were found at places whose replaced lines overlap: each place is
+    found in the unmutated source, so applying both would make neither hunk's change as
+    recorded. Context lines are left out, since applying a hunk writes only its replaced lines."""
+    spans = sorted((at + start, at + len(old) - end)
+                   for at, old, new in places
+                   for start, end in [hunk_shared_context_line_counts(old, new)])
     return any(next_start < end for (_, end), (next_start, _) in zip(spans, spans[1:]))
 
 
@@ -1702,7 +1705,7 @@ def recorded_mutant_verdict_without_a_suite_run(checkout, path, hunks, head, sou
         if recorded_mutant_hunk_places_overlap(places):
             return ("could not be judged", (
                 f"in {path} at head {head[:12]}, two hunks of this diff file are found at "
-                f"places whose lines overlap, so applying both would not make the mutant as it "
+                f"places whose replaced lines overlap, so applying both would not make the mutant as it "
                 f"was recorded, and no suite was run. The diff's `@@` lines give the line "
                 f"numbers the mutant had when it was recorded.\n"
                 f"Make the diff's change by hand at those lines, run the file's suites, and "

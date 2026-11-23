@@ -1014,13 +1014,21 @@ def run_recorded_mutant_killed_check_cases():
               "x  # pragma: no mutate\n    return y * 2", "x  # pragma: no mutate\n    return y + 2"),
           (twin_verdict, twin_mutated))
 
-    # Both hunks moved off their own lines, so each is found by its replaced line alone: the
-    # second hunk's replaced line is the first hunk's context line, and their places overlap.
+    # Both hunks moved off their own lines: the second hunk's replaced line is the first
+    # hunk's context line, so their places overlap only through context, and both apply.
+    context_source = "x\na\nb\nc\n"
+    context_hunks = [(1, ["a", "b"], ["A", "b"]), (5, ["b", "c"], ["B", "c"])]
+    context_verdict, context_mutated = survivors.recorded_mutant_verdict_without_a_suite_run(
+        None, "scripts/thing.py", context_hunks, "0" * 40, context_source, None, {})
+    check("a recorded mutant whose two hunks overlap only through context lines is applied",
+          context_verdict is None and context_mutated == "x\nA\nB\nc\n",
+          (context_verdict, context_mutated))
+    # Both hunks replace the same line `b`, so applying both cannot make the mutant.
     overlap_source = "x\na\nb\nc\n"
-    overlap_hunks = [(1, ["a", "b"], ["A", "b"]), (5, ["b", "c"], ["B", "c"])]
+    overlap_hunks = [(1, ["a", "b", "c"], ["a", "B", "c"]), (5, ["b", "c"], ["b2", "c"])]
     overlap_verdict, overlap_mutated = survivors.recorded_mutant_verdict_without_a_suite_run(
         None, "scripts/thing.py", overlap_hunks, "0" * 40, overlap_source, None, {})
-    check("a recorded mutant whose two hunks are found at overlapping places is not applied "
+    check("a recorded mutant whose two hunks replace overlapping lines is not applied "
           "and could not be judged",
           overlap_mutated is None and overlap_verdict is not None
           and overlap_verdict[0] == "could not be judged" and "overlap" in overlap_verdict[1],
