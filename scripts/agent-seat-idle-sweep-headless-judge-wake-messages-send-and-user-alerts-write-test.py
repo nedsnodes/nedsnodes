@@ -998,6 +998,83 @@ check("rule 2: a promise message that opened its wait and failed to send is quot
       PROMISE in escalation and [event["why"] for event in machine.events("wait_ended")]
       == ["it recorded what a task waits on after the promise message"], machine.events())
 
+def recorded_task(number, minute):
+    """An agent-seat turn at this minute that records one task waiting on a pull request."""
+    tool_id = f"t-settle-{number}"
+    return [user("go on", at(minute - 0.1)),
+            assistant(tool=("TaskCreate", {"subject": f"report on PR {number}", "metadata": {
+                "prerequisites": [{"pr_merged": number}]}}), when=at(minute), tool_id=tool_id),
+            task_result(tool_id, f"Task #{number} created successfully: report on PR {number}",
+                        at(minute + 0.01)),
+            assistant("Recorded.", at(minute + 0.1)), turn_end(at(minute + 0.1))]
+
+
+SETTLED = "it recorded what a task waits on after the promise message"
+
+# A failed promise message from one run, then a delivered one from a later run.
+machine = promise_sent_on_rule_five_wait(PROMISE_SEND_FAILS)
+machine.append("alpha", user("and", at(7.5)), assistant(OTHER_PROMISE, at(8)), turn_end(at(8)))
+machine.script(sent_ok())
+machine.run(14)
+check("rule 2: the later run delivered its promise message",
+      len(machine.events("promise_message")) == 1, machine.events())
+machine.append("alpha", *recorded_task(927, 15), *recorded_task(928, 16))
+machine.script()
+machine.run(22)
+check("rule 2: after a failed promise message and a delivered one from a later run, one task call "
+      "per sentence ends the wait",
+      [event["why"] for event in machine.events("wait_ended")] == [SETTLED], machine.events())
+
+# An interrupted run left a promise step with no message event; a later run's send fails.
+machine = promise_sent_on_rule_five_wait(PROMISE_SEND_FAILS)
+log_lines = machine.log.read_text().splitlines()
+machine.log.write_text("".join(line + "\n" for line in log_lines
+                               if json.loads(line).get("event") != "promise_message_send_failed"))
+machine.append("alpha", user("and", at(7.5)), assistant(OTHER_PROMISE, at(8)), turn_end(at(8)))
+machine.script(PROMISE_SEND_FAILS)
+machine.run(14)
+check("rule 2: the later run's promise message failed to send",
+      [event["sentences"] for event in machine.events("promise_message_send_failed")]
+      == [[OTHER_PROMISE]], machine.events())
+machine.append("alpha", *recorded_task(928, 15))
+machine.script(sent_ok())
+machine.run(21)
+check("rule 2: a failed send from a later run does not answer an earlier run's promise step, so "
+      "task calls do not settle the wait on the newer sentences alone",
+      not machine.events("wait_ended"), machine.events())
+
+# Every promise message on a rule 5 wait failed, and the agent-seat recorded the task.
+machine = promise_sent_on_rule_five_wait(PROMISE_SEND_FAILS)
+machine.append("alpha", *recorded_task(927, 8))
+machine.script()
+machine.run(14)
+check("rule 2: a wait whose only promise message failed to send ends when the agent-seat records "
+      "its task", [event["why"] for event in machine.events("wait_ended")] == [SETTLED],
+      machine.events())
+
+# The sender fails only after the agent-seat recorded the task.
+machine = promise_sent_on_rule_five_wait(dict(PROMISE_SEND_FAILS, sleep=2.5))
+failed = machine.events("promise_message_send_failed")[0]
+machine.append("alpha", *recorded_task(927, 7.02))
+machine.script()
+machine.run(14)
+check("rule 2: a task recorded after a failed send started, before its failure was logged, ends "
+      "the wait", failed["send_started_at"] < failed["at"]
+      and [event["why"] for event in machine.events("wait_ended")] == [SETTLED], machine.events())
+
+# A new promise is found in the run at which the user-alert falls due, and its send fails.
+machine = promise_sent_on_rule_five_wait(sent_ok())
+machine.script(sent_ok())
+machine.run(16)
+machine.append("alpha", user("and", at(20)), assistant(OTHER_PROMISE, at(21)), turn_end(at(21)))
+machine.script(PROMISE_SEND_FAILS)
+machine.run(32)
+check("rule 2: a promise message whose send fails in the run the user-alert falls due is named in "
+      "that user-alert",
+      any("after a nudge and an escalation" in alert["title"]
+          and OTHER_PROMISE in alert["alert_text"] for alert in machine.alerts()),
+      (machine.events(), machine.alerts()))
+
 ANNOUNCED = "I'm starting the PR 1633 work now."
 
 # An agent-seat that records the task a promise message asked for, and then sits idle waiting on it.

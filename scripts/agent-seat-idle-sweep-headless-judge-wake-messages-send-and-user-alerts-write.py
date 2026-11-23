@@ -210,7 +210,8 @@ PROMISE_MESSAGES = "promise_messages"
 # An event logged when a rule 2 message's send on an open wait failed, carrying its text and the
 # sentences it names, since no message_sent or promise_message event holds them.
 PROMISE_MESSAGE_SEND_FAILED = "promise_message_send_failed"
-# On an open wait: the rule 2 messages whose send on it failed, [{"at", "kinds", "sentences", "text"}].
+# On an open wait: the rule 2 messages whose send on it failed, [{"at", "failed_at", "kinds",
+# "sentences", "text"}]. "at" is when the send started, which settlement compares task calls with.
 FAILED_PROMISE_MESSAGES = "failed_promise_messages"
 
 SEND_ANSWER_SCHEMA = {"type": "object", "required": ["sent", "reason"],
@@ -397,9 +398,14 @@ class SweepLog:
                 wait, owed = None, False
             elif event["event"] == PROMISE_MESSAGE_SEND_FAILED:
                 if wait is not None:
+                    # A failure answers only its own invocation's step: an earlier step with no
+                    # event of its own leaves sentences that settlement cannot know.
+                    if owed and owed_by != invocation:
+                        wait[PROMISE_MESSAGES] = None
                     wait[FAILED_PROMISE_MESSAGES].append({
-                        "at": event["at"], "kinds": set(event["kinds"]),
-                        "sentences": event["sentences"], "text": event["text"]})
+                        "at": event.get("send_started_at", event["at"]), "failed_at": event["at"],
+                        "kinds": set(event["kinds"]), "sentences": event["sentences"],
+                        "text": event["text"]})
                 owed = False
             elif event["event"] == PROMISE_MESSAGE:
                 if wait is None:
@@ -811,10 +817,13 @@ class Sweep:
                                self.timeout_seconds)
         return text, outcome, started_at
 
-    def send(self, seat, verdict, text, step):
+    def send(self, seat, verdict, text, step, failure_event=None):
         """Send code's text to one agent-seat; log the send for the delivery check. Returns the
-        message_sent event, or False when the send failed."""
+        message_sent event, or False when the send failed, after logging failure_event, if given,
+        with the time the send started."""
         text, outcome, started_at = self.send_wake_message([seat], text)
+        if failure_event and (outcome.error or send_problems(outcome, [seat])):
+            self.record({**failure_event, "send_started_at": iso(started_at)})
         if outcome.error:
             self.headless_failed(seat, f"send its {step} message", outcome.error,
                                  outcome.error_kind, outcome)
@@ -968,7 +977,8 @@ class Sweep:
                 and parse_time(worked_at) > parse_time(wait[NUDGE])):
             self.end_wait(seat, "it made a tool call after the nudge")
             wait = None
-        if wait and wait[PROMISE_MESSAGES]:
+        if wait and wait[PROMISE_MESSAGES] is not None and (
+                wait[PROMISE_MESSAGES] or wait[FAILED_PROMISE_MESSAGES]):
             # A failed message's sentences must be backed too, so that a call backing an earlier
             # promise does not end the wait before the escalation and the user-alert report them.
             messages = sorted(wait[PROMISE_MESSAGES] + wait[FAILED_PROMISE_MESSAGES],
@@ -1013,7 +1023,7 @@ class Sweep:
             self.end_wait(seat, "nothing to do")
             wait = None
         if wait:
-            self.due_step(seat, verdict, wait)
+            self.escalation_if_due(seat, verdict, wait)
         paused = self.headless_usage_limit_pause_holds()
         # An escalation stopped at a usage limit can start the pause after the sentences were
         # judged. When it holds back their promise message, the unbacked sentences and the check
@@ -1027,6 +1037,8 @@ class Sweep:
             self.sentences_checked(seat, sentences_checked)
             self.checked(seat, verdict, transcript_read_at, check_is_new)
         if paused:
+            if wait:
+                self.user_alert_if_due(seat, verdict, wait)
             return
         if promise_text:
             # A promise given in answer to a message goes on the open wait, so that repeated
@@ -1044,17 +1056,19 @@ class Sweep:
                 # still report the promise, and they read a failed message from its own event.
                 if PROMISE not in wait:
                     self.record({"event": "wait_step", "agent_seat": seat, "step": PROMISE})
-                sent = self.send(seat, verdict, promise_text, NUDGE)
+                sent = self.send(seat, verdict, promise_text, NUDGE, failure_event={
+                    "event": PROMISE_MESSAGE_SEND_FAILED, "agent_seat": seat,
+                    "kinds": promise_kinds, "sentences": promise_sentences, "text": promise_text})
                 if sent:
                     self.record({"event": PROMISE_MESSAGE, "agent_seat": seat,
                                  "kinds": promise_kinds, "sentences": promise_sentences,
                                  "send_started_at": sent["send_started_at"]})
-                else:
-                    self.record({"event": PROMISE_MESSAGE_SEND_FAILED, "agent_seat": seat,
-                                 "kinds": promise_kinds, "sentences": promise_sentences,
-                                 "text": promise_text})
+                # Read again so that a user-alert due now reports a send that just failed.
+                wait = self.log.open_wait(seat)
         elif not wait:
             self.nudge(seat, verdict, rule, text, stretch)
+        if wait:
+            self.user_alert_if_due(seat, verdict, wait)
 
     def end_wait(self, seat, why, **details):
         self.record({"event": "wait_ended", "agent_seat": seat, "why": why, **details})
@@ -1065,42 +1079,50 @@ class Sweep:
                      "text": step_text})
 
     def due_step(self, seat, verdict, wait):
-        """The step of an open wait that is due: the escalation 15 minutes after the nudge, then
-        the user-alert 15 minutes after the escalation; after that, none. The escalation is a
-        send, so a headless usage-limit pause holds it."""
-        if TELL_USER in wait:
-            return
-        minutes = int(seconds_between(wait["first_idle_at"] or wait[NUDGE], self.now) // 60)
-        failed = wait[FAILED_PROMISE_MESSAGES]
-        if ESCALATE in wait:
-            if seconds_between(wait[ESCALATE], self.now) >= WAIT_STEP_SECONDS:
-                self.record({"event": "wait_step", "agent_seat": seat, "step": TELL_USER})
-                self.alert(f"tell-user:{seat}:{wait[NUDGE]}",
-                           f"{seat} has been idle {minutes} minutes after a nudge and an escalation",
-                           f"The idle sweep found {seat} idle with something to do, messaged it "
-                           f"at {wait[NUDGE]} and escalated at {wait[ESCALATE]}, and it is idle "
-                           f"again. Its transcript is {verdict[fields.TRANSCRIPT_PATH]}. The idle "
-                           "sweep sends it nothing more until it spends tokens and goes idle again."
-                           + "".join(f" At {message['at']} the idle sweep failed to send it a "
-                                     "message naming these sentences of its own, which only the "
-                                     "escalation quoted: "
-                                     + " ".join(f'"{sentence}"' for sentence in message["sentences"])
-                                     for message in failed),
-                           f"An agent on ned-box can read {seat}'s transcript and its tmux session "
-                           f"{seat} to see why it stopped, and message it with SendMessage; the "
-                           "user may want to look at it himself.", failure=False)
+        self.escalation_if_due(seat, verdict, wait)
+        self.user_alert_if_due(seat, verdict, wait)
+
+    def idle_minutes(self, wait):
+        return int(seconds_between(wait["first_idle_at"] or wait[NUDGE], self.now) // 60)
+
+    def escalation_if_due(self, seat, verdict, wait):
+        """The escalation, 15 minutes after the nudge. It is a send, so a headless usage-limit
+        pause holds it."""
+        if ESCALATE in wait or TELL_USER in wait:
             return
         if (seconds_between(wait[NUDGE], self.now) >= WAIT_STEP_SECONDS
                 and not self.headless_usage_limit_pause_holds()):
             text = ESCALATION_TEXT.format(
-                minutes=minutes, nudge_time=parse_time(wait[NUDGE]).strftime("%Y-%m-%d %H:%MZ"),
+                minutes=self.idle_minutes(wait),
+                nudge_time=parse_time(wait[NUDGE]).strftime("%Y-%m-%d %H:%MZ"),
                 quoted_nudge=quoted(wait["nudge_text"])) + "".join(
                     FAILED_PROMISE_ESCALATION_TEXT.format(
-                        time=parse_time(message["at"]).strftime("%Y-%m-%d %H:%MZ"),
+                        time=parse_time(message["failed_at"]).strftime("%Y-%m-%d %H:%MZ"),
                         quoted_text=quoted(message["text"]))
-                    for message in failed)
+                    for message in wait[FAILED_PROMISE_MESSAGES])
             self.record({"event": "wait_step", "agent_seat": seat, "step": ESCALATE, "text": text})
             self.send(seat, verdict, text, ESCALATE)
+
+    def user_alert_if_due(self, seat, verdict, wait):
+        """The user-alert, 15 minutes after the escalation; after that, no step."""
+        if ESCALATE not in wait or TELL_USER in wait:
+            return
+        if seconds_between(wait[ESCALATE], self.now) >= WAIT_STEP_SECONDS:
+            self.record({"event": "wait_step", "agent_seat": seat, "step": TELL_USER})
+            self.alert(f"tell-user:{seat}:{wait[NUDGE]}",
+                       f"{seat} has been idle {self.idle_minutes(wait)} minutes after a nudge and "
+                       "an escalation",
+                       f"The idle sweep found {seat} idle with something to do, messaged it "
+                       f"at {wait[NUDGE]} and escalated at {wait[ESCALATE]}, and it is idle "
+                       f"again. Its transcript is {verdict[fields.TRANSCRIPT_PATH]}. The idle "
+                       "sweep sends it nothing more until it spends tokens and goes idle again."
+                       + "".join(f" At {message['failed_at']} the idle sweep failed to send it a "
+                                 "message naming these sentences of its own: "
+                                 + " ".join(f'"{sentence}"' for sentence in message["sentences"])
+                                 for message in wait[FAILED_PROMISE_MESSAGES]),
+                       f"An agent on ned-box can read {seat}'s transcript and its tmux session "
+                       f"{seat} to see why it stopped, and message it with SendMessage; the "
+                       "user may want to look at it himself.", failure=False)
 
     def nudge(self, seat, verdict, rule, text, stretch):
         if rule == 3:
