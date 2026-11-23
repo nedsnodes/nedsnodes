@@ -4391,6 +4391,43 @@ with tempfile.TemporaryDirectory() as scratch:
               f"{done_worktree_tip}" in done_removal.stdout,
           done_removal.stdout + done_removal.stderr)
 
+with tempfile.TemporaryDirectory() as git_directory_scratch:
+    reflog_scan_module = load_clean_worktrees_module()
+    reflog_scan_cutoff = 2000
+
+    def reflog_scan_file(relative_path, content, mtime):
+        path = Path(git_directory_scratch, relative_path)
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_bytes(content)
+        os.utime(path, (mtime, mtime))
+        return path
+
+    def reflog_entry_written_at(seconds):
+        return f"{'0' * 40} {'1' * 40} agent <agent@example.com> {seconds} +0000\tcommit: work\n".encode()
+
+    outside_logs = reflog_scan_file("refs/looks-like-a-reflog", reflog_entry_written_at(1000), 3000)
+    found = reflog_scan_module.git_directory_file_changed_since(Path(git_directory_scratch), reflog_scan_cutoff)
+    check("a file outside logs/, in a directory sorting after it, is judged by its mtime, not by an entry it holds",
+          found == outside_logs, repr(found))
+    outside_logs.unlink()
+
+    reflog_scan_file("logs/a-emptied", b"", 1000)
+    entry_after_empty = reflog_scan_file("logs/b-written-today", reflog_entry_written_at(3000), 1000)
+    real_walk = os.walk
+
+    # os.walk's order is the filesystem's, and this case needs the empty reflog read first.
+    def walk_with_file_names_sorted(*args, **kwargs):
+        for directory, directory_names, file_names in real_walk(*args, **kwargs):
+            yield directory, directory_names, sorted(file_names)
+
+    reflog_scan_module.os.walk = walk_with_file_names_sorted
+    try:
+        found = reflog_scan_module.git_directory_file_changed_since(Path(git_directory_scratch), reflog_scan_cutoff)
+    finally:
+        reflog_scan_module.os.walk = real_walk
+    check("an emptied reflog does not stop the scan of the reflogs after it in its directory",
+          found == entry_after_empty, repr(found))
+
 check("no run of the suite shipped into the store every run defaults to",
       not any(Path(_ship_store_for_every_run).iterdir()),
       str(list(Path(_ship_store_for_every_run).rglob("*"))))
