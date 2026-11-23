@@ -126,8 +126,8 @@ the pull request's branch after the round's commit, with a clean worktree apart 
 switches to NEW_TOPIC_BRANCH cut from origin/main and copies each PATH from the frozen-head, and only then
 records the move in MOVE_STATE_FILE_NAME in the git directory and moves the answers file there, so a failed
 switch or copy leaves nothing recorded and the answers file in place. The second refuses while an answers
-file or the description file is in the worktree, stages every change, runs the nn-test-suites as the pull
-request ready command runs them, commits,
+file or the description file is in the worktree, stages every change, runs the nn-test-suites in this
+worktree, with no wait for the machine's test lock, commits,
 pushes with the pre-push hook's time limit, opens the pull request with gh pr create, switches back,
 restores the answers file, deletes the local NEW_TOPIC_BRANCH and checks that it is gone. A failure after
 the commit undoes nothing and prints the commit, the steps done and the steps still to do, which are
@@ -1205,6 +1205,10 @@ def file_exists_at(commit, path):
                           stdin=subprocess.DEVNULL, timeout=git_output.GIT_TIMEOUT_SECONDS).returncode == 0
 
 
+TEST_RUNNER_MACHINE_LOCK_WAIT_ARGUMENTS = ["--wait-for-lock-seconds",
+                                           f"{test_suite_runner.MACHINE_LOCK_WAIT_SECONDS_SUGGESTED:g}"]
+
+
 def failing_suites_in_scratch_worktree(commit, command_for_checkout):
     """Run the suite runner command_for_checkout(checkout) names in a scratch worktree of commit, passing
     its output through as it arrives; return each suite it reports failing, once, in its order."""
@@ -1256,12 +1260,14 @@ def suites_the_round_broke_and_suites_failing_at_frozen_head_too(frozen_head, co
     """Run the suites at commit, and those that fail there at frozen_head too; return
     (failing at commit only, failing at both)."""
     at_commit = failing_suites_in_scratch_worktree(
-        commit, lambda checkout: ready_command.selective_test_run_command(checkout, merge_base))
+        commit, lambda checkout: [*ready_command.selective_test_run_command(checkout, merge_base),
+                                 *TEST_RUNNER_MACHINE_LOCK_WAIT_ARGUMENTS])
     at_frozen_head = [suite for suite in at_commit if file_exists_at(frozen_head, suite)]
     if at_frozen_head:
         failing_there = failing_suites_in_scratch_worktree(frozen_head, lambda checkout: [
             "python3", str(checkout / "scripts" / "run-all-test-suites.py"),
-            "--leave-recorded-inputs-and-failure-history-unchanged", "--only-suites-named", *at_frozen_head])
+            "--leave-recorded-inputs-and-failure-history-unchanged", *TEST_RUNNER_MACHINE_LOCK_WAIT_ARGUMENTS,
+            "--only-suites-named", *at_frozen_head])
         at_frozen_head = [suite for suite in at_frozen_head if suite in failing_there]
     return [suite for suite in at_commit if suite not in at_frozen_head], at_frozen_head
 
