@@ -2565,6 +2565,27 @@ _, facts = judge_asked_at(machine, 45)
 check("rule 5: a reminded task held after the reminder is raised again once it is free",
       [task["id"] for task in facts.get("open_tasks_nothing_holds", [])] == ["1"], facts)
 
+machine = one_reminder_of_task_1()
+machine.append("alpha",
+               assistant(tool=("TaskUpdate", {"taskId": "2", "addBlocks": ["1"]}), when=at(11),
+                         tool_id="t-blocks"),
+               task_result("t-blocks", "Updated task #2 blocks", at(11.01)),
+               assistant("Held.", when=at(11.1)), turn_end(at(11.1)))
+_, facts = judge_asked_at(machine, 45)
+check("rule 5: a reminded task held through another task's addBlocks is raised again once it is free",
+      [task["id"] for task in facts.get("open_tasks_nothing_holds", [])] == ["1"], facts)
+
+machine = one_reminder_of_task_1()
+machine.append("alpha",
+               assistant(tool=("TaskUpdate", {"taskId": "2", "addBlocks": ["1"]}), when=at(11),
+                         tool_id="t-blocks"),
+               task_result("t-blocks", "Task not found", at(11.01)),
+               assistant("Held.", when=at(11.1)), turn_end(at(11.1)))
+machine.script()
+machine.run(45)
+check("rule 5: an addBlocks call that failed does not count as a hold, so the reminder stays withheld",
+      not machine.claude_calls()[1:], machine.claude_calls())
+
 machine = Machine()
 machine.seat("alpha", DONE_TURN)
 machine.handoff_put_off()

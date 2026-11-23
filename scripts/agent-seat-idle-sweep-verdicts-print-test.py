@@ -1117,6 +1117,25 @@ try:
               {"time": "2026-11-02T11:40:00Z", "name": "TaskUpdate", "task": "3"}],
           verdicts["alpha"])
     machine = Machine()
+    machine.seat("alpha", [user("go"),
+                           assistant(tool=("TaskUpdate", {"taskId": "2", "addBlocks": ["1", "3"]}),
+                                     at="2026-11-02T11:40:00Z", tool_id="t-blocks"),
+                           task_result("Updated task #2 blocks", at="2026-11-02T11:40:01Z",
+                                       tool_id="t-blocks"),
+                           assistant(tool=("TaskUpdate", {"taskId": "9", "addBlocks": ["4"]}),
+                                     at="2026-11-02T11:41:00Z", tool_id="t-failed"),
+                           task_result("Task not found", at="2026-11-02T11:41:01Z",
+                                       tool_id="t-failed"),
+                           assistant("Done.", at="2026-11-02T11:48:00Z"), turn_end()])
+    _, verdicts, _ = machine.run()
+    check("each addBlocks call whose result shows success lists the tasks it blocks; a failed one does "
+          "not, and neither counts as setting what the calling task waits on",
+          verdicts["alpha"].get(
+              "idle_sweep_verdict_field_listing_successful_task_update_tool_calls_setting_add_blocks_with_blocked_tasks")
+          == [{"time": "2026-11-02T11:40:00Z", "blocked_tasks": ["1", "3"]}]
+          and verdicts["alpha"].get("successful_task_tool_calls_setting_prerequisites_or_blocked_by") == [],
+          verdicts["alpha"])
+    machine = Machine()
     machine.seat("alpha", [user("go"), assistant(tool=("TaskCreate", {"subject": "plain"})),
                            assistant("Done."), turn_end()])
     _, verdicts, _ = machine.run()

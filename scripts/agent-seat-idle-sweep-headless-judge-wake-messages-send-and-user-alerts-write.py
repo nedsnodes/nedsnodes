@@ -1148,11 +1148,15 @@ class Sweep:
 
     def reminded_subjects(self, seat, verdict):
         last_held_at = {}
-        for call in verdict.get(
-                fields.SUCCESSFUL_TASK_TOOL_CALLS_SETTING_PREREQUISITES_OR_BLOCKED_BY) or []:
-            moment = parse_time(call["time"])
+        holds = [(call["time"], call["task"]) for call in verdict.get(
+            fields.SUCCESSFUL_TASK_TOOL_CALLS_SETTING_PREREQUISITES_OR_BLOCKED_BY) or []]
+        holds += [(call["time"], task) for call in verdict.get(
+            fields.IDLE_SWEEP_VERDICT_FIELD_LISTING_SUCCESSFUL_TASK_UPDATE_TOOL_CALLS_SETTING_ADD_BLOCKS_WITH_BLOCKED_TASKS) or []
+            for task in call["blocked_tasks"]]
+        for time, task in holds:
+            moment = parse_time(time)
             if moment:
-                subject = open_task_subject(call["task"])
+                subject = open_task_subject(task)
                 last_held_at[subject] = max(moment, last_held_at.get(subject, moment))
         return self.log.reminded_subjects(seat, verdict[fields.SESSION_ID],
                                           verdict.get(fields.LAST_USER_TYPED_AT), last_held_at)

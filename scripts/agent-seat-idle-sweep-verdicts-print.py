@@ -863,6 +863,10 @@ def verdict_for_seat(seat, paths, now, since, checker, parser, usage_limit_recor
             {"time": iso(moment), "name": name, "task": task_id}
             for moment, name, tool_input, task_id in facts.task_tool_calls
             if moment and sets_prerequisites_or_blocked_by(tool_input)]
+        verdict[fields.IDLE_SWEEP_VERDICT_FIELD_LISTING_SUCCESSFUL_TASK_UPDATE_TOOL_CALLS_SETTING_ADD_BLOCKS_WITH_BLOCKED_TASKS] = [
+            {"time": iso(moment), "blocked_tasks": [str(task) for task in tool_input["addBlocks"]]}
+            for moment, _, tool_input, _ in facts.task_tool_calls
+            if moment and tool_input.get("addBlocks")]
 
         last = facts.last_model_turn_record or {}
         limit = is_usage_limit(last)
