@@ -1,5 +1,5 @@
 ---
-issue: "[Mutual oversight: agents watch each other's session transcripts, both runtimes — capability record + lean build candidate](https://github.com/nedschorus/nedschorus/issues/36)"
+issue: "[Mutual oversight: agents watch each other's session transcripts, both runtimes — capability record + lean build candidate](https://github.com/nedsnodes/nedsnodes/issues/36)"
 ---
 
 # Mutual oversight: agents watch each other's session transcripts, both runtimes — capability record + lean build candidate
