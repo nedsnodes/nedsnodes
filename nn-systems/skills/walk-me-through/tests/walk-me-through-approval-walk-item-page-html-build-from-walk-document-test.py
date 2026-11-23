@@ -540,6 +540,10 @@ def run_page_link_cases(scratch):
           result.returncode == 0 and page_links(page) == '<nav class="pages"><a href="https://claude.ai/artifact/Item4">'
           'Next: item 4</a></nav>' and "The page has no Previous link: no whole item numbered below 3 has an "
           "`#item_page` line with a link" in result.stdout and "python3 " not in result.stdout, result)
+    minutes.write_text("#item_page item 3 of 9 https://claude.ai/artifact/Item3\n", encoding="utf-8")
+    result, page = built(scratch, "5")
+    check("one line that states no version is version 1, so the next version is 2",
+          f"{scratch / 'item-3-version-2.html'} --version 2" in result.stdout, result.stdout)
     minutes.write_text("#item_page item 3 of 9 https://claude.ai/artifact/Item3\n"
                        "#item_page item 3 of 9 https://claude.ai/artifact/Item3 (version 4, count 9)\n"
                        "#item_page item 4.1 of 9 https://claude.ai/artifact/SubStep41\n", encoding="utf-8")
