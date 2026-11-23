@@ -1825,8 +1825,10 @@ machine = Machine()
 machine.seat("alpha", [user("go"), assistant(PROMISE), turn_end()])
 machine.script(sent_ok())
 machine.run(0)
-machine.append("alpha", cross_session("You promised", at(0.5)), assistant(ANNOUNCED, at(8)),
-               turn_end(at(8)), user("and again", at(8.5)), assistant(ANNOUNCED, at(9)),
+machine.append("alpha", cross_session("You promised", at(0.5)),
+               assistant(ANNOUNCED, at(8), uuid="backed-record"),
+               turn_end(at(8)), user("and again", at(8.5)),
+               assistant(ANNOUNCED, at(9), uuid="unbacked-record"),
                turn_end(at(9)))
 machine.script({"answer": {"sentences": [{"index": 0, "backed": True, "reason": "a test ran"},
                                          {"index": 1, "backed": False, "reason": "nothing ran"}]}},
@@ -1836,7 +1838,8 @@ same_sentence_checked = [event for event in machine.events("sentence_checked")
                          if event["sentence"] == ANNOUNCED]
 check("two turns end with the same sentence, one judged backed and one not, and a pause holds back "
       "the message: the backed record is logged and the unbacked one is not",
-      len(same_sentence_checked) == 1, (same_sentence_checked, machine.claude_calls()))
+      [event["record_uuid"] for event in same_sentence_checked] == ["backed-record"],
+      (same_sentence_checked, machine.claude_calls()))
 
 machine = Machine()
 machine.seat("alpha", [user("go"), assistant(PROMISE), turn_end()])

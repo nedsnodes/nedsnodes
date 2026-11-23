@@ -1000,7 +1000,7 @@ class Sweep:
                 # The check is not logged, so that the next read after the reset still holds the
                 # sentences the judge could not judge.
                 return
-            promise_text, promise_kinds, promise_sentences, promise_records = promise or (None, None, None, ())
+            promise_text, promise_kinds, promise_records = promise or (None, None, ())
             fallback = verdict.get(fields.IF_EVERY_SENTENCE_BACKED)
             if outcome == "all backed" and fallback is not None:
                 rule, text = fallback[fields.RULE], fallback.get(fields.TEXT)
@@ -1031,6 +1031,7 @@ class Sweep:
         if paused:
             return
         if promise_text:
+            promise_sentences = [item["sentence"] for item in promise_records]
             # A promise given in answer to a message goes on the open wait, so that repeated
             # promises cannot put off its escalation and the user-alert.
             if not wait:
@@ -1204,7 +1205,7 @@ class Sweep:
     def sentences(self, seat, verdict):
         """Rule 2: judge what code could not settle, and word one message naming every unbacked
         sentence. Returns ("unbacked", (the message, the sorted kinds of the sentences it names,
-        those sentences, their records), the sentences checked), ("failed", None, []), ("paused", None, []) or
+        their records), the sentences checked), ("failed", None, []), ("paused", None, []) or
         ("all backed", None, the sentences checked). The caller logs the sentences checked, except,
         when a pause a later launch starts holds back the promise message, the unbacked ones, which
         are judged again after the reset; a judge stopped by the pause logs none, and a failed judge
@@ -1250,8 +1251,7 @@ class Sweep:
         return "unbacked", ("\n".join(UNBACKED_SENTENCE_LINES[item["kind"]].format(
             sentence=item["sentence"],
             minutes=int(seconds_between(item["time"], self.now) // 60) if item["time"] else "some")
-            for item in unbacked), sorted({item["kind"] for item in unbacked}),
-            [item["sentence"] for item in unbacked], unbacked), new
+            for item in unbacked), sorted({item["kind"] for item in unbacked}), unbacked), new
 
     def sentences_checked(self, seat, items):
         for item in items:
