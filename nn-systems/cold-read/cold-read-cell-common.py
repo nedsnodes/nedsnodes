@@ -103,6 +103,10 @@ REVIEWER_PROGRAM_LOGIN_FILES = {
             pathlib.Path.home() / ".gemini" / "antigravity-cli" / "antigravity-oauth-token"),
 }
 
+# The Codex and agy launchers remove these from the reviewer's environment; the Claude cold-read-cell
+# runs without Bash, so it cannot run gh.
+COLD_READ_CELL_REVIEWER_PROGRAM_ENVIRONMENT_REMOVED_GITHUB_TOKEN_VARIABLES = ("GH_TOKEN", "GITHUB_TOKEN")
+
 
 def reviewer_program_login_files(except_program: str = None,
                                  only_present: bool = False) -> list:
