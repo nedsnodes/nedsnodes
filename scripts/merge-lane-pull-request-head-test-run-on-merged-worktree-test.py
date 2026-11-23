@@ -118,7 +118,7 @@ def build_review_tools_clone(scratch):
 
 
 def without_main_commit(stdout):
-    return re.sub(r"; tested on main [0-9a-f]{12}$", "", stdout, flags=re.M)
+    return re.sub(r"; tested merged onto main [0-9a-f]{12}$", "", stdout, flags=re.M)
 
 
 def run_program(scratch, helpers, exits, *pull_requests, review_tools=None, cwd=None):
@@ -356,6 +356,7 @@ def main():
         git(author, "push", "-q", str(scratch / "origin.git"), "main:refs/heads/main")
         git(review_tools, "fetch", "-q", "origin", "refs/pull/8/head")
         fetch_head_before = (review_tools / ".git" / "FETCH_HEAD").read_text()
+        tracking_main_before = git(review_tools, "rev-parse", "refs/remotes/origin/main")
         completed, calls = run_program(scratch, helpers, {}, "7")
         detail = f"exit {completed.returncode}\n{completed.stdout}{completed.stderr}"
         check("when origin's main has moved past the review tools worktree and pr<n>-merged, "
@@ -364,18 +365,23 @@ def main():
               and git(merged, "rev-parse", "HEAD") != stale_merged
               and git(merged, "rev-parse", "HEAD^1") == main_fix
               and git(review_tools, "rev-parse", "HEAD") == pinned_main
-              and f"; tested on main {main_fix[:12]}\n" in completed.stdout_naming_main, detail)
+              and f"; tested merged onto main {main_fix[:12]}\n" in completed.stdout_naming_main, detail)
         check("a direct run selects suites against the origin main it merged onto",
               calls and calls[0]["argv"][calls[0]["argv"].index("--since") + 1] == main_fix,
               json.dumps(calls))
         check("a direct run's fetches of main and of the head leave FETCH_HEAD as it was",
               (review_tools / ".git" / "FETCH_HEAD").read_text() == fetch_head_before, detail)
+        check("a direct run's fetch of main leaves refs/remotes/origin/main as it was",
+              git(review_tools, "rev-parse", "refs/remotes/origin/main") == tracking_main_before
+              and tracking_main_before != main_fix, detail)
+        check("a direct run leaves no reference of its own behind",
+              git(review_tools, "for-each-ref", "refs/merge-lane-head-test-run") == "", detail)
         completed, calls = run_program(scratch, helpers, {}, "7", "--main-commit", pinned_main)
         detail = f"exit {completed.returncode}\n{completed.stdout}{completed.stderr}"
         check("--main-commit is the main merged onto, even when origin's main is newer",
               completed.returncode == 0 and git(merged, "rev-parse", "HEAD^1") == pinned_main
               and not calls[0]["holds_main_fix"]
-              and f"; tested on main {pinned_main[:12]}\n" in completed.stdout_naming_main, detail)
+              and f"; tested merged onto main {pinned_main[:12]}\n" in completed.stdout_naming_main, detail)
         check("--main-commit is also the commit suites are selected against, so a change "
               "between it and a newer tracking ref is not left out of selection",
               calls and calls[0]["argv"][calls[0]["argv"].index("--since") + 1] == pinned_main,
@@ -422,6 +428,33 @@ def main():
               and "--head-commit" in completed.stderr,
               f"exit {completed.returncode}\n{completed.stdout}{completed.stderr}")
 
+        git(author, "checkout", "-q", "-b", "head-origin-replaces", pushed_head)
+        replaced_head = commit_file(author, "replaced-by-a-rebase.txt", "replaced\n")
+        git(author, "push", "-q", str(scratch / "origin.git"), "HEAD:refs/pull/7/head")
+        git(author, "checkout", "-q", "-b", "head-after-rebase", pushed_head)
+        rebased_head = commit_file(author, "after-the-rebase.txt", "rebased\n")
+        rebased_marker = scratch / "head-already-rebased"
+        rebasing_git = helpers / "tripwire-bin" / "git"
+        real_git = shlex.quote(shutil.which("git"))
+        # The head moves on origin right after the program first reads it.
+        rebasing_git.write_text(
+            f'#!/bin/sh\n{real_git} "$@"\ncode=$?\n'
+            f'case "$*" in *refs/pull/7/head*)\n'
+            f'  if [ ! -e {shlex.quote(str(rebased_marker))} ]; then\n'
+            f'    touch {shlex.quote(str(rebased_marker))}\n'
+            f'    {real_git} -C {shlex.quote(str(author))} push -q -f '
+            f'{shlex.quote(str(scratch / "origin.git"))} '
+            f'{rebased_head}:refs/pull/7/head\n'
+            f'  fi;;\nesac\nexit $code\n')
+        rebasing_git.chmod(0o755)
+        completed, calls = run_program(scratch, helpers, {}, "7")
+        rebasing_git.unlink()
+        detail = f"exit {completed.returncode}\n{completed.stdout}{completed.stderr}"
+        check("when the head is rebased on origin just after the program reads it, the commit "
+              "it read is still merged and tested",
+              completed.returncode == 0 and len(calls) == 1 and rebased_marker.exists()
+              and git(merged, "rev-parse", "HEAD^2") == replaced_head, detail)
+
         git_calls_log = scratch / "git-calls.log"
         git_logger = helpers / "tripwire-bin" / "git"
         git_logger.write_text(f'#!/bin/sh\nprintf "%s\\n" "$*" >> {shlex.quote(str(git_calls_log))}\n'
@@ -434,6 +467,17 @@ def main():
             check(f"an empty {option} exits 2 with no suite run and no git call",
                   completed.returncode == 2 and calls == [] and git_calls == ""
                   and option in completed.stderr,
+                  f"exit {completed.returncode}, {len(calls)} run(s), git calls: {git_calls!r}\n"
+                  f"{completed.stdout}{completed.stderr}")
+        for short_or_named in (reviewed_head[:12], "origin/topic"):
+            git_calls_log.unlink(missing_ok=True)
+            completed, calls = run_program(scratch, helpers, {}, "7",
+                                           "--head-commit", short_or_named)
+            git_calls = git_calls_log.read_text() if git_calls_log.exists() else ""
+            check(f"a --head-commit that is not a full hash, {short_or_named}, exits 2 with no "
+                  "suite run and no git call",
+                  completed.returncode == 2 and calls == [] and git_calls == ""
+                  and "full 40-character commit hash" in completed.stderr,
                   f"exit {completed.returncode}, {len(calls)} run(s), git calls: {git_calls!r}\n"
                   f"{completed.stdout}{completed.stderr}")
         git_logger.unlink()
