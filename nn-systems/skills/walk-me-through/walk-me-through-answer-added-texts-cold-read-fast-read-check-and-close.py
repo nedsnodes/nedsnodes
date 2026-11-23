@@ -3525,7 +3525,7 @@ def bump(arguments):
                      else BUMP_ALREADY_SHOWN_WAITING)
             raise Failure(BUMP_ALREADY_SHOWN.format(heading=lines[named[0][3]].strip(), document=document,
                                                     state=state))
-        example = next((lines[first][3:].strip() for first in placing), "the point of the item")
+        example = next((lines[first][3:].strip() for first in placing), "the point of the item")  # pragma: no mutate, [2:] or [3:] of a "## " heading strip to the same title
         raise Failure(BUMP_NOT_FOUND.format(document=document, title=arguments.bump.strip(),
                                             command=check_command_with_cwd(top, "--bump", example)))
     first, end = unshown[0][3], unshown[0][4]
