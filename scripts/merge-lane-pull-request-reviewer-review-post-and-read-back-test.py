@@ -663,6 +663,11 @@ def verdict_review_marks_cases(scratch):
               posted_request, [comment for comment in result.posted["comments"] if "**Blocks**" not in comment["body"]])
           == "its body states **Blocking: 2**, but 1 of its comments open with **Blocks**"
           if result.posted else False, result.detail)
+    check("a request for changes with more blocking comments than its body states lacks the marks, naming the count",
+          posting.posted_verdict_review_missing_review_posting_program_marks_reason_or_none(
+              {"state": "CHANGES_REQUESTED", "body": "REQUEST_CHANGES\n\n**Blocking: 1**\n\nThe review body."},
+              [{"body": "**Blocks** One finding."}, {"body": "**Blocks** Another finding."}])
+          == "its body states **Blocking: 1**, but 2 of its comments open with **Blocks**")
     result = run_program(scratch, review("APPROVE", comments=[finding(2, "fix-next")]), arguments=MERGE_LANE_ARGUMENTS)
     posted_approval = {"state": "APPROVED", "body": result.posted["body"]} if result.posted else {}
     check("an approval this program posted has the marks",
@@ -679,6 +684,10 @@ def verdict_review_marks_cases(scratch):
           == "its body does not open with the line REQUEST_CHANGES, a blank line and the line **Blocking: N**")
     check("a review without a verdict needs no marks",
           posting.posted_verdict_review_missing_review_posting_program_marks_reason_or_none({"state": "COMMENTED", "body": "Read it."}, []) is None)
+    # Each of these sorts before "APPROVED", unlike every state GitHub gives a review.
+    for given in ({"state": "", "body": "Read it."}, {"state": "APPROVE", "body": "Read it."}, {"body": "Read it."}):
+        reason = posting.posted_verdict_review_missing_review_posting_program_marks_reason_or_none(given, [])
+        check(f"a review with the state {given.get('state')!r} needs no marks", reason is None, reason)
 
     code, out, err = marks_check(posted_approval, [])
     check("the marks check program exits 0 on a review with the marks", code == 0 and out == "", (code, out, err))
