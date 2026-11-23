@@ -244,18 +244,22 @@ NO LONGER EXISTS when there is nothing to kill, because the line it changes ends
 head and origin/main, read without fetching, lacks the lines it replaces, or has
 them only where none of the diff's non-blank context lines stands beside them, as a bare
 `continue` the diff replaces has unrelated copies elsewhere; and
-MUTANT COULD NOT BE JUDGED, with what to do, when the diff file cannot be read or
-names no file, the file has no suite while the mutant still applies at the
-head, the diff does not apply at the head while origin/main has those lines,
-the diff does not apply at the head and whether origin/main has those lines
-cannot be told (there is no local origin/main, git cannot read the file there,
-or the lines appear there more than once and some copy has one of
-the diff's non-blank context lines beside it), two of the diff's hunks are found at
-places whose lines overlap, some copies of the lines it replaces end with a
-`# pragma: no mutate` comment and others do not, so that the lines appear more
-than once at the head when that comment is ignored but only once when it is
-not, or the runner judged no suite with the mutant applied, as when a suite ran
-past its own time limit or the runner was refused. When those lines appear more
+MUTANT COULD NOT BE JUDGED, with what to do, in each of these cases:
+  - the diff file cannot be read, or names no file;
+  - the file has no suite, while the mutant still applies at the head;
+  - the diff does not apply at the head, while origin/main has those lines;
+  - the diff does not apply at the head, and there is no local origin/main, or
+    git cannot read the file there;
+  - the diff does not apply at the head, and the lines it replaces appear on
+    origin/main more than once, with one of the diff's non-blank context lines
+    beside some copy, or with no non-blank context line in the hunk;
+  - two of the diff's hunks are found at places whose lines overlap;
+  - some copies of the lines it replaces end with a `# pragma: no mutate`
+    comment and others do not, so that the lines appear more than once at the
+    head when that comment is ignored but only once when it is not;
+  - the runner judged no suite with the mutant applied, as when a suite ran past
+    its own time limit or the runner was refused.
+When those lines appear more
 than once even with the comment counted, as when every copy ends with it, the
 mutant does not apply at the head, and origin/main decides between MUTANT NO
 LONGER EXISTS and MUTANT COULD NOT BE JUDGED as above. Whether a mutant still exists is decided before
