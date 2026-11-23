@@ -16,6 +16,7 @@ import io
 import json
 import re
 import shutil
+import socket
 import subprocess
 import sys
 import tempfile
@@ -143,6 +144,57 @@ except SystemExit as error:
     exit_code = error.code
 check("a guard's own exit, such as a refusal's 2, passes through unchanged", exit_code == 2,
       exit_code)
+
+# --- traceback is loaded only on the crash path ---
+
+# A fresh interpreter, because this suite's own imports may already have loaded traceback.
+LOAD_MODULE_SOURCE = (
+    "import importlib.util\n"
+    "import sys\n"
+    "spec = importlib.util.spec_from_file_location(\n"
+    f"    'guard_hook_crash_fail_open_with_notice_common', {str(MODULE_PATH)!r})\n"
+    "crash_notice = importlib.util.module_from_spec(spec)\n"
+    "spec.loader.exec_module(crash_notice)\n")
+result = subprocess.run(
+    [sys.executable, "-c", LOAD_MODULE_SOURCE + "print('traceback' in sys.modules)"],
+    capture_output=True, text=True, timeout=60)
+check("importing the module in a fresh interpreter leaves traceback out of sys.modules",
+      result.returncode == 0 and result.stdout.strip() == "False",
+      (result.returncode, result.stdout, result.stderr))
+
+with tempfile.TemporaryDirectory() as temporary_directory:
+    crashing_guard = Path(temporary_directory) / "crashing-guard.py"
+    crashing_guard.write_text(
+        LOAD_MODULE_SOURCE
+        + "with crash_notice.guard_hook_crash_fail_open_with_notice_context_manager(\n"
+          "        '/x/.claude/guard-hooks/some-guard.py', True):\n"
+          "    raise ValueError('injected value')\n", encoding="utf-8")
+    result = subprocess.run([sys.executable, str(crashing_guard)], capture_output=True, text=True,
+                            timeout=60)
+host = socket.gethostname().split(".")[0]
+crash = "ValueError: injected value, at crashing-guard.py:9"
+expected_notice = {
+    "hookSpecificOutput": {
+        "hookEventName": "PreToolUse",
+        "additionalContext": (
+            f"The guard hook some-guard.py crashed on {host} ({crash}), so this tool call went "
+            "ahead without being checked, and the call has run. A crashed guard lets the call go "
+            "ahead so that the crash does not stop work; the user has been shown that the guard "
+            "crashed.\nCheck whether this call is one some-guard.py would have refused; the "
+            "docstring at the top of /x/.claude/guard-hooks/some-guard.py says which calls it "
+            "refuses.\nIf it is, or you cannot tell, report what the call did and ask whether to "
+            "undo it: a subagent asks the agent that dispatched it, any other agent asks the "
+            "user. Do not undo the call before you have the answer, because an undo can do "
+            "further damage.\nIf it is not, go on with your task."),
+    },
+    "systemMessage": (
+        f"The guard hook some-guard.py crashed on {host} and let a tool call through unchecked "
+        f"({crash}). The agent has been told to check what the call did."),
+}
+check("a crash in a fresh interpreter exits 0 and prints exactly the crash notice",
+      result.returncode == 0 and result.stderr == ""
+      and result.stdout == json.dumps(expected_notice) + "\n",
+      (result.returncode, result.stdout, result.stderr))
 
 # --- each guard, crashed for real ---
 
