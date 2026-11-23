@@ -1003,6 +1003,21 @@ try:
         check("run_claude: exit 1 without JSON keeps the exit-code message",
               result is None and error == "claude exited 1: boom", (result, error))
 
+        # ghi-issue-write.py reports one stderr line of a failed ask, and every
+        # turn's failure, cold-start, first turn or recheck, comes from here.
+        for case_name, completed in [
+                ("run_claude: a multi-line result error comes back on one line",
+                 FakeCompletedProcess(1, json.dumps(
+                     {"is_error": True, "result": "Invalid API key\n  Please run claude auth login"}))),
+                ("run_claude: a multi-line stderr without JSON comes back on one line",
+                 FakeCompletedProcess(1, "", stderr="Invalid API key\n  Please run claude auth login\n"))]:
+            ghi_ask.subprocess.run = fake_subprocess_run_returning(completed)
+            result, error = run_claude_real("q", None, seat, 5, {})
+            check(case_name,
+                  result is None and "\n" not in error
+                  and error.startswith("claude exited 1: Invalid API key Please run claude auth login"),
+                  (result, error))
+
         ghi_ask.subprocess.run = fake_subprocess_run_returning(
             FakeCompletedProcess(0, json.dumps({"is_error": True, "result": "rate limited"})))
         result, error = run_claude_real("q", None, seat, 5, {})
@@ -1329,10 +1344,8 @@ with tempfile.TemporaryDirectory() as temporary:
             ("a drift recheck after a verdict that cites the closed GHI again fails the ask",
              ({"session_id": "sess-W", "structured_output": first_verdict}, None),
              "the rechecked verdict still cites a closed GHI"),
-            # ghi-issue-write.py reports only the not-usable line, so a
-            # multi-line failure must reach it on that one line.
-            ("a drift recheck whose turn fails with a multi-line error keeps its remedy on the not-usable line",
-             (None, "claude exited 1: Invalid API key\n  Please run claude auth login"),
+            ("a drift recheck whose turn fails keeps the turn's failure in the not-usable message",
+             (None, "claude exited 1: Invalid API key Please run claude auth login"),
              "the turn failed: claude exited 1: Invalid API key Please run claude auth login")]:
         seat_verdict_recheck = root / ("seat-" + case_name.replace(" ", "-")[:60])
         seat_verdict_recheck.mkdir()

@@ -1107,11 +1107,14 @@ def adjudicate(repo: str, title: str, text: str, repository_root: Path,
     reaches GitHub; otherwise None. A ruling question
     does not stop the write.
 
-    Not handled: a too-similar verdict naming the edited issue and a number
-    that is not a GHI, such as a pull request's. The edited issue is dropped,
-    the ask's closed-GHI check passes a number its mirror does not hold, and
-    the refusal sends the author to that number; the author's reconsider
-    path in RECONSIDER_LINE passes the write."""
+    Not handled: a too-similar verdict naming the edited issue, while it is
+    open, and a number that is not a GHI, such as a pull request's. The ask's
+    closed-GHI check passes a number its mirror does not hold, the edited
+    issue is dropped here, and the refusal sends the author to that number;
+    the author's reconsider path in RECONSIDER_LINE passes the write. When
+    the edited issue is closed in the mirror, the ask rechecks the verdict
+    before it reaches here, and a failed or repeated recheck skips the
+    adjudication instead."""
     marker = repository_root / RECONSIDERED_MARKER_NAME
     if marker.is_file():
         marker.unlink()
