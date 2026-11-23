@@ -672,6 +672,8 @@ try:
                           "description": " ".join(LONG_COMMAND.split())[
                               :fields.BACKGROUND_COMMAND_LINE_CHARACTERS_KEPT - 1] + "…",
                           "timeout_ends_at": None}, commands)
+    check("a command line cut for a name keeps 120 characters, the ellipsis included",
+          len(commands[1]["description"]) == 120, commands[1]["description"])
     check("a blank description falls back to the command line, and `timeout 0`, which disables the "
           "timeout, gives no timeout end",
           commands[2] == {"id": "bk3", "started": "2026-11-02T11:27:00Z",

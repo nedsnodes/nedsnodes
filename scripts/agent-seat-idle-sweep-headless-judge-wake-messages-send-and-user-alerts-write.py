@@ -436,7 +436,7 @@ class SweepLog:
         find in the agent-seat's transcript named."""
         not_found = {event["message_id"] for event in self.of_seat(seat, "delivery_checked")
                      if not event["found"]}
-        return {work_id for event in self.of_seat(seat, "judge_answer") if event.get("rule") == 5
+        return {work_id for event in self.of_seat(seat, "judge_answer") if event.get("rule") == 5  # pragma: no mutate, a judge_answer's rule is 2 or 5, and only rule 5's carries this key
                 and event.get("message_id") not in not_found
                 for work_id in event.get(RUNNING_WORK_ASKED_ABOUT, [])}
 
