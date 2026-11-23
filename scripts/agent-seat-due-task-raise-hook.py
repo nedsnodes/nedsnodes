@@ -471,9 +471,6 @@ class MarkdownParserParsingEachTextOnce:
             self._tokens_by_text[text] = self._parser.parse(text)
         return self._tokens_by_text[text]
 
-    def __getattr__(self, name):
-        return getattr(self._parser, name)
-
 
 def approval_walk_item_decided_or_problem(condition: dict, checker=None) -> dict:
     """{"met": bool}, with "problem", a clause saying why, when the item cannot be found.
