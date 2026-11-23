@@ -11,6 +11,7 @@ fixes the time with --now.
 
 import atexit
 import fcntl
+import hashlib
 import json
 import os
 import re
@@ -141,8 +142,18 @@ OWNER_TASKS = "nedsnodes-reboot-test-tasks"
 DELIVERY_TASK_SUBJECT = "Idle sweep: a message it sent is missing from the agent-seat's transcript"
 
 
+def socket_path(seat):
+    """The messaging socket path Machine.seat records for an agent-seat's agent-session."""
+    return f"/run/user/1000/cc-socks/{seat}.sock"
+
+
+def listed_ref(path):
+    """The [ref] ListAgents gives the agent-session whose messaging socket is at path."""
+    return hashlib.sha256(f"session:{path}".encode()).hexdigest()[:6]
+
+
 def send_to(seat, message="@prompt-text", **extra):
-    return dict({"to": f"{seat} [abc123]", "message": message}, **extra)
+    return dict({"to": f"{seat} [{listed_ref(socket_path(seat))}]", "message": message}, **extra)
 
 
 def sent_ok(seat="alpha"):
@@ -199,7 +210,17 @@ class Machine:
         transcript = project / f"{session}.jsonl"
         transcript.write_text("".join(json.dumps(record) + "\n" for record in records))
         self.transcripts[name] = transcript
+        self.session_record(name, session, socket_path(name))
         return transcript
+
+    def session_record(self, file_name, session, path, **fields):
+        """Claude Code's session record of a running agent-session; a None field is left out."""
+        records = self.home / ".claude" / "sessions"
+        records.mkdir(parents=True, exist_ok=True)
+        record = dict({"pid": 1, "sessionId": session, "kind": "interactive",
+                       "messagingSocketPath": path}, **fields)
+        (records / f"{file_name}.json").write_text(json.dumps(
+            {key: value for key, value in record.items() if value is not None}))
 
     def append(self, name, *records):
         with self.transcripts[name].open("a") as stream:
@@ -289,9 +310,9 @@ check("rule 3: the sender runs on Sonnet, allowed only SendMessage, ListAgents a
       argv[argv.index("--model") + 1] == "sonnet"
       and argv[argv.index("--tools") + 1] == "SendMessage,ListAgents,ToolSearch"
       and argv[argv.index("--allowedTools") + 1] == "SendMessage,ListAgents,ToolSearch", argv)
-check("rule 3: the sender is handed code's handoff text and the agent-seat's tmux session",
-      calls and HANDOFF_TEXT_START in calls[0]["prompt"] and "tmux alpha:" in calls[0]["prompt"],
-      calls)
+check("rule 3: the sender is handed code's handoff text and the ref of the agent-seat's entry",
+      calls and HANDOFF_TEXT_START in calls[0]["prompt"]
+      and f"whose ref is [{listed_ref(socket_path('alpha'))}]" in calls[0]["prompt"], calls)
 sent = machine.events("message_sent")
 check("rule 3: the send is logged as the nudge, with the text code wrote",
       len(sent) == 1 and sent[0]["step"] == "nudge" and sent[0]["text"].startswith(HANDOFF_TEXT_START),
@@ -1269,7 +1290,7 @@ check("rule 1, the reset time not passed: no wake, the limit's account recorded"
 # --- the account changes ---------------------------------------------------------------------------
 machine = Machine()
 machine.seat("alpha", [user("go"), usage_limit(RESET_PASSED + 86400)])
-machine.seat("beta", DONE_TURN)
+machine.seat("beta", DONE_TURN, session="s-beta")
 machine.script()
 machine.run(0)
 check("the first account seen is only recorded",
@@ -1283,7 +1304,9 @@ machine.script({"sends": [send_to("alpha"), send_to("beta")], "answer": {"sent":
 code, _ = machine.run(2)
 calls = machine.claude_calls()
 check("an account change: one headless agent-session sends the notice to every agent-seat",
-      code == 0 and len(calls) == 1 and "alpha, beta" in calls[0]["prompt"]
+      code == 0 and len(calls) == 1
+      and f"alpha [{listed_ref(socket_path('alpha'))}], beta [{listed_ref(socket_path('beta'))}]"
+      in calls[0]["prompt"]
       and "The claude.ai account logged in on ned-box changed at" in calls[0]["prompt"]
       and sorted(event["agent_seat"] for event in machine.events("message_sent")) == ["alpha", "beta"],
       (code, calls))
@@ -1412,12 +1435,13 @@ check("a difference beside a send to another entry: each goes to a task of its o
       and machine.owner_task_subjects() == [
           SENT_TEXT_TASK_SUBJECT, "Idle sweep: a headless agent-session failed: the sender's "
           "SendMessage calls were not the sends code asked for"]
-      and len(failed) == 1 and failed[0]["problem"] == "sent to 'beta [abc123]', which is not alpha"
+      and len(failed) == 1 and failed[0]["problem"]
+      == f"sent to 'beta [{listed_ref(socket_path('beta'))}]', which is not alpha"
       and not machine.alerts(), (failed, machine.alerts(), machine.owner_tasks()))
 
 machine = Machine()
 machine.seat("alpha", DONE_TURN)
-machine.seat("beta", DONE_TURN)
+machine.seat("beta", DONE_TURN, session="s-beta")
 machine.run(0)
 machine.account("account-2")
 machine.script({"sends": [DROPPED, send_to("beta")], "answer": {"sent": True, "reason": "r"}})
@@ -1433,7 +1457,7 @@ check("an account notice sent to one agent-seat with another text: logged, a tas
 
 machine = Machine()
 machine.seat("alpha", DONE_TURN)
-machine.seat("beta", DONE_TURN)
+machine.seat("beta", DONE_TURN, session="s-beta")
 machine.run(0)
 machine.account("account-2")
 machine.script({"sends": [send_to("beta"), DROPPED], "answer": {"sent": True, "reason": "r"}})
@@ -1499,6 +1523,123 @@ machine.run(0)
 check("the sender is told that the do-not-reply sentence is part of the message",
       KEEP_IT in machine.claude_calls()[0]["prompt"].replace("\n", " "), machine.claude_calls())
 
+
+# --- which entry is the agent-seat's: the ref of the agent-session its supervisor launched last ----
+def reached(to, prepare=lambda machine: None, session="s-1"):
+    """Run rule 3 for alpha with one send to `to`; return the machine."""
+    machine = Machine()
+    machine.seat("alpha", DONE_TURN, session=session)
+    machine.handoff_put_off(session)
+    prepare(machine)
+    machine.script({"sends": [{"to": to, "message": "@prompt-text"}],
+                    "answer": {"sent": True, "reason": "sent"}})
+    machine.run(0)
+    return machine
+
+
+def counted(machine):
+    return bool(machine.events("message_sent")) and not machine.events("headless_failed")
+
+
+# After a session-handoff, a helper the previous agent-session started in the agent-seat's tmux
+# pane, such as a reviewer, can still run; it is older than the successor and may share its name.
+HELPER_SOCKET = "/run/user/1000/cc-socks/4100.sock"
+SUCCESSOR_SOCKET = "/run/user/1000/cc-socks/4200.sock"
+
+
+def helper_and_successor(machine):
+    machine.session_record("4100", "s-1", HELPER_SOCKET, name="alpha", tmux="alpha:@0.%0",
+                           startedAt=1_000)
+    machine.session_record("alpha", "s-2", SUCCESSOR_SOCKET, name="alpha", tmux="alpha:@0.%0",
+                           startedAt=2_000)
+
+
+machine = reached(f"alpha [{listed_ref(HELPER_SOCKET)}]", helper_and_successor, session="s-2")
+check("after a session-handoff, a send to an older helper named after the agent-seat does not "
+      "count: the agent-seat is the agent-session whose id the supervisor launched last",
+      not machine.events("message_sent") and any(
+          "no SendMessage to alpha succeeded" in event["problem"]
+          for event in machine.events("headless_failed")), machine.events())
+machine = reached(f"alpha [{listed_ref(SUCCESSOR_SOCKET)}]", helper_and_successor, session="s-2")
+check("after a session-handoff, a send to the successor counts",
+      counted(machine), machine.events())
+check("the sender is told the successor's ref, not the helper's",
+      f"[{listed_ref(SUCCESSOR_SOCKET)}]" in machine.claude_calls()[0]["prompt"]
+      and listed_ref(HELPER_SOCKET) not in machine.claude_calls()[0]["prompt"],
+      machine.claude_calls())
+
+# MD-skills-2's entry, as ListAgents listed it on ned-box for the agent-session whose socket was this
+# path: the ref is computed as Claude Code computes it.
+machine = reached("Cpc [bc3857]", lambda machine: machine.session_record(
+    "alpha", "s-1", "/run/user/1000/cc-socks/3996201.sock"))
+check("a renamed agent-session counts by its ref, whatever its name", counted(machine),
+      machine.events())
+
+for to, case in (("alpha [aaaaaa]", "a send to the agent-seat's name with another ref"),
+                 ("alpha", "a send to the agent-seat's name with no ref")):
+    machine = reached(to)
+    check(f"{case} does not count", not machine.events("message_sent") and any(
+        "sent to" in event["problem"] for event in machine.events("headless_failed")),
+        machine.events())
+
+
+def unreadable_records_first(machine):
+    records = machine.home / ".claude" / "sessions"
+    (records / "0-a-directory.json").mkdir()
+    (records / "1-not-json.json").write_text("{not json")
+    (records / "2-not-an-object.json").write_text("[]")
+
+
+machine = reached(send_to("alpha")["to"], unreadable_records_first)
+check("session records that cannot be read are skipped, and the agent-seat's is found",
+      counted(machine), machine.events())
+
+for case, breaks in (
+        ("no session record", lambda machine: (
+            machine.home / ".claude" / "sessions" / "alpha.json").unlink()),
+        ("its session record gives no socket path",
+         lambda machine: machine.session_record("alpha", "s-1", None))):
+    machine = Machine()
+    machine.seat("alpha", DONE_TURN)
+    machine.handoff_put_off()
+    breaks(machine)
+    machine.script(sent_ok())
+    code, _ = machine.run(0)
+    check(f"{case} has the id the supervisor launched last: no sender is started, and a "
+          "user-alert, exit 1",
+          code == 1 and not machine.claude_calls() and not machine.events("message_sent")
+          and [event["session_id"] for event in machine.events("agent_seat_entry_not_found")]
+          == ["s-1"] and [alert["title"] for alert in machine.alerts()]
+          == ["The idle sweep found no running agent-session of alpha"],
+          (code, machine.claude_calls(), machine.events(), machine.alerts()))
+
+machine = Machine()
+machine.seat("alpha", DONE_TURN)
+machine.seat("beta", DONE_TURN, session="s-beta")
+machine.run(0)
+(machine.home / ".claude" / "sessions" / "beta.json").unlink()
+machine.account("account-2")
+machine.script(sent_ok())
+code, _ = machine.run(1)
+calls = machine.claude_calls()
+check("an account notice for an agent-seat with no running agent-session goes to the others only, "
+      "and that agent-seat is alerted",
+      code == 1 and len(calls) == 1 and "beta" not in calls[0]["prompt"].split("----------")[0]
+      and [event["agent_seat"] for event in machine.events("message_sent")] == ["alpha"]
+      and [event["agent_seat"] for event in machine.events("agent_seat_entry_not_found")]
+      == ["beta"], (code, calls, machine.events()))
+
+machine = Machine()
+machine.seat("alpha", DONE_TURN)
+machine.run(0)
+(machine.home / ".claude" / "sessions" / "alpha.json").unlink()
+machine.account("account-2")
+machine.script(sent_ok())
+code, _ = machine.run(1)
+check("an account notice when no agent-seat has a running agent-session: no sender is started",
+      code == 1 and not machine.claude_calls() and not machine.events("message_sent")
+      and len(machine.events("agent_seat_entry_not_found")) == 1, (code, machine.events()))
+
 # --- headless agent-sessions that fail --------------------------------------------------------------
 FAILURES = (
     ("exits nonzero", {"exit": 1}, "claude exited 1"),
@@ -1508,7 +1649,7 @@ FAILURES = (
     ("gives no JSON answer", {"result": {"subtype": "success", "is_error": False}},
      "no JSON answer"),
     ("sends to another entry", {"sends": [send_to("beta")], "answer": {"sent": True, "reason": "r"}},
-     "sent to 'beta [abc123]'"),
+     f"sent to 'beta [{listed_ref(socket_path('beta'))}]'"),
     ("has its send fail", {"sends": [send_to("alpha", is_error=True)],
                            "answer": {"sent": False, "reason": "r"}}, "no SendMessage to alpha"),
     ("runs past its time", {"sleep": 5, "answer": {"sent": True, "reason": "r"}}, "stopped after"),
@@ -1660,8 +1801,9 @@ def usage_limit_exit_with_transcript(resets_at, session_id="headless-1"):
 
 def two_seats_with_open_tasks():
     machine = Machine()
-    for seat in ("alpha", "beta"):
-        machine.seat(seat, DONE_TURN)
+    # Each agent-seat has its own agent-session: the sweep finds an entry by its session id.
+    for seat, session in (("alpha", "s-1"), ("beta", "s-beta")):
+        machine.seat(seat, DONE_TURN, session=session)
         machine.task(seat, "1")
     return machine
 
@@ -1837,7 +1979,7 @@ check("a transcript the delivery check cannot read: a read failure logged, the c
 
 machine = Machine()
 machine.seat("alpha", [user("go"), usage_limit(RESET_PASSED + 86400)])
-machine.seat("beta", DONE_TURN)
+machine.seat("beta", DONE_TURN, session="s-beta")
 machine.run(0)
 machine.account("account-2")
 machine.script({"sends": [send_to("alpha"), send_to("beta")], "answer": {"sent": True, "reason": "r"}})
@@ -2061,8 +2203,9 @@ check("a rule 5 message whose send failed: a task, exit 1, the wait started so t
 # --- each event carries the time it was written, not the time the run started ---------------------
 machine = Machine()
 machine.seat("alpha", DONE_TURN)
-machine.seat("beta", DONE_TURN)
+machine.seat("beta", DONE_TURN, session="s-beta")
 machine.handoff_put_off()
+machine.handoff_put_off("s-beta")
 machine.script(dict(sent_ok(), sleep=2.5), sent_ok("beta"))
 machine.run(0)
 nudges = {event["agent_seat"]: event["at"] for event in machine.events("wait_step")}
@@ -2074,7 +2217,7 @@ check("a nudge logged after an earlier headless agent-session carries the time i
 machine = Machine()
 machine.seat("alpha", DONE_TURN)
 machine.handoff_put_off()
-machine.seat("beta", DONE_TURN)
+machine.seat("beta", DONE_TURN, session="s-beta")
 (machine.handoffs / "beta-supervisor-state.json").write_text("{not json")
 machine.script(dict(sent_ok(), sleep=1.2))
 machine.run(0)
@@ -2276,7 +2419,7 @@ machine.run(0)
 wake_texts += [("limit wake", text) for text in sender_texts(machine)]
 machine = Machine()
 machine.seat("alpha", DONE_TURN)
-machine.seat("beta", DONE_TURN)
+machine.seat("beta", DONE_TURN, session="s-beta")
 machine.run(0)
 machine.account("account-2")
 machine.script({"sends": [send_to("alpha"), send_to("beta")], "answer": {"sent": True, "reason": "r"}})

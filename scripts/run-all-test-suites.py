@@ -1058,6 +1058,9 @@ SUITES_RUN_WITHOUT_ANY_SANDBOX = {
     "nn-systems/general-tools/tests/agent-seat-worktree-create-with-owner-file-claude-code-worktree-create-hook-real-claude-code-test.py":
         "it runs the real claude, which needs the real HOME it is logged in from and an "
         "agent-seat of this machine, and the sandbox's HOME is empty",
+    "scripts/agent-seat-idle-sweep-list-agents-ref-formula-matches-installed-claude-code-test.py":
+        "it compares refs computed from ~/.claude/sessions, which the sandbox's HOME hides because "
+        "those records sit beside the agent-sessions' peer keys, with the refs in their transcripts",
 }
 
 SUITES_THAT_RUN_THE_REAL_CLAUDE_CLI = {
