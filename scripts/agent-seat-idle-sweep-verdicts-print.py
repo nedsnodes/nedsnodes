@@ -120,8 +120,6 @@ PROMISE_AFTER_EVENT = fields.PROMISE_AFTER_EVENT
 STANDING_RULE = fields.STANDING_RULE
 HOLD = fields.HOLD
 CONDITIONAL_ON_USER = fields.CONDITIONAL_ON_USER
-NEGATIVE = fields.NEGATIVE
-NOT_RAISED_KINDS = (CONDITIONAL_ON_USER, NEGATIVE)
 
 PROMISE_PHRASES = (
     (CONDITIONAL_ON_USER, re.compile(r"\bsay the word,? and I'?ll\b", re.I)),
@@ -195,17 +193,6 @@ RX_CONDITIONAL_ON_EVENT = re.compile(
     r"|\bas\s+(?:each\b|(?:it|they)\s+(?!(?:(?:\w+ly|always|now|still|already|often|never)\s+)?"
     r"(?:is|are|was|were|be|should|would|could|can|may|might|must|will|does|did|do|has|had|have|"
     r"says?|said|stands?|seems?|looks?|goes|went|happens|turns|\w+ed)\b)[a-z])", re.I)
-RX_NEGATED_ACTION = re.compile(
-    r"\b(?:without|instead of|rather than|not yet|never|no longer|don't|won't|can't)\s+"
-    r"(?:\w+\s+){0,2}?(?:push|pushing|commit|committing|dispatch|dispatching|fork|forking|file|"
-    r"filing|open|opening|send|sending|message|messaging|start|starting|spawn|spawning)\b"
-    # A negated object declines the action too, as in "I'm starting nothing else for now"; but
-    # "nothing but the test" names what is done, and "no more than five" sets a limit.
-    r"|\b(?:" + _VERBS + "|" + _GERUNDS + r")\s+(?:nothing|none|no\s+(?:more|other|new|further))\b"
-    r"(?!\s+(?:else\s+)?(?:but|than)\b)",
-    re.I)
-# Coordinated clauses share the sentence's subject: "I'll push no further changes and merge it now".
-RX_CLAUSE_BREAK = re.compile(r",\s*(?:and\s+)?then\s+|\s+and\s+(?:then\s+)?|;\s*", re.I)
 
 
 def clean_text(text):
@@ -250,26 +237,13 @@ def _announces(sentence):
     return bool(match and _gerund_announces(sentence, match))
 
 
-def _declines_every_action(sentence):
-    """Whether a clause declines an action and no other clause announces one."""
-    clauses = RX_CLAUSE_BREAK.split(sentence)
-    if not any(RX_NEGATED_ACTION.search(clause) for clause in clauses):
-        return False
-    return not any(not RX_NEGATED_ACTION.search(clause)
-                   and (_announces(clause) or _announces("I'll " + clause))
-                   for clause in clauses)
-
-
 def sentence_kind(sentence):
     """Return the kind of a sentence the phrase lists match, or None for a sentence they miss."""
     if sentence.endswith("?"):
         return None
     kind = next((kind for kind, pattern in PROMISE_PHRASES if pattern.search(sentence)), None)
-    if kind is None:
-        if not _announces(sentence):
-            return None
-        if _declines_every_action(sentence):
-            return NEGATIVE
+    if kind is None and not _announces(sentence):
+        return None
     # The user has the next move whatever else the sentence promises.
     if RX_CONDITIONAL_ON_USER.search(sentence):
         return CONDITIONAL_ON_USER
@@ -740,7 +714,7 @@ def code_reading_of_sentence(kind, turn_started_at, task_tool_calls, open_waitin
 
     A task created or updated in the sentence's turn or after it may back the sentence, and so may
     any open task that waits on something, however old."""
-    if kind in NOT_RAISED_KINDS:
+    if kind == CONDITIONAL_ON_USER:
         return fields.NOT_RAISED
     if kind in (PROMISE_AFTER_EVENT, HOLD):
         if open_waiting_tasks:

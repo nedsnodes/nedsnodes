@@ -379,7 +379,6 @@ try:
         ("Unless you object, I'll add that as one clause to the item's new text.",
          "promise_after_event"),
         ("If you haven't, I'll hold it.", "hold"),
-        # A clause that declines does not hide an action another clause announces.
         ("I'm starting nothing else until the tests finish, then I'll merge PR 4001.",
          "promise_after_event"),
         ("I'll push no further changes and merge it now.", "announced_action"),
@@ -411,13 +410,15 @@ try:
                      "I'll open no more pull requests today.",
                      "I'll push no other branches.",
                      "I'm starting no new reviews for now and the load is high.",
-                     "I'll file no further issues today."):
+                     "I'll file no further issues today.",
+                     "I'll open no new issues and pull requests",
+                     "I'll push no further changes, but I'll merge it now."):
         machine = Machine()
         machine.seat("alpha", [user("go"), assistant(sentence), turn_end()])
         _, verdicts, _ = machine.run()
-        check(f"a negative sentence is not raised, and rules 3 to 5 decide: {sentence!r}",
+        check(f"a sentence that declines goes to the judge: {sentence!r}",
               [(s["kind"], s["code_reading"]) for s in verdicts["alpha"]["sentences"]]
-              == [("negative", "not_raised")] and verdicts["alpha"].get("rule") == 4,
+              == [("announced_action", "judge")] and verdicts["alpha"].get("rule") == 2,
               verdicts["alpha"])
     machine = Machine()
     machine.seat("alpha", [user("go"),
