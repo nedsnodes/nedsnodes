@@ -786,23 +786,19 @@ with tempfile.TemporaryDirectory() as workspace:
     ])
     check("a removal still claims its display past another removal", never_read(path) == ["B"], never_read(path))
 
-    hop_peer = '<cross-session-message from="s" hop-chain="abc" from-name="x" from-mode="prompting">\nbody\n</cross-session-message>'
-    delivered_peer = '<cross-session-message from="s" from-name="x" from-mode="prompting">\nbody\n</cross-session-message>'
-    path = write_transcript(workspace, "peer-delivered-without-hop-chain.jsonl", [
-        *ordinary_records(), enqueue_record("human reply"), enqueue_record(hop_peer), dequeue_record(),
-        user_record(f"Another Claude session sent a message:\n{delivered_peer}\n\nThis came from another Claude session."),
-        assistant_record("handled"),
+    path = write_transcript(workspace, "equal-reply-queued-before-absorbed-attachment.jsonl", [
+        *ordinary_records(), enqueue_record("A"), remove_record("A", "absorbed_mid_turn"),
+        enqueue_record("A"), absorbed_attachment_record("A"),
     ])
-    check("a peer message delivered without hop-chain is the one dequeued, not the older reply",
-          never_read(path) == ["human reply"], never_read(path))
+    check("an absorbed removal claims its attachment past an equal message queued after it",
+          never_read(path) == ["A"], never_read(path))
 
-    other_peer = '<cross-session-message from="s" from-name="x" from-mode="prompting">\nanother body\n</cross-session-message>'
-    path = write_transcript(workspace, "different-peer-body-does-not-match.jsonl", [
-        *ordinary_records(), enqueue_record(hop_peer),
-        user_record(f"Another Claude session sent a message:\n{other_peer}\n"),
+    path = write_transcript(workspace, "absorbed-without-attachment-then-equal-dequeued.jsonl", [
+        *ordinary_records(), enqueue_record("human reply"), enqueue_record("N"),
+        remove_record("N", "absorbed_mid_turn"), enqueue_record("N"), dequeue_record(), user_record("N"),
     ])
-    check("a delivered peer message with another body does not read the queued one",
-          extractor.shown_text_is_queued_text(f"Another Claude session sent a message:\n{other_peer}\n", hop_peer) is False)
+    check("an absorbed removal does not claim the user record of a later equal message's dequeue",
+          never_read(path) == ["human reply"], never_read(path))
 
     path = write_transcript(workspace, "short-final-turn-nothing-queued.jsonl", [
         *ordinary_records(), assistant_record("Approve the short change? A approve, D disapprove."),

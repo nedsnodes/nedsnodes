@@ -387,7 +387,7 @@ CONVERSATION_TAIL_QUEUED_USER_MESSAGES_NEVER_READ_BY_AGENT_INTRODUCTION = (
 QUEUED_TEXT_OF_ANOTHER_SENDER_TAG_OPENINGS = ("<task-notification", "<cross-session-message", "<agent-message")
 PEER_MESSAGE_TAG_OPENINGS = ("<cross-session-message", "<agent-message")
 DELIVERED_PEER_MESSAGE_FIRST_LINE = "Another Claude session sent a message:"
-QUEUE_REMOVE_REASONS_THAT_DELIVER_TO_AGENT = ("absorbed_mid_turn", "delivered_to_agent")
+QUEUE_REMOVE_REASON_ABSORBED_MID_TURN = "absorbed_mid_turn"
 
 
 def texts_shown_to_agent(record) -> list:
@@ -410,22 +410,16 @@ def texts_shown_to_agent(record) -> list:
     return [joined_text_blocks(content).strip()]
 
 
-def peer_message_without_hop_chain(message: str) -> str:
-    return re.sub(r'\A(<[^>]*?) hop-chain="[^"]*"', r"\1", message)
+class QueuedCommandAttachmentShownForms(list):
+    """The shown texts of a queued_command attachment, the one record type that delivers an absorbed removal."""
 
 
 def shown_text_is_queued_text(shown: str, queued: str) -> bool:
-    """Match exactly, so that `A` is not read in any text containing it.
-
-    Claude Code delivers a peer message under a first line, with advice after it and without its hop-chain attribute.
-    """
+    """Match exactly, so that `A` is not read in any text containing it; a peer message may carry the harness's wrapper."""
     if shown == queued:
         return True
-    first_line = f"{DELIVERED_PEER_MESSAGE_FIRST_LINE}\n"
-    if not queued.startswith(PEER_MESSAGE_TAG_OPENINGS) or not shown.startswith(first_line):
-        return False
-    delivered = peer_message_without_hop_chain(shown[len(first_line):])
-    return f"{delivered}\n".startswith(f"{peer_message_without_hop_chain(queued)}\n")
+    return (queued.startswith(PEER_MESSAGE_TAG_OPENINGS)
+            and f"{shown}\n".startswith(f"{DELIVERED_PEER_MESSAGE_FIRST_LINE}\n{queued}\n"))
 
 
 def first_pending_position_shown(pending: list, shown_forms: list):
@@ -457,31 +451,19 @@ def queue_events_of_transcript(transcript_path: Path) -> list:
             else:
                 shown_forms = [text for text in texts_shown_to_agent(record) if text]
                 if shown_forms:
-                    events.append(shown_forms)
+                    events.append(QueuedCommandAttachmentShownForms(shown_forms)
+                                  if record.get("type") == "attachment" else shown_forms)
     return events
 
 
-def queue_operation_may_own_later_display_of(event, queued: str) -> bool:
-    if not isinstance(event, dict):
-        return False
-    return event["operation"] in ("dequeue", "popAll") or (
-        event["operation"] == "enqueue" and isinstance(event["content"], str) and event["content"].strip() == queued)
-
-
-def claim_delivery_record(events: list, operation_index: int, claimed: set, queued_texts: list,
-                          stop_at_operation_that_may_own_the_display: bool = False):
-    """Claim the first unclaimed record before the next agent record that shows a queued text; return that text's position.
-
-    A delivering remove may have no display record of its own, so its claim stops where a later operation may own the display.
-    """
+def claim_delivery_record(events: list, operation_index: int, claimed: set, queued_texts: list, record_type: type = list):
+    """Claim the first unclaimed record of record_type before the next agent record that shows a queued text; return that text's position."""
     for position, queued in enumerate(queued_texts):
         for index in range(operation_index + 1, len(events)):
             event = events[index]
             if event is None:
                 break
-            if stop_at_operation_that_may_own_the_display and queue_operation_may_own_later_display_of(event, queued):
-                break
-            if isinstance(event, list) and index not in claimed and first_pending_position_shown([queued], event) is not None:
+            if isinstance(event, record_type) and index not in claimed and first_pending_position_shown([queued], event) is not None:
                 claimed.add(index)
                 return position
     return None
@@ -497,8 +479,9 @@ def unread_queued_user_messages_with_enqueue_lines(transcript_path: Path) -> lis
 
     A queue-operation "enqueue" adds a message; "remove" takes the first with its content away; "popAll"
     returns every message to the input box; "dequeue", which names no content, takes the message that a
-    user record before the next agent record shows, or else the oldest. The record that delivers a dequeue
-    or a delivering remove removes no second copy; any other record showing a message removes one copy.
+    user record before the next agent record shows, or else the oldest. A queued_command attachment delivers
+    an absorbed remove. The record that delivers either removes no second copy; any other record showing a
+    message removes one copy.
     Messages from another sender's known tag are left out. Each is a dict of its text and its enqueue's
     transcript line index, which keeps its place among the dialog turns.
     """
@@ -523,9 +506,8 @@ def unread_queued_user_messages_with_enqueue_lines(transcript_path: Path) -> lis
         elif operation == "remove" and content in pending:
             position = pending.index(content)
             del pending[position], enqueue_lines[position]
-            if event["reason"] in QUEUE_REMOVE_REASONS_THAT_DELIVER_TO_AGENT:
-                claim_delivery_record(events, index, claimed, [content],
-                                      stop_at_operation_that_may_own_the_display=True)
+            if event["reason"] == QUEUE_REMOVE_REASON_ABSORBED_MID_TURN:
+                claim_delivery_record(events, index, claimed, [content], QueuedCommandAttachmentShownForms)
         elif operation == "popAll":
             pending, enqueue_lines = [], []
         elif operation == "dequeue" and pending:
