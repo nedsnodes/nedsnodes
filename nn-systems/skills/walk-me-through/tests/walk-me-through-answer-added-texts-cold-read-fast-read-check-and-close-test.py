@@ -2006,6 +2006,42 @@ def test_a_waiting_item_under_a_heading_shared_with_another_reads_only_its_own_l
           and "\nitem 7 of 9: the user answered approved #case_against_none (" in case.minutes.read_text(), described(result))
 
 
+def test_a_waiting_item_reads_a_new_line_of_its_shared_setext_heading_that_its_shown_copy_holds():
+    document = ("# A walk\n\nItems 1 and 2 of 2: two rows\n#new \"Hide the old rows.\"\n----------------------------\n\n"
+                "**Item 1:** the first row.\n\n#case_against none.\n\nRecommendation: approve.\n\n"
+                "**Item 2:** the second row.\n\n#case_against none.\n\nRecommendation: approve.\n")
+    case = Case(next_to_present="item 2 of 2", document=document)
+    result = case.run("check")
+    check("check for item 2 fast-reads the #new line its shared setext heading holds above the underline, which the "
+          "copy the user is shown of item 2 holds",
+          result.returncode == 0 and case.calls.read_text() == "Hide the old rows.\n", described(result))
+
+
+
+def test_a_new_line_of_a_shared_setext_heading_that_runs_onto_the_next_line_is_refused_as_run_on():
+    document = ("# A walk\n\nItems 1 and 2 of 2: two rows\n#new \"Hide the old\nrows.\"\n----------------------------\n\n"
+                "**Item 1:** the first row.\n\n#case_against none.\n\nRecommendation: approve.\n\n"
+                "**Item 2:** the second row.\n\n#case_against none.\n\nRecommendation: approve.\n")
+    case = Case(next_to_present="item 2 of 2", document=document)
+    result = case.run("check")
+    check("check for item 2 refuses a #new line of its shared setext heading whose text runs onto the next line above "
+          "the underline, rather than fast-reading only its first line",
+          result.returncode != 0 and "line 4: the text of `#new` runs onto line 5 right below it" in result.stderr
+          and not case.calls.read_text(), described(result))
+
+
+def test_an_item_with_no_opening_of_its_own_under_a_shared_heading_keeps_the_heading_line_it_starts_at():
+    for opener in ("**Items 1 and 2 of 2: Recommendation: keep both rows.**",
+                   "## Items 1 and 2 of 2: Recommendation: keep both rows.",
+                   "Items 1 and 2 of 2: Recommendation: keep both rows.\n#case_against none.\n----------------"):
+        document = f"# A walk\n\n{opener}\n\nThe rows stay.\n\n**Item 2:** the second row.\n\nNothing more.\n"
+        case = Case(next_to_present="item 1 of 2", document=document)
+        case.minutes.write_text("# Minutes\n\n#next_to_present item 1 of 2\n")
+        checked = case.run("check", "--moved-on-no-decision", reply="next")
+        check(f"check --moved-on-no-decision for item 1, which has no opening of its own, reads the recommendation on "
+              f"the shared opener's line and refuses: {opener!r}",
+              checked.returncode == 1 and 'recommends "keep both rows' in checked.stderr, described(checked))
+
 def test_a_withdrawn_version_below_the_item_adds_no_text():
     document = WALK_DOCUMENT.replace(
         "## Item 4 of 9: no proposal here\n",
