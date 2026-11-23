@@ -14,20 +14,10 @@ from pathlib import Path
 wt = Path(sys.argv[1])
 spec = importlib.util.spec_from_file_location("fx", wt / "nn-systems/handoff/tests/handoff-supervisor-test-fixture.py")
 fx = importlib.util.module_from_spec(spec); spec.loader.exec_module(fx)
-DOC = "# W
-
-## Item 1 of 2: First
-
-Recommendation: x.
-
-## Item 2 of 2: Second
-
-Recommendation: y.
-"
+DOC = "# W\n\n## Item 1 of 2: First\n\nRecommendation: x.\n\n## Item 2 of 2: Second\n\nRecommendation: y.\n"
 root = Path(tempfile.mkdtemp()); d = root / "docs" / "walk"; d.mkdir(parents=True)
 for name, item in (("A-walk", "1"), ("B-walk", "2")):
-    (d / f"{name}.md").write_text(DOC); (d / f"{name}-minutes.md").write_text(f"#next_to_present item {item} of 2
-")
+    (d / f"{name}.md").write_text(DOC); (d / f"{name}-minutes.md").write_text(f"#next_to_present item {item} of 2\n")
 os.utime(d / "B-walk-minutes.md", (time.time() - 3600,) * 2)  # A-walk has the newer walk-minutes
 for step in ("Resume approval-walk B-walk.",
              "Read cold-read-records/A-walk/cold-read-triage.md, then resume approval-walk B-walk."):
