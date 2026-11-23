@@ -142,8 +142,8 @@ NEW_WORK_DURING_HANDOFF_DEFERRAL_INSTRUCTION = (
     "whether to start it again. Write work the "
     "writer could not list into a new next-step file that holds your next step "
     "and names that work, and run the writer again with --next-step-file. Do not "
-    "start long work, such as a cold-read-full-run or a pull-request review: add "
-    "it to your task list for your successor."
+    "start 10-plus-minute work, such as a cold-read-full-run or a pull-request "
+    "review: add it to your task list for your successor."
 )
 
 HANDOFF_DEFERRED_MARKER_NOT_DELETED = (
