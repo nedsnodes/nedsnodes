@@ -6,10 +6,10 @@ issue: "[Scheduled full mutation pass opens a duplicate failed-step task when th
 
 ## Reproduction
 
-This run used origin/main at `663c805a3cab39d9ff1d52f28c58c7a3bc1b390d`, in a detached worktree. The program under test is `scripts/scheduled-full-mutation-pass-of-merged-pull-requests-and-survivor-tasks-open.py`. The script below builds that program's own test fixture, so every log, task list and state file is in a scratch directory. For each merge it runs the program twice with a fake mutation program that exits 0 and writes no JSON result. To run it again, save the script printed below as `failed-step-task-subject-repro.py` in a scratch directory, make a detached worktree of the commit above, and put that worktree's path in place of `<worktree>`.
+This run used origin/main at `663c805a3cab39d9ff1d52f28c58c7a3bc1b390d`, in a detached worktree. The program under test is `scripts/scheduled-full-mutation-pass-of-merged-pull-requests-and-survivor-tasks-open.py`. The script below builds that program's own test fixture, so every log, task list and state file is in a scratch directory. For each merge it runs the program twice with a fake mutation program that exits 0 and writes no JSON result. To run it again, save the script printed below as `scheduled-full-mutation-pass-duplicate-failed-step-task-when-failure-line-holds-temporary-path-reproduction.py` in a scratch directory, make a detached worktree of the commit above, and put that worktree's path in place of `<worktree>`.
 
 ```
-env -u TMP -u TEMP TMPDIR=/tmp/q9 PYTHONDONTWRITEBYTECODE=1 python3 -B failed-step-task-subject-repro.py <worktree>/scripts/scheduled-full-mutation-pass-of-merged-pull-requests-and-survivor-tasks-open-test.py
+env -u TMP -u TEMP TMPDIR=/tmp/q9 PYTHONDONTWRITEBYTECODE=1 python3 -B scheduled-full-mutation-pass-duplicate-failed-step-task-when-failure-line-holds-temporary-path-reproduction.py <worktree>/scripts/scheduled-full-mutation-pass-of-merged-pull-requests-and-survivor-tasks-open-test.py
 ```
 
 `/tmp/q9` was a symbolic link to a scratch directory, removed afterwards, so that the temporary path stayed short while its files stayed in scratch. Its name is 3 characters longer than `/tmp`, so the threshold in this output is 36 characters where it is 39 with `TMPDIR=/tmp`.
@@ -28,7 +28,7 @@ subject_len=101 exits=[4, 4] tasks=1
    subject tail: 'xited 0 but its JSON file /tmp/q9/scheduled-fu'
 ```
 
-The script, `failed-step-task-subject-repro.py`:
+The script, `scheduled-full-mutation-pass-duplicate-failed-step-task-when-failure-line-holds-temporary-path-reproduction.py`:
 
 ```python
 import importlib.util, sys, tempfile
