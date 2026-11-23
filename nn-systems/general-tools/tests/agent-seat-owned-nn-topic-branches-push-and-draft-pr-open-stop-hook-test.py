@@ -25,6 +25,13 @@ _specification = importlib.util.spec_from_file_location(
 worktree_owner_file = importlib.util.module_from_spec(_specification)
 _specification.loader.exec_module(worktree_owner_file)
 
+_git_environment_fixture_specification = importlib.util.spec_from_file_location(
+    "git_redirecting_environment_removal_test_fixture",
+    REPO_ROOT / "scripts" / "git-redirecting-environment-removal-test-fixture.py")
+_git_environment_fixture = importlib.util.module_from_spec(_git_environment_fixture_specification)
+_git_environment_fixture_specification.loader.exec_module(_git_environment_fixture)
+_git_environment_fixture.remove_git_redirecting_environment_variables_from_this_process()
+
 FAKE_GH = """#!/usr/bin/env python3
 import json, os, sys
 with open(os.environ["FAKE_GH_CALLS"], "a") as calls:

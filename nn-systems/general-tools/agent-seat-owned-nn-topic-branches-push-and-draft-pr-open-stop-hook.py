@@ -54,6 +54,13 @@ DRAFT_PULL_REQUEST_DESCRIPTION = (
     "This description is a placeholder. Before marking the pull request ready for review, its "
     "owner replaces it with what the pull request changes, ending with the defect line CLAUDE.md "
     "asks for.\n")
+BRANCHES_NOT_FULLY_ON_GITHUB_OPENING_MESSAGE = (
+    "[rule turn-end-push-branches-not-fully-on-github] At this turn end, these branches of your "
+    "agent-seat did not fully reach GitHub:")
+BRANCHES_NOT_FULLY_ON_GITHUB_NEXT_STEP_MESSAGE = (
+    "For a branch whose line says it was not pushed, fix what the line names, and the next "
+    "turn end pushes it; do not push it by hand, because a ready pull request's head is "
+    "frozen. When a line quotes the pre-push hook's refusal, follow that refusal's steps.")
 
 
 def load_module(name, path):
@@ -184,11 +191,8 @@ def run(stdin_text, environment, default_directory):
         branch_push_and_draft_open(worktree, branch, failures)
     if not failures:
         return "", "", 0
-    lines = [f"{HOOK_NAME}: at this turn end, these branches of your agent-seat did not fully reach "
-             f"GitHub:"] + [f"- {failure}" for failure in failures]
-    lines.append("For a branch whose line says it was not pushed, fix what the line names, and the next "
-                 "turn end pushes it; do not push it by hand, because a ready pull request's head is "
-                 "frozen. When a line quotes the pre-push hook's refusal, follow that refusal's steps.")
+    lines = [BRANCHES_NOT_FULLY_ON_GITHUB_OPENING_MESSAGE, *(f"- {failure}" for failure in failures),
+             BRANCHES_NOT_FULLY_ON_GITHUB_NEXT_STEP_MESSAGE]
     output = {"hookSpecificOutput": {"hookEventName": "Stop", "additionalContext": "\n".join(lines)}}
     return json.dumps(output) + "\n", "", 0
 
