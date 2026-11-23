@@ -140,8 +140,9 @@ N or next to continue.](<page link>)`, alone on its line, or, for a sub-step
 whose publish failed, the same line without its link.
 approval_walk_waiting_sub_step_numbers_whose_text_ends_with_no_decision_closing_line
 says which waiting sub-steps ask for no decision: those whose text as shown
-ends with that line and holds no recommendation, the sub-steps the answer
-program's --moved-on-no-decision accepts.
+ends with that line and holds no recommendation, so that the answer
+program's --moved-on-no-decision, which refuses an item with a recommendation,
+accepts each of them.
 
 Tool-messages-to-agent follow
 docs/nedsnodes-wiki/nedsnodes-how-to-write-a-tool-message-to-agent-such-as-a-hook-refusal-or-script-error.md.

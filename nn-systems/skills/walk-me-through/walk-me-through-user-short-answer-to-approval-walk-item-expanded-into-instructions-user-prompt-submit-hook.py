@@ -312,15 +312,15 @@ WALK_UNKNOWN_FIND = (
     "Find out yourself: the last `#next_to_present` line in each of the checkout's docs/walk/*-minutes.md names its "
     "waiting item, and a value other than `none` or `closed` marks the approval-walk open.")
 ITEM_NOT_SHOWN_OPENING_LINE = "[rule walk-me-through-short-answer-to-item-not-shown-discarded] The user answered \"{answer}\" to {item} of approval-walk {walk}."
-NO_DECISION_SUB_STEP_ANSWER_NOT_RECORDED_LINES = (
+APPROVAL_WALK_SUB_STEP_ASKING_FOR_NO_DECISION_ANSWER_NOT_RECORDED_LINES = (
     "[rule walk-me-through-short-answer-not-recorded-because-sub-step-asks-for-no-decision-hook-message-rule] The user answered \"{answer}\" while {item} of approval-walk {walk} waits. That sub-step asks "
     "for no decision, so his answer approves, disapproves and records nothing.",
     "Do not run the walk's check or close step for this answer, because check would record it as his decision.",
     "Tell him in one sentence that his only choice here is N or next, then end your message with the closing line "
     "below, word for word, and wait for his answer.\n{closing_lines}",
 )
-NO_DECISION_SUB_STEP_ANSWER_ADDED_WORDS_TEXT = "He also wrote: \"{added}\". Act on those words first."
-NO_DECISION_SUB_STEP_NO_PAGE_TEXT = (
+APPROVAL_WALK_SUB_STEP_ASKING_FOR_NO_DECISION_ANSWER_USER_ADDED_WORDS_LINE = "He also wrote: \"{added}\". Act on those words first."
+APPROVAL_WALK_SUB_STEP_ASKING_FOR_NO_DECISION_AGENT_INSTRUCTION_TO_PUBLISH_PAGE_MISSING_FROM_WALK_MINUTES_LINE = (
     "If a line above shows `<page link>`, the walk-minutes record no `#item_page` line for that item: publish its "
     "page as the walk-me-through skill says, add the line, and put the page's link in place of `<page link>`.")
 IF_WALK_OPEN = "If an approval-walk is open:"
@@ -1658,12 +1658,12 @@ def no_decision_sub_step_answer_context(answer, walk):
         return None
     closing = [closing_line(number, walk) or closing_line(number, walk, "<page link>") for number in walk.numbers]
     lines = [line.format(answer=answer["answer"], item=walk.item, walk=walk.name, closing_lines="\n".join(closing))
-             for line in NO_DECISION_SUB_STEP_ANSWER_NOT_RECORDED_LINES]
+             for line in APPROVAL_WALK_SUB_STEP_ASKING_FOR_NO_DECISION_ANSWER_NOT_RECORDED_LINES]
     added = answer.get("rest") or answer.get("condition")
     if added:
-        lines.insert(2, NO_DECISION_SUB_STEP_ANSWER_ADDED_WORDS_TEXT.format(added=added))
+        lines.insert(2, APPROVAL_WALK_SUB_STEP_ASKING_FOR_NO_DECISION_ANSWER_USER_ADDED_WORDS_LINE.format(added=added))
     if any("<page link>" in line for line in closing):
-        lines.append(NO_DECISION_SUB_STEP_NO_PAGE_TEXT)
+        lines.append(APPROVAL_WALK_SUB_STEP_ASKING_FOR_NO_DECISION_AGENT_INSTRUCTION_TO_PUBLISH_PAGE_MISSING_FROM_WALK_MINUTES_LINE)
     return "\n".join(lines)
 
 
