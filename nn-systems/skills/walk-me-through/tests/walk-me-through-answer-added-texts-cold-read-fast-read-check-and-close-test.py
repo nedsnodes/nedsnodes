@@ -6542,6 +6542,23 @@ def test_a_bumped_item_answered_after_a_re_plan_removed_the_item_it_suspended_go
           and shown == ["two", "Summary"], f"{described(bumped)}{shown}\n{walk_document(case)}")
 
 
+def test_a_bumped_item_answered_after_the_item_it_suspended_was_deferred_twice_does_not_bring_that_item_back():
+    document = ordered_walk("## Item 2 of 9: two\n\n#case_against none.\n\nRecommendation: approve.\n\n")
+    case = Case(next_to_present="item 1 of 9", document=document)
+    case.run("check", "--deferred")
+    case.run("close")
+    case.run("check")
+    case.run("close")
+    path = case.checkout / "docs" / "walk" / f"{WALK_NAME}.md"
+    path.write_text(walk_document(case).replace("## Summary", unshown_item("three", f"{CATEGORY_TAG}must_fix_now")
+                                                + unshown_item("four", f"{CATEGORY_TAG}fix_next") + "## Summary"))
+    bumped = case.run("check", "--bump", "four", reply="bump four")
+    shown = titles_shown_in_turn(case, {0: ("--deferred",), 1: ("--deferred",)})
+    check("item 1, deferred a second time while the bumped item was still open, has left the walk, so answering the "
+          "bumped item does not bring it back", bumped.returncode == 0
+          and shown == ["one", "three", "four", "Summary"], f"{described(bumped)}{shown}\n{walk_document(case)}")
+
+
 def test_a_bumped_item_decided_through_its_last_sub_step_gives_way_to_the_item_it_suspended():
     document = ordered_walk("## Item 2 of 9: two\n\n#case_against none.\n\nRecommendation: approve.\n\n")
     case = Case(next_to_present="item 1 of 9", document=document)
