@@ -1878,6 +1878,24 @@ try:
           and (clean_removed_repository / "tracked.md").read_text(encoding="utf-8") == "Committed.\n"
           and clean_removed_git("status", "--porcelain").stdout == "", repr(clean_removed_lines))
 
+    # A clean file renamed and re-created: status lists its name as a rename source and as ??.
+    renamed_repository, renamed_git = repository_with_committed_file("checkout-stopped-cell-renames-a-clean-file")
+    with mock.patch.object(grid_module.cell_common, "REPO_ROOT", renamed_repository):
+        renamed_baseline = grid_module.cell_common.working_tree_state()
+        renamed_git("mv", "tracked.md", "moved.md")
+        (renamed_repository / "tracked.md").write_text("A reviewer's new file.\n", encoding="utf-8")
+        renamed_lines = grid_module.stopped_cells_write_check_lines(
+            [scratch / "claude-hunt-deep.md"], renamed_baseline, None, set())
+    renamed_commands = [command for line in renamed_lines for command in commands_in_line(line)]
+    renamed_removals = [line for line in renamed_lines if "rm -r -- " in line]
+    for command in renamed_commands:
+        subprocess.run(shlex.split(command), capture_output=True, text=True)
+    check("the undo given for a clean file renamed and re-created restores it and removes the rename's new name",
+          len(renamed_lines) == 2 and len(renamed_commands) == 2 and not renamed_removals
+          and (renamed_repository / "tracked.md").read_text(encoding="utf-8") == "Committed.\n"
+          and not (renamed_repository / "moved.md").exists()
+          and renamed_git("status", "--porcelain").stdout == "", repr(renamed_lines))
+
     # An already-conflicted file overwritten with the incoming side: only a diff against HEAD shows it.
     conflict_repository, conflict_git = repository_with_committed_file("checkout-stopped-cell-overwrites-a-conflict")
     conflict_git("checkout", "--quiet", "-b", "incoming")
