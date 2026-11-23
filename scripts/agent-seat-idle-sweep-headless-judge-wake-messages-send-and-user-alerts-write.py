@@ -207,9 +207,10 @@ PROMISE_MESSAGE = "promise_message"
 # On an open wait: the rule 2 messages sent on it, [{"at", "kinds", "sentences"}], or None when one
 # of them was sent by a version of this program that logged no sentences for it.
 PROMISE_MESSAGES = "promise_messages"
-# An event logged before a rule 2 message's sentences on an open wait are marked checked, carrying
-# its text and sentences. Until an outcome from the same invocation answers it, it holds the wait
-# open and the escalation and the user-alert report it.
+# The one event that holds a rule 2 message's text and sentences and marks every sentence judged
+# with them checked. With no wait open, the next invocation opens the wait on it and sends it. On
+# an open wait, until an outcome from the same invocation answers it, it holds the wait open and
+# the escalation and the user-alert report it.
 PROMISE_MESSAGE_PENDING = "promise_message_pending"
 # An event logged when a rule 2 message's send on an open wait failed, carrying its text and the
 # sentences it names, since no message_sent or promise_message event holds them.
@@ -408,10 +409,6 @@ class SweepLog:
             elif event["event"] == PROMISE_MESSAGE_PENDING:
                 if wait is not None:
                     wait.setdefault(PROMISE, event["at"])
-                    # A run stopped before marking these sentences checked judges them again, so
-                    # its record is replaced by the new one that holds them.
-                    pending = [record for record in pending
-                               if not set(record["sentences"]) <= set(event["sentences"])]
                     pending.append(event)
             elif event["event"] == PROMISE_MESSAGE_SEND_FAILED:
                 if wait is not None:
@@ -456,6 +453,20 @@ class SweepLog:
                  "sentences": record["sentences"], "text": record["text"]} for record in pending]
         return wait
 
+    def promise_with_no_wait(self, seat, session):
+        """The promise_message_pending record of this agent-session written with no wait open,
+        when no wait has opened since: a sweep stopped before opening the wait on it."""
+        unsent, wait_is_open = None, False
+        for event in self.of_seat(seat, "wait_step", "wait_ended", PROMISE_MESSAGE_PENDING):
+            if event["event"] == "wait_ended":
+                wait_is_open = False
+            elif event["event"] == PROMISE_MESSAGE_PENDING:
+                if not wait_is_open:
+                    unsent = event
+            elif event["step"] == NUDGE:
+                unsent, wait_is_open = None, True
+        return unsent if unsent and unsent["session_id"] == session else None
+
     def last_judge_answer(self, seat):
         answers = [event for event in self.of_seat(seat, "judge_answer") if event.get("rule") == 5]
         return answers[-1] if answers else None
@@ -471,7 +482,10 @@ class SweepLog:
 
     def checked_sentences(self, seat):
         return {(event["record_uuid"], event["sentence"])
-                for event in self.of_seat(seat, "sentence_checked")}
+                for event in self.of_seat(seat, "sentence_checked")} | {
+                    (item["record_uuid"], item["sentence"])
+                    for event in self.of_seat(seat, PROMISE_MESSAGE_PENDING)
+                    for item in event["sentences_checked"]}
 
     def limit_account(self, seat, record_uuid):
         """The account logged in when code first saw the limit record, the first one known."""
@@ -1020,6 +1034,14 @@ class Sweep:
         if wait and TELL_USER in wait and stretch and parse_time(stretch) > parse_time(wait[TELL_USER]):
             self.end_wait(seat, "it spent tokens after the user was told")
             wait = None
+        if not wait:
+            unsent = self.log.promise_with_no_wait(seat, session)
+            if unsent:
+                # Its sentences count as checked, so no later verdict would name this promise.
+                if not self.headless_usage_limit_pause_holds():
+                    self.send_promise_opening_wait(seat, verdict, stretch, unsent["text"],
+                                                   unsent["kinds"], unsent["sentences"])
+                return
         promise_text = None
         judged_sentences = rule == 2
         sentences_checked = []
@@ -1058,11 +1080,17 @@ class Sweep:
             self.sentences_checked(seat, [item for item in sentences_checked
                                           if item["sentence"] not in promise_sentences])
         elif judged_sentences:
-            if promise_text and wait:
+            if promise_text:
+                # One write holds the promise and marks its sentences checked, so that a sweep
+                # stopped at any later point cannot skip the sentences and lose the promise.
                 self.record({"event": PROMISE_MESSAGE_PENDING, "agent_seat": seat,
-                             "kinds": promise_kinds, "sentences": promise_sentences,
-                             "text": promise_text})
-            self.sentences_checked(seat, sentences_checked)
+                             "session_id": session, "kinds": promise_kinds,
+                             "sentences": promise_sentences, "text": promise_text,
+                             "sentences_checked": [
+                                 {"record_uuid": item["record_uuid"], "sentence": item["sentence"]}
+                                 for item in sentences_checked]})
+            else:
+                self.sentences_checked(seat, sentences_checked)
             self.checked(seat, verdict, transcript_read_at, check_is_new)
         if paused:
             if wait:
@@ -1072,12 +1100,8 @@ class Sweep:
             # A promise given in answer to a message goes on the open wait, so that repeated
             # promises cannot put off its escalation and the user-alert.
             if not wait:
-                # Logged before the send: the escalation quotes the nudge that opened the wait, so
-                # a promise message whose own send failed still reaches the agent-seat.
-                self.start_wait(seat, verdict, stretch, promise_text, 2)
-                self.record({"event": PROMISE_MESSAGE, "agent_seat": seat, "kinds": promise_kinds,
-                             "sentences": promise_sentences})
-                self.send(seat, verdict, promise_text, NUDGE)
+                self.send_promise_opening_wait(seat, verdict, stretch, promise_text, promise_kinds,
+                                               promise_sentences)
             else:
                 sent = self.send(seat, verdict, promise_text, NUDGE, failure_event={
                     "event": PROMISE_MESSAGE_SEND_FAILED, "agent_seat": seat,
@@ -1100,6 +1124,14 @@ class Sweep:
         self.record({"event": "wait_step", "agent_seat": seat, "step": NUDGE, "rule": rule,
                      "session_id": verdict[fields.SESSION_ID], "first_idle_at": stretch,
                      "text": step_text})
+
+    def send_promise_opening_wait(self, seat, verdict, stretch, text, kinds, sentences):
+        # Logged before the send: the escalation quotes the nudge that opened the wait, so a
+        # promise message whose own send failed still reaches the agent-seat.
+        self.start_wait(seat, verdict, stretch, text, 2)
+        self.record({"event": PROMISE_MESSAGE, "agent_seat": seat, "kinds": kinds,
+                     "sentences": sentences})
+        self.send(seat, verdict, text, NUDGE)
 
     def due_step(self, seat, verdict, wait):
         self.escalation_if_due(seat, verdict, wait)

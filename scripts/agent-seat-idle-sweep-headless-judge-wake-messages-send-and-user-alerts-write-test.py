@@ -789,7 +789,8 @@ check("rule 2, an unbacked promise code settles: no judge, one sender with the p
       len(calls) == 1 and 'You promised "I\'ll report when PR 927 merges.". Record it as a task'
       in calls[0]["prompt"], calls)
 check("rule 2: the sentence is logged as checked, and the message is the nudge",
-      [event["sentence"] for event in machine.events("sentence_checked")] == [PROMISE]
+      [item["sentence"] for event in machine.events("promise_message_pending")
+       for item in event["sentences_checked"]] == [PROMISE]
       and machine.events("wait_step")[0]["step"] == "nudge", machine.events())
 machine.script()
 machine.run(3)
@@ -1076,7 +1077,7 @@ def later_promise_run_stopped_after(last_event):
     return machine
 
 
-for last_event in ("sentence_checked", "checked", "message_sent"):
+for last_event in ("promise_message_pending", "checked", "message_sent"):
     machine = later_promise_run_stopped_after(last_event)
     machine.append("alpha", *recorded_task(927, 15))
     machine.script(sent_ok())
@@ -1093,19 +1094,132 @@ for last_event in ("sentence_checked", "checked", "message_sent"):
               and OTHER_PROMISE in alert["alert_text"] for alert in machine.alerts()),
           machine.alerts())
 
-# Stopped before its sentences were marked checked, a run's promise is judged and sent again.
-machine = later_promise_run_stopped_after("promise_message_pending")
+def promise_reaches_someone_after_a_stop_at_every_log_line(scenario, build, stopped_at, sentence):
+    """Stops the run at minute stopped_at after each line it logs, in turn. A stop after the send
+    but before its outcome is logged sends the promise again: on a wait the stopped run opened,
+    the escalation quotes it, and on an open wait the escalation and the user-alert report it as
+    unconfirmed."""
+    machine = build()
+    lines_before = len(machine.log.read_text().splitlines()) if machine.log.exists() else 0
+    machine.script(sent_ok())
+    machine.run(stopped_at)
+    lines_after = len(machine.log.read_text().splitlines())
+    check(f"{scenario}: the stopped run logs lines to cut", lines_after > lines_before)
+    for kept in range(lines_before + 1, lines_after + 1):
+        machine = build()
+        machine.script(sent_ok())
+        machine.run(stopped_at)
+        log_lines = machine.log.read_text().splitlines()
+        last_event = json.loads(log_lines[kept - 1])["event"]
+        machine.log.write_text("".join(line + "\n" for line in log_lines[:kept]))
+        machine.script(*[sent_ok() for _ in range(4)])
+        for minutes_later in (1, 17, 33):
+            machine.run(stopped_at + minutes_later)
+        sent = any(sentence in event["text"] for event in machine.events("message_sent"))
+        alerted = any(sentence in alert["alert_text"] for alert in machine.alerts())
+        check(f"{scenario}: stopped after line {kept} ({last_event}), the promise still reaches "
+              "the agent-seat or the user-alert", sent or alerted, machine.events())
+
+
+def promise_opening_its_wait():
+    machine = Machine()
+    machine.seat("alpha", [user("go"), assistant(PROMISE), turn_end()])
+    return machine
+
+
+def later_promise_after_a_failed_send():
+    machine = promise_sent_on_rule_five_wait(PROMISE_SEND_FAILS)
+    machine.append("alpha", user("and", at(7.5)), assistant(OTHER_PROMISE, at(8)), turn_end(at(8)))
+    return machine
+
+
+def same_words_in_a_later_turn():
+    machine = promise_sent_on_rule_five_wait(sent_ok())
+    machine.append("alpha", user("and", at(7.5)),
+                   assistant(PROMISE, at(8), uuid="later-turn-same-words"), turn_end(at(8)))
+    return machine
+
+
+promise_reaches_someone_after_a_stop_at_every_log_line(
+    "rule 2, a promise that opens its wait", promise_opening_its_wait, 0, PROMISE)
+promise_reaches_someone_after_a_stop_at_every_log_line(
+    "rule 2, a later promise after a failed send", later_promise_after_a_failed_send, 14,
+    OTHER_PROMISE)
+promise_reaches_someone_after_a_stop_at_every_log_line(
+    "rule 2, the same words in a later turn", same_words_in_a_later_turn, 14, PROMISE)
+
+# A stop before the wait opened: the record alone brings the promise back, once.
+machine = promise_opening_its_wait()
 machine.script(sent_ok())
-machine.run(14.5)
-check("rule 2: a run stopped after its pending record sends the promise again",
-      [event["sentences"] for event in machine.events("promise_message")] == [[OTHER_PROMISE]],
-      machine.events())
-machine.append("alpha", *recorded_task(927, 14.6), *recorded_task(928, 14.8))
+machine.run(0)
+log_lines = machine.log.read_text().splitlines()
+pending_line = next(index for index, line in enumerate(log_lines)
+                    if json.loads(line)["event"] == "promise_message_pending")
+machine.log.write_text("".join(line + "\n" for line in log_lines[:pending_line + 1]))
+machine.script(sent_ok())
+machine.run(1)
+check("rule 2: a run stopped before opening the wait: the next run opens it and sends the promise",
+      [event["step"] for event in machine.events("wait_step")] == ["nudge"]
+      and [event["sentences"] for event in machine.events("promise_message")] == [[PROMISE]]
+      and PROMISE in machine.events("message_sent")[-1]["text"], machine.events())
 machine.script()
-machine.run(20)
-check("rule 2: the promise sent again replaces the stopped run's pending record, so one task per "
-      "sentence ends the wait",
-      [event["why"] for event in machine.events("wait_ended")] == [SETTLED], machine.events())
+machine.run(2)
+check("rule 2: the promise a later run recovered is not sent a second time",
+      len(machine.events("promise_message")) == 1, machine.events())
+
+# A pause does not lose a record a stopped run already wrote.
+machine = promise_opening_its_wait()
+machine.script(sent_ok())
+machine.run(0)
+log_lines = machine.log.read_text().splitlines()
+pending_line = next(index for index, line in enumerate(log_lines)
+                    if json.loads(line)["event"] == "promise_message_pending")
+pause = {"at": at(0), "agent_seat_idle_sweep_invocation_started_at": at(0),
+         "event": "headless_usage_limit_pause", "resets_at": at(10)}
+machine.log.write_text("".join(line + "\n" for line in log_lines[:pending_line + 1])
+                       + json.dumps(pause) + "\n")
+machine.script()
+machine.run(1)
+check("rule 2: during a pause, a stopped run's promise is held, with no wait and no send",
+      not machine.events("wait_step") and not machine.claude_calls(), machine.events())
+machine.script(sent_ok())
+machine.run(11)
+check("rule 2: after the pause, a stopped run's promise opens its wait and is sent",
+      [event["sentences"] for event in machine.events("promise_message")] == [[PROMISE]]
+      and PROMISE in machine.events("message_sent")[-1]["text"], machine.events())
+
+# A stopped run's record for a promise of an earlier agent-session asks for nothing.
+machine = promise_opening_its_wait()
+machine.script(sent_ok())
+machine.run(0)
+log_lines = machine.log.read_text().splitlines()
+pending_line = next(index for index, line in enumerate(log_lines)
+                    if json.loads(line)["event"] == "promise_message_pending")
+machine.log.write_text("".join(line + "\n" for line in log_lines[:pending_line + 1]))
+machine.seat("alpha", DONE_TURN, session="s-2")
+machine.script()
+machine.run(1)
+check("rule 2: a stopped run's promise is not sent into a new agent-session",
+      not machine.events("promise_message"), machine.events())
+
+# A stopped run's record, then the same words in a later turn: the two are separate obligations.
+machine = promise_sent_on_rule_five_wait(sent_ok())
+log_before_stop = machine.log.read_text().splitlines()
+last_check = max(index for index, line in enumerate(log_before_stop)
+                 if json.loads(line)["event"] == "checked")
+machine.log.write_text("".join(line + "\n" for line in log_before_stop[:last_check + 1]))
+machine.append("alpha", user("and", at(7.5)),
+               assistant(PROMISE, at(8), uuid="later-turn-same-words"), turn_end(at(8)))
+machine.script(sent_ok())
+machine.run(14)
+machine.append("alpha", *recorded_task(927, 15))
+machine.script(sent_ok())
+machine.run(21)
+check("rule 2: the same words in a later turn do not erase a stopped run's promise, so one task "
+      "does not end the wait", not machine.events("wait_ended"), machine.events())
+check("rule 2: the escalation quotes the stopped run's promise",
+      PROMISE in machine.events("message_sent")[-1]["text"]
+      and "please check" in machine.events("message_sent")[-1]["text"], machine.events())
 
 # Every promise message on a rule 5 wait failed, and the agent-seat recorded the task.
 machine = promise_sent_on_rule_five_wait(PROMISE_SEND_FAILS)
@@ -1932,6 +2046,9 @@ check("an escalation sender at a usage limit with a reset time ahead: a pause, n
       and [event["step"] for event in machine.events("message_sent")] == ["nudge"],
       (code, machine.events("headless_usage_limit_pause"), machine.owner_tasks(),
        machine.claude_calls()))
+check("a promise a pause holds back writes no pending record, so its sentences stay unchecked",
+      [event["sentences"] for event in machine.events("promise_message_pending")] == [[PROMISE]],
+      machine.events("promise_message_pending"))
 machine.script(sent_ok())
 code, _ = machine.run(90)
 check("after the reset, the promise message the escalation's pause held back is sent",
@@ -2367,8 +2484,9 @@ machine.append("beta", user("more", at(1 / 60)), assistant(SECOND_PROMISE, at(1 
 machine.script(sent_ok("beta"), sent_ok("beta"))
 machine.run(7)
 check("a promise written between the transcript read and the check record is read on the next run",
-      SECOND_PROMISE in [event["sentence"] for event in machine.events("sentence_checked")
-                         if event["agent_seat"] == "beta"], machine.events())
+      SECOND_PROMISE in [item["sentence"] for event in machine.events("promise_message_pending")
+                         if event["agent_seat"] == "beta"
+                         for item in event["sentences_checked"]], machine.events())
 
 # --- the delivery check measures from the send's start, not from the sender's end ------------------
 # The sender runs 2 s, so its message_sent record is written 2 s after the send began. A received
