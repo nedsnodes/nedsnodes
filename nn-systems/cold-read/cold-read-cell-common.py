@@ -59,18 +59,42 @@ class CellRefusal(Exception):
         self.exit_code = exit_code
 
 
-# The keychain remains accessible because masking it logs the agent-binaries out.
+# The launchers treat Linux as ned-box. Each file on ned-box that holds a credential, by its exact path; with
+# REVIEWER_PROGRAM_LOGIN_FILES below, this is the whole of ned-box's list.
+CREDENTIAL_FILES_ON_NED_BOX = tuple(pathlib.Path.home() / path for path in (
+    ".ssh/id_ed25519_mac_side_action",
+    ".ssh/id_ed25519_ned_box_to_itself",
+    ".config/gh/hosts.yml",
+    ".config/nedsnodes/gemini-api.key",
+    ".config/nedsnodes/mac-claude.token",
+    ".config/nedsnodes/ned-review-merge.token",
+    ".config/nedsnodes/nn-shared-database-service-accepted-tokens",
+    ".config/nedsnodes/nn-shared-database-service.token",
+    ".config/nedsnodes/ubuntu-claude.token",
+    ".claude/daemon/control.key",
+    ".local/share/gnome-remote-desktop/certificates/rdp-tls.key",
+    "nedsmessenger/.env",
+    "nedsmessenger/secrets/claude-bot-token.json",
+    "nedsmessenger/secrets/claude-oauth-token",
+    "nedsmessenger/secrets/github-ubuntu-claude",
+    "nedsmessenger/secrets/github-ubuntu-codex",
+    "nedsmessenger/secrets/mac-claude-token.json",
+))
+# The Mac denies these folders and name patterns until its own list of credential files replaces them. On ned-box
+# the patterns only find files to ask the user about: nn-systems/cold-read/
+# cold-read-cell-credential-files-outside-denied-directories-daily-check-user-alert-write.py reports each file so
+# named that CREDENTIAL_FILES_ON_NED_BOX leaves out. The keychain remains accessible because masking it logs the
+# agent-binaries out.
 CREDENTIAL_DIRECTORIES = (
     pathlib.Path.home() / ".config" / "nedsnodes",
     pathlib.Path.home() / ".config" / "gh",
     pathlib.Path.home() / ".ssh",
     pathlib.Path.home() / ".steam",
-    # Denied whole: secrets/ holds credential files no name pattern matches.
     pathlib.Path.home() / "nedsmessenger",
 )
 CREDENTIAL_FILE_NAME_PATTERNS = ("*.token", ".env")
 
-# agy reads its login inside its sandbox; Claude and Codex authenticate outside model tools.
+# Both machines. agy reads its login inside its sandbox; Claude and Codex authenticate outside model tools.
 REVIEWER_PROGRAM_LOGIN_FILES = {
     "claude": (pathlib.Path.home() / ".claude" / ".credentials.json",),
     "codex": (pathlib.Path.home() / ".codex" / "auth.json",),
@@ -89,6 +113,12 @@ def reviewer_program_login_files(except_program: str = None,
             for path in paths if not only_present or path.is_file()]
 
 
+def ned_box_credential_and_login_files_present(except_program: str = None) -> list:
+    """Return ned-box's credential files that exist, login files included except except_program's."""
+    return ([str(path) for path in CREDENTIAL_FILES_ON_NED_BOX if path.is_file()]
+            + reviewer_program_login_files(except_program, only_present=True))
+
+
 def credential_directories_present() -> list:
     return [str(directory) for directory in CREDENTIAL_DIRECTORIES
             if directory.is_dir()]
@@ -101,9 +131,11 @@ def codex_credential_denying_permission_profile_arguments(
     # JSON string escaping also works for TOML basic strings used as path keys.
     entries = ({":slash_tmp": "read", ":tmpdir": "read"}
                if platform.startswith("linux") and extends == ":workspace" else {})
-    denied = credential_directories_present()
-    denied += reviewer_program_login_files(only_present=True)
-    if not platform.startswith("linux"):
+    if platform.startswith("linux"):
+        denied = ned_box_credential_and_login_files_present()
+    else:
+        denied = credential_directories_present()
+        denied += reviewer_program_login_files(only_present=True)
         denied += [f"/**/{pattern}" for pattern in CREDENTIAL_FILE_NAME_PATTERNS]
     entries.update((path, "deny") for path in denied)
     table = "{" + ",".join(f"{json.dumps(path)}={json.dumps(access)}"

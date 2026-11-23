@@ -244,6 +244,17 @@ with tempfile.TemporaryDirectory(prefix="cold-read-reviewer-score-test-") as nam
     check("precision with no hit and no FALSE is 0, not a division by zero",
           nothing_judged["precision"] == 0.0, str(nothing_judged))
 
+    # A parsed category is a new string object, so an identity comparison would miss it.
+    parsed_category = "".join(["TRUE_ONLY_OF_READER_", "CHECKOUT_NOT_OF_DRAFT"])
+    reader_checkout_only = scorer.summarize(
+        [{"reviewer": "x", "id": "1", "quote": "q", "placement": "TRUE-ONLY",
+          "rows": set(), "category": parsed_category, "confidence": "sure", "reason": ""}],
+        weights, total, 4)
+    check("a category equal to the true-only-of-reader-checkout name, but not the "
+          "same string object, counts as true only of the reader checkout",
+          reader_checkout_only["true_only_of_reader_checkout"] == 1
+          and reader_checkout_only["unfixed"] == 0, str(reader_checkout_only))
+
     # --- Fault: findings true only of the reader checkout had no category----------------
     artifact_placements = write_placements(scratch / "artifact", {
         "delta--placement.md": [
@@ -316,6 +327,17 @@ with tempfile.TemporaryDirectory(prefix="cold-read-reviewer-score-test-") as nam
           "they are byte-identical",
           result.returncode == 64
           and "The two files are byte-identical." in result.stderr,
+          result.stdout + result.stderr)
+    # "zeta--placement.md" sorts first, so here the earlier file's bytes are the lesser.
+    earlier_bytes_lesser = write_placements(scratch / "earlier-bytes-lesser", {
+        "zeta--placement.md": [("1", "ROW 1", "sure", "x")],
+        "zeta.md": [("1", "ROW 2", "sure", "x")],
+    })
+    result = run("--placements", str(earlier_bytes_lesser), "--defect-list", str(ruler))
+    check("two files of one reviewer whose earlier file has the lesser bytes are "
+          "called different, not byte-identical",
+          result.returncode == 64
+          and "The two files are different." in result.stderr,
           result.stdout + result.stderr)
     same_run = write_placements(scratch / "same-reader-run", {
         "ann--placement.md": [("1", "ROW 1", "sure", "x")],
@@ -409,6 +431,20 @@ with tempfile.TemporaryDirectory(prefix="cold-read-reviewer-score-test-") as nam
     check("a row of weight exactly 5 that a set misses in its only run is "
           "listed as a heavy row missed",
           "| ann + bob | 1 | 17 % | 1 | 1 |" in captured.getvalue(),
+          captured.getvalue())
+
+    captured = io.StringIO()
+    with contextlib.redirect_stdout(captured):
+        scorer.print_unions({"ann-run-1": {"rows_hit": {1, 2}},
+                             "ann-run-2": {"rows_hit": {1}},
+                             "ann-run-3": {"rows_hit": set()},
+                             "bob-run-1": {"rows_hit": set()},
+                             "bob-run-2": {"rows_hit": set()},
+                             "bob-run-3": {"rows_hit": set()}},
+                            {1: 8, 2: 6}, 14, [2], 6)
+    check("a heavy row missed in 1 of 3 runs is not listed as missed, and one "
+          "missed in 2 of 3 is",
+          "| ann + bob | 8 | 57 % | 1 | 2 |" in captured.getvalue(),
           captured.getvalue())
 
     captured = io.StringIO()

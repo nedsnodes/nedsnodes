@@ -35,7 +35,7 @@ Checks, per file type:
           JSON that parsers resolve silently: the second value wins and an
           edit to the first does nothing)
 
-An nc-architecture-overview, a file at the path
+An nn-architecture-overview, a file at the path
 scripts/architecture-overview-path-template-and-checked-against-commit-reader-common.py
 gives for a system with a directory under nn-systems/, gets the overview
 checks of docs/nedsnodes-wiki/nedsnodes-how-to-write-an-architecture-overview.md
@@ -382,7 +382,7 @@ def check_markdown_links(line: str, md_path: Path, repo_root: Path):
 
 
 def architecture_overview_system(path: Path, repo_root: Path):
-    """Return the system an nc-architecture-overview at path describes, or None."""
+    """Return the system an nn-architecture-overview at path describes, or None."""
     try:
         relative = path.resolve().relative_to(repo_root.resolve()).as_posix()
     except ValueError:
@@ -459,13 +459,17 @@ def check_overview_lock_and_environment_variable_sources(line: str, md_path: Pat
             yield f"{claim} does not appear in the source of {names}"
 
 
-GITHUB_REPOSITORY = "nedsnodes/nedsnodes"
-# GitHub redirects the repository's old name, and text written before the rename still holds it.
-OLD_REPOSITORY = "nedschorus/nedschorus"
+_repository_names_spec = importlib.util.spec_from_file_location(
+    "github_repository_name_and_name_before_project_rename_common",
+    Path(__file__).resolve().parents[1] / "nn-systems" / "general-tools"
+    / "github-repository-name-and-name-before-project-rename-common.py")
+repository_names = importlib.util.module_from_spec(_repository_names_spec)
+_repository_names_spec.loader.exec_module(repository_names)
+GITHUB_REPOSITORY = repository_names.REPOSITORY
 PLANNED_WORK_HEADING = "## Planned work"
 PLANNED_WORK_GHI_LINE = re.compile(
     r"\s*(?:[-*+]|\d+[.)]) GHI \[(?P<title>.+)\]\(https://github\.com/"
-    + r"(?:" + re.escape(GITHUB_REPOSITORY) + "|" + re.escape(OLD_REPOSITORY) + r")/issues/(?P<number>\d+)\)")
+    + repository_names.REPOSITORY_NAME_OR_NAME_BEFORE_PROJECT_RENAME_PATTERN + r"/issues/(?P<number>\d+)\)")
 PLANNED_WORK_ENTRY = re.compile(r"\s*(?:[-*+]|\d+[.)])\s|.*github\.com/[^)\s]+/issues/\d+")
 GITHUB_QUERY_TIMEOUT_SECONDS = 60
 
@@ -612,7 +616,7 @@ def in_frozen_measured_data(path: Path, repo_root: Path) -> bool:
 
 
 def lint_markdown(path: Path, repo_root: Path, architecture_overview_checks=False):
-    """Yield (line number, problem). The nc-architecture-overview checks, one of
+    """Yield (line number, problem). The nn-architecture-overview checks, one of
     which queries GitHub, run only when architecture_overview_checks is true."""
     if in_frozen_measured_data(path, repo_root):
         return

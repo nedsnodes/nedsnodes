@@ -7,7 +7,8 @@ two suites sharing one copy would see each other's patches.
 
 Loading it puts in place, for the rest of the process, the sandboxes every
 case relies on: a scratch HOME, so no launch writes the real ~/.claude.json;
-an ssh first on PATH that never reaches ned-box, an empty
+no TMUX or TMUX_PANE, so no supervisor start pipes the calling agent-seat's
+tmux pane, and a scratch terminal captures directory; an ssh first on PATH that never reaches ned-box, an empty
 directory standing in for the overview reminders' marks, and a directory of
 the process's own for the agent-binary update lock.
 
@@ -50,6 +51,16 @@ atexit.register(shutil.rmtree, SCRATCH_HOME_DIRECTORY, True)
 os.environ["HOME"] = str(SCRATCH_HOME_DIRECTORY)
 SCRATCH_CLAUDE_JSON_PATH = SCRATCH_HOME_DIRECTORY / ".claude.json"
 
+# No supervisor a case starts may pipe the calling agent-seat's tmux pane: every
+# supervisor start runs `tmux pipe-pane -t $TMUX_PANE`, which replaces the pane's
+# running terminal capture, and agents run these suites from their own pane.
+# Without TMUX and TMUX_PANE a start captures nothing; a case that wants a
+# capture runs a tmux server of its own and points the destination elsewhere.
+os.environ.pop("TMUX", None)
+os.environ.pop("TMUX_PANE", None)
+os.environ["AGENT_SEAT_TERMINAL_CAPTURES_DESTINATION"] = str(
+    SCRATCH_HOME_DIRECTORY / "agent-seat-terminal-captures")
+
 _spec = importlib.util.spec_from_file_location("handoff_supervisor", SCRIPT_PATH)
 supervisor = importlib.util.module_from_spec(_spec)
 _spec.loader.exec_module(supervisor)
@@ -81,7 +92,7 @@ SSH_THAT_NEVER_REACHES_NED_BOX_DIRECTORY = Path(
     tempfile.mkdtemp(prefix="ssh-that-never-reaches-ned-box-"))
 atexit.register(shutil.rmtree, SSH_THAT_NEVER_REACHES_NED_BOX_DIRECTORY, True)
 (SSH_THAT_NEVER_REACHES_NED_BOX_DIRECTORY / "ssh").write_text(
-    "#!/bin/sh\necho 'ssh: this nc-test-suite never reaches ned-box' >&2\nexit 255\n",
+    "#!/bin/sh\necho 'ssh: this nn-test-suite never reaches ned-box' >&2\nexit 255\n",
     encoding="utf-8")
 (SSH_THAT_NEVER_REACHES_NED_BOX_DIRECTORY / "ssh").chmod(0o755)
 os.environ["PATH"] = (f"{SSH_THAT_NEVER_REACHES_NED_BOX_DIRECTORY}{os.pathsep}"

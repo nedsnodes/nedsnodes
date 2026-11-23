@@ -90,7 +90,7 @@ the threshold with no file written fails, as on the other legs.
 
 AGY RUNS INSIDE THE OPERATING SYSTEM'S SANDBOX, because nothing inside agy
 keeps a reviewer from reading a credential file (user-ruled 2026-09-28; the
-rule and why are beside CREDENTIAL_DIRECTORIES in
+lists of credential files are CREDENTIAL_FILES_ON_NED_BOX and its neighbours in
 nn-systems/cold-read/cold-read-cell-common.py). Measured 2026-09-28 with
 canary files: unguarded, agy read all three canaries, on the Mac and on
 ned-box; its own `--sandbox` switch still let it read all three; inside the
@@ -99,11 +99,8 @@ both machines.
   - macOS: `sandbox-exec` with a profile that denies reading or writing the
     credential directories and any path whose name matches a credential
     file name.
-  - Linux: `bwrap` over the whole filesystem, with an empty tmpfs mounted
-    over each credential directory that exists. bwrap takes exact paths, not
-    patterns, so a file named like a credential outside those directories is
-    not covered on Linux; the directory list names every place such files
-    are known to sit.
+  - Linux: `bwrap` over the whole filesystem, with /dev/null mounted over
+    each of ned-box's credential files that exists, except agy's own login.
 Neither sandbox cuts the network, so agy's own web tool still fetches the
 pages a document links to, which the reviewer reads (user-ruled 2026-09-29,
 items 3 and 5 of the walk what-a-cold-read-reviewer-may-read-2026-09-28;
@@ -120,7 +117,10 @@ AGY USES THE USER'S GOOGLE LOGIN, NOT A GEMINI API KEY. A key is billed per
 call; the login draws on the user's subscription. agy's login lives under
 ~/.gemini/, which the sandbox leaves readable. This program removes
 GEMINI_API_KEY from agy's environment, so that a key the caller holds cannot
-move agy's calls onto per-call billing. When agy finds no login, it prints
+move agy's calls onto per-call billing. It also removes GH_TOKEN and
+GITHUB_TOKEN, which an agent-seat's supervisor sets to the agent-seat's own
+GitHub token, so agy gets no GitHub token from its caller. On the Mac the sandbox leaves the keychain readable, so a
+gh login stored there still works inside it. When agy finds no login, it prints
 a line starting with AGY_MISSING_GOOGLE_LOGIN_STDERR_LINE_PREFIX, waits a
 minute for a login that cannot come headless, and exits 1; the cell's cause
 line is then logged-out, saying how to log agy in.
@@ -202,9 +202,13 @@ def agy_stream_json_stdout_line_final_result_event_parse_to_exit_code_and_respon
     return exit_code, str(result.get("response") or "")
 
 
-def agy_environment_copy_without_gemini_api_key(environment) -> dict:
-    """Return a copy of environment without GEMINI_API_KEY."""
-    return {name: value for name, value in environment.items() if name != "GEMINI_API_KEY"}
+AGY_ENVIRONMENT_REMOVED_VARIABLES = ("GEMINI_API_KEY", "GH_TOKEN", "GITHUB_TOKEN")
+
+
+def agy_environment_copy_without_gemini_api_key_or_github_token(environment) -> dict:
+    """Return a copy of environment without AGY_ENVIRONMENT_REMOVED_VARIABLES."""
+    return {name: value for name, value in environment.items()
+            if name not in AGY_ENVIRONMENT_REMOVED_VARIABLES}
 
 
 def logged_out_failure_texts(model: str) -> list:
@@ -260,10 +264,7 @@ def credential_sandbox_prefix(platform: str = sys.platform, *,
             prefix += ["--bind", str(path), str(path)]
     if not network:
         prefix += ["--unshare-net"]
-    for directory in common.credential_directories_present():
-        prefix += ["--tmpfs", directory]
-    for path in common.reviewer_program_login_files(except_program="agy",
-                                                    only_present=True):
+    for path in common.ned_box_credential_and_login_files_present(except_program="agy"):
         prefix += ["--ro-bind", "/dev/null", path]
     return prefix
 
@@ -307,7 +308,7 @@ def main() -> int:
         invocation_builder=invocation_builder,
         recover_report_from_stdout=stdout_is_a_review,
         recognised_failure_texts_for_model=logged_out_failure_texts,
-        child_environment=agy_environment_copy_without_gemini_api_key(os.environ),
+        child_environment=agy_environment_copy_without_gemini_api_key_or_github_token(os.environ),
         per_model_run_timeout_seconds=COLD_READ_AGY_CELL_PER_MODEL_RUN_KILL_AFTER_SECONDS,
         parse_agent_binary_final_result_from_stdout_line=agy_stream_json_stdout_line_final_result_event_parse_to_exit_code_and_response_or_none,
         report_wait_after_result_line_seconds=COLD_READ_AGY_CELL_WAIT_FOR_REPORT_FILE_AFTER_AGY_STDOUT_RESULT_LINE_BEFORE_PROCESS_GROUP_KILL_SECONDS,

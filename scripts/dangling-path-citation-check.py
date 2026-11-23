@@ -44,8 +44,6 @@ CITING_FILES_THAT_KEEP_REMOVED_PATHS_ON_PURPOSE = (
     "nn-systems/skills/explain/tests/explain-reply-cold-read-fast-read-fixtures/*",
     "scripts/handoff-context-threshold-hook-recorded-handoff-deferrals-replay-test-fixtures/*",
     "scripts/unvalidated-negative-result-check-fixtures/*",
-    "scripts/project-rename-machine-state-move-hack.py",
-    "scripts/project-rename-machine-state-move-hack-test.py",
     "scripts/project-rename-repository-contents-rewrite-hack.py",
     "scripts/project-rename-repository-contents-rewrite-hack-test.py",
 )

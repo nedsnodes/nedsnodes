@@ -763,17 +763,36 @@ def approval_walk_item_heading_and_item_page_body_lines(text, parser, all_units,
         own = [each for each in sub_unit[0] if each.startswith(sub_step)]
         body += ["", approval_walk_item_heading_with_deferred_note_removed(lines[sub_unit[3]])]
         body += own_lines_of_unit(text, parser, lines, sub_unit, openings,
-                                  own if len(own) < len(sub_unit[0]) else None)[1:]
+                                  own if len(own) < len(sub_unit[0]) else None, keep_setext_underline=True)[1:]
     return heading, body
 
 
-def own_lines_of_unit(text, parser, lines, unit, openings, own=None):
+def own_lines_of_unit(text, parser, lines, unit, openings, own=None, keep_setext_underline=False):
     """Return the lines below unit's heading line, each run of them after a blank line, that belong to the item
     numbers own of the item numbers unit names: all of them when own is None, and otherwise, as
     approval_walk_item_line_range_within_heading_shared_by_several_items gives each, the lines of own's first
     number and those of each later one that has an opening of its own. openings is a list that holds
-    item_opening_lines' result once one call has needed it, so that the walk-document is read once."""
+    item_opening_lines' result once one call has needed it, so that the walk-document is read once. Below a setext
+    heading, the heading's further lines come first, whatever own is, since the heading names every number in unit,
+    as a paragraph, and a blank line stands where its underline was; with keep_setext_underline, for a caller that
+    puts the heading line back above them, the underline stays, so that the heading is still a heading.
+
+    Not handled: a further line of a setext heading indented four spaces or more, such as `    #new Hide rows.`, is
+    heading text in the walk-document but becomes an indented code block once the underline is replaced, so a
+    message that leaves that line out is not caught. Nor, with keep_setext_underline, is a further line such as
+    `#new Hide rows.`: it stays heading text, and the short-answer hook, which skips headings, does not check that
+    the message showed it."""
     numbers, total, _, first, end = unit
+    opening = parser.parse("\n".join(lines[first:end]))
+    heading_end = first + 1
+    if (opening and opening[0].type == "heading_open"
+            and opening[0].markup in ("=", "-") and opening[0].map[0] == 0):
+        heading_end = first + opening[0].map[1]
+        if not keep_setext_underline:
+            # Read as the heading's own body, a further line such as `#new_if_d Show every row.` would sit above the
+            # underline and make a second heading; and the blank line keeps an indented code block below the
+            # underline a code block rather than that paragraph's last line.
+            lines = [*lines[:heading_end - 1], "", *lines[heading_end:]]
     if own is None:
         ranges = [(first, end)]
     else:
@@ -784,7 +803,7 @@ def own_lines_of_unit(text, parser, lines, unit, openings, own=None):
         # A number with no opening of its own would bring in the unit's lines above the first number's own opening.
         ranges = ranges[:1] + [(start, stop) for start, stop in ranges[1:] if start != first]
     # A number with no opening of its own has a range that already holds the later numbers' ranges.
-    body, covered = [], first + 1
+    body, covered = (["", *lines[first + 1:heading_end]] if heading_end > first + 1 else []), heading_end
     for start, stop in sorted(ranges):
         if max(start, covered) < stop:
             body += ["", *lines[max(start, covered):stop]]
