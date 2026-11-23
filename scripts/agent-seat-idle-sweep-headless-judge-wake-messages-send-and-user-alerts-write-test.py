@@ -1806,9 +1806,10 @@ machine.append("alpha", cross_session("You promised", at(0.5)), assistant(ANNOUN
                turn_end(at(9)))
 machine.script({"answer": {"sentences": [{"index": 0, "backed": True, "reason": "a test runs"}]}},
                usage_limit_exit_with_transcript(RESET_IN_AN_HOUR))
+checked_count_before_minute_16 = len(machine.events("checked"))
 machine.run(16)
 calls_before_reset = machine.claude_calls()
-checked_before_reset = machine.events("checked")
+checked_before_reset = machine.events("checked")[checked_count_before_minute_16:]
 machine.script()
 code, _ = machine.run(90)
 check("every sentence judged backed, then an escalation sender at a usage limit: the sentences and "
@@ -1819,6 +1820,23 @@ check("every sentence judged backed, then an escalation sender at a usage limit:
       and not machine.claude_calls(),
       (code, machine.events("sentence_checked"), checked_before_reset, calls_before_reset,
        machine.claude_calls()))
+
+machine = Machine()
+machine.seat("alpha", [user("go"), assistant(PROMISE), turn_end()])
+machine.script(sent_ok())
+machine.run(0)
+machine.append("alpha", cross_session("You promised", at(0.5)), assistant(ANNOUNCED, at(8)),
+               turn_end(at(8)), user("and again", at(8.5)), assistant(ANNOUNCED, at(9)),
+               turn_end(at(9)))
+machine.script({"answer": {"sentences": [{"index": 0, "backed": True, "reason": "a test ran"},
+                                         {"index": 1, "backed": False, "reason": "nothing ran"}]}},
+               usage_limit_exit_with_transcript(RESET_IN_AN_HOUR))
+machine.run(16)
+same_sentence_checked = [event for event in machine.events("sentence_checked")
+                         if event["sentence"] == ANNOUNCED]
+check("two turns end with the same sentence, one judged backed and one not, and a pause holds back "
+      "the message: the backed record is logged and the unbacked one is not",
+      len(same_sentence_checked) == 1, (same_sentence_checked, machine.claude_calls()))
 
 machine = Machine()
 machine.seat("alpha", [user("go"), assistant(PROMISE), turn_end()])
