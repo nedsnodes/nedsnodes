@@ -975,9 +975,9 @@ def unheld_and_held_tasks(tasks: dict, directory: Path, checker,
     A task whose record shows its prerequisites raised as met is not asked about again, so in a
     Stop run every gh question for a task no blockedBy holds is one `due_task_lines` asked first,
     before its held tasks spent the budget, and is answered from the cache, except one the budget
-    skipped there: that one is not cached, and with the budget spent its task is counted as held,
-    whether evaluation stops at an earlier unmet prerequisite or reaches that question and skips
-    it again.
+    skipped there: that one is not cached, and with the budget spent its task is counted as held.
+    The closed-without-merging scan asks a `pr_merged` question before `all()` runs and can skip
+    it again, so `all()` stopping at an earlier unmet prerequisite saves only its own lookup.
 
     Not handled: a task raised as met stays listed as unheld when what its prerequisites name
     changes afterwards, such as the walk-document of an `approval_walk_item_decided` being
