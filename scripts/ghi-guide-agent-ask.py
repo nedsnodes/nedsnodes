@@ -478,7 +478,8 @@ def ghi_guide_agent_answer_extract_and_schema_check_from_claude_result(result: d
         return None, f"the answer's kind {kind!r} is none the schema allows: {shown}"
     unknown = sorted(set(answer) - set(properties))
     if unknown:
-        return None, f"the answer has fields the schema does not: {', '.join(unknown)}: {shown}"
+        # A field name is the model's text, so it is quoted: a newline in it would split the message.
+        return None, f"the answer has fields the schema does not: {', '.join(map(json.dumps, unknown))}: {shown}"
     missing = [field for field in GHI_GUIDE_AGENT_ANSWER_FIELDS_EACH_KIND_NEEDS[kind] if field not in answer]
     if missing:
         return None, f"the {kind} answer lacks its {', '.join(missing)} field: {shown}"
