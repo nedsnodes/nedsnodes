@@ -1437,12 +1437,15 @@ def item_openings_as_shown(tokens, parser, env):
             yield token.map[0], words
 
 
-@functools.cache
 def item_numbers_an_opening_names(words):
     """The item numbers of a message's heading or closing line, as shown_words gives it, with every range expanded:
     the numbers of the walk finder's ITEM_LABEL_WITHOUT_COUNT, as in `Item 5: ...`, `Items 3.1, 3.2 & 4.1 - ...`,
-    `Item 5, ...` or `Item 5` alone. None when words open no item, as `Item 5 fixes a path`, a mention, does; [] for a
-    list the walk finder calls an unusable range."""
+    `Item 5, more` or `Item 5` alone. None when words open no item, as `Item 5 fixes a path`, a mention, does; [] for a
+    list the walk finder calls an unusable range.
+
+    Not handled: `Item 5, 2 things changed`, `Item 5:foo` and `Item 5,foo` name no item, so they do not end another
+    item's shown text; and a deeper heading that only mentions items, as `### Items 2 and 3 are prerequisites`, names
+    them, so it ends the shown text of the item that holds it."""
     walk_finder = load_walk_finder()
     opening = walk_finder.ITEM_LABEL_WITHOUT_COUNT.match(words)
     if not opening:
