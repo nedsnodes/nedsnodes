@@ -183,6 +183,8 @@ def load_handoff_extractor():
 
 refresh_common = load_sibling_module("log_store_session_dialogs_refresh_common",
                                      "log-store-session-dialogs-refresh-common.py")
+record_shipper = load_sibling_module("cold_read_record_ship",
+                                     "../nn-systems/cold-read/cold-read-record-ship.py")
 SESSION_DIALOG_FILE_NAME_SUFFIX = refresh_common.SESSION_DIALOG_FILE_NAME_SUFFIX
 
 PROGRAM_FILE_NAME = "log-store-past-discussions-regex-search-newest-first.py"
@@ -392,7 +394,12 @@ def excerpt(text, start):
 
 def ripgrep_command(arguments_before_pattern, pattern, paths):
     ripgrep = os.environ.get(RIPGREP_OVERRIDE) or "rg"
-    return [ripgrep, "--no-ignore", "--hidden", "--ignore-case", *arguments_before_pattern,
+    # A shipment's staging directory, in walk/ or cold-read-records/, is not the published record,
+    # and its shipment may remove it while ripgrep walks it. The trailing slash keeps a file of the
+    # same name in the search.
+    skip_staging = f"!{record_shipper.STAGING_DIRECTORY_PREFIX}*/"
+    return [ripgrep, "--no-ignore", "--hidden", "--ignore-case", "--glob", skip_staging,
+            *arguments_before_pattern,
             "-e", pattern, "--", *[str(path) for path in paths]]
 
 

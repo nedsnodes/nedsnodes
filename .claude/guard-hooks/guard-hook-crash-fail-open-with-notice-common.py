@@ -20,12 +20,14 @@ import contextlib
 import json
 import socket
 import sys
-import traceback
 from pathlib import Path
 
 
 def guard_hook_crash_notice_hook_output_json_text(guard_file, error):
     """Return the PreToolUse JSON that lets the call go ahead and says the guard crashed."""
+    # Imported here because guards load this module on every tool call and only a crash needs it.
+    import traceback
+
     guard_name = Path(guard_file).name
     host = socket.gethostname().split(".")[0]
     # Frames inside importlib say nothing about which file to fix.

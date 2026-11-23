@@ -16,7 +16,7 @@ Only `*.json` files are read, because
 the list directory also holds the harness's `.lock`. Task files are never
 written.
 
-WHAT MAKES A TASK DUE. One optional key in a task's `metadata`:
+WHAT MAKES A TASK DUE. Two optional keys in a task's `metadata`:
 
   prerequisites  a non-empty list of conditions, each {"pr_merged": <number>}
                  or {"issue_closed": <number>} on the repository
@@ -30,6 +30,8 @@ WHAT MAKES A TASK DUE. One optional key in a task's `metadata`:
                  list this hook cannot read is never met, and the hook names
                  its fault to the agent once, as RAISED ONCE says, so the task
                  is not held in silence for good.
+  approval       a string, not blank, saying why the task needs no
+                 decision from the user. Any other value is no record.
 
 APPROVAL-WALK ITEMS. An item is named by its heading, because its number and
 count can change while the walk runs. The walk-document is the walk-minutes'
@@ -45,7 +47,8 @@ yet numbered. A walk-document that
 does not exist, or that holds no item with the heading, or more than one, is
 a fault the hook names as it names an unreadable list: the walk-document
 holds the item before its heading can be named, so its absence means a wrong
-path. The files are read on this machine only, with no cache.
+path. The files are read on this machine only, and each hook execution reads
+them afresh; only its parse of a text it has already parsed is reused.
 
 An open task (status pending or in_progress) is raised when its
 prerequisites are met, and only when every task in its blockedBy is
@@ -60,6 +63,14 @@ raise, is told this hook raises the task when that prerequisite is done. A
 raise for prerequisites also records the completed blockedBy list, so the
 same blockers do not raise the task a second time. A deleted blocker frees such
 a task without raising it, because nothing it waited on was done.
+
+A PENDING TASK THAT RECORDS approval is raised once it is ready: nothing in
+its blockedBy holds it, and its prerequisites are met or it has none, so an
+approval opts in even a task with nothing to wait on. Its raise tells the
+agent to set the task in_progress and dispatch a forked subagent for it, in
+place of "Act on task N now", whatever made it ready. A task whose
+prerequisites cannot be used is never ready. An in_progress task with an
+approval is raised as a task without one, since someone is already on it.
 
 A PULL REQUEST CLOSED WITHOUT MERGING never meets its `pr_merged`
 condition, so its task would wait in silence. An open task is raised once
@@ -76,8 +87,9 @@ whether to wake it.
 
 RAISED ONCE. The hook records, per task, the prerequisites list it raised
 the task for, or for a task raised because its blockers completed, its
-blockedBy list, and does not raise the task again for the same value;
-changing either lets the task be raised again. A task raised because a
+blockedBy list, and for a task raised for its approval, the approval, and
+does not raise the task again for the same values; changing any of them
+lets the task be raised again. A task raised because a
 pull request closed without merging records that pull request's number, and is
 never raised again for that number. A prerequisites list the
 hook cannot read, or whose approval-walk item it cannot find, is named to the
@@ -113,7 +125,11 @@ recorded as a failure with its time so it too waits the interval, and the
 stop that asked reports it, as OUTPUT says. No condition is checked for a
 task already raised for its current prerequisites; of a task held by
 blockedBy, only its `pr_merged` pull requests not yet raised as closed without
-merging are checked. An agent-seat whose tasks have no prerequisites makes no
+merging are checked. Tasks no blockedBy holds are checked first, so a held
+task's checks spend only the budget they leave. A condition not checked
+because the budget is spent is answered not met and not cached, so the next
+stop asks gh, and this stop names each open task that waits on it, as OUTPUT
+says. An agent-seat whose tasks have no prerequisites makes no
 network call. The same call
 fetches the title and URL the raise line cites; a condition gh never
 answered is cited by its number alone.
@@ -158,16 +174,19 @@ OUTPUT. Something to raise, or the next-action prompt: one JSON object,
 {"hookSpecificOutput": {"hookEventName": "Stop", "additionalContext": ...}},
 which Claude Code delivers to the model as non-error feedback while the
 conversation continues. No `decision` field and no `systemMessage`: the text
-is for the agent. The text is one instruction per due task, then, when any
-task was raised, the instruction for a task that cannot be acted on yet,
-then one line per task whose pull request closed without merging and, when
-there is any, the instructions for re-planning it, then two lines per
-prerequisites list the hook cannot use, then the
+is for the agent. The text is one instruction per due task, the approval
+raise for a pending task that records approval and "Act on task N now" for
+any other, then, when any task was raised, the instruction for a task that
+cannot be acted on yet, then one line per task whose pull request closed
+without merging and, when there is any, the instructions for re-planning it,
+then two lines per prerequisites list the hook cannot use, then the
 next-action prompt's lines, then one line per condition gh could not answer
-at this stop. Nothing to raise or name and no next-action prompt:
+at this stop, then one line per open task that waits on a condition the
+budget left unchecked and, when there is any, the instructions for it. Nothing to raise or name and no next-action prompt:
 nothing printed, exit 0. A fault, such as a payload
 that is not a JSON object, a state file that cannot be written, a condition
-gh could not answer at a stop with nothing else to print, or any exception:
+gh could not answer or the budget left unchecked at a stop with nothing else
+to print, or any exception:
 one line on stderr naming the hook and the fault, nothing on stdout, exit 1.
 The line for a failed state write says how many due tasks went unraised, or
 that none was due, and that the first stop after the state file can be
@@ -253,6 +272,8 @@ WALK_MINUTES_FIELD = "approval_walk_minutes_file_path"
 ITEM_HEADING_FIELD = "approval_walk_item_heading"
 WALK_MINUTES_SUFFIX = "-minutes.md"
 PREREQUISITES_KEY = "prerequisites"
+APPROVAL_KEY = "approval"
+PENDING_TASK_STATUS = "pending"
 PULL_REQUEST_KIND = "pr_merged"
 CLOSED_WITHOUT_MERGING_ANSWER_KEY = "closed_without_merging"
 CLOSED_WITHOUT_MERGING_RECORD_KEY = "pull_requests_closed_without_merging"
@@ -264,6 +285,12 @@ PREREQUISITE_FORMS = (
 
 RAISE_LINE_TEMPLATE = ('[rule due-task-raise-when-prerequisites-met] Act on task {task_id} "{subject}" '
                        "now: {reasons}.")
+# The user set this wording; change it only with his approval. The rule ID is the only addition.
+APPROVAL_RAISE_LINE_TEMPLATE = (
+    '[rule due-task-approved-ready-task-forked-subagent-dispatch-reminder] Task {task_id} "{subject}" is ready and '
+    "needs no decision from the user ({approval}). Set it in_progress with TaskUpdate, then dispatch a "
+    'forked subagent for it now, with the Agent tool\'s isolation "worktree", and mark the task '
+    "completed when the subagent reports it done.")
 DEFER_INSTRUCTION = (
     "If a task above cannot be acted on yet, record what it now waits on with TaskUpdate "
     "instead: a pull request, a GHI or an approval-walk item in a new "
@@ -283,6 +310,18 @@ CLOSED_WITHOUT_MERGING_INSTRUCTIONS = (
 PREREQUISITES_PROBLEM_LINE_TEMPLATE = (
     '[rule due-task-prerequisites-unusable-correct-them] Task {task_id} "{subject}" is never raised as its metadata.prerequisites stand, because '
     "{problem}.")
+BUDGET_SKIPPED_TASK_LINE_TEMPLATE = (
+    "At this stop this hook ran out of its {budget}-second budget for GitHub calls before it asked "
+    'about {conditions}, so task {task_id} "{subject}", which waits on {pronoun}, was treated as '
+    "still waiting and not raised.")
+BUDGET_SKIPPED_INSTRUCTIONS = (
+    "If you have other work, nothing is needed for a task named above as not checked: the next "
+    "stop asks GitHub again and raises the task when what it waits on is done.",
+    "If you are about to end your turn with no other work, check each such pull request or GHI "
+    "yourself with `gh pr view <number> --repo nedsnodes/nedsnodes --json state` or `gh issue "
+    "view <number> --repo nedsnodes/nedsnodes --json state`, and act on the task now if every "
+    "prerequisite is done.",
+)
 PREREQUISITES_CORRECTION_INSTRUCTION = (
     'Correct the task with TaskUpdate, giving its metadata a "prerequisites" list whose entries '
     "are each one of " + PREREQUISITE_FORMS + '; if the task waits on no pull request, GHI or '
@@ -418,8 +457,25 @@ def walk_finder_and_answer_program():
     return _walk_modules
 
 
-def approval_walk_item_decided_or_problem(condition: dict) -> dict:
-    """{"met": bool}, with "problem", a clause saying why, when the item cannot be found."""
+class MarkdownParserParsingEachTextOnce:
+    """A markdown parser that parses each distinct text once; callers must not change its tokens.
+
+    Keyed by the text itself, so a file that changes is parsed anew."""
+
+    def __init__(self, parser):
+        self._parser = parser
+        self._tokens_by_text = {}
+
+    def parse(self, text):
+        if text not in self._tokens_by_text:
+            self._tokens_by_text[text] = self._parser.parse(text)
+        return self._tokens_by_text[text]
+
+
+def approval_walk_item_decided_or_problem(condition: dict, checker=None) -> dict:
+    """{"met": bool}, with "problem", a clause saying why, when the item cannot be found.
+
+    With `checker`, parses through the parser it keeps for this execution."""
     walk_finder, answer_program = walk_finder_and_answer_program()
     minutes = Path(condition[WALK_MINUTES_FIELD])
     document = minutes.with_name(minutes.name[:-len(WALK_MINUTES_SUFFIX)] + ".md")
@@ -431,7 +487,8 @@ def approval_walk_item_decided_or_problem(condition: dict) -> dict:
         # means a wrong path, which would otherwise hold the task in silence for good.
         return {"met": False, "problem": f"the walk-document {document}, which the walk-minutes "
                                          f"path {minutes} names, does not exist"}
-    parser = walk_finder.markdown_parser()
+    parser = (walk_finder.markdown_parser() if checker is None
+              else checker.markdown_parser_parsing_each_text_once(walk_finder))
     lines = document_text.split("\n")
     title = answer_program.heading_title(walk_finder, heading)
     units = walk_finder.item_unit_spans(document_text, parser)
@@ -450,7 +507,7 @@ def approval_walk_item_decided_or_problem(condition: dict) -> dict:
 
 def condition_answer(kind: str, condition, checker) -> dict:
     if kind == APPROVAL_WALK_ITEM_KIND:
-        return approval_walk_item_decided_or_problem(condition)
+        return approval_walk_item_decided_or_problem(condition, checker)
     return checker.answer(kind, condition)
 
 
@@ -506,6 +563,8 @@ class GitHubConditionChecker:
     `gh_failures` gets a (kind, number, cause) entry for every failed answer `answer` returns,
     fresh or cached, so one condition answered twice is listed twice; a caller that answers
     for several agent-seats reads the entries its own calls appended.
+    `conditions_skipped_for_budget` gets a (kind, number) entry for every condition answered
+    not met because the budget was spent, in the same way.
     """
 
     # The budget's clock; the test replaces it so its budget cases do not depend on machine speed.
@@ -517,6 +576,15 @@ class GitHubConditionChecker:
         self.started = self.clock()
         self.changed = False
         self.gh_failures = []
+        self.conditions_skipped_for_budget = []
+        self._markdown_parser_parsing_each_text_once = None
+
+    def markdown_parser_parsing_each_text_once(self, walk_finder) -> MarkdownParserParsingEachTextOnce:
+        """The one parser of this checker, and so of this execution, built on first use."""
+        if self._markdown_parser_parsing_each_text_once is None:
+            self._markdown_parser_parsing_each_text_once = MarkdownParserParsingEachTextOnce(
+                walk_finder.markdown_parser())
+        return self._markdown_parser_parsing_each_text_once
 
     def answer(self, kind: str, number: int) -> dict:
         answer = self.cached_or_fresh_answer(kind, number)
@@ -534,8 +602,8 @@ class GitHubConditionChecker:
             return cached
         remaining = GH_CALLS_TOTAL_BUDGET_SECONDS - (self.clock() - self.started)
         if remaining <= 0:
-            # Out of budget: not met this run, and not recorded, so the next
-            # run checks it.
+            # Not cached, so the next stop asks gh about it.
+            self.conditions_skipped_for_budget.append((kind, number))
             return {"met": False}
         fresh = self.ask_gh(kind, number, min(GH_CALL_TIMEOUT_SECONDS, remaining))
         fresh["checked_at_epoch"] = self.now_epoch
@@ -629,6 +697,53 @@ def gh_failure_line(kind: str, number: int, cause: str) -> str:
             f"the user to run `gh auth login` on this machine.")
 
 
+def prerequisites_raised_as_met(record: dict, prerequisites_value) -> bool:
+    """Whether the task's record shows its current prerequisites raised as met. A raised
+    `pr_merged` pull request stays merged, so none of them can have closed without merging; a
+    raised `issue_closed` GHI that is reopened later still counts as met."""
+    return record.get(PREREQUISITES_KEY) == canonical_prerequisites(prerequisites_value)
+
+
+def budget_skipped_task_lines(tasks: dict, skipped_conditions, raised: dict) -> list:
+    """One line per open task the skip left unraised, that is, one that names a condition the
+    checker skipped for lack of budget and that `raised`, the state file's record as this run
+    leaves it, neither shows raised as met nor shows told to re-plan for a pull request closed
+    without merging; then the instructions, or nothing when there is no such task.
+
+    Not handled: a pull request with an old closed-without-merging record that was reopened and
+    merged since. Its task gets no line here even when the budget skipped the pull request; a
+    later run that asks GitHub sees the merge, and raises the task once its other prerequisites
+    and blockers allow."""
+    skipped = set(skipped_conditions)
+    lines = []
+    for task_id in sorted(tasks, key=lambda text: (len(text), text)):
+        task = tasks[task_id]
+        metadata = task.get("metadata")
+        if task.get("status") not in OPEN_TASK_STATUSES or not isinstance(metadata, dict):
+            continue
+        try:
+            conditions = parse_prerequisites(metadata.get(PREREQUISITES_KEY))
+        except UnreadablePrerequisites:
+            continue
+        record = raised.get(task_id) if isinstance(raised.get(task_id), dict) else {}
+        closed_without_merging = record.get(CLOSED_WITHOUT_MERGING_RECORD_KEY) or []
+        if (prerequisites_raised_as_met(record, metadata.get(PREREQUISITES_KEY))
+                or any(kind == PULL_REQUEST_KIND and number in closed_without_merging
+                       for kind, number in conditions)):
+            continue
+        names = list(dict.fromkeys(f"{CONDITION_KINDS[kind][2]} {number}"
+                                   for kind, number in conditions
+                                   if kind in CONDITION_KINDS and (kind, number) in skipped))
+        if names:
+            lines.append(BUDGET_SKIPPED_TASK_LINE_TEMPLATE.format(
+                budget=GH_CALLS_TOTAL_BUDGET_SECONDS, conditions=", ".join(names),
+                task_id=task["id"], subject=single_line(task.get("subject", "")),
+                pronoun="it" if len(names) == 1 else "them"))
+    if lines:
+        lines += BUDGET_SKIPPED_INSTRUCTIONS
+    return lines
+
+
 def raise_line(task: dict, met_citations, done_blockers=None) -> str:
     reasons = []
     if met_citations is not None:
@@ -638,6 +753,12 @@ def raise_line(task: dict, met_citations, done_blockers=None) -> str:
                        + ", ".join(f"task {single_line(blocker)}" for blocker in done_blockers))
     return RAISE_LINE_TEMPLATE.format(task_id=task["id"], subject=single_line(task.get("subject", "")),
                                       reasons=", and ".join(reasons))
+
+
+def approval_raise_line(task: dict, approval: str) -> str:
+    return APPROVAL_RAISE_LINE_TEMPLATE.format(
+        task_id=task["id"], subject=single_line(task.get("subject", "")),
+        approval=single_line(approval))
 
 
 def due_task_lines(tasks: dict, directory: Path, state: dict,
@@ -655,8 +776,12 @@ def due_task_lines(tasks: dict, directory: Path, state: dict,
     problem_lines = []
     state_changed = False
     conditions_still_named = set()
+    held_task_ids = {task_id for task_id, task in tasks.items()
+                     if task.get("status") in OPEN_TASK_STATUSES
+                     and is_held_by_blockers(task, tasks, directory)}
 
-    for task_id in sorted(tasks, key=lambda text: (len(text), text)):
+    # Tasks no blockedBy holds come first, so they spend the gh budget before held tasks do.
+    for task_id in sorted(tasks, key=lambda text: (text in held_task_ids, len(text), text)):
         task = tasks[task_id]
         if task.get("status") not in OPEN_TASK_STATUSES:
             continue
@@ -680,8 +805,7 @@ def due_task_lines(tasks: dict, directory: Path, state: dict,
             conditions_still_named.update(condition_key(k, n) for k, n in conditions
                                           if k in CONDITION_KINDS)
 
-        if (conditions is not None
-                and record.get(PREREQUISITES_KEY) != canonical_prerequisites(prerequisites_value)):
+        if conditions is not None and not prerequisites_raised_as_met(record, prerequisites_value):
             newly_closed = pull_requests_closed_without_merging(
                 pull_request_conditions_not_raised_as_closed(conditions, record), checker)
             if newly_closed:
@@ -693,9 +817,12 @@ def due_task_lines(tasks: dict, directory: Path, state: dict,
                     citations="; ".join(github_item_citation(PULL_REQUEST_KIND, number, answer)
                                         for number, answer in newly_closed)))
 
+        approval = metadata.get(APPROVAL_KEY)
+        if not isinstance(approval, str) or not approval.strip():
+            approval = None
         prerequisite_citations = None
         done_blockers = None
-        if not is_held_by_blockers(task, tasks, directory):
+        if task_id not in held_task_ids:
             blockers = completed_blockers(task, tasks)
             already_raised_for_prerequisites = False
             if conditions is not None:
@@ -718,7 +845,17 @@ def due_task_lines(tasks: dict, directory: Path, state: dict,
                     and blockers is not None and record.get("blocked_by") != blockers):
                 done_blockers = blockers
                 new_record["blocked_by"] = blockers
-            if prerequisite_citations is not None or done_blockers is not None:
+            approval_ready = (approval is not None
+                              and task.get("status") == PENDING_TASK_STATUS
+                              and (prerequisites_value is None
+                                   or already_raised_for_prerequisites
+                                   or prerequisite_citations is not None))
+            if approval_ready and (record.get(APPROVAL_KEY) != approval
+                                   or prerequisite_citations is not None
+                                   or done_blockers is not None):
+                new_record[APPROVAL_KEY] = approval
+                lines.append(approval_raise_line(task, approval))
+            elif prerequisite_citations is not None or done_blockers is not None:
                 lines.append(raise_line(task, prerequisite_citations, done_blockers))
         # Kept while the list is unchanged, so a stop that does not look at the list, such as one
         # where a blocker holds the task, does not name the same fault again later.
@@ -833,10 +970,25 @@ def unheld_and_held_tasks(tasks: dict, directory: Path, checker,
                           raised: dict) -> "tuple[list, int]":
     """The ids of open tasks nothing recorded holds back, or that wait on a pull request closed
     without merging that `raised`, the state file's record, does not show raised yet, oldest
-    first, and the count of the rest."""
+    first, and the count of the rest.
+
+    A task whose record shows its prerequisites raised as met is not asked about again, so in a
+    Stop run every gh question for a task no blockedBy holds is one `due_task_lines` asked first,
+    before its held tasks spent the budget, and is answered from the cache, except one the budget
+    skipped there: that one is not cached, and with the budget spent its task is counted as held,
+    whether evaluation stops at an earlier unmet prerequisite or reaches that question and skips
+    it again.
+
+    Not handled: a task raised as met stays listed as unheld when what its prerequisites name
+    changes afterwards, such as the walk-document of an `approval_walk_item_decided` being
+    removed."""
     unheld = []
     held = 0
-    for task_id in sorted(tasks, key=lambda text: (len(text), text)):
+    held_by_blockers = {task_id for task_id, task in tasks.items()
+                        if task.get("status") in OPEN_TASK_STATUSES
+                        and is_held_by_blockers(task, tasks, directory)}
+    # Tasks no blockedBy holds come first, so they spend the gh budget before held tasks do.
+    for task_id in sorted(tasks, key=lambda text: (text in held_by_blockers, len(text), text)):
         task = tasks[task_id]
         if task.get("status") not in OPEN_TASK_STATUSES:
             continue
@@ -849,21 +1001,23 @@ def unheld_and_held_tasks(tasks: dict, directory: Path, checker,
             except UnreadablePrerequisites:
                 pass  # due_task_lines names it to the agent
         record = raised.get(task_id) if isinstance(raised.get(task_id), dict) else {}
-        if conditions and pull_requests_closed_without_merging(
+        raised_as_met = (conditions is not None
+                         and prerequisites_raised_as_met(record, prerequisites_value))
+        if conditions and not raised_as_met and pull_requests_closed_without_merging(
                 pull_request_conditions_not_raised_as_closed(conditions, record), checker):
             unheld.append(task_id)  # its agent must re-plan it, whatever else holds it
             continue
-        if is_held_by_blockers(task, tasks, directory):
+        if task_id in held_by_blockers:
             held += 1
             continue
-        if prerequisites_value is not None:
+        if prerequisites_value is not None and not raised_as_met:
             if conditions is None or not all(
                     condition_answer(kind, number, checker).get("met") is True
                     for kind, number in conditions):
                 held += 1
                 continue
         unheld.append(task_id)
-    return unheld, held
+    return sorted(unheld, key=lambda text: (len(text), text)), held
 
 
 def listed_with_limit(header: str, entries: list, limit: int) -> list:
@@ -984,6 +1138,8 @@ def run(stdin_text: str, environment, home: Path, now: datetime) -> "str | None"
     state_changed = state_changed or checker.changed
     gh_failure_lines = [gh_failure_line(kind, number, cause)
                         for kind, number, cause in dict.fromkeys(checker.gh_failures)]
+    gh_failure_lines += budget_skipped_task_lines(tasks, checker.conditions_skipped_for_budget,
+                                                  state["raised"])
     if state_changed:
         try:
             write_state_atomically(state_path, state)

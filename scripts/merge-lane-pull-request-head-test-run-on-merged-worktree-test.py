@@ -1,18 +1,22 @@
 #!/usr/bin/env python3
 """Tests for merge-lane-pull-request-head-test-run-on-merged-worktree.py.
 
-A scratch --review-tools-worktree-at-main holds a fake scripts/pull-request-head-test-run.py
-that logs its arguments, working directory, the first PATH entry and whether
-GIT_DIR reached it, prints a SUMMARY line and a line on stderr, and exits
-with the code the case gives for its --checkout. The program runs with
-GIT_DIR set, so a case that finds GIT_DIR absent shows the program dropped
-it.
+A scratch --review-tools-worktree-at-main, a real clone of a bare origin that
+holds main and pull request heads at refs/pull/<n>/head, holds the real
+rebuild program and a fake scripts/pull-request-head-test-run.py that logs its
+arguments, working directory, the first PATH entry, whether GIT_DIR reached it
+and whether its checkout holds main's newest file, prints a SUMMARY line and a
+line on stderr, and exits with the code the case gives for its --checkout. The
+program runs with GIT_DIR set, so a case that finds GIT_DIR absent shows the
+program dropped it.
 
 Run: python3 scripts/merge-lane-pull-request-head-test-run-on-merged-worktree-test.py
 """
 
+import importlib.util
 import json
 import os
+import re
 import shlex
 import shutil
 import subprocess
@@ -20,7 +24,19 @@ import sys
 import tempfile
 from pathlib import Path
 
+_git_environment_fixture_spec = importlib.util.spec_from_file_location(
+    "git_redirecting_environment_removal_test_fixture",
+    Path(__file__).resolve().with_name(
+        "git-redirecting-environment-removal-test-fixture.py"))
+_git_environment_fixture = importlib.util.module_from_spec(_git_environment_fixture_spec)
+_git_environment_fixture_spec.loader.exec_module(_git_environment_fixture)
+_git_environment_fixture.remove_git_redirecting_environment_variables_from_this_process()
+os.environ.update({"GIT_CONFIG_GLOBAL": os.devnull, "GIT_CONFIG_NOSYSTEM": "1"})
+
 PROGRAM = Path(__file__).with_name("merge-lane-pull-request-head-test-run-on-merged-worktree.py")
+REBUILD_PROGRAM = PROGRAM.resolve().with_name(
+    "merge-lane-pull-request-head-and-merged-worktrees-rebuild.py")
+GIT_IDENTITY = ("-c", "user.name=test", "-c", "user.email=test@example.invalid")
 
 FAKE_HEAD_TEST_RUN = r'''#!/usr/bin/env python3
 import json, os, sys
@@ -29,7 +45,9 @@ checkout = argv[argv.index("--checkout") + 1]
 with open(os.environ["MERGE_LANE_HEAD_TEST_RUN_TEST_LOG"], "a") as log:
     log.write(json.dumps({"argv": argv, "cwd": os.getcwd(),
                           "first_path_entry": os.environ["PATH"].split(os.pathsep)[0],
-                          "git_dir": os.environ.get("GIT_DIR")}) + "\n")
+                          "git_dir": os.environ.get("GIT_DIR"),
+                          "holds_main_fix": os.path.exists(
+                              os.path.join(checkout, "fixed-on-main.txt"))}) + "\n")
 exit_code = json.loads(os.environ["MERGE_LANE_HEAD_TEST_RUN_TEST_EXITS"]).get(
     os.path.basename(checkout), 0)
 print("pull-request-head-test-run: starting")
@@ -64,6 +82,45 @@ def check(name, condition, detail=""):
             print("      " + detail.replace("\n", "\n      "))
 
 
+def git(directory, *arguments):
+    return subprocess.run(["git", "-C", str(directory), *GIT_IDENTITY, *arguments],
+                          capture_output=True, text=True, check=True).stdout.strip()
+
+
+def commit_file(directory, name, contents):
+    (directory / name).write_text(contents)
+    git(directory, "add", name)
+    git(directory, "commit", "-q", "-m", name)
+    return git(directory, "rev-parse", "HEAD")
+
+
+def build_review_tools_clone(scratch):
+    """Make origin with main and heads for pull requests 7, 8, 9 and 11; return
+    (the clone that is the review tools worktree, the author's clone)."""
+    origin = scratch / "origin.git"
+    author = scratch / "author"
+    subprocess.run(["git", "init", "-q", "--bare", "-b", "main", str(origin)], check=True)
+    subprocess.run(["git", "init", "-q", "-b", "main", str(author)], check=True)
+    commit_file(author, "on-main.txt", "main\n")
+    git(author, "checkout", "-q", "-b", "topic")
+    commit_file(author, "on-topic.txt", "topic\n")
+    git(author, "checkout", "-q", "-b", "conflicting-topic", "main")
+    commit_file(author, "conflict.txt", "from the pull request\n")
+    git(author, "push", "-q", str(origin), "main:refs/heads/main",
+        *(f"topic:refs/pull/{number}/head" for number in (7, 8, 9)),
+        "conflicting-topic:refs/pull/11/head")
+    review_tools = scratch / "main-checkout"
+    subprocess.run(["git", "clone", "-q", str(origin), str(review_tools)], check=True)
+    (review_tools / "scripts").mkdir()
+    (review_tools / "scripts" / "pull-request-head-test-run.py").write_text(FAKE_HEAD_TEST_RUN)
+    (review_tools / "scripts" / REBUILD_PROGRAM.name).symlink_to(REBUILD_PROGRAM)
+    return review_tools, author
+
+
+def without_main_commit(stdout):
+    return re.sub(r"; tested merged onto main [0-9a-f]{12}$", "", stdout, flags=re.M)
+
+
 def run_program(scratch, helpers, exits, *pull_requests, review_tools=None, cwd=None):
     log = scratch / "head-test-run-calls.log"
     log.unlink(missing_ok=True)
@@ -78,15 +135,15 @@ def run_program(scratch, helpers, exits, *pull_requests, review_tools=None, cwd=
              "MERGE_LANE_HEAD_TEST_RUN_TEST_EXITS": json.dumps(exits)})
     calls = ([json.loads(line) for line in log.read_text().splitlines()]
              if log.exists() else [])
+    completed.stdout_naming_main = completed.stdout
+    completed.stdout = without_main_commit(completed.stdout)
     return completed, calls
 
 
 def main():
     scratch = Path(tempfile.mkdtemp(prefix="merge-lane-head-test-run-test-")).resolve()
     try:
-        (scratch / "main-checkout" / "scripts").mkdir(parents=True)
-        (scratch / "main-checkout" / "scripts" / "pull-request-head-test-run.py").write_text(
-            FAKE_HEAD_TEST_RUN)
+        review_tools, author = build_review_tools_clone(scratch)
         helpers = scratch / "merge-helpers"
         (helpers / "tripwire-bin").mkdir(parents=True)
 
@@ -96,14 +153,19 @@ def main():
             call["argv"][call["argv"].index("--checkout") + 1] for call in calls] == [
             str(review_worktrees_directory(helpers) / "pr7-merged"),
             str(review_worktrees_directory(helpers) / "pr8-merged")], detail)
-        check("the run gets the paths under the worktrees and outputs directory, selecting by hr/store and saving its recordings under hr/pr<n>",
+        check("the run gets the paths under the worktrees and outputs directory, selecting by "
+              "hr/store and, read-only, by the after-merge test run's recordings directory, "
+              "and saving its recordings under hr/pr<n>",
               calls and calls[0]["argv"] == [
                   "--checkout", str(review_worktrees_directory(helpers) / "pr7-merged"),
                   "--log-store-root", str(helpers / "hr" / "pr7" / "log-store"),
                   "--temporary-directory", str(helpers / "hr" / "pr7" / "tmp"),
+                  "--since", git(review_tools, "rev-parse", "origin/main"),
                   "--recorded-inputs-directory", str(helpers / "hr" / "store"),
                   "--save-recorded-inputs-to-directory",
-                  str(helpers / "hr" / "pr7" / "recorded-inputs")],
+                  str(helpers / "hr" / "pr7" / "recorded-inputs"),
+                  "--also-leave-out-suites-whose-recorded-inputs-in-read-only-directory-match-checkout",
+                  str(Path.home() / ".cache" / "nedsnodes-test-suite-recorded-inputs")],
               json.dumps(calls))
         check("the log-store root and temporary directory are made",
               (helpers / "hr" / "pr7" / "log-store").is_dir()
@@ -162,7 +224,8 @@ def main():
         check("a line the run prints on stderr reaches the program's stderr while the run "
               "still runs, so a run stopped early has shown how far it got",
               first == "a progress line on stderr\n" and live.returncode == 0
-              and stdout == "PR 7 head test run: exit 0; SUMMARY: fake summary for pr7-merged\n",
+              and without_main_commit(stdout)
+              == "PR 7 head test run: exit 0; SUMMARY: fake summary for pr7-merged\n",
               f"exit {live.returncode}\n{first!r}\n{stdout}{rest}")
 
         # /dev/full fails every write with ENOSPC, as a full disk under the outputs does.
@@ -187,6 +250,8 @@ def main():
                   ("When you need the lost stderr, run the head test run for PR 9 again with "
                    "this command, from any directory: " + shlex.join([
                        sys.executable, str(PROGRAM.resolve()), "9",
+                       "--head-commit", git(author, "rev-parse", "topic"),
+                       "--main-commit", git(review_tools, "rev-parse", "origin/main"),
                        "--merge-lane-worktrees-and-outputs-directory", str(helpers.resolve()),
                        "--merge-lane-review-worktrees-directory", str(review_worktrees_directory(helpers).resolve()),
                        "--review-tools-worktree-at-main",
@@ -220,7 +285,7 @@ def main():
             except subprocess.TimeoutExpired:
                 both.kill()
                 stdout = "still running after 60 s"
-            lines = stdout.splitlines()
+            lines = without_main_commit(stdout).splitlines()
             rerun_lines = [line for line in lines if line.startswith(
                 "When you need the lost stderr, run the head test run for PR 9 again")]
             before_lines = [line for line in lines if line.startswith("Before you run it")]
@@ -260,7 +325,7 @@ def main():
         except subprocess.TimeoutExpired:
             unread.kill()
             stdout = "still running after 60 s"
-        lines = stdout.splitlines()
+        lines = without_main_commit(stdout).splitlines()
         check("when writing the run's stderr to the program's stderr fails, the run still "
               "goes to its end, its stderr file is whole, and the program says so with the "
               "run's process id, points at that file instead of a rerun, keeps the summary "
@@ -280,6 +345,171 @@ def main():
               and len((helpers / "hr" / "pr7" / "stderr").read_text().splitlines()) == 2002,
               f"exit {unread.returncode}\n{stdout}")
 
+        merged = review_worktrees_directory(helpers) / "pr7-merged"
+        head_worktree = review_worktrees_directory(helpers) / "pr7-head"
+        git(review_tools, "worktree", "add", "-q", "--detach", str(head_worktree), "origin/main")
+        (head_worktree / "a-reviewer-is-reading-this.txt").write_text("in use\n")
+        stale_merged = git(merged, "rev-parse", "HEAD")
+        pinned_main = git(review_tools, "rev-parse", "HEAD")
+        git(author, "checkout", "-q", "main")
+        main_fix = commit_file(author, "fixed-on-main.txt", "fixed\n")
+        git(author, "push", "-q", str(scratch / "origin.git"), "main:refs/heads/main")
+        git(review_tools, "fetch", "-q", "origin", "refs/pull/8/head")
+        fetch_head_before = (review_tools / ".git" / "FETCH_HEAD").read_text()
+        tracking_main_before = git(review_tools, "rev-parse", "refs/remotes/origin/main")
+        completed, calls = run_program(scratch, helpers, {}, "7")
+        detail = f"exit {completed.returncode}\n{completed.stdout}{completed.stderr}"
+        check("when origin's main has moved past the review tools worktree and pr<n>-merged, "
+              "a direct run tests a rebuilt pr<n>-merged on origin's main, and says so",
+              completed.returncode == 0 and len(calls) == 1 and calls[0]["holds_main_fix"]
+              and git(merged, "rev-parse", "HEAD") != stale_merged
+              and git(merged, "rev-parse", "HEAD^1") == main_fix
+              and git(review_tools, "rev-parse", "HEAD") == pinned_main
+              and f"; tested merged onto main {main_fix[:12]}\n" in completed.stdout_naming_main, detail)
+        check("a direct run selects suites against the origin main it merged onto",
+              calls and calls[0]["argv"][calls[0]["argv"].index("--since") + 1] == main_fix,
+              json.dumps(calls))
+        check("a direct run's fetches of main and of the head leave FETCH_HEAD as it was",
+              (review_tools / ".git" / "FETCH_HEAD").read_text() == fetch_head_before, detail)
+        check("a direct run's fetch of main leaves refs/remotes/origin/main as it was",
+              git(review_tools, "rev-parse", "refs/remotes/origin/main") == tracking_main_before
+              and tracking_main_before != main_fix, detail)
+        check("a direct run leaves no reference of its own behind",
+              git(review_tools, "for-each-ref", "refs/merge-lane-head-test-run") == "", detail)
+        completed, calls = run_program(scratch, helpers, {}, "7", "--main-commit", pinned_main)
+        detail = f"exit {completed.returncode}\n{completed.stdout}{completed.stderr}"
+        check("--main-commit is the main merged onto, even when origin's main is newer",
+              completed.returncode == 0 and git(merged, "rev-parse", "HEAD^1") == pinned_main
+              and not calls[0]["holds_main_fix"]
+              and f"; tested merged onto main {pinned_main[:12]}\n" in completed.stdout_naming_main, detail)
+        check("--main-commit is also the commit suites are selected against, so a change "
+              "between it and a newer tracking ref is not left out of selection",
+              calls and calls[0]["argv"][calls[0]["argv"].index("--since") + 1] == pinned_main,
+              json.dumps(calls))
+        if Path("/dev/full").exists():
+            completed, calls = run_program(scratch, helpers, {}, "9", "--main-commit", pinned_main)
+            check("the lost-stderr rerun command of a pinned run names the same main and head, "
+                  "although origin's main is newer",
+                  shlex.join(["--head-commit", git(review_worktrees_directory(helpers) / "pr9-merged",
+                                                   "rev-parse", "HEAD^2"),
+                              "--main-commit", pinned_main]) in completed.stdout,
+                  f"exit {completed.returncode}\n{completed.stdout}{completed.stderr}")
+        completed, calls = run_program(scratch, helpers, {}, "7", "--main-commit", "no-such-commit")
+        check("a --main-commit that names no commit exits 2 before any run",
+              completed.returncode == 2 and calls == []
+              and "not run: git cannot read the main commit: git rev-parse" in completed.stdout,
+              f"exit {completed.returncode}\n{completed.stdout}{completed.stderr}")
+        completed, calls = run_program(scratch, helpers, {}, "7")
+        detail = f"exit {completed.returncode}\n{completed.stdout}{completed.stderr}"
+        check("a run after --main-commit returns to origin's main",
+              completed.returncode == 0 and git(merged, "rev-parse", "HEAD^1") == main_fix, detail)
+        check("the rebuild leaves pr<n>-head in place, for the reviewers running beside it",
+              (head_worktree / "a-reviewer-is-reading-this.txt").exists(), detail)
+
+        reviewed_head = git(merged, "rev-parse", "HEAD^2")
+        git(author, "checkout", "-q", "topic")
+        pushed_head = commit_file(author, "pushed-later.txt", "later\n")
+        git(author, "push", "-q", str(scratch / "origin.git"), "topic:refs/pull/7/head")
+        completed, calls = run_program(scratch, helpers, {}, "7", "--head-commit", reviewed_head)
+        detail = f"exit {completed.returncode}\n{completed.stdout}{completed.stderr}"
+        check("--head-commit is the head merged, even when the pull request has a newer one",
+              completed.returncode == 0 and git(merged, "rev-parse", "HEAD^2") == reviewed_head,
+              detail)
+        completed, calls = run_program(scratch, helpers, {}, "7")
+        detail = f"exit {completed.returncode}\n{completed.stdout}{completed.stderr}"
+        check("without --head-commit, the pull request's current head is merged",
+              completed.returncode == 0 and git(merged, "rev-parse", "HEAD^2") == pushed_head,
+              detail)
+
+        completed, calls = run_program(scratch, helpers, {}, "7", "8",
+                                       "--head-commit", reviewed_head)
+        check("--head-commit with two pull requests exits 2 before any run",
+              completed.returncode == 2 and calls == []
+              and "--head-commit" in completed.stderr,
+              f"exit {completed.returncode}\n{completed.stdout}{completed.stderr}")
+
+        git(author, "checkout", "-q", "-b", "head-origin-replaces", pushed_head)
+        replaced_head = commit_file(author, "replaced-by-a-rebase.txt", "replaced\n")
+        git(author, "push", "-q", str(scratch / "origin.git"), "HEAD:refs/pull/7/head")
+        git(author, "checkout", "-q", "-b", "head-after-rebase", pushed_head)
+        rebased_head = commit_file(author, "after-the-rebase.txt", "rebased\n")
+        rebased_marker = scratch / "head-already-rebased"
+        rebasing_git = helpers / "tripwire-bin" / "git"
+        real_git = shlex.quote(shutil.which("git"))
+        # The head moves on origin right after the program first reads it.
+        rebasing_git.write_text(
+            f'#!/bin/sh\n{real_git} "$@"\ncode=$?\n'
+            f'case "$*" in *refs/pull/7/head*)\n'
+            f'  if [ ! -e {shlex.quote(str(rebased_marker))} ]; then\n'
+            f'    touch {shlex.quote(str(rebased_marker))}\n'
+            f'    {real_git} -C {shlex.quote(str(author))} push -q -f '
+            f'{shlex.quote(str(scratch / "origin.git"))} '
+            f'{rebased_head}:refs/pull/7/head\n'
+            f'  fi;;\nesac\nexit $code\n')
+        rebasing_git.chmod(0o755)
+        completed, calls = run_program(scratch, helpers, {}, "7")
+        rebasing_git.unlink()
+        detail = f"exit {completed.returncode}\n{completed.stdout}{completed.stderr}"
+        check("when the head is rebased on origin just after the program reads it, the commit "
+              "it read is still merged and tested",
+              completed.returncode == 0 and len(calls) == 1 and rebased_marker.exists()
+              and git(merged, "rev-parse", "HEAD^2") == replaced_head, detail)
+
+        git_calls_log = scratch / "git-calls.log"
+        git_logger = helpers / "tripwire-bin" / "git"
+        git_logger.write_text(f'#!/bin/sh\nprintf "%s\\n" "$*" >> {shlex.quote(str(git_calls_log))}\n'
+                              f'exec {shlex.quote(shutil.which("git"))} "$@"\n')
+        git_logger.chmod(0o755)
+        for option in ("--head-commit", "--main-commit"):
+            git_calls_log.unlink(missing_ok=True)
+            completed, calls = run_program(scratch, helpers, {}, "7", option, "")
+            git_calls = git_calls_log.read_text() if git_calls_log.exists() else ""
+            check(f"an empty {option} exits 2 with no suite run and no git call",
+                  completed.returncode == 2 and calls == [] and git_calls == ""
+                  and option in completed.stderr,
+                  f"exit {completed.returncode}, {len(calls)} run(s), git calls: {git_calls!r}\n"
+                  f"{completed.stdout}{completed.stderr}")
+        for short_or_named in (reviewed_head[:12], "origin/topic"):
+            git_calls_log.unlink(missing_ok=True)
+            completed, calls = run_program(scratch, helpers, {}, "7",
+                                           "--head-commit", short_or_named)
+            git_calls = git_calls_log.read_text() if git_calls_log.exists() else ""
+            check(f"a --head-commit that is not a full hash, {short_or_named}, exits 2 with no "
+                  "suite run and no git call",
+                  completed.returncode == 2 and calls == [] and git_calls == ""
+                  and "full 40-character commit hash" in completed.stderr,
+                  f"exit {completed.returncode}, {len(calls)} run(s), git calls: {git_calls!r}\n"
+                  f"{completed.stdout}{completed.stderr}")
+        git_logger.unlink()
+
+        git(author, "checkout", "-q", "main")
+        commit_file(author, "conflict.txt", "from main\n")
+        git(author, "push", "-q", str(scratch / "origin.git"), "main:refs/heads/main")
+        completed, calls = run_program(scratch, helpers, {}, "11", "8")
+        detail = f"exit {completed.returncode}\n{completed.stdout}{completed.stderr}"
+        check("a rebuild that fails on a merge conflict runs no tests for that pull request, "
+              "says what failed, goes on to the next pull request and exits 2",
+              completed.returncode == 2
+              and [call["argv"][call["argv"].index("--checkout") + 1] for call in calls]
+              == [str(review_worktrees_directory(helpers) / "pr8-merged")]
+              and "PR 11 head test run: not run" in completed.stdout
+              and "conflicts with main" in completed.stdout, detail)
+
+        completed, calls = run_program(scratch, helpers, {}, "99")
+        detail = f"exit {completed.returncode}\n{completed.stdout}{completed.stderr}"
+        check("a pull request whose head origin does not have runs no tests and exits 2",
+              completed.returncode == 2 and calls == []
+              and "PR 99 head test run: not run" in completed.stdout, detail)
+
+        rebuild_link = review_tools / "scripts" / REBUILD_PROGRAM.name
+        rebuild_link.unlink()
+        completed, calls = run_program(scratch, helpers, {}, "7")
+        check("a review tools worktree without the rebuild program exits 2 before any run",
+              completed.returncode == 2 and calls == []
+              and f"{REBUILD_PROGRAM.name} is missing" in completed.stdout,
+              f"exit {completed.returncode}\n{completed.stdout}{completed.stderr}")
+        rebuild_link.symlink_to(REBUILD_PROGRAM)
+
         shutil.rmtree(helpers / "tripwire-bin")
         completed, calls = run_program(scratch, helpers, {}, "7")
         check("a missing tripwire-bin exits 2 before any run",
@@ -293,6 +523,19 @@ def main():
         check("a review tools worktree without pull-request-head-test-run.py exits 2 before any run",
               completed.returncode == 2 and calls == []
               and "pull-request-head-test-run.py is missing" in completed.stdout,
+              f"exit {completed.returncode}\n{completed.stdout}{completed.stderr}")
+
+        not_a_checkout = scratch / "holds-both-programs-but-is-not-a-git-checkout"
+        (not_a_checkout / "scripts").mkdir(parents=True)
+        (not_a_checkout / "scripts" / "pull-request-head-test-run.py").write_text(
+            FAKE_HEAD_TEST_RUN)
+        (not_a_checkout / "scripts" / REBUILD_PROGRAM.name).symlink_to(REBUILD_PROGRAM)
+        completed, calls = run_program(scratch, helpers, {}, "7", review_tools=not_a_checkout)
+        check("a review tools worktree that holds both programs but is not a git checkout "
+              "exits 2 before any run, naming the git step that failed",
+              completed.returncode == 2 and calls == []
+              and "not run: git cannot read the main commit: git fetch" in completed.stdout
+              and str(not_a_checkout) in completed.stdout,
               f"exit {completed.returncode}\n{completed.stdout}{completed.stderr}")
     finally:
         shutil.rmtree(scratch, ignore_errors=True)

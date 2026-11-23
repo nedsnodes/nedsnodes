@@ -124,7 +124,7 @@ def commit_file(repository, name):
 
 
 def build_repositories(scratch):
-    """Return (checkout, main commit, nc-head-commit reviewed before, nc-head-commit, merge base)."""
+    """Return (checkout, main commit, nn-head-commit reviewed before, nn-head-commit, merge base)."""
     origin = scratch / "origin.git"
     author = scratch / "author"
     subprocess.run(["git", "init", "-q", "--bare", "-b", "main", str(origin)], check=True,
@@ -138,7 +138,7 @@ def build_repositories(scratch):
     checkout = scratch / "checkout"
     subprocess.run(["git", "clone", "-q", str(origin), str(checkout)], check=True,
                    env=GIT_ENVIRONMENT)
-    # The checkout fetched the earlier nc-head-commit in the earlier round.
+    # The checkout fetched the earlier nn-head-commit in the earlier round.
     git(checkout, "fetch", "-q", "origin", "refs/pull/7/head")
     head_commit = commit_file(author, "topic-round-2.txt")
     git(author, "checkout", "-q", "main")
@@ -276,7 +276,7 @@ def main():
                   ["7", head_commit, main_commit, *directory_options],
                   [str(filled_in_file), *directory_options],
                   ["7", merge_base, *directory_options],
-                  ["7", *directory_options],
+                  ["7", "--head-commit", head_commit, "--main-commit", main_commit, *directory_options],
                   ["7", "7a", head_commit, *directory_options]], detail)
         filled_in = json.loads(filled_in_file.read_text()) if filled_in_file.exists() else None
         check("the filled-in copy is the entry with origin's full head and main added",
@@ -316,11 +316,11 @@ def main():
                                           "reviewed_before": head_reviewed_before[:10]}],
             "--head-commit-reviewed-before", head_reviewed_before[:12])
         detail = f"exit {completed.returncode}\n{completed.stdout}{completed.stderr}\n{calls}"
-        check("a fix-round's Codex base is the full nc-head-commit reviewed before, and "
+        check("a fix-round's Codex base is the full nn-head-commit reviewed before, and "
               "abbreviated commits in the file and the option are accepted",
               completed.returncode == 0 and len(calls) == 5
               and argv_of(calls, STEPS[2]) == ["7", head_reviewed_before, *directory_options]
-              and "(nc-head-commit reviewed before)" in completed.stdout, detail)
+              and "(nn-head-commit reviewed before)" in completed.stdout, detail)
         filled_in = json.loads(filled_in_file.read_text())
         check("a head named in the file is replaced by its full commit in the filled-in copy",
               filled_in[0]["head"] == head_commit and filled_in[0]["main"] == main_commit,
@@ -382,7 +382,8 @@ def main():
                   and all(other in completed.stdout for other in others)
                   and "never met the other steps" not in completed.stdout
                   and completed.stdout.count("nothing was merged.") == 1, detail)
-            expected_arguments = {3: ["7", merge_base], 4: ["7"], 5: ["7", "7a", head_commit]}
+            expected_arguments = {3: ["7", merge_base], 4: ["7", "--head-commit", head_commit, "--main-commit", main_commit],
+                                  5: ["7", "7a", head_commit]}
             rerun_line = (f"  step {position}: "
                           + shlex.join([sys.executable, str(checkout / "scripts" / step),
                                         *expected_arguments[position], *directory_options]))
@@ -400,6 +401,10 @@ def main():
               and f"PR 7: step 3 exited 0; step 4, {STEPS[3]}, exited 5; step 5 was skipped; "
                   f"nothing was merged." in completed.stdout,
               f"exit {completed.returncode}\n{completed.stdout}{completed.stderr}\n{calls}")
+        check("a failed step 4's rerun command uses the same commits, main included",
+              "the command uses the same commits" in completed.stdout
+              and shlex.join(["--main-commit", main_commit]) in completed.stdout,
+              f"exit {completed.returncode}\n{completed.stdout}{completed.stderr}")
 
         completed, calls, _ = run_program(
             scratch, checkout, helpers, [first_round], environment_changes={
@@ -527,7 +532,7 @@ def main():
                   f"{helpers / 'cx' / ('pr7-' + merge_base[:8])}, and do not run it again\n"
                   in stderr
               and f"  step 4 exited 3: run it alone, with the same commits, to see its "
-                  f"message: {shlex.join([sys.executable, str(checkout / 'scripts' / STEPS[3]), '7', *directory_options])}\n"
+                  f"message: {shlex.join([sys.executable, str(checkout / 'scripts' / STEPS[3]), '7', '--head-commit', head_commit, '--main-commit', main_commit, *directory_options])}\n"
                   in stderr
               and f"  step 5 exited 0: read its records in "
                   f"{helpers / 'claude-reviews' / ('pr7-' + head_commit)}*, and do not run it "
@@ -656,7 +661,7 @@ def main():
               "not the generic one",
               "If the commit is right, fetch it into" in completed.stdout
               and completed.stdout.rstrip().endswith(
-                  "run this again with --head-commit-reviewed-before set to the nc-head-commit "
+                  "run this again with --head-commit-reviewed-before set to the nn-head-commit "
                   "that was reviewed before.")
               and generic_instruction not in completed.stdout, completed.stdout)
         completed, _, _ = run_program(scratch, checkout, helpers, "[{not json")

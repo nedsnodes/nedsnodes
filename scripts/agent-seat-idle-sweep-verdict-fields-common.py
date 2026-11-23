@@ -46,8 +46,8 @@ RUNNING = "running"
 BACKGROUND_COMMAND_DESCRIPTION = "description"
 BACKGROUND_COMMAND_LINE_CHARACTERS_KEPT = 120
 # ISO time at which the coreutils `timeout <duration>` the command line starts with stops the
-# command, its start plus the duration; null when the line starts with no such timeout, the duration
-# is 0, or the start is unknown.
+# command, its start plus the duration; null when the line starts with no such timeout, runs another
+# command after the timed one other than through a pipe, the duration is 0, or the start is unknown.
 BACKGROUND_COMMAND_TIMEOUT_ENDS_AT = "timeout_ends_at"
 # Keys a running subagent entry also carries when the subagent has stopped and reported, and is
 # counted only because background commands it launched still run: when it stopped (ISO time), and

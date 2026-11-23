@@ -997,6 +997,12 @@ with tempfile.TemporaryDirectory() as scratch:
     check("a one-word alias such as haiku is capitalised too, as Claude's model-limit message spells it",
           claude_module.model_family_name("haiku") == "Haiku",
           repr(claude_module.model_family_name("haiku")))
+    check("a two-word model id such as claude-haiku gives its second word",
+          claude_module.model_family_name("claude-haiku") == "Haiku",
+          repr(claude_module.model_family_name("claude-haiku")))
+    check("a model id whose second word is empty is capitalised whole",
+          claude_module.model_family_name("claude--x") == "Claude--x",
+          repr(claude_module.model_family_name("claude--x")))
 
     # Through the real cells: the cause line is the last line of the attempt
     # in the log the grid reads, in the form the grid parses.
@@ -1605,11 +1611,31 @@ with tempfile.TemporaryDirectory() as scratch:
     # relative to the working directory and blocked 1 of 3 canaries.
     passed_deny_rules = (json.loads(passed_settings).get("permissions", {}).get("deny", [])
                          if passed_settings.startswith("{") else [])
-    check("the Claude cell denies reading every credential path",
-          set(passed_deny_rules) >= {"Read(~/.config/nedsnodes/**)", "Read(~/.config/gh/**)",
-                                     "Read(~/.ssh/**)",
-                                     "Read(//**/*.token)", "Read(//**/.env)"},
-          repr(passed_deny_rules))
+    if sys.platform.startswith("linux"):
+        ned_box_file_rules = {f"Read(/{claude_scratch_home / path.relative_to(Path.home())})"
+                              for path in claude_module.common.CREDENTIAL_FILES_ON_NED_BOX}
+        check("on ned-box the Claude cell denies reading each listed credential file by its exact path, "
+              "and no folder or name pattern",
+              set(passed_deny_rules) >= ned_box_file_rules
+              and not any("**" in rule for rule in passed_deny_rules),
+              f"missing {sorted(ned_box_file_rules - set(passed_deny_rules))}")
+    else:
+        check("on the Mac the Claude cell denies reading every credential folder and name pattern",
+              set(passed_deny_rules) >= {"Read(~/.config/nedsnodes/**)", "Read(~/.config/gh/**)",
+                                         "Read(~/.ssh/**)", "Read(~/.steam/**)", "Read(~/nedsmessenger/**)",
+                                         "Read(//**/*.token)", "Read(//**/.env)"},
+              repr(passed_deny_rules))
+    # Both platforms' rules are built here on every machine; the module's lists name the real home,
+    # so only counts and relative names reach a failure line.
+    mac_rules = claude_module.credential_read_deny_rules("darwin")
+    linux_rules = claude_module.credential_read_deny_rules("linux")
+    check("the Claude cell's Mac rules keep the folders and name patterns, ~/.steam and ~/nedsmessenger among them",
+          {"Read(~/.steam/**)", "Read(~/nedsmessenger/**)", "Read(//**/*.token)", "Read(//**/.env)"}
+          <= set(mac_rules), len(mac_rules))
+    check("the Claude cell's Linux rules are one exact-path rule per credential file and login file",
+          len(linux_rules) == len(claude_module.common.CREDENTIAL_FILES_ON_NED_BOX)
+          + len(claude_module.common.reviewer_program_login_files())
+          and not any("**" in rule or "~" in rule for rule in linux_rules), len(linux_rules))
     # Every reviewer program's login file, Claude's own included (user-ruled
     # 2026-09-29): Claude Code reads its own login outside the Read tool,
     # so the rule leaves it logged in (measured on both machines).
@@ -1625,10 +1651,10 @@ with tempfile.TemporaryDirectory() as scratch:
     # profile extending :workspace, which Codex will not combine with
     # --sandbox. The cell runs with HOME at a scratch home holding
     # .config/nedsnodes, .config/gh, .steam and nedsmessenger and no .ssh,
-    # and three credential-named canaries, in the repository, in the home and
-    # in neither, which no profile names by path: a named path its owner
-    # deletes before Codex starts makes Codex stop or recreate it on the real
-    # disk (review 5346123311).
+    # two of ned-box's listed credential files, and three credential-named
+    # canaries, in the repository, in the home and in neither, which no
+    # profile names by path: a named path its owner deletes before Codex
+    # starts makes Codex stop or recreate it on the real disk (review 5346123311).
     shutil.rmtree(repository)
     repository = build_scratch_repository(scratch)
     report = report_path_for(repository, "codex-denies-credentials", "codex")
@@ -1637,6 +1663,9 @@ with tempfile.TemporaryDirectory() as scratch:
     (scratch_home / ".config" / "gh").mkdir(parents=True, exist_ok=True)
     (scratch_home / ".steam").mkdir(parents=True, exist_ok=True)
     (scratch_home / "nedsmessenger" / "secrets").mkdir(parents=True, exist_ok=True)
+    listed_present = [scratch_home / ".config" / "nedsnodes" / "ubuntu-claude.token",
+                      scratch_home / "nedsmessenger" / "secrets" / "claude-oauth-token"]
+    listed_absent = scratch_home / ".ssh" / "id_ed25519_mac_side_action"
     credential_canary = repository / "codex-credential-canary.token"
     home_canary = scratch_home / "projects" / "codex-home-canary.token"
     unscanned_canary = scratch / "neither-home-nor-repository" / "codex-unscanned-canary.token"
@@ -1647,7 +1676,7 @@ with tempfile.TemporaryDirectory() as scratch:
                       scratch_home / ".codex" / "auth.json",
                       scratch_home / ".gemini" / "antigravity-cli" / "antigravity-oauth-token"]
     absent_login_file = scratch_home / ".gemini" / "oauth_creds.json"
-    for canary in (credential_canary, home_canary, unscanned_canary, *login_canaries):
+    for canary in (credential_canary, home_canary, unscanned_canary, *login_canaries, *listed_present):
         canary.parent.mkdir(parents=True, exist_ok=True)
         canary.write_text("CANARY-NOT-A-SECRET-common-test\n", encoding="utf-8")
     received_argv_path = scratch / "codex-denies-credentials-argv.json"
@@ -1665,11 +1694,13 @@ with tempfile.TemporaryDirectory() as scratch:
                          if override.startswith("permissions.cold-read-no-credentials.filesystem=")),
                         "")
     home = str(scratch_home)
-    expected_denials = [f'"{home}/.config/nedsnodes"="deny"', f'"{home}/.config/gh"="deny"',
-                        f'"{home}/.steam"="deny"', f'"{home}/nedsmessenger"="deny"']
+    mac_directory_denials = [f'"{home}/.config/nedsnodes"="deny"', f'"{home}/.config/gh"="deny"',
+                             f'"{home}/.steam"="deny"', f'"{home}/nedsmessenger"="deny"']
+    if sys.platform.startswith("linux"):
+        expected_denials = [f'"{path}"="deny"' for path in listed_present]
+    else:
+        expected_denials = mac_directory_denials + ['"/**/*.token"="deny"', '"/**/.env"="deny"']
     expected_denials += [f'"{login}"="deny"' for login in login_canaries]
-    if not sys.platform.startswith("linux"):
-        expected_denials += ['"/**/*.token"="deny"', '"/**/.env"="deny"']
     check("a Codex cell's run reaches the runtime at all",
           result.returncode == 0, f"exit {result.returncode}; stderr={result.stderr!r}")
     check("the Codex cell runs under no --sandbox, which Codex will not combine with a profile",
@@ -1690,10 +1721,10 @@ with tempfile.TemporaryDirectory() as scratch:
     check("the Codex cell's profile denies every credential path",
           all(denial in denied_table for denial in expected_denials),
           f"expected {expected_denials} in {denied_table!r}")
-    check("the Codex cell's profile names no credential directory that does not exist",
-          f'"{home}/.ssh"' not in denied_table, denied_table)
-    # No scan runs before a launch: a credential-named file outside the
-    # credential directories is named by no path, on either platform.
+    check("the Codex cell's profile names no credential directory or listed file that does not exist",
+          f'"{home}/.ssh"' not in denied_table and str(listed_absent) not in denied_table, denied_table)
+    # No scan runs before a launch: a credential-named file off the lists is
+    # named by no path, on either platform.
     check("the Codex cell's profile names no credential-named file by its path",
           not any(str(canary) in denied_table
                   for canary in (credential_canary, home_canary, unscanned_canary)),
@@ -1714,9 +1745,12 @@ with tempfile.TemporaryDirectory() as scratch:
     # Each is re-rooted from the real list rather than listed here, so a
     # directory dropped from CREDENTIAL_DIRECTORIES drops out of both tables.
     real_directories = codex_module.common.CREDENTIAL_DIRECTORIES
+    real_files = codex_module.common.CREDENTIAL_FILES_ON_NED_BOX
     real_login_files = codex_module.common.REVIEWER_PROGRAM_LOGIN_FILES
     codex_module.common.CREDENTIAL_DIRECTORIES = tuple(
         scratch_home / directory.relative_to(Path.home()) for directory in real_directories)
+    codex_module.common.CREDENTIAL_FILES_ON_NED_BOX = tuple(
+        scratch_home / path.relative_to(Path.home()) for path in real_files)
     codex_module.common.REVIEWER_PROGRAM_LOGIN_FILES = {
         "claude": (login_canaries[0],), "codex": (login_canaries[1],),
         "agy": (login_canaries[2], absent_login_file)}
@@ -1726,6 +1760,7 @@ with tempfile.TemporaryDirectory() as scratch:
             for platform in ("linux", "darwin")}
     finally:
         codex_module.common.CREDENTIAL_DIRECTORIES = real_directories
+        codex_module.common.CREDENTIAL_FILES_ON_NED_BOX = real_files
         codex_module.common.REVIEWER_PROGRAM_LOGIN_FILES = real_login_files
     check("the Linux profile keeps /tmp and $TMPDIR read-only",
           '":slash_tmp"="read"' in profile_tables["linux"]
@@ -1734,30 +1769,30 @@ with tempfile.TemporaryDirectory() as scratch:
           '":slash_tmp"' not in profile_tables["darwin"]
           and '":tmpdir"' not in profile_tables["darwin"], profile_tables["darwin"])
     scratch_credential_directory_denial = f'"{home}/.config/nedsnodes"="deny"'
-    check("the Linux profile denies the credential directory and names no credential-named file",
-          scratch_credential_directory_denial in profile_tables["linux"]
+    check("the Linux profile denies each listed credential file that exists, by its exact path, and no "
+          "folder, absent listed file, unlisted credential-named file or name pattern",
+          all(f'"{path}"="deny"' in profile_tables["linux"] for path in listed_present)
+          and not any(denial in profile_tables["linux"] for denial in mac_directory_denials)
+          and str(listed_absent) not in profile_tables["linux"]
           and str(home_canary) not in profile_tables["linux"]
           and "/**/" not in profile_tables["linux"], profile_tables["linux"])
     check("the macOS profile denies the credential directory, *.token and .env anywhere",
           scratch_credential_directory_denial in profile_tables["darwin"]
           and '"/**/*.token"="deny"' in profile_tables["darwin"]
           and '"/**/.env"="deny"' in profile_tables["darwin"], profile_tables["darwin"])
-    check("both platforms' profiles deny gh's login directory",
-          all(f'"{home}/.config/gh"="deny"' in profile_tables[platform]
-              for platform in ("linux", "darwin")), repr(profile_tables))
     present_scratch_directories = [
         scratch_home / directory.relative_to(Path.home()) for directory in real_directories
         if (scratch_home / directory.relative_to(Path.home())).is_dir()]
-    check("both platforms' profiles deny every credential directory that exists, "
-          "~/.steam and ~/nedsmessenger among them",
-          {scratch_home / ".steam", scratch_home / "nedsmessenger"} <= set(present_scratch_directories)
-          and all(f'"{directory}"="deny"' in profile_tables[platform]
-                  for directory in present_scratch_directories
-                  for platform in ("linux", "darwin")), repr(profile_tables))
-    check("neither platform's profile names the real home's credential directories",
-          not any(str(directory) in profile_tables[platform]
-                  for directory in real_directories for platform in ("linux", "darwin")),
-          "a table names a real credential directory")
+    check("the macOS profile denies every credential directory that exists, "
+          "~/.config/gh, ~/.steam and ~/nedsmessenger among them",
+          {scratch_home / ".config" / "gh", scratch_home / ".steam", scratch_home / "nedsmessenger"}
+          <= set(present_scratch_directories)
+          and all(f'"{directory}"="deny"' in profile_tables["darwin"]
+                  for directory in present_scratch_directories), profile_tables["darwin"])
+    check("neither platform's profile names the real home's credential directories or files",
+          not any(str(path) in profile_tables[platform]
+                  for path in (*real_directories, *real_files) for platform in ("linux", "darwin")),
+          "a table names a real credential path")
     check("both platforms' profiles deny each login file that exists",
           all(f'"{login}"="deny"' in profile_tables[platform]
               for login in login_canaries for platform in ("linux", "darwin")),

@@ -108,8 +108,7 @@ The poem page goes in the wiki, next to the glossary and the style guide, so tha
 **The strongest case for N:** a page in the wiki is one more document agents must be told to read. **Recommendation: Y.**"""
 
 # The closing line's answer letters; the answer hook's suite checks that the walk-me-through skill writes the same.
-LETTERS = ("A approve · AO approve as obvious · Aa approve after an advisor check · D disapprove · Z defer · "
-           "E explain · O other options")
+LETTERS = "A approve · D disapprove · M more responses"
 COUNT_IN_DOCUMENT = re.compile(r"Items?\s+(\d+(?:\.\d+)*(?:\s*(?:,|and|to|-)\s*\d+(?:\.\d+)*)*)\s+of\s+(\d+)")
 
 
@@ -254,7 +253,7 @@ def test_a_reply_ending_with_the_closing_line_passes_and_one_without_it_is_sent_
             ("a closing line in bold is sent back", f"**{closing(2)}**"),
             ("a closing line as a list item is sent back", f"- {closing(2)}"),
             ("a closing line whose letters are cut short is sent back",
-             closing(2).replace(" · O other options", "")),
+             closing(2).replace(" · M more responses", "")),
             ("a closing line whose label opens in lower case is sent back", closing(2).replace("[Item", "[item")),
             ("a closing line with a question after its letters is sent back", closing(2) + " Merge now?"),
             ("a closing line whose count is a backwards range naming the item is sent back",

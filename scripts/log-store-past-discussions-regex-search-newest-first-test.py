@@ -185,6 +185,38 @@ with tempfile.TemporaryDirectory() as scratch:
     check("a user's message carries the time he sent it",
           "2026-09-28T09:01:00Z  user-messages" in result.stdout, result.stdout)
 
+    staging_copy = root / "cold-read-records" / ".ship-staging-egret-plan-2026-09-21-k3j9" / "fast-read.md"
+    write(root / "cold-read-records" / "egret-plan-2026-09-21" / "fast-read.md", "the egret plan is unclear\n")
+    write(staging_copy, "the egret plan is unclear\n")
+    result = run(root, "egret plan", "--kind", "cold-read-records")
+    shutil.rmtree(root / "cold-read-records" / "egret-plan-2026-09-21")
+    shutil.rmtree(staging_copy.parent)
+    check("a shipment's leftover staging copy of a cold-read-record gives no hit of its own",
+          result.returncode == 0 and len(hit_headers(result.stdout)) == 1
+          and ".ship-staging-" not in result.stdout, result.stdout + result.stderr)
+
+    walk_staging = root / "walk" / ".ship-staging-egret-walk-2026-09-21-p2q7"
+    write(root / "walk" / "egret-walk-2026-09-21-minutes.md", "the egret walk is open\n")
+    write(walk_staging / "egret-walk-2026-09-21-minutes.md", "the egret walk is open\n")
+    write(root / "walk" / ".ship-staging-named-file-2026-09-22.md", "the egret walk is open\n")
+    unreadable_staging = root / "cold-read-records" / ".ship-staging-gone-2026-09-23-x1y2"
+    write(unreadable_staging / "fast-read.md", "the egret walk is open\n")
+    # Stands in for a staging directory its shipment removes while ripgrep walks it.
+    unreadable_staging.chmod(0)
+    result = run(root, "egret walk", "--kind", "walk", "--kind", "cold-read-records")
+    unreadable_staging.chmod(0o700)
+    shutil.rmtree(unreadable_staging)
+    shutil.rmtree(walk_staging)
+    (root / "walk" / "egret-walk-2026-09-21-minutes.md").unlink()
+    (root / "walk" / ".ship-staging-named-file-2026-09-22.md").unlink()
+    check("ripgrep never enters a shipment's staging directory, in walk/ or cold-read-records/, "
+          "while a file whose name opens the same way is still searched",
+          result.returncode == 0 and len(hit_headers(result.stdout)) == 2
+          and "egret-walk-2026-09-21-minutes.md" in result.stdout
+          and ".ship-staging-named-file-2026-09-22.md" in result.stdout
+          and ".ship-staging-egret-walk" not in result.stdout
+          and ".ship-staging-gone" not in result.stdout + result.stderr, result.stdout + result.stderr)
+
     result = run(root, "heron plan", "--kind", "session-dialogs", "--since", "2026-11-01")
     check("--since leaves out a session dialog whose transcript ended before it, whatever the dialog's modification time",
           result.returncode == 1 and not hit_headers(result.stdout), result.stdout)
