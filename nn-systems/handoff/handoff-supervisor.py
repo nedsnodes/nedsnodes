@@ -1289,9 +1289,11 @@ def successor_initial_agent_instructions_line_naming_waiting_approval_walk_item(
             return ()
         named_in_next_step = []
         for walk in walks:
-            # A name followed by -minutes.md is the walk's walk-minutes path; any other longer name is another walk.
+            # A name followed by -minutes.md and a file-name boundary is the walk's walk-minutes path; any other
+            # longer name, -minutes.md.bak included, is another file.
             mention = re.search(rf"(?<![\w-]){re.escape(walk[0].name[:-len(walk_finder.MINUTES_SUFFIX)])}"
-                                rf"(?!(?!{re.escape(walk_finder.MINUTES_SUFFIX)})[\w-])", next_step)
+                                rf"(?!(?!{re.escape(walk_finder.MINUTES_SUFFIX)}(?![\w-]|\.\w))[\w-])",
+                                next_step)
             if mention:
                 named_in_next_step.append((mention.start(), walk))
         if named_in_next_step:
@@ -1315,9 +1317,10 @@ def successor_initial_agent_instructions_line_naming_waiting_approval_walk_item(
         document = minutes.with_name(name + ".md")
         text = document.read_text(encoding="utf-8")
         spans = walk_finder.item_unit_spans(text, parser)
-        total, units = walk_finder.waiting_item_units(document, value, numbers, total, parser, spans)
-        # units[0] is the first waiting item's own heading; a later waiting item's heading may name it too.
-        point = walk_short_answer_hook.heading_points(text.split("\n"), units[:1], parser).get(number)
+        # Only the first-named item, because waiting_item_units returns units in walk-document order, and a later
+        # waiting item's heading may name the first item too.
+        total, units = walk_finder.waiting_item_units(document, value, [number], total, parser, spans)
+        point = walk_short_answer_hook.heading_points(text.split("\n"), units, parser).get(number)
     except Exception as error:
         print(f"handoff-supervisor: waiting approval-walk item's walk-document unreadable: "
               f"{type(error).__name__}: {error}")

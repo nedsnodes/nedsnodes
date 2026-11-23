@@ -1718,8 +1718,13 @@ def changed_reason(*findings, minute=0, item="item 4 of 9"):
             "with parts, the text after each `Part N.`. A line passes when a line of the same kind in the message "
             "holds the same words, ignoring punctuation, letter case and the marks `#new`, `#new_if_d`, "
             "`#case_against` and `[advisor]`, or, for a line other than a recommendation or an alternative that the "
-            "message shows without its mark, when a paragraph, list or quotation of the message ends with those "
-            "words; for any other line a model judges whether the message's line of the same kind in the same place, "
+            "message shows without its mark, when a paragraph, list or quotation of the message holds those words and "
+            "no others, alone or after the words its kind may carry, \"If you approve, the new text:\", \"If you "
+            "disapprove, the new text:\" or \"Case against\", on its first line or as a paragraph of their own above "
+            "it, each such paragraph, list or quotation below the one before. In either text, any other words ending "
+            "in a colon above a line, as a paragraph right above its block or a heading over its section, count as part of the line, "
+            "since such a lead-in, as \"Do not adopt the following:\", can reverse what follows it; such a line passes "
+            "with no model call only under the same lead-in. For any other line a model judges whether the message's line of the same kind in the same place, "
             "or else its closest paragraph, means the same, and for a line the message showed that the item no longer "
             "has, "
             "whether the item's closest paragraph still says it, so a change made only for clarity passes, and so "
@@ -2409,6 +2414,50 @@ def test_a_new_if_d_line_with_the_new_text_label_counts_shown_as_the_stop_hook_s
           "disapprove, the new text: Show every row.\"", counted(lines) and not case.model_calls(), f"lines {lines!r}")
 
 
+def test_a_line_shown_below_a_heading_a_list_item_or_a_comment_ending_a_lead_in_goes_to_the_model():
+    for name, shown_line in (
+            ("a heading ending in a colon", "#### Do not adopt the following:\n\nHide rows older than a year."),
+            ("an earlier item of the same list", "- Do not adopt the following:\n- Hide rows older than a year."),
+            ("a lead-in an HTML comment separates from the line",
+             "Do not adopt the following:\n<!-- a drafter's note -->\nHide rows older than a year."),
+            ("a lead-in a blank-lined HTML comment separates from the line",
+             "Do not adopt the following:\n\n<!-- a drafter's note -->\n\nHide rows older than a year."),
+            ("a lead-in above the line that keeps its mark",
+             "If you disapprove, the new text:\n\n> #new Hide rows older than a year.")):
+        case = Case(next_to_present="item 4 of 9", document=DECISION_DOCUMENT, model="changed")
+        shown = DECISION_ITEM.replace("#new Hide rows older than a year.", shown_line)
+        lines = case.lines("a", case.transcript(f"{shown}\n\n{ITEM_4_CLOSING_LINE}"))
+        check(f"an answer goes to the model and is refused when the `#new` line was shown below {name}",
+              len(case.model_calls()) == 1 and lines is not None and not counted(lines), f"lines {lines!r}")
+
+
+def test_every_line_shown_below_one_if_you_approve_lead_in_counts_with_no_model_call():
+    item = DECISION_ITEM.replace("#new Hide rows older than a year.",
+                                 "#new Hide rows older than a year.\n\n#new Keep the rest.")
+    for name, shown_block in (("bullets", "- Hide rows older than a year.\n- Keep the rest."),
+                              ("paragraphs of a quotation", "> Hide rows older than a year.\n>\n> Keep the rest.")):
+        case = Case(next_to_present="item 4 of 9", document="# A walk\n\n" + item + "\n", model="changed")
+        shown = item.replace("#new Hide rows older than a year.\n\n#new Keep the rest.",
+                             f"If you approve, the new text:\n\n{shown_block}")
+        lines = case.lines("a", case.transcript(f"{shown}\n\n{ITEM_4_CLOSING_LINE}"))
+        check(f"an answer counts with no model call when two `#new` lines were shown as {name} below one \"If you "
+              "approve, the new text:\"", counted(lines) and not case.model_calls(), f"lines {lines!r}")
+
+
+def test_a_bold_new_text_label_is_read_as_the_label_by_both_hooks():
+    hook = load_short_answer_hook_for_test()
+    check("a source `#new **The new text:** X` line is shown as \"If you approve, the new text: X\"",
+          hook.new_text_as_shown("#new **The new text:** Show every row.")
+          == "If you approve, the new text: Show every row.",
+          hook.new_text_as_shown("#new **The new text:** Show every row."))
+    item = DECISION_ITEM.replace("#new_if_d Show every row.", "#new_if_d **The new text:** Show every row.")
+    case = Case(next_to_present="item 4 of 9", document="# A walk\n\n" + item + "\n", model="changed")
+    shown = item.replace("#new_if_d **The new text:** Show", "If you disapprove, the new text: Show")
+    lines = case.lines("d", case.transcript(f"{shown}\n\n{ITEM_4_CLOSING_LINE}"))
+    check("'d' counts with no model call when `#new_if_d **The new text:** Show every row.` was shown as \"If you "
+          "disapprove, the new text: Show every row.\"", counted(lines) and not case.model_calls(), f"lines {lines!r}")
+
+
 def test_a_range_items_shown_text_ends_at_a_later_item_and_not_at_an_item_inside_the_range():
     closing = f"[Item 11 of 20, grouped](https://claude.ai/artifact/x) · {LETTERS_AFTER_LINK}"
     range_shown = RANGE_HEADING_DOCUMENT.split("## Item 13")[0]
@@ -2444,6 +2493,17 @@ def test_the_items_own_sub_step_heading_does_not_end_its_shown_text():
     lines = case.lines("a", case.transcript(f"{shown}\n\n{ITEM_4_CLOSING_LINE}"))
     check("an answer counts with no model call when the item's own sub-step heading comes before its decision lines",
           counted(lines) and not case.model_calls(), f"lines {lines!r}")
+
+
+def test_a_sub_step_heading_shared_with_an_earlier_item_does_not_end_its_shown_text():
+    for form, heading in (("an ATX", "### Items 3.1 and 4.1 of 9: shared defaults"),
+                          ("a setext", "Items 3.1 and 4.1 of 9: shared defaults\n---")):
+        shown = DECISION_ITEM.replace("#new Hide", f"{heading}\n\n#new Hide")
+        case = decision_case(model="changed")
+        lines = case.lines("a", case.transcript(f"{shown}\n\n{ITEM_4_CLOSING_LINE}"))
+        check(f"an answer counts with no model call when {form} sub-step heading that names an earlier item first, "
+              "then this item, comes before its decision lines",
+              counted(lines) and not case.model_calls(), f"lines {lines!r}")
 
 
 def test_a_recommendation_or_alternative_shown_without_its_label_goes_to_the_model():
@@ -2916,6 +2976,13 @@ def test_items_headings_with_words_group_and_amendment_headings_stay_in_their_it
 def load_walk_finder_for_test():
     path = HOOK_SCRIPT.parent / "walk-me-through-approval-walk-minutes-and-walk-document-item-finder-common.py"
     spec = importlib.util.spec_from_file_location("walk_finder_for_short_answer_hook_test", path)
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return module
+
+
+def load_short_answer_hook_for_test():
+    spec = importlib.util.spec_from_file_location("short_answer_hook_for_test", HOOK_SCRIPT)
     module = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(module)
     return module

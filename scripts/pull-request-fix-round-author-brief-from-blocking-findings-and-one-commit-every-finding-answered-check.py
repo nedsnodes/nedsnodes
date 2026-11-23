@@ -365,8 +365,9 @@ def is_ancestor(ancestor, descendant):
 
 
 def pull_request(number):
-    """(url, head, branch, description) of the pull request; the description may be empty."""
-    arguments = ["pr", "view", str(number), "--json", ",".join((*PULL_REQUEST_FIELDS, "body"))]
+    """(url, head, branch, description, author's login) of the pull request; the description may be empty, and
+    the login None when GitHub names no author."""
+    arguments = ["pr", "view", str(number), "--json", ",".join((*PULL_REQUEST_FIELDS, "body", "author"))]
     command = "gh " + " ".join(arguments)
     rerun = (f" Run {command} yourself: if it now prints an object with all three fields filled in, "
              f"run {shlex.join(['python3', *sys.argv])} again.")
@@ -383,7 +384,8 @@ def pull_request(number):
     if missing:
         raise StepFailed(f"{command} printed JSON in which these fields are missing or empty: "
                          f"{', '.join(missing)}." + rerun)
-    return (*(facts[field] for field in PULL_REQUEST_FIELDS), facts.get("body") or "")
+    return (*(facts[field] for field in PULL_REQUEST_FIELDS), facts.get("body") or "",
+            (facts.get("author") or {}).get("login"))
 
 
 def round_records(number):
@@ -412,20 +414,33 @@ def verdict_line(review):
     return (review.get("body") or "").split("\n", 1)[0]
 
 
-def are_merge_lane_verdicts_on_pull_request_comment_reviews(own):
-    """Are merge-lane-2's verdicts on this pull request COMMENT reviews? On a pull request ned-review-merge
-    opened, GitHub takes that account's verdict only as a COMMENT review, which the posting program opens
-    with the verdict line; on any other, the posting program gives each verdict its own review state."""
-    return not any(review.get("state") in ("CHANGES_REQUESTED", "APPROVED") for review in own)
+def merge_lane_review_verdict_from_review_state_or_comment_review_first_line(
+        review, pull_request_author_login, reviewer_login):
+    """APPROVE, REQUEST_CHANGES, or None for a review by reviewer_login, merge-lane-2's account, that carries no
+    verdict. GitHub refuses an approving or changes-requesting review from a pull request's author, so on a pull
+    request that account opened the posting program posts the verdict as a COMMENT review opening with the
+    verdict line, and on any other pull request as the review's own state; the author alone decides which is read.
+    Raises StepFailed for a review GitHub returned without a state, whose verdict cannot be known."""
+    state = review.get("state")
+    if not state:
+        raise StepFailed(f"GitHub returned a review by {reviewer_login} without a state, so its verdict cannot be "
+                         f"read: {json.dumps(review)[:300]}")
+    if state == "APPROVED":
+        return "APPROVE"
+    if state == "CHANGES_REQUESTED":
+        return "REQUEST_CHANGES"
+    if (state == "COMMENTED" and pull_request_author_login == reviewer_login
+            and verdict_line(review) in ("APPROVE", "REQUEST_CHANGES")):
+        return verdict_line(review)
+    return None
 
 
-def does_merge_lane_review_ask_for_fix_round(review, as_comments):
-    """Does this merge-lane-2 review ask for a fix-round? as_comments is are_merge_lane_verdicts_on_pull_request_comment_reviews()."""
-    return (review.get("state") == "CHANGES_REQUESTED"
-            or as_comments and review.get("state") == "COMMENTED" and verdict_line(review) == "REQUEST_CHANGES")
+def does_merge_lane_review_ask_for_fix_round(review, pull_request_author_login, reviewer_login):
+    return merge_lane_review_verdict_from_review_state_or_comment_review_first_line(
+        review, pull_request_author_login, reviewer_login) == "REQUEST_CHANGES"
 
 
-def round_reviews(number, reviewer_login):
+def round_reviews(number, pull_request_author_login, reviewer_login):
     """merge-lane-2's latest changes-requested review; the round's reviews, in the order GitHub
     returns them; whether a round record already names that review; and the round's number."""
     reviews = gh_json_lines(["api", "--paginate", f"repos/{{owner}}/{{repo}}/pulls/{number}/reviews",
@@ -438,14 +453,15 @@ def round_reviews(number, reviewer_login):
         raise Refused(f"Pull request {number} has no review by {reviewer_login}, merge-lane-2's "
                       "account, so there is no fix-round to brief.\n"
                       "Wait for merge-lane-2's review; run this again when it requests changes.")
-    as_comments = are_merge_lane_verdicts_on_pull_request_comment_reviews([review for _, review in own])
-    requested = [index for index, (_, review) in enumerate(own) if does_merge_lane_review_ask_for_fix_round(review, as_comments)]
+    requested = [index for index, (_, review) in enumerate(own)
+                 if does_merge_lane_review_ask_for_fix_round(review, pull_request_author_login, reviewer_login)]
     if requested:
         _, anchor = own[requested[-1]]
         frozen_head = anchor.get("commit_id")
         # A later approval posted as a COMMENT review closes the round, as an APPROVED one does.
         if all(review.get("state") == "COMMENTED" and review.get("commit_id") == frozen_head
-               and not (as_comments and verdict_line(review) == "APPROVE")
+               and merge_lane_review_verdict_from_review_state_or_comment_review_first_line(
+                   review, pull_request_author_login, reviewer_login) != "APPROVE"
                for _, review in own[requested[-1] + 1:]):
             on_head = [review_ids for head, review_ids in records if head == frozen_head]
             recorded = any(anchor.get("id") in review_ids for review_ids in on_head)
@@ -464,20 +480,21 @@ def round_reviews(number, reviewer_login):
                   "merge-lane-2 why not, with SendMessage.")
 
 
-def changes_requested_round_count(number, reviewer_login):
+def changes_requested_round_count(number, pull_request_author_login, reviewer_login):
     """The round count round_reviews gives, read also for a pull request with no open round."""
     reviews = gh_json_lines(["api", "--paginate", f"repos/{{owner}}/{{repo}}/pulls/{number}/reviews",
                              "--jq", ".[]"])
     own = [review for review in reviews if (review.get("user") or {}).get("login") == reviewer_login]
-    as_comments = are_merge_lane_verdicts_on_pull_request_comment_reviews(own)
-    return round_count([review for review in own if does_merge_lane_review_ask_for_fix_round(review, as_comments)], round_records(number))
+    return round_count([review for review in own
+                        if does_merge_lane_review_ask_for_fix_round(review, pull_request_author_login, reviewer_login)],
+                       round_records(number))
 
 
 def replaced_pull_requests(number, url, description):
-    """(number, head, numbers it replaces directly) of each pull request this one replaces, oldest first, by the
-    #replaces lines."""
+    """(number, head, numbers it replaces directly, author's login) of each pull request this one replaces, oldest
+    first, by the #replaces lines."""
     repository = "/".join(url.split("/")[3:5])
-    facts = {number: (url, None, None, description)}
+    facts = {number: (url, None, None, description, None)}
 
     def read_description(replaced):
         if replaced not in facts:
@@ -488,7 +505,8 @@ def replaced_pull_requests(number, url, description):
     except replaces_reader.ReplacedPullRequestChainUnreadable as error:
         raise Refused(str(error)) from None
     return [(replaced, facts[replaced][1],
-             replaces_reader.replaced_pull_request_numbers_on_replaces_lines(facts[replaced][3], repository, replaced))
+             replaces_reader.replaced_pull_request_numbers_on_replaces_lines(facts[replaced][3], repository, replaced),
+             facts[replaced][4])
             for replaced in chain]
 
 
@@ -497,19 +515,19 @@ def unanswered_round_findings_of_replaced_pull_requests(replaced, reviewer_login
     each marked with that round's review under "carried_from", leaving out the pull requests that a replaced
     pull request whose first round was answered replaces, directly or through others: that answer covered them."""
     open_rounds, answered_first_round = {}, []
-    for replaced_number, replaced_head, _replaces in replaced:
+    for replaced_number, replaced_head, _replaces, replaced_author in replaced:
         try:
-            anchor, reviews, recorded, round_number = round_reviews(replaced_number, reviewer_login)
+            anchor, reviews, recorded, round_number = round_reviews(replaced_number, replaced_author, reviewer_login)
         except Refused:
             # No open round: any changes-requested round it had was answered.
-            if changes_requested_round_count(replaced_number, reviewer_login):
+            if changes_requested_round_count(replaced_number, replaced_author, reviewer_login):
                 answered_first_round.append(replaced_number)
             continue
         if not recorded and anchor.get("commit_id") == replaced_head:
             open_rounds[replaced_number] = (anchor, reviews)
         if round_number > 1 or replaced_number not in open_rounds:
             answered_first_round.append(replaced_number)
-    replaces = {replaced_number: direct for replaced_number, _head, direct in replaced}
+    replaces = {replaced_number: direct for replaced_number, _head, direct, _author in replaced}
     covered = set()
     pending = [older for number in answered_first_round for older in replaces[number]]
     while pending:
@@ -518,7 +536,7 @@ def unanswered_round_findings_of_replaced_pull_requests(replaced, reviewer_login
             covered.add(older)
             pending += replaces.get(older, [])
     blocking, nits = [], []
-    for replaced_number, _head, _replaces in replaced:
+    for replaced_number, _head, _replaces, _author in replaced:
         if replaced_number not in open_rounds or replaced_number in covered:
             continue
         anchor, reviews = open_rounds[replaced_number]
@@ -661,8 +679,8 @@ def finding_place(comment):
 
 
 def round_facts(number, reviewer_login):
-    url, head, branch, description = pull_request(number)
-    anchor, reviews, recorded, own_round_number = round_reviews(number, reviewer_login)
+    url, head, branch, description, author = pull_request(number)
+    anchor, reviews, recorded, own_round_number = round_reviews(number, author, reviewer_login)
     frozen_head = anchor.get("commit_id")
     if not frozen_head:
         raise StepFailed(f"merge-lane-2's review {anchor.get('html_url')} carries no commit_id")
@@ -670,8 +688,8 @@ def round_facts(number, reviewer_login):
     findings = blocking_findings(number, anchor, reviews, reviewer_login)
     nits = nit_findings_of_merge_lane_2_reviews_in_round(number, reviews, reviewer_login)
     replaced = replaced_pull_requests(number, url, description)
-    fix_round_number = own_round_number + sum(changes_requested_round_count(replaced_number, reviewer_login)
-                                              for replaced_number, _head, _replaces in replaced)
+    fix_round_number = own_round_number + sum(changes_requested_round_count(replaced_number, replaced_author, reviewer_login)
+                                              for replaced_number, _head, _replaces, replaced_author in replaced)
     # The answer to this pull request's first round, a fix commit or a round record, answers the carried
     # findings too, so a later round carries none.
     if own_round_number == 1:
@@ -842,11 +860,11 @@ def topic_worktree_at_frozen_head(number, branch, frozen_head, finding_count, re
         if answers_file_answers_every_finding_of_round(answers, finding_count, review_submitted_at):
             raise Refused(f"Pull request {number}'s topic-worktree {worktree} is at the frozen-head "
                           f"{frozen_head[:12]} with no fix-round commit, and its answers file {answers} answers "
-                          "every finding of this round, so a fix-round subagent wrote every answer and made no "
-                          "commit.\n"
+                          "every finding of this round, so a fix-round subagent wrote every answer.\n"
                           "If that subagent is still working there, wait for it to finish.\n"
-                          "If the answers describe fixes, their commit was reset away, or if you mean to start the "
-                          f"round again: delete {answers} and run this again.\n"
+                          "If the answers describe fixes, which means the fix-round commit was reset away, or if you "
+                          f"mean to start the round again: delete {answers}, then run cd {quoted} && python3 "
+                          f"{PROGRAM} {number}.\n"
                           f"Otherwise finish the round: run cd {quoted} && python3 {PROGRAM} {number} --check, and do "
                           "what it says.")
         return worktree

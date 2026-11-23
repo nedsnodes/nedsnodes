@@ -791,8 +791,7 @@ def own_lines_of_unit(text, parser, lines, unit, openings, own=None, keep_setext
         lines = [*lines[:heading_end - 1], "", *lines[heading_end:]]
     body = []
     for start, stop in ranges:
-        # Lines that go on straight from the heading's own lines stay one run with them, as in the walk-document.
-        body += [*([] if body and start == heading_end else [""]), *lines[start:stop]]
+        body += ["", *lines[start:stop]]
     return body
 
 

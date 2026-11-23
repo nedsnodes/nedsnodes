@@ -381,9 +381,36 @@ with tempfile.TemporaryDirectory() as directory:
           and s.state()["last_run"]["result"] == "passed", (code, printed, calls))
     s.state_file.write_text("{not json")
     code, printed, _ = s.run("pass", "--record-follow-up-request-sent")
-    check("--record-follow-up-request-sent refuses an unreadable state file",
-          code == program.EXIT_REFUSED and "not JSON" in printed
-          and "that records a passed, failed or stopped run replaces the file" in printed, (code, printed))
+    refusal_line_prefixes = (
+        "no-sandbox-test-suites-run-on-main-in-a-quiet-gap: the follow-up request was not "
+        f"recorded, because the state file cannot be read: {s.state_file} is not JSON",
+        "If you have not yet sent agent-seat reboot-test a follow-up request quoting "
+        "this message's first line",
+        "Do not run python3 scripts/no-sandbox-test-suites-run-on-main-in-a-quiet-gap.py "
+        "--record-follow-up-request-sent again for this refusal")
+    check("--record-follow-up-request-sent refuses an unreadable state file, its three lines "
+          "in order, each on its own line",
+          code == program.EXIT_REFUSED
+          and [line[:len(prefix)] for line, prefix
+               in zip(printed.splitlines(), refusal_line_prefixes)] == list(refusal_line_prefixes)
+          and len(printed.splitlines()) == 3, (code, printed))
+    absolute_state_file = s.state_file
+    # The test sandbox makes TMPDIR a symlink, and after chdir() the program sees the physical path.
+    physical_state_file = absolute_state_file.parent.resolve() / absolute_state_file.name
+    working_directory = os.getcwd()
+    os.chdir(absolute_state_file.parent)
+    try:
+        s.state_file = Path(absolute_state_file.name)
+        code, printed, _ = s.run("pass", "--record-follow-up-request-sent")
+        notice = s.notice()
+    finally:
+        os.chdir(working_directory)
+        s.state_file = absolute_state_file
+    check("a relative --state-file is named by its full path in the refusal",
+          code == program.EXIT_REFUSED
+          and f"cannot be read: {physical_state_file} is not JSON" in printed, (code, printed))
+    check("a relative --state-file is named by its full path in the merge-gate notice",
+          f"cannot be read: {physical_state_file} is not JSON" in notice, notice)
     s.run()
     code, printed, _ = s.run("pass", "--record-follow-up-request-sent")
     check("--record-follow-up-request-sent refuses when the last run passed",

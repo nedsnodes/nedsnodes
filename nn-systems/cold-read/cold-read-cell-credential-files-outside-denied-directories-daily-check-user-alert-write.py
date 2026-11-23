@@ -12,7 +12,7 @@ CREDENTIAL_FILE_NAME_PATTERNS, `*.token` or `.env`, that neither list names and 
 one user-alert naming every one found, through
 nn-systems/general-tools/user-alerts-pending-and-claimed-files-write-claim-release-and-delete-common.py.
 It keeps no state, so the alert comes again each day until the file is added to CREDENTIAL_FILES_ON_NED_BOX or
-deleted.
+IGNORED_FILES, or deleted.
 
 It runs once a day on ned-box, from the table nn-systems/general-tools/scheduled-jobs-on-each-machine.json,
 which nn-systems/general-tools/install-scheduled-jobs-on-this-machine.py installs as this cron line:

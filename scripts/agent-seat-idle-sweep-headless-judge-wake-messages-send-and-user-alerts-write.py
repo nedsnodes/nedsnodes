@@ -989,15 +989,19 @@ class Sweep:
             wait = None
         if wait:
             self.due_step(seat, verdict, wait)
-        if judged_sentences:
-            if self.headless_usage_limit_pause_holds():
-                # An escalation stopped at a usage limit started the pause after the sentences were
-                # judged: neither they nor the check are logged, so that after the reset they are
-                # judged again and their promise message is sent.
-                return
+        paused = self.headless_usage_limit_pause_holds()
+        # An escalation stopped at a usage limit can start the pause after the sentences were
+        # judged. When it holds back their promise message, the unbacked sentences and the check
+        # are not logged, so that after the reset they are judged again and the message is sent.
+        # Every other sentence checked is logged, so that a second judge cannot answer
+        # differently about it and add a wrong line to that message.
+        if judged_sentences and paused and promise_text:
+            self.sentences_checked(seat, [item for item in sentences_checked
+                                          if item["sentence"] not in promise_sentences])
+        elif judged_sentences:
             self.sentences_checked(seat, sentences_checked)
             self.checked(seat, verdict, transcript_read_at, check_is_new)
-        if self.headless_usage_limit_pause_holds():
+        if paused:
             return
         if promise_text:
             # A promise given in answer to a message goes on the open wait, so that repeated
@@ -1010,11 +1014,14 @@ class Sweep:
                              "sentences": promise_sentences})
                 self.send(seat, verdict, promise_text, NUDGE)
             else:
-                # Logged only once sent, since no later message quotes it.
+                # The promise step is logged whether or not the send succeeds: its sentences are
+                # already logged as checked, so only the wait's escalation and user-alert can
+                # still report the promise. The promise_message is logged only once sent, since
+                # no later message quotes it.
+                if PROMISE not in wait:
+                    self.record({"event": "wait_step", "agent_seat": seat, "step": PROMISE})
                 sent = self.send(seat, verdict, promise_text, NUDGE)
                 if sent:
-                    if PROMISE not in wait:
-                        self.record({"event": "wait_step", "agent_seat": seat, "step": PROMISE})
                     self.record({"event": PROMISE_MESSAGE, "agent_seat": seat,
                                  "kinds": promise_kinds, "sentences": promise_sentences,
                                  "send_started_at": sent["send_started_at"]})
@@ -1158,9 +1165,10 @@ class Sweep:
         """Rule 2: judge what code could not settle, and word one message naming every unbacked
         sentence. Returns ("unbacked", (the message, the sorted kinds of the sentences it names,
         those sentences), the sentences checked), ("failed", None, []), ("paused", None, []) or
-        ("all backed", None, the sentences checked). The caller logs the sentences checked, so that
-        a pause a later launch starts leaves them to be judged after the reset; a judge stopped by
-        the pause logs none, and a failed judge logs them all."""
+        ("all backed", None, the sentences checked). The caller logs the sentences checked, except,
+        when a pause a later launch starts holds back the promise message, the unbacked ones, which
+        are judged again after the reset; a judge stopped by the pause logs none, and a failed judge
+        logs them all."""
         checked = self.log.checked_sentences(seat)
         new_by_code_reading = fields.verdict_sentences_grouped_by_code_reading(
             item for item in verdict.get(fields.SENTENCES, [])

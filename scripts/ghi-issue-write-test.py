@@ -574,7 +574,23 @@ def run_cases(scratch: Path):
           tool.pairing_key(FILE_TEXT) == tool.pairing_key(FILE_TEXT)
           and tool.pairing_key(FILE_TEXT) != tool.pairing_key(FILE_TEXT + "x"))
     check("the placeholder body carries the key, so a rerun can find it",
-          tool.pairing_key(FILE_TEXT) in tool.placeholder_body(tool.pairing_key(FILE_TEXT)))
+          tool.pairing_key(FILE_TEXT) in tool.placeholder_body(tool.pairing_key(FILE_TEXT), REPO))
+    # The body's rerun command is read back as the shell would split it, so a
+    # filing run with --repo tells its rerun to file into the same repository.
+    for repo, expected_tail in ((REPO, []),
+                                ("someone/fork", ["--repo", "someone/fork"])):
+        body = tool.placeholder_body(tool.pairing_key(FILE_TEXT), repo)
+        command = body.split("`")[1] if body.count("`") >= 2 else body
+        check(f"the placeholder body of a filing run against {repo} tells "
+              "the rerun that --repo",
+              shlex.split(command) == ["scripts/ghi-issue-write.py", "create"]
+              + expected_tail, command)
+    forked = Recorder({"gh issue create": Completed(
+        "https://github.com/someone/fork/issues/7\n")})
+    tool.file_issue("someone/fork", "Widget", "ghipairabc", forked, quiet)
+    check("and step 3 gives the placeholder body the --repo the run used",
+          forked.ran("create --repo someone/fork` on the file"),
+          forked.calls)
     check("the body is links and nothing else, in filename order",
           tool.links_body(REPO, ["docs/issues/9-b.md", "docs/issues/9-a.md"])
           == ("- [9-a.md](https://github.com/nedsnodes/nedsnodes/blob/main/docs/issues/9-a.md)\n"
@@ -2169,6 +2185,21 @@ def run_cases(scratch: Path):
           and not nothing_filed.ran("gh issue edit"),
           str(nothing_filed.commands()))
 
+    # The rerun line is read back as the shell would split it, so a path
+    # with a space and a --repo other than the default both survive it.
+    for repo, expected_tail in ((REPO, []),
+                                ("someone/fork", ["--repo", "someone/fork"])):
+        told = []
+        tool.link_body(repo, 570, scratch,
+                       Recorder({"git ls-tree": Completed("")}),
+                       told.append, "docs/issues/570 my widget.md")
+        rerun = told[-1].split("rerun: ", 1)[1]
+        check(f"step 5's rerun line, run against {repo}, is a command the "
+              "shell splits into create, the path whole, and that --repo",
+              shlex.split(rerun) == ["scripts/ghi-issue-write.py", "create",
+                                     "docs/issues/570 my widget.md"]
+              + expected_tail, rerun)
+
     # --- Where the checkout is looked for ---------------------------------
     # Through the shared `run`, so that function's docstring is true of this
     # call too, and with check off, so a path outside a checkout keeps this
@@ -2821,7 +2852,7 @@ def run_saved_question_on_resume_cases(scratch: Path):
     created_saved.write_text(ghi_guide_agent_file("may the filing go ahead?"))
     numbered = Recorder({
         "gh issue view 570": Completed(json.dumps(
-            {"body": tool.placeholder_body(tool.pairing_key(FILE_TEXT))})),
+            {"body": tool.placeholder_body(tool.pairing_key(FILE_TEXT), REPO)})),
         "git ls-tree": Completed(EDIT_RELATIVE + "\0"),
     })
     lines = []
@@ -2946,6 +2977,21 @@ def run_edit_cases(scratch: Path):
                            directory="nn-systems/statusline"),
               scratch)[2] == 570)
 
+    # nn-systems/general-tools/reusable-prompt-file-recognized-by-name-ending-
+    # and-not-ghi-md-common.py takes a GHI-MD by issue_number_in_file_name, so
+    # validate_edit must ask the same function or the two can disagree.
+    original_rule = tool.issue_number_in_file_name
+    tool.issue_number_in_file_name = lambda path: 572
+    try:
+        check("validate_edit takes a file's issue number from "
+              "issue_number_in_file_name, the rule the reusable-prompt rule "
+              "asks",
+              lambda: tool.validate_edit(
+                  filed_ghi_md(scratch, name="v2-follows-the-shared-rule.md"),
+                  scratch)[2] == 572)
+    finally:
+        tool.issue_number_in_file_name = original_rule
+
     for case_name, target in [
             ("a file not named for an issue is refused",
              filed_ghi_md(scratch, name="notes.md")),
@@ -2993,7 +3039,7 @@ def run_edit_cases(scratch: Path):
 
     check("a link list is a body the tool wrote", tool.is_derived_body(one_link))
     check("so is the placeholder create leaves between its steps",
-          tool.is_derived_body(tool.placeholder_body(tool.pairing_key(FILE_TEXT))))
+          tool.is_derived_body(tool.placeholder_body(tool.pairing_key(FILE_TEXT), REPO)))
     check("an empty body is not prose to protect", tool.is_derived_body(""))
     check("prose is not a body the tool wrote",
           not tool.is_derived_body("This issue is about the statusline.\n"))
@@ -5388,7 +5434,9 @@ def run_pushed_filing_branch_rerun_line_real_git_cases(scratch: Path):
           refusal is not None and refusal.code == 1
           and "ghi-4101-gadget" in str(refusal)
           and f"at commit {gadget_commit}," in str(refusal)
-          and f"`scripts/ghi-issue-write.py create {source}`" in str(refusal),
+          and str(refusal).count("`") >= 2
+          and shlex.split(str(refusal).split("`")[1])
+          == ["scripts/ghi-issue-write.py", "create", str(source)],
           str(refusal))
     told = str(refusal)
     check("and tells the agent to leave the branch to the user, tell the "
@@ -5400,6 +5448,21 @@ def run_pushed_filing_branch_rerun_line_real_git_cases(scratch: Path):
           and "Then leave this filing until the user answers." in told
           and "\nIf you are a subagent, pass those two facts to the agent "
           "that dispatched you instead." in told, told)
+
+    spaced = scratch / "my widget.tool.design.md"
+    spaced.write_text(source.read_text(encoding="utf-8"), encoding="utf-8")
+    try:
+        tool.land_file("someone/fork", 4101, "Gadget", spaced, author, runner,
+                       quiet)
+        forked = ""
+    except tool.Refused as refused:
+        forked = str(refused)
+    printed = forked.split("`")[1] if forked.count("`") >= 2 else forked
+    check("the refusal's rerun command, read as the shell splits it, keeps "
+          "a source path with a space whole and the run's --repo",
+          shlex.split(printed) == ["scripts/ghi-issue-write.py", "create",
+                                   str(spaced), "--repo", "someone/fork"],
+          printed)
 
     # Followed as the refusal says: once the branch holds one file for the
     # issue, the same rerun names it.
@@ -5488,7 +5551,7 @@ def run_resumed_create_after_older_name_merged_real_git_cases(scratch: Path):
             if "issue list" in gh_calls[-1]:
                 return Completed(json.dumps([{
                     "number": number, "title": title,
-                    "body": tool.placeholder_body(tool.pairing_key(text))}]))
+                    "body": tool.placeholder_body(tool.pairing_key(text), REPO)}]))
             if "pr list" in gh_calls[-1]:
                 return Completed("[]")
             if "pr create" in gh_calls[-1]:

@@ -798,10 +798,10 @@ def _slug_cut_within(joined: str, limit: int) -> str:
     return head.rsplit("-", 1)[0] if "-" in head else joined[:limit]
 
 
-def placeholder_body(key: str) -> str:
+def placeholder_body(key: str, repo: str) -> str:
     return (f"Filing in progress, pairing key {key}. This body becomes the "
             "links to this issue's files once they land on main. If it still "
-            "reads this way, rerun `scripts/ghi-issue-write.py create` on the "
+            f"reads this way, rerun `{create_rerun_command(repo)}` on the "
             "file and it will continue from where it stopped. If that file is "
             f"gone, rerun it on this issue's file under {GHI_MD_DIRECTORY}/.")
 
@@ -1105,7 +1105,16 @@ def adjudicate(repo: str, title: str, text: str, repository_root: Path,
     Returns the RulingConflict when ghi-guide-agent answered with a ruling
     question, for the caller to record in the log-store before anything
     reaches GitHub; otherwise None. A ruling question
-    does not stop the write."""
+    does not stop the write.
+
+    Not handled: a too-similar verdict naming the edited issue, while it is
+    open, and a number that is not a GHI, such as a pull request's. The ask's
+    closed-GHI check passes a number its mirror does not hold, the edited
+    issue is dropped here, and the refusal sends the author to that number;
+    the author's reconsider path in RECONSIDER_LINE passes the write. When
+    the edited issue is closed in the mirror, the ask rechecks the verdict
+    before it reaches here, and a failed or repeated recheck skips the
+    adjudication instead."""
     marker = repository_root / RECONSIDERED_MARKER_NAME
     if marker.is_file():
         marker.unlink()
@@ -1169,8 +1178,9 @@ def adjudicate(repo: str, title: str, text: str, repository_root: Path,
                "proposed-improvements-or-changes-file in the log-store")
         # The saved file holds the question on one line, and
         # ruling_question_lines() reads back only that line.
-        # Only line breaks are replaced: the question may quote a command
-        # whose spaces matter, as in printf 'a  b'.
+        # Each line is trimmed at both ends and the lines are joined with one
+        # space; whitespace within a line is kept, because the question may
+        # quote a command whose spaces matter, as in printf 'a  b'.
         return RulingConflict(answer.get("ruling_issue"), " ".join(
             line.strip() for line in str(answer.get("sentence", "")).splitlines()
             if line.strip()))
@@ -1602,7 +1612,7 @@ def file_issue(repo: str, title: str, key: str, runner, report) -> int:
     only thing a rerun has to find this issue by."""
     completed = runner(
         ["gh", "issue", "create", "--repo", repo, "--title", title,
-         "--body", placeholder_body(key)])
+         "--body", placeholder_body(key, repo)])
     report((completed.stdout or "").strip())
     match = re.search(r"/issues/(\d+)", completed.stdout or "")
     if not match:
@@ -1873,7 +1883,7 @@ def land_file(repo: str, number: int, title: str, source: Path,
         cwd=str(repository_root))
     if (on_remote.stdout or "").strip():
         pushed = ghi_md_path_on_pushed_filing_branch(
-            number, branch, source, repository_root, runner)
+            repo, number, branch, source, repository_root, runner)
         waiting = existing_pull_request_for_branch(repo, branch, runner)
         if waiting:
             report(f"step 4 already done: pull request "
@@ -1931,7 +1941,19 @@ def land_file(repo: str, number: int, title: str, source: Path,
     return destination
 
 
-def ghi_md_path_on_pushed_filing_branch(number: int, branch: str,
+def create_rerun_command(repo: str, source=None) -> str:
+    """The create command a stopped filing tells the agent to rerun, quoted
+    for the shell and carrying the run's --repo, so the rerun files into the
+    same repository. Without a source, the text around it names the file."""
+    arguments = ["scripts/ghi-issue-write.py", "create"]
+    if source is not None:
+        arguments.append(str(source))
+    if repo != DEFAULT_REPO:
+        arguments += ["--repo", repo]
+    return shlex.join(arguments)
+
+
+def ghi_md_path_on_pushed_filing_branch(repo: str, number: int, branch: str,
                                         source: Path, repository_root: Path,
                                         runner) -> str:
     """The issue's file on a filing branch already on the remote, read from
@@ -1962,7 +1984,7 @@ def ghi_md_path_on_pushed_filing_branch(number: int, branch: str,
             f"Tell the user two facts: branch {branch} holds {held} for "
             f"issue {number}; and filing issue {number} stays stopped until "
             "the branch holds exactly one file for it, after which "
-            f"`scripts/ghi-issue-write.py create {source}` continues it. "
+            f"`{create_rerun_command(repo, source)}` continues it. "
             "Then leave this filing until the user answers.\n"
             "If you are a subagent, pass those two facts to the agent that "
             "dispatched you instead.", 1)
@@ -2103,7 +2125,7 @@ def link_body(repo: str, number: int, repository_root: Path, runner, report,
         report(f"step 5 not done: no file for issue {number} is on main yet, "
                "so its body keeps the placeholder.")
         report("Once the pull request from step 4 merges, pull main and "
-               f"rerun: scripts/ghi-issue-write.py create {rerun_on}")
+               f"rerun: {create_rerun_command(repo, rerun_on)}")
         return False
     runner(["gh", "issue", "edit", str(number), "--repo", repo,
             "--body", links_body(repo, paths)])
@@ -2285,9 +2307,8 @@ def validate_edit(path: Path, repository_root: Path):
     text = path.read_text(encoding="utf-8")
     if not text.strip():
         raise Refused(f"{path} is empty", 64)
-    numbered = re.match(r"^(\d+)-", path.name)
-    if numbered:
-        number = int(numbered.group(1))
+    number = issue_number_in_file_name(path)
+    if number is not None:
         relative = relative_to_root(path, repository_root)
         if not writable_relative_path(relative):
             raise Refused(

@@ -53,6 +53,7 @@ LATER_PART = "a later part of a message, after the opening that carries its rule
 HOOK_FAILED = "says the hook failed or could not check, and lets the act through"
 NOT_A_RULE = "no message for a rule: text the hook hands on as data"
 COMMAND_MODE = "printed when an agent runs the file as a command, not when it runs as a hook"
+USER_ONLY_NOTICE = "a systemMessage Claude Code shows the user and not the agent"
 
 # (hook path, constant name): why the constant opens no message for a rule.
 CONSTANTS_THAT_OPEN_NO_RULE_MESSAGE = {
@@ -112,6 +113,9 @@ CONSTANTS_THAT_OPEN_NO_RULE_MESSAGE = {
     ("nn-systems/general-tools/python-edit-changed-tool-message-to-agent-strings-check-reminder-hook.py", "LISTING_LINE_TEMPLATE"): LATER_PART,
     ("nn-systems/general-tools/python-edit-changed-tool-message-to-agent-strings-check-reminder-hook.py", "MORE_NOT_LISTED_LINE_TEMPLATE"): LATER_PART,
     ("nn-systems/general-tools/python-edit-changed-tool-message-to-agent-strings-check-reminder-hook.py", "NOT_INSPECTED_MESSAGE_TEMPLATE"): HOOK_FAILED,
+    ("nn-systems/handoff/handoff-asked-stop-typing-user-notice-user-prompt-submit-hook.py", "HOOK_FAILED_MESSAGE"): HOOK_FAILED,
+    ("nn-systems/handoff/handoff-asked-stop-typing-user-notice-user-prompt-submit-hook.py", "HANDOFF_ASKED_STOP_TYPING_WITH_NEW_SESSION_NAME_USER_NOTICE_TEMPLATE"): USER_ONLY_NOTICE,
+    ("nn-systems/handoff/handoff-asked-stop-typing-user-notice-user-prompt-submit-hook.py", "HANDOFF_ASKED_STOP_TYPING_WITHOUT_NEW_SESSION_NAME_USER_NOTICE"): USER_ONLY_NOTICE,
     ("nn-systems/skills/emergency-stop/emergency-stop-file-shown-and-push-and-merge-refusal-hook.py", "UNREADABLE_LINE"): LATER_PART,
     ("nn-systems/skills/emergency-stop/emergency-stop-file-shown-and-push-and-merge-refusal-hook.py", "UNREAD_COMMAND_LINE"): LATER_PART,
     ("nn-systems/skills/walk-me-through/walk-me-through-agent-question-to-user-outside-approval-walk-items-refusal-stop-hook.py", "DECIDED_BY_MODEL_NOTICE"): LATER_PART,
@@ -274,6 +278,7 @@ CONSTANTS_THAT_OPEN_NO_RULE_MESSAGE = {
 # Hook path: why the hook prints no message for a rule.
 HOOKS_THAT_PRINT_NO_RULE_MESSAGE = {
     "nn-systems/general-tools/agent-seat-worktree-create-with-owner-file-claude-code-worktree-create-hook.py": "prints only the worktree path Claude Code reads, or its own failure",
+    "nn-systems/handoff/handoff-asked-stop-typing-user-notice-user-prompt-submit-hook.py": "it shows the user a systemMessage, which the agent does not see, and otherwise reports only its own failure",
     "scripts/uncommitted-work-snapshot-hook.py": "it speaks only when it could not keep a work-snapshot or write a worktree's owner file, which reports its own failure",
 }
 

@@ -10,9 +10,10 @@ every path that scripts/ghi-issue-write.py's edit operation accepts as a
 GHI-MD named for its issue, by asking that program's own rule.
 
 It has no side effects on load, so a guard hook can load it.
-scripts/ghi-issue-write.py is loaded only when a path has a reusable-prompt
-ending, because loading it takes tens of milliseconds and the hooks that call
-this run on every prompt. Load this module by path, under the snake_case form
+has_reusable_prompt_file_name_and_is_not_ghi_md loads
+scripts/ghi-issue-write.py only for a path with a reusable-prompt ending,
+because loading it takes tens of milliseconds and the hooks that call it run
+on every prompt; is_numbered_ghi_md_path loads it on every first call. Load this module by path, under the snake_case form
 of its file name:
 
     spec = importlib.util.spec_from_file_location(

@@ -469,7 +469,7 @@ GITHUB_REPOSITORY = repository_names.REPOSITORY
 PLANNED_WORK_HEADING = "## Planned work"
 PLANNED_WORK_GHI_LINE = re.compile(
     r"\s*(?:[-*+]|\d+[.)]) GHI \[(?P<title>.+)\]\(https://github\.com/"
-    + r"(?:" + re.escape(GITHUB_REPOSITORY) + "|" + re.escape(repository_names.OLD_REPOSITORY) + r")/issues/(?P<number>\d+)\)")
+    + repository_names.REPOSITORY_NAME_OR_NAME_BEFORE_PROJECT_RENAME_PATTERN + r"/issues/(?P<number>\d+)\)")
 PLANNED_WORK_ENTRY = re.compile(r"\s*(?:[-*+]|\d+[.)])\s|.*github\.com/[^)\s]+/issues/\d+")
 GITHUB_QUERY_TIMEOUT_SECONDS = 60
 

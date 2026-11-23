@@ -900,16 +900,26 @@ def promise_sent_on_rule_five_wait(promise_sender):
 PROMISE_SEND_FAILS = {"sends": [send_to("alpha", is_error=True)],
                       "answer": {"sent": False, "reason": "r"}}
 machine = promise_sent_on_rule_five_wait(PROMISE_SEND_FAILS)
-check("rule 2: a promise message on an open wait whose send failed logs neither a promise step nor "
-      "a promise_message event",
-      [event["step"] for event in machine.events("wait_step")] == ["nudge"]
+check("rule 2: a promise message on an open wait whose send failed logs the promise step but no "
+      "promise_message event",
+      [event["step"] for event in machine.events("wait_step")] == ["nudge", "promise"]
       and not machine.events("promise_message") and len(machine.events("headless_failed")) == 1,
       machine.events())
 machine.script()
 machine.run(8)
-check("rule 2: after a promise message on an open wait failed to send, nothing to do ends the wait, "
-      "as it ends a wait no promise message reached",
-      [event["why"] for event in machine.events("wait_ended")] == ["nothing to do"], machine.events())
+check("rule 2: after a promise message on an open wait failed to send, nothing to do does not end "
+      "the wait, so the dropped promise is not lost unreported",
+      not machine.events("wait_ended"), machine.events())
+machine.script(sent_ok())
+machine.run(16)
+machine.script()
+machine.run(32)
+check("rule 2: after a promise message on an open wait failed to send, the wait goes on to the "
+      "escalation and the user-alert",
+      [event["step"] for event in machine.events("wait_step")]
+      == ["nudge", "promise", "escalate", "tell_user"]
+      and any("after a nudge and an escalation" in alert["title"] for alert in machine.alerts()),
+      (machine.events("wait_step"), machine.alerts()))
 
 # The sender runs on after its SendMessage, and the agent-seat records the task before it ends.
 machine = promise_sent_on_rule_five_wait(dict(sent_ok(), sleep=2.5))
@@ -1746,6 +1756,50 @@ check("after the reset, the promise message the escalation's pause held back is 
       code == 0 and [event["step"] for event in machine.events("message_sent")] == ["nudge", "nudge"]
       and "after lunch" in machine.events("message_sent")[-1]["text"],
       (code, machine.events("message_sent"), machine.claude_calls()))
+
+machine = Machine()
+machine.seat("alpha", [user("go"), assistant(PROMISE), turn_end()])
+machine.script(sent_ok())
+machine.run(0)
+machine.append("alpha", cross_session("You promised", at(0.5)), assistant(ANNOUNCED, at(9)),
+               turn_end(at(9)))
+machine.script({"answer": {"sentences": [{"index": 0, "backed": True, "reason": "a test runs"}]}},
+               usage_limit_exit_with_transcript(RESET_IN_AN_HOUR))
+machine.run(16)
+calls_before_reset = machine.claude_calls()
+checked_before_reset = machine.events("checked")
+machine.script()
+code, _ = machine.run(90)
+check("every sentence judged backed, then an escalation sender at a usage limit: the sentences and "
+      "the check are logged, so no second judge is started after the reset",
+      code == 0 and ANNOUNCED in [event["sentence"] for event in machine.events("sentence_checked")]
+      and any(event["rule"] == 2 for event in checked_before_reset)
+      and len(machine.events("headless_usage_limit_pause")) == 1 and len(calls_before_reset) == 2
+      and not machine.claude_calls(),
+      (code, machine.events("sentence_checked"), checked_before_reset, calls_before_reset,
+       machine.claude_calls()))
+
+machine = Machine()
+machine.seat("alpha", [user("go"), assistant(PROMISE), turn_end()])
+machine.script(sent_ok())
+machine.run(0)
+machine.append("alpha", cross_session("You promised", at(0.5)),
+               assistant(f"{SECOND_PROMISE} {ANNOUNCED}", at(9)), turn_end(at(9)))
+machine.script({"answer": {"sentences": [{"index": 0, "backed": True, "reason": "a test runs"}]}},
+               usage_limit_exit_with_transcript(RESET_IN_AN_HOUR))
+machine.run(16)
+checked_sentences_before_reset = [event["sentence"] for event in machine.events("sentence_checked")]
+machine.script(sent_ok())
+code, _ = machine.run(90)
+sent = machine.events("message_sent")
+check("one sentence judged backed and a promise unbacked, then an escalation sender at a usage "
+      "limit: the backed sentence is logged, so after the reset no second judge runs and the "
+      "promise message names only the promise",
+      code == 0 and ANNOUNCED in checked_sentences_before_reset
+      and SECOND_PROMISE not in checked_sentences_before_reset
+      and [event["step"] for event in sent] == ["nudge", "nudge"]
+      and "after lunch" in sent[-1]["text"] and "PR 1633" not in sent[-1]["text"],
+      (code, checked_sentences_before_reset, sent, machine.claude_calls()))
 
 machine = Machine()
 machine.seat("alpha", [user("go"), assistant(PROMISE), turn_end()])

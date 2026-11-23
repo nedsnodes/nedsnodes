@@ -183,11 +183,8 @@ def load_handoff_extractor():
 
 refresh_common = load_sibling_module("log_store_session_dialogs_refresh_common",
                                      "log-store-session-dialogs-refresh-common.py")
-_record_shipper_spec = importlib.util.spec_from_file_location(
-    "cold_read_record_ship",
-    Path(__file__).resolve().parent.parent / "nn-systems" / "cold-read" / "cold-read-record-ship.py")
-record_shipper = importlib.util.module_from_spec(_record_shipper_spec)
-_record_shipper_spec.loader.exec_module(record_shipper)
+record_shipper = load_sibling_module("cold_read_record_ship",
+                                     "../nn-systems/cold-read/cold-read-record-ship.py")
 SESSION_DIALOG_FILE_NAME_SUFFIX = refresh_common.SESSION_DIALOG_FILE_NAME_SUFFIX
 
 PROGRAM_FILE_NAME = "log-store-past-discussions-regex-search-newest-first.py"
@@ -397,7 +394,12 @@ def excerpt(text, start):
 
 def ripgrep_command(arguments_before_pattern, pattern, paths):
     ripgrep = os.environ.get(RIPGREP_OVERRIDE) or "rg"
-    return [ripgrep, "--no-ignore", "--hidden", "--ignore-case", *arguments_before_pattern,
+    # A shipment's staging directory, in walk/ or cold-read-records/, copies files the store already
+    # holds, and its shipment may remove it while ripgrep walks it. The trailing slash keeps a file
+    # of the same name in the search.
+    skip_staging = f"!{record_shipper.STAGING_DIRECTORY_PREFIX}*/"
+    return [ripgrep, "--no-ignore", "--hidden", "--ignore-case", "--glob", skip_staging,
+            *arguments_before_pattern,
             "-e", pattern, "--", *[str(path) for path in paths]]
 
 
@@ -422,14 +424,10 @@ class RipgrepMissing(Exception):
 def file_facts(path, root):
     """The kind, machine, agent-seat and, where its name holds one, the date of one file's hits.
 
-    None for a file in session-dialogs/ that is not a session dialog, and for a file in a shipment's
-    staging copy of a cold-read-record, which holds the same files as the record.
+    None for a file in session-dialogs/ that is not a session dialog.
     """
     parts = path.relative_to(root).parts
     kind = parts[0]
-    if (kind == FILE_KIND_DIRECTORIES["cold-read-records"] and len(parts) > 2
-            and record_shipper.cold_read_records_entry_name_is_shipment_staging_directory(parts[1])):
-        return None
     facts = {"kind": kind, "machine": "", "seat": ""}
     if kind == SESSION_DIALOGS:
         # The refresher keeps its own state files beside the machines' directories.
