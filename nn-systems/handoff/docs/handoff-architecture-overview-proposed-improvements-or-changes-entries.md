@@ -1047,3 +1047,63 @@ The claim check's evidence:
 > - nn-systems/handoff/handoff-supervisor-restart-onto-main-code-by-relaunch-from-reference-checkout.py:422 "If you are the agent-seat {seat}: write your session-handoff now with the /handoff skill"
 > - The restart program also triggers the skill. The successor-prompt notice at handoff-supervisor.py:2371-2375 sends the agent there too.
 State: open
+
+## E89 — possible problem: an assertion of the overview is contradicted
+
+Claim: It deletes a local branch other than main that no worktree has checked out, and no other branch: with `git branch -d`, one whose commits are all on origin/main; otherwise with `git branch -D`, one that is the head branch of a merged or closed pull request and whose tip equals that pull request's `refs/pull/<number>/head`.
+Found by: the overview claim check of 2026-11-23 against commit 69fa4ecc22e3bbedb07e4c5ddd5cca4ad3ff4928; its report is /home/nedlern/nedsnodes-logs/overview-write-architecture-overview-claim-check-reports/nedsnodes-handoff-architecture-overview/726a5d4794a1fe4426c5391ac0f96a9056706454-2026-11-23T15-00-43-576182Z.md.
+Fixed by: regular maintenance, in the overview.
+Goes wrong when: a reader takes the assertion as exact.
+The claim check's evidence:
+> `scripts/clean-worktrees.py:203-207` `--force-delete-branch keeps` / `the branch when it is main,` / `does not exist, is checked out in a worktree, cannot be checked against the` / `pull requests, or is the head branch of an open pull request; otherwise it` / `deletes it with git branch -D`. `:201-202` also deletes a named worktree's branch with `-D` `even when origin/main lacks some of its commits`. The sentence holds for `--remove`, and the overview's Entry points name the one-branch commands, so no agent is misdirected.
+State: open
+
+## E90 — possible problem: an assertion of the overview is contradicted
+
+Claim: when a session-handoff waits, it leaves that session-handoff to a new handoff-supervisor, unless the session-handoff asks for the user to be consulted, when it leaves the agent-seat down.
+Found by: the overview claim check of 2026-11-23 against commit 69fa4ecc22e3bbedb07e4c5ddd5cca4ad3ff4928; its report is /home/nedlern/nedsnodes-logs/overview-write-architecture-overview-claim-check-reports/nedsnodes-handoff-architecture-overview/726a5d4794a1fe4426c5391ac0f96a9056706454-2026-11-23T15-00-43-576182Z.md.
+Fixed by: regular maintenance, in the overview.
+Goes wrong when: a reader takes the assertion as exact.
+The claim check's evidence:
+> `scripts/recover-crashed-seats.py:1232-1237` `if verdict == "seat-asked-to-be-consulted":` / `counter, reason = detail` / `if restart_at_the_operators_word:` … `launch_exit_code = launch(name, seat_directory, handoff_directory, "")`. After an operator's yes at the leftover-shell question it does launch a new supervisor, which then asks its own restart question (`:1244-1247`).
+State: open
+
+## E91 — possible problem: an assertion of the overview is contradicted
+
+Claim: Without one, at a session-handoff that does not consult the user, it exits, leaving the agent-session running and the session-handoff unconsumed for a handoff-supervisor that has one.
+Found by: the overview claim check of 2026-11-23 against commit 69fa4ecc22e3bbedb07e4c5ddd5cca4ad3ff4928; its report is /home/nedlern/nedsnodes-logs/overview-write-architecture-overview-claim-check-reports/nedsnodes-handoff-architecture-overview/726a5d4794a1fe4426c5391ac0f96a9056706454-2026-11-23T15-00-43-576182Z.md.
+Fixed by: regular maintenance, in the overview.
+Goes wrong when: a reader takes the assertion as exact.
+The claim check's evidence:
+> `nn-systems/handoff/handoff-supervisor.py:2289` `# Check the file before exit: a headless session can write its handoff and exit in the same turn.`; `:2298-2302` returns the fields even when the child has exited; `:2819-2827` then exits. In that case the agent-session is not left running. The session-handoff is still left unconsumed.
+State: open
+
+## E92 — possible problem: an assertion of the overview is contradicted
+
+Claim: A handoff-supervisor that outlives its agent-session records the exit before it exits, so `recover-crashed-seats.py` and the agent-crash-watcher can tell an agent-seat its handoff-supervisor left down from one that crashed.
+Found by: the overview claim check of 2026-11-23 against commit 69fa4ecc22e3bbedb07e4c5ddd5cca4ad3ff4928; its report is /home/nedlern/nedsnodes-logs/overview-write-architecture-overview-claim-check-reports/nedsnodes-handoff-architecture-overview/726a5d4794a1fe4426c5391ac0f96a9056706454-2026-11-23T15-00-43-576182Z.md.
+Fixed by: regular maintenance, in the overview.
+Goes wrong when: a reader takes the assertion as exact.
+The claim check's evidence:
+> `nn-systems/handoff/handoff-supervisor.py:2289` `# Check the file before exit: a headless session can write its handoff and exit in the same turn.`; `:2819-2827` returns 0 with no `record_agent_exit_in_supervisor_state` call when it has no terminal. The overview's listed exceptions do not include this path. A waiting session-handoff still keeps recovery from reading it as a crash.
+State: open
+
+## E93 — possible problem: an assertion of the overview is contradicted
+
+Claim: `<session>-handoff-asked` and `<session>-handoff-deferred`, keyed by Claude Code session ID: written by `handoff-context-threshold-hook.py`; read by it and by `scripts/agent-seat-due-task-raise-hook.py`.
+Found by: the overview claim check of 2026-11-23 against commit 69fa4ecc22e3bbedb07e4c5ddd5cca4ad3ff4928; its report is /home/nedlern/nedsnodes-logs/overview-write-architecture-overview-claim-check-reports/nedsnodes-handoff-architecture-overview/726a5d4794a1fe4426c5391ac0f96a9056706454-2026-11-23T15-00-43-576182Z.md.
+Fixed by: regular maintenance, in the overview.
+Goes wrong when: a reader takes the assertion as exact.
+The claim check's evidence:
+> `nn-systems/handoff/handoff-asked-stop-typing-user-notice-user-prompt-submit-hook.py:121-122` `threshold = module_from_path("handoff_context_threshold_hook", THRESHOLD_HOOK_PATH)` / `marker = threshold.handoff_asked_marker_path(session_id)`. This registered `UserPromptSubmit` hook (`.claude/settings.json:78`) also reads the first marker, and the overview omits it. It takes the path from the threshold hook, so a rename would not break it.
+State: open
+
+## E94 — possible problem: an assertion of the overview is contradicted
+
+Claim: `NEDSNODES_HANDOFF_SUPERVISOR_AGENT_NAME`, `NEDSNODES_HANDOFF_SUPERVISOR_WORKING_DIRECTORY` and `NEDSNODES_HANDOFF_SUPERVISOR_SESSION_ID`: set by `handoff-supervisor.py` for its agent-session; read by `handoff-write-and-check-supervisor.py`.
+Found by: the overview claim check of 2026-11-23 against commit 69fa4ecc22e3bbedb07e4c5ddd5cca4ad3ff4928; its report is /home/nedlern/nedsnodes-logs/overview-write-architecture-overview-claim-check-reports/nedsnodes-handoff-architecture-overview/726a5d4794a1fe4426c5391ac0f96a9056706454-2026-11-23T15-00-43-576182Z.md.
+Fixed by: regular maintenance, in the overview.
+Goes wrong when: a reader takes the assertion as exact.
+The claim check's evidence:
+> `nn-systems/handoff/handoff-asked-stop-typing-user-notice-user-prompt-submit-hook.py:94` `return os.environ.get(supervisor.HANDOFF_SUPERVISOR_AGENT_NAME_ENVIRONMENT_VARIABLE, "").strip()`. This hook also reads the first variable. It takes the name from the supervisor's constant, so a rename would not break it.
+State: open
