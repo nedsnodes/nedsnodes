@@ -10,6 +10,7 @@ Run: python3 nn-systems/handoff/tests/agent-seat-terminal-captures-common-test.p
 import importlib.util
 import json
 import os
+import subprocess
 import sys
 import tempfile
 import time
@@ -211,6 +212,32 @@ with tempfile.TemporaryDirectory() as scratch_name:
                               f"{a_file_not_a_directory}/MD-skills could not be made (")
               and f"on {machine}, run `ls -ld {a_file_not_a_directory}/MD-skills`" in line
               and "tell the user which directory" in line, line)
+
+    # -- TMUX and TMUX_PANE are each required; the limits on tmux and on the file's appearing -------
+    tmux_exited_0 = subprocess.CompletedProcess([], 0, "", "")
+    for unset_variable, pane_variables in (("TMUX_PANE", {"TMUX": IN_A_PANE["TMUX"]}),
+                                           ("TMUX", {"TMUX_PANE": IN_A_PANE["TMUX_PANE"]})):
+        with mock.patch.object(captures.subprocess, "run", return_value=tmux_exited_0) as tmux_run:
+            line = start_with(dict(base_environment, **pane_variables,
+                                   **{OVERRIDE: str(scratch / "one-tmux-variable-only")}))
+        check(f"with {unset_variable} unset and the other set, tmux is not run and the line says this "
+              "supervisor is not in a tmux pane",
+              not tmux_run.called and "this handoff-supervisor is not in a tmux pane" in line, line)
+
+    fake_monotonic_clock = [1000.0]
+
+    def fake_sleep(seconds):
+        fake_monotonic_clock[0] += seconds
+
+    with mock.patch.object(captures.subprocess, "run", return_value=tmux_exited_0) as tmux_run, \
+            mock.patch.object(captures.time, "monotonic", lambda: fake_monotonic_clock[0]), \
+            mock.patch.object(captures.time, "sleep", fake_sleep):
+        line = start_with(dict(in_pane_environment, **{OVERRIDE: str(scratch / "capture-file-never-appears")}))
+    check("tmux pipe-pane is given 30 seconds", tmux_run.call_args.kwargs.get("timeout") == 30,
+          str(tmux_run.call_args))
+    check("a capture file that never appears is waited for 2 seconds, and the line says so",
+          abs(fake_monotonic_clock[0] - 1002.0) < 0.1 and "did not appear within 2 seconds" in line,
+          f"clock {fake_monotonic_clock[0]}; {line}")
 
 print()
 if failures:

@@ -11,8 +11,10 @@ import contextlib
 import importlib.util
 import io
 import os
+import subprocess
 import sys
 import tempfile
+import time
 from pathlib import Path
 from unittest import mock
 
@@ -106,6 +108,41 @@ with tempfile.TemporaryDirectory() as scratch_name:
     exit_code, output = run(["--captures-directory", str(scratch / "never-made")])
     check("a captures directory that does not exist is not a failure: exit 0, nothing deleted",
           exit_code == 0 and "deleted 0 capture(s)" in output and "FAILED" not in output, output)
+
+    # -- the seven-day line, on captures that are not their agent-seat's newest ----------------------
+    # The newest is never age-checked, so only these files show the age check itself. Sorted by
+    # name, a kept file comes before a deleted one, so the run must go on past a kept file.
+    seven_day_line_store = scratch / "seven-day-line-store"
+    under_seven_days = capture_file(seven_day_line_store, "a-seat", "20261101T000000Z-a-seat-terminal-capture.log", 1)
+    after_a_kept_file = capture_file(seven_day_line_store, "a-seat", "20261102T000000Z-a-seat-terminal-capture.log", 8)
+    exactly_seven_days = capture_file(seven_day_line_store, "a-seat", "20261103T000000Z-a-seat-terminal-capture.log", 7)
+    one_second_over = capture_file(seven_day_line_store, "a-seat", "20261104T000000Z-a-seat-terminal-capture.log", 7 + 1 / DAY)
+    capture_file(seven_day_line_store, "a-seat", "20261105T000000Z-a-seat-terminal-capture.log", 0.1)
+    exit_code, output = run(["--captures-directory", str(seven_day_line_store)])
+    check("a capture under seven days old that is not its agent-seat's newest is kept",
+          exit_code == 0 and under_seven_days.exists(), output)
+    check("an old capture named after a kept one is still deleted: the run goes on past a kept file",
+          not after_a_kept_file.exists(), output)
+    check("a capture last written exactly seven days ago is kept", exactly_seven_days.exists(), output)
+    check("a capture last written seven days and one second ago is deleted", not one_second_over.exists(), output)
+
+    help_printed = io.StringIO()
+    with contextlib.redirect_stdout(help_printed), contextlib.suppress(SystemExit):
+        deletion.main(["--help"], now=NOW)
+    check("--help opens with the first line of the program's description",
+          deletion.__doc__.splitlines()[0] in " ".join(help_printed.getvalue().split()), help_printed.getvalue())
+
+    run_as_a_program_store = scratch / "run-as-a-program-store"
+    old_for_the_program = capture_file(run_as_a_program_store, "a-seat", "20261001T000000Z-a-seat-terminal-capture.log", 0)
+    newest_for_the_program = capture_file(run_as_a_program_store, "a-seat", "20261105T000000Z-a-seat-terminal-capture.log", 0)
+    thirty_days_ago = time.time() - 30 * DAY
+    os.utime(old_for_the_program, (thirty_days_ago, thirty_days_ago))
+    completed = subprocess.run(
+        [sys.executable, str(PROGRAM_PATH), "--captures-directory", str(run_as_a_program_store)],
+        capture_output=True, text=True, check=False, timeout=60)
+    check("run as a program, it deletes the old capture, keeps the newest and exits 0",
+          completed.returncode == 0 and not old_for_the_program.exists() and newest_for_the_program.exists()
+          and f"deleted {old_for_the_program}\n" in completed.stdout, completed.stdout + completed.stderr)
 
     # -- which directories each machine deletes from ----------------------------------------------
     fake_store = scratch / "fake-log-store" / "agent-session-files-by-machine"

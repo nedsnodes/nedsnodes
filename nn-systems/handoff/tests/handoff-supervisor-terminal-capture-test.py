@@ -117,6 +117,11 @@ try:
               and "is not being captured to a file: this handoff-supervisor is not in a tmux pane"
               in started_from_a_suite.stdout,
               f"tmux calls {calls!r}; stdout {started_from_a_suite.stdout[-1500:]!r}")
+        capture_line_at = started_from_a_suite.stdout.find("is not being captured to a file")
+        agent_output_at = started_from_a_suite.stdout.find("stub-agent-launch-1")
+        check("with its output going to a pipe, the supervisor's line about the terminal capture comes "
+              "before the output of the agent it launches",
+              0 <= capture_line_at < agent_output_at, started_from_a_suite.stdout[-1500:])
         if counter.exists():
             counter.unlink()
 
