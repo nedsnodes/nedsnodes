@@ -3231,6 +3231,57 @@ def test_bump_on_an_open_walk_runs_check_bump_with_the_title_and_without_a_walk_
           result.returncode == 0 and result.stdout == "", f"exit {result.returncode}, stdout {result.stdout!r}")
 
 
+NO_DECISION_SUB_STEP_DOCUMENT = """# A walk
+
+## Item 4 of 9: a filter
+
+### Item 4.1 of 9: What a filter does
+
+A filter hides old rows.
+
+[No decision here; type N or next to continue.](https://claude.ai/artifact/p41)
+
+### Item 4.2 of 9: The choice
+
+Recommendation: leave the filter out.
+
+## Item 5 of 9: the next item
+
+Recommendation: do the next thing.
+"""
+NO_DECISION_LINE = "[No decision here; type N or next to continue.](https://claude.ai/artifact/p41)"
+NO_DECISION_PAGES = ("#item_page item 4.1 of 9 https://claude.ai/artifact/p41\n"
+                     "#item_page item 4.2 of 9 https://claude.ai/artifact/p42\n")
+
+
+def test_an_answer_to_a_no_decision_sub_step_records_nothing():
+    case = Case(next_to_present="item 4.1 of 9", document=NO_DECISION_SUB_STEP_DOCUMENT)
+    case.minutes(NO_DECISION_PAGES + "#next_to_present item 4.1 of 9")
+    for prompt in ("a", "ao", "aa", "d", "m", "approve", "disapprove", "more responses", "4.1 a", "4.1 d", "all a",
+                   "a but fix it", "a if the tests pass"):
+        lines = case.lines(prompt, case.transcript("Here is the plan.", NO_DECISION_LINE))
+        text = "\n".join(lines or [])
+        check(f"{prompt!r} on a no-decision sub-step is not taken as an answer and is told the only choice",
+              "[rule walk-me-through-short-answer-not-recorded-because-sub-step-asks-for-no-decision-hook-message-rule]" in text
+              and NO_DECISION_LINE in text and "only choice" in text and "Do not run" in text
+              and "--user-reply-as-typed" not in text and "A approve" not in text, text)
+    check("no answer to a no-decision sub-step calls the model", case.model_calls() == [], case.model_calls())
+    text = "\n".join(case.lines("a but fix it", case.transcript("Here.")) or [])
+    check("words added to the answer are passed on", "fix it" in text, text)
+    text = "\n".join(case.lines("r", case.transcript("Here.")) or [])
+    check("R on a no-decision sub-step repeats the no-decision line", NO_DECISION_LINE in text
+          and "A approve" not in text, text)
+    check("N is left to the agent as a navigation word", case.lines("n", case.transcript("Here.")) is None, "")
+
+
+def test_an_answer_to_a_sub_step_that_asks_a_decision_still_counts():
+    case = Case(next_to_present="item 4.2 of 9", document=NO_DECISION_SUB_STEP_DOCUMENT)
+    case.minutes(NO_DECISION_PAGES + "#next_to_present item 4.2 of 9")
+    text = "\n".join(case.lines("a") or [])
+    check("A on the sub-step with a recommendation is still an approval",
+          "walk-me-through-short-answer-not-recorded-because-sub-step-asks-for-no-decision-hook-message-rule" not in text and "means approve" in text, text)
+
+
 def main():
     try:
         for name, function in sorted(globals().items()):

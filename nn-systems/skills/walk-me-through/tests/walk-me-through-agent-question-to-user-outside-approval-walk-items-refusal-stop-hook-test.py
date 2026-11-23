@@ -1500,6 +1500,41 @@ def test_silent_during_an_emergency_stop():
                   '"Should I merge the pull request now?"')
 
 
+NO_DECISION_SUB_STEP_DOCUMENT = """# A walk
+
+## Item 4 of 9: a filter
+
+### Item 4.1 of 9: What a filter does
+
+A filter hides old rows.
+
+[No decision here; type N or next to continue.](https://claude.ai/artifact/p41)
+
+### Item 4.2 of 9: The choice
+
+Recommendation: leave the filter out.
+
+## Item 5 of 9: the next item
+
+Recommendation: do the next thing.
+"""
+NO_DECISION_LINE = "[No decision here; type N or next to continue.](https://claude.ai/artifact/p41)"
+NO_DECISION_PAGES = ("#item_page item 4.1 of 9 https://claude.ai/artifact/p41\n"
+                     "#item_page item 4.2 of 9 https://claude.ai/artifact/p42\n")
+
+
+def test_the_question_refusal_on_a_no_decision_sub_step_offers_only_next():
+    case = Case(document=NO_DECISION_SUB_STEP_DOCUMENT,
+                minutes=NO_DECISION_PAGES + "#next_to_present item 4.1 of 9")
+    case.reply("Should I merge the pull request now?\n\n" + NO_DECISION_LINE)
+    result = case.run(model="yes")
+    check_blocked("the refusal gives the no-decision line", result, NO_DECISION_LINE)
+    check("the refusal offers no A, D or M", "A approve" not in (blocked_reason(result) or "A approve"),
+          blocked_reason(result))
+    case.reply("The tests passed.\n\n" + NO_DECISION_LINE)
+    check_silent("the line the refusal printed passes when it ends the reply", case.run(model="no"))
+
+
 def main():
     if sys.argv[1:] == [LIVE_MODEL_FLAG]:
         return print_live_model_labels()

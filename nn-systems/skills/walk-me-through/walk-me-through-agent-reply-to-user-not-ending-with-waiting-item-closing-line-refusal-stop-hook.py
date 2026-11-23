@@ -111,6 +111,10 @@ passes when the reply holds a line that is `[No decision here; type N or next
 to continue.](<page link>)`, the line a sub-step that asks for no decision
 ends with, and its link is the sub-step's page; or, for a sub-step whose
 publish failed, that line without its link, as WALK_FINDER_FILE reads it.
+A sub-step that WALK_FINDER_FILE's
+approval_walk_waiting_sub_step_numbers_whose_text_ends_with_no_decision_closing_line
+names passes only that way, since a line offering A, D and M offers answers
+it does not take.
 
 SILENT while the agent answers a Stop hook (stop_hook_active set), as the
 Stop-hook silence rule's module requires, when the agent-session is a
@@ -199,7 +203,7 @@ UNPUBLISHED_INSTRUCTIONS = (
     "Then end your reply with each waiting item's closing line below, on a line of its own, with nothing after it, "
     "copied as it stands but for the page's link in place of `<page link>`. " + NOT_IN_BACKTICKS + "\n{closing_lines}",
     "For an item whose publish failed, write its closing line without the link: drop the `[` that opens it and "
-    "the `](<page link>)` before its first ` · `, keeping the rest of the line.",
+    "the `](<page link>)` that closes its link text, keeping the rest of the line.",
 )
 REPLY_LACKS_CLOSING_LINE_OPENING_TEMPLATE = (
     "[rule walk-me-through-reply-ends-with-waiting-item-closing-line] approval-walk current-item check: your reply to the user does not end with the right closing line for "
@@ -216,6 +220,9 @@ LINK_AFTER_FAILED_PUBLISH_PROBLEM = (
 IN_CODE_SPAN_PROBLEM = (
     "the closing line for `Item {number} of {total}` sits between backticks, so the user sees it as code and cannot "
     "click its link")
+NO_DECISION_LINE_MISSING_PROBLEM = (
+    "`Item {number} of {total}` asks for no decision, so its closing line is the no-decision line below, which "
+    "offers only N or next, and no line offering A, D or M")
 NO_LINK_PROBLEM = (
     "the closing line for `Item {number} of {total}` has no link, but the walk-minutes record its page as {page}")
 REPLY_LACKS_CLOSING_LINE_INSTRUCTIONS = (
@@ -459,28 +466,37 @@ def output_for(payload, environment):
         "walk_me_through_user_short_answer_to_approval_walk_item_expanded_into_instructions_user_prompt_submit_hook",
         ANSWER_HOOK_FILE)
     letters = answer_hook.ANSWER_LETTERS_TEXT
-    points = answer_hook.heading_points(document.read_text(encoding="utf-8").split("\n"), units, parser)
+    document_text = document.read_text(encoding="utf-8")
+    points = answer_hook.heading_points(document_text.split("\n"), units, parser)
+    no_decision_numbers = walk_finder.approval_walk_waiting_sub_step_numbers_whose_text_ends_with_no_decision_closing_line(
+        document_text, parser, units, numbers)
 
     def closing_lines(lines_pages):
-        walk = answer_hook.WalkState(None, None, numbers, total, {}, None, pages=lines_pages, points=points)
+        walk = answer_hook.WalkState(None, None, numbers, total, {}, None, pages=lines_pages, points=points,
+                                     no_decision_numbers=no_decision_numbers)
         return "\n".join(answer_hook.closing_line(number, walk) for number in numbers)
 
     unpublished = [number for number in numbers if number not in pages]
     if unpublished:
-        return block(UNPUBLISHED_OPENING_TEMPLATE, UNPUBLISHED_INSTRUCTIONS + no_decision_instructions(unpublished),
+        return block(UNPUBLISHED_OPENING_TEMPLATE,
+                     UNPUBLISHED_INSTRUCTIONS + no_decision_instructions(
+                         [number for number in unpublished if number not in no_decision_numbers]),
                      named=" and ".join(f"`Item {number} of {total}`" for number in unpublished),
                      page_line=sub_step_page_line(unpublished, total),
                      closing_lines=closing_lines({number: pages.get(number, "<page link>") for number in numbers}))
     no_decision_links = {walk_finder.approval_walk_sub_step_no_decision_closing_line_page_link_or_none(line)
                          for line in reply.split("\n")}
     numbers_needing_closing_line = [number for number in numbers
-                                    if not ("." in number and pages[number] in no_decision_links)]
+                                    if number not in no_decision_numbers
+                                    and not ("." in number and pages[number] in no_decision_links)]
     link_parser = walk_finder.markdown_parser()
     # markdown-it refuses a file: link by default and reads it as text, which would hide the wrong link
     # the block must name.
     link_parser.validateLink = lambda url: True
-    problems = closing_line_problems(numbers_needing_closing_line, total,
-                                     ending_closing_lines(reply, link_parser, letters), pages, link_parser)
+    problems = [NO_DECISION_LINE_MISSING_PROBLEM.format(number=number, total=total) for number in numbers
+                if number in no_decision_numbers and pages[number] not in no_decision_links]
+    problems += closing_line_problems(numbers_needing_closing_line, total,
+                                      ending_closing_lines(reply, link_parser, letters), pages, link_parser)
     if not problems:
         return None
     return block(REPLY_LACKS_CLOSING_LINE_OPENING_TEMPLATE,
