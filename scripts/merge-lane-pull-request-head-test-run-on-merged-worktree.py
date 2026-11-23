@@ -124,13 +124,16 @@ def commit_fetched_from_origin(tools, source, environment):
         tools, ["ls-remote", "--exit-code", "origin", source], environment)
     if failure is not None:
         return None, failure
-    commit = listed.split()[0]
+    # ls-remote also lists references whose names merely end in source.
+    commit = next((row.split()[0] for row in listed.splitlines() if row.split()[1:] == [source]),
+                  None)
+    if commit is None:
+        return None, (f"git ls-remote origin {source} in {tools} listed no reference named "
+                      f"exactly {source}.")
     # The fetch writes no reference: git's connectivity check reads every reference, so one
-    # that an overlapping run deletes during the check makes this fetch fail. An empty
-    # --refmap leaves refs/remotes/origin/* alone.
+    # that an overlapping run deletes during the check makes this fetch fail.
     _, failure = git_output_or_failure(
-        tools, ["fetch", "-q", "--no-write-fetch-head", "--no-tags", "--refmap=", "origin",
-                commit], environment)
+        tools, ["fetch", "-q", "--no-write-fetch-head", "origin", commit], environment)
     if failure is not None:
         return None, failure
     return git_output_or_failure(tools, ["rev-parse", "--verify", f"{commit}^{{commit}}"],

@@ -197,6 +197,26 @@ def check_commit_fetched_from_origin(review_tools, author, origin, main_commit):
           commit is None and failure and "rev-parse" in failure
           and git(review_tools, "for-each-ref") == references_before, f"{commit!r} {failure!r}")
 
+    # ls-remote matches trailing path components, and these sort before the exact references.
+    siblings = {"refs/heads/a/refs/heads/main": pull_head,
+                "refs/heads/fix/refs/pull/8/head": main_commit,
+                "refs/heads/fix/refs/pull/13/head": main_commit}
+    git(author, "push", "-q", str(origin),
+        *(f"{commit}:{reference}" for reference, commit in siblings.items()))
+    check("main is the commit of refs/heads/main, not of a branch whose name ends in it",
+          program.commit_fetched_from_origin(review_tools, "refs/heads/main", environment)
+          == (main_commit, None))
+    check("a pull request's head is the commit of its own reference, not of a branch whose "
+          "name ends in it",
+          program.commit_fetched_from_origin(review_tools, "refs/pull/8/head", environment)
+          == (pull_head, None))
+    commit, failure = program.commit_fetched_from_origin(
+        review_tools, "refs/pull/13/head", environment)
+    check("a reference only a longer branch name matches is reported as not found",
+          commit is None and failure and "refs/pull/13/head" in failure,
+          f"{commit!r} {failure!r}")
+    git(author, "push", "-q", str(origin), *(f":{reference}" for reference in siblings))
+
 
 def main():
     scratch = Path(tempfile.mkdtemp(prefix="merge-lane-head-test-run-test-")).resolve()
