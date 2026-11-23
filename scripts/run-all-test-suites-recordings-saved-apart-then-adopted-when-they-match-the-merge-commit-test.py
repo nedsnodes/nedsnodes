@@ -395,15 +395,17 @@ def read_only_directory_overlap_is_judged_by_the_directory_and_by_what_this_run_
     scratch = Scratch()
     m1 = commit(scratch.repo, {"first.txt": "1\n"}, "M1")
     a_checkout, _ = scratch.worktree("pr-a", m1, {"unread.txt": "a\n"})
-    for name, extra, driver in (
-            ("--record-inputs-with-strace is not given", (), None),
-            ("strace cannot be used", ("--record-inputs-with-strace",), STRACE_UNUSABLE_DRIVER)):
-        result = scratch.run(a_checkout, since=m1, save_to="pr-a-recordings",
+    for save_to, name, extra, driver in (
+            ("pr-a-recordings-without-strace", "--record-inputs-with-strace is not given", (),
+             None),
+            ("pr-a-recordings-strace-unusable", "strace cannot be used",
+             ("--record-inputs-with-strace",), STRACE_UNUSABLE_DRIVER)):
+        result = scratch.run(a_checkout, since=m1, save_to=save_to,
                              read_only="strace-lists", extra=extra, driver=driver)
         check(f"a run whose read-only directory is its strace-lists directory is not refused "
               f"when {name}",
               result.returncode == 0 and "would also write to" not in result.stderr
-              and scratch.recording("pr-a-recordings") is not None
+              and scratch.recording(save_to) is not None
               and not [path for path in (scratch.root / "strace-lists").rglob("*")
                        if path.is_file()],
               (result.returncode, result.stderr[-800:]))
@@ -435,13 +437,20 @@ def read_only_directory_overlap_is_judged_by_the_directory_and_by_what_this_run_
         except runner.CouldNotRun:
             return True
 
-    # Injected: this suite also runs on the Mac, whose default volume ignores case.
-    real_volume_ignores_case = runner.volume_ignores_case
-    runner.volume_ignores_case = lambda directory: False
+    # Injected: this suite also runs on the Mac, whose default volume ignores case, so the
+    # swapped-case lookup fails there only by injection.
+    real_samefile = pathlib.Path.samefile
+
+    def on_case_sensitive_volume(path, other):
+        if pathlib.Path(other).name == path.name.swapcase() != path.name:
+            raise FileNotFoundError(other)
+        return real_samefile(path, other)
+
+    pathlib.Path.samefile = on_case_sensitive_volume
     try:
         refused = refused_as_one_directory(store / "MISSING", store / "missing")
     finally:
-        runner.volume_ignores_case = real_volume_ignores_case
+        pathlib.Path.samefile = real_samefile
     check("on a case-sensitive volume, two missing directories differing in case are not "
           "refused", not refused)
 
@@ -461,7 +470,6 @@ def read_only_directory_overlap_is_judged_by_the_directory_and_by_what_this_run_
 
     # Injected: samefile() answers as a case-insensitive volume would, and still fails for a
     # path that does not exist.
-    real_samefile = pathlib.Path.samefile
     top = scratch.root.resolve()
 
     def on_case_insensitive_volume(path):
