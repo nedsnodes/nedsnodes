@@ -28,6 +28,7 @@ non-blocking findings, with a gh that answers with the posted reviews.
 Run: python3 scripts/merge-lane-pull-request-reviewer-review-post-and-read-back-test.py
 """
 
+import ast
 import contextlib
 import io
 import json
@@ -690,6 +691,13 @@ def verdict_review_marks_cases(scratch):
         check(f"the marks check program exits 2 on the input {given!r}",
               done.returncode == 2 and "standard input is not one JSON object" in done.stderr,
               (done.returncode, done.stdout, done.stderr))
+
+    paragraphs = ast.get_docstring(ast.parse(MARKS_CHECK_PROGRAM.read_text()), clean=False).split("\n\n")
+    done = subprocess.run([sys.executable, str(MARKS_CHECK_PROGRAM), "--help"], capture_output=True, text=True)
+    check("the marks check program's --help shows its docstring's first paragraph once, and every later one as the epilog",
+          done.returncode == 0 and done.stdout.count(paragraphs[0]) == 1
+          and done.stdout.endswith("\n\n" + "\n\n".join(paragraphs[1:]).strip("\n") + "\n"),
+          (done.returncode, done.stdout, done.stderr))
 
 
 def check_prints_a_failing_case_detail_that_is_not_a_string():
