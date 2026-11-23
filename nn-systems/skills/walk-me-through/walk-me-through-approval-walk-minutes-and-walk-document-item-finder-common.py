@@ -138,6 +138,11 @@ approval_walk_sub_step_no_decision_closing_line_page_link_or_none reads the
 line a sub-step that asks for no decision ends with, `[No decision here; type
 N or next to continue.](<page link>)`, alone on its line, or, for a sub-step
 whose publish failed, the same line without its link.
+approval_walk_waiting_sub_step_numbers_whose_text_ends_with_no_decision_closing_line
+says which waiting sub-steps ask for no decision: those whose text as shown
+ends with that line and holds no recommendation, so that the answer
+program's --moved-on-no-decision, which refuses an item with a recommendation,
+accepts each of them.
 
 Tool-messages-to-agent follow
 docs/nedsnodes-wiki/nedsnodes-how-to-write-a-tool-message-to-agent-such-as-a-hook-refusal-or-script-error.md.
@@ -186,8 +191,9 @@ ITEM_LABEL = re.compile(
     rf"^(?:(?P<bold>\*\*|__)item\s+(?P<bold_number>{WHOLE_NUMBER})(?:\s+of\s+(?P<total>\d+))?"
     rf"(?=\s*[:.,]|(?P=bold)\s*(?:[:.,\-–—]|$))"
     rf"|item\s+(?P<plain_number>{WHOLE_NUMBER})[:.](?=\s|$))", re.I)
+APPROVAL_WALK_SUB_STEP_ASKING_FOR_NO_DECISION_CLOSING_LINE_WORDS_WITHOUT_LINK = "No decision here; type N or next to continue."
 SUB_STEP_NO_DECISION_CLOSING_LINE = re.compile(
-    r"^\s*(?:\[No decision here; type N or next to continue\.\]\((\S+)\)|No decision here; type N or next to continue\.)\s*$")
+    rf"^\s*(?:\[{re.escape(APPROVAL_WALK_SUB_STEP_ASKING_FOR_NO_DECISION_CLOSING_LINE_WORDS_WITHOUT_LINK)}\]\((\S+)\)|{re.escape(APPROVAL_WALK_SUB_STEP_ASKING_FOR_NO_DECISION_CLOSING_LINE_WORDS_WITHOUT_LINK)})\s*$")
 CLOSING_LINE_LABEL = re.compile(rf"Items?\s+({NUMBER_LIST})\s+of\s+(\d+)(?:,\s.*)?", re.S)
 # Only right after the count, as in `(revised)` or `, revised:`, so a title that uses the word drops nothing.
 REVISED = re.compile(r"^[*_\s(,:;.\-\u2013\u2014]*revised\b", re.I)
@@ -468,6 +474,26 @@ def approval_walk_sub_step_no_decision_closing_line_page_link_or_none(line):
     if match is None:
         return None
     return match[1] or ITEM_PAGE_PUBLISH_FAILED
+
+
+def approval_walk_waiting_sub_step_numbers_whose_text_ends_with_no_decision_closing_line(
+        text, parser, waiting_units, numbers, all_units=None):
+    """The set of numbers that are sub-steps asking for no decision, as the module docstring's CLOSING LINES says, of
+    the walk-document text; waiting_units are waiting_item_units' units for numbers, and all_units item_unit_spans'
+    units of text when the caller has them already."""
+    sub_steps = [number for number in numbers if "." in number]
+    if not sub_steps:
+        return set()
+    all_units = item_unit_spans(text, parser) if all_units is None else all_units
+    found = set()
+    for number in sub_steps:
+        unit = next(unit for unit in waiting_units if number in unit[0])
+        shown = approval_walk_item_text_as_shown_to_user(text, parser, all_units, unit, number)
+        lines = [line for line in prose_lines(shown, parser) if line.strip()]
+        if (approval_walk_sub_step_no_decision_closing_line_page_link_or_none(lines[-1]) is not None
+                and approval_walk_item_last_recommendation_text_from_item_lines(lines) is None):
+            found.add(number)
+    return found
 
 
 def is_closed(value):

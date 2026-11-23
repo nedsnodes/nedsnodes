@@ -1500,8 +1500,8 @@ def print_block(reviews, comments, gh_failure=None, read_back=None, description=
     pull_requests = {NUMBER: (description, reviews, comments), **(replaced or {})}
 
     def fake_gh(arguments, timeout_seconds=None):
-        if arguments[:2] == ["pr", "view"] and "author" in arguments:
-            return author + "\n"
+        if arguments[:2] == ["pr", "view"] and "body,author" in arguments:
+            return author + "\n" + pull_requests[int(arguments[2])][0] + "\n"
         if arguments[:2] == ["pr", "view"]:
             return (pull_requests[int(arguments[2])][0] if "body" in arguments else TITLE) + "\n"
         if gh_failure:
@@ -1603,10 +1603,15 @@ def test_print_block():
                                        "expected shape: KeyError"), err)
     without_state = merge_lane_review(2)
     del without_state["state"]
-    code, out, err = print_block([merge_lane_review(1), without_state],
+    code, out, err = print_block([without_state, merge_lane_review(1)],
                                  [merge_lane_comment(10, 1, "**fix-next** Rename it.")])
-    check(f"{PRINT_BLOCK} prints nothing and fails with exit 2 when a merge-lane-2 review has no state, whose "
-          "verdict cannot be read",
+    check(f"{PRINT_BLOCK} prints the block when a merge-lane-2 review has no state but another review approves",
+          code == 0 and err == "" and out == (f"#follow_up_request pull request {NUMBER}\n"
+                                               "1. fix-next: `scripts/thing.py:3`: Rename it.\n"), out + err)
+    code, out, err = print_block([merge_lane_review(1, state="CHANGES_REQUESTED"), without_state],
+                                 [merge_lane_comment(10, 1, "**fix-next** Rename it.")])
+    check(f"{PRINT_BLOCK} prints nothing and fails with exit 2 when a merge-lane-2 review has no state and no "
+          "readable review approves",
           code == 2 and out == "" and err.startswith("FAILED: GitHub returned a review by ned-review-merge without a "
                                                      "state, so its verdict cannot be read: "), out + err)
     code, out, err = print_block([merge_lane_review(1)], [merge_lane_comment(10, 1, "**fix-next** Rename it.")],

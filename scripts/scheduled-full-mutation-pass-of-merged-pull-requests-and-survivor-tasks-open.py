@@ -40,8 +40,9 @@ WHAT ONE RUN DOES, in order.
      scheduled-full-mutation-pass-of-merged-pull-requests-and-survivor-tasks-open.lock
      in --state-directory; while another run holds it, this run exits
      EXIT_ANOTHER_RUN_HOLDS_THE_LOCK having done nothing, and the next
-     scheduled run carries on. The command a job failure task gives for a
-     hand run of one merge takes the same lock, but waits for it instead of
+     scheduled run carries on. A hand run of one merge, the systemd-run
+     command that mutation_testing_hand_run_command() builds and a job
+     failure task prints, takes the same lock, but waits for it instead of
      exiting: that hand run resumes the kept sessions this program uses.
   2. Runs `git fetch origin main` in the clone and resolves origin/main.
   3. Reads the state file. With no state file, it writes one naming
@@ -539,8 +540,9 @@ def read_state(state_file):
             f"If the file can be repaired by hand, repair it: it holds last_tested_main_commit, "
             f"a commit hash, and tasks_opened, an object, and may hold "
             f"{MERGES_WITH_MUTANTS_NOT_RUN_STATE_KEY}, an object that gives each merge an "
-            f"object holding merged_at_unix_seconds and mutants_not_run_count, both whole "
-            f"numbers, and surviving_mutant_keys_already_handled, a list, and may hold "
+            f"object of its own. Each merge's object holds merged_at_unix_seconds and "
+            f"mutants_not_run_count, both whole numbers, and "
+            f"surviving_mutant_keys_already_handled, a list, and may also hold "
             f"{ERRORED_MUTANT_KEYS_ALREADY_REPORTED_STATE_KEY}, a list.\n"
             f"Otherwise delete it: the next run then starts from origin/main, and merges since "
             f"the last good run go untested.") from error
@@ -1107,10 +1109,12 @@ def errored_mutants_job_failure_task_opened(arguments, merge, merge_subject, err
     except OSError as error:
         raise StepFailed(
             f"merge {merge[:12]} ({merge_subject}): {len(errored)} of its mutants ended "
-            f"ERRORED, but their job failure task could not be opened or added to on "
+            f"ERRORED, but the job failure task that names ERRORED mutants could not be "
+            f"opened, nor could the open one have them added to its description, on "
             f"{JOB_FAILURE_TASK_AGENT_SEAT}'s task list ({type(error).__name__}: {error}), so "
             f"the merge is not recorded as tested and no later merge is tested. The next run "
-            f"tries this merge again, and gives no surviving mutant a second task.\n"
+            f"tries this merge again and reports these ERRORED mutants in that task; the "
+            f"surviving mutants this run already gave tasks get none again.\n"
             f"Fix what the error names, such as a task list directory that does not exist, "
             f"then run this program again on ned-box: {RUN_BY_HAND}") from error
     for mutant in errored:
