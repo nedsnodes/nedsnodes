@@ -71,7 +71,8 @@ and run this again; this program cannot tell the two apart. Otherwise write the 
 "<n>. " per finding and print the brief. A file there that holds any text but such lines is first copied,
 unchanged, to a new file in ANSWERS_KEPT_COPIES_DIRECTORY_NAME in the worktree's git directory, because git
 cannot restore an ignored file and no test of a file's age or record shows which round its answers are for;
-the brief names the copy. The brief holds:
+the brief names the copy. --check tests a file's age only by its mtime, so it does not notice an old round's
+kept copy copied whole over the answers file. The brief holds:
 the frozen-head, ADVISOR_FIX_ROUND_INSTRUCTION when the round's number is ADVISOR_FIX_ROUND_NUMBER and on
 no other, each blocking finding word for word, then each nit word for word, numbered on from the blocking
 findings, to fix in the same round, how to dispatch the fix-round subagent, a fork without Claude Code's
@@ -847,8 +848,12 @@ def answers_file_text_kept_in_new_copy(path, kept_copies_directory):
     kept_copies_directory.mkdir(parents=True, exist_ok=True)
     # mkstemp makes a name no earlier copy holds, so one copy never replaces another.
     descriptor, kept = tempfile.mkstemp(prefix=f"{path.stem}-", suffix=path.suffix, dir=kept_copies_directory)
-    with os.fdopen(descriptor, "wb") as copy:
-        copy.write(data)
+    try:
+        with os.fdopen(descriptor, "wb") as copy:
+            copy.write(data)
+    except OSError:
+        os.unlink(kept)
+        raise
     return Path(kept)
 
 
@@ -857,7 +862,14 @@ def answers_file_with_one_line_per_finding_write(path, finding_count, kept_copie
     writes the answer after it, and return the new copy of the text it held, or None."""
     try:
         kept = answers_file_text_kept_in_new_copy(path, kept_copies_directory)
-        path.write_text("".join(f"{index}. \n" for index in range(1, finding_count + 1)))
+        # A write that fails part way must leave the answers file whole.
+        incomplete = path.with_name(f"{path.name}.incomplete")
+        try:
+            incomplete.write_text("".join(f"{index}. \n" for index in range(1, finding_count + 1)))
+            os.replace(incomplete, path)
+        except OSError:
+            incomplete.unlink(missing_ok=True)
+            raise
     except OSError as error:
         raise StepFailed(f"could not write the answers file {path}: {error}") from None
     return kept
@@ -1579,9 +1591,11 @@ def move_start(number, reviewer_login, new_branch, whole_file_paths):
     set_aside = state_path.parent / ANSWERS_SET_ASIDE_DIRECTORY_NAME / answers_name
     if answers.exists():
         try:
-            answers_file_text_kept_in_new_copy(set_aside, state_path.parent / ANSWERS_KEPT_COPIES_DIRECTORY_NAME)
+            kept = answers_file_text_kept_in_new_copy(set_aside, state_path.parent / ANSWERS_KEPT_COPIES_DIRECTORY_NAME)
         except OSError as error:
             raise StepFailed(f"could not keep a copy of {set_aside} before replacing it: {error}") from None
+        if kept:
+            print(f"Answers an earlier move left in {set_aside} are now in {kept}.")
     git(["switch", "-q", "--no-overwrite-ignore", "-c", new_branch, "origin/main"])
     if whole_file_paths:
         git(["checkout", frozen_head, "--", *whole_file_paths])
@@ -1618,12 +1632,7 @@ def move_finish(number, reviewer_login, title, body_file):
     if Path(body_file).resolve().is_relative_to(root):
         raise Refused(f"The description file {body_file} is inside this worktree, so the commit would carry it.\n"
                       "Move it outside the worktree and run this again.")
-    if answers.exists():
-        raise Refused(f"An answers file {answers} is in this worktree, so the commit would carry it to "
-                      f"{new_branch}.\n"
-                      f"Move it to a new file name in {state_path.parent / ANSWERS_KEPT_COPIES_DIRECTORY_NAME} and "
-                      f"run this again. Do not move it onto {set_aside}, which holds the round's answers and comes "
-                      "back when the move ends.")
+    kept_copies_directory = state_path.parent / ANSWERS_KEPT_COPIES_DIRECTORY_NAME
     if git(["rev-list", "--count", "origin/main..HEAD"]).strip() != "0":  # pragma: no mutate, a count has no leading zero, so `>` matches every count but "0" as `!=` does, and so does `is not`, as CPython keeps one "0" string
         head = git(["rev-parse", "HEAD"]).strip()
         base = git(["merge-base", "HEAD", "origin/main"]).strip()
@@ -1633,6 +1642,19 @@ def move_finish(number, reviewer_login, title, body_file):
                       "to do that its message listed, instead of running it again.\n"
                       f"Otherwise undo the commit, keeping its changes staged, with git reset --soft {base}, then "
                       "run this again: it runs the tests and commits the moved change.")
+    if answers.exists():
+        try:
+            if set_aside.exists():
+                kept = answers_file_text_kept_in_new_copy(answers, kept_copies_directory)
+                answers.unlink()
+                if kept:
+                    print(f"{answers} was written during this move, so this program moved its text to {kept}, "
+                          f"and the round's answers in {set_aside} come back when the move ends.")
+            else:
+                set_aside.parent.mkdir(exist_ok=True)
+                shutil.move(answers, set_aside)
+        except OSError as error:
+            raise StepFailed(f"could not keep the answers file {answers} out of the commit: {error}") from None
     git(["add", "-A"])
     if not git(["diff", "--cached", "--name-only"]).strip():
         raise Refused(f"{new_branch} holds no change beside origin/main, so there is nothing to move.\n"
@@ -1671,9 +1693,18 @@ def move_finish(number, reviewer_login, title, body_file):
                              "--body-file", body_file]).strip().splitlines()[-1]
 
     def restore_answers():
-        if set_aside.exists():
-            answers_file_text_kept_in_new_copy(answers, state_path.parent / ANSWERS_KEPT_COPIES_DIRECTORY_NAME)
-            shutil.move(set_aside, answers)
+        if not set_aside.exists():
+            return
+        try:
+            kept = answers_file_text_kept_in_new_copy(answers, kept_copies_directory)
+        except OSError as error:
+            print(f"The round's answers stay in {set_aside}, because {answers} holds other text and no copy of it "
+                  f"could be made: {error}. Read both files, and put each answer you need in {answers}.")
+            return
+        shutil.move(set_aside, answers)
+        if kept:
+            print(f"{answers} was written during this move, so this program moved its text to {kept} before "
+                  "bringing the round's answers back.")
 
     def delete_branch():
         git(["branch", "-D", new_branch])
@@ -1684,7 +1715,8 @@ def move_finish(number, reviewer_login, title, body_file):
              (f"open its pull request with gh pr create --base main --head {new_branch}, if gh pr list --head "
               f"{new_branch} shows none", open_pull_request),
              (f"git switch {return_branch}", lambda: git(["switch", "-q", return_branch])),
-             (f"move {set_aside} back to {answers} if it is there", restore_answers),
+             (f"move {set_aside} back to {answers} if it is there, first moving any file at {answers} to a new name in "
+              f"{kept_copies_directory}", restore_answers),
              (f"git branch -D {new_branch}", delete_branch),
              (f"delete {state_path}", state_path.unlink)]
     def labelled_hook_output():

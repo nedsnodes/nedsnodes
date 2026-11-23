@@ -15,6 +15,7 @@ import datetime
 import importlib.util
 import json
 import os
+import resource
 import shlex
 import shutil
 import subprocess
@@ -2011,12 +2012,6 @@ def move_cases(root, _repository, _base, _frozen_head):
     git(repository, "switch", "-q", NEW_BRANCH)
     (repository / "partly.txt").write_text(PARTLY_MOVED_ONLY)
 
-    answers.write_text("a new answers file\n")
-    code, out, err = run(root, repository, routes, *finish)
-    check("move-finish: refuses while an answers file is in the worktree, and commits nothing",
-          code == 1 and "would carry it" in err
-          and git(repository, "rev-parse", "HEAD") == git(repository, "rev-parse", "origin/main"), err)
-    answers.unlink()
     inside = repository / "description-inside.md"
     inside.write_text("inside\n")
     code, out, err = run(root, repository, routes, "--move-change-to-own-pull-request-finish", "--title", "Move it", "--body-file", str(inside))
@@ -2128,6 +2123,107 @@ def move_keeps_answers_cases(root, _repository, _base, _frozen_head):
     check("move-finish: an answers file written during the move is in a copy before the set-aside file comes back",
           code == 0 and answers.read_text() == ANSWERS_TEXT
           and "1. Written during the push.\n" in [path.read_text() for path in kept_directory.iterdir()], out + err)
+
+
+def move_finish_answers_moves_cases(root, _repository, _base, _frozen_head):
+    body = root / "description.md"
+    body.write_text("Moves the timeout change.\n")
+    finish = ("--move-change-to-own-pull-request-finish", "--title", "Move it", "--body-file", str(body))
+
+    def started(name, answers_text):
+        directory = root / name
+        directory.mkdir()
+        repository, frozen_head = move_repository(directory)
+        answers = repository / ANSWERS_NAME
+        if answers_text is None:
+            answers.unlink(missing_ok=True)
+        else:
+            answers.write_text(answers_text)
+        routes = move_routes(frozen_head, body)
+        code, out, err = run(root, repository, routes, "--move-change-to-own-pull-request-cut-new-topic-branch",
+                             NEW_BRANCH, "moved.py")
+        check(f"move-finish setup {name}: the move starts", code == 0, out + err)
+        (repository / "partly.txt").write_text(PARTLY_MOVED_ONLY)
+        git_directory = Path(git(repository, "rev-parse", "--absolute-git-dir"))
+        return repository, answers, routes, git_directory / "fix-round-answers-set-aside" / ANSWERS_NAME, \
+            git_directory / "fix-round-answers-kept-copies"
+
+    repository, answers, routes, set_aside, kept_directory = started("no-set-aside", None)
+    answers.write_text("1. Written during the move.\n")
+    code, out, err = run(root, repository, routes, *finish)
+    check("move-finish: with nothing set aside, the program carries the answers file past the commit and brings it back",
+          code == 0 and answers.read_text() == "1. Written during the move.\n" and not set_aside.exists()
+          and ANSWERS_NAME not in git(repository, "show", "--name-only", "--format=", "origin/" + NEW_BRANCH),
+          out + err)
+
+    repository, answers, routes, set_aside, kept_directory = started("both", ANSWERS_TEXT)
+    answers.write_text("1. Written during the move.\n")
+    code, out, err = run(root, repository, routes, *finish)
+    kept = list(kept_directory.iterdir())
+    check("move-finish: a file written beside set-aside answers is in a copy the program names, and the answers return",
+          code == 0 and answers.read_text() == ANSWERS_TEXT and len(kept) == 1
+          and kept[0].read_text() == "1. Written during the move.\n" and str(kept[0]) in out, out + err)
+
+    repository, answers, routes, set_aside, kept_directory = started("during-push", ANSWERS_TEXT)
+    hook = Path(git(repository, "rev-parse", "--path-format=absolute", "--git-path", "hooks")) / "pre-push"
+    hook.parent.mkdir(exist_ok=True)
+    hook.write_text(f"#!/bin/sh\nprintf '1. Written during the push.\\n' > {shlex.quote(str(answers))}\n")
+    hook.chmod(0o755)
+    code, out, err = run(root, repository, routes, *finish)
+    kept = list(kept_directory.iterdir())
+    check("move-finish: the success output names the copy of a file written during the push",
+          code == 0 and answers.read_text() == ANSWERS_TEXT and len(kept) == 1 and str(kept[0]) in out, out + err)
+
+    repository, answers, routes, set_aside, kept_directory = started("no-copy", ANSWERS_TEXT)
+    kept_directory.write_text("a file where the directory of copies goes")
+    hook = Path(git(repository, "rev-parse", "--path-format=absolute", "--git-path", "hooks")) / "pre-push"
+    hook.parent.mkdir(exist_ok=True)
+    hook.write_text(f"#!/bin/sh\nprintf '1. Written during the push.\\n' > {shlex.quote(str(answers))}\n")
+    hook.chmod(0o755)
+    code, out, err = run(root, repository, routes, *finish)
+    check("move-finish: when no copy can be made, both answers files stay whole and the output names both",
+          code == 0 and answers.read_text() == "1. Written during the push.\n"
+          and set_aside.read_text() == ANSWERS_TEXT and str(set_aside) in out and str(answers) in out, out + err)
+
+
+def answers_write_failure_cases(root, _repository, _base, _frozen_head):
+    specification = importlib.util.spec_from_file_location("fix_round_program", PROGRAM)
+    program = importlib.util.module_from_spec(specification)
+    specification.loader.exec_module(program)
+    directory = root / "write-failure"
+    directory.mkdir()
+    kept_directory = directory / "kept"
+    answers = directory / "answers.md"
+    text = "1. A long answer that is past the size limit.\n" * 40
+    answers.write_text(text)
+    limit = resource.getrlimit(resource.RLIMIT_FSIZE)
+    resource.setrlimit(resource.RLIMIT_FSIZE, (40, limit[1]))
+    try:
+        try:
+            program.answers_file_with_one_line_per_finding_write(answers, 30, kept_directory)
+            failed = False
+        except program.StepFailed:
+            failed = True
+    finally:
+        resource.setrlimit(resource.RLIMIT_FSIZE, limit)
+    check("answers kept: a copy that fails part way leaves no partial copy, and the answers file is whole",
+          failed and answers.read_text() == text and not list(kept_directory.iterdir())
+          and [path.name for path in directory.iterdir() if path.name.endswith(".incomplete")] == [], str(failed))
+    small = "1. Short.\n"
+    answers.write_text(small)
+    limit = resource.getrlimit(resource.RLIMIT_FSIZE)
+    resource.setrlimit(resource.RLIMIT_FSIZE, (40, limit[1]))
+    try:
+        try:
+            program.answers_file_with_one_line_per_finding_write(answers, 30, kept_directory)
+            failed = False
+        except program.StepFailed:
+            failed = True
+    finally:
+        resource.setrlimit(resource.RLIMIT_FSIZE, limit)
+    check("answers kept: a new answers file that fails part way leaves the old file whole and no temporary file",
+          failed and answers.read_text() == small
+          and not [path for path in directory.iterdir() if path.name.endswith(".incomplete")], str(failed))
 
 
 def move_failure_after_push_cases(root, _repository, _base, _frozen_head):
@@ -3054,6 +3150,8 @@ case("stated count position", stated_count_position_cases)
 case("moved into body", moved_into_body_cases)
 case("replaces", replaces_cases)
 case("move keeps answers", move_keeps_answers_cases)
+case("move finish answers moves", move_finish_answers_moves_cases)
+case("answers write failure", answers_write_failure_cases)
 case("move push time limit", move_push_time_limit_case)
 case("moved change git apply cannot start", moved_change_git_apply_cannot_start_case)
 print(f"{'FAILED' if failures else 'PASSED'}: {len(failures)} failed")
