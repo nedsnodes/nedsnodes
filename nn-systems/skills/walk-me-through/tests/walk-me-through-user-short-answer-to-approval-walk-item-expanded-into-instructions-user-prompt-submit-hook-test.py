@@ -3361,11 +3361,46 @@ def test_settled_line_unreadable_transcript_falls_back_to_the_prompts_opening():
     transcript = case.checkout.parent / "unreadable-transcript.jsonl"
     transcript.write_bytes(b"\xff\xfe not a record\n")
     result = case.run("take the other option", transcript_path=transcript)
-    check("a reply in the user's own words with an unreadable transcript still gets the own-words message",
-          is_only_the_own_words_message(result), f"exit {result.returncode}, stdout {result.stdout!r}")
+    lines = context_lines(result)
+    check("a reply with an unreadable transcript names the failure, does not say the user wrote it, and exits 0",
+          result.returncode == 0 and len(lines) == 3 and lines[0].startswith(OWN_WORDS_RULE_OPENING)
+          and "his reply is in his own words" not in lines[0] and str(transcript) in lines[1]
+          and "could not tell who wrote this prompt" in lines[1] and "UnicodeDecodeError" in lines[1]
+          and lines[2] == SETTLED_LINE, f"exit {result.returncode}, stdout {result.stdout!r}")
+    (case.walk / f"{WALK_NAME}-minutes.md").write_bytes(b"#next_to_present item 4 of 9\n\xff\xfe")
+    result = case.run("take the other option", transcript_path=transcript)
+    lines = context_lines(result)
+    check("with the walk state and the transcript both unreadable, the reply names both failures",
+          result.returncode == 0 and len(lines) == 3 and "reading the approval-walk state failed" in lines[0]
+          and "could not tell who wrote this prompt" in lines[1] and lines[2] == SETTLED_LINE,
+          f"exit {result.returncode}, stdout {result.stdout!r}")
     result = case.run("<task-notification>a task ended</task-notification>", transcript_path=transcript)
     check("a task notice with an unreadable transcript prints nothing",
           result.returncode == 0 and result.stdout == "", f"stdout {result.stdout!r}")
+
+
+def test_settled_line_not_shown_for_an_a_from_a_headless_session_or_another_agent_seat():
+    case = Case(next_to_present="item 4 of 9")
+    result = case.run("a", environment={"CLAUDE_CODE_SESSION_ATTENDED": "0"})
+    check("a headless A keeps its answer lines without the settled line",
+          SETTLED_LINE not in context_lines(result) and any(line.startswith("A means approve")
+                                                            for line in context_lines(result)), result.stdout)
+    document = (case.walk / f"{WALK_NAME}.md").read_text()
+    transcript = case.transcript(document)
+    with open(transcript, "a", encoding="utf-8") as records:
+        records.write(json.dumps({"type": "user", "turnOrigin": "peer",
+                                  "message": {"role": "user", "content": "a"}}) + "\n")
+    result = case.run("a", transcript_path=transcript)
+    check("an A the transcript shows another agent-seat sent has no settled line",
+          SETTLED_LINE not in context_lines(result), result.stdout)
+
+
+def test_settled_line_follows_every_line_of_an_answer_typed_on_several_lines():
+    case = Case(next_to_present="item 4 of 9")
+    context = "\n".join(context_lines(case.run("a, keep it short\nand also rename it")))
+    check("the settled line is not inside the user's quoted answer",
+          SETTLED_LINE in context and "and also rename it" in context
+          and context.index("and also rename it") < context.index(SETTLED_LINE), context)
 
 
 def test_settled_line_failure_reading_the_walk_keeps_short_answer_output_and_reports_on_own_words():
