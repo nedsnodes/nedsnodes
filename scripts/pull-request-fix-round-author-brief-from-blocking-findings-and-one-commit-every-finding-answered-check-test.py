@@ -853,6 +853,8 @@ def stopped_round_cases(root, repository, made, frozen_head, dated_routes, submi
 
     def write_answers(text, seconds_after_review):
         answers.write_text(text)
+        load_program().answers_file_round_findings_identity_digest_write_to_git_directory(
+            answers, [BLOCKING_COMMENTS[0], BLOCKING_COMMENTS[2]])
         os.utime(answers, (submitted_seconds + seconds_after_review, submitted_seconds + seconds_after_review))
 
     fix = commit_file(made, "hook.py", "fixed\n", "the round's fix")
@@ -962,8 +964,8 @@ def stopped_round_cases(root, repository, made, frozen_head, dated_routes, submi
     for reviews, seconds_after_review, expected, why in (
             ([anchor, dated_addendum], 60, "1. \n2. \n3. \n",
              "written before a later review of the round, which can renumber the findings, is replaced"),
-            ([anchor, dated_addendum], 180, "1. Fixed.\n2. \n3. \n",
-             "written after the round's later review keeps its answer and gains the new finding's line"),
+            ([anchor, dated_addendum], 180, "1. \n2. \n3. \n",
+             "written after a later review that added a finding, for the findings before it, is replaced"),
             ([anchor, addendum], 180, "1. \n2. \n3. \n",
              "beside a later review with no submitted_at is replaced")):
         write_answers("1. Fixed.\n2. \n", seconds_after_review)
@@ -971,6 +973,19 @@ def stopped_round_cases(root, repository, made, frozen_head, dated_routes, submi
                                                     **addendum_comments))
         check(f"stopped round: a partial answers file {why}",
               code == 0 and answers.read_text() == expected, repr(answers.read_text()) + err + out)
+    answers.unlink()
+    code, out, err = run(root, repository, dated_routes)
+    answers.write_text("1. Fixed.\n2. \n")
+    os.utime(answers, (submitted_seconds + 60, submitted_seconds + 60))
+    code, out, err = run(root, repository, dated_routes)
+    check("stopped round: answers saved into the file the brief wrote are kept when the brief runs again on the same "
+          "findings", code == 0 and answers.read_text() == "1. Fixed.\n2. \n", repr(answers.read_text()) + err + out)
+    load_program().answers_file_round_findings_identity_digest_write_to_git_directory(
+        answers, [BLOCKING_COMMENTS[2], BLOCKING_COMMENTS[0]])
+    os.utime(answers, (submitted_seconds + 60, submitted_seconds + 60))
+    code, out, err = run(root, repository, dated_routes)
+    check("stopped round: answers recorded for the same findings in another order are replaced, however new the file",
+          code == 0 and answers.read_text() == "1. \n2. \n", repr(answers.read_text()) + err + out)
     extra_entry = "1. Fixed.\n2. Fixed.\n3. An entry for a finding this round does not have.\n"
     write_answers(extra_entry, 60)
     code, out, err = run(root, repository, dated_routes)
@@ -978,7 +993,7 @@ def stopped_round_cases(root, repository, made, frozen_head, dated_routes, submi
           "is left as it was",
           code == 1 and "wrote every answer" in err and answers.read_text() == extra_entry, err + out)
     write_answers("1. Fixed.\n", 60)
-    load_program().answers_file_with_one_line_per_finding_write(answers, 3, None)
+    load_program().answers_file_with_one_line_per_finding_write(answers, BLOCKING_COMMENTS, None)
     check("stopped round: an answers file whose round is unknown, because the review has no submitted_at, is replaced "
           "with a line for each of three findings",
           answers.read_text() == "1. \n2. \n3. \n", repr(answers.read_text()))
