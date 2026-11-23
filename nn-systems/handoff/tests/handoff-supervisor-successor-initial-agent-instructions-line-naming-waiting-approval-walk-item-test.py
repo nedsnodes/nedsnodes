@@ -270,6 +270,16 @@ def run_walk_minutes_cases(workspace):
           and "could not read the item's text" in one_missing[0] and "`Item 2`" in one_missing[0],
           repr(one_missing))
 
+    root = workspace / "several-items-no-total-later-named-one-without-heading"
+    walk_in(root, "#next_to_present items 1 and 2\n",
+            document="# Fixture\n\n## Item 1 of 3: Named first\n\nRecommendation: one.\n\n"
+                     "## Item 3 of 3: Last\n\nRecommendation: three.\n")
+    with contextlib.redirect_stdout(io.StringIO()):
+        no_total = lines_for(root)
+    check("several waiting items, no total, a later-named one with no heading: the `#item_page` line still has `of M`",
+          len(no_total) == 1 and no_total[0].startswith(without_link_line(WALK, "1 of 2", "1 of 2"))
+          and "`Item 2`" in no_total[0], repr(no_total))
+
     root = workspace / "open-and-paused"
     paused = walk_in(root, "#next_to_present item 1 of 3\n#approval_walk_paused away\n", name="fixture-paused-walk")
     walk_in(root, OPEN_MINUTES)
