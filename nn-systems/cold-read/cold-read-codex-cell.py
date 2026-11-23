@@ -167,6 +167,12 @@ TIER_TO_REASONING_EFFORT = {
 }
 
 
+# "priority" is the id `codex debug models` gives the Fast tier: twice the speed, more usage.
+TIER_TO_SERVICE_TIER = {
+    "deep": "priority",
+}
+
+
 CREDENTIAL_DENYING_PERMISSION_PROFILE = "cold-read-no-credentials"
 
 
@@ -176,7 +182,7 @@ def credential_denying_permission_profile_arguments(platform: str = sys.platform
         CREDENTIAL_DENYING_PERMISSION_PROFILE, ":workspace", platform, network=True)
 
 
-def invocation_builder(effort: str, report_staging_directory: pathlib.Path = None):
+def invocation_builder(effort: str, report_staging_directory: pathlib.Path = None, tier: str = None):
     """Return a callback producing (argv, stdin text) for each model and prompt."""
     # Codex takes a positional prompt; None tells the runner to close stdin explicitly.
     def build_invocation(model: str, prompt: str):
@@ -191,6 +197,8 @@ def invocation_builder(effort: str, report_staging_directory: pathlib.Path = Non
         if model:
             command += ["-m", model]
         command += ["-c", f"model_reasoning_effort={effort}"]
+        if tier in TIER_TO_SERVICE_TIER:
+            command += ["-c", f'service_tier="{TIER_TO_SERVICE_TIER[tier]}"']
         command += ["-c", 'web_search="live"']
         command.append(prompt)
         return command, None
@@ -219,6 +227,7 @@ def main() -> int:
         invocation_builder=invocation_builder,
         recognised_failure_texts_for_model=recognised_failure_texts_for_model,
         stage_report_outside_checkout=True,
+        pass_cold_read_tier_to_invocation_builder=True,
     )
 
 
