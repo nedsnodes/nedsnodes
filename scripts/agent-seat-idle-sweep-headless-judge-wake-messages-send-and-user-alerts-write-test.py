@@ -869,7 +869,7 @@ for opener in ("rule 5", "rule 3"):
     machine.run(8)
     check(f"a promise sent on a {opener} wait: nothing to do does not end the wait",
           not machine.events("wait_ended")
-          and [event["step"] for event in machine.events("wait_step")] == ["nudge", "promise"],
+          and [event["step"] for event in machine.events("wait_step")] == ["nudge"],
           machine.events())
     machine.script(sent_ok())
     machine.run(16)
@@ -877,7 +877,7 @@ for opener in ("rule 5", "rule 3"):
     machine.run(32)
     check(f"a promise sent on a {opener} wait: the escalation, then the user is told",
           [event["step"] for event in machine.events("wait_step")]
-          == ["nudge", "promise", "escalate", "tell_user"]
+          == ["nudge", "escalate", "tell_user"]
           and any("after a nudge and an escalation" in alert["title"] for alert in machine.alerts()),
           (machine.events("wait_step"), machine.alerts()))
 
@@ -900,9 +900,11 @@ def promise_sent_on_rule_five_wait(promise_sender):
 PROMISE_SEND_FAILS = {"sends": [send_to("alpha", is_error=True)],
                       "answer": {"sent": False, "reason": "r"}}
 machine = promise_sent_on_rule_five_wait(PROMISE_SEND_FAILS)
-check("rule 2: a promise message on an open wait whose send failed logs the promise step and the "
-      "failed message's sentences, but no promise_message event",
-      [event["step"] for event in machine.events("wait_step")] == ["nudge", "promise"]
+check("rule 2: a promise message on an open wait whose send failed logs its pending record and "
+      "the failed message's sentences, but no promise_message event",
+      [event["step"] for event in machine.events("wait_step")] == ["nudge"]
+      and [(event["sentences"], event["text"] != "")
+           for event in machine.events("promise_message_pending")] == [([PROMISE], True)]
       and [event["sentences"] for event in machine.events("promise_message_send_failed")]
       == [[PROMISE]]
       and not machine.events("promise_message") and len(machine.events("headless_failed")) == 1,
@@ -923,7 +925,7 @@ machine.run(32)
 check("rule 2: after a promise message on an open wait failed to send, the wait goes on to the "
       "escalation and the user-alert, which names the failed message's sentence",
       [event["step"] for event in machine.events("wait_step")]
-      == ["nudge", "promise", "escalate", "tell_user"]
+      == ["nudge", "escalate", "tell_user"]
       and any("after a nudge and an escalation" in alert["title"] and PROMISE in alert["alert_text"]
               for alert in machine.alerts()),
       (machine.events("wait_step"), machine.alerts()))
@@ -1058,6 +1060,52 @@ machine.script()
 machine.run(21)
 check("rule 2: a task for the first failed promise does not end the wait while a later run's send "
       "has no outcome", not machine.events("wait_ended"), machine.events())
+
+
+def later_promise_run_stopped_after(last_event):
+    """A machine whose first promise send failed and whose later run, sending OTHER_PROMISE,
+    stopped just after it logged last_event."""
+    machine = promise_sent_on_rule_five_wait(PROMISE_SEND_FAILS)
+    machine.append("alpha", user("and", at(7.5)), assistant(OTHER_PROMISE, at(8)), turn_end(at(8)))
+    machine.script(sent_ok())
+    machine.run(14)
+    log_lines = machine.log.read_text().splitlines()
+    stop = max(index for index, line in enumerate(log_lines)
+               if json.loads(line).get("event") == last_event)
+    machine.log.write_text("".join(line + "\n" for line in log_lines[:stop + 1]))
+    return machine
+
+
+for last_event in ("sentence_checked", "checked", "message_sent"):
+    machine = later_promise_run_stopped_after(last_event)
+    machine.append("alpha", *recorded_task(927, 15))
+    machine.script(sent_ok())
+    machine.run(21)
+    check(f"rule 2: a run stopped after {last_event}: a task for the earlier promise does not end "
+          "the wait", not machine.events("wait_ended"), machine.events())
+    escalation = machine.events("message_sent")[-1]["text"]
+    check(f"rule 2: a run stopped after {last_event}: the escalation quotes the later promise",
+          "please check" in escalation and OTHER_PROMISE in escalation, escalation)
+    machine.script()
+    machine.run(37)
+    check(f"rule 2: a run stopped after {last_event}: the user-alert names the later promise",
+          any("after a nudge and an escalation" in alert["title"]
+              and OTHER_PROMISE in alert["alert_text"] for alert in machine.alerts()),
+          machine.alerts())
+
+# Stopped before its sentences were marked checked, a run's promise is judged and sent again.
+machine = later_promise_run_stopped_after("promise_message_pending")
+machine.script(sent_ok())
+machine.run(14.5)
+check("rule 2: a run stopped after its pending record sends the promise again",
+      [event["sentences"] for event in machine.events("promise_message")] == [[OTHER_PROMISE]],
+      machine.events())
+machine.append("alpha", *recorded_task(927, 14.6), *recorded_task(928, 14.8))
+machine.script()
+machine.run(20)
+check("rule 2: the promise sent again replaces the stopped run's pending record, so one task per "
+      "sentence ends the wait",
+      [event["why"] for event in machine.events("wait_ended")] == [SETTLED], machine.events())
 
 # Every promise message on a rule 5 wait failed, and the agent-seat recorded the task.
 machine = promise_sent_on_rule_five_wait(PROMISE_SEND_FAILS)

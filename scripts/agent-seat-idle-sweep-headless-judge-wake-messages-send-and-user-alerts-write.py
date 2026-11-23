@@ -207,12 +207,16 @@ PROMISE_MESSAGE = "promise_message"
 # On an open wait: the rule 2 messages sent on it, [{"at", "kinds", "sentences"}], or None when one
 # of them was sent by a version of this program that logged no sentences for it.
 PROMISE_MESSAGES = "promise_messages"
+# An event logged before a rule 2 message's sentences on an open wait are marked checked, carrying
+# its text and sentences. Until an outcome from the same invocation answers it, it holds the wait
+# open and the escalation and the user-alert report it.
+PROMISE_MESSAGE_PENDING = "promise_message_pending"
 # An event logged when a rule 2 message's send on an open wait failed, carrying its text and the
 # sentences it names, since no message_sent or promise_message event holds them.
-PROMISE_MESSAGE_SEND_STARTED = "promise_message_send_started"
 PROMISE_MESSAGE_SEND_FAILED = "promise_message_send_failed"
-# On an open wait: the rule 2 messages whose send on it failed, [{"at", "failed_at", "kinds",
-# "sentences", "text"}]. "at" is when the send started, which settlement compares task calls with.
+# On an open wait: the rule 2 messages whose send on it failed or has no outcome, [{"at",
+# "failed_at", "kinds", "sentences", "text"}]. "at" is when the send started, or the pending
+# record's time, which settlement compares task calls with.
 FAILED_PROMISE_MESSAGES = "failed_promise_messages"
 
 SEND_ANSWER_SCHEMA = {"type": "object", "required": ["sent", "reason"],
@@ -392,11 +396,23 @@ class SweepLog:
         # Whether a PROMISE step awaits its PROMISE_MESSAGE, and the invocation that logged the
         # step.
         owed, owed_by = False, None
+        pending = []
         for event in self.of_seat(seat, "wait_step", "wait_ended", PROMISE_MESSAGE,
-                                  PROMISE_MESSAGE_SEND_STARTED, PROMISE_MESSAGE_SEND_FAILED):
+                                  PROMISE_MESSAGE_PENDING, PROMISE_MESSAGE_SEND_FAILED):
             invocation = event.get("agent_seat_idle_sweep_invocation_started_at")
+            if event["event"] in (PROMISE_MESSAGE, PROMISE_MESSAGE_SEND_FAILED):
+                pending = [record for record in pending if record.get(
+                    "agent_seat_idle_sweep_invocation_started_at") != invocation]
             if event["event"] == "wait_ended":
-                wait, owed = None, False
+                wait, owed, pending = None, False, []
+            elif event["event"] == PROMISE_MESSAGE_PENDING:
+                if wait is not None:
+                    wait.setdefault(PROMISE, event["at"])
+                    # A run stopped before marking these sentences checked judges them again, so
+                    # its record is replaced by the new one that holds them.
+                    pending = [record for record in pending
+                               if not set(record["sentences"]) <= set(event["sentences"])]
+                    pending.append(event)
             elif event["event"] == PROMISE_MESSAGE_SEND_FAILED:
                 if wait is not None:
                     # A failure answers only its own invocation's step: an earlier step with no
@@ -408,11 +424,6 @@ class SweepLog:
                         "kinds": set(event["kinds"]), "sentences": event["sentences"],
                         "text": event["text"]})
                 owed = False
-            elif event["event"] == PROMISE_MESSAGE_SEND_STARTED:
-                if wait is not None:
-                    if owed:
-                        wait[PROMISE_MESSAGES] = None
-                    owed, owed_by = True, invocation
             elif event["event"] == PROMISE_MESSAGE:
                 if wait is None:
                     continue
@@ -437,8 +448,12 @@ class SweepLog:
             elif wait is not None:
                 wait[event["step"]] = event["at"]
         # A step still awaiting its outcome holds sentences that settlement cannot know.
-        if wait is not None and owed:
+        if wait is not None and (owed or pending):
             wait[PROMISE_MESSAGES] = None
+        if wait is not None:
+            wait[FAILED_PROMISE_MESSAGES] += [
+                {"at": record["at"], "failed_at": record["at"], "kinds": set(record["kinds"]),
+                 "sentences": record["sentences"], "text": record["text"]} for record in pending]
         return wait
 
     def last_judge_answer(self, seat):
@@ -1043,6 +1058,10 @@ class Sweep:
             self.sentences_checked(seat, [item for item in sentences_checked
                                           if item["sentence"] not in promise_sentences])
         elif judged_sentences:
+            if promise_text and wait:
+                self.record({"event": PROMISE_MESSAGE_PENDING, "agent_seat": seat,
+                             "kinds": promise_kinds, "sentences": promise_sentences,
+                             "text": promise_text})
             self.sentences_checked(seat, sentences_checked)
             self.checked(seat, verdict, transcript_read_at, check_is_new)
         if paused:
@@ -1060,13 +1079,6 @@ class Sweep:
                              "sentences": promise_sentences})
                 self.send(seat, verdict, promise_text, NUDGE)
             else:
-                # The promise step is logged whether or not the send succeeds: its sentences are
-                # already logged as checked, so only the wait's escalation and user-alert can
-                # still report the promise, and they read a failed message from its own event.
-                if PROMISE in wait:
-                    self.record({"event": PROMISE_MESSAGE_SEND_STARTED, "agent_seat": seat})
-                else:
-                    self.record({"event": "wait_step", "agent_seat": seat, "step": PROMISE})
                 sent = self.send(seat, verdict, promise_text, NUDGE, failure_event={
                     "event": PROMISE_MESSAGE_SEND_FAILED, "agent_seat": seat,
                     "kinds": promise_kinds, "sentences": promise_sentences, "text": promise_text})
@@ -1127,8 +1139,8 @@ class Sweep:
                        f"at {wait[NUDGE]} and escalated at {wait[ESCALATE]}, and it is idle "
                        f"again. Its transcript is {verdict[fields.TRANSCRIPT_PATH]}. The idle "
                        "sweep sends it nothing more until it spends tokens and goes idle again."
-                       + "".join(f" At {message['failed_at']} the idle sweep failed to send it a "
-                                 "message naming these sentences of its own: "
+                       + "".join(f" At {message['failed_at']} the idle sweep could not confirm "
+                                 "sending it a message naming these sentences of its own: "
                                  + " ".join(f'"{sentence}"' for sentence in message["sentences"])
                                  for message in wait[FAILED_PROMISE_MESSAGES]),
                        f"An agent on ned-box can read {seat}'s transcript and its tmux session "
