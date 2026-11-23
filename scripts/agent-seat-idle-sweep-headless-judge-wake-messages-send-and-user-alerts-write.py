@@ -68,12 +68,13 @@ and never escalated.
 How it fails, and who hears: each failure of this program goes to the agent-seat that owns it,
 OWNING_AGENT_SEAT, as a task on its task list, one open task for each subject; the agent-seat
 tells the user only when the fix needs a change to a guarded system or it cannot find the cause.
-The user gets a user-alert only when that task cannot be written. The failures are: a sender
+The user gets a user-alert when that task cannot be written, and when an agent-seat has no
+running agent-session of the id its handoff-supervisor launched last. The failures are: a sender
 that sends a text other than the one code wrote, whose text is logged as a
 sent_text_differs_from_code_text event, and which step 4's delivery check then looks for; a
 headless agent-session that fails, is stopped, answers JSON code cannot use, or sends to the
-wrong entry, with one subject for each cause code names, however claude's text for that cause
-varies; a message missing from the agent-seat's transcript; a read failure slice 1 reports for
+wrong entry, all under one subject whatever the cause, which the log and the task's description
+name; a message missing from the agent-seat's transcript; a read failure slice 1 reports for
 the same agent-seat with the same text at every run for 2 minutes or more, counted from the
 failure's first run and through any invocation the lock made skip, since only a run that does
 not meet the failure ends the count; and any other failure, such as an unwritable log, which
@@ -140,6 +141,7 @@ RUN_FAILURES_ALERTED_FILE_NAME = "run-failures-alerted.txt"
 # the user hears of one only through that agent-seat, or when the task cannot be written.
 OWNING_AGENT_SEAT = "reboot-test"
 PROGRAM_PATH_IN_REPOSITORY = f"scripts/{Path(__file__).name}"
+HEADLESS_FAILED_TASK_SUBJECT = "Idle sweep: a headless agent-session failed"
 SENT_TEXT_DIFFERS_TASK_SUBJECT = "Idle sweep: a headless sender sent a text other than the one code wrote"
 OWNING_AGENT_SEAT_TASK_LAST_LINES = (
     "Tell the user only if the fix needs a change to a guarded system, or if you cannot find the "
@@ -162,7 +164,7 @@ SENDING_TOOLS = "SendMessage,ListAgents,ToolSearch"
 # Claude Code's session records, one <pid>.json file for each running agent-session, under HOME.
 SESSION_RECORDS_DIRECTORY_UNDER_HOME = Path(".claude") / "sessions"
 # The [ref] at the end of a SendMessage "to", as in "Cpc [9ea9da]".
-TO_REF = re.compile(r"\[(?P<ref>[0-9a-f]+)\]\s*$")
+TO_REF = re.compile(r"\[(?P<ref>[0-9a-f]{6,})\]\s*$")
 JUDGED_TEXT_CHARACTERS = 4000
 
 NUDGE, ESCALATE, TELL_USER = "nudge", "escalate", "tell_user"
@@ -244,11 +246,12 @@ KEEP_THE_LAST_SENTENCE = (
 
 FIND_THE_ENTRY = """\
 Find the agent-seat's entry with ListAgents (load ListAgents and SendMessage with ToolSearch first \
-if they are not loaded). Its entry is the one whose ref is [{ref}], whatever name it is listed by, \
-because the user can rename an agent-session, as in "Cpc [{ref}] · interactive". Write only to that \
+if they are not loaded). Its entry is the one whose ref, the hex digits in square brackets, is the start of {ref}, \
+whatever name it is listed by, because the user can rename an agent-session, as in \
+"Cpc [bc3857] · interactive". Write only to that \
 entry, never to another, even one named {seat} or in the tmux session {seat}. In SendMessage's \
-"to", give the name and the ref as ListAgents lists them, as in "Cpc [{ref}]". If no entry has the \
-ref [{ref}], send nothing."""
+"to", give the name and the ref as ListAgents lists them, as in "Cpc [bc3857]". If no entry's ref \
+is the start of {ref}, send nothing."""
 
 SENDER_PROMPT = """\
 You deliver one message for the idle sweep, a program on ned-box that wakes idle agent-seats. You \
@@ -268,7 +271,7 @@ You deliver one notice for the idle sweep, a program on ned-box. You judge nothi
 decided the notice is sent.
 
 Send it, with one SendMessage call for each, to each of these agent-seats, each given with the \
-ref of its entry: {seats}. For each agent-seat, {find_the_entry}
+digits its entry's ref is the start of: {seats}. For each agent-seat, {find_the_entry}
 
 Each message is the text between the two lines of dashes below, exactly as written, with nothing \
 added or removed. {keep_the_last_sentence} Then answer: sent true if every send succeeded, \
@@ -641,14 +644,18 @@ def run_headless(prompt, schema, tools, working_directory, timeout_seconds):
 
 
 def list_agents_tool_entry_ref_of_running_agent_session_id(session_id):
-    """The [ref] ListAgents gives the running agent-session session_id, from Claude Code's
-    session records; None when no running agent-session has that id.
+    """The hex digest whose start is the [ref] ListAgents gives the running agent-session
+    session_id, from Claude Code's session records; None when no running agent-session has that id.
 
-    The ref is the first 6 hex digits of the SHA-256 of "session:" and the agent-session's
-    messaging socket path, as Claude Code 2.1.330 computes it. Should Claude Code change that, no
-    entry has the ref, so the sender sends nothing and the send is reported as failed; and
+    The digest is the SHA-256 of "session:" and the agent-session's messaging socket path, as
+    Claude Code 2.1.330 computes it; the ref is its first 6 digits, or more when two refs share
+    those. A killed process leaves its record behind, and resuming its session writes another, so
+    the record with the latest startedAt is the running one. Should Claude Code change the
+    formula, no entry has the ref, so the sender sends nothing and the send is reported as failed;
     scripts/agent-seat-idle-sweep-list-agents-ref-formula-matches-installed-claude-code-test.py
-    fails first, comparing this with the refs the installed Claude Code advertises."""
+    reports the change at the next full test run, since a selective run does not see a Claude
+    Code update."""
+    matching = []
     for path in sorted((Path.home() / SESSION_RECORDS_DIRECTORY_UNDER_HOME).glob("*.json")):
         try:
             record = json.loads(path.read_text(encoding="utf-8"))
@@ -658,23 +665,24 @@ def list_agents_tool_entry_ref_of_running_agent_session_id(session_id):
             continue
         if (isinstance(record, dict) and session_id and record.get("sessionId") == session_id
                 and isinstance(record.get("messagingSocketPath"), str)):
-            socket_path = record["messagingSocketPath"]
-            return hashlib.sha256(f"session:{socket_path}".encode()).hexdigest()[:6]
-    return None
+            matching.append(record)
+    if not matching:
+        return None
+    newest = max(matching, key=lambda record: record.get("startedAt")
+                 if isinstance(record.get("startedAt"), (int, float)) else 0)
+    return hashlib.sha256(f"session:{newest['messagingSocketPath']}".encode()).hexdigest()
 
 
 def list_agents_tool_entry_ref_of_agent_seat_last_handoff_supervisor_launched_agent_session_find(
         seat, handoff_directory):
     """list_agents_tool_entry_ref_of_running_agent_session_id for the agent-session seat's
-    handoff-supervisor launched last; None also when its supervisor state cannot be read or names
-    none. For a program with no verdict, which holds that agent-session's id."""
+    handoff-supervisor launched last; None also when its supervisor state names none. For a
+    program with no verdict, which holds that agent-session's id. Raises OSError or ValueError
+    when the supervisor state cannot be read."""
     path = verdicts_print.supervisor.supervisor_state_path(Path(handoff_directory).expanduser(), seat)
-    try:
-        state = json.loads(path.read_text(encoding="utf-8"))
-    except (OSError, ValueError):
-        return None
+    state = json.loads(path.read_text(encoding="utf-8"))
     if not isinstance(state, dict):
-        return None
+        raise ValueError("it does not hold a JSON object")
     return list_agents_tool_entry_ref_of_running_agent_session_id(
         state.get(verdicts_print.LAUNCHED_SESSION_ID_KEY)
         or state.get(verdicts_print.LEGACY_SESSION_ID_KEY))
@@ -682,11 +690,12 @@ def list_agents_tool_entry_ref_of_agent_seat_last_handoff_supervisor_launched_ag
 
 def entry_seat(to, refs):
     """The agent-seat a SendMessage "to" reaches: the one in refs, {agent-seat: ref}, whose
-    current agent-session's ref the "to" ends with; None for any other entry. The name in "to"
+    current agent-session's digest starts with the ref the "to" ends with; None for any other
+    entry. The name in "to"
     does not count: the user can rename an agent-session, and a session started inside an
     agent-seat's tmux pane, such as a reviewer, is listed in the agent-seat's tmux session."""
     match = TO_REF.search(to)
-    return next((seat for seat, ref in refs.items() if match and ref == match["ref"]), None)
+    return next((seat for seat, ref in refs.items() if match and ref.startswith(match["ref"])), None)
 
 
 def send_problems(outcome, refs):
@@ -769,22 +778,21 @@ class Sweep:
         return alert_id
 
     def headless_failed(self, seat, purpose, problem, kind, outcome=None):
-        """problem is the failure's full text; kind names its cause in words code alone chose, so
-        that a cause met at every invocation, such as a usage limit, opens one task. A usage limit
-        whose reset time is still ahead opens none: it pauses every headless agent-session, and
-        this returns True."""
+        """problem is the failure's full text; kind names its cause in words code alone chose.
+        Every cause shares one open task. A usage limit whose reset time is still ahead opens none:
+        it pauses every headless agent-session, and this returns True."""
         self.failed = True
         self.record({"event": "headless_failed", "agent_seat": seat, "purpose": purpose,
-                     "problem": problem})
+                     "kind": kind, "problem": problem})
         resets_at = self.usage_limit_reset_time(outcome) if outcome else None
         if resets_at is not None and resets_at > self.now.timestamp():
             self.record({"event": HEADLESS_USAGE_LIMIT_PAUSE, "agent_seat": seat,
                          "resets_at": iso(datetime.fromtimestamp(resets_at, timezone.utc))})
             return True
         self.owning_agent_seat_task(
-            f"Idle sweep: a headless agent-session failed: {kind}",
+            HEADLESS_FAILED_TASK_SUBJECT,
             f"The idle sweep, {PROGRAM_PATH_IN_REPOSITORY}, started a headless agent-session to "
-            f"{purpose} for the agent-seat {seat}, and it failed: {problem}\n"
+            f"{purpose} for the agent-seat {seat}, and it failed ({kind}): {problem}\n"
             f"Each such failure is a headless_failed event in the idle sweep's log, {self.log.path}. "
             "Find the cause and fix it; to see whether claude is logged out, run `claude -p` by hand "
             "on ned-box.\n" + OWNING_AGENT_SEAT_TASK_LAST_LINES)
@@ -879,7 +887,7 @@ class Sweep:
         else:
             prompt = NOTICE_SENDER_PROMPT.format(
                 seats=", ".join(f"{seat} [{ref}]" for seat, ref in refs.items()), text=text,
-                find_the_entry=FIND_THE_ENTRY.format(seat="<agent-seat>", ref="<its ref>"),
+                find_the_entry=FIND_THE_ENTRY.format(seat="<agent-seat>", ref="<its digits>"),
                 keep_the_last_sentence=KEEP_THE_LAST_SENTENCE)
         started_at = self.current()
         outcome = run_headless(prompt, SEND_ANSWER_SCHEMA, SENDING_TOOLS, self.working_directory,
@@ -917,7 +925,9 @@ class Sweep:
 
     # --- The account ---
 
-    def account_change(self, verdicts):
+    def account_change(self, verdicts, verdict_read_again):
+        """verdict_read_again(seat) reads seat's verdict afresh: a session-handoff since the first
+        read would otherwise lose the notice, because account_seen is logged only once."""
         try:
             account = verdicts_print.logged_in_account(self.paths.claude_json)
         except verdicts_print.ReadFailure as error:
@@ -939,6 +949,12 @@ class Sweep:
         for seat in seats:
             ref = list_agents_tool_entry_ref_of_running_agent_session_id(
                 verdicts[seat][fields.SESSION_ID])
+            if ref is None:
+                fresh = verdict_read_again(seat)
+                if fresh.get(fields.SESSION_ID) not in (None, verdicts[seat][fields.SESSION_ID]):
+                    verdicts[seat] = fresh
+                    ref = list_agents_tool_entry_ref_of_running_agent_session_id(
+                        fresh[fields.SESSION_ID])
             if ref is None:
                 self.entry_not_found(seat, "send the account-change notice",
                                      verdicts[seat][fields.SESSION_ID])
@@ -1449,10 +1465,14 @@ def sweep(arguments, now):
     checker = verdicts_print.due_task_hook.GitHubConditionChecker({}, now.timestamp())
     parser = verdicts_print.walk_finder.markdown_parser()
     verdicts, read_times = {}, {}
+
+    def limit_records_to_skip(seat):
+        return {record_uuid for record_uuid, woken_at in log.limit_wakes(seat).items()
+                if seconds_between(woken_at, now) >= LIMIT_WAKE_GRACE_SECONDS}
+
     for seat in seats:
         check = log.last_check(seat)
-        skipped = {record_uuid for record_uuid, woken_at in log.limit_wakes(seat).items()
-                   if seconds_between(woken_at, now) >= LIMIT_WAKE_GRACE_SECONDS}
+        skipped = limit_records_to_skip(seat)
         # Sentences only from the turns that ended since the last check of the same agent-session;
         # a new agent-session is read again with its last turn-ending message only. Since the read,
         # not the record: judge calls for other agent-seats run between the two, and a turn that
@@ -1464,7 +1484,8 @@ def sweep(arguments, now):
             verdict = verdicts_print.verdict_for_seat(seat, paths, now, None, checker, parser,
                                                       skipped)
         verdicts[seat] = verdict
-    run.account_change(verdicts)
+    run.account_change(verdicts, lambda seat: verdicts_print.verdict_for_seat(
+        seat, paths, now, None, checker, parser, limit_records_to_skip(seat)))
     run.delivery_checks(verdicts)
     for seat, verdict in verdicts.items():
         for error in verdict.get(fields.ERRORS, []):

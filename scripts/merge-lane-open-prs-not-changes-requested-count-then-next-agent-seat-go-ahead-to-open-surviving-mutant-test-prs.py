@@ -268,12 +268,16 @@ def release_message_send_problems(state_directory, agent_seat, text):
     """Send text to agent_seat as the idle sweep sends its wake messages; return what failed,
     by the idle sweep's own check and by a comparison of each text sent with the release
     message, or [] when the send passed both."""
-    ref = (idle_sweep.
-           list_agents_tool_entry_ref_of_agent_seat_last_handoff_supervisor_launched_agent_session_find(
-               agent_seat, HANDOFF_DIRECTORY))
+    state_path = idle_sweep.verdicts_print.supervisor.supervisor_state_path(HANDOFF_DIRECTORY,
+                                                                             agent_seat)
+    try:
+        ref = (idle_sweep.
+               list_agents_tool_entry_ref_of_agent_seat_last_handoff_supervisor_launched_agent_session_find(
+                   agent_seat, HANDOFF_DIRECTORY))
+    except (OSError, ValueError) as error:
+        return [f"could not read {state_path.expanduser()}, the supervisor state of {agent_seat}: "
+                f"{type(error).__name__}: {error}, so its entry cannot be told from any other"]
     if ref is None:
-        state_path = idle_sweep.verdicts_print.supervisor.supervisor_state_path(HANDOFF_DIRECTORY,
-                                                                                 agent_seat)
         return [f"no running agent-session of {agent_seat} has the session id its "
                 f"handoff-supervisor launched last, in {state_path}, so its entry cannot be told "
                 f"from any other"]
