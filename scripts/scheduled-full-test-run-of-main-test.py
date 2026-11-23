@@ -837,8 +837,8 @@ def run_cases_on_ned_box(workspace: Path):
     other_temporary = workspace / "another-temporary-directory"
     other_directory = (other_temporary.resolve()
                        / program.SCHEDULED_FULL_TEST_RUN_DIRECTORY_NAME)
-    ref_of_other_run = (program.main_fetch_destination_git_ref_name(other_directory)
-                        if hasattr(program, "main_fetch_destination_git_ref_name")
+    ref_of_other_run = (program.scheduled_full_test_run_main_fetch_destination_git_ref_name_for_temporary_directory(other_directory)
+                        if hasattr(program, "scheduled_full_test_run_main_fetch_destination_git_ref_name_for_temporary_directory")
                         else "refs/scheduled-full-test-run-of-main/main")
     real_git_for_overlap = program.git
 

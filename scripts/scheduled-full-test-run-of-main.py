@@ -45,7 +45,7 @@ runner's docstring calls the scheduled full run.
 WHAT ONE RUN DOES, in order.
 
   1. Fetches origin's main into a ref only this run writes, named by
-     main_fetch_destination_git_ref_name from the run's temporary
+     scheduled_full_test_run_main_fetch_destination_git_ref_name_for_temporary_directory from the run's temporary
      directory, with an empty --refmap and --no-tags, so the fetch leaves
      refs/remotes/origin/main, the tags and FETCH_HEAD alone. Other cron
      jobs fetch in the same clone at the same minute, and two fetches that
@@ -248,7 +248,7 @@ def first_stderr_line_or_no_detail(text: str) -> str:
     return (text.strip().splitlines() or ["no detail"])[0]
 
 
-def main_fetch_destination_git_ref_name(directory: Path) -> str:
+def scheduled_full_test_run_main_fetch_destination_git_ref_name_for_temporary_directory(directory: Path) -> str:
     """The ref a run whose temporary directory is `directory` fetches main into.
 
     Runs that share a directory share its lock, so no two of them write one ref at once."""
@@ -488,7 +488,7 @@ def main(argv=None, now=None, monotonic=time.monotonic) -> int:
             directory)
     finally:
         # A ref left by a failed delete is harmless: the next run with this directory overwrites it.
-        git(clone, "update-ref", "-d", main_fetch_destination_git_ref_name(directory))
+        git(clone, "update-ref", "-d", scheduled_full_test_run_main_fetch_destination_git_ref_name_for_temporary_directory(directory))
         lock_handle.close()
 
 
@@ -503,7 +503,7 @@ def scheduled_full_test_run_under_lock(arguments, now, monotonic, on_ned_box, ma
     completed = None
     seconds_waiting_for_lock = 0
 
-    fetch_destination = main_fetch_destination_git_ref_name(directory)
+    fetch_destination = scheduled_full_test_run_main_fetch_destination_git_ref_name_for_temporary_directory(directory)
     fetched = git(clone, "fetch", "--no-write-fetch-head", "--no-tags", "--refmap=", "origin",
                   f"+refs/heads/main:{fetch_destination}")
     if fetched.returncode != 0:
