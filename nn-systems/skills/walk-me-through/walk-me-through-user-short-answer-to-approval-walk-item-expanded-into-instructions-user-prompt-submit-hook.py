@@ -300,6 +300,7 @@ PARTS_NOT_TOLD_APART_PROBLEM = (
     "inside or right after the bold, as in `**Item 5: the label.**` or `- **Item 5, step 1.**`, or on the "
     "first line of a top-level paragraph that starts `Item 5:`, `Item 5.` or the full count `Item 5 of 9`")
 CHANGE_MAKING_ANSWERS = ("A", "AO", "AA", "D")
+ANSWERS_A_NO_DECISION_SUB_STEP_CANNOT_TAKE = (*CHANGE_MAKING_ANSWERS, "Z", "O2", "O3")
 # How an answer code is written to the agent: Aa's second letter is lower case.
 CODE_NAMES = {"AA": "Aa"}
 
@@ -320,6 +321,13 @@ APPROVAL_WALK_SUB_STEP_ASKING_FOR_NO_DECISION_ANSWER_NOT_RECORDED_LINES = (
     "below, word for word, and wait for his answer.\n{closing_lines}",
 )
 APPROVAL_WALK_SUB_STEP_ASKING_FOR_NO_DECISION_ANSWER_USER_ADDED_WORDS_LINE = "He also wrote: \"{added}\". Act on those words first."
+APPROVAL_WALK_SUB_STEP_ASKING_FOR_NO_DECISION_ANSWER_CONDITION_NOT_TO_BE_CARRIED_OUT_LINE = (
+    "The user made that answer depend on this condition: \"{condition}\". Do not do what the condition asks, because "
+    "the answer it was set on is not recorded.")
+APPROVAL_WALK_SUB_STEP_ASKING_FOR_NO_DECISION_ANSWERED_BESIDE_DECISION_ITEM_LINE = (
+    "{item} asks for no decision, so the user's answer to it records no decision. Before you record his other "
+    "answers, which the next lines cover, add the line `{one_item_line}` as the last line of {minutes}, run "
+    "`python3 {program} check --moved-on-no-decision`, then run the close command it prints.")
 APPROVAL_WALK_SUB_STEP_ASKING_FOR_NO_DECISION_AGENT_INSTRUCTION_TO_PUBLISH_PAGE_MISSING_FROM_WALK_MINUTES_LINE = (
     "If a line above shows `<page link>`, the walk-minutes record no `#item_page` line for that item: publish its "
     "page as the walk-me-through skill says, add the line, and put the page's link in place of `<page link>`.")
@@ -1045,7 +1053,7 @@ def meaning_lines(answer, walk, in_walk):
         lines = [] if only_repeats else [line.format(pairs=pairs, one_item_line=values["one_item_line"])
                                          for line in NUMBERED_LINES[branch]]
         if in_walk:
-            named = {number for number, _ in answer["pairs"]}
+            named = {number for number, _ in answer["pairs"]} | set(answer.get("no-decision sub-steps answered", ()))
             unnamed = [number for number in numbers if number not in named]
             if not only_repeats:
                 lines.append(NUMBERED_UNNAMED_LINE.format(unnamed=", ".join(item_name(n, walk) for n in unnamed))
@@ -1054,7 +1062,8 @@ def meaning_lines(answer, walk, in_walk):
                 lines += recommendation_unknown_lines(letter, [number], walk)
             repeated = [number for number, letter in answer["pairs"] if letter == "R"]
             lines += [repeat_line(f"{number} R", number, walk) for number in repeated]
-            answered = {number for number, letter in answer["pairs"] if letter != "R"}
+            answered = ({number for number, letter in answer["pairs"] if letter != "R"}
+                        | set(answer.get("no-decision sub-steps answered", ())))
             still_waiting = [number for number in numbers if number not in answered]
             if repeated and still_waiting:
                 lines.append(NUMBERED_R_WAITING_ITEM_LINE.format(
@@ -1088,18 +1097,18 @@ def repeat_line(answer, number, walk):
     return REPEAT_PAGE_LINE.format(answer=answer, item=item_name(number, walk), closing_line=line)
 
 
-def checked_item_numbers(answer, walk):
-    """The waiting items to which the answer gives A, AO, Aa or D, in the order the walk names them."""
+def checked_item_numbers(answer, walk, answers=CHANGE_MAKING_ANSWERS):
+    """The waiting items to which the answer gives one of answers, in the order the walk names them."""
     if walk is None:
         return []
     if answer["form"] != "numbered":
-        return list(walk.numbers) if answer["code"] in CHANGE_MAKING_ANSWERS else []
+        return list(walk.numbers) if answer["code"] in answers else []
     parts = answered_parts(answer, walk)
     letters = {number: [] for number in walk.numbers}
     for number, letter in answer["pairs"]:
         # Part numbers answer the one waiting item.
         letters.get(walk.numbers[0] if parts else number, []).append(letter)
-    return [number for number in walk.numbers if set(letters[number]) & set(CHANGE_MAKING_ANSWERS)]
+    return [number for number in walk.numbers if set(letters[number]) & set(answers)]
 
 
 RENDERED_CHILD_TYPES = ("text", "code_inline", "html_inline", "image")
@@ -1650,21 +1659,41 @@ def unseen_item_lines(answer, walk, transcript_path):
 
 
 def no_decision_sub_step_answer_context(answer, walk):
-    """The context refusing an A, AO, Aa, D or M given to a waiting sub-step that asks for no decision, or None."""
+    """The context refusing an answer that a waiting sub-step asking for no decision cannot take, or None. M is
+    refused only when every waiting item asks for no decision, since M lists the responses of an item that asks one."""
     if walk is None or not walk.no_decision_numbers:
         return None
-    reached = walk.numbers if answer.get("code") == "M" else checked_item_numbers(answer, walk)
+    if answer.get("code") == "M" and set(walk.numbers) - set(walk.no_decision_numbers):
+        return None
+    reached = (walk.numbers if answer.get("code") == "M"
+               else checked_item_numbers(answer, walk, ANSWERS_A_NO_DECISION_SUB_STEP_CANNOT_TAKE))
     if not set(reached) & set(walk.no_decision_numbers):
         return None
     closing = [closing_line(number, walk) or closing_line(number, walk, "<page link>") for number in walk.numbers]
     lines = [line.format(answer=answer["answer"], item=walk.item, walk=walk.name, closing_lines="\n".join(closing))
              for line in APPROVAL_WALK_SUB_STEP_ASKING_FOR_NO_DECISION_ANSWER_NOT_RECORDED_LINES]
-    added = answer.get("rest") or answer.get("condition")
-    if added:
-        lines.insert(2, APPROVAL_WALK_SUB_STEP_ASKING_FOR_NO_DECISION_ANSWER_USER_ADDED_WORDS_LINE.format(added=added))
+    if answer.get("rest"):
+        lines.insert(2, APPROVAL_WALK_SUB_STEP_ASKING_FOR_NO_DECISION_ANSWER_USER_ADDED_WORDS_LINE.format(
+            added=answer["rest"]))
+    elif answer.get("condition"):
+        lines.insert(2, APPROVAL_WALK_SUB_STEP_ASKING_FOR_NO_DECISION_ANSWER_CONDITION_NOT_TO_BE_CARRIED_OUT_LINE.format(
+            condition=answer["condition"]))
     if any("<page link>" in line for line in closing):
         lines.append(APPROVAL_WALK_SUB_STEP_ASKING_FOR_NO_DECISION_AGENT_INSTRUCTION_TO_PUBLISH_PAGE_MISSING_FROM_WALK_MINUTES_LINE)
     return "\n".join(lines)
+
+
+def answer_without_its_answers_to_no_decision_sub_steps(answer, walk):
+    """A numbered answer that also answers a waiting item asking a decision, with its answers to no-decision sub-steps
+    moved out of its pairs, so that its other answers count; any other answer unchanged."""
+    if walk is None or answer["form"] != "numbered" or answered_parts(answer, walk):
+        return answer
+    no_decision = [number for number, _ in answer["pairs"] if number in walk.no_decision_numbers]
+    others = [pair for pair in answer["pairs"] if pair[0] not in walk.no_decision_numbers]
+    if not no_decision or not any(letter in ANSWERS_A_NO_DECISION_SUB_STEP_CANNOT_TAKE and number in walk.numbers
+                                  for number, letter in others):
+        return answer
+    return {**answer, "pairs": others, "no-decision sub-steps answered": no_decision}
 
 
 def text_quoted_shortened(text):
@@ -1698,6 +1727,7 @@ def output_for(payload):
         walk, walk_error = None, error
     if named_item_missing(answer, walk, walk_error):
         return None
+    answer = answer_without_its_answers_to_no_decision_sub_steps(answer, walk)
     no_decision_context = no_decision_sub_step_answer_context(answer, walk)
     if no_decision_context:
         return {"hookSpecificOutput": {"hookEventName": "UserPromptSubmit", "additionalContext": no_decision_context}}
@@ -1731,6 +1761,10 @@ def context_for(answer, walk, walk_error):
         prefix = [line.format(condition=answer["condition"]) for line in CONDITION_LINES]
     elif answer["form"] == "rider":
         prefix = [line.format(rest=answer["rest"]) for line in RIDER_LINES]
+    prefix = [APPROVAL_WALK_SUB_STEP_ASKING_FOR_NO_DECISION_ANSWERED_BESIDE_DECISION_ITEM_LINE.format(
+        item=item_name(number, walk), minutes=walk.minutes, program=CHECK_PROGRAM,
+        one_item_line=f"#next_to_present item {number}" + (f" of {walk.total}" if walk.total else ""))
+              for number in answer.get("no-decision sub-steps answered", ())] + prefix
     if walk_error is not None:
         lines = [WALK_UNKNOWN_OPENING_LINE.format(answer=answer["answer"], error=repr(walk_error)), WALK_UNKNOWN_FIND]
         lines += prefix + [IF_WALK_OPEN]

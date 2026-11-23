@@ -1397,16 +1397,6 @@ def item_line_ranges(walk_finder, minutes, value, numbers, total, parser, named_
     return document, text, tokens, ranges, spans
 
 
-# CommonMark's open tag, as the Markdown parser reads one; no `<!--` in it opens a comment.
-HTML_OPEN_TAG = re.compile(r"""<[A-Za-z][A-Za-z0-9-]*(?:\s+[A-Za-z_:][A-Za-z0-9:._-]*"""
-                           r"""(?:\s*=\s*(?:[^"'=<>`\x00-\x20]+|'[^']*'|"[^"]*"))?)*\s*/?>""")
-
-
-def comment_openings_in_tags_escaped(text):
-    """Return text with each `<!--` inside an HTML open tag, such as `<div title="<!--">`, written as `&lt;!--`."""
-    return HTML_OPEN_TAG.sub(lambda tag: tag[0].replace("<!--", "&lt;!--"), text)
-
-
 def item_lines(walk_finder, minutes, value, numbers, total, parser):
     """Return (walk-document path, the lines of the items numbered, outside fenced code, the items' marks as
     new_marks returns them, the problem line of each mark whose text would not be read whole, the same lines
@@ -1414,7 +1404,7 @@ def item_lines(walk_finder, minutes, value, numbers, total, parser):
     document, text, tokens, ranges, _ = item_line_ranges(walk_finder, minutes, value, numbers, total, parser)
     lines = walk_finder.prose_lines(text, parser, tokens)
     marks = new_marks(text, tokens, ranges, lines)
-    tag_comments_kept = walk_finder.prose_lines(comment_openings_in_tags_escaped(text), parser)
+    tag_comments_kept = walk_finder.prose_lines(walk_finder.comment_openings_in_tags_escaped(text), parser)
     return (document, [line for first, end in ranges for line in lines[first:end]], marks,
             unreadable_new_marks(marks),
             [line for first, end in ranges for line in tag_comments_kept[first:end]])

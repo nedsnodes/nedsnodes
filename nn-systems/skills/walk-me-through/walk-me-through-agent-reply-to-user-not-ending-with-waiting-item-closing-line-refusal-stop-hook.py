@@ -344,11 +344,16 @@ def closing_line_inside_code_span(line, parser, letters):
 
 
 def ending_closing_lines(reply, parser, letters):
-    """The closing lines that end the reply, blank lines aside, as the module docstring says, the last line first,
-    each as (item numbers, M, link or None, whether it sits in a code span)."""
-    found = []
+    """The closing lines that end the reply, blank lines aside, as the module docstring says, the last line first:
+    the answer-letter lines, each as (item numbers, M, link or None, whether it sits in a code span), and the set of
+    the no-decision lines' links, as approval_walk_sub_step_no_decision_closing_line_page_link_or_none gives them."""
+    found, no_decision_links = [], set()
     for line in reversed(reply.rstrip().split("\n")):
         if not line.strip():
+            continue
+        no_decision_link = walk_finder.approval_walk_sub_step_no_decision_closing_line_page_link_or_none(line)
+        if no_decision_link is not None:
+            no_decision_links.add(no_decision_link)
             continue
         closing = walk_finder.approval_walk_closing_line_read(line, parser, letters)
         in_code_span = closing is None
@@ -357,7 +362,7 @@ def ending_closing_lines(reply, parser, letters):
         if closing is None:
             break
         found.append((*closing, in_code_span))
-    return found
+    return found, no_decision_links
 
 
 def closing_line_problems(numbers, total, closing_lines, pages, parser):
@@ -484,19 +489,19 @@ def output_for(payload, environment):
                      named=" and ".join(f"`Item {number} of {total}`" for number in unpublished),
                      page_line=sub_step_page_line(unpublished, total),
                      closing_lines=closing_lines({number: pages.get(number, "<page link>") for number in numbers}))
-    no_decision_links = {walk_finder.approval_walk_sub_step_no_decision_closing_line_page_link_or_none(line)
-                         for line in reply.split("\n")}
-    numbers_needing_closing_line = [number for number in numbers
-                                    if number not in no_decision_numbers
-                                    and not ("." in number and pages[number] in no_decision_links)]
     link_parser = walk_finder.markdown_parser()
     # markdown-it refuses a file: link by default and reads it as text, which would hide the wrong link
     # the block must name.
     link_parser.validateLink = lambda url: True
+    answer_letter_lines, no_decision_links = ending_closing_lines(reply, link_parser, letters)
+    numbers_needing_closing_line = [number for number in numbers
+                                    if number not in no_decision_numbers
+                                    and not ("." in number and pages[number] in no_decision_links)]
+    numbers_on_answer_letter_lines = {number for line_numbers, *_ in answer_letter_lines for number in line_numbers}
     problems = [NO_DECISION_LINE_MISSING_PROBLEM.format(number=number, total=total) for number in numbers
-                if number in no_decision_numbers and pages[number] not in no_decision_links]
-    problems += closing_line_problems(numbers_needing_closing_line, total,
-                                      ending_closing_lines(reply, link_parser, letters), pages, link_parser)
+                if number in no_decision_numbers
+                and (pages[number] not in no_decision_links or number in numbers_on_answer_letter_lines)]
+    problems += closing_line_problems(numbers_needing_closing_line, total, answer_letter_lines, pages, link_parser)
     if not problems:
         return None
     return block(REPLY_LACKS_CLOSING_LINE_OPENING_TEMPLATE,
