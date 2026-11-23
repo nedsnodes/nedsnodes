@@ -1697,8 +1697,7 @@ def _path_to_find_in_the_log_store(wanted):
 
 def _command_listing_every_log_store_name(log_store_root, name, store_is_here, box_ssh_host):
     pattern = "*%s*" % re.sub(r"([*?\[\\])", r"\\\1", name)
-    command = "find %s -name %s -prune -o ! -type d -iname %s -exec ls -lt {} +" % (
-        shlex.quote(log_store_root), shlex.quote(locator.WALK_DOCUMENT_COPIES_DIRECTORY_NAME), shlex.quote(pattern))
+    command = "find %s ! -type d -iname %s -exec ls -lt {} +" % (shlex.quote(log_store_root), shlex.quote(pattern))
     return command if store_is_here else "ssh %s %s" % (box_ssh_host, shlex.quote(command))
 
 
@@ -1716,8 +1715,7 @@ _LOG_STORE_NAME_PROBE = "\n".join([
     "    print('NOROOT')",
     "    sys.exit(0)",
     "unread = []",
-    "for directory, subdirectories, files in os.walk(root, onerror=unread.append):",
-    "    subdirectories[:] = [name_ for name_ in subdirectories if name_ != %r]" % locator.WALK_DOCUMENT_COPIES_DIRECTORY_NAME,
+    "for directory, _, files in os.walk(root, onerror=unread.append):",
     "    for base in files:",
     "        if name in base.lower():",
     "            path = os.path.join(directory, base)",

@@ -65,9 +65,7 @@ HASH_SIZE_LIMIT_BYTES = 64 * 1024 * 1024
 MAX_FILE_HITS_PER_MACHINE = 300
 MAX_GIT_PATHS_PER_CLONE = 300
 MAX_ENTRIES_PER_LIST = 25
-# A copy of the walk check program's folder name, since this file is sent over ssh alone; its test fails when the two differ.
-WALK_DOCUMENT_COPIES_DIRECTORY_NAME = ".walk-document-copies"
-SKIPPED_DIRECTORY_NAMES = ("__pycache__", "node_modules", ".venv", "venv", WALK_DOCUMENT_COPIES_DIRECTORY_NAME)
+SKIPPED_DIRECTORY_NAMES = ("__pycache__", "node_modules", ".venv", "venv")
 
 NESTED_WORKTREE_PARTS = (".claude", "worktrees")
 # Do not search all of /private/tmp: backup snapshot mounts can expand the search to the whole disk.

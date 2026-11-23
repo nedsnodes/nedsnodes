@@ -1233,14 +1233,5 @@ print(json.dumps([hit.get("occurrence") for hit in kept]))
           any(line.endswith("newest-first.py --own-session mac-session-1 --own-session-compacted-at never -- -heron")
               for line in result.stdout.splitlines()), result.stdout)
 
-with tempfile.TemporaryDirectory() as scratch:
-    root = Path(scratch) / "store"
-    build_store(root)
-    write(root / ".walk-document-copies" / "heron-walk-2026-10-01" / "2026-10-02T00-00-00.000000Z.md",
-          "the kingfisher plan, in a saved copy of a walk-document\n")
-    result = run(root, "kingfisher")
-    check("a saved walk-document copy is not a search hit", ".walk-document-copies" not in result.stdout
-          and "kingfisher plan" not in result.stdout, result.stdout + result.stderr)
-
 print(f"{'FAILED' if failures else 'all cases passed'}: {len(failures)} failure(s)")
 sys.exit(1 if failures else 0)
