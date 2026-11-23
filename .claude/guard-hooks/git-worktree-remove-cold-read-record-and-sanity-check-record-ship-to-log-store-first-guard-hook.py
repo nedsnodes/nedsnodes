@@ -4,7 +4,8 @@
 Both record folders, cold-read-records/ and sanity-check-records/, are
 gitignored, so `git worktree remove` deletes them without a word. Before a
 Bash command that runs `git worktree remove`, this PreToolUse hook lists the
-repository's worktrees with `git worktree list`, run in the hook's cwd, works
+worktrees of the repository each removal runs in with `git worktree list`, run
+in the removal's -C directory joined to the hook's cwd, works
 out which of them the command removes, and ships the records of those alone:
 a removal whose path names a worktree never reads, ships or waits on another
 worktree's records. A removal the hook cannot place, as described below,
@@ -46,8 +47,10 @@ worktree's real path. When it cannot tell, because the path or a -C holds a
 variable, a glob or a substitution, `worktree remove` is given an option
 other than -f or --force, more than one path or no path in the command text
 (as through xargs), the command changes directory (cd, pushd or popd, after
-builtin too, or a wrapper's -C) before a path that depends on it, or the path
-names no worktree the hook can find, the hook ships every worktree's records,
+builtin too, or a wrapper's -C) before a path or -C that depends on it, git
+cannot list the worktrees in the -C directory, or the path
+names no worktree the hook can find, the hook ships the records of every
+worktree of the repository its cwd is in,
 refuses the removal
 while any worktree holds a record being written or one that did not ship,
 starts no waiter, and gives the run-again instruction for its reason, with -f
@@ -58,7 +61,10 @@ lets the removal through. A removal
 of a worktree in which a record is being written, in a command that does more
 than that removal, as in `git push && git worktree remove /wt`, gets the same
 refusal and starts no waiter, because the hook cannot tell whether the shell
-would run the removal.
+would run the removal. A path that names no worktree because a `git worktree
+add` earlier in the same command adds one there, with a leading ~ expanded as
+bash would, names a new worktree that holds no records, so its removal ships
+nothing.
 
 It allows the command silently when every record shipped or none needed to.
 It refuses the command, naming each record that did not ship, its worktree,
@@ -105,10 +111,11 @@ additionalContext that no records were shipped. When the worker fails before
 it has read every worktree's records, as when a shipper module cannot be
 loaded, or has not read them when the deadline passes, the command is let
 through and the agent is told, the same way, that records may not have
-shipped. A removal in another repository, given by git's -C or --git-dir,
+shipped. A removal in another repository, given by git's --git-dir,
 names none of the worktrees of the repository the hook's cwd is in, so the
 hook cannot place it and ships the records of every worktree of the cwd's
-repository, not of that one. On the Mac each record is
+repository, not of that one; one given by -C is matched against the
+worktrees git lists in the -C directory. On the Mac each record is
 checked against the store over ssh, one record at a time, so with many
 records the budget can run out and refuse the removal; a run after that
 skips the records already shipped. When the worktree's directory cannot be
