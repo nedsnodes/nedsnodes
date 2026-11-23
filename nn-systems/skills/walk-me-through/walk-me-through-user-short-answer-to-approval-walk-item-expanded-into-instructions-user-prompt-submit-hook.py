@@ -609,9 +609,6 @@ DECISION_MARK = re.compile(r"^(#new_if_d|#new|#case_against)(?!\w)[\s:]*(.*)$", 
 DECISION_PART = re.compile(r"^(Part \d+)\.(?:\s+|$)(.*)$")
 DECISION_LABEL = re.compile(r"(Recommendation|The alternative):", re.I)
 BARE_MARKS_INTRODUCING_A_BLOCK = ("#new", "#new_if_d")
-# A message's heading or closing line that opens another item, as shown_words gives it: `Item 5: ...`,
-# `Items 5 and 6: ...`, `Item 5, ...`, or `Item 5` alone; `Item 5 fixes a path` is a mention, not an opening.
-ITEM_OPENING_AS_SHOWN = re.compile(r"^Items?\s+(\d+(?:\.\d+)*)((?:\s*(?:,|and|to)\s*\d+(?:\.\d+)*)*)\s*(?:[:,]|$)")
 DECISION_LABEL_NAMES = {"recommendation": "Recommendation", "the alternative": "The alternative"}
 # Marks that tag a line, not words of its meaning, dropped from both texts before they are compared.
 MARK_WORDS = re.compile(r"\[advisor\]|#(?:new_if_d|new|case_against)(?!\w)", re.I)
@@ -1438,24 +1435,31 @@ def item_openings_as_shown(tokens, parser, env):
             yield token.map[0], words
 
 
+def item_numbers_an_opening_names(words):
+    """The item numbers of a message's heading or closing line, as shown_words gives it, with every range expanded:
+    `Item 5: ...`, `Items 3.1, 3.2 & 4.1: ...`, `Item 5, ...` or `Item 5` alone. None when words open no item, as
+    `Item 5 fixes a path`, a mention, does; [] for a list the walk finder calls an unusable range."""
+    walk_finder = load_walk_finder()
+    opening = re.match(rf"^Items?\s+({walk_finder.NUMBER_LIST})\s*(?:[:,]|$)", words)
+    if not opening:
+        return None
+    try:
+        return walk_finder.expand_numbers(opening[1])
+    except walk_finder.UnusableRange:
+        return []
+
+
 def opens_another_item(words, heading):
     """Whether a message's heading or closing line, as item_openings_as_shown gives it, opens an item other than the
-    one heading names, as ITEM_OPENING_AS_SHOWN reads it: such a line ends the text shown for heading's
-    item, so that another item's lines in the same message are not taken for its own. A sub-step of heading's item,
-    an item inside heading's range, and a heading that names one of those among other items, as `Items 3.1 and 4.1`
-    does for item 4, are its own."""
-    opening = ITEM_OPENING_AS_SHOWN.match(words)
-    own = ITEM_OPENING_AS_SHOWN.match(heading)
-    if not opening or not own:
+    one heading names: such a line ends the text shown for heading's item, so that another item's lines in the same
+    message are not taken for its own. A sub-step of heading's item, an item inside heading's range, and a heading
+    that names one of those among other items, as `Items 3.1 and 4.1` does for item 4, are its own. An unusable range
+    names nothing, so it ends the text: a line cut off goes to the model, while a line let in could count unchecked."""
+    numbers = item_numbers_an_opening_names(words)
+    own_numbers = item_numbers_an_opening_names(heading)
+    if numbers is None or own_numbers is None:
         return False
-    own_numbers = [own[1], *re.findall(r"\d+(?:\.\d+)*", own[2])]
-    numbers = [opening[1], *re.findall(r"\d+(?:\.\d+)*", opening[2])]
-    if any(number == mine or number.startswith(f"{mine}.") for number in numbers for mine in own_numbers):
-        return False
-    if re.search(r"\bto\b", own[2]):
-        low, high = int(own_numbers[0].split(".")[0]), int(own_numbers[-1].split(".")[0])
-        return not any(low <= int(number.split(".")[0]) <= high for number in numbers)
-    return True
+    return not any(number == mine or number.startswith(f"{mine}.") for number in numbers for mine in own_numbers)
 
 
 def model_judgement(pairs, timeout_seconds=MODEL_TIMEOUT_SECONDS):
