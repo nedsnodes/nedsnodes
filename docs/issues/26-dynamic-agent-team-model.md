@@ -11,7 +11,7 @@ User-designed 2026-07-25 (outer walk item 16); supersedes the org-chart possibil
 
 ## In one line
 
-Task-scoped worker agents + on-tap domain-knowledge agents + SDLC skills carried by workers and subagents; **sparring pairs** of one Claude Code agent and one Codex agent (cooperate as driver/guardian — the guardian covers the driver's back, protective never antagonistic — compete as N-version teams on hard tasks, reconcile at phase boundaries); cheap **spy** watchers triaging a filtered intent-stream to domain experts; PM agents as the user's interface.
+Task-scoped worker agents + on-tap domain-knowledge agents + SDLC skills carried by workers and subagents; **sparring pairs** (Claude Code + Codex; cooperate as driver/guardian — the guardian covers the driver's back, protective never antagonistic — compete as N-version teams on hard tasks, reconcile at phase boundaries); cheap **spy** watchers triaging a filtered intent-stream to domain experts; PM agents as the user's interface.
 
 ## The goal: context engineering
 
@@ -31,7 +31,7 @@ Four months and a billion legacy tokens taught one structural lesson: agents can
 
 ## The sparring pair
 
-A pair of one Claude Code agent and one Codex agent that alternates between cooperation and competition — sparring: you fight each other specifically to make each other better, and the deliverable is the reconciliation, never the victory.
+A pair (Claude Code + Codex), each side one agent when cooperating and a team when competing, that alternates between cooperation and competition — sparring: you fight each other specifically to make each other better, and the deliverable is the reconciliation, never the victory.
 
 - **Cooperating (default): driver and guardian.** Every Claude writing code or docs gets a Codex guardian behind it, and vice versa — continuous background protection, the pair-programming split without the turn-taking humans need (agents tolerate the background role). The guardian carries the observer stance below: it covers the driver's back. This makes the legacy fleet's proven terminal-review catch (legs on Claude Code and Codex finding different defects) *continuous*.
 - **Competing (hard or big tasks): N-version teams.** Two teams, one Claude-led, one Codex-led, build from the same spec; at each SDLC phase boundary they compare work products and produce a best-of-both reconciliation — the reconciliation done by a distinct third team, never by the competitors themselves (user refinement 2026-08-03: the cherry-pick is judged by eyes with no authorship stake). The pattern applies to every work-product class, not only code: plans, skills, MD files, tests. The classic name is **N-version programming** (1970s–80s fault-tolerance engineering). Its classic caution travels with it: the Knight–Leveson experiment showed independent *human* teams make correlated errors — everyone stumbles on the same hard spots. LLM teams on different agent-binaries have genuinely different training (real decorrelation, measured in the legacy dual-leg data) but the diversity is partial (overlapping corpora) — so reserve the pattern for high-stakes work and **measure** whether the reconciled product beats the better team's output alone.
@@ -59,7 +59,7 @@ The complete role-class set, growing only when a real task exposes a gap (same o
 - **agents** (generic, task-scoped workers — the drivers; every guardian implies one) and **subagents** (one-shot skill executors; user-leaning name for the one-job-one-prompt class, 2026-08-03: **focused agents** — pairs with the question-instead-of-answer retry contract on issue [run-agent: one CLI to invoke a Claude or Codex agent headlessly from any caller (Python, shell, either runtime)](https://github.com/nedsnodes/nedsnodes/issues/41): a focused agent that cannot do its one job returns the question and exits; the invoker re-aims a fresh one).
 - **guardians** — the paired second (renamed from navigator): covers the driver's back, protective stance.
 - **spies** — cheap watchers triaging the filtered intent-stream to experts.
-- **sparring-partners** — the competing-and-reconciling mode of a pair of one Claude Code agent and one Codex agent.
+- **sparring-partners** — the competing-and-reconciling mode of a Claude Code + Codex pair.
 - **domain-experts** — on-tap knowledge agents, guardians of their domains.
 - **project managers** — the user's interface and continuity (the user has also called these project-leaders; "project manager" is the standard SDLC term — final name at first pilot).
 
