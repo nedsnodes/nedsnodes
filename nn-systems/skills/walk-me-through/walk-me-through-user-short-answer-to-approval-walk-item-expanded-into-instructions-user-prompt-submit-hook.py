@@ -1442,18 +1442,19 @@ def opens_another_item(words, heading):
     """Whether a message's heading or closing line, as item_openings_as_shown gives it, opens an item other than the
     one heading names, as ITEM_OPENING_AS_SHOWN reads it: such a line ends the text shown for heading's
     item, so that another item's lines in the same message are not taken for its own. A sub-step of heading's item,
-    and an item inside heading's range, are its own."""
+    an item inside heading's range, and a heading that names one of those among other items, as `Items 3.1 and 4.1`
+    does for item 4, are its own."""
     opening = ITEM_OPENING_AS_SHOWN.match(words)
     own = ITEM_OPENING_AS_SHOWN.match(heading)
     if not opening or not own:
         return False
     own_numbers = [own[1], *re.findall(r"\d+(?:\.\d+)*", own[2])]
-    number = opening[1]
-    if any(number == mine or number.startswith(f"{mine}.") for mine in own_numbers):
+    numbers = [opening[1], *re.findall(r"\d+(?:\.\d+)*", opening[2])]
+    if any(number == mine or number.startswith(f"{mine}.") for number in numbers for mine in own_numbers):
         return False
     if re.search(r"\bto\b", own[2]):
         low, high = int(own_numbers[0].split(".")[0]), int(own_numbers[-1].split(".")[0])
-        return not low <= int(number.split(".")[0]) <= high
+        return not any(low <= int(number.split(".")[0]) <= high for number in numbers)
     return True
 
 
