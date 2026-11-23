@@ -234,8 +234,8 @@ whose sandbox gets a writable copy-on-write overlay of the repository's git
 directory) and SUITES_WHOSE_TEST_SANDBOX_SHARES_THE_MACHINE_NETWORK (suites
 whose sandbox keeps the machine's network). The three are read from the
 scripts/run-all-test-suites.py of the checkout whose suites the run tests,
-parsed and never run, and from this file only when that checkout has none;
-the report names the file. A run refuses, exit 2, when that file does not
+parsed and never run, and from this file for each list that checkout lacks;
+the report names each file that supplied a list. A run refuses, exit 2, when that file does not
 assign each of the three a literal dict.
 A suite bwrap reports as exiting 128+N is reported as killed by signal N;
 sandbox-exec replaces itself with the suite, so a suite's exit passes through.
@@ -1868,13 +1868,14 @@ def checkout_top_directory(given):
 
 
 def suite_sandbox_lists_read_from_checkout_under_test(top):
-    """Return ({list name: {suite: reason}}, the file they came from) for the checkout under test.
+    """Return ({list name: {suite: reason}}, where they came from) for the checkout under test.
 
     The lists name the checkout's suites by path, so they come from the checkout's own copy
     of this program: a pull request head test run runs main's runner on the merged tree, and
     a pull request that renames a listed suite renames its entry too. That copy is parsed,
     never run, so none of the checkout's code runs in this program. A checkout without the
-    file, such as a test's scratch checkout, gets this program's own lists."""
+    file, such as a test's scratch checkout, gets this program's own lists. Where they came
+    from names each file that supplied a list, for the report."""
     source_file = top / "scripts" / "run-all-test-suites.py"
     try:
         source = source_file.read_text(encoding="utf-8")
@@ -1959,6 +1960,9 @@ def suite_sandbox_lists_read_from_checkout_under_test(top):
             f"level, so which sandbox each suite runs in is unknown.\n"
             f"In {source_file}, assign each of {', '.join(unreadable)} once, at the top level, "
             f"a dict written out literally, then rerun the command you ran.")
+    if len(supplied_by_this_program) == len(SUITE_SANDBOX_LIST_NAMES_READ_FROM_CHECKOUT_UNDER_TEST):
+        return found, (f"{Path(__file__).resolve()}, since {source_file} lacks every list or "
+                       f"assigns each a set")
     if supplied_by_this_program:
         return found, (f"{source_file}, and in {Path(__file__).resolve()} for "
                        f"{', '.join(supplied_by_this_program)}, which the checkout lacks or "
