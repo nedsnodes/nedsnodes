@@ -39,16 +39,17 @@ because the branch then has no commit origin lacks; its failure line gives the c
 import importlib.util
 import json
 import os
+import shlex
 import subprocess
 import sys
 from pathlib import Path
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
-HOOK_NAME = "agent-seat-owned-nn-topic-branches-push-and-draft-pull-request-open-stop-hook"
+HOOK_NAME = "agent-seat-owned-nn-topic-branches-push-and-draft-pr-open-stop-hook"
 MAIN_BRANCH = "main"
 DRAFT_PULL_REQUEST_DESCRIPTION = (
     "Draft opened by the turn-end hook, "
-    "nn-systems/general-tools/agent-seat-owned-nn-topic-branches-push-and-draft-pull-request-open-stop-hook.py, "
+    "nn-systems/general-tools/agent-seat-owned-nn-topic-branches-push-and-draft-pr-open-stop-hook.py, "
     "so that this branch's committed work is on GitHub and not only in a local worktree.\n\n"
     "This description is a placeholder. Before marking the pull request ready for review, its "
     "owner replaces it with what the pull request changes, ending with the defect line CLAUDE.md "
@@ -145,8 +146,8 @@ def branch_push_and_draft_open(worktree, branch, failures):
         return
     pushed = run_command(["git", "push", "origin", f"refs/heads/{branch}:refs/heads/{branch}"], worktree)
     if pushed.returncode != 0:
-        failures.append(f"branch {branch}: `git push origin {branch}` from {worktree} failed, so its "
-                        f"new commits are not on GitHub: {command_error(pushed)}")
+        failures.append(f"branch {branch}: `git push origin {branch}` from {worktree} failed, so it was "
+                        f"not pushed: {command_error(pushed)}")
         return
     if open_pull_requests:
         return
@@ -159,8 +160,7 @@ def branch_push_and_draft_open(worktree, branch, failures):
         failures.append(
             f"branch {branch}: pushed, but its draft pull request could not be opened, and the next "
             f"turn end will not try again because the branch is then pushed: {command_error(created)}. "
-            f"Open it yourself from {worktree} with: "
-            f"gh pr create --draft --base {MAIN_BRANCH} --head {branch} --title <title> --body <description>")
+            f"Open it yourself from {worktree} with: {shlex.join(create)}")
 
 
 def run(stdin_text, environment, default_directory):
@@ -184,10 +184,11 @@ def run(stdin_text, environment, default_directory):
         branch_push_and_draft_open(worktree, branch, failures)
     if not failures:
         return "", "", 0
-    lines = [f"{HOOK_NAME}: at this turn end, pushing your agent-seat's branches to GitHub failed "
-             f"for these branches:"] + [f"- {failure}" for failure in failures]
-    lines.append("For each branch, fix what its line names, then push it yourself; when a line quotes "
-                 "the pre-push hook's refusal, follow that refusal's own steps.")
+    lines = [f"{HOOK_NAME}: at this turn end, these branches of your agent-seat did not fully reach "
+             f"GitHub:"] + [f"- {failure}" for failure in failures]
+    lines.append("For a branch whose line says it was not pushed, fix what the line names, and the next "
+                 "turn end pushes it; do not push it by hand, because a ready pull request's head is "
+                 "frozen. When a line quotes the pre-push hook's refusal, follow that refusal's steps.")
     output = {"hookSpecificOutput": {"hookEventName": "Stop", "additionalContext": "\n".join(lines)}}
     return json.dumps(output) + "\n", "", 0
 

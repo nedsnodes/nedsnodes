@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Tests for nn-systems/general-tools/agent-seat-owned-nn-topic-branches-push-and-draft-pull-request-open-stop-hook.py.
+"""Tests for nn-systems/general-tools/agent-seat-owned-nn-topic-branches-push-and-draft-pr-open-stop-hook.py.
 
 Each test runs the hook as Claude Code does, as a program reading the Stop payload on stdin, in a
 real clone of a bare origin made in a temporary directory, with a fake `gh` first on PATH that
@@ -17,7 +17,7 @@ import unittest
 from pathlib import Path
 
 REPO_ROOT = Path(__file__).resolve().parents[3]
-HOOK = REPO_ROOT / "nn-systems" / "general-tools" / "agent-seat-owned-nn-topic-branches-push-and-draft-pull-request-open-stop-hook.py"
+HOOK = REPO_ROOT / "nn-systems" / "general-tools" / "agent-seat-owned-nn-topic-branches-push-and-draft-pr-open-stop-hook.py"
 SEAT = "test-seat"
 
 _specification = importlib.util.spec_from_file_location(

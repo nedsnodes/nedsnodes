@@ -94,7 +94,7 @@
           },
           {
             "type": "command",
-            "command": "python3 \"$CLAUDE_PROJECT_DIR\"/nn-systems/general-tools/agent-seat-owned-nn-topic-branches-push-and-draft-pull-request-open-stop-hook.py",
+            "command": "python3 \"$CLAUDE_PROJECT_DIR\"/nn-systems/general-tools/agent-seat-owned-nn-topic-branches-push-and-draft-pr-open-stop-hook.py",
             "timeout": 180
           },
           {
