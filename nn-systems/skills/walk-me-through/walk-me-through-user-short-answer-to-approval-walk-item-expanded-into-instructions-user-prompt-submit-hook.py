@@ -41,7 +41,9 @@ CHECK_PROGRAM's check step, with --obvious for AO and --after-advisor for Aa.
 O asks the agent to show the item again with an "Option 2" and an "Option 3"
 paragraph; O2 and O3 approve one of them, through the check step with
 --option. M asks the agent to show MORE_RESPONSES_TEXT, the responses the
-closing line leaves out, and records nothing.
+closing line leaves out, or, with no approval-walk open, every response but
+M; it records nothing, so it takes no item number and gets no
+--user-reply-as-typed line.
 
 THE OPEN APPROVAL-WALK is found with WALK_FINDER_FILE, the module the
 walk-me-through Stop hook uses too, loaded by path: the one
@@ -118,7 +120,8 @@ terminal the session runs in. The text opens with one line naming the answer
 and the approval-walk item it answers, or saying no approval-walk is open;
 then the answer's lines; while an approval-walk is open, or the walk state
 cannot be read, a last line gives the check step's --user-reply-as-typed flag
-with the prompt, its whitespace runs squeezed, quoted for the shell.
+with the prompt, its whitespace runs squeezed, quoted for the shell, except
+after M, which runs no check.
 
 AN ANSWER TO A VERSION THE USER MAY NOT HAVE SEEN. When an answer gives A,
 AO, Aa or D to a waiting item, in any form above, parts included, the hook
@@ -252,8 +255,10 @@ ALL = re.compile(rf"^(?:all\s+(?P<first>{AO}|a)|(?P<last>{AO}|a)\s+to\s+all)$", 
 PAIR = rf"(?:items?\s*)?({NUMBER})\s*(?:[-:=)]\s*)?({AO}|[adzr])(?![a-z])"
 NUMBERED = re.compile(rf"^(?:{PAIR}(?:[\s,;]+|$))+$", re.I)
 PAIRS = re.compile(PAIR, re.I)
+# M records nothing, and a check run with no flag records an A, so M never takes item numbers.
+NUMBERED_WORD = "|".join(word.replace(" ", r"\s+") for word, code in WORDS.items() if code != "M")
 WORD_NUMBERS = re.compile(
-    rf"^(?P<word>{WORD})\s+(?:items?\s+)?(?P<numbers>{NUMBER}(?:(?:\s*,\s*|\s+and\s+|\s+){NUMBER})*)$", re.I)
+    rf"^(?P<word>{NUMBERED_WORD})\s+(?:items?\s+)?(?P<numbers>{NUMBER}(?:(?:\s*,\s*|\s+and\s+|\s+){NUMBER})*)$", re.I)
 NOT_AN_ITEM_NUMBER = r"(?!(?:items?\s*)?\d)"
 CONDITION = re.compile(rf"^{ANSWER}\s*[,;:\-]?\s+(?P<condition>(?:if|after)\b.+)$", re.I | re.S)
 LETTER_RIDER = re.compile(
@@ -1639,7 +1644,7 @@ def output_for(payload):
                              *refusal])
         return {"hookSpecificOutput": {"hookEventName": "UserPromptSubmit", "additionalContext": context}}
     context = context_for(answer, walk, walk_error)
-    if walk is not None or walk_error is not None:
+    if (walk is not None or walk_error is not None) and answer.get("code") != "M":
         context += "\n" + USER_REPLY_LINE.format(reply=shlex.quote(" ".join(payload["prompt"].split())))
     return {"hookSpecificOutput": {"hookEventName": "UserPromptSubmit", "additionalContext": context}}
 

@@ -433,6 +433,17 @@ def test_m_shows_the_responses_the_closing_line_leaves_out_and_records_nothing()
           lines is not None and lines[-1].endswith(": A approve · AO approve as obvious · Aa approve after an advisor "
                                                    "check · D disapprove · Z defer · E explain · O other options"),
           f"lines {lines!r}")
+    for prompt in ("m", "more responses"):
+        result = case.run(prompt)
+        check(f"{prompt!r} on an open walk gets no line about running the check step",
+              result.returncode == 0 and result.stdout and "--user-reply-as-typed" not in result.stdout
+              and "check step" not in result.stdout, f"stdout {result.stdout!r}")
+    for prompt in ("more responses 4", "more responses item 4", "More responses 4."):
+        lines = case.lines(prompt)
+        check(f"{prompt!r} is not read as a numbered answer, so nothing tells the agent to record it",
+              lines is None or not any("check step" in line or "--user-reply-as-typed" in line
+                                       or line.startswith("The answer gives each item") for line in lines),
+              f"lines {lines!r}")
     check("every response is on the closing line or in M's list, once",
           sorted((LETTERS_AFTER_LINK + " · " + MORE_RESPONSES).split(" · "))
           == sorted(["A approve", "AO approve as obvious", "Aa approve after an advisor check", "D disapprove",
