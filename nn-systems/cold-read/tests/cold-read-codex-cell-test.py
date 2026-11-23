@@ -45,6 +45,10 @@ launcher's list holds the logged-out text alone, and a codex whose stderr
 carries the captured 401 line leaves the cell naming `cause: logged-out` in
 its own stderr, the line the grid lifts.
 
+The service tier is pinned for both cases: the deep tier asks codex for the
+Fast service tier, and the second-strongest-model tier asks for no service
+tier.
+
 Everything else about this cell — the model and effort pins, the memory store
 being off for the launch, the stray-write detector, the provenance stamp's
 fields — is NOT covered here; this file was written for the exit-code seam
