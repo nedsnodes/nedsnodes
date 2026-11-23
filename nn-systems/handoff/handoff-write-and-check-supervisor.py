@@ -444,26 +444,34 @@ def background_task_field_lines(tasks) -> list:
     return lines
 
 
-def background_task_fields_for_this_session(working_directory: Path):
-    """Return (field lines, console status), reporting failures without blocking handoff."""
+def background_task_fields_for_this_session(working_directory: Path,
+                                            task_ids_listed_past_wait_limit=frozenset()):
+    """Return (field lines, console status, whether the running tasks were listed), reporting
+    failures without blocking handoff.
+
+    A task in task_ids_listed_past_wait_limit is left out: its background-task-past-wait-limit
+    field already lists it, with a different instruction to the successor.
+    """
     session_id = os.environ.get("CLAUDE_CODE_SESSION_ID", "")
     if not session_id:
         return [], ("background tasks: not listed — CLAUDE_CODE_SESSION_ID is unset, so this "
                     "script cannot find the transcript. Name in the next step, with its command, "
-                    "any background task still running that your successor must restart.")
+                    "any background task still running that your successor must restart."), False
     try:
         transcript_path = find_session_transcript(session_id, working_directory)
         if transcript_path is None:
             return [], (f"background tasks: not listed — no single transcript found for session "
                         f"{session_id} under {PROJECTS_ROOT}. Name in the next step, with its "
-                        "command, any background task still running that your successor must restart.")
-        tasks = background_task_launches_still_running_in_transcript(transcript_path)
+                        "command, any background task still running that your successor must restart."), False
+        tasks = [task for task in background_task_launches_still_running_in_transcript(transcript_path)
+                 if task[0] not in task_ids_listed_past_wait_limit]
     except Exception as error:  # noqa: BLE001 - the list never blocks a handoff
         return [], (f"background tasks: not listed — {type(error).__name__}: {error}. Name in the "
                     "next step, with its command, any background task still running that your "
-                    "successor must restart.")
+                    "successor must restart."), False
     return (background_task_field_lines(tasks),
-            f"background tasks: {len(tasks)} still running, recorded for the successor")
+            f"background tasks: {len(tasks)} still running and not listed as past their wait-limit, recorded "
+            "for the successor", True)
 
 
 def handoff_deferral_field_lines(refused_commands) -> list:
@@ -559,16 +567,17 @@ def past_wait_limit_tasks_by_hand_instruction() -> str:
 
 def background_task_past_wait_limit_fields_for_this_session(handoff_directory: Path,
                                                             working_directory: Path, now=None):
-    """Return (field lines, console status) for the background tasks past their wait-limit.
+    """Return (field lines, ids of the tasks the lines list, console status, the error that stopped
+    the listing or None) for the background tasks past their wait-limit.
 
     Never raises: what cannot be read is named in the status, which tells the agent to add it to
     the next step by hand.
     """
     session_id = os.environ.get("CLAUDE_CODE_SESSION_ID", "")
     if not session_id:
-        return [], ("background tasks past their wait-limit: not listed, because "
+        return [], frozenset(), ("background tasks past their wait-limit: not listed, because "
                     "CLAUDE_CODE_SESSION_ID is unset and this script cannot find this session's "
-                    "transcript without it. " + past_wait_limit_tasks_by_hand_instruction())
+                    "transcript without it. " + past_wait_limit_tasks_by_hand_instruction()), None
     try:
         marker = deferred_marker_files.handoff_deferral_record_read_from_marker_or_moved_at_fire(
             handoff_directory, session_id)
@@ -582,10 +591,12 @@ def background_task_past_wait_limit_fields_for_this_session(handoff_directory: P
         past_tasks = background_tasks_past_wait_limit_still_running(
             transcript_path, marker.deferral_began_at if marker is not None else None, now=now)
     except Exception as error:  # noqa: BLE001 - these fields never block a handoff
-        return [], (f"background tasks past their wait-limit: not listed ({type(error).__name__}: "
-                    f"{error}). " + past_wait_limit_tasks_by_hand_instruction())
+        listing_error = f"{type(error).__name__}: {error}"
+        return [], frozenset(), (f"background tasks past their wait-limit: not listed ({listing_error}). "
+                                 + past_wait_limit_tasks_by_hand_instruction()), listing_error
     return (background_task_past_wait_limit_field_lines(past_tasks),
-            f"background tasks past their wait-limit: {len(past_tasks)} recorded")
+            frozenset(task[0] for task in past_tasks),
+            f"background tasks past their wait-limit: {len(past_tasks)} recorded", None)
 
 
 def write_handoff_file(handoff_path: Path, next_step: str, counter: int,
@@ -1024,12 +1035,16 @@ def write_handoff_and_report_supervisor(argv) -> int:
 
     counter = next_restart_counter(handoff_path, state_path)
     spawned_subagent_lines, roster_report = spawned_subagent_roster_for_this_session(seat_directory)
-    background_task_lines, background_task_report = background_task_fields_for_this_session(
-        seat_directory)
+    past_wait_limit_lines, past_wait_limit_task_ids, past_wait_limit_report, past_wait_limit_listing_error = \
+        background_task_past_wait_limit_fields_for_this_session(handoff_directory, seat_directory)
+    background_task_lines, background_task_report, running_tasks_listed = background_task_fields_for_this_session(
+        seat_directory, past_wait_limit_task_ids)
+    if past_wait_limit_listing_error is not None and running_tasks_listed:
+        # Every running task is already in a background-task-N field; asking for a rerun would list it twice.
+        past_wait_limit_report = (f"background tasks past their wait-limit: not listed ({past_wait_limit_listing_error}); "
+                                  "every running task, if any, is in a background-task-N field")
     handoff_deferral_lines, handoff_deferral_report = handoff_deferral_fields_for_this_session(
         handoff_directory)
-    past_wait_limit_lines, past_wait_limit_report = background_task_past_wait_limit_fields_for_this_session(
-        handoff_directory, seat_directory)
     prune_report = prune_completed_tasks(next_step_text)
     write_handoff_file(handoff_path, next_step, counter, arguments.ask_user_before_restart, seat_directory,
                        spawned_subagent_lines=spawned_subagent_lines,
