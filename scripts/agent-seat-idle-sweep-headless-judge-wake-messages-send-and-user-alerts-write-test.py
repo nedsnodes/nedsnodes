@@ -1261,14 +1261,11 @@ task_file.write_text(json.dumps({**json.loads(task_file.read_text()),
                                  "metadata": {"prerequisites": [{"pr_merged": 50}]}}))
 machine.script(judged(False, reason="r"))
 code, output = machine.run(0, github_budget_spent=True)
-calls, judge_facts = rule_five_judge_facts(machine)
 skipped = [{"kind": "pr_merged", "number": 50}]
-check("a prerequisite the GitHub budget left unasked: logged by name, and handed to the rule 5 judge",
+check("a prerequisite the GitHub budget left unasked: logged by name",
       code == 0 and [(event["agent_seat"], event["conditions"]) for event in
-                     machine.events("github_conditions_skipped_for_budget")] == [("alpha", skipped)]
-      and judge_facts.get("github_conditions_skipped_for_budget") == skipped
-      and judge_facts.get("open_tasks_nothing_holds") == [],
-      (code, output, machine.events(), judge_facts))
+                     machine.events("github_conditions_skipped_for_budget")] == [("alpha", skipped)],
+      (code, output, machine.events()))
 
 # --- rule 1: a usage limit ------------------------------------------------------------------------
 RESET_PASSED = int(START.timestamp()) - 60

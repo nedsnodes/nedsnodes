@@ -1232,6 +1232,37 @@ try:
           and verdict.get(fields.GITHUB_CONDITIONS_SKIPPED_FOR_BUDGET)
           == [{"kind": "pr_merged", "number": 50}],
           (decision, checker.conditions_skipped_for_budget, verdict))
+    # The same checker, as the sweep shares it, for an agent-seat checked after that skip.
+    verdict = {"running": {}, "handoff_deferred_marker": False}
+    decision = program.rules_three_to_five(verdict, None, checker, Path(tempfile.mkdtemp(
+        dir=str(SUITE_ROOT))), budget_tasks)
+    check("an agent-seat checked after another's budget skip, with no task and no skip of its own: "
+          "rule 4, and the verdict names no skip",
+          decision == {fields.RULE: 4, fields.DECISION: fields.NO_WAKE}
+          and fields.GITHUB_CONDITIONS_SKIPPED_FOR_BUDGET not in verdict, (decision, verdict))
+    failing_tasks = Path(tempfile.mkdtemp(dir=str(SUITE_ROOT)))
+    for task_id, number in (("1", 51), ("2", 52)):
+        (failing_tasks / f"{task_id}.json").write_text(json.dumps(
+            {"id": task_id, "subject": f"task {task_id}", "status": "pending", "blockedBy": [],
+             "metadata": {"prerequisites": [{"pr_merged": number}]}}))
+    checker = program.due_task_hook.GitHubConditionChecker({}, 0)
+
+    def gh_times_out_and_spends_the_budget(kind, number, timeout_seconds):
+        checker.started -= program.due_task_hook.GH_CALLS_TOTAL_BUDGET_SECONDS
+        return {"gh_failure": f"gh did not answer within {timeout_seconds:g} seconds"}
+    checker.ask_gh = gh_times_out_and_spends_the_budget
+    verdict = {"running": {}, "handoff_deferred_marker": False}
+    try:
+        program.rules_three_to_five(verdict, None, checker, failing_tasks, failing_tasks)
+        message = None
+    except program.ReadFailure as error:
+        message = str(error)
+    check("a gh call that times out, then a prerequisite the spent budget skips: the read failure, "
+          "and the verdict still names the skip",
+          message is not None and message.startswith("GitHub could not say whether")
+          and len(verdict.get(fields.GITHUB_CONDITIONS_SKIPPED_FOR_BUDGET) or []) == 1
+          and verdict[fields.GITHUB_CONDITIONS_SKIPPED_FOR_BUDGET][0]["number"] in (51, 52),
+          (message, verdict))
     machine = Machine()
     machine.seat("alpha", [user("go"), assistant("Done."), turn_end()])
     machine.seat("beta", [user("go"), assistant("Done."), turn_end()])

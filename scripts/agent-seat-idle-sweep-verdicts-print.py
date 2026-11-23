@@ -801,14 +801,17 @@ def rules_three_to_five(verdict, put_off_at, checker, task_directory,
     if not running and not verdict["handoff_deferred_marker"]:
         # The checker is shared by every agent-seat, so only the skips appended here are this one's.
         skipped_before = len(checker.conditions_skipped_for_budget)
-        verdict["open_tasks_nothing_holds"] = open_tasks_nothing_holds(
-            task_directory, checker, due_task_raise_state_directory)
-        skipped = dict.fromkeys(checker.conditions_skipped_for_budget[skipped_before:])
-        if skipped:
-            verdict[fields.GITHUB_CONDITIONS_SKIPPED_FOR_BUDGET] = [
-                {"kind": kind, "number": number} for kind, number in skipped]
+        try:
+            verdict["open_tasks_nothing_holds"] = open_tasks_nothing_holds(
+                task_directory, checker, due_task_raise_state_directory)
+        finally:
+            # A gh failure raises after the scan, so the skips it made are named even then.
+            skipped = dict.fromkeys(checker.conditions_skipped_for_budget[skipped_before:])
+            if skipped:
+                verdict[fields.GITHUB_CONDITIONS_SKIPPED_FOR_BUDGET] = [
+                    {"kind": kind, "number": number} for kind, number in skipped]
         # A condition the shared GitHub budget skipped may be met, so it leaves the verdict to rule 5.
-        elif not verdict["open_tasks_nothing_holds"]:
+        if not skipped and not verdict["open_tasks_nothing_holds"]:
             return {fields.RULE: 4, fields.DECISION: fields.NO_WAKE}
     return {fields.RULE: 5, fields.DECISION: fields.JUDGE}
 
