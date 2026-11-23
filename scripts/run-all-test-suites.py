@@ -4250,13 +4250,51 @@ def recordings_directory_for(given, top):
     return Path(given).expanduser() / min(roots.stdout.split())[:16]
 
 
+def nearest_existing_directory_and_names_below_it(path):
+    existing = path.resolve()
+    missing_names = []
+    while not os.path.exists(existing) and existing != existing.parent:
+        missing_names.insert(0, existing.name)
+        existing = existing.parent
+    return existing, missing_names
+
+
+def volume_ignores_case(directory):
+    for place in (directory, *directory.parents):
+        swapped_name = place.name.swapcase()
+        if swapped_name != place.name:
+            try:
+                return place.samefile(place.with_name(swapped_name))
+            except OSError:
+                return False
+    return False
+
+
 def same_directory(first, second):
-    """Whether two paths name one directory, as a case-insensitive volume or a symlink may hide."""
+    """Whether two paths name one directory, as a case-insensitive volume or a symlink may hide.
+
+    Not handled when a path is missing:
+    - The nearest existing directory is a mount point: the parent volume's case rule answers, so
+      a run may write into the read-only directory, or two distinct directories may be refused.
+    - On a case-sensitive volume, a sibling symlink named the swapped-case spelling, such as
+      `foo -> FOO`, reads as a case-insensitive volume, so a valid run is refused.
+    - Another run creates the destination between the two ancestor lookups: two identical paths
+      can compare as different, so a run may write into the read-only directory.
+    - casefold() merges names a volume keeps distinct, such as `straße` and `strasse` on exFAT,
+      so a valid run is refused."""
     try:
         return first.samefile(second)
     except OSError:
-        # A path that does not exist yet is compared as spelled once resolved.
-        return first.resolve() == second.resolve()
+        # resolve() keeps the spelling of a missing path, so a case difference survives it.
+        first_existing, first_missing = nearest_existing_directory_and_names_below_it(first)
+        second_existing, second_missing = nearest_existing_directory_and_names_below_it(second)
+        if not first_existing.samefile(second_existing):
+            return False
+        if first_missing == second_missing:
+            return True
+        return (volume_ignores_case(first_existing)
+                and [name.casefold() for name in first_missing]
+                == [name.casefold() for name in second_missing])
 
 
 def refuse_read_only_recordings_directory_this_run_writes(read_only_dir, saved_recordings_dir,
