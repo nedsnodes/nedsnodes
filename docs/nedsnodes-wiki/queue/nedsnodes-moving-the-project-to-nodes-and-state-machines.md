@@ -278,7 +278,7 @@ The user has no "strong opinions" on order beyond easy parts first. Each step is
 3. Do you approve python-jsonschema 4.26.0 as the one JSON Schema library, replacing `answer_problems()`? The alternative is Pydantic with a second validator for schema documents (section 5.1).
 4. After a state-machine-run exits to wait, what calls the later `next`: the agent that owns the state-machine-run, a hook, or a scheduled job?
 5. If a resumed `claude -p` agent does not show in Remote Control, how does the user reach an agent inside a node?
-6. Where is the state-machine-run's record kept: a JSONL file in the log-store on ned-box, which a Mac state-machine-run needs ned-box to reach; under the git common directory with a copy shipped to the log-store; or GHI 2505's one store, with the JSONL as a log beside it?
+6. Each state-machine-run's record is one JSONL file in the log-store on ned-box; a state-machine-run on the Mac waits while ned-box cannot be reached.
 7. When a detached task passes its wait-limit, does the machine keep waiting, stop and rerun the task, or ask the user?
 8. Does a transition need general guards on state-machine-run data, or are loop limits enough until a real machine needs more?
 9. The runner's schema check rests on the user's approval of item 4; no node adds its own validation, and `CLAUDE.md`'s two conditions for a guard stay as they are.
