@@ -50,6 +50,13 @@ def run(checkout, *arguments):
                           capture_output=True, text=True)
 
 
+def run_stages(checkout, *stages):
+    """Run each stage; return the failed runs as (stage, exit code, stderr), so a case that checks files stayed
+    unchanged cannot pass on a stage that exited before writing anything."""
+    results = [(stage, run(checkout, "--stage", stage)) for stage in stages]
+    return [(stage, result.returncode, result.stderr) for stage, result in results if result.returncode != 0]
+
+
 def read(checkout, path):
     return (checkout / path).read_text(encoding="utf-8")
 
@@ -157,13 +164,12 @@ checkout = scratch_checkout({
     "scripts/binary.bin": b"\xff\xfe nedschorus/nedschorus\n",
 })
 os.chmod(checkout / "scripts/run.sh", 0o755)
-for stage in ("1", "2", "3"):
-    run(checkout, "--stage", stage)
+failed_stages = run_stages(checkout, "1", "2", "3")
 check("stage 1 leaves Markdown, captured responses, a kept program file and non-UTF-8 files alone",
-      read(checkout, "README.md") == "gh pr list --repo nedschorus/nedschorus\n"
+      not failed_stages and read(checkout, "README.md") == "gh pr list --repo nedschorus/nedschorus\n"
       and "nedschorus/nedschorus" in read(checkout, "scripts/merge-gate-test-captured-github-responses/x.json")
       and "nedschorus/nedschorus" in read(checkout, "scripts/project-rename-repository-contents-rewrite-hack.py")
-      and (checkout / "scripts/binary.bin").read_bytes() == b"\xff\xfe nedschorus/nedschorus\n")
+      and (checkout / "scripts/binary.bin").read_bytes() == b"\xff\xfe nedschorus/nedschorus\n", failed_stages)
 check("stages 2 and 3 rewrite a GHI-MD file's paths like any other file's",
       read(checkout, "docs/issues/1-a.md") == "nn-systems/x and /home/nedlern/nedsnodes-logs\n",
       read(checkout, "docs/issues/1-a.md"))
@@ -429,10 +435,10 @@ check("stage 2 renames the shared database's unit file, at the top or in a direc
 # --- Stage 3 does not rename a citation of a kept nedschorus- file ----------------------------------
 CAPTURED = "scripts/merge-gate-test-captured-github-responses/nedschorus-nedschorus-1-pr-view.json"
 checkout = scratch_checkout({CAPTURED: "{}\n", "scripts/gate-test.py": 'NAME = "nedschorus-nedschorus-1-pr-view.json"\n'})
-run(checkout, "--stage", "3")
+failed_stages = run_stages(checkout, "3")
 check("stage 3 leaves a citation of a kept file whose name starts nedschorus-, which keeps its name",
-      read(checkout, "scripts/gate-test.py") == 'NAME = "nedschorus-nedschorus-1-pr-view.json"\n'
-      and read(checkout, CAPTURED) == "{}\n", read(checkout, "scripts/gate-test.py"))
+      not failed_stages and read(checkout, "scripts/gate-test.py") == 'NAME = "nedschorus-nedschorus-1-pr-view.json"\n'
+      and read(checkout, CAPTURED) == "{}\n", (failed_stages, read(checkout, "scripts/gate-test.py")))
 
 # --- Stages 1 and 2 leave stage 3's page names and Bash-guard map alone ------------------------------
 checkout = scratch_checkout({
@@ -440,10 +446,9 @@ checkout = scratch_checkout({
     "docs/issues/1-a.md": "See `nedschorus-glossary.md`.\n",
     "nn-systems/general-tools/" + BASH_GUARD_CHECK.rsplit("/", 1)[-1]: (
         'BASH_GUARD_CURRENT_PATHS_BY_FORMER_PATH = {\n}\nGUARDS = {\n    "nn-systems/x/stop-hook.py": read_stop,\n}\n')})
-for stage in ("1", "2"):
-    run(checkout, "--stage", stage)
+failed_stages = run_stages(checkout, "1", "2")
 check("stages 1 and 2 rename no page cited by name alone and add no former path to the Bash-guard check",
-      git(checkout, "status", "--porcelain") == "", git(checkout, "diff"))
+      not failed_stages and git(checkout, "status", "--porcelain") == "", (failed_stages, git(checkout, "diff")))
 
 # --- The summary counts the files rewritten and the paths moved, a twin's removal included ------------
 checkout = scratch_checkout({"nc-systems/x/a.py": "see nc-systems/x/b.py\nb = 1\n",
@@ -509,8 +514,10 @@ check("the residue report does not let a covered span cover an old name that sta
 
 # --- The command line -------------------------------------------------------------------------------
 help_text = subprocess.run([sys.executable, str(PROGRAM), "--help"], capture_output=True, text=True).stdout
+# argparse wraps the description at the terminal's COLUMNS, so a line break can fall inside the phrase checked.
+help_words = " ".join(help_text.split())
 check("--help describes the program by its docstring's first line alone",
-      "Rewrite one git checkout's tracked files" in help_text and "WHAT IT DOES NOT DO" not in help_text, help_text)
+      "Rewrite one git checkout's tracked files" in help_words and "WHAT IT DOES NOT DO" not in help_words, help_text)
 no_checkout = subprocess.run([sys.executable, str(PROGRAM), "--stage", "1"], capture_output=True, text=True)
 no_action = subprocess.run([sys.executable, str(PROGRAM), "--checkout", str(checkout)], capture_output=True, text=True)
 check("--checkout and one of --stage or --residue-report are required",

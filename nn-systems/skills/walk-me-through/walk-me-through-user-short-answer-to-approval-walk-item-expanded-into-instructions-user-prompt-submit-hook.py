@@ -9,9 +9,9 @@ but a rider, then read, ignoring case, as the first of these forms it matches,
 in every form allowing a hyphen, with or without spaces around it, between the
 letters of AO, O2 and O3 (`A-O`, `a - o`, `O-2`):
 
-  SINGLE      one answer: A, AO, Aa, D, Z, R, E, O, O2 or O3, or a word approve,
-              approved, approve as obvious, disapprove, disapproved, defer,
-              later or repeat.
+  SINGLE      one answer: A, AO, Aa, D, Z, R, E, O, O2, O3 or M, or a word
+              approve, approved, approve as obvious, disapprove, disapproved,
+              defer, later, repeat or more responses.
   ALL         `all a`, `a to all`, `all ao`, `ao to all`.
   NUMBERED    one or more pairs of a number and A, AO, D, Z or R:
               `8a`, `6 - a`, `1 a 2 d`, `5 d, 6 z`, `item 3 ao`, `37.4 r`; or a
@@ -40,7 +40,10 @@ alternative is done. An answer that makes a change sends the agent to
 CHECK_PROGRAM's check step, with --obvious for AO and --after-advisor for Aa.
 O asks the agent to show the item again with an "Option 2" and an "Option 3"
 paragraph; O2 and O3 approve one of them, through the check step with
---option.
+--option. M asks the agent to show MORE_RESPONSES_TEXT, the responses the
+closing line leaves out, or, with no approval-walk open, every response but
+M; it records nothing, so it takes no item number and gets no
+--user-reply-as-typed line.
 
 THE OPEN APPROVAL-WALK is found with WALK_FINDER_FILE, the module the
 walk-me-through Stop hook uses too, loaded by path: the one
@@ -117,7 +120,8 @@ terminal the session runs in. The text opens with one line naming the answer
 and the approval-walk item it answers, or saying no approval-walk is open;
 then the answer's lines; while an approval-walk is open, or the walk state
 cannot be read, a last line gives the check step's --user-reply-as-typed flag
-with the prompt, its whitespace runs squeezed, quoted for the shell.
+with the prompt, its whitespace runs squeezed, quoted for the shell, except
+after M, which runs no check.
 
 AN ANSWER TO A VERSION THE USER MAY NOT HAVE SEEN. When an answer gives A,
 AO, Aa or D to a waiting item, in any form above, parts included, the hook
@@ -208,6 +212,17 @@ closing line, so a decision-bearing line the agent wrote of its own
 between the item's text and its closing line is read as one the item
 dropped, and goes to the model.
 
+Not handled either, in how lead_ins reads a colon lead-in: a heading inside a
+quotation or list ends a top-level heading's section as a peer heading does,
+and a quoted colon heading reaches past its quotation; an HTML comment
+between a lead-in and what it introduces, or at the end of the lead-in's own
+line, hides the lead-in; and the text after `The new text:` loses emphasis
+characters that open it, as `_reset` read as `reset`. Each can pass a
+reversed line with no model call or send an unchanged one to the model,
+which only asks the user to answer again. Both texts under one colon heading,
+one as `#new Keep rows.` and one as `If you approve, the new text: Keep
+rows.`, go to the model, since the heading's words come before the label.
+
 WHEN READING THE WALK STATE FAILS, such as a minutes file that is not UTF-8,
 the first line says so and why, and the text gives the answer's lines both for
 an open approval-walk and for none. When an A, AO, Aa or D answer reaches an item
@@ -220,6 +235,7 @@ docs/nedsnodes-wiki/nedsnodes-how-to-write-a-tool-message-to-agent-such-as-a-hoo
 """
 import collections
 import difflib
+import functools
 import importlib.util
 import json
 import os
@@ -239,11 +255,11 @@ EXPLAIN_SKILL = CHECKOUT / ".claude" / "skills" / "explain" / "SKILL.md"
 
 # Longer forms first, so `ao` is not read as `a` and `approve as obvious` not as `approve`.
 WORDS = {"approve as obvious": "AO", "approved": "A", "approve": "A", "disapproved": "D",
-         "disapprove": "D", "defer": "Z", "later": "Z", "repeat": "R"}
+         "disapprove": "D", "defer": "Z", "later": "Z", "repeat": "R", "more responses": "M"}
 NUMBER = r"\d+(?:\.\d+)*"
 JOINER = r"(?:\s*-\s*)?"
 AO = rf"a{JOINER}o"
-LETTER = rf"aa|{AO}|o{JOINER}[23]|[adzreo]"
+LETTER = rf"aa|{AO}|o{JOINER}[23]|[adzreom]"
 SINGLE_LETTER = re.compile(rf"^(?:{LETTER})$", re.I)
 WORD = "|".join(word.replace(" ", r"\s+") for word in WORDS)
 ANSWER = rf"(?P<answer>{WORD}|{LETTER})"
@@ -251,8 +267,10 @@ ALL = re.compile(rf"^(?:all\s+(?P<first>{AO}|a)|(?P<last>{AO}|a)\s+to\s+all)$", 
 PAIR = rf"(?:items?\s*)?({NUMBER})\s*(?:[-:=)]\s*)?({AO}|[adzr])(?![a-z])"
 NUMBERED = re.compile(rf"^(?:{PAIR}(?:[\s,;]+|$))+$", re.I)
 PAIRS = re.compile(PAIR, re.I)
+# M records nothing, and a check run with no flag records an A, so M never takes item numbers.
+NUMBERED_WORD = "|".join(word.replace(" ", r"\s+") for word, code in WORDS.items() if code != "M")
 WORD_NUMBERS = re.compile(
-    rf"^(?P<word>{WORD})\s+(?:items?\s+)?(?P<numbers>{NUMBER}(?:(?:\s*,\s*|\s+and\s+|\s+){NUMBER})*)$", re.I)
+    rf"^(?P<word>{NUMBERED_WORD})\s+(?:items?\s+)?(?P<numbers>{NUMBER}(?:(?:\s*,\s*|\s+and\s+|\s+){NUMBER})*)$", re.I)
 NOT_AN_ITEM_NUMBER = r"(?!(?:items?\s*)?\d)"
 CONDITION = re.compile(rf"^{ANSWER}\s*[,;:\-]?\s+(?P<condition>(?:if|after)\b.+)$", re.I | re.S)
 LETTER_RIDER = re.compile(
@@ -262,9 +280,17 @@ WORD_RIDER = re.compile(rf"^(?P<answer>{WORD})\b[\s,;:.\-]+{NOT_AN_ITEM_NUMBER}(
 PART_START = re.compile(r"^Part (\d+)\.(?=\s|$)")
 MOST_PARTS = 5
 HEADING_POINT = re.compile(r"^[#\s*]*items?\s[^:]*:\s*(.*?)[\s*]*$", re.I)
+# Each response the user can give an item, with its label, in the order the walk shows them.
+RESPONSE_LABELS = (("A", "approve"), ("AO", "approve as obvious"), ("Aa", "approve after an advisor check"),
+                   ("D", "disapprove"), ("Z", "defer"), ("E", "explain"), ("O", "other options"),
+                   ("M", "more responses"))
+CLOSING_LINE_RESPONSES = ("A", "D", "M")
 # The walk-me-through skill's closing line after its link, word for word; the hook's test checks SKILL.md holds it.
-ANSWER_LETTERS_TEXT = ("A approve · AO approve as obvious · Aa approve after an advisor check · D disapprove · "
-                       "Z defer · E explain · O other options")
+ANSWER_LETTERS_TEXT = " · ".join(f"{code} {label}" for code, label in RESPONSE_LABELS
+                                 if code in CLOSING_LINE_RESPONSES)
+# What M shows: every response the closing line leaves out.
+MORE_RESPONSES_TEXT = " · ".join(f"{code} {label}" for code, label in RESPONSE_LABELS
+                                 if code not in CLOSING_LINE_RESPONSES)
 NO_RECOMMENDATION_PROBLEM = "no line starting \"Recommendation:\""
 PARTS_NOT_TOLD_APART_PROBLEM = (
     "it is one of the items under the walk-document's heading `{heading}`, which holds more than one line "
@@ -381,6 +407,14 @@ MEANINGS = {
            "and wait for his answer.",)),
     "E": (("E means explain: run the explain skill, {explain_skill}, on {item}.",),
           ("E means explain: run the explain skill, {explain_skill}, on your last message.",)),
+    "M": (("{word} asks for more responses: the user is not answering {item} yet, and wants to see the responses "
+           "its closing line leaves out.",
+           "Reply with only this line, word for word, then, on a line of its own, {item}'s closing line, and wait "
+           "for his answer; record nothing in the minutes: " + MORE_RESPONSES_TEXT),
+          ("{word} asks for more responses: the user wants to see every response he can give your last question "
+           "or proposal.",
+           "Reply with only this line, word for word, and wait for his answer: "
+           + " · ".join(f"{code} {label}" for code, label in RESPONSE_LABELS if code != "M"))),
 }
 # O2 and O3 approve an option the agent showed after an O, instead of the recommendation.
 OPTION_TAKEN_LINES = (
@@ -609,9 +643,6 @@ DECISION_MARK = re.compile(r"^(#new_if_d|#new|#case_against)(?!\w)[\s:]*(.*)$", 
 DECISION_PART = re.compile(r"^(Part \d+)\.(?:\s+|$)(.*)$")
 DECISION_LABEL = re.compile(r"(Recommendation|The alternative):", re.I)
 BARE_MARKS_INTRODUCING_A_BLOCK = ("#new", "#new_if_d")
-# A message's heading or closing line that opens another item, as shown_words gives it: `Item 5: ...`,
-# `Items 5 and 6: ...`, `Item 5, ...`, or `Item 5` alone; `Item 5 fixes a path` is a mention, not an opening.
-ITEM_OPENING_AS_SHOWN = re.compile(r"^Items?\s+(\d+(?:\.\d+)*)((?:\s*(?:,|and|to)\s*\d+(?:\.\d+)*)*)\s*(?:[:,]|$)")
 DECISION_LABEL_NAMES = {"recommendation": "Recommendation", "the alternative": "The alternative"}
 # Marks that tag a line, not words of its meaning, dropped from both texts before they are compared.
 MARK_WORDS = re.compile(r"\[advisor\]|#(?:new_if_d|new|case_against)(?!\w)", re.I)
@@ -663,6 +694,7 @@ RECOMMENDATION_UNKNOWN_LINE = (
     "what he wants done before acting on {answer_letter}.")
 
 
+@functools.cache
 def load_walk_finder():
     spec = importlib.util.spec_from_file_location(
         "walk_me_through_approval_walk_minutes_and_walk_document_item_finder_common", WALK_FINDER_FILE)
@@ -672,7 +704,7 @@ def load_walk_finder():
 
 
 def answer_code(answer):
-    """The answer's code, A, AO, AA for Aa, D, Z, R, E, O, O2 or O3, from a letter or a word in any case and
+    """The answer's code, A, AO, AA for Aa, D, Z, R, E, O, O2, O3 or M, from a letter or a word in any case and
     spacing, with any hyphen between the letters dropped."""
     lowered = " ".join(answer.lower().split())
     return WORDS.get(lowered) or re.sub(r"[\s-]", "", lowered).upper()
@@ -1176,19 +1208,18 @@ def rendered_blocks(markdown, parser, env):
     return blocks
 
 
-def shown_units(markdown, parser, env):
+def shown_units(markdown, parser, env, blocks, found):
     """[(first line, line after the last, words)] for each unit of markdown a decision-bearing line can be compared
-    with, in order of first line: each of rendered_blocks' blocks, its lines joined, and each list and quotation
-    whole, as shown_words gives it, since a bare `#new` mark's text can be a whole list or quotation. A unit has the
-    words of each of lead_ins' lead-ins introducing it first, and keeps its own first line, so that each unit below
-    one lead-in is below the one before it. A unit holding ANSWER_LETTERS_TEXT, a closing line, or no words is left
-    out."""
+    with, in order of first line: each of blocks, rendered_blocks' blocks of markdown, its lines joined, and each list
+    and quotation whole, as shown_words gives it, since a bare `#new` mark's text can be a whole list or quotation. A
+    unit has the words of each of found, lead_ins' lead-ins of markdown, introducing it first, and keeps its own first
+    line, so that each unit below one lead-in is below the one before it. A unit holding ANSWER_LETTERS_TEXT, a closing
+    line, or no words is left out."""
     text = load_walk_finder().approval_walk_text_with_approval_walk_item_hashtag_lines_removed(markdown)
     source_lines = text.split("\n")
-    units = [(*block.span, " ".join(block.lines)) for block in rendered_blocks(markdown, parser, env)]
+    units = [(*block.span, " ".join(block.lines)) for block in blocks]
     units += [(*token.map, shown_words("\n".join(source_lines[slice(*token.map)]), parser, env))
               for token in parser.parse(text, env) if token.map and token.type in CONTAINER_BLOCK_TYPES]
-    found = lead_ins(markdown, parser, env)
     units = [(first, last, with_lead_ins(first, last, found, words)) for first, last, words in units]
     return sorted(unit for unit in units if ANSWER_LETTERS_TEXT not in unit[2] and comparable_words(unit[2]))
 
@@ -1209,15 +1240,15 @@ def new_text_as_shown(line):
     return f"{LEAD_INS_BEFORE_A_LINE_SHOWN_WITHOUT_ITS_MARK[f'`{mark[1].lower()}` line']} {marked_text(mark)}"
 
 
-def decision_bearing_lines(body, parser, env, has_parts):
+def decision_bearing_lines(blocks, blocks_lead_ins, has_parts):
     """[(the line's name, as a refusal names it; its decision-bearing text; the words of the unit, of shown_units'
-    units, that holds it, which a refusal quotes as the user saw it)] for the item body's Markdown, as the module
-    docstring's AN ANSWER TO A VERSION THE USER MAY NOT HAVE SEEN says, read line by line as rendered. A text and its
-    unit have the words of each of lead_ins' lead-ins introducing the line's block first, so that `> #new X` shown
-    below "If you disapprove, the new text:" is not the same line as the item's `#new X`."""
+    units, that holds it, which a refusal quotes as the user saw it)] for an item body's Markdown, given as blocks,
+    its rendered_blocks, and blocks_lead_ins, its lead_ins, as the module docstring's AN ANSWER TO A VERSION THE USER
+    MAY NOT HAVE SEEN says, read line by line as rendered. A text and its unit have the words of each lead-in
+    introducing the line's block first, so that `> #new X` shown below "If you disapprove, the new text:" is not the
+    same line as the item's `#new X`."""
     found = []
-    blocks_lead_ins = lead_ins(body, parser, env)
-    for block in rendered_blocks(body, parser, env):
+    for block in blocks:
         def led_in(text, block=block):
             return with_lead_ins(*block.span, blocks_lead_ins, text)
         unit = led_in(" ".join(block.lines))
@@ -1438,23 +1469,33 @@ def item_openings_as_shown(tokens, parser, env):
             yield token.map[0], words
 
 
+@functools.cache
+def item_numbers_an_opening_names(words):
+    """The item numbers of a message's heading or closing line, as shown_words gives it, with every range expanded:
+    the numbers of the walk finder's ITEM_LABEL_WITHOUT_COUNT, as in `Item 5: ...`, `Items 3.1, 3.2 & 4.1 - ...`,
+    `Item 5, ...` or `Item 5` alone. None when words open no item, as `Item 5 fixes a path`, a mention, does; [] for a
+    list the walk finder calls an unusable range."""
+    walk_finder = load_walk_finder()
+    opening = walk_finder.ITEM_LABEL_WITHOUT_COUNT.match(words)
+    if not opening:
+        return None
+    try:
+        return walk_finder.expand_numbers(opening["numbers"] or opening["plural_numbers"])
+    except walk_finder.UnusableRange:
+        return []
+
+
 def opens_another_item(words, heading):
     """Whether a message's heading or closing line, as item_openings_as_shown gives it, opens an item other than the
-    one heading names, as ITEM_OPENING_AS_SHOWN reads it: such a line ends the text shown for heading's
-    item, so that another item's lines in the same message are not taken for its own. A sub-step of heading's item,
-    and an item inside heading's range, are its own."""
-    opening = ITEM_OPENING_AS_SHOWN.match(words)
-    own = ITEM_OPENING_AS_SHOWN.match(heading)
-    if not opening or not own:
+    one heading names: such a line ends the text shown for heading's item, so that another item's lines in the same
+    message are not taken for its own. A sub-step of heading's item, an item inside heading's range, and a heading
+    that names one of those among other items, as `Items 3.1 and 4.1` does for item 4, are its own. An unusable range
+    names nothing, so it ends the text: a line cut off goes to the model, while a line let in could count unchecked."""
+    numbers = item_numbers_an_opening_names(words)
+    own_numbers = item_numbers_an_opening_names(heading)
+    if numbers is None or own_numbers is None:
         return False
-    own_numbers = [own[1], *re.findall(r"\d+(?:\.\d+)*", own[2])]
-    number = opening[1]
-    if any(number == mine or number.startswith(f"{mine}.") for mine in own_numbers):
-        return False
-    if re.search(r"\bto\b", own[2]):
-        low, high = int(own_numbers[0].split(".")[0]), int(own_numbers[-1].split(".")[0])
-        return not low <= int(number.split(".")[0]) <= high
-    return True
+    return not any(number == mine or number.startswith(f"{mine}.") for number in numbers for mine in own_numbers)
 
 
 def model_judgement(pairs, timeout_seconds=MODEL_TIMEOUT_SECONDS):
@@ -1546,9 +1587,13 @@ def unseen_item_lines(answer, walk, transcript_path):
         # The message's copy is read as holding parts on its own count, so a part the item dropped is still read.
         has_parts = number in walk.parts or bool(part_numbers(part_starts(parser.parse(copy, {})), 0,
                                                               copy.count("\n") + 1))
-        checks = decision_line_checks(decision_bearing_lines(body, parser, env, has_parts),
-                                      decision_bearing_lines(copy, parser, message_env, has_parts),
-                                      shown_units(copy, parser, message_env), shown_units(body, parser, env))
+        # Each text is parsed for its blocks and lead-ins once, as this runs on every prompt.
+        body_reading = (rendered_blocks(body, parser, env), lead_ins(body, parser, env))
+        copy_reading = (rendered_blocks(copy, parser, message_env), lead_ins(copy, parser, message_env))
+        checks = decision_line_checks(decision_bearing_lines(*body_reading, has_parts),
+                                      decision_bearing_lines(*copy_reading, has_parts),
+                                      shown_units(copy, parser, message_env, *copy_reading),
+                                      shown_units(body, parser, env, *body_reading))
         if checks:
             misses[number] = (timestamp, checks)
     pairs = [check for _, checks in misses.values() for check in checks if None not in check]
@@ -1622,7 +1667,7 @@ def output_for(payload):
                              *refusal])
         return {"hookSpecificOutput": {"hookEventName": "UserPromptSubmit", "additionalContext": context}}
     context = context_for(answer, walk, walk_error)
-    if walk is not None or walk_error is not None:
+    if (walk is not None or walk_error is not None) and answer.get("code") != "M":
         context += "\n" + USER_REPLY_LINE.format(reply=shlex.quote(" ".join(payload["prompt"].split())))
     return {"hookSpecificOutput": {"hookEventName": "UserPromptSubmit", "additionalContext": context}}
 

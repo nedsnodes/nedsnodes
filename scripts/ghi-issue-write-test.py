@@ -2983,16 +2983,14 @@ def run_edit_cases(scratch: Path):
     original_rule = tool.issue_number_in_file_name
     tool.issue_number_in_file_name = lambda path: 572
     try:
-        followed = tool.validate_edit(
-            filed_ghi_md(scratch, name="v2-follows-the-shared-rule.md"),
-            scratch)[2] == 572
-    except tool.Refused:
-        followed = False
+        check("validate_edit takes a file's issue number from "
+              "issue_number_in_file_name, the rule the reusable-prompt rule "
+              "asks",
+              lambda: tool.validate_edit(
+                  filed_ghi_md(scratch, name="v2-follows-the-shared-rule.md"),
+                  scratch)[2] == 572)
     finally:
         tool.issue_number_in_file_name = original_rule
-    check("validate_edit takes a file's issue number from "
-          "issue_number_in_file_name, the rule the reusable-prompt rule asks",
-          followed)
 
     for case_name, target in [
             ("a file not named for an issue is refused",
