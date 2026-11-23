@@ -4271,7 +4271,17 @@ def volume_ignores_case(directory):
 
 
 def same_directory(first, second):
-    """Whether two paths name one directory, as a case-insensitive volume or a symlink may hide."""
+    """Whether two paths name one directory, as a case-insensitive volume or a symlink may hide.
+
+    Not handled when a path is missing:
+    - The nearest existing directory is a mount point: the parent volume's case rule answers, so
+      a run may write into the read-only directory, or two distinct directories may be refused.
+    - On a case-sensitive volume, a sibling symlink named the swapped-case spelling, such as
+      `foo -> FOO`, reads as a case-insensitive volume, so a valid run is refused.
+    - Another run creates the destination between the two ancestor lookups: two identical paths
+      can compare as different, so a run may write into the read-only directory.
+    - casefold() merges names a volume keeps distinct, such as `straße` and `strasse` on exFAT,
+      so a valid run is refused."""
     try:
         return first.samefile(second)
     except OSError:

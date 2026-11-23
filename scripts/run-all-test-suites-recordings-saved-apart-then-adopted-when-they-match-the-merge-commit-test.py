@@ -435,20 +435,26 @@ def read_only_directory_overlap_is_judged_by_the_directory_and_by_what_this_run_
         except runner.CouldNotRun:
             return True
 
+    # Injected: this suite also runs on the Mac, whose default volume ignores case.
+    real_volume_ignores_case = runner.volume_ignores_case
+    runner.volume_ignores_case = lambda directory: False
+    try:
+        refused = refused_as_one_directory(store / "MISSING", store / "missing")
+    finally:
+        runner.volume_ignores_case = real_volume_ignores_case
     check("on a case-sensitive volume, two missing directories differing in case are not "
-          "refused",
-          not refused_as_one_directory(store / "MISSING", store / "missing"))
+          "refused", not refused)
 
     # Injected: ned-box's volumes are case-sensitive. A symlink stands for the second spelling
     # of an existing directory, and resolve() keeps each spelling, as on a case-insensitive
     # volume, where the target's root-commit subdirectory does not exist yet.
-    (scratch.root / "recordings").mkdir()
-    (scratch.root / "Recordings").symlink_to(scratch.root / "recordings")
+    (scratch.root / "recordings-spelling-one").mkdir()
+    (scratch.root / "recordings-spelling-two").symlink_to(scratch.root / "recordings-spelling-one")
     real_resolve = pathlib.Path.resolve
     pathlib.Path.resolve = lambda self, strict=False: pathlib.Path(os.path.abspath(self))
     try:
-        refused = refused_as_one_directory(scratch.root / "Recordings" / "abc",
-                                           scratch.root / "recordings" / "abc")
+        refused = refused_as_one_directory(scratch.root / "recordings-spelling-two" / "abc",
+                                           scratch.root / "recordings-spelling-one" / "abc")
     finally:
         pathlib.Path.resolve = real_resolve
     check("a missing directory under two spellings of one existing directory is refused", refused)
