@@ -81,7 +81,7 @@ def main_commit_option_value(value):
 def head_commit_option_value(value):
     # A branch name could move before a printed rerun command is used, and an empty shell
     # variable must not fall back to the pull request's head on origin.
-    if not re.fullmatch(r"[0-9a-f]{40}", value):
+    if not re.fullmatch(r"[0-9a-fA-F]{40}", value):
         raise argparse.ArgumentTypeError(
             f"{value!r} is not a full 40-character commit hash, so no suite ran.\n"
             "Pass the commit's full hash, or leave the option out to use the pull request's "
@@ -131,9 +131,14 @@ def commit_fetched_from_origin(tools, source, environment):
         return None, failure
     commit, failure = git_output_or_failure(
         tools, ["rev-parse", "--verify", f"{destination}^{{commit}}"], environment)
-    if failure is not None:
-        return None, failure
-    _, failure = git_output_or_failure(tools, ["update-ref", "-d", destination], environment)
+    _, cleanup_failure = git_output_or_failure(tools, ["update-ref", "-d", destination],
+                                               environment)
+    if cleanup_failure is not None:
+        print(f"The fetched reference {destination} was left in the git checkout {tools}, "
+              f"because deleting it failed: {cleanup_failure}\n"
+              f"Do nothing about this: no program reads that reference, and this program "
+              f"continues with the commit it already read.",
+              file=sys.stderr, flush=True)
     if failure is not None:
         return None, failure
     return commit, None

@@ -13,7 +13,9 @@ program dropped it.
 Run: python3 scripts/merge-lane-pull-request-head-test-run-on-merged-worktree-test.py
 """
 
+import contextlib
 import importlib.util
+import io
 import json
 import os
 import re
@@ -22,6 +24,7 @@ import shutil
 import subprocess
 import sys
 import tempfile
+from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 
 _git_environment_fixture_spec = importlib.util.spec_from_file_location(
@@ -65,6 +68,18 @@ for _ in range(int(os.environ.get("MERGE_LANE_HEAD_TEST_RUN_TEST_EXTRA_STDERR_LI
 print(f"SUMMARY: fake summary for {os.path.basename(checkout)}")
 print("a line on stderr", file=sys.stderr)
 sys.exit(exit_code)
+'''
+
+OVERLAPPING_FETCHES_CHILD = r'''
+import importlib.util, os, sys
+from pathlib import Path
+spec = importlib.util.spec_from_file_location("head_test_run_program", sys.argv[1])
+program = importlib.util.module_from_spec(spec)
+spec.loader.exec_module(program)
+for _ in range(10):
+    commit, _failure = program.commit_fetched_from_origin(
+        Path(sys.argv[2]), sys.argv[3], dict(os.environ))
+    print(commit)
 '''
 
 failures = []
@@ -138,6 +153,52 @@ def run_program(scratch, helpers, exits, *pull_requests, review_tools=None, cwd=
     completed.stdout_naming_main = completed.stdout
     completed.stdout = without_main_commit(completed.stdout)
     return completed, calls
+
+
+def check_commit_fetched_from_origin(review_tools, author, origin, main_commit):
+    spec = importlib.util.spec_from_file_location("head_test_run_program", PROGRAM)
+    program = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(program)
+    environment = dict(os.environ)
+    pull_head = git(origin, "rev-parse", "refs/pull/8/head")
+    # Separate processes, because the destination reference is named by process id.
+    sources = [("refs/heads/main", main_commit), ("refs/pull/8/head", pull_head)] * 8
+    def fetched_commits(pair):
+        return subprocess.run(
+            [sys.executable, "-c", OVERLAPPING_FETCHES_CHILD, str(PROGRAM), str(review_tools),
+             pair[0]], capture_output=True, text=True).stdout.split()
+    with ThreadPoolExecutor(max_workers=len(sources)) as pool:
+        results = list(pool.map(fetched_commits, sources))
+    check("overlapping processes fetching different sources each get their own source's commit",
+          results == [[commit] * 10 for _, commit in sources], repr(results[:2]))
+
+    real_git_output = program.git_output_or_failure
+    program.git_output_or_failure = lambda tools, command, environment: (
+        (None, "git update-ref failed: packed-refs.lock is held")
+        if command[0] == "update-ref" else real_git_output(tools, command, environment))
+    cleanup_stderr = io.StringIO()
+    with contextlib.redirect_stderr(cleanup_stderr):
+        commit, failure = program.commit_fetched_from_origin(
+            review_tools, "refs/heads/main", environment)
+    program.git_output_or_failure = real_git_output
+    left_behind = f"{program.FETCHED_COMMIT_REFERENCE_PREFIX}/{os.getpid()}"
+    check("a failed delete of the fetched reference keeps the commit read, and reports the "
+          "reference and that nothing need be done",
+          commit == main_commit and failure is None
+          and "packed-refs.lock is held" in cleanup_stderr.getvalue()
+          and left_behind in cleanup_stderr.getvalue()
+          and "Do nothing about this" in cleanup_stderr.getvalue(),
+          f"{commit!r} {failure!r} {cleanup_stderr.getvalue()!r}")
+    git(review_tools, "update-ref", "-d", left_behind)
+
+    blob = git(author, "rev-parse", "HEAD:on-main.txt")
+    git(author, "push", "-q", str(origin), f"{blob}:refs/pull/12/head")
+    references_before = git(review_tools, "for-each-ref")
+    commit, failure = program.commit_fetched_from_origin(
+        review_tools, "refs/pull/12/head", environment)
+    check("a fetched object that is not a commit is reported and leaves no reference behind",
+          commit is None and failure and "rev-parse" in failure
+          and git(review_tools, "for-each-ref") == references_before, f"{commit!r} {failure!r}")
 
 
 def main():
@@ -376,6 +437,7 @@ def main():
               and tracking_main_before != main_fix, detail)
         check("a direct run leaves no reference of its own behind",
               git(review_tools, "for-each-ref", "refs/merge-lane-head-test-run") == "", detail)
+        check_commit_fetched_from_origin(review_tools, author, scratch / "origin.git", main_fix)
         completed, calls = run_program(scratch, helpers, {}, "7", "--main-commit", pinned_main)
         detail = f"exit {completed.returncode}\n{completed.stdout}{completed.stderr}"
         check("--main-commit is the main merged onto, even when origin's main is newer",
@@ -453,6 +515,7 @@ def main():
         check("when the head is rebased on origin just after the program reads it, the commit "
               "it read is still merged and tested",
               completed.returncode == 0 and len(calls) == 1 and rebased_marker.exists()
+              and git(scratch / "origin.git", "rev-parse", "refs/pull/7/head") == rebased_head
               and git(merged, "rev-parse", "HEAD^2") == replaced_head, detail)
 
         git_calls_log = scratch / "git-calls.log"
@@ -460,6 +523,20 @@ def main():
         git_logger.write_text(f'#!/bin/sh\nprintf "%s\\n" "$*" >> {shlex.quote(str(git_calls_log))}\n'
                               f'exec {shlex.quote(shutil.which("git"))} "$@"\n')
         git_logger.chmod(0o755)
+        completed, calls = run_program(scratch, helpers, {}, "7")
+        head_fetches = [line for line in git_calls_log.read_text().splitlines()
+                        if " fetch " in f" {line} " and "pull/7/head" in line]
+        check("a run fetches the pull request's head once, so the rebuild needs no second "
+              "request to origin",
+              completed.returncode == 0 and len(head_fetches) == 1
+              and git(merged, "rev-parse", "HEAD^2") == rebased_head,
+              f"exit {completed.returncode}, head fetches: {head_fetches}\n"
+              f"{completed.stdout}{completed.stderr}")
+        completed, calls = run_program(scratch, helpers, {}, "7",
+                                       "--head-commit", reviewed_head.upper())
+        check("an uppercase full hash is accepted as --head-commit",
+              completed.returncode == 0 and git(merged, "rev-parse", "HEAD^2") == reviewed_head,
+              f"exit {completed.returncode}\n{completed.stdout}{completed.stderr}")
         for option in ("--head-commit", "--main-commit"):
             git_calls_log.unlink(missing_ok=True)
             completed, calls = run_program(scratch, helpers, {}, "7", option, "")
