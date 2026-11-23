@@ -30,8 +30,23 @@ letters of AO, O2 and O3 (`A-O`, `a - o`, `O-2`):
               tells the agent to run CHECK_PROGRAM's `check --bump` with that
               title, which shows that item next and the waiting item after it;
               with no walk open, the hook prints nothing.
-Every other prompt prints nothing and exits 0 without reading any file: Y and
-C are not answers, and N, like next, is a navigation word the agent reads.
+Every other prompt is a reply in the user's own words: Y and C are not answers,
+and N, like next, is a navigation word the agent reads.
+
+A REPLY THAT MAY FOLLOW A SETTLED DISCUSSION. While an item waits, the text
+carries WALK_ME_THROUGH_HOOK_INSTRUCTION_TO_AGENT_REWRITE_APPROVAL_WALK_ITEM_WHEN_DISCUSSION_SETTLED_ON_NON_RECOMMENDED_OPTION_LINE, which holds the
+walk-me-through skill's sentence on a discussion that settles on another
+option, word for word, for an answer that gives A, AO or Aa, in any form above,
+since the user may type A right after such a discussion. The line comes right
+after the opening line, a refused answer's included, because it can override
+the lines after it. A numbered answer naming a number no item has, which
+the hook does not expand, counts as a reply in his own words. A reply in his own
+words gets WALK_ME_THROUGH_HOOK_AGENT_CONTEXT_OPENING_WHEN_APPROVAL_WALK_ITEM_WAITING_AND_USER_REPLY_NOT_SHORT_ANSWER_LINE and that line, and nothing else, when he typed
+it in an agent-session he attends, as the pending-user-alerts hook's
+typed_by_user and agent-session-unattended-by-user-check-common.py decide. With
+no item waiting, an empty prompt, or a prompt he did not type, it prints
+nothing. When reading the approval-walk state fails, the reply gets
+WALK_ME_THROUGH_HOOK_AGENT_CONTEXT_OPENING_WHEN_APPROVAL_WALK_STATE_READ_FAILED_AND_USER_REPLY_NOT_SHORT_ANSWER_LINE and that line, and exit 0.
 
 A, AO, Aa and D answer the item's recommendation: A, AO and Aa approve it,
 Aa only after an advisor check, which the agent makes as AA_SKILL_TEXT, the
@@ -77,8 +92,9 @@ or on a part of the waiting item, does the same for the item it names, and an
 answer whose every letter is R, such as `37.4 r`, gets none of the lines for
 recording answers, since R records nothing. When no approval-walk is
 open, or its walk-document has no item with a number an R names, or with one
-of the numbers after a word, as in `approve 5 and 6`, the hook prints
-nothing, so the prompt reaches the agent as typed; when the walk-document or
+of the numbers after a word, as in `approve 5 and 6`, the hook does not expand
+the answer, so the prompt reaches the agent as typed, with only what a reply in
+his own words gets; when the walk-document or
 the `#next_to_present` line cannot be read, the hook still gives the text, and
 the agent looks for the item itself.
 
@@ -328,6 +344,27 @@ AA_SKILL_TEXT = (
     "outside the item becomes a new item in the walk or a loose end. If the call fails, say so and show "
     "the item again, unapproved; the user may then answer A to approve it without the check."
 )
+# The walk-me-through skill's sentence, word for word; the hook's test checks SKILL.md still holds it.
+DISCUSSION_SETTLED_SKILL_TEXT = (
+    "When the discussion of an item settles on any option but its recommendation, even its alternative, rewrite the "
+    "item's recommendation as that option and its alternative as the old recommendation, show the revised item, and "
+    "record only an answer given to the revised item."
+)
+WALK_ME_THROUGH_HOOK_INSTRUCTION_TO_AGENT_REWRITE_APPROVAL_WALK_ITEM_WHEN_DISCUSSION_SETTLED_ON_NON_RECOMMENDED_OPTION_LINE = (
+    "Act on this line only if the discussion of the waiting approval-walk item settled on an option other than its "
+    "recommendation: " + DISCUSSION_SETTLED_SKILL_TEXT)
+WALK_ME_THROUGH_HOOK_AGENT_CONTEXT_OPENING_WHEN_APPROVAL_WALK_ITEM_WAITING_AND_USER_REPLY_NOT_SHORT_ANSWER_LINE = (
+    "[rule walk-me-through-hook-instruction-to-agent-rewrite-approval-walk-item-when-discussion-settled-on-non-recommended-option] "
+    "{item} of approval-walk {walk} is waiting for the user's answer, and his reply is in his own words.")
+WALK_ME_THROUGH_HOOK_AGENT_CONTEXT_OPENING_WHEN_APPROVAL_WALK_STATE_READ_FAILED_AND_USER_REPLY_NOT_SHORT_ANSWER_LINE = (
+    "[rule walk-me-through-hook-instruction-to-agent-rewrite-approval-walk-item-when-discussion-settled-on-non-recommended-option] "
+    "The hook could not tell whether an approval-walk item is waiting for the user's answer, because reading the "
+    "approval-walk state failed: {error}. Find out yourself: the last `#next_to_present` line in each of the "
+    "checkout's docs/walk/*-minutes.md names its waiting item, and a value other than `none` or `closed` marks the "
+    "approval-walk open. If an item is waiting, the next line applies; if none is, it does not.")
+ANSWERS_THAT_APPROVE = ("A", "AO", "AA")
+PENDING_USER_ALERTS_HOOK_FILE = HERE / "walk-me-through-pending-user-alerts-claim-and-insert-as-approval-walk-items-user-prompt-submit-hook.py"
+ATTENDANCE_CHECK_FILE = CHECKOUT / "nn-systems" / "general-tools" / "agent-session-unattended-by-user-check-common.py"
 # Each answer's lines: (lines while an approval-walk is open, lines while none is).
 MEANINGS = {
     "A": (("{word} means approve: the user agrees with the recommendation of {item}{recommended}. "
@@ -1654,21 +1691,73 @@ def output_for(payload):
         return bump_output(payload, bump)
     answer = parsed_answer(payload.get("prompt") or "")
     if answer is None:
-        return None
+        return own_words_output(payload)
     try:
         walk, walk_error = read_walk(payload.get("cwd") or os.getcwd()), None
     except Exception as error:
         walk, walk_error = None, error
     if named_item_missing(answer, walk, walk_error):
-        return None
+        return own_words_output(payload)
+    # Right after the opening line, because it can override what the answer's own lines tell the agent to do.
+    settled_line = [WALK_ME_THROUGH_HOOK_INSTRUCTION_TO_AGENT_REWRITE_APPROVAL_WALK_ITEM_WHEN_DISCUSSION_SETTLED_ON_NON_RECOMMENDED_OPTION_LINE] if (
+        (walk is not None or walk_error is not None) and answer_approves(answer)) else []
     refusal = unseen_item_lines(answer, walk, payload.get("transcript_path"))
     if refusal:
         context = "\n".join([ITEM_NOT_SHOWN_OPENING_LINE.format(answer=answer["answer"], item=walk.item, walk=walk.name),
-                             *refusal])
+                             *settled_line, *refusal])
         return {"hookSpecificOutput": {"hookEventName": "UserPromptSubmit", "additionalContext": context}}
-    context = context_for(answer, walk, walk_error)
+    opening, *answer_lines = context_for(answer, walk, walk_error).split("\n")
+    context = "\n".join([opening, *settled_line, *answer_lines])
     if (walk is not None or walk_error is not None) and answer.get("code") != "M":
         context += "\n" + USER_REPLY_LINE.format(reply=shlex.quote(" ".join(payload["prompt"].split())))
+    return {"hookSpecificOutput": {"hookEventName": "UserPromptSubmit", "additionalContext": context}}
+
+
+def answer_approves(answer):
+    """Whether the answer gives A, AO or Aa, to any item or part when it is numbered."""
+    if answer["form"] == "numbered":
+        return any(letter in ANSWERS_THAT_APPROVE for _, letter in answer["pairs"])
+    return answer["code"] in ANSWERS_THAT_APPROVE
+
+
+def load_module_by_path(name, path):
+    specification = importlib.util.spec_from_file_location(name, path)
+    module = importlib.util.module_from_spec(specification)
+    specification.loader.exec_module(module)
+    return module
+
+
+def own_words_output(payload):
+    """The output for a prompt that is no short answer: the settled-discussion line while an item waits, else None.
+    Reads only the walk-minutes, not the walk-document, whose faults concern the answer forms."""
+    if not (payload.get("prompt") or "").strip():
+        return None
+    attendance = load_module_by_path("agent_session_unattended_by_user_check_common", ATTENDANCE_CHECK_FILE)
+    if attendance.agent_session_unattended_by_user(os.environ):
+        return None
+    try:
+        walk_finder = load_walk_finder()
+        top = walk_finder.checkout_top(Path(payload.get("cwd") or os.getcwd()))
+        if top is None or not (top / walk_finder.WALK_DIRECTORY).is_dir():
+            return None
+        walk = walk_finder.open_walk(top / walk_finder.WALK_DIRECTORY, walk_finder.markdown_parser())
+        if walk is None:
+            return None
+        minutes, value, _ = walk
+        count = walk_finder.VALUE_COUNT.match(value)
+        opening = WALK_ME_THROUGH_HOOK_AGENT_CONTEXT_OPENING_WHEN_APPROVAL_WALK_ITEM_WAITING_AND_USER_REPLY_NOT_SHORT_ANSWER_LINE.format(item=count[0] if count else f"The item `{value}`",
+                                                walk=minutes.name[:-len(walk_finder.MINUTES_SUFFIX)])
+    except Exception as error:
+        opening = WALK_ME_THROUGH_HOOK_AGENT_CONTEXT_OPENING_WHEN_APPROVAL_WALK_STATE_READ_FAILED_AND_USER_REPLY_NOT_SHORT_ANSWER_LINE.format(error=repr(error))
+    alerts_hook = load_module_by_path("walk_me_through_pending_user_alerts_hook", PENDING_USER_ALERTS_HOOK_FILE)
+    try:
+        typed = alerts_hook.typed_by_user(payload)
+    except (OSError, ValueError):
+        # An unreadable transcript says nothing about who wrote the prompt, so its opening decides.
+        typed = not payload["prompt"].lstrip().startswith(alerts_hook.NOT_TYPED_PROMPT_OPENINGS)
+    if not typed:
+        return None
+    context = "\n".join([opening, WALK_ME_THROUGH_HOOK_INSTRUCTION_TO_AGENT_REWRITE_APPROVAL_WALK_ITEM_WHEN_DISCUSSION_SETTLED_ON_NON_RECOMMENDED_OPTION_LINE])
     return {"hookSpecificOutput": {"hookEventName": "UserPromptSubmit", "additionalContext": context}}
 
 
