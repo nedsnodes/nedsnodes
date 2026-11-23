@@ -7,12 +7,12 @@ file for this agent-session exists, the hook prints {"systemMessage": <line>},
 which Claude Code shows the user, in the terminal and on the claude.ai page, and
 not the agent. The message itself always goes through unchanged.
 
-The line names the new agent-session by this agent-session's current title, the
-customTitle of the last custom-title record in its transcript, which is the name
-claude.ai shows and changes when the user renames the agent-session there. With
-no such record, or a transcript that cannot be read, the line names the agent-seat
-the handoff-supervisor launched the agent-session under, and failing that, says
-"this agent-seat's new session".
+The line names the new agent-session by the agent-seat the handoff-supervisor
+launched this agent-session under, because the handoff-supervisor starts the
+successor under that name even after the user renames this agent-session in
+claude.ai. With no such name, as when no handoff-supervisor launched it, the line
+names it by its current title, the customTitle of the last custom-title record in
+its transcript, and failing that, says "this agent-seat's new session".
 
 The line is shown once per marker file, because a refused handoff leaves the
 marker file in place and a wrong notice must not repeat on every message. Before
@@ -96,14 +96,13 @@ def launched_agent_seat_name() -> str:
 
 def new_session_name(transcript_path_text) -> str:
     """Return the name the line gives the new agent-session, or "" when none is found."""
-    if isinstance(transcript_path_text, str) and transcript_path_text:
-        try:
-            title = session_title_from_transcript(transcript_path_text)
-        except OSError:
-            title = ""
-        if title:
-            return title
-    return launched_agent_seat_name()
+    agent_seat_name = launched_agent_seat_name()
+    if agent_seat_name or not (isinstance(transcript_path_text, str) and transcript_path_text):
+        return agent_seat_name
+    try:
+        return session_title_from_transcript(transcript_path_text)
+    except OSError:
+        return ""
 
 
 def user_notice(name: str) -> str:
@@ -132,7 +131,7 @@ def main() -> int:
             pass
         notice = user_notice(new_session_name(payload.get("transcript_path")))
         shown_record.write_text(marker_modified + "\n", encoding="utf-8")
-        print(json.dumps({"systemMessage": notice}, ensure_ascii=False))
+        print(json.dumps({"systemMessage": notice}))
     except Exception as error:
         print(HOOK_FAILED_MESSAGE.format(error=f"{type(error).__name__}: {error}"), file=sys.stderr)
         return 1

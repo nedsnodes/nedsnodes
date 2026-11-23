@@ -50,8 +50,10 @@ def check(case_name, condition, detail=""):
         failures.append(case_name)
 
 
-def run_hook(payload, home, agent_seat_name=None, raw_input_text=None):
+def run_hook(payload, home, agent_seat_name=None, raw_input_text=None, stdout_encoding=None):
     environment = {**os.environ, "HOME": str(home)}
+    if stdout_encoding is not None:
+        environment["PYTHONIOENCODING"] = stdout_encoding
     environment.pop(AGENT_NAME_VARIABLE, None)
     if agent_seat_name is not None:
         environment[AGENT_NAME_VARIABLE] = agent_seat_name
@@ -126,28 +128,45 @@ with tempfile.TemporaryDirectory() as workspace:
     marker("s-once").write_text("40.0\n", encoding="utf-8")
     os.utime(marker("s-once"), ns=(1_000_000_000_000, 1_000_000_000_000))
     payload = {"session_id": "s-once", "transcript_path": str(titled)}
-    result = run_hook(payload, home, agent_seat_name="seat-a")
-    check("marker file present: the line names the last custom-title, exit 0",
+    result = run_hook(payload, home)
+    check("marker file present, no launched agent-seat: the line names the last custom-title, exit 0",
           result.returncode == 0 and shown_notice(result) == expected_named("efficiency-renamed"),
           f"code {result.returncode}, stdout {result.stdout!r}, stderr {result.stderr!r}")
     check("marker file present: the file recording the shown notice holds the marker file's modification time",
           (handoffs / "s-once-handoff-asked-user-notice-shown").read_text(encoding="utf-8").strip()
           == "1000000000000")
 
-    result = run_hook(payload, home, agent_seat_name="seat-a")
+    result = run_hook(payload, home)
     check("second message, same marker file: no output, exit 0", silent(result),
           f"code {result.returncode}, stdout {result.stdout!r}, stderr {result.stderr!r}")
 
     os.utime(marker("s-once"), ns=(2_000_000_000_000, 2_000_000_000_000))
-    result = run_hook(payload, home, agent_seat_name="seat-a")
+    result = run_hook(payload, home)
     check("a newer marker file: the line again",
           result.returncode == 0 and shown_notice(result) == expected_named("efficiency-renamed"),
           f"code {result.returncode}, stdout {result.stdout!r}")
-    result = run_hook(payload, home, agent_seat_name="seat-a")
+    result = run_hook(payload, home)
     check("a newer marker file, second message: no output", silent(result),
           f"stdout {result.stdout!r}")
 
-    # ---- fallbacks for the name --------------------------------------------
+    # ---- which name the line gives -----------------------------------------
+
+    marker("s-renamed").write_text("40.0\n", encoding="utf-8")
+    result = run_hook({"session_id": "s-renamed", "transcript_path": str(titled)}, home,
+                      agent_seat_name="seat-a")
+    check("a launched agent-seat and a renamed agent-session: the line names the launched"
+          " agent-seat, under which the successor starts",
+          result.returncode == 0 and shown_notice(result) == expected_named("seat-a"),
+          f"code {result.returncode}, stdout {result.stdout!r}, stderr {result.stderr!r}")
+
+    accented = workspace / "accented.jsonl"
+    accented.write_text(custom_title_record("café") + "\n", encoding="utf-8")
+    marker("s-ascii-stdout").write_text("40.0\n", encoding="utf-8")
+    result = run_hook({"session_id": "s-ascii-stdout", "transcript_path": str(accented)}, home,
+                      stdout_encoding="ascii")
+    check("a title with é and an ASCII stdout: the line, exit 0",
+          result.returncode == 0 and shown_notice(result) == expected_named("café"),
+          f"code {result.returncode}, stdout {result.stdout!r}, stderr {result.stderr!r}")
 
     marker("s-untitled").write_text("40.0\n", encoding="utf-8")
     result = run_hook({"session_id": "s-untitled", "transcript_path": str(untitled)}, home,
@@ -195,7 +214,25 @@ with tempfile.TemporaryDirectory() as workspace:
     (handoffs / "s-record-unwritable-handoff-asked-user-notice-shown").mkdir()
     result = run_hook({"session_id": "s-record-unwritable", "transcript_path": str(titled)},
                       home, agent_seat_name="seat-a")
-    check("the file recording a shown notice cannot be read or written: exit 1, nothing on stdout, one stderr line",
+    check("the file recording a shown notice cannot be read: exit 1, nothing on stdout, one stderr line",
+          result.returncode == 1 and result.stdout == ""
+          and len(result.stderr.splitlines()) == 1
+          and result.stderr.startswith(hook.PROGRAM + ": "),
+          f"code {result.returncode}, stdout {result.stdout!r}, stderr {result.stderr!r}")
+
+    # A home of its own, so that making its handoffs directory read-only touches no other case.
+    unwritable_home = workspace / "unwritable-home"
+    unwritable_handoffs = unwritable_home / ".claude" / "handoffs"
+    unwritable_handoffs.mkdir(parents=True)
+    (unwritable_handoffs / "s-record-absent-handoff-asked").write_text("40.0\n", encoding="utf-8")
+    unwritable_handoffs.chmod(0o555)
+    try:
+        result = run_hook({"session_id": "s-record-absent", "transcript_path": str(titled)},
+                          unwritable_home, agent_seat_name="seat-a")
+    finally:
+        unwritable_handoffs.chmod(0o755)
+    check("no file recording a shown notice, and its directory refuses writes: exit 1, nothing on"
+          " stdout, one stderr line",
           result.returncode == 1 and result.stdout == ""
           and len(result.stderr.splitlines()) == 1
           and result.stderr.startswith(hook.PROGRAM + ": "),
