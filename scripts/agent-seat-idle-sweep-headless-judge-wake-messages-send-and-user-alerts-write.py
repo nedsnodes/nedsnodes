@@ -27,8 +27,10 @@ Each invocation, under a lock that keeps two from overlapping:
    command whose verdict gives a `timeout_ends_at` not yet reached, since such work ends by itself, nor of a background command, subagent or workflow a rule 5 message
    has already named, since the sweep asks once about each; when something runs and all of it is
    such work, the judge is not asked. Neither is it told of an open task a rule 5 message has
-   already reminded this agent-session of since the user last typed in it, and rule 3 does not send
-   again about the same put-off handoff in that time; when nothing else is left, nothing is sent. A
+   already raised in this agent-session since the user last typed in it, unless the agent-seat has
+   since recorded something the task waits on, and rule 3 does not send again about the same
+   put-off handoff in that time, leaving the open tasks to the judge; when nothing else is left,
+   nothing is sent. A
    wait whose rule 2 messages named only
    promises to act after an event and hold sentences ends when the agent-seat has recorded, after each
    message, one task per sentence it and the later messages named, a message whose send failed
@@ -93,7 +95,6 @@ import fcntl
 import importlib.util
 import json
 import os
-import re
 import shutil
 import signal
 import socket
@@ -221,10 +222,16 @@ FAILED_PROMISE_MESSAGES = "failed_promise_messages"
 
 SEND_ANSWER_SCHEMA = {"type": "object", "required": ["sent", "reason"],
                       "properties": {"sent": {"type": "boolean"}, "reason": {"type": "string"}}}
+OPEN_TASK_IDS_RAISED = "open_task_ids_raised"
 IDLE_JUDGE_ANSWER_SCHEMA = {
-    "type": "object", "required": ["send", "message", "reason"],
+    "type": "object", "required": ["send", "message", "reason", OPEN_TASK_IDS_RAISED],
     "properties": {"send": {"type": "boolean"}, "message": {"type": "string"},
-                   "reason": {"type": "string"}}}
+                   "reason": {"type": "string"},
+                   OPEN_TASK_IDS_RAISED: {
+                       "type": "array", "items": {"type": "string"},
+                       "description": "The id of each task in open_tasks_nothing_holds that the "
+                                      "message raises; empty when send is false or the message "
+                                      "raises none."}}}
 SENTENCES_ANSWER_SCHEMA = {
     "type": "object", "required": ["sentences"],
     "properties": {"sentences": {"type": "array", "items": {
@@ -448,16 +455,19 @@ class SweepLog:
                 and event.get("message_id") not in not_found
                 for work_id in event.get(RUNNING_WORK_ASKED_ABOUT, [])}
 
-    def reminded_subjects(self, seat, session_id, last_user_typed_at):
+    def reminded_subjects(self, seat, session_id, last_user_typed_at, last_held_at):
         """What a rule 3 or rule 5 message has reminded this agent-session of since the user last
-        typed in it, less what a message the delivery check did not find named."""
+        typed in it, less what a message the delivery check did not find named and what
+        last_held_at, {subject: time}, shows was held after the message."""
         not_found = {event["message_id"] for event in self.of_seat(seat, "delivery_checked")
                      if not event["found"]}
         typed = parse_time(last_user_typed_at) if last_user_typed_at else None
         return {subject for event in self.of_seat(seat, REMINDER_SENT)
                 if event["session_id"] == session_id and event["message_id"] not in not_found
                 and (typed is None or parse_time(event["send_started_at"]) >= typed)
-                for subject in event["subjects"]}
+                for subject in event["subjects"]
+                if subject not in last_held_at
+                or last_held_at[subject] < parse_time(event["send_started_at"])}
 
     def checked_sentences(self, seat):
         return {(event["record_uuid"], event["sentence"])
@@ -1127,6 +1137,9 @@ class Sweep:
         if rule == 3:
             subject = f"handoff put off: {text}"
             if subject in self.reminded_subjects(seat, verdict):
+                if verdict.get(fields.OPEN_TASKS_NOTHING_HOLDS):
+                    self.judge_idle_seat(seat, {**verdict, fields.HANDOFF_DEFERRED_MARKER: None},
+                                         stretch)
                 return
             self.start_wait(seat, verdict, stretch, text, 3)
             self.reminder_sent(seat, verdict, self.send(seat, verdict, text, NUDGE), [subject])
@@ -1134,8 +1147,15 @@ class Sweep:
             self.judge_idle_seat(seat, verdict, stretch)
 
     def reminded_subjects(self, seat, verdict):
+        last_held_at = {}
+        for call in verdict.get(
+                fields.SUCCESSFUL_TASK_TOOL_CALLS_SETTING_PREREQUISITES_OR_BLOCKED_BY) or []:
+            moment = parse_time(call["time"])
+            if moment:
+                subject = open_task_subject(call["task"])
+                last_held_at[subject] = max(moment, last_held_at.get(subject, moment))
         return self.log.reminded_subjects(seat, verdict[fields.SESSION_ID],
-                                          verdict.get(fields.LAST_USER_TYPED_AT))
+                                          verdict.get(fields.LAST_USER_TYPED_AT), last_held_at)
 
     def reminder_sent(self, seat, verdict, sent, subjects):
         if sent:
@@ -1206,7 +1226,7 @@ class Sweep:
         reminded = self.reminded_subjects(seat, verdict)
         open_tasks = all_facts["open_tasks_nothing_holds"] or []
         facts["open_tasks_nothing_holds"] = [task for task in open_tasks
-                                             if open_task_subject(task) not in reminded]
+                                             if open_task_subject(task["id"]) not in reminded]
         if open_tasks and not facts["open_tasks_nothing_holds"] and not any(
                 facts[key] for key in running_keys):
             return
@@ -1215,15 +1235,16 @@ class Sweep:
                                           facts=json.dumps(facts, indent=1, ensure_ascii=False))
         outcome = run_headless(prompt, IDLE_JUDGE_ANSWER_SCHEMA, "", self.working_directory,
                                self.timeout_seconds)
-        problem = outcome.error or idle_judge_answer_problem(outcome.answer)
+        problem = outcome.error or idle_judge_answer_problem(
+            outcome.answer, [task["id"] for task in facts["open_tasks_nothing_holds"] or []])
         answer = outcome.answer or {}
         send = not problem and answer["send"]
         sent = False
         if send:
             self.start_wait(seat, verdict, stretch, answer["message"], 5)
             sent = self.send(seat, verdict, answer["message"], NUDGE)
-            self.reminder_sent(seat, verdict, sent, open_task_subjects_named_in(
-                facts["open_tasks_nothing_holds"], answer["message"]))
+            self.reminder_sent(seat, verdict, sent, [open_task_subject(task_id)
+                                                     for task_id in answer[OPEN_TASK_IDS_RAISED]])
         # Work counts as asked about only once a message reached the agent-seat: a failed send
         # leaves it for a later sweep to hand to the judge again.
         self.record({"event": "judge_answer", "agent_seat": seat, "rule": 5,
@@ -1344,24 +1365,19 @@ def running_work_named_in(facts, message):
     return sorted(work_id for work_id in set(ids) if work_id in message)
 
 
-def open_task_subject(task):
-    return f"open task: {task['id']}"
+def open_task_subject(task_id):
+    return f"open task: {task_id}"
 
 
-def open_task_subjects_named_in(tasks, message):
-    """The reminder subjects of the open tasks the message names, by subject or as #id or (id); of
-    every task handed to the judge when it names none, so that a message saying only "your open
-    tasks" is not sent again."""
-    named = [task for task in tasks if task["subject"] in message
-             or re.search(rf"[#(]{re.escape(str(task['id']))}\b", message)]
-    return [open_task_subject(task) for task in named or tasks]
-
-
-def idle_judge_answer_problem(answer):
+def idle_judge_answer_problem(answer, open_task_ids):
     if not isinstance(answer.get("send"), bool) or not isinstance(answer.get("message"), str) or (
             answer["send"] and not answer["message"].strip()):
         return f"the judge's answer does not give send true or false, with a message when true: " \
                f"{json.dumps(answer)[:500]}"
+    raised = answer.get(OPEN_TASK_IDS_RAISED)
+    if not isinstance(raised, list) or any(task_id not in open_task_ids for task_id in raised):
+        return f"the judge's answer does not list, in {OPEN_TASK_IDS_RAISED}, only ids of the " \
+               f"open tasks it was given, {open_task_ids}: {json.dumps(answer)[:500]}"
     return None
 
 

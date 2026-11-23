@@ -801,14 +801,14 @@ def tool_calls_since_start_of_earliest_turn_with_sentence_to_judge(facts, judged
 def rules_three_to_five(verdict, put_off_at, checker, task_directory,
                         due_task_raise_state_directory):
     running = any(verdict["running"].values())
-    if verdict["handoff_deferred_marker"] and not running:
-        return {fields.RULE: 3, fields.DECISION: fields.WAKE_HANDOFF_PUT_OFF,
-                fields.TEXT: HANDOFF_PUT_OFF_TEXT.format(time=iso(put_off_at))}
-    if not running and not verdict["handoff_deferred_marker"]:
+    if not running:
         # A condition the shared GitHub budget skipped may be met, so it leaves the verdict to rule 5.
         skipped_before = len(checker.conditions_skipped_for_budget)
         verdict["open_tasks_nothing_holds"] = open_tasks_nothing_holds(
             task_directory, checker, due_task_raise_state_directory)
+        if verdict["handoff_deferred_marker"]:
+            return {fields.RULE: 3, fields.DECISION: fields.WAKE_HANDOFF_PUT_OFF,
+                    fields.TEXT: HANDOFF_PUT_OFF_TEXT.format(time=iso(put_off_at))}
         if (not verdict["open_tasks_nothing_holds"]
                 and len(checker.conditions_skipped_for_budget) == skipped_before):
             return {fields.RULE: 4, fields.DECISION: fields.NO_WAKE}

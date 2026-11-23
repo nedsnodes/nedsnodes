@@ -150,9 +150,10 @@ def sent_ok(seat="alpha"):
     return {"sends": [send_to(seat)], "answer": {"sent": True, "reason": "sent"}}
 
 
-def judged(send, message="", reason="r"):
+def judged(send, message="", reason="r", raised=()):
     """A rule 5 judge's answer."""
-    return {"answer": {"send": send, "message": message, "reason": reason}}
+    return {"answer": {"send": send, "message": message, "reason": reason,
+                       "open_task_ids_raised": list(raised)}}
 
 
 DO_NOT_REPLY = "Do not reply to this message: the idle sweep sent it, and nothing acts on a reply."
@@ -2391,7 +2392,7 @@ def one_reminder_of_task_1():
     machine = Machine()
     machine.seat("alpha", DONE_TURN)
     machine.task("alpha", "1")
-    machine.script(judged(True, 'Your task "task 1" is open and nothing holds it.'), sent_ok())
+    machine.script(judged(True, 'Your task "task 1" is open and nothing holds it.', raised=["1"]), sent_ok())
     machine.run(0)
     answered_with_a_tool_call_and_idle_again(machine, 10)
     return machine
@@ -2444,7 +2445,7 @@ machine = Machine()
 machine.seat("alpha", DONE_TURN)
 machine.task("alpha", "1")
 machine.task("alpha", "2")
-machine.script(judged(True, 'Your task "task 1" is open and nothing holds it.'), sent_ok())
+machine.script(judged(True, 'Your task "task 1" is open and nothing holds it.', raised=["1"]), sent_ok())
 machine.run(0)
 answered_with_a_tool_call_and_idle_again(machine, 10)
 _, facts = judge_asked_at(machine, 20)
@@ -2455,16 +2456,39 @@ machine = Machine()
 machine.seat("alpha", DONE_TURN)
 machine.task("alpha", "1")
 machine.task("alpha", "2")
-machine.script(judged(True, "You have open tasks and nothing holds them."), sent_ok())
+machine.script(judged(True, "You have open tasks and nothing holds them.", raised=["1", "2"]),
+               sent_ok())
 machine.run(0)
 answered_with_a_tool_call_and_idle_again(machine, 10)
 calls, _ = judge_asked_at(machine, 20)
-check("rule 5: a message naming no task counts as reminding of every task it was handed", not calls, calls)
+check("rule 5: every task the judge lists as raised counts as reminded", not calls, calls)
 
 machine = Machine()
 machine.seat("alpha", DONE_TURN)
 machine.task("alpha", "1")
-machine.script(judged(True, 'Your task "task 1" is open.'),
+machine.task("alpha", "12")
+machine.script(judged(True, 'Your task "task 12" is open: (1) rebase it.', raised=["12"]), sent_ok())
+machine.run(0)
+check("rule 5: only the ids the judge lists are recorded, whatever the message's words match",
+      [event["subjects"] for event in machine.events("reminder_sent")] == [["open task: 12"]],
+      machine.events("reminder_sent"))
+
+for name, bad_raised in (("an id it was not given", ["9"]), ("no list", None)):
+    machine = Machine()
+    machine.seat("alpha", DONE_TURN)
+    machine.task("alpha", "1")
+    answer = judged(True, 'Your task "task 1" is open.', raised=["1"])
+    answer["answer"]["open_task_ids_raised"] = bad_raised
+    machine.script(answer)
+    machine.run(0)
+    check(f"rule 5: a judge answer listing {name} is a failure and sends nothing",
+          not machine.events("message_sent") and not machine.events("reminder_sent")
+          and machine.events("judge_answer")[-1]["failed"], machine.events("judge_answer"))
+
+machine = Machine()
+machine.seat("alpha", DONE_TURN)
+machine.task("alpha", "1")
+machine.script(judged(True, 'Your task "task 1" is open.', raised=["1"]),
                {"sends": [send_to("alpha", is_error=True)], "answer": {"sent": False, "reason": "r"}})
 machine.run(0)
 check("rule 5: a message whose send failed logs no reminder", not machine.events("reminder_sent"),
@@ -2473,7 +2497,7 @@ check("rule 5: a message whose send failed logs no reminder", not machine.events
 machine = Machine()
 machine.seat("alpha", DONE_TURN)
 machine.task("alpha", "1")
-machine.script(judged(True, 'Your task "task 1" is open.'), sent_ok())
+machine.script(judged(True, 'Your task "task 1" is open.', raised=["1"]), sent_ok())
 machine.run(0)
 answered_with_a_tool_call_and_idle_again(machine, 10, received=False)
 machine.run(11)
@@ -2509,7 +2533,7 @@ check("rule 3: once the user has typed, the put-off handoff is raised again",
 machine = Machine()
 machine.seat("alpha", DONE_TURN)
 machine.task("alpha", "1")
-machine.script(judged(True, 'Your task "task 1" is open.'), sent_ok())
+machine.script(judged(True, 'Your task "task 1" is open.', raised=["1"]), sent_ok())
 machine.run(0)
 machine.append("alpha", cross_session(machine.events("message_sent")[-1]["text"], at(0.5)),
                assistant("Done.", when=at(1)), turn_end(at(1)))
@@ -2530,6 +2554,31 @@ check("a new promise is still raised while the open task's reminder is held",
       and len(machine.events("message_sent")) == 2,
       ([event.get("rule") for event in machine.events("wait_step")],
        [event["event"] for event in machine.events()][-6:], machine.claude_calls()[:1]))
+
+machine = one_reminder_of_task_1()
+machine.append("alpha",
+               assistant(tool=("TaskUpdate", {"taskId": "1", "metadata": {
+                   "prerequisites": [{"pr_merged": 927}]}}), when=at(11), tool_id="t-hold"),
+               task_result("t-hold", "Updated task #1 metadata", at(11.01)),
+               assistant("Held.", when=at(11.1)), turn_end(at(11.1)))
+_, facts = judge_asked_at(machine, 45)
+check("rule 5: a reminded task held after the reminder is raised again once it is free",
+      [task["id"] for task in facts.get("open_tasks_nothing_holds", [])] == ["1"], facts)
+
+machine = Machine()
+machine.seat("alpha", DONE_TURN)
+machine.handoff_put_off()
+machine.script(sent_ok())
+machine.run(0)
+answered_with_a_tool_call_and_idle_again(machine, 10)
+machine.task("alpha", "2")
+machine.script(judged(False))
+machine.run(20)
+_, facts = rule_five_judge_facts(machine)
+check("rule 3: while its reminder is held, a new open task still goes to the judge, without the "
+      "put-off handoff",
+      [task["id"] for task in facts.get("open_tasks_nothing_holds", [])] == ["2"]
+      and facts.get("handoff_deferral_marker_file") is None, facts)
 
 machine = Machine()
 machine.seat("alpha", DONE_TURN)
