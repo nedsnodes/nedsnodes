@@ -1900,6 +1900,55 @@ try:
           and (glob_repository / "chapter1.md").read_text(encoding="utf-8") == "The agent's own edit.\n",
           repr(glob_lines))
 
+    # The fallback message's restore command, run as printed on a path with a glob character.
+    fallback_repository, fallback_git = repository_with_committed_file("fallback-undo-of-a-glob-named-file")
+    (fallback_repository / "chapter[1].md").write_text("Committed.\n", encoding="utf-8")
+    (fallback_repository / "chapter1.md").write_text("Committed.\n", encoding="utf-8")
+    fallback_git("add", "chapter[1].md", "chapter1.md")
+    fallback_git("commit", "--quiet", "-m", "chapters")
+    (fallback_repository / "chapter1.md").write_text("The agent's own edit.\n", encoding="utf-8")
+    (fallback_repository / "chapter[1].md").write_text("A reviewer's rewrite.\n", encoding="utf-8")
+    fallback_restore = re.search(r"`(git [^`]*restore [^`]*<path>[^`]*)`", grid_module.STOPPED_CELL_WRITE_CHECK_LINE)
+    if fallback_restore:
+        subprocess.run(["bash", "-c", fallback_restore.group(1).replace("<path>", "chapter[1].md")],
+                       cwd=fallback_repository, capture_output=True, text=True)
+    check("the fallback message's restore command undoes a glob-named path and keeps another file's edit",
+          fallback_restore is not None
+          and (fallback_repository / "chapter[1].md").read_text(encoding="utf-8") == "Committed.\n"
+          and (fallback_repository / "chapter1.md").read_text(encoding="utf-8") == "The agent's own edit.\n",
+          repr(fallback_restore and fallback_restore.group(1)))
+
+    # A conflict with a missing side: both diffs can print only `* Unmerged path`.
+    for missing_side_code, written in (("DD", "A reviewer's write.\n"), ("DU", "Incoming.\n")):
+        missing_repository, missing_git = repository_with_committed_file(
+            f"checkout-stopped-cell-overwrites-a-{missing_side_code}-conflict")
+        missing_git("checkout", "--quiet", "-b", "incoming")
+        if missing_side_code == "DD":
+            missing_git("mv", "tracked.md", "incoming-name.md")
+        else:
+            (missing_repository / "tracked.md").write_text("Incoming.\n", encoding="utf-8")
+            missing_git("add", "tracked.md")
+        missing_git("commit", "--quiet", "-m", "incoming")
+        missing_git("checkout", "--quiet", "main")
+        if missing_side_code == "DD":
+            missing_git("mv", "tracked.md", "our-name.md")
+        else:
+            missing_git("rm", "--quiet", "tracked.md")
+        missing_git("commit", "--quiet", "-m", "ours")
+        missing_git("merge", "--no-ff", "incoming")
+        missing_status = missing_git("status", "--porcelain", "--", "tracked.md").stdout
+        (missing_repository / "tracked.md").write_text("The agent's draft.\n", encoding="utf-8")
+        with mock.patch.object(grid_module.cell_common, "REPO_ROOT", missing_repository):
+            missing_baseline = grid_module.cell_common.working_tree_state()
+            (missing_repository / "tracked.md").write_text(written, encoding="utf-8")
+            missing_lines = grid_module.stopped_cells_write_check_lines(
+                [scratch / "claude-hunt-deep.md"], missing_baseline, None, set())
+        missing_line = next((line for line in missing_lines if line.startswith("STRAY WRITE: tracked.md ")), "")
+        check(f"a {missing_side_code} conflict path overwritten by a cell is given the copy on disk to read",
+              missing_status.startswith(missing_side_code)
+              and f"{missing_repository / 'tracked.md'}, the copy on disk" in missing_line,
+              repr((missing_status, missing_lines)))
+
     # An already-conflicted file overwritten with either side: each side's diff shows the other's loss.
     conflict_repository, conflict_git = repository_with_committed_file("checkout-stopped-cell-overwrites-a-conflict")
     conflict_git("checkout", "--quiet", "-b", "incoming")

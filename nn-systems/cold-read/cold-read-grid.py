@@ -279,14 +279,17 @@ GRID_MARKER_PREFIXES = (FROZEN_COPY_CHANGED_MARKER_PREFIX, INCOMPLETE_SET_MARKER
 # These prefixes are consumed by the cold-read skill's Monitor; FAILED keeps its no-colon form.
 RETRYING_PREFIX = "RETRYING:"
 AGENT_BINARY_DOWN_PREFIX = "AGENT-BINARY DOWN:"
+# Both undo messages share this, so that neither can drop the `--` before a path.
+STRAY_WRITE_RESTORE_ARGUMENTS = "restore --staged --worktree --"
 STOPPED_CELL_WRITE_CHECK_LINE = (
     "The {cell} cell was stopped before it could check for files it wrote outside its "
     "report, and the grid could not check for it, because {reason}; that is "
     + cell_common.COLD_READ_CELL_STRAY_WRITE_CHECK_SKIPPED_IS_NOT_A_CLEAN_RESULT_PHRASE
     + ". Before "
     "you do anything else, read `git status` against the edits you know are your own. "
-    "Undo a change git status lists, by deleting the file or directory if it is untracked or running "
-    "`git restore --staged --worktree <path>` if it is tracked, only when its content shows a reviewer wrote "
+    "Undo a change git status lists, by running `rm -r -- '<path>'` if it is untracked or "
+    f"`git --literal-pathspecs {STRAY_WRITE_RESTORE_ARGUMENTS} '<path>'` if it is tracked, keeping the "
+    "single quotes, only when its content shows a reviewer wrote "
     "it, such as notes about the document under review. Ask the user about any other "
     "change you did not make, and whenever you are unsure.")
 
@@ -300,7 +303,7 @@ STRAY_WRITE_UNDO_UNTRACKED = (
     "Ask the user about it if you did not make it and are unsure.")
 STRAY_WRITE_UNDO_TRACKED = (
     "If its content shows a reviewer wrote it, undo it: "
-    "`git -C {repository} restore --staged --worktree -- {path}`. "
+    f"`git -C {{repository}} {STRAY_WRITE_RESTORE_ARGUMENTS} {{path}}`. "
     "Ask the user about it if you did not make it and are unsure.")
 STRAY_WRITE_NO_UNDO_ALREADY_CHANGED = (
     "It already had uncommitted changes before the cells launched, so no undo command is given: "
@@ -318,9 +321,11 @@ STRAY_WRITE_ALREADY_CHANGED_STAGED_DELETION_READ = (
     "{absolute_path}, the copy on disk, which git does not track,")
 # For an unmerged path `diff --cached` prints only that it is unmerged, the combined diff can
 # omit every hunk of a file overwritten with one side, and `diff HEAD` is empty for the HEAD side.
+# A path with a missing side, such as DD or DU, can print only `* Unmerged path` from both diffs.
 STRAY_WRITE_ALREADY_CHANGED_UNMERGED_READ = (
     "both `git -C {repository} diff --ours -- {path}` and `git -C {repository} diff --theirs -- {path}`, "
-    "the file against each side of its unresolved merge conflict,")
+    "the file against each side of its unresolved merge conflict, and {absolute_path}, the copy on "
+    "disk, because those diffs show nothing against a side the conflict does not have,")
 GIT_STATUS_UNMERGED_CODES = frozenset({"DD", "AU", "UD", "UA", "DU", "AA", "UU"})
 # A cell can move an already-edited file without git pairing the move as a rename (a plain
 # `mv`, or a `git mv` of a much-edited file), can re-create the old name afterwards, and can
