@@ -2819,6 +2819,17 @@ Recommendation: do the next thing.
 """
 
 
+def test_a_list_line_that_reads_as_a_reference_definition_only_alone_defines_nothing_for_the_message():
+    item = DECISION_ITEM.replace("#new Hide rows older than a year.",
+                                 "[Proposed edits][edits 4]:\n\n#new Hide rows older than a year.")
+    document = DECISION_DOCUMENT.replace(DECISION_ITEM, item)
+    case = Case(next_to_present="item 4 of 9", document=document, model="changed")
+    # The list line above the item names the item's number, so the search for the item's heading reads it alone.
+    lines = case.lines("a", case.transcript(f"- outer\n  - inner\n[edits 4]: /docs\n\n{item}\n\n{ITEM_4_CLOSING_LINE}"))
+    check("an item shown word for word counts with no model call when a list line above it would be a reference "
+          "definition only if parsed alone", counted(lines) and not case.model_calls(), f"lines {lines!r}")
+
+
 def test_an_item_whose_heading_holds_a_reference_link_counts_when_shown_word_for_word():
     case = Case(next_to_present="item 4 of 9", document=REFERENCE_LINK_HEADING_DOCUMENT)
     lines = case.lines("a", case.transcript(REFERENCE_LINK_HEADING_DOCUMENT, ITEM_4_CLOSING_LINE))

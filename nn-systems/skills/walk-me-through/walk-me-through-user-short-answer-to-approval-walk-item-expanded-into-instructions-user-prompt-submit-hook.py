@@ -215,11 +215,13 @@ dropped, and goes to the model.
 Not handled either, in how lead_ins reads a colon lead-in: a heading inside a
 quotation or list ends a top-level heading's section as a peer heading does,
 and a quoted colon heading reaches past its quotation; an HTML comment
-between a lead-in and what it introduces, or at the end of the lead-in's own
-line, hides the lead-in; and the text after `The new text:` loses emphasis
-characters that open it, as `_reset` read as `reset`. Each can pass a
-reversed line with no model call or send an unchanged one to the model,
-which only asks the user to answer again. Both texts under one colon heading,
+inside a list item, below that item's lead-in and above the next item, or at
+the end of the lead-in's own line, hides the lead-in; and the text after
+`The new text:` loses emphasis characters that open it, as `_reset` read as
+`reset`. Each can pass a reversed line with no model call, which counts the
+answer for text the user was not shown as proposed, or send a line to the
+model, which either judges it unchanged, and the answer counts, or has the
+user answer again. Both texts under one colon heading,
 one as `#new Keep rows.` and one as `If you approve, the new text: Keep
 rows.`, go to the model, since the heading's words come before the label.
 
@@ -1123,10 +1125,11 @@ def text_as_shown_squeezed(text):
 def shown_words(markdown, parser, env=None):
     """The words of markdown as the user reads it rendered, as one string: no `#approval_walk_item_` line, no link
     target or other markup, as text_as_shown_squeezed gives it. env holds the reference definitions of the whole text
-    markdown was cut from, so a reference link in one line renders as it does in the whole."""
+    markdown was cut from, so a reference link in one line renders as it does in the whole. The parse gets a copy,
+    since a line that is ordinary text in the whole, as in a nested list, can read as a definition when cut out."""
     pieces = []
     text = load_walk_finder().approval_walk_text_with_approval_walk_item_hashtag_lines_removed(markdown)
-    for token in parser.parse(text, {} if env is None else env):
+    for token in parser.parse(text, {"references": dict((env or {}).get("references", {}))}):
         if token.type == "inline":
             pieces += [" " if child.type in ("softbreak", "hardbreak") else child.content for child in token.children
                        if child.type in (*RENDERED_CHILD_TYPES, "softbreak", "hardbreak")]
