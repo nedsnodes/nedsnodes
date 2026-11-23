@@ -321,10 +321,10 @@ APPROVAL_WALK_SUB_STEP_ASKING_FOR_NO_DECISION_ANSWER_NOT_RECORDED_LINES = (
     "below, word for word, and wait for his answer.\n{closing_lines}",
 )
 APPROVAL_WALK_SUB_STEP_ASKING_FOR_NO_DECISION_ANSWER_USER_ADDED_WORDS_LINE = "He also wrote: \"{added}\". Act on those words first."
-APPROVAL_WALK_SUB_STEP_ASKING_FOR_NO_DECISION_ANSWER_CONDITION_NOT_TO_BE_CARRIED_OUT_LINE = (
+APPROVAL_WALK_SUB_STEP_ASKING_FOR_NO_DECISION_AGENT_INSTRUCTION_NOT_TO_DO_WHAT_UNRECORDED_ANSWER_CONDITION_ASKS_LINE = (
     "The user made that answer depend on this condition: \"{condition}\". Do not do what the condition asks, because "
     "the answer it was set on is not recorded.")
-APPROVAL_WALK_SUB_STEP_ASKING_FOR_NO_DECISION_ANSWERED_BESIDE_DECISION_ITEM_LINE = (
+APPROVAL_WALK_SUB_STEP_ASKING_FOR_NO_DECISION_AGENT_INSTRUCTION_TO_MOVE_ON_WHEN_NUMBERED_ANSWER_ALSO_ANSWERS_DECISION_ITEM_LINE = (
     "{item} asks for no decision, so the user's answer to it records no decision. Before you record his other "
     "answers, which the next lines cover, add the line `{one_item_line}` as the last line of {minutes}, run "
     "`python3 {program} check --moved-on-no-decision`, then run the close command it prints.")
@@ -1676,7 +1676,7 @@ def no_decision_sub_step_answer_context(answer, walk):
         lines.insert(2, APPROVAL_WALK_SUB_STEP_ASKING_FOR_NO_DECISION_ANSWER_USER_ADDED_WORDS_LINE.format(
             added=answer["rest"]))
     elif answer.get("condition"):
-        lines.insert(2, APPROVAL_WALK_SUB_STEP_ASKING_FOR_NO_DECISION_ANSWER_CONDITION_NOT_TO_BE_CARRIED_OUT_LINE.format(
+        lines.insert(2, APPROVAL_WALK_SUB_STEP_ASKING_FOR_NO_DECISION_AGENT_INSTRUCTION_NOT_TO_DO_WHAT_UNRECORDED_ANSWER_CONDITION_ASKS_LINE.format(
             condition=answer["condition"]))
     if any("<page link>" in line for line in closing):
         lines.append(APPROVAL_WALK_SUB_STEP_ASKING_FOR_NO_DECISION_AGENT_INSTRUCTION_TO_PUBLISH_PAGE_MISSING_FROM_WALK_MINUTES_LINE)
@@ -1761,7 +1761,7 @@ def context_for(answer, walk, walk_error):
         prefix = [line.format(condition=answer["condition"]) for line in CONDITION_LINES]
     elif answer["form"] == "rider":
         prefix = [line.format(rest=answer["rest"]) for line in RIDER_LINES]
-    prefix = [APPROVAL_WALK_SUB_STEP_ASKING_FOR_NO_DECISION_ANSWERED_BESIDE_DECISION_ITEM_LINE.format(
+    prefix = [APPROVAL_WALK_SUB_STEP_ASKING_FOR_NO_DECISION_AGENT_INSTRUCTION_TO_MOVE_ON_WHEN_NUMBERED_ANSWER_ALSO_ANSWERS_DECISION_ITEM_LINE.format(
         item=item_name(number, walk), minutes=walk.minutes, program=CHECK_PROGRAM,
         one_item_line=f"#next_to_present item {number}" + (f" of {walk.total}" if walk.total else ""))
               for number in answer.get("no-decision sub-steps answered", ())] + prefix
