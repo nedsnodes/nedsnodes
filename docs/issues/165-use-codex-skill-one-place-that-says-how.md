@@ -27,7 +27,7 @@ GHI [run-agent: one CLI to invoke a Claude or Codex agent headlessly from any ca
 
 A `use-codex` skill (name provisional; collision-checked 2026-08-25: no skill or script under `.claude/skills/`, `~/.codex/skills/` (which has an unrelated `codex-primary-runtime`), or `scripts/` carries the name, and ghi-guide-agent found no issue proposing the skill) at `.claude/skills/use-codex/SKILL.md`, and its Codex-side twin under `~/.codex/skills/` if Codex agents also launch Codex:
 
-1. When to buy a Codex read: a second model family for a review or audit (the standing cross-agent-binary pattern, GHI [run-agent: one CLI to invoke a Claude or Codex agent headlessly from any caller (Python, shell, either runtime)](https://github.com/nedsnodes/nedsnodes/issues/41)'s problem statement), a read of OpenAI-side source or docs, or a task the user names Codex for.
+1. When to buy a Codex read: a second model family for a review or audit (the standing pattern of a read by the other agent-binary, GHI [run-agent: one CLI to invoke a Claude or Codex agent headlessly from any caller (Python, shell, either runtime)](https://github.com/nedsnodes/nedsnodes/issues/41)'s problem statement), a read of OpenAI-side source or docs, or a task the user names Codex for.
 2. The pinned model and effort per tier, in one place the scripts and the skill both cite (today the constant is repeated in three files).
 3. The launch: the flags above, the prompt-on-stdin form, the output file, absence-as-failure, the stderr tail, the timeout — as a command an agent can copy, and as the script to call where one exists.
 4. What Codex reads at startup on this machine, and what that means for a naive cell.

@@ -105,8 +105,8 @@ a Markdown document, or both should not be reopened without new evidence.
 
 Retired as a section 2026-07-26 (user-ruled): the walk behavior is specified
 by the walk-me-through skill itself — its frontmatter and code are the
-documentation, and a separate prose description would only drift. Cross-agent-binary
-scenario tests are deferred to NN step-1 (inner-walk item 2 ruling, pair issue [Ned's notes: engineering methods and sources — boot-set, rewrite policy, and skill shortlist (doc: docs/issues/9-neds-notes.md)](https://github.com/nedsnodes/nedsnodes/issues/9)
+documentation, and a separate prose description would only drift. Scenario tests on both agent-binaries
+are deferred to NN step-1 (inner-walk item 2 ruling, pair issue [Ned's notes: engineering methods and sources — boot-set, rewrite policy, and skill shortlist (doc: docs/issues/9-neds-notes.md)](https://github.com/nedsnodes/nedsnodes/issues/9)
 walk minutes). The bullets formerly here are recoverable from git history.
 
 ## Candidate publishing modules
@@ -264,7 +264,7 @@ overbroad wording narrowed where the later discussion identified a problem.
 - Preserve independent first passes for important artifacts.
 - Long-lived subsystem expertise and fresh-context review are complementary;
   reviewers do not all need to be disposable.
-- When one agent-binary's agent asks another's to implement or test, review the design and
+- When an agent on one agent-binary asks an agent on a different agent-binary to implement or test, review the design and
   test plan as well as the final code when those artifacts are material.
 
 ## Testing, QA, and root-cause research

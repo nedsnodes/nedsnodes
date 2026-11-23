@@ -4,7 +4,7 @@ issue: "[Mutual oversight: agents watch each other's session transcripts, both r
 
 # Mutual oversight: agents watch each other's session transcripts, both runtimes — capability record + lean build candidate
 
-Boss-named capability ("mutual oversight" — his replacement for "spying"), boss-directed GHI 2026-07-29, filed by new-vp (nedlern session b6241858). Capability record plus build candidate: **agents watch each other's session transcripts, in both agent-binary directions**, so one agent can follow another's work in near-real time without the human ferrying content between sessions.
+Boss-named capability ("mutual oversight" — his replacement for "spying"), boss-directed GHI 2026-07-29, filed by new-vp (nedlern session b6241858). Capability record plus build candidate: **agents watch each other's session transcripts, in both directions between Claude Code and Codex**, so one agent can follow another's work in near-real time without the human ferrying content between sessions.
 
 ## What is proven today (all evidence verified on disk before filing)
 
