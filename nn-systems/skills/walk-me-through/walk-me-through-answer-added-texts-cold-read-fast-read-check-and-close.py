@@ -1450,7 +1450,7 @@ def approval_walk_item_word_counted_line_ranges(walk_finder, text, tokens, parse
         for each in walk_finder.approval_walk_item_sub_step_units_below_item_in_walk_document(all_units, unit, [number]):
             parts =[part for part in each[0] if part.startswith(number + ".") and part not in numbers]
             ranges += [own_range(each, part) for part in parts]
-            if parts and len(each[0]) > 1:
+            if len(each[0]) > 1:
                 ranges += shared_heading_text(each)
     return sorted(set(ranges))
 

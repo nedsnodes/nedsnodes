@@ -1549,6 +1549,18 @@ def test_the_waiting_item_read_step_counts_the_sub_steps_of_each_item_of_a_share
           and case.calls.read_text() == "", described(result))
 
 
+def test_the_waiting_item_read_step_leaves_out_another_item_s_sub_step_under_a_heading_it_shares():
+    document = ("# A walk\n\n## Items 6 and 7 of 9: two short items\n\n**Item 6 of 9:** the first.\n\nShort.\n\n"
+                "#case_against weak: one.\n\nRecommendation: do one.\n\n**Item 7 of 9:** the second.\n\nShort.\n\n"
+                "#case_against weak: two.\n\nRecommendation: do two.\n\n"
+                "### Items 6.1 and 7.1 of 9: a detail of each\n\n**Item 6.1 of 9:** the first's detail.\n\nShort.\n\n"
+                "**Item 7.1 of 9:** the second's detail.\n\n" + words_of_body(320))
+    case = Case(next_to_present="item 6 of 9", document=document)
+    result = case.run(WAITING_ITEM_READ_STEP_NAME)
+    check("with only item 6 named, sub-step 7.1, which shares a heading with 6.1, is not shown, so its 320 words "
+          "are not counted", result.returncode == 0 and "had to be run now" in result.stdout, described(result))
+
+
 def test_the_waiting_item_read_step_counts_the_text_of_a_heading_shared_by_sub_steps_above_the_first():
     document = ("# A walk\n\n## Item 3 of 9: the opening sentence\n\nShort.\n\n### Items 3.1 and 3.2 of 9: both halves\n\n"
                 + words_of_body(400) + "\n**Item 3.1 of 9:** the first half.\n\nShort.\n\n"
