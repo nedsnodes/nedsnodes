@@ -237,7 +237,7 @@
       }
     },
     {
-      "name": "watch-open-pull-requests-hack-poll-once",
+      "name": "watch-open-pull-requests-hack-poll-once-every-minute-cron-job",
       "owner": "merge-lane-2",
       "program": "scripts/watch-open-pull-requests-hack.py",
       "arguments": ["--poll-once"],

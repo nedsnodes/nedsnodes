@@ -2521,6 +2521,154 @@ check("the account notice is logged for each agent-seat as sent, with the do-not
       and all(event["text"] == wake_texts[-1][1] for event in machine.events("message_sent")),
       machine.events("message_sent"))
 
+# --- rule 5: an open pull-request events task wakes merge-lane-2 in code ------------------------
+EVENTS_SEAT = "merge-lane-2"
+EVENTS_TASK_SUBJECT = "Read the new pull-request events in the watcher's event file"
+FAKE_GITHUB = """#!{python}
+import os, sys
+sys.stdout.write(open(os.environ["FAKE_GITHUB_ANSWER"]).read())
+"""
+
+
+def github_answer(*numbers):
+    return json.dumps({"data": {"repository": {"pullRequests": {
+        "nodes": [{"number": number, "title": "t", "isDraft": False, "headRefOid": "a" * 40,
+                   "author": {"login": "nedlern"}} for number in numbers],
+        "pageInfo": {"hasNextPage": False, "endCursor": None}}}}})
+
+
+class RealWatcher:
+    """watch-open-pull-requests-hack.py itself, run as cron runs it, against a fake gh."""
+
+    def __init__(self, machine):
+        self.root = machine.root / "watcher"
+        (self.root / "bin").mkdir(parents=True)
+        fake_gh = self.root / "bin" / "gh"
+        fake_gh.write_text(FAKE_GITHUB.format(python=sys.executable))
+        fake_gh.chmod(0o755)
+        self.answer = self.root / "answer.json"
+        self.token = self.root / "token"
+        self.token.write_text("fixture-token-never-a-real-credential")
+        self.tasks = machine.tasks / f"nedsnodes-{EVENTS_SEAT}-tasks"
+        self.tasks.mkdir(exist_ok=True)
+
+    def run(self, flag, *numbers):
+        self.answer.write_text(github_answer(*numbers))
+        environment = dict(os.environ, FAKE_GITHUB_ANSWER=str(self.answer),
+                           PATH=f"{self.root / 'bin'}{os.pathsep}{os.environ['PATH']}")
+        return subprocess.run(
+            [sys.executable, str(PROGRAM.with_name("watch-open-pull-requests-hack.py")), flag,
+             "--token-file", str(self.token), "--poll-once-directory", str(self.root / "state"),
+             "--task-list-directory", str(self.tasks),
+             "--needs-a-look-directory", str(self.root / "notices")],
+            env=environment, capture_output=True, text=True, check=False).returncode
+
+    def complete_tasks(self):
+        for path in self.tasks.glob("*.json"):
+            task = json.loads(path.read_text())
+            path.write_text(json.dumps(dict(task, status="completed")))
+
+
+machine = Machine()
+machine.seat(EVENTS_SEAT, DONE_TURN)
+watcher = RealWatcher(machine)
+baseline_code = watcher.run("--poll-once-write-baseline", 1)
+quiet_code = watcher.run("--poll-once", 1)
+machine.script()
+machine.run(0)
+check("a watcher run that detects nothing new opens no task, and the sweep starts no agent-session "
+      "and sends merge-lane-2 nothing",
+      (baseline_code, quiet_code) == (0, 0) and not list(watcher.tasks.glob("*.json"))
+      and not machine.claude_calls() and not machine.events("message_sent"),
+      (baseline_code, quiet_code, machine.claude_calls()))
+new_code = watcher.run("--poll-once", 1, 2)
+task_id = next(watcher.tasks.glob("*.json")).stem
+machine.script(sent_ok(EVENTS_SEAT))
+machine.run(1)
+calls = machine.claude_calls()
+check("the watcher's events task wakes idle merge-lane-2: one sender and no judge, with code's text",
+      new_code == 0 and len(calls) == 1 and "SendMessage" in calls[0]["argv"][calls[0]["argv"].index("--tools") + 1]
+      and machine.events("message_sent")[-1]["agent_seat"] == EVENTS_SEAT
+      and machine.events("message_sent")[-1]["text"].startswith(f"Task {task_id} on your task list holds new "
+                                                               "pull-request events.")
+      and machine.events("wait_step")[-1]["step"] == "nudge", (calls, machine.events()))
+machine.script()
+machine.run(2)
+check("the open wait sends no second wake", not machine.claude_calls(), machine.claude_calls())
+machine.append(EVENTS_SEAT, assistant(None, at(3), tool=("Read", {"file_path": "/x"}), tool_id="r1"),
+               task_result("r1", "ok", at(3)), assistant("Done again.", at(4)), turn_end(at(4)))
+machine.script()
+machine.run(10)
+check("a tool call ends the wait, and the same task wakes no one again within 15 minutes",
+      not machine.claude_calls()
+      and machine.events("wait_ended")[-1]["why"] == "it made a tool call after the nudge",
+      (machine.claude_calls(), machine.events("wait_ended")))
+machine.script(sent_ok(EVENTS_SEAT))
+machine.run(17)
+check("the task still open 15 minutes after the wake wakes merge-lane-2 once more",
+      len(machine.claude_calls()) == 1 and len(machine.events("message_sent")) == 2, machine.events())
+watcher.complete_tasks()
+machine.append(EVENTS_SEAT, assistant("Handled.", at(18)), turn_end(at(18)))
+machine.script()
+machine.run(24)
+check("with the events task completed, the sweep wakes no one",
+      not machine.claude_calls() and len(machine.events("message_sent")) == 2
+      and machine.events("checked")[-1]["rule"] == 4, machine.claude_calls())
+
+machine = Machine()
+machine.seat("alpha", DONE_TURN)
+directory = machine.tasks / "nedsnodes-alpha-tasks"
+directory.mkdir()
+(directory / "1.json").write_text(json.dumps({"id": "1", "subject": EVENTS_TASK_SUBJECT,
+                                              "status": "pending", "blocks": [], "blockedBy": []}))
+machine.script(judged(False, reason="not its work"))
+machine.run(0)
+calls = machine.claude_calls()
+check("the same task subject on another agent-seat's list still goes to the judge",
+      len(calls) == 1 and calls[0]["argv"][calls[0]["argv"].index("--tools") + 1] == ""
+      and not machine.events("message_sent"), calls)
+
+machine = Machine()
+machine.seat(EVENTS_SEAT, DONE_TURN)
+directory = machine.tasks / f"nedsnodes-{EVENTS_SEAT}-tasks"
+directory.mkdir()
+(directory / "1.json").write_text(json.dumps({"id": "1", "subject": "task 1", "status": "pending",
+                                              "blocks": [], "blockedBy": []}))
+machine.script(judged(False, reason="busy"))
+machine.run(0)
+check("another task on merge-lane-2's list still goes to the judge",
+      len(machine.claude_calls()) == 1 and not machine.events("message_sent"), machine.claude_calls())
+
+machine = Machine()
+machine.seat(EVENTS_SEAT, DONE_TURN)
+directory = machine.tasks / f"nedsnodes-{EVENTS_SEAT}-tasks"
+directory.mkdir()
+(directory / "1.json").write_text(json.dumps({"id": "1", "subject": EVENTS_TASK_SUBJECT,
+                                              "status": "pending", "blocks": [], "blockedBy": []}))
+running_machine = Machine()
+running_machine.seat(EVENTS_SEAT, [
+    user("go"), *background_bash_launch("bk1", "python3 scripts/x-test.py", at(-20), "tb1"),
+    assistant("Waiting on the check."), turn_end()])
+running_directory = running_machine.tasks / f"nedsnodes-{EVENTS_SEAT}-tasks"
+running_directory.mkdir()
+(running_directory / "7.json").write_text(json.dumps({"id": "7", "subject": EVENTS_TASK_SUBJECT,
+                                                      "status": "pending", "blocks": [],
+                                                      "blockedBy": []}))
+running_machine.script(sent_ok(EVENTS_SEAT))
+running_machine.run(0)
+calls = running_machine.claude_calls()
+check("an idle merge-lane-2 with a background command running is still woken for its events task, "
+      "with no judge",
+      len(calls) == 1 and "SendMessage" in calls[0]["argv"][calls[0]["argv"].index("--tools") + 1]
+      and running_machine.events("message_sent")[-1]["text"].startswith("Task 7 on your task list"),
+      (calls, running_machine.events()))
+
+machine.script({"exit": 3})
+machine.run(0)
+check("a wake whose send fails is reported to the sweep's owner, and its wait stays open to escalate",
+      not machine.events("message_sent") and machine.events("wait_step")[-1]["step"] == "nudge"
+      and machine.owner_tasks() != [], machine.events())
+
 if failures:
     print(f"{len(failures)} case(s) failed")
     sys.exit(1)

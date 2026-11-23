@@ -1203,8 +1203,8 @@ class PollOnceMachine:
         self.token_file = token_file
         self.now = 1_800_000_000.0
         self.poll = []
-        self.state_path = self.directory / watcher_module.POLL_STATE_FILE_NAME
-        self.events_path = self.directory / watcher_module.EVENTS_FILE_NAME
+        self.state_path = self.directory / watcher_module.WATCH_OPEN_PULL_REQUESTS_POLL_STATE_BETWEEN_CRON_RUNS_FILE_NAME
+        self.events_path = self.directory / watcher_module.WATCH_OPEN_PULL_REQUESTS_EVENTS_LOG_FILE_NAME
 
     def time(self):
         return self.now
@@ -1328,7 +1328,7 @@ def run_poll_once_cases(scratch_root, token_file):
     machine.run()
     check("once that task is completed, the event still waits until 20 minutes after the last "
           "task opened", len(machine.tasks_read()) == 1, machine.tasks_read())
-    machine.now += watcher_module.SECONDS_BETWEEN_EVENTS_TASKS
+    machine.now += watcher_module.WATCH_OPEN_PULL_REQUESTS_MINIMUM_SECONDS_BETWEEN_EVENTS_TASKS
     machine.run()
     check("after 20 minutes one new task names only the line not yet delivered",
           len(machine.tasks_read()) == 2
@@ -1338,7 +1338,7 @@ def run_poll_once_cases(scratch_root, token_file):
     machine.poll = [poll_once_pull_request(1)]
     machine.run("--poll-once-write-baseline")
     machine.poll = "GitHub is down"
-    codes = [machine.run() for _ in range(watcher_module.FAILED_POLLS_BEFORE_FAILURE_TASK - 1)]
+    codes = [machine.run() for _ in range(watcher_module.WATCH_OPEN_PULL_REQUESTS_FAILED_GITHUB_POLLS_IN_A_ROW_BEFORE_FAILURE_TASK - 1)]
     check("failed polls below the limit exit 1 and open no task",
           set(codes) == {1} and machine.tasks_read() == [], machine.tasks_read())
     machine.run()

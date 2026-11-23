@@ -51,12 +51,12 @@ state is a file, so an opening or a draft marked ready between two runs raises
 its event. It appends each event to an event file in the log-store. A task on
 merge-lane-2's task list names the new lines, only when there are new lines,
 no events task is open, and the last one opened at least
-SECONDS_BETWEEN_EVENTS_TASKS ago; a run that finds nothing new writes no task
+WATCH_OPEN_PULL_REQUESTS_MINIMUM_SECONDS_BETWEEN_EVENTS_TASKS ago; a run that finds nothing new writes no task
 and sends no message. A missing or unreadable state file stops the run with a
 task saying how to repair it, and never becomes a new baseline, which would
 drop the events since the last run; --poll-once-write-baseline makes the first
 state file. A failed poll keeps the state, and only
-FAILED_POLLS_BEFORE_FAILURE_TASK failed polls in a row open a task.
+WATCH_OPEN_PULL_REQUESTS_FAILED_GITHUB_POLLS_IN_A_ROW_BEFORE_FAILURE_TASK failed polls in a row open a task.
 
 Polling needs no public webhook endpoint. GraphQL selects only needed fields
 and avoids gh versions’ differing --json field lists."""
@@ -108,15 +108,13 @@ NOTICE_FIRST_LINE_CHARS = 300
 STATUS_UNREADABLE = "status unreadable"
 
 POLL_ONCE_DIRECTORY_NAME = "open-pull-request-watcher-poll-once-state-events-and-lock"
-POLL_STATE_FILE_NAME = "poll-state.json"
-EVENTS_FILE_NAME = "pull-request-events.log"
+WATCH_OPEN_PULL_REQUESTS_POLL_STATE_BETWEEN_CRON_RUNS_FILE_NAME = "poll-state.json"
+WATCH_OPEN_PULL_REQUESTS_EVENTS_LOG_FILE_NAME = "pull-request-events.log"
 LOCK_FILE_NAME = "poll-once.lock"
-EVENTS_TASK_SUBJECT = "Read the new pull-request events in the watcher's event file"
 FAILURE_TASK_SUBJECT_PREFIX = "Open-pull-request watcher cron job failed: "
-# The user approved 20-minute batches of events on 2026-11-15.
-SECONDS_BETWEEN_EVENTS_TASKS = 1200
+WATCH_OPEN_PULL_REQUESTS_MINIMUM_SECONDS_BETWEEN_EVENTS_TASKS = 1200
 # A short GitHub outage costs no event, because the state file keeps the last good poll.
-FAILED_POLLS_BEFORE_FAILURE_TASK = 10
+WATCH_OPEN_PULL_REQUESTS_FAILED_GITHUB_POLLS_IN_A_ROW_BEFORE_FAILURE_TASK = 10
 
 # A short redaction pattern would corrupt ordinary output; reject invalid credentials at startup.
 MINIMUM_PLAUSIBLE_TOKEN_CHARS = 8
@@ -463,13 +461,13 @@ def events_task_opened_when_due(state, state_path, events_path, task_list_direct
             f"the event file {events_path} holds {total} lines, but {delivered} were already "
             f"delivered, so it was truncated. Restore it, or set event_lines_delivered in "
             f"{state_path} to {total} once you have read what it holds.")
-    if total == delivered or open_task_with_subject_exists(task_list_directory, EVENTS_TASK_SUBJECT):
+    if total == delivered or open_task_with_subject_exists(task_list_directory, agent_seat_task_list.MERGE_LANE_2_PULL_REQUEST_EVENTS_TASK_SUBJECT):
         return None
     last_opened = state["last_events_task_opened_at"]
-    if last_opened is not None and now - last_opened < SECONDS_BETWEEN_EVENTS_TASKS:
+    if last_opened is not None and now - last_opened < WATCH_OPEN_PULL_REQUESTS_MINIMUM_SECONDS_BETWEEN_EVENTS_TASKS:
         return None
     task_id = agent_seat_task_list.agent_seat_task_list_new_pending_task_write(
-        task_list_directory, EVENTS_TASK_SUBJECT,
+        task_list_directory, agent_seat_task_list.MERGE_LANE_2_PULL_REQUEST_EVENTS_TASK_SUBJECT,
         f"Read lines {delivered + 1} to {total} of {events_path}. Act on them, and mark this task "
         f"completed.")
     state["event_lines_delivered"] = total
@@ -503,8 +501,8 @@ def poll_once(arguments):
     """One cron run: see the module docstring. Return the exit status."""
     directory = arguments.poll_once_directory
     task_list_directory = arguments.task_list_directory
-    state_path = directory / POLL_STATE_FILE_NAME
-    events_path = directory / EVENTS_FILE_NAME
+    state_path = directory / WATCH_OPEN_PULL_REQUESTS_POLL_STATE_BETWEEN_CRON_RUNS_FILE_NAME
+    events_path = directory / WATCH_OPEN_PULL_REQUESTS_EVENTS_LOG_FILE_NAME
     try:
         directory.mkdir(parents=True, exist_ok=True)
         lock = (directory / LOCK_FILE_NAME).open("w", encoding="utf-8")
@@ -550,7 +548,7 @@ def poll_once(arguments):
         if reason is None:
             return 0
         snippet = one_line_snippet(reason, FAILURE_REASON_SNIPPET_CHARS)
-        if state["failed_polls"] == FAILED_POLLS_BEFORE_FAILURE_TASK:
+        if state["failed_polls"] == WATCH_OPEN_PULL_REQUESTS_FAILED_GITHUB_POLLS_IN_A_ROW_BEFORE_FAILURE_TASK:
             return failure_reported(
                 task_list_directory, "GitHub queries keep failing",
                 f"{state['failed_polls']} polls in a row failed, the last with: {snippet}. "

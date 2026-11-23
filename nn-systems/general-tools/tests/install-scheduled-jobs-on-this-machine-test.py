@@ -375,7 +375,7 @@ check("the table's jobs are the two typed by hand before this program, the workt
                             "scheduled-full-test-run-of-main",
                             "transcript-mirror-to-log-store",
                             "uncommitted-work-snapshot-hook-scheduled-check-that-real-claude-session-is-recorded-as-owner",
-                            "watch-open-pull-requests-hack-poll-once"],
+                            "watch-open-pull-requests-hack-poll-once-every-minute-cron-job"],
       sorted(real_jobs))
 watcher = real_jobs["handoff-agent-crash-watcher"]
 check("the crash restart watcher runs on ned-box only, every minute",
@@ -568,7 +568,7 @@ check("--print as ned-box prints ned-box's cron lines from the real table and ru
           "line:", NED_BOX_FINDING_OUTCOMES_COUNT_LINE,
           "agent-seat-terminal-captures-older-than-seven-days-delete — cron line:",
           NED_BOX_TERMINAL_CAPTURES_DELETE_LINE,
-          "watch-open-pull-requests-hack-poll-once — cron line:",
+          "watch-open-pull-requests-hack-poll-once-every-minute-cron-job — cron line:",
           NED_BOX_OPEN_PULL_REQUEST_WATCHER_POLL_LINE],
       (exit_code, printed.getvalue(), errors.getvalue()))
 printed, errors = io.StringIO(), io.StringIO()
