@@ -1484,6 +1484,10 @@ def hook_run_recording_each_parsed_text(seat):
         parser_class.parse = real_parse
 
 
+def walk_item_condition(seat, heading):
+    return {hook.WALK_MINUTES_FIELD: str(seat.minutes), hook.ITEM_HEADING_FIELD: heading}
+
+
 seat = WalkSeat()
 seat.waiting_task("130", ITEM_1, subject="Decided")
 seat.waiting_task("131", "The `restore` task finds its commit", subject="Undecided")
@@ -1494,21 +1498,47 @@ check("three conditions on one walk-document: the document is parsed exactly onc
       parsed.count(WALK_DOCUMENT) == 1, parsed.count(WALK_DOCUMENT))
 check("three conditions on one walk-document: only the decided item's task is raised",
       output is not None and 'task 130 \\"Decided\\"' in output and "ndecided" not in output, output)
-check("three conditions on one walk-document: each answer equals one computed with its own parse",
-      [hook.approval_walk_item_decided_or_problem({hook.WALK_MINUTES_FIELD: str(seat.minutes),
-                                                   hook.ITEM_HEADING_FIELD: heading})["met"]
-       for heading in (ITEM_1, "The `restore` task finds its commit", "What this walk decided")]
-      == [True, False, False])
+conditions = [walk_item_condition(seat, heading)
+              for heading in (ITEM_1, "The `restore` task finds its commit",
+                              "What this walk decided", "A heading the walk-document lacks")]
+one_checker = hook.GitHubConditionChecker({}, 0)
+answers_sharing_one_checker = [hook.approval_walk_item_decided_or_problem(condition, one_checker)
+                               for condition in conditions]
+answers_each_with_its_own_parse = [hook.approval_walk_item_decided_or_problem(condition)
+                                   for condition in conditions]
+check("three conditions on one walk-document: answers sharing one checker equal fresh parses",
+      answers_sharing_one_checker == answers_each_with_its_own_parse,
+      (answers_sharing_one_checker, answers_each_with_its_own_parse))
+check("three conditions on one walk-document: the fresh parses give the expected answers",
+      [answer["met"] for answer in answers_each_with_its_own_parse] == [True, False, False, False]
+      and "problem" in answers_each_with_its_own_parse[3], answers_each_with_its_own_parse)
+
+APPROVED_ITEM_1 = "item 1 of 3: approved; every text the change adds has had a fast read. <accepted>"
+seat, same_length_seat = WalkSeat(), WalkSeat(WALK_DOCUMENT.replace(
+    f"# Walk\n\n## Item 1 of 3: {ITEM_1}\n\nRecommendation",
+    f"# Walk\n\n\n## Item 1 of 3: {ITEM_1}\nRecommendation"))
+seat.minutes_say(APPROVED_ITEM_1)
+same_length_seat.minutes_say(APPROVED_ITEM_1)
+one_checker = hook.GitHubConditionChecker({}, 0)
+answers = [hook.approval_walk_item_decided_or_problem(walk_item_condition(each, ITEM_1), one_checker)
+           for each in (seat, same_length_seat)]
+check("two same-length walk-documents, item 1 on different lines, one checker: each answers met",
+      len(seat.document.read_text()) == len(same_length_seat.document.read_text())
+      and seat.document.read_text() != same_length_seat.document.read_text()
+      and answers == [{"met": True}, {"met": True}], answers)
 
 seat = WalkSeat()
-seat.waiting_task("133", ITEM_1)
-seat.minutes_say("item 1 of 3: deferred; it moves to just before the summary item. <open>")
-first_output = hook_run_in_process(seat)
-seat.document.write_text(WALK_DOCUMENT.replace(ITEM_1, "A heading the task does not name"))
-second_output = hook_run_in_process(seat) or ""
-check("walk-document changed between two hook runs: the second run reads the changed file",
-      first_output is None and "holds no item heading that reads" in second_output,
-      (first_output, second_output))
+seat.minutes_say(APPROVED_ITEM_1)
+one_checker = hook.GitHubConditionChecker({}, 0)
+before_the_edit = hook.approval_walk_item_decided_or_problem(walk_item_condition(seat, ITEM_1), one_checker)
+seat.document.write_text(WALK_DOCUMENT.replace(
+    f"# Walk\n\n## Item 1 of 3: {ITEM_1}\n\nRecommendation",
+    f"```\n\n## Item 1 of 3: {ITEM_1}\n```\nRecommendation"))
+after_the_edit = hook.approval_walk_item_decided_or_problem(walk_item_condition(seat, ITEM_1), one_checker)
+check("walk-document fenced around an unmoved heading, one checker: the answer follows the new text",
+      before_the_edit == {"met": True} and after_the_edit["met"] is False
+      and "holds no item heading that reads" in after_the_edit.get("problem", ""),
+      (before_the_edit, after_the_edit))
 
 # --- an approval record: a ready pending task is started by a forked subagent ----
 APPROVAL = "walk item 5, approved 2026-10-26"
