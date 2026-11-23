@@ -18,21 +18,27 @@ Each invocation, under a lock that keeps two from overlapping:
    every agent-seat with a running agent-session the account-change notice, through one headless
    agent-session; for an agent-seat idle at a usage limit, that notice is its limit wake.
 4. Looks, a minute or more after each send, for the message in the agent-seat's transcript, once
-   the agent-seat's turn has ended, and writes a user-alert when it is not there.
-5. For each idle agent-seat, applies the verdict's rule: rule 1 wakes it once its limit has ended;
+   the agent-seat's turn has ended, and gives OWNING_AGENT_SEAT a task when it is not there.
+5. For each idle agent-seat, applies the verdict's rule, skipping each step that starts a headless
+   agent-session while a headless usage-limit pause holds, as "How it fails" below says: rule 1 wakes it once its limit has ended;
    rule 2 has unbacked promises and announced actions judged and named to it; rule 3 sends the
    handoff text; rule 4 ends a wait no rule 2 message was sent on; rule 5 has the judge
-   decide whether to message it, and write the message. A wait whose rule 2 messages named only
+   decide whether to message it, and write the message. The judge is not told of a background
+   command whose verdict gives a `timeout_ends_at` not yet reached, since such work ends by itself, nor of a background command, subagent or workflow a rule 5 message
+   has already named, since the sweep asks once about each; when something runs and all of it is
+   such work, the judge is not asked. A wait whose rule 2 messages named only
    promises to act after an event and hold sentences ends when the agent-seat has recorded, after each
-   message, one task per sentence it named, each with a TaskCreate or TaskUpdate call whose result
+   message, one task per sentence it and the later messages named, a message whose send failed
+   included, each with a TaskCreate or TaskUpdate call whose result
    succeeded and that sets `metadata.prerequisites` or `addBlockedBy`. A message starts a wait, unless a wait is
    already open: 15 minutes later, if the agent-seat is idle, code sends the escalation, which
-   quotes the message that opened the wait, and 15 minutes after that writes the user a
-   user-alert, once.
+   quotes the message that opened the wait and each rule 2 message whose send on the open wait
+   failed, and 15 minutes after that writes the user a user-alert, once, which names the sentences
+   of those failed messages too.
 
 Every message to an agent-seat goes through Sweep.send_wake_message, which ends it with
-DO_NOT_REPLY_SENTENCE: the headless agent-session that sends it has exited by the time the
-agent-seat reads it, so a reply fails.
+DO_NOT_REPLY_SENTENCE: the headless agent-session that sends it reads no reply, and may still
+be running when the agent-seat reads it.
 
 Headless agent-sessions: `claude -p --model sonnet` in an empty working directory under the state
 directory. A sender is allowed only SendMessage, ListAgents and ToolSearch; the rule 2 and rule 5
@@ -49,27 +55,33 @@ case only when no rule 2 message was sent on the wait, makes the task call a rul
 asked for, as step 5 says, stops at a usage limit (rule 1), starts a
 new agent-session, or spends tokens after the user was told. So an agent-seat that answers each
 rule 3 or rule 5 message with a tool call and goes idle again is nudged again, and never
-escalated; one that answers a rule 2 message with a tool call and a fresh promise is escalated,
-because a tool call that ended a promise wait would let an agent-seat that makes a fresh promise
-at each rule 2 message be nudged again forever and never escalated.
+escalated, unless all that still runs has been asked about; a command that hangs after the one
+question about it reaches nobody until the agent-seat looks. One that answers a rule 2 message
+with a tool call and a fresh promise is escalated, because a tool call that ended a promise wait
+would let an agent-seat that makes a fresh promise at each rule 2 message be nudged again forever
+and never escalated.
 
-How it fails, and what the user sees: when a sender sends a text other than the one code wrote,
-the text it sent is logged as a sent_text_differs_from_code_text event, step 4's delivery check
-looks for that text, and the agent-seat ned-box-helper, OWNING_AGENT_SEAT, gets a task to find why,
-one task at a time. The difference is this program's defect, with nothing for the user to do, so
-only a failure to write that task is a user-alert. A headless agent-session that fails, is
-stopped, answers JSON code cannot use, or sends to the wrong entry; a message missing from the
-agent-seat's transcript; and a read failure slice 1 reports for the same agent-seat with the same
-text at every run for 2 minutes or more, counted from the failure's first run and through any
-invocation the lock made skip, since only a run that does not meet the failure ends the count,
-each become a user-alert; the invocation goes on to the other agent-seats, then exits 1. Each cause is alerted once; a failed headless
-agent-session is alerted once a day for each agent-seat and cause, such as the headless
-agent-session itself stopping at a usage limit, however claude's text for that cause varies. A read
-failure seen once only, such as the last line of a transcript
-Claude Code is still writing, is logged and not alerted; a run that does not meet it again logs its end, so that it
-coming back later is dated from its return. Any other failure, such as an unwritable log, prints a
-traceback, writes one user-alert per distinct error, and exits 1. A message step is logged before
-its send, so a failed send is not retried every minute: the wait goes on to its next step.
+How it fails, and who hears: each failure of this program goes to the agent-seat that owns it,
+OWNING_AGENT_SEAT, as a task on its task list, one open task for each subject; the agent-seat
+tells the user only when the fix needs a change to a guarded system or it cannot find the cause.
+The user gets a user-alert only when that task cannot be written. The failures are: a sender
+that sends a text other than the one code wrote, whose text is logged as a
+sent_text_differs_from_code_text event, and which step 4's delivery check then looks for; a
+headless agent-session that fails, is stopped, answers JSON code cannot use, or sends to the
+wrong entry, with one subject for each cause code names, however claude's text for that cause
+varies; a message missing from the agent-seat's transcript; a read failure slice 1 reports for
+the same agent-seat with the same text at every run for 2 minutes or more, counted from the
+failure's first run and through any invocation the lock made skip, since only a run that does
+not meet the failure ends the count; and any other failure, such as an unwritable log, which
+also prints a traceback. The invocation goes on to the other agent-seats, then exits 1. A read
+failure seen once only, such as the last line of a transcript Claude Code is still writing, is
+logged and not reported; a run that does not meet it again logs its end, so that it coming back
+later is dated from its return. A headless agent-session stopped at a usage limit whose reset
+time its own transcript carries opens no task: code logs a headless_usage_limit_pause event, and
+starts no headless agent-session, for any agent-seat, until that time passes or the logged-in
+account changes; a rule 2 judge stopped so logs neither the check nor its sentences, so that
+they are judged after the pause. A message step is logged before its send, so a failed send is not retried every
+minute: the wait goes on to its next step.
 The harm it can cause is an extra message to an agent-seat, which costs that agent-seat one turn.
 """
 
@@ -118,10 +130,18 @@ STATE_DIRECTORY = (Path.home() / ".local" / "state" / "nedsnodes"
 # The folder's name is the name the receiving agent-seat sees the message come from.
 HEADLESS_WORKING_DIRECTORY_NAME = "agent-seat-idle-sweep"
 RUN_FAILURES_ALERTED_FILE_NAME = "run-failures-alerted.txt"
-# The agent-seat that owns this program: a defect of the program that needs nothing from the user
-# goes to its task list.
-OWNING_AGENT_SEAT = "ned-box-helper"
+# The agent-seat that owns this program: each failure of the program goes to its task list, and
+# the user hears of one only through that agent-seat, or when the task cannot be written.
+OWNING_AGENT_SEAT = "reboot-test"
+PROGRAM_PATH_IN_REPOSITORY = f"scripts/{Path(__file__).name}"
 SENT_TEXT_DIFFERS_TASK_SUBJECT = "Idle sweep: a headless sender sent a text other than the one code wrote"
+OWNING_AGENT_SEAT_TASK_LAST_LINES = (
+    "Tell the user only if the fix needs a change to a guarded system, or if you cannot find the "
+    "cause.\nMark this task completed when the cause is fixed; the idle sweep opens a new task at "
+    "its next failure with this subject.")
+# Logged when a headless agent-session stops at a usage limit whose reset time its transcript
+# carries: no headless agent-session starts until that time, or until the account changes.
+HEADLESS_USAGE_LIMIT_PAUSE = "headless_usage_limit_pause"
 
 WAIT_STEP_SECONDS = 15 * 60
 JUDGE_ASK_AGAIN_SECONDS = 15 * 60
@@ -143,10 +163,12 @@ LIMIT_WAKE, ACCOUNT_NOTICE = "limit_wake", "account_notice"
 # Kinds of headless failure that run_headless does not name, for headless_failed's key.
 SENDS_WRONG = "the sender's SendMessage calls were not the sends code asked for"
 JUDGE_ANSWER_UNUSABLE = "the judge's answer could not be used"
-DO_NOT_REPLY_SENTENCE = "Do not reply to this message: its sender has exited, so a reply fails."
+DO_NOT_REPLY_SENTENCE = "Do not reply to this message: the idle sweep sent it, and nothing acts on a reply."
 ESCALATION_TEXT = ("You've given this {minutes} minutes, please check; if not sure, hand off. At "
                    "{nudge_time} the idle sweep wrote this, which you have not acted on:\n\n"
                    "{quoted_nudge}")
+FAILED_PROMISE_ESCALATION_TEXT = ("\n\nAt {time} the idle sweep tried to send you this too, and the "
+                                  "send failed:\n\n{quoted_text}")
 LIMIT_WAKE_TEXT = ("The usage limit that stopped you has ended: {why}. Carry on with the work the "
                    "limit stopped.")
 LIMIT_ENDED_BY_RESET = "its reset time has passed"
@@ -177,11 +199,19 @@ UNBACKED_SENTENCE_LINES = {
 # The kinds of sentence whose message asks for a task call that code can see: one that sets
 # prerequisites or addBlockedBy. An announced action or a standing rule only the judge finds done.
 TASK_CALL_SETTLED_KINDS = frozenset((fields.PROMISE_AFTER_EVENT, fields.HOLD))
+# On a rule 5 judge_answer event: the ids of the background commands, subagents and workflows its
+# message asked about, which no later rule 5 message asks about again.
+RUNNING_WORK_ASKED_ABOUT = "running_work_asked_about"
 # An event logged with each rule 2 message, carrying the sentences it names and their kinds.
 PROMISE_MESSAGE = "promise_message"
 # On an open wait: the rule 2 messages sent on it, [{"at", "kinds", "sentences"}], or None when one
 # of them was sent by a version of this program that logged no sentences for it.
 PROMISE_MESSAGES = "promise_messages"
+# An event logged when a rule 2 message's send on an open wait failed, carrying its text and the
+# sentences it names, since no message_sent or promise_message event holds them.
+PROMISE_MESSAGE_SEND_FAILED = "promise_message_send_failed"
+# On an open wait: the rule 2 messages whose send on it failed, [{"at", "kinds", "sentences", "text"}].
+FAILED_PROMISE_MESSAGES = "failed_promise_messages"
 
 SEND_ANSWER_SCHEMA = {"type": "object", "required": ["sent", "reason"],
                       "properties": {"sent": {"type": "boolean"}, "reason": {"type": "string"}}}
@@ -246,13 +276,16 @@ agent-seat's other work.
 
 Judge whether the agent-seat could act now. If it could, write it one short message saying what you \
 saw. Name each background command, workflow and subagent that has not finished or reported, \
-with how long it has run, and ask whether it is taking longer than expected, such as "Your \
-test-suite run started 25 minutes ago and has not finished. Is it taking longer than expected?". \
+with how long it has run, and ask whether it is taking longer than expected. Name a background \
+command by its description, in quotation marks, followed by its id in brackets, or by its id \
+alone when its description is null, and a subagent or workflow by its id, such as "Your background command "Run the idle-sweep test \
+suites" (b7k2m4qzp) started 25 minutes ago and has not finished. Is it taking longer than \
+expected?". \
 A subagent with stopped_at has stopped and reported: it is not running, and only the background \
 commands it launched, under own_running_background_commands, still run. Say so, and name each of \
-those commands with how long it has run, such as "Your subagent ae10c20d94ca876c9 reported 124 \
-minutes ago, but background command bgyicuvln, which it started 131 minutes ago, has not \
-finished. Is it still needed?". \
+those commands with how long it has run, such as "Your subagent ae10c20d94ca876c9 reported 20 \
+minutes ago. Your subagent's background command "Check which recorded surviving mutants current \
+main kills" (bk9617lvz) started 29 minutes ago and has not finished. Is it still needed?". \
 With nothing running, ask what is going on, such as "Your task "Open the pull request for the \
 reviewed fix" is open and nothing holds it, and you have made no tool call for 12 minutes. What's \
 going on?". If it could not act now, write \
@@ -279,9 +312,10 @@ it, or by a task to build one together with a proposal to the user; a memory nev
 - A hold, such as "I'll hold", is backed by a task whose prerequisites name what releases the hold.
 
 Judge each sentence by the rule of the kind the JSON gives it, because the message that names an \
-unbacked sentence is worded for that kind; a sentence that, read whole, declines or puts off an \
-action instead of promising one, such as "ned-box's load is near 22, so I'm starting nothing else \
-for now", leaves nothing undone: it is backed.
+unbacked sentence is worded for that kind; a sentence that, read whole, only declines an action \
+and commits the agent-seat to nothing later, such as "ned-box's load is near 22, so I'm starting \
+nothing else for now", leaves nothing undone: it is backed. A hold or a promise to act after an \
+event puts off an action until something happens; judge it by its own rule above.
 
 The tool calls the agent-seat made from the earliest sentence's turn on are in the JSON below, with \
 the tasks they created or updated and the files they changed; so are its open tasks that have \
@@ -357,24 +391,33 @@ class SweepLog:
         # Whether a PROMISE step awaits its PROMISE_MESSAGE, and the invocation that logged the
         # step.
         owed, owed_by = False, None
-        for event in self.of_seat(seat, "wait_step", "wait_ended", PROMISE_MESSAGE):
+        for event in self.of_seat(seat, "wait_step", "wait_ended", PROMISE_MESSAGE,
+                                  PROMISE_MESSAGE_SEND_FAILED):
             invocation = event.get("agent_seat_idle_sweep_invocation_started_at")
             if event["event"] == "wait_ended":
                 wait, owed = None, False
+            elif event["event"] == PROMISE_MESSAGE_SEND_FAILED:
+                if wait is not None:
+                    wait[FAILED_PROMISE_MESSAGES].append({
+                        "at": event["at"], "kinds": set(event["kinds"]),
+                        "sentences": event["sentences"], "text": event["text"]})
+                owed = False
             elif event["event"] == PROMISE_MESSAGE:
                 if wait is None:
                     continue
                 if (owed and owed_by != invocation) or "sentences" not in event:
                     wait[PROMISE_MESSAGES] = None
                 elif wait[PROMISE_MESSAGES] is not None:
-                    wait[PROMISE_MESSAGES].append({"at": event["at"], "kinds": set(event["kinds"]),
-                                                   "sentences": event["sentences"]})
+                    wait[PROMISE_MESSAGES].append({
+                        "at": event.get("send_started_at", event["at"]),
+                        "kinds": set(event["kinds"]), "sentences": event["sentences"]})
                 owed = False
             elif event["step"] == NUDGE or (wait is not None and event["step"] == PROMISE):
                 if event["step"] == NUDGE:
                     wait = {"session_id": event["session_id"],
                             "first_idle_at": event["first_idle_at"], NUDGE: event["at"],
-                            "nudge_text": event["text"], PROMISE_MESSAGES: []}
+                            "nudge_text": event["text"], PROMISE_MESSAGES: [],
+                            FAILED_PROMISE_MESSAGES: []}
                     owed = False
                     if event.get("rule") != 2:
                         continue
@@ -387,6 +430,15 @@ class SweepLog:
     def last_judge_answer(self, seat):
         answers = [event for event in self.of_seat(seat, "judge_answer") if event.get("rule") == 5]
         return answers[-1] if answers else None
+
+    def running_work_asked_about(self, seat):
+        """The running work rule 5 messages named, less what a message the delivery check did not
+        find in the agent-seat's transcript named."""
+        not_found = {event["message_id"] for event in self.of_seat(seat, "delivery_checked")
+                     if not event["found"]}
+        return {work_id for event in self.of_seat(seat, "judge_answer") if event.get("rule") == 5
+                and event.get("message_id") not in not_found
+                for work_id in event.get(RUNNING_WORK_ASKED_ABOUT, [])}
 
     def checked_sentences(self, seat):
         return {(event["record_uuid"], event["sentence"])
@@ -428,6 +480,17 @@ class SweepLog:
                 record[event["event"]]((event["agent_seat"], event["error"]))
         return open_failures
 
+    def headless_usage_limit_pause(self):
+        """The last headless_usage_limit_pause event, unless an account_seen event follows it: the
+        new account has limits of its own."""
+        pause = None
+        for event in self.events:
+            if event.get("event") == HEADLESS_USAGE_LIMIT_PAUSE:
+                pause = event
+            elif event.get("event") == "account_seen":
+                pause = None
+        return pause
+
     def alerted(self, key):
         return any(event.get("event") == "user_alert" and event.get("key") == key
                    for event in self.events)
@@ -454,6 +517,10 @@ def agent_seat_idle_sweep_invocation_started_at(event):
 def seconds_between(earlier, later):
     earlier = parse_time(earlier) if isinstance(earlier, str) else earlier
     return (later - earlier).total_seconds()
+
+
+def quoted(text):
+    return "\n".join(f"> {line}" for line in text.split("\n"))
 
 
 def task_calls_settling_promise_messages(promise_messages, task_calls):
@@ -484,6 +551,7 @@ class HeadlessOutcome:
         self.error_kind = None     # the error's cause, worded by code alone: a user-alert's key
         self.answer = None         # its --json-schema answer
         self.sends = []            # [{"to", "message", "succeeded", "result"}]
+        self.session_id = None     # the agent-session's id, which names its transcript
 
 
 def claude_binary():
@@ -524,6 +592,8 @@ def run_headless(prompt, schema, tools, working_directory, timeout_seconds):
             continue
         if not isinstance(event, dict):
             continue
+        if isinstance(event.get("session_id"), str):
+            outcome.session_id = event["session_id"]
         if event.get("type") == "result":
             result = event
         content = (event.get("message") or {}).get("content")
@@ -593,6 +663,23 @@ def text_sent_to(outcome, seat, text):
     return sent[-1] if sent else text
 
 
+def owning_agent_seat_task_opened_unless_open(tasks_root, subject, description):
+    """Open a task on OWNING_AGENT_SEAT's task list unless one with the subject that is not marked
+    completed is there; return the new task's id, or None. Raises OSError."""
+    list_directory = tasks_root / f"nedsnodes-{OWNING_AGENT_SEAT}-tasks"
+    if list_directory.is_dir():
+        for path in list_directory.glob("*.json"):
+            try:
+                task = json.loads(path.read_text(encoding="utf-8"))
+            except ValueError:
+                continue
+            if (task.get("status") != "completed"  # pragma: no mutate, Claude Code writes pending, in_progress or completed, and both others sort after completed, so > says the same
+                    and task.get("subject") == subject):
+                return None
+    return agent_seat_task_list.agent_seat_task_list_new_pending_task_write(
+        list_directory, subject, description)
+
+
 # --- One invocation ---
 
 class Sweep:
@@ -626,19 +713,45 @@ class Sweep:
         print(f"user-alert {alert_id}: {title}", flush=True)
         return alert_id
 
-    def headless_failed(self, seat, purpose, problem, kind):
+    def headless_failed(self, seat, purpose, problem, kind, outcome=None):
         """problem is the failure's full text; kind names its cause in words code alone chose, so
-        that a cause met at every invocation, such as a usage limit, gives one user-alert a day."""
+        that a cause met at every invocation, such as a usage limit, opens one task. A usage limit
+        whose reset time is still ahead opens none: it pauses every headless agent-session, and
+        this returns True."""
         self.failed = True
         self.record({"event": "headless_failed", "agent_seat": seat, "purpose": purpose,
                      "problem": problem})
-        self.alert(f"headless-failed:{seat}:{kind}:{self.now.date()}",
-                   f"The idle sweep's headless agent-session for {seat} failed",
-                   f"The idle sweep started a headless agent-session to {purpose} for the "
-                   f"agent-seat {seat}, and it failed: {problem}",
-                   "An agent on ned-box can read the idle sweep's log, "
-                   f"{self.log.path}, and the cron output log, and check whether {seat} needs a "
-                   "message; run `claude -p` by hand on ned-box to see whether claude is logged out.")
+        resets_at = self.usage_limit_reset_time(outcome) if outcome else None
+        if resets_at is not None and resets_at > self.now.timestamp():
+            self.record({"event": HEADLESS_USAGE_LIMIT_PAUSE, "agent_seat": seat,
+                         "resets_at": iso(datetime.fromtimestamp(resets_at, timezone.utc))})
+            return True
+        self.owning_agent_seat_task(
+            f"Idle sweep: a headless agent-session failed: {kind}",
+            f"The idle sweep, {PROGRAM_PATH_IN_REPOSITORY}, started a headless agent-session to "
+            f"{purpose} for the agent-seat {seat}, and it failed: {problem}\n"
+            f"Each such failure is a headless_failed event in the idle sweep's log, {self.log.path}. "
+            "Find the cause and fix it; to see whether claude is logged out, run `claude -p` by hand "
+            "on ned-box.\n" + OWNING_AGENT_SEAT_TASK_LAST_LINES)
+        return False
+
+    def usage_limit_reset_time(self, outcome):
+        """The reset time of the last usage-limit record in the headless agent-session's
+        transcript, or None when there is none or the transcript cannot be read."""
+        if not outcome.session_id:
+            return None
+        transcript = (verdicts_print.transcript_lookup.project_directory_for_seat(
+            self.working_directory, self.paths.projects_root) / f"{outcome.session_id}.jsonl")
+        try:
+            limits = [record for record in verdicts_print.transcript_records(transcript)
+                      if verdicts_print.is_usage_limit(record)]
+        except verdicts_print.ReadFailure:
+            return None
+        return verdicts_print.usage_limit_reset_time(limits[-1]) if limits else None
+
+    def headless_usage_limit_pause_holds(self):
+        pause = self.log.headless_usage_limit_pause()
+        return pause is not None and self.now < parse_time(pause["resets_at"])
 
     def sent_texts_differ(self, outcome, seats, text, step):
         """Log each text a sender sent in place of code's, and give OWNING_AGENT_SEAT a task to
@@ -649,47 +762,36 @@ class Sweep:
                          "text": text, "sent_text": sent_text})
         if not differing:
             return
-        try:
-            task_id = self.owning_agent_seat_task_opened_unless_open()
-        except OSError as error:
-            self.alert(f"owner-task-not-written:{type(error).__name__}: {error}:{self.now.date()}",
-                       f"The idle sweep could not give {OWNING_AGENT_SEAT} a task",
-                       f"A headless agent-session sent {', '.join(seat for seat, _ in differing)} "
-                       "a text other than the one the idle sweep wrote, and the idle sweep could "
-                       f"not write the task that tells {OWNING_AGENT_SEAT} to find why: "
-                       f"{type(error).__name__}: {error}",
-                       f"An agent on ned-box can fix what the error names, such as the task list "
-                       f"directory of {OWNING_AGENT_SEAT} not existing, and give "
-                       f"{OWNING_AGENT_SEAT} the sent_text_differs_from_code_text events of the idle sweep's "
-                       f"log, {self.log.path}.")
-            return
-        if task_id is not None:
-            self.record({"event": "owning_agent_seat_task_opened", "agent_seat": OWNING_AGENT_SEAT,
-                         "task_id": task_id, "subject": SENT_TEXT_DIFFERS_TASK_SUBJECT})
-
-    def owning_agent_seat_task_opened_unless_open(self):
-        """Open the sent-text task on OWNING_AGENT_SEAT's task list unless one not marked
-        completed is there; return the new task's id, or None. Raises OSError."""
-        list_directory = self.paths.tasks_root / f"nedsnodes-{OWNING_AGENT_SEAT}-tasks"
-        if list_directory.is_dir():
-            for path in list_directory.glob("*.json"):
-                try:
-                    task = json.loads(path.read_text(encoding="utf-8"))
-                except ValueError:
-                    continue
-                if (task.get("status") != "completed"  # pragma: no mutate, Claude Code writes pending, in_progress or completed, and both others sort after completed, so > says the same
-                        and task.get("subject") == SENT_TEXT_DIFFERS_TASK_SUBJECT):
-                    return None
-        return agent_seat_task_list.agent_seat_task_list_new_pending_task_write(
-            list_directory, SENT_TEXT_DIFFERS_TASK_SUBJECT,
-            "A headless agent-session the idle sweep, scripts/agent-seat-idle-sweep-headless-"
-            "judge-wake-messages-send-and-user-alerts-write.py, started to send a message sent a "
-            "text other than the one code wrote. Each time is a sent_text_differs_from_code_text event in the "
+        self.owning_agent_seat_task(
+            SENT_TEXT_DIFFERS_TASK_SUBJECT,
+            f"A headless agent-session the idle sweep, {PROGRAM_PATH_IN_REPOSITORY}, started to send "
+            "a message sent a text other than the one code wrote. Each time is a "
+            "sent_text_differs_from_code_text event in the "
             f"idle sweep's log, {self.log.path}, with the text code wrote and the text sent.\n"
             "Compare the two, find why the sender changed the text, such as a sender prompt "
             "that lets it, and fix the cause in a pull request.\n"
             "Mark this task completed when the fix is merged; the idle sweep opens a new task "
             "at the next difference.")
+
+    def owning_agent_seat_task(self, subject, description):
+        """Open a task on OWNING_AGENT_SEAT's task list unless one with the subject is open, and
+        log it; write a user-alert when the task cannot be written, the only other route."""
+        try:
+            task_id = owning_agent_seat_task_opened_unless_open(self.paths.tasks_root, subject,
+                                                                description)
+        except OSError as error:
+            failure = f"{type(error).__name__}: {error}"
+            self.alert(f"owner-task-not-written:{subject}:{failure}:{self.now.date()}",
+                       f"The idle sweep could not give {OWNING_AGENT_SEAT} a task",
+                       f"The idle sweep could not write the task \"{subject}\" on "
+                       f"{OWNING_AGENT_SEAT}'s task list: {failure}. The task says:\n\n{description}",
+                       "An agent on ned-box can fix what the error names, such as the task list "
+                       f"directory of {OWNING_AGENT_SEAT} not existing, and give {OWNING_AGENT_SEAT} "
+                       "the task.")
+            return
+        if task_id is not None:
+            self.record({"event": "owning_agent_seat_task_opened", "agent_seat": OWNING_AGENT_SEAT,
+                         "task_id": task_id, "subject": subject})
 
     def send_wake_message(self, seats, text):
         """The one way a message reaches an agent-seat: end the text with DO_NOT_REPLY_SENTENCE and
@@ -711,26 +813,27 @@ class Sweep:
         return text, outcome, started_at
 
     def send(self, seat, verdict, text, step):
-        """Send code's text to one agent-seat; log the send for the delivery check."""
+        """Send code's text to one agent-seat; log the send for the delivery check. Returns the
+        message_sent event, or False when the send failed."""
         text, outcome, started_at = self.send_wake_message([seat], text)
         if outcome.error:
             self.headless_failed(seat, f"send its {step} message", outcome.error,
-                                 outcome.error_kind)
-            return
+                                 outcome.error_kind, outcome)
+            return False
         self.sent_texts_differ(outcome, [seat], text, step)
         problems = send_problems(outcome, [seat])
         if problems:
             self.headless_failed(seat, f"send its {step} message", "; ".join(problems), SENDS_WRONG)
-            return
-        self.message_sent(seat, verdict, text_sent_to(outcome, seat, text), step, started_at)
+            return False
+        return self.message_sent(seat, verdict, text_sent_to(outcome, seat, text), step, started_at)
 
     def message_sent(self, seat, verdict, text, step, started_at):
         # The delivery check compares transcript times with the send's start: a sender may run on
         # for minutes after its SendMessage, and the record is written when it ends.
-        self.record({"event": "message_sent", "agent_seat": seat, "step": step, "text": text,
-                     "send_started_at": iso(started_at),
-                     "message_id": uuid.uuid4().hex, "session_id": verdict.get(fields.SESSION_ID),
-                     "transcript_path": verdict.get(fields.TRANSCRIPT_PATH)})
+        return self.record({"event": "message_sent", "agent_seat": seat, "step": step, "text": text,
+                            "send_started_at": iso(started_at), "message_id": uuid.uuid4().hex,
+                            "session_id": verdict.get(fields.SESSION_ID),
+                            "transcript_path": verdict.get(fields.TRANSCRIPT_PATH)})
 
     # --- The account ---
 
@@ -757,7 +860,7 @@ class Sweep:
         text, outcome, started_at = self.send_wake_message(seats, text)
         if outcome.error:
             self.headless_failed(", ".join(seats), "send the account-change notice", outcome.error,
-                                 outcome.error_kind)
+                                 outcome.error_kind, outcome)
             return
         self.sent_texts_differ(outcome, seats, text, ACCOUNT_NOTICE)
         wrong = [problem for problem in send_problems(outcome, seats)
@@ -798,15 +901,17 @@ class Sweep:
             self.record({"event": "delivery_checked", "agent_seat": seat,
                          "message_id": sent["message_id"], "found": found})
             if not found:
-                step = sent["step"].replace("_", " ")
-                self.alert(f"delivery:{sent['message_id']}",
-                           f"The idle sweep's {step} message did not reach {seat}",
-                           f"At {sent['at']} the idle sweep sent {seat} this cross-session "
-                           f"message, and its transcript {sent['transcript_path']} does not hold "
-                           f"it: {sent['text']}",
-                           f"An agent on ned-box can run ListAgents to see whether {seat} has more "
-                           "than one entry, such as an offline Remote Control one, and send it the "
-                           "message with SendMessage.")
+                self.failed = True
+                self.owning_agent_seat_task(
+                    "Idle sweep: a message it sent is missing from the agent-seat's transcript",
+                    f"At {sent['at']} the idle sweep sent {seat} its {sent['step'].replace('_', ' ')} "
+                    f"message, and its transcript {sent['transcript_path']} does not hold it:\n\n"
+                    f"{sent['text']}\n\n"
+                    "Each such message is a delivery_checked event with found false in the idle "
+                    f"sweep's log, {self.log.path}. Find why, such as the agent-seat having more "
+                    "than one ListAgents entry, an offline Remote Control one among them, and fix "
+                    "the cause; send each agent-seat its message with SendMessage if it still "
+                    "needs it.\n" + OWNING_AGENT_SEAT_TASK_LAST_LINES)
 
     # --- Read failures ---
 
@@ -818,15 +923,15 @@ class Sweep:
             return
         if (seconds_between(agent_seat_idle_sweep_invocation_started_at(first_seen), self.now)
                 >= READ_FAILURE_ALERT_AFTER_SECONDS):
-            # Keyed by the text alone: two readers of one broken file, such as ~/.claude.json,
-            # report it in the same words.
-            self.alert(f"read-failure:{text}",
-                       f"The idle sweep cannot read what it needs for {seat}",
-                       f"Since {first_seen['at']} the idle sweep has failed, each minute, to "
-                       f"read: {text}",
-                       "An agent on ned-box can open the file the failure names and repair it, or "
-                       "tell the user what is wrong with it; until then the idle sweep does not "
-                       f"check {seat}.")
+            # The subject holds the text alone: two readers of one broken file, such as
+            # ~/.claude.json, report it in the same words.
+            self.failed = True
+            self.owning_agent_seat_task(
+                f"Idle sweep: cannot read what it needs: {text}",
+                f"Since {first_seen['at']} the idle sweep has failed, at every run, to read: "
+                f"{text}\nUntil it can, the idle sweep skips {seat}. Open the file the failure names, "
+                "find why it cannot be read, and fix the cause.\n"
+                + OWNING_AGENT_SEAT_TASK_LAST_LINES)
 
     def read_failures_end(self):
         """A failure this invocation did not meet again has ended, so that one coming back later
@@ -837,6 +942,9 @@ class Sweep:
     # --- One idle agent-seat ---
 
     def handle_seat(self, seat, verdict, transcript_read_at):
+        # Checked before each step that starts a headless agent-session: a judge or send earlier in
+        # this invocation, for this agent-seat too, may have started the pause. During it, only the
+        # steps that start none run; the others are not logged, so they run after it.
         session = verdict[fields.SESSION_ID]
         stretch = (verdict.get(fields.LAST_ACTIVITY) or {}).get("time")
         wait = self.log.open_wait(seat)
@@ -844,13 +952,13 @@ class Sweep:
             self.end_wait(seat, "a new agent-session")
             wait = None
         check = self.log.last_check(seat)
-        if not (check and check["session_id"] == session and check["last_activity"] == stretch):
-            self.record({"event": "checked", "agent_seat": seat, "session_id": session,
-                         "transcript_read_at": iso(transcript_read_at),
-                         "last_activity": stretch, "rule": verdict[fields.RULE],
-                         "decision": verdict.get(fields.DECISION)})
+        check_is_new = not (check and check["session_id"] == session
+                            and check["last_activity"] == stretch)
         rule, text = verdict[fields.RULE], verdict.get(fields.TEXT)
         if rule == 1:
+            if self.headless_usage_limit_pause_holds():
+                return
+            self.checked(seat, verdict, transcript_read_at, check_is_new)
             if wait:
                 self.end_wait(seat, "a usage limit")
             self.usage_limit(seat, verdict)
@@ -862,13 +970,17 @@ class Sweep:
             self.end_wait(seat, "it made a tool call after the nudge")
             wait = None
         if wait and wait[PROMISE_MESSAGES]:
+            # A failed message's sentences must be backed too, so that a call backing an earlier
+            # promise does not end the wait before the escalation and the user-alert report them.
+            messages = sorted(wait[PROMISE_MESSAGES] + wait[FAILED_PROMISE_MESSAGES],
+                              key=lambda message: parse_time(message["at"]))
             settling_calls = task_calls_settling_promise_messages(
-                wait[PROMISE_MESSAGES],
+                messages,
                 verdict.get(
                     fields.SUCCESSFUL_TASK_TOOL_CALLS_SETTING_PREREQUISITES_OR_BLOCKED_BY) or [])
             if settling_calls is not None:
                 self.end_wait(seat, "it recorded what a task waits on after the promise message",
-                              sentences=[sentence for message in wait[PROMISE_MESSAGES]
+                              sentences=[sentence for message in messages
                                          for sentence in message["sentences"]],
                               task_calls=settling_calls)
                 wait = None
@@ -876,14 +988,26 @@ class Sweep:
             self.end_wait(seat, "it spent tokens after the user was told")
             wait = None
         promise_text = None
-        if rule == 2:
-            outcome, promise = self.sentences(seat, verdict)
-            promise_text, promise_kinds, promise_sentences = promise or (None, None, None)
+        judged_sentences = rule == 2
+        sentences_checked = []
+        if judged_sentences and self.headless_usage_limit_pause_holds():
+            if wait:
+                self.due_step(seat, verdict, wait)
+            return
+        if judged_sentences:
+            outcome, promise, sentences_checked = self.sentences(seat, verdict)
+            if outcome == "paused":
+                # The check is not logged, so that the next read after the reset still holds the
+                # sentences the judge could not judge.
+                return
+            promise_text, promise_kinds, promise_sentences, promise_records = promise or (None, None, None, ())
             fallback = verdict.get(fields.IF_EVERY_SENTENCE_BACKED)
             if outcome == "all backed" and fallback is not None:
                 rule, text = fallback[fields.RULE], fallback.get(fields.TEXT)
             elif not promise_text:
                 rule = None
+        if not judged_sentences:
+            self.checked(seat, verdict, transcript_read_at, check_is_new)
         # Nothing to do settles the open tasks a rule 3 or 5 message was about, but not a promise
         # a rule 2 message named, whatever message opened the wait it was sent on.
         if rule == 4 and wait and PROMISE not in wait:
@@ -891,16 +1015,46 @@ class Sweep:
             wait = None
         if wait:
             self.due_step(seat, verdict, wait)
+        paused = self.headless_usage_limit_pause_holds()
+        # An escalation stopped at a usage limit can start the pause after the sentences were
+        # judged. When it holds back their promise message, the unbacked sentences and the check
+        # are not logged, so that after the reset they are judged again and the message is sent.
+        # Every other sentence checked is logged, so that a second judge cannot answer
+        # differently about it and add a wrong line to that message.
+        if judged_sentences and paused and promise_text:
+            unbacked_keys = {(item["record_uuid"], item["sentence"]) for item in promise_records}
+            self.sentences_checked(seat, [item for item in sentences_checked
+                                          if (item["record_uuid"], item["sentence"]) not in unbacked_keys])
+        elif judged_sentences:
+            self.sentences_checked(seat, sentences_checked)
+            self.checked(seat, verdict, transcript_read_at, check_is_new)
+        if paused:
+            return
         if promise_text:
             # A promise given in answer to a message goes on the open wait, so that repeated
             # promises cannot put off its escalation and the user-alert.
             if not wait:
+                # Logged before the send: the escalation quotes the nudge that opened the wait, so
+                # a promise message whose own send failed still reaches the agent-seat.
                 self.start_wait(seat, verdict, stretch, promise_text, 2)
-            elif PROMISE not in wait:
-                self.record({"event": "wait_step", "agent_seat": seat, "step": PROMISE})
-            self.record({"event": PROMISE_MESSAGE, "agent_seat": seat, "kinds": promise_kinds,
-                         "sentences": promise_sentences})
-            self.send(seat, verdict, promise_text, NUDGE)
+                self.record({"event": PROMISE_MESSAGE, "agent_seat": seat, "kinds": promise_kinds,
+                             "sentences": promise_sentences})
+                self.send(seat, verdict, promise_text, NUDGE)
+            else:
+                # The promise step is logged whether or not the send succeeds: its sentences are
+                # already logged as checked, so only the wait's escalation and user-alert can
+                # still report the promise, and they read a failed message from its own event.
+                if PROMISE not in wait:
+                    self.record({"event": "wait_step", "agent_seat": seat, "step": PROMISE})
+                sent = self.send(seat, verdict, promise_text, NUDGE)
+                if sent:
+                    self.record({"event": PROMISE_MESSAGE, "agent_seat": seat,
+                                 "kinds": promise_kinds, "sentences": promise_sentences,
+                                 "send_started_at": sent["send_started_at"]})
+                else:
+                    self.record({"event": PROMISE_MESSAGE_SEND_FAILED, "agent_seat": seat,
+                                 "kinds": promise_kinds, "sentences": promise_sentences,
+                                 "text": promise_text})
         elif not wait:
             self.nudge(seat, verdict, rule, text, stretch)
 
@@ -914,10 +1068,12 @@ class Sweep:
 
     def due_step(self, seat, verdict, wait):
         """The step of an open wait that is due: the escalation 15 minutes after the nudge, then
-        the user-alert 15 minutes after the escalation; after that, none."""
+        the user-alert 15 minutes after the escalation; after that, none. The escalation is a
+        send, so a headless usage-limit pause holds it."""
         if TELL_USER in wait:
             return
         minutes = int(seconds_between(wait["first_idle_at"] or wait[NUDGE], self.now) // 60)
+        failed = wait[FAILED_PROMISE_MESSAGES]
         if ESCALATE in wait:
             if seconds_between(wait[ESCALATE], self.now) >= WAIT_STEP_SECONDS:
                 self.record({"event": "wait_step", "agent_seat": seat, "step": TELL_USER})
@@ -926,15 +1082,25 @@ class Sweep:
                            f"The idle sweep found {seat} idle with something to do, messaged it "
                            f"at {wait[NUDGE]} and escalated at {wait[ESCALATE]}, and it is idle "
                            f"again. Its transcript is {verdict[fields.TRANSCRIPT_PATH]}. The idle "
-                           "sweep sends it nothing more until it spends tokens and goes idle again.",
+                           "sweep sends it nothing more until it spends tokens and goes idle again."
+                           + "".join(f" At {message['at']} the idle sweep failed to send it a "
+                                     "message naming these sentences of its own, which only the "
+                                     "escalation quoted: "
+                                     + " ".join(f'"{sentence}"' for sentence in message["sentences"])
+                                     for message in failed),
                            f"An agent on ned-box can read {seat}'s transcript and its tmux session "
                            f"{seat} to see why it stopped, and message it with SendMessage; the "
                            "user may want to look at it himself.", failure=False)
             return
-        if seconds_between(wait[NUDGE], self.now) >= WAIT_STEP_SECONDS:
+        if (seconds_between(wait[NUDGE], self.now) >= WAIT_STEP_SECONDS
+                and not self.headless_usage_limit_pause_holds()):
             text = ESCALATION_TEXT.format(
                 minutes=minutes, nudge_time=parse_time(wait[NUDGE]).strftime("%Y-%m-%d %H:%MZ"),
-                quoted_nudge="\n".join(f"> {line}" for line in wait["nudge_text"].split("\n")))
+                quoted_nudge=quoted(wait["nudge_text"])) + "".join(
+                    FAILED_PROMISE_ESCALATION_TEXT.format(
+                        time=parse_time(message["at"]).strftime("%Y-%m-%d %H:%MZ"),
+                        quoted_text=quoted(message["text"]))
+                    for message in failed)
             self.record({"event": "wait_step", "agent_seat": seat, "step": ESCALATE, "text": text})
             self.send(seat, verdict, text, ESCALATE)
 
@@ -966,6 +1132,31 @@ class Sweep:
                 "running_background_commands": with_minutes(running.get("background_commands", [])),
                 "running_workflows": with_minutes(running.get("workflows", []))}
 
+    def running_work_to_ask_about(self, facts, asked_about):
+        """The facts less the running work not to ask the agent-seat about: each background
+        command whose own timeout has not yet ended it, since it ends by itself; each command,
+        subagent and workflow a rule 5 message has already asked about, since the sweep asks once
+        about each; and each stopped subagent left with no other command."""
+        own = fields.SUBAGENT_OWN_RUNNING_BACKGROUND_COMMANDS
+        ends_at = fields.BACKGROUND_COMMAND_TIMEOUT_ENDS_AT
+
+        def to_ask_about(commands):
+            return [command for command in commands if command["id"] not in asked_about
+                    and not (command.get(ends_at) and parse_time(command[ends_at]) > self.now)]
+        subagents = []
+        for entry in facts["running_subagents"]:
+            if own in entry:
+                entry = {**entry, own: to_ask_about(entry[own])}
+                if not entry[own]:
+                    continue
+            elif entry["id"] in asked_about:
+                continue
+            subagents.append(entry)
+        return {**facts, "running_subagents": subagents,
+                "running_background_commands": to_ask_about(facts["running_background_commands"]),
+                "running_workflows": [workflow for workflow in facts["running_workflows"]
+                                      if workflow["id"] not in asked_about]}
+
     def judge_idle_seat(self, seat, verdict, stretch):
         answer = self.log.last_judge_answer(seat)
         if (answer and answer["session_id"] == verdict[fields.SESSION_ID]
@@ -973,7 +1164,12 @@ class Sweep:
                 and seconds_between(agent_seat_idle_sweep_invocation_started_at(answer), self.now)
                 < JUDGE_ASK_AGAIN_SECONDS):
             return
-        facts = dict(self.facts(seat, verdict), step=NUDGE)
+        all_facts = self.facts(seat, verdict)
+        facts = dict(self.running_work_to_ask_about(all_facts, self.log.running_work_asked_about(seat)),
+                     step=NUDGE)
+        running_keys = ("running_subagents", "running_background_commands", "running_workflows")
+        if any(all_facts[key] for key in running_keys) and not any(facts[key] for key in running_keys):
+            return
         idle_minutes = int(seconds_between(stretch, self.now) // 60) if stretch else None
         prompt = IDLE_JUDGE_PROMPT.format(seat=seat, idle_minutes=idle_minutes,
                                           facts=json.dumps(facts, indent=1, ensure_ascii=False))
@@ -981,22 +1177,38 @@ class Sweep:
                                self.timeout_seconds)
         problem = outcome.error or idle_judge_answer_problem(outcome.answer)
         answer = outcome.answer or {}
+        send = not problem and answer["send"]
+        sent = False
+        if send:
+            self.start_wait(seat, verdict, stretch, answer["message"], 5)
+            sent = self.send(seat, verdict, answer["message"], NUDGE)
+        # Work counts as asked about only once a message reached the agent-seat: a failed send
+        # leaves it for a later sweep to hand to the judge again.
         self.record({"event": "judge_answer", "agent_seat": seat, "rule": 5,
                      "session_id": verdict[fields.SESSION_ID], "last_activity": stretch,
-                     "send": not problem and answer["send"], "reason": answer.get("reason"),
-                     "failed": bool(problem)})
+                     "send": send, "reason": answer.get("reason"), "failed": bool(problem),
+                     RUNNING_WORK_ASKED_ABOUT: running_work_named_in(facts, answer["message"])
+                     if sent else [], **({"message_id": sent["message_id"]} if sent else {})})
         if problem:
             self.headless_failed(seat, "judge whether it could act now", problem,
-                                 outcome.error_kind or JUDGE_ANSWER_UNUSABLE)
-            return
-        if answer["send"]:
-            self.start_wait(seat, verdict, stretch, answer["message"], 5)
-            self.send(seat, verdict, answer["message"], NUDGE)
+                                 outcome.error_kind or JUDGE_ANSWER_UNUSABLE, outcome)
+
+    def checked(self, seat, verdict, transcript_read_at, check_is_new):
+        """Log the check, which moves where the next read of the agent-seat's transcript starts."""
+        if check_is_new:
+            self.record({"event": "checked", "agent_seat": seat, "session_id": verdict[fields.SESSION_ID],
+                         "transcript_read_at": iso(transcript_read_at),
+                         "last_activity": (verdict.get(fields.LAST_ACTIVITY) or {}).get("time"),
+                         "rule": verdict[fields.RULE], "decision": verdict.get(fields.DECISION)})
 
     def sentences(self, seat, verdict):
         """Rule 2: judge what code could not settle, and word one message naming every unbacked
         sentence. Returns ("unbacked", (the message, the sorted kinds of the sentences it names,
-        those sentences)), ("failed", None) or ("all backed", None)."""
+        those sentences, their records), the sentences checked), ("failed", None, []), ("paused", None, []) or
+        ("all backed", None, the sentences checked). The caller logs the sentences checked, except,
+        when a pause a later launch starts holds back the promise message, the unbacked ones, which
+        are judged again after the reset; a judge stopped by the pause logs none, and a failed judge
+        logs them all."""
         checked = self.log.checked_sentences(seat)
         new_by_code_reading = fields.verdict_sentences_grouped_by_code_reading(
             item for item in verdict.get(fields.SENTENCES, [])
@@ -1005,7 +1217,7 @@ class Sweep:
         unbacked = new_by_code_reading.get(fields.UNBACKED, [])
         new = judged + unbacked
         if not new:
-            return "all backed", None
+            return "all backed", None, []
         backed = {}
         if judged:
             facts = dict(self.facts(seat, verdict),
@@ -1021,29 +1233,30 @@ class Sweep:
             outcome = run_headless(prompt, SENTENCES_ANSWER_SCHEMA, "", self.working_directory,
                                    self.timeout_seconds)
             problem = outcome.error or sentence_answer_problem(outcome.answer, len(judged))
-            for item in new:
-                self.record({"event": "sentence_checked", "agent_seat": seat,
-                             "record_uuid": item["record_uuid"], "sentence": item["sentence"]})
+            if problem and self.headless_failed(seat, "judge whether its promises are backed",
+                                                problem, outcome.error_kind or JUDGE_ANSWER_UNUSABLE,
+                                                outcome):
+                return "paused", None, []
             if problem:
-                self.headless_failed(seat, "judge whether its promises are backed", problem,
-                                     outcome.error_kind or JUDGE_ANSWER_UNUSABLE)
-                return "failed", None
+                self.sentences_checked(seat, new)
+                return "failed", None, []
             for answer in outcome.answer["sentences"]:
                 backed[answer["index"]] = answer["backed"]
             self.record({"event": "judge_answer", "agent_seat": seat, "rule": 2,
                          "answers": outcome.answer["sentences"]})
-        else:
-            for item in new:
-                self.record({"event": "sentence_checked", "agent_seat": seat,
-                             "record_uuid": item["record_uuid"], "sentence": item["sentence"]})
         unbacked += [item for index, item in enumerate(judged) if not backed[index]]
         if not unbacked:
-            return "all backed", None
+            return "all backed", None, new
         return "unbacked", ("\n".join(UNBACKED_SENTENCE_LINES[item["kind"]].format(
             sentence=item["sentence"],
             minutes=int(seconds_between(item["time"], self.now) // 60) if item["time"] else "some")
             for item in unbacked), sorted({item["kind"] for item in unbacked}),
-            [item["sentence"] for item in unbacked])
+            [item["sentence"] for item in unbacked], unbacked), new
+
+    def sentences_checked(self, seat, items):
+        for item in items:
+            self.record({"event": "sentence_checked", "agent_seat": seat,
+                         "record_uuid": item["record_uuid"], "sentence": item["sentence"]})
 
     def usage_limit(self, seat, verdict):
         limit = verdict[fields.USAGE_LIMIT]
@@ -1075,6 +1288,18 @@ def sentence_answer_problem(answer, count):
         return f"the judge's answer does not give backed true or false once for each of {count} " \
                f"sentences: {json.dumps(answer)[:500]}"
     return None
+
+
+def running_work_named_in(facts, message):
+    """The ids of the running work handed to the judge that its message names: the prompt asks it
+    to name each by id, and one it left out is asked about at the next rule 5 nudge instead of
+    never."""
+    own = fields.SUBAGENT_OWN_RUNNING_BACKGROUND_COMMANDS
+    ids = [command["id"] for entry in facts["running_subagents"] for command in entry.get(own, [])]
+    ids += [entry["id"] for entry in facts["running_subagents"] if own not in entry]
+    ids += [entry["id"] for key in ("running_background_commands", "running_workflows")
+            for entry in facts[key]]
+    return sorted(work_id for work_id in set(ids) if work_id in message)
 
 
 def idle_judge_answer_problem(answer):
@@ -1161,15 +1386,27 @@ def sweep(arguments, now):
     return 1 if run.failed else 0
 
 
-def alert_run_failure(state_directory, error_text):
-    """One user-alert for each distinct failure of a whole invocation, recorded in the state
-    directory, since the failure may be the log itself."""
+def run_failure_report(state_directory, tasks_root, error_text):
+    """A task on OWNING_AGENT_SEAT's task list for a failure of a whole invocation, which may be
+    the log itself; when the task cannot be written, one user-alert for each distinct failure,
+    recorded in the state directory."""
+    try:
+        owning_agent_seat_task_opened_unless_open(
+            tasks_root, f"Idle sweep: an invocation failed: {error_text}",
+            f"The idle sweep, {PROGRAM_PATH_IN_REPOSITORY}, failed: {error_text}\nThe traceback is "
+            "in the cron output log ~/.claude/agent-seat-idle-sweep-headless-judge-wake-messages-"
+            "send-and-user-alerts-write.log on ned-box; until the cause is fixed, no idle agent-seat "
+            "is woken. Find the cause and fix it.\n" + OWNING_AGENT_SEAT_TASK_LAST_LINES)
+        return
+    except OSError as error:
+        task_error = f"{type(error).__name__}: {error}"
     alerted_file = state_directory / RUN_FAILURES_ALERTED_FILE_NAME
     alerted = alerted_file.read_text(encoding="utf-8").splitlines() if alerted_file.exists() else []
     if error_text in alerted:
         return
     user_alerts.user_alert_write_to_pending(
-        "The idle sweep failed", f"The idle sweep, {Path(__file__).name}, failed: {error_text}",
+        "The idle sweep failed", f"The idle sweep, {Path(__file__).name}, failed: {error_text}. "
+        f"It could not give {OWNING_AGENT_SEAT} a task about it: {task_error}",
         "An agent on ned-box can read the traceback in the cron output log "
         "~/.claude/agent-seat-idle-sweep-headless-judge-wake-messages-send-and-user-alerts-write.log "
         "and fix the cause; until then no idle agent-seat is woken.")
@@ -1189,6 +1426,8 @@ def main(argv=None):
     parser.add_argument("--projects-root", default="~/.claude/projects")
     parser.add_argument("--tasks-root", default="~/.claude/tasks")
     parser.add_argument("--claude-json", default="~/.claude.json")
+    parser.add_argument("--due-task-raise-state-directory",
+                        default=str(Path("~") / verdicts_print.due_task_hook.STATE_DIRECTORY_UNDER_HOME))
     arguments = parser.parse_args(argv)
     now = parse_time(arguments.now) if arguments.now else datetime.now(timezone.utc)
     if now is None:
@@ -1205,7 +1444,8 @@ def main(argv=None):
         try:
             return sweep(arguments, now)
         except Exception as error:
-            alert_run_failure(state_directory, f"{type(error).__name__}: {error}")
+            run_failure_report(state_directory, Path(arguments.tasks_root).expanduser(),
+                               f"{type(error).__name__}: {error}")
             raise
 
 

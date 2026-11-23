@@ -508,7 +508,7 @@ def main():
     runner_gate.run_claude = lambda prompt, checkout=None: (
         0, "the cell's report body\n\n## Questions\n\nNone.\n\n"
            "## Leanness certification\n\n- the whole document\n",
-        "claude-fable-5-1", "")
+        "claude-fable-5-2", "")
     buffer = io.StringIO()
     # A real record directory, in a temporary tree: run_cell makes the cell's
     # scratch directory under the one it is handed, and a relative path here
@@ -1008,28 +1008,34 @@ def main():
 
     # The credential lists are pointed at a scratch home for the call, so the
     # profile's denials name paths in it and the real home is not named in a
-    # failure line. The credential directories are re-rooted
-    # from the real list rather than listed here, so a directory dropped from
-    # CREDENTIAL_DIRECTORIES drops out of the profile.
+    # failure line. The credential directories and ned-box's credential files
+    # are re-rooted from the real lists rather than listed here, so a path
+    # dropped from either list drops out of the profile.
     credential_scratch = tempfile.TemporaryDirectory()
     scratch_home = pathlib.Path(credential_scratch.name)
     (scratch_home / ".config" / "nedsnodes").mkdir(parents=True)
     (scratch_home / ".config" / "gh").mkdir(parents=True)
     login_canary = scratch_home / ".codex" / "auth.json"
+    listed_canary = scratch_home / ".config" / "gh" / "hosts.yml"
     login_canary.parent.mkdir(parents=True)
-    login_canary.write_text("CANARY-NOT-A-SECRET-sanity-check-adversarial-prompts-test\n", encoding="utf-8")
+    for canary in (login_canary, listed_canary):
+        canary.write_text("CANARY-NOT-A-SECRET-sanity-check-adversarial-prompts-test\n", encoding="utf-8")
     shared = runner_memories.common
-    real_lists = (shared.CREDENTIAL_DIRECTORIES, shared.REVIEWER_PROGRAM_LOGIN_FILES)
+    real_lists = (shared.CREDENTIAL_DIRECTORIES, shared.CREDENTIAL_FILES_ON_NED_BOX,
+                  shared.REVIEWER_PROGRAM_LOGIN_FILES)
     try:
         runner_memories.run_agent_binary_unless_run_stopped = capture_command
         shared.CREDENTIAL_DIRECTORIES = tuple(
             scratch_home / directory.relative_to(pathlib.Path.home())
             for directory in real_lists[0])
+        shared.CREDENTIAL_FILES_ON_NED_BOX = tuple(
+            scratch_home / path.relative_to(pathlib.Path.home()) for path in real_lists[1])
         shared.REVIEWER_PROGRAM_LOGIN_FILES = {"codex": (login_canary,)}
         runner_memories.run_codex("a prompt no model ever sees")
     finally:
         runner_memories.run_agent_binary_unless_run_stopped = real_memories_launch
-        shared.CREDENTIAL_DIRECTORIES, shared.REVIEWER_PROGRAM_LOGIN_FILES = real_lists
+        (shared.CREDENTIAL_DIRECTORIES, shared.CREDENTIAL_FILES_ON_NED_BOX,
+         shared.REVIEWER_PROGRAM_LOGIN_FILES) = real_lists
     codex_command = captured.get("command", [])
     check("run_codex launches codex with memories disabled",
           ("--disable", "memories") in list(zip(codex_command, codex_command[1:])),
@@ -1050,9 +1056,10 @@ def main():
           and 'permissions.sanity-check-no-credentials.extends=":workspace"' in codex_overrides
           and "permissions.sanity-check-no-credentials.network.enabled=true" in codex_overrides,
           repr(codex_overrides))
-    check("run_codex's profile denies the credential directories and a reviewer program's login file",
-          f'"{scratch_home}/.config/nedsnodes"="deny"' in denied_table
-          and f'"{scratch_home}/.config/gh"="deny"' in denied_table
+    expected_denials = ([f'"{listed_canary}"="deny"'] if sys.platform.startswith("linux")
+                        else [f'"{scratch_home}/.config/nedsnodes"="deny"', f'"{scratch_home}/.config/gh"="deny"'])
+    check("run_codex's profile denies this machine's credential paths and a reviewer program's login file",
+          all(denial in denied_table for denial in expected_denials)
           and f'"{login_canary}"="deny"' in denied_table, denied_table)
     credential_scratch.cleanup()
 
@@ -1095,14 +1102,14 @@ def main():
     # The claude agent-binary's model chain. Fable 5 is obsolete (user, 2026-09-04)
     # and Fable is sometimes unavailable (user, 2026-09-11: "sometimes fable is
     # not available, so it should fall back to opus in that case"), so the cell
-    # tries Fable 5.1 and falls back to Opus 5. The three ways an attempt can
+    # tries Fable 5.2 and falls back to Opus 5.5. The three ways an attempt can
     # produce no review are the house chain's (run_model_chain in
     # nn-systems/cold-read/cold-read-cell-common.py). No model is called: the
     # launch is replaced for the length of these cases and answers per model.
     runner_chain = load_runner()
     fable, opus = runner_chain.CLAUDE_MODEL_CHAIN
-    check("the chain is Fable 5.1 then Opus 5, and Opus ends it",
-          runner_chain.CLAUDE_MODEL_CHAIN == ("claude-fable-5-1", "claude-opus-5"),
+    check("the chain is Fable 5.2 then Opus 5.5, and Opus ends it",
+          runner_chain.CLAUDE_MODEL_CHAIN == ("claude-fable-5-2", "claude-opus-5-5"),
           runner_chain.CLAUDE_MODEL_CHAIN)
 
     def answering(answers):
@@ -1193,15 +1200,15 @@ def main():
     runner_chain.subprocess.run = no_cli_launch_here
     try:
         fell_back = runner_chain.provenance_line(
-            "claude", "claude-opus-5", "cut", "docs/x.md", False, "commit=abc1234",
-            "claude-fable-5-1(exit1)")
+            "claude", "claude-opus-5-5", "cut", "docs/x.md", False, "commit=abc1234",
+            "claude-fable-5-2(exit1)")
         straight_through = runner_chain.provenance_line(
             "codex", "gpt-5.6-sol", "cut", "docs/x.md", False, "commit=abc1234")
     finally:
         runner_chain.subprocess.run = real_version_probe_run
     check("the provenance line records the model that answered and the fallback",
-          "model=claude-opus-5 " in fell_back
-          and "fallback_from=claude-fable-5-1(exit1) " in fell_back, fell_back)
+          "model=claude-opus-5-5 " in fell_back
+          and "fallback_from=claude-fable-5-2(exit1) " in fell_back, fell_back)
     check("a cell that did not fall back carries no fallback_from field",
           "fallback_from=" not in straight_through, straight_through)
     check("and neither line launched a CLI: both versions came from the cache",
@@ -1968,7 +1975,7 @@ def main():
     # returns the four values of the older contract, with no cause, is
     # reported by its exit code.
     for runtime in runner_relaunch.RUNTIMES:
-        attempts = "claude-fable-5-1(exit1)+claude-opus-5(exit1)" if runtime == "claude" else ""
+        attempts = "claude-fable-5-2(exit1)+claude-opus-5-5(exit1)" if runtime == "claude" else ""
         launcher = with_launcher(runner_relaunch, answering_in_turn([
             (1, "", "", attempts, ("exit-1", "first launch: overloaded")),
             (1, "", "", attempts, ("exit-1", capacity))]))

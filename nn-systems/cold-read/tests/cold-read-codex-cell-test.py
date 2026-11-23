@@ -405,6 +405,25 @@ with tempfile.TemporaryDirectory() as scratch:
           bool(added_directories) and not Path(added_directories[0]).exists(),
           repr(added_directories))
 
+    def service_tier_settings(argv):
+        return [argv[index + 1] for index, argument in enumerate(argv[:-1])
+                if argument == "-c" and argv[index + 1].startswith("service_tier=")]
+
+    check("the deep tier asks codex for the Fast service tier",
+          service_tier_settings(received_argv) == ['service_tier="priority"'],
+          repr(service_tier_settings(received_argv)))
+    second_tier_argv_dump = scratch / "second-strongest-model-cell-argv.json"
+    report.unlink(missing_ok=True)
+    result = run_cell(stubs, STUB_CODEX_WRITES_REPORT, report,
+                      "--cell", "defect-hunt", "--tier", "second-strongest-model",
+                      "--target", str(target), argv_path=second_tier_argv_dump)
+    second_tier_argv = (json.loads(second_tier_argv_dump.read_text(encoding="utf-8"))
+                        if second_tier_argv_dump.is_file() else None)
+    check("the second-strongest-model tier asks codex for no service tier",
+          result.returncode == 0 and second_tier_argv is not None
+          and service_tier_settings(second_tier_argv) == [],
+          f"exit {result.returncode}; argv={second_tier_argv!r}; stderr={result.stderr[-300:]!r}")
+
     # --- A report that cannot be moved to its destination fails the cell ----
     locked_directory = scratch / "a-directory-the-cell-cannot-write"
     locked_directory.mkdir()

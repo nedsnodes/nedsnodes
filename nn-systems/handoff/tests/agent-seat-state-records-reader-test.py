@@ -257,7 +257,9 @@ with tempfile.TemporaryDirectory() as scratch:
                               (reader.TASK_LIST_ID_PREFIX_BEFORE_PROJECT_RENAME + "merge-lane-2", "merge-lane-2"),
                               ("merge-lane-2-tasks", "merge-lane-2"),
                               ("some-other-list", "some-other-list"),
-                              ("nedsnodes--tasks", "nedsnodes--tasks")):
+                              ("nedsnodes--tasks", "nedsnodes--tasks"),
+                              ("nedsnodes-" + reader.TASK_LIST_ID_PREFIX_BEFORE_PROJECT_RENAME + "x-tasks",
+                               reader.TASK_LIST_ID_PREFIX_BEFORE_PROJECT_RENAME + "x")):
         got = reader.seat_of(list_id)
         check(f"seat_of: {list_id} names {expected}", got == expected, got)
 

@@ -16,7 +16,7 @@ The user ruled to close this issue as not planned on 2026-11-20 at 23:53Z, answe
 
 Earlier context: on 2026-11-05, in item 2 of walk ghi-1115-agent-seat-message-queue-design-2026-11-05, the user approved not building a message queue, after research found 13 "offline" replies in 8,690 sends from ned-box between 2026-10-05 and 2026-11-05, none of which lost work. Those minutes are at `nedlern@ned-box:/home/nedlern/nedschorus-logs/walk/ghi-1115-agent-seat-message-queue-design-2026-11-05-minutes.md`, and the research at `nedlern@ned-box:/home/nedlern/nedschorus-logs/seats/merge-lane-2/ghi-1115-lost-message-research-2026-11-05/`. The design below is kept as it stood and was never built.
 
-One agent-seat sends a message to another, on either machine, in either runtime, and the recipient acts on it without the user relaying anything. That is the whole job. This document extends [comms-bridge-spec.md](https://github.com/nedschorus/nedschorus/blob/295c9f35/docs/cross-project/comms-bridge-spec.md), the user's append-only log-pair design adopted verbatim 2026-07-20; everything below that is not marked NEW is that spec, applied to ten seats instead of two.
+One agent-seat sends a message to another, on either machine, in Claude Code or Codex, and the recipient acts on it without the user relaying anything. That is the whole job. This document extends [comms-bridge-spec.md](https://github.com/nedschorus/nedschorus/blob/295c9f35/docs/cross-project/comms-bridge-spec.md), the user's append-only log-pair design adopted verbatim 2026-07-20; everything below that is not marked NEW is that spec, applied to ten seats instead of two.
 
 ## Why the fleet needs it
 

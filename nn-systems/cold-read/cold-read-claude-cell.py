@@ -81,12 +81,17 @@ DISALLOWED_TOOLS = "Bash,Monitor"
 
 # Disable hooks without disabling CLAUDE.md: hooks can block reports or rebase the reviewed checkout.
 # Read deny patterns need // for absolute paths; authentication happens outside model tools.
-CREDENTIAL_READ_DENY_RULES = (
-    [f"Read(~/{directory.relative_to(pathlib.Path.home())}/**)"
-     for directory in common.CREDENTIAL_DIRECTORIES]
-    + [f"Read(//**/{pattern})" for pattern in common.CREDENTIAL_FILE_NAME_PATTERNS]
-    + [f"Read(/{path})" for path in common.reviewer_program_login_files()]
-)
+def credential_read_deny_rules(platform: str = sys.platform) -> list:
+    if platform.startswith("linux"):
+        return [f"Read(/{path})" for path in common.CREDENTIAL_FILES_ON_NED_BOX
+                + tuple(common.reviewer_program_login_files())]
+    return ([f"Read(~/{directory.relative_to(pathlib.Path.home())}/**)"
+             for directory in common.CREDENTIAL_DIRECTORIES]
+            + [f"Read(//**/{pattern})" for pattern in common.CREDENTIAL_FILE_NAME_PATTERNS]
+            + [f"Read(/{path})" for path in common.reviewer_program_login_files()])
+
+
+CREDENTIAL_READ_DENY_RULES = credential_read_deny_rules()
 SETTINGS = {"disableAllHooks": True, "permissions": {"deny": CREDENTIAL_READ_DENY_RULES}}
 PROMPT_CACHE_FIVE_MINUTE_TTL_SETTINGS = {"promptCacheTtl": "5m"}
 

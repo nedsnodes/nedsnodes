@@ -8,7 +8,9 @@ Every case builds its own transcript in a temporary directory, so the tests
 never read a real session and never touch ~/.claude.
 """
 
+import contextlib
 import importlib.util
+import io
 import json
 import sys
 import tempfile
@@ -422,13 +424,32 @@ with tempfile.TemporaryDirectory() as workspace:
           selected[-1]["text"] == "handoff please",
           selected[-1]["text"][:60])
 
+    # The malformed line gives the run a skip count to report.
+    path = write_transcript(workspace, "tail-fragment-with-malformed-line.jsonl", tail_fragment,
+                            trailing_raw_lines=['{"type": "user", "message": BROKEN}\n'])
     fragment_output = Path(workspace) / "fragment-out.md"
-    exit_code = extractor.main(["--transcript-path", str(path),
-                                "--minimum-words", "10",
-                                "--output", str(fragment_output)])
+    fragment_stderr = io.StringIO()
+    with contextlib.redirect_stderr(fragment_stderr):
+        exit_code = extractor.main(["--transcript-path", str(path),
+                                    "--minimum-words", "10",
+                                    "--output", str(fragment_output)])
     fragment_text = fragment_output.read_text(encoding="utf-8")
-    check("header reports the trimmed fragment count",
-          "Trimmed from the end: 1 short agent turn(s)" in fragment_text,
+    fragment_errors = fragment_stderr.getvalue()
+    check("stderr reports the trimmed fragment count",
+          "Trimmed from the end: 1 short agent turn(s)" in fragment_errors,
+          fragment_errors[:400])
+    check("stderr reports the records skipped while reading",
+          "Records skipped while reading: 1 malformed." in fragment_errors,
+          fragment_errors[:400])
+    check("stderr says turn counts are dialog only",
+          "Turn counts are dialog only" in fragment_errors,
+          fragment_errors[:400])
+    check("the tail's header holds none of the lines stderr carries",
+          not any(part in fragment_text for part in
+                  ("Trimmed from the end", "Records skipped while reading", "Turn counts are dialog only")),
+          fragment_text[:400])
+    check("the tail's header keeps its boundary and turn counts",
+          "Boundary: " in fragment_text and "Turns carried: 3 of 4 (104 words)." in fragment_text.split("\n"),
           fragment_text[:400])
 
     # argparse refuses via SystemExit(2); catch it so the suite survives.
@@ -604,6 +625,102 @@ with tempfile.TemporaryDirectory() as workspace:
     check("the handoff's own dialog files keep every repeat whole",
           "(repeated:" not in output.read_text(encoding="utf-8") + companion and companion.count(CLOSING) == 5,
           companion)
+
+# --- Queued messages the agent never read -----------------------------------
+# Claude Code's records, each copied from a real transcript with only its content replaced; when Claude
+# Code changes their format, these cases are what will show it.
+def enqueue_record(content):
+    return {"type": "queue-operation", "operation": "enqueue", "timestamp": "2026-11-07T22:22:52.871Z",
+            "sessionId": "279d6b08-3a6b-4aea-802e-01c238ad967d", "content": content}
+
+
+def dequeue_record():
+    return {"type": "queue-operation", "operation": "dequeue", "timestamp": "2026-11-05T22:25:39.719Z",
+            "sessionId": "279d6b08-3a6b-4aea-802e-01c238ad967d"}
+
+
+def remove_record(content, reason=None):
+    record = {"type": "queue-operation", "operation": "remove", "timestamp": "2026-11-06T01:37:45.122Z",
+              "sessionId": "279d6b08-3a6b-4aea-802e-01c238ad967d", "content": content}
+    if reason:
+        record["reason"] = reason
+    return record
+
+
+def pop_all_record(content):
+    return {"type": "queue-operation", "operation": "popAll", "timestamp": "2026-09-18T19:20:59.215Z",
+            "sessionId": "da317042-4df3-48ab-b0ae-10a8d71f4f0b", "content": content}
+
+
+def absorbed_attachment_record(prompt):
+    return {"parentUuid": "a2118a2d-1f4f-4c10-9cb2-85c8130dd3b5", "isSidechain": False, "type": "attachment",
+            "attachment": {"type": "queued_command", "prompt": prompt, "origin": {"kind": "human"}}}
+
+
+INTRODUCTION = extractor.CONVERSATION_TAIL_QUEUED_USER_MESSAGES_NEVER_READ_BY_AGENT_INTRODUCTION
+with tempfile.TemporaryDirectory() as workspace:
+    path = write_transcript(workspace, "unread.jsonl", [
+        *ordinary_records(),
+        enqueue_record("absorbed mid-turn"),
+        remove_record("absorbed mid-turn", "absorbed_mid_turn"),
+        absorbed_attachment_record("absorbed mid-turn"),
+        enqueue_record("taken off the queue by the user"),
+        remove_record("taken off the queue by the user"),
+        enqueue_record("returned to the input box"),
+        pop_all_record("returned to the input box"),
+        enqueue_record("dequeued as a prompt"),
+        dequeue_record(),
+        user_record("dequeued as a prompt"),
+        assistant_record("an answer to the dequeued prompt"),
+        enqueue_record("/walk-me-through whatever I need"),
+        user_record("<command-message>walk-me-through</command-message>\n<command-name>/walk-me-through"
+                    "</command-name>\n<command-args>whatever I need</command-args>"),
+        enqueue_record("A"),
+        enqueue_record('<cross-session-message from="bridge:session_01">merge it</cross-session-message>'),
+        enqueue_record("<task-notification>\n<task-id>b1</task-id>\n</task-notification>"),
+        enqueue_record('<agent-message from="a1">\n[Subagent hand-back] done\n</agent-message>'),
+        assistant_record("an agent turn that has not read the queue"),
+        enqueue_record('<pasted_content id="28f2">\nwhat the user pasted\n</pasted_content>'),
+        enqueue_record("and a second thought"),
+    ], trailing_raw_lines=["not json at all\n"])
+    check("a message queued and never read is recovered, in the order typed, without another sender's "
+          "tagged text and with the user's paste",
+          extractor.claude_code_session_transcript_queued_user_messages_never_read_by_agent(path)
+          == ["A", '<pasted_content id="28f2">\nwhat the user pasted\n</pasted_content>', "and a second thought"],
+          extractor.claude_code_session_transcript_queued_user_messages_never_read_by_agent(path))
+    output = Path(workspace) / "seat-dialog-0002.md"
+    exit_code = extractor.main(["--transcript-path", str(path), "--output", str(output)])
+    tail = output.read_text(encoding="utf-8")
+    check("the tail ends with one User turn: the line, then each unread message",
+          exit_code == 0 and tail.split("\n---\n")[1].rstrip().endswith(
+              f"## User\n\n{INTRODUCTION}\n\nA\n\n<pasted_content id=\"28f2\">\nwhat the user pasted\n"
+              f"</pasted_content>\n\nand a second thought"), tail)
+
+    path = write_transcript(workspace, "dequeue-takes-the-later.jsonl", [
+        *ordinary_records(),
+        enqueue_record("typed first, never read"),
+        enqueue_record("typed second, read"),
+        dequeue_record(),
+        user_record("typed second, read"),
+    ])
+    check("a dequeue takes the message the next prompt shows, not the oldest",
+          extractor.claude_code_session_transcript_queued_user_messages_never_read_by_agent(path) == ["typed first, never read"],
+          extractor.claude_code_session_transcript_queued_user_messages_never_read_by_agent(path))
+
+    path = write_transcript(workspace, "dequeue-shows-nothing.jsonl", [
+        *ordinary_records(), enqueue_record("/logout"), enqueue_record("typed later"), dequeue_record(),
+    ])
+    check("a dequeue that no prompt shows takes the oldest message",
+          extractor.claude_code_session_transcript_queued_user_messages_never_read_by_agent(path) == ["typed later"],
+          extractor.claude_code_session_transcript_queued_user_messages_never_read_by_agent(path))
+
+    path = write_transcript(workspace, "all-read.jsonl", [
+        *ordinary_records(), enqueue_record("read"), remove_record("read", "absorbed_mid_turn"),
+    ])
+    output = Path(workspace) / "seat-dialog-0003.md"
+    extractor.main(["--transcript-path", str(path), "--output", str(output)])
+    check("with nothing unread, the tail has no such turn",
+          INTRODUCTION not in output.read_text(encoding="utf-8"))
 
 print()
 if failures:
