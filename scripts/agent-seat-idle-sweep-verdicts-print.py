@@ -430,14 +430,17 @@ def timeout_seconds_of_command_line(command):
     handled, so each keeps a deadline although work runs outside the timeout: a command
     substitution the outer shell runs before the timeout starts, as in `timeout 1h echo "$(a)"`; a
     comment holding a lone `'` or `)` before a line break, or a `<<`; an ANSI-C string, as in
-    `$'it\\'s'; b`; odd nesting, as in `"$(b ")")" ; c`; a `$(...)` in an unquoted here-document's
-    body, which the outer shell runs before the timeout starts; a delimiter partly quoted, as in
-    `<<'END'OF`, whose body is read to a line `END`, not `ENDOF`; a here-document inside
-    parentheses, as in `cat < <(cat <<'EOF'`, whose body is read for quotes and can hide a later
-    `;`; a `<<` that is a shift, as in `${PWD:1<<2}`, which is read as a here-document whose body
-    hides the next line; and a delimiter line continued with a backslash. Also not handled, but the
-    other way, dropping the deadline although nothing runs outside the timeout: a `;` with only a
-    comment or a here-document body after it, as in `timeout 5m sleep 0; # done`."""
+    `$'it\\'s'; b`; odd nesting, as in `"$(b ")")" ; c`; a `$(...)` the outer shell runs,
+    before the timeout starts, in an unquoted here-document's body when the scanner finds no
+    other command after the timed one, as in `timeout 1h cat <<EOF` with the body line `$(a)`; a
+    delimiter partly quoted, as in `<<'END'OF`, whose body is read to a line `END`, not `ENDOF`; a
+    here-document inside parentheses, as in `cat < <(cat <<'EOF'`, whose body is read for quotes
+    and can hide a later `;`; a `<<` shift outside `$((...))` that the scanner reads as a
+    here-document operator, as in `${PWD:1<<2}`, whose body then hides the next line; and a
+    delimiter line continued with a backslash. Also not handled, but the other way, dropping the
+    deadline although nothing runs outside the timeout: a `;` with only a comment after it, as in
+    `timeout 5m sleep 0; # done`, or only a here-document body in which the shell runs no command
+    substitution."""
     match = TIMEOUT_COMMAND_LINE_START_PATTERN.match(command)
     if not match or command_line_runs_another_command_after(command[match.end():]):
         return None

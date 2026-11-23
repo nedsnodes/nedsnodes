@@ -836,7 +836,8 @@ def run_errored_mutants_cases():
               "exit 4, with the merge not recorded as tested",
               completed.returncode == job.EXIT_STEP_FAILED
               and f"merge {merge[:12]} (change scripts/thing.py): 1 of its mutants ended "
-                  f"ERRORED, but their job failure task could not be opened or added to on "
+                  f"ERRORED, but the job failure task that names ERRORED mutants could not be "
+                  f"opened, nor could the open one have them added to its description, on "
                   f"{job.JOB_FAILURE_TASK_AGENT_SEAT}'s task list (FileNotFoundError"
                   in completed.stderr
               and fixture.state_json()["last_tested_main_commit"] == start,

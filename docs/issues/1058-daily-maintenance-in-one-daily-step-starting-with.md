@@ -491,13 +491,13 @@ When the search program exits 1, because a place could not be searched or was se
 
 ### Structured output, weekly: programs that parse an agent's prose
 
-A program that reads an agent's free-text answer with regular expressions or prefixes breaks when the agent words its answer differently. The three runtimes the project uses can each constrain an agent's final answer to a schema: `claude -p --json-schema`, `codex exec --output-schema`, and `agy --json-schema`.
+A program that reads an agent's free-text answer with regular expressions or prefixes breaks when the agent words its answer differently. The three agent-binaries the project uses can each constrain an agent's final answer to a schema: `claude -p --json-schema`, `codex exec --output-schema`, and `agy --json-schema`.
 
 What it reads: the repository at main, new systems in particular, meaning programs added since the last run; and the last run's list of candidates.
 
 What it does: it finds each program that launches an agent and parses its prose answer where a schema-constrained final answer would do, with the commits and issues that record a misparse there, and leaves out a program whose agent is interactive or whose output no program parses. A first survey, made on 2026-10-23, found seven candidates, among them ghi-guide-agent's answers in `scripts/ghi-guide-agent-ask.py` and the cold-read restater judge: `nedlern@ned-box:/home/nedlern/nedsnodes-logs/seats/merge-lane-2/research/structured-output-candidates-2026-10-23.md`.
 
-What the user sees: each new candidate, with the program, the lines that parse the answer, the failures recorded there, and the runtime option that fits; and each candidate where a user ruling stands in the way, such as his ruling that the Codex review cell uses Codex's built-in review and never a custom prompt.
+What the user sees: each new candidate, with the program, the lines that parse the answer, the failures recorded there, and the agent-binary option that fits; and each candidate where a user ruling stands in the way, such as his ruling that the Codex review cell uses Codex's built-in review and never a custom prompt.
 
 When it could not read a file or launch its search, it says which part of the repository it did not review and why, and never reports that no candidate was found.
 

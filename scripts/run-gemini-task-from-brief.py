@@ -31,7 +31,7 @@ on macOS a gh login stored in the keychain stays readable. When agy has no login
 the log.
 
 Runs `agy models` inside the same sandbox before starting the task, refusing
-unknown names with the known names. The default is gemini-4-argon-high.
+unknown names with the known names. The default is gemini-4-neon-high.
 Closes stdin and logs both output streams to REPORT.run.log, or to
 --run-log; an existing log at that path is overwritten. The
 deadline covers model discovery and task execution after sandbox setup;
@@ -75,7 +75,7 @@ def _parser():
     parser.add_argument("--brief", required=True)
     parser.add_argument("-o", dest="report", required=True)
     parser.add_argument("--sandbox", choices=("read-only", "workspace-write"), default="read-only")
-    parser.add_argument("-m", dest="model", default="gemini-4-argon-high")
+    parser.add_argument("-m", dest="model", default="gemini-4-neon-high")
     parser.add_argument("--effort")
     parser.add_argument("--writable-root", action="append", default=[])
     parser.add_argument("--network", action="store_true")

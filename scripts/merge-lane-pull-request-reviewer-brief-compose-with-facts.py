@@ -19,7 +19,7 @@ worktrees directory's pr<n>-merged, and gh reads from GitHub as the merge
 account. Among the facts are the merged pull requests whose not-fixed line, in
 either form, links to an issue the pull request closes, as GitHub lists them,
 or to the pull request itself: the reviewer judges whether this pull request
-makes useless a case fix or workaround they kept. The facts end with the pull
+makes useless a point fix or workaround they kept. The facts end with the pull
 request's description, which the brief quotes as the author's claims. The
 reviewer runs with no GitHub login, so the brief is where it reads the
 description. The brief is written to

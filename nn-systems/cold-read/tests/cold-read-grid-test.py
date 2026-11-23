@@ -56,7 +56,7 @@ WHAT IS PINNED HERE.
 
   - The read is seven cells: the defect-hunt pass on both tiers of both
     agent-binaries, the terminology pass (user-ruled 2026-09-05) on the
-    `deep` tier of both, and the defect-hunt pass on agy, on Gemini Argon at
+    `deep` tier of both, and the defect-hunt pass on agy, on Gemini Neon at
     high. The terminology cells and the agy cell run
     at the effort the grid pins, which the stub reads off its own command
     line; the agy cell runs inside the fixture's pass-through stand-in for
@@ -268,6 +268,9 @@ def reviews_saved_lines(result):
 # whose report name contains COLD_READ_GRID_TEST_STUB_FAST_REPORT_NAME_FRAGMENT,
 # which does not wait. One fast cell that edits the target while six slow
 # ones read is how a case moves the target mid-run.
+# COLD_READ_GRID_TEST_STUB_FINISHED_READING_MARKER_DIRECTORY, when set, gets a file
+# named for the report once that wait ends. The grid deletes a stopped cell's report
+# but not this file, so the file shows the cell outlived its time limit.
 # COLD_READ_GRID_TEST_STUB_SHIP_RECORD_FIRST_LINE_FILE, when set, is a file outside
 # the scratch repository: the fast cell runs the real shipper on its record
 # before writing its report, as the pre-remove hook does when an agent-seat
@@ -361,7 +364,11 @@ sleep_seconds = float(os.environ.get("COLD_READ_GRID_TEST_STUB_SLEEP_SECONDS") o
 fast_fragment = os.environ.get("COLD_READ_GRID_TEST_STUB_FAST_REPORT_NAME_FRAGMENT")
 if sleep_seconds and not (fast_fragment and fast_fragment in given.name):
     time.sleep(sleep_seconds)
-ship_line_file = os.environ.get("COLD_READ_GRID_TEST_STUB_SHIP_RECORD_FIRST_LINE_FILE")
+finished_marker_directory = os.environ.get("COLD_READ_GRID_TEST_STUB_FINISHED_READING_MARKER_DIRECTORY")
+if finished_marker_directory:
+    pathlib.Path(finished_marker_directory).mkdir(parents=True, exist_ok=True)
+    (pathlib.Path(finished_marker_directory) / given.name).touch()
+ship_line_file =os.environ.get("COLD_READ_GRID_TEST_STUB_SHIP_RECORD_FIRST_LINE_FILE")
 if ship_line_file and fast_fragment and fast_fragment in given.name:
     import subprocess
     shipped = subprocess.run(
@@ -449,11 +456,32 @@ def write_target(repository, relative_path):
     return target
 
 
+# Runs the grid with its clock jumped past any attempt time limit once the record holds
+# this many nonempty reports, so a limit cannot expire before a slow cell has written.
+GRID_WITH_CLOCK_JUMPED_ONCE_REPORTS_EXIST = r'''import pathlib, runpy, sys, time
+grid, records, report_count, jump_seconds = sys.argv[1:5]
+real_monotonic = time.monotonic
+jumped = False
+def monotonic():
+    global jumped
+    jumped = jumped or sum(path.stat().st_size > 0 for path in pathlib.Path(records).glob("*/*.md")
+                           if path.name != "cold-read-reference-check.md") >= int(report_count)
+    return real_monotonic() + (float(jump_seconds) if jumped else 0)
+time.monotonic = monotonic
+sys.argv = [grid, *sys.argv[5:]]
+sys.path.insert(0, str(pathlib.Path(grid).parent))
+runpy.run_path(grid, run_name="__main__")
+'''
+
+
 def run_grid(repository, stub_directory, environment_overrides=None,
              target_relative_path=TARGET_RELATIVE_PATH, extra_arguments=(),
-             current_directory=None):
+             current_directory=None, launcher_arguments_before_grid=None, timeout_seconds=None):
     """The grid in `repository` as a subprocess, run from `current_directory`,
-    by default `repository`."""
+    by default `repository`. `launcher_arguments_before_grid`, when given, is
+    (launcher file, report count, jump seconds) for
+    GRID_WITH_CLOCK_JUMPED_ONCE_REPORTS_EXIST. Past `timeout_seconds` the grid is
+    killed and subprocess.TimeoutExpired raised; its cells keep running."""
     stub_directory.mkdir(parents=True, exist_ok=True)
     for runtime_name in ("claude", "codex", "agy"):
         stub = stub_directory / runtime_name
@@ -476,10 +504,16 @@ def run_grid(repository, stub_directory, environment_overrides=None,
         repository.parent / "stub-attempt-counts" / repository.name / str(time.time_ns()))
     environment.update(environment_overrides or {})
     return subprocess.run(
-        [sys.executable, str(repository / "nn-systems" / "cold-read" / "cold-read-grid.py"),
+        [sys.executable,
+         *([str(launcher_arguments_before_grid[0]),
+            str(repository / "nn-systems" / "cold-read" / "cold-read-grid.py"),
+            str(repository / "cold-read-records"),
+            str(launcher_arguments_before_grid[1]), str(launcher_arguments_before_grid[2])]
+           if launcher_arguments_before_grid
+           else [str(repository / "nn-systems" / "cold-read" / "cold-read-grid.py")]),
          "--target", target_relative_path, *extra_arguments],
         capture_output=True, text=True, check=False, env=environment,
-        cwd=current_directory or repository,
+        cwd=current_directory or repository, timeout=timeout_seconds,
     )
 
 
@@ -689,6 +723,11 @@ try:
         return [line.strip() for line in listing.splitlines()
                 if any(fragment in line for fragment in fragments)]
 
+    def kill_processes_mentioning(*fragments):
+        for line in processes_mentioning(*fragments):
+            with contextlib.suppress(ProcessLookupError):
+                os.kill(int(line.split()[0]), signal.SIGKILL)
+
     repository = build_scratch_repository(scratch, "checkout-target-moves-mid-run")
     slow_stubs = scratch / "stub-bin-target-moves-mid-run"
     note_left_by_stopped_cells = "notes-left-before-the-frozen-copy-moved.md"
@@ -716,7 +755,7 @@ try:
     check("the closing text names the six cells still reading as stopped",
           all(name in stopped_line for name in (
               "claude-hunt-deep", "claude-hunt-second-strongest-model", "claude-terminology-deep",
-              "codex-hunt-deep", "codex-terminology-deep", "agy-hunt-gemini-4-argon-high")), repr(stopped_line))
+              "codex-hunt-deep", "codex-terminology-deep", "agy-hunt-gemini-4-neon-high")), repr(stopped_line))
     saved_lines = [line for line in result.stdout.splitlines() if line.startswith("saved:")]
     check("no cell that was still reading lands",
           all("codex-hunt-second-strongest-model" in line for line in saved_lines), repr(saved_lines))
@@ -1096,11 +1135,18 @@ try:
     # The limit is shortened to seconds; every stub reads for longer than that.
     stub_reading_seconds = 8
     repository = build_scratch_repository(scratch, "checkout-attempts-timed-out")
+    finished_reading_markers = scratch / "timed-out-stubs-finished-reading-markers"
+    timed_out_stubs = scratch / "stub-bin-attempts-timed-out"
     started = time.monotonic()
-    result = run_grid(repository, stubs, {
+    result = run_grid(repository, timed_out_stubs, {
         "COLD_READ_GRID_TEST_STUB_SLEEP_SECONDS": str(stub_reading_seconds),
+        "COLD_READ_GRID_TEST_STUB_FINISHED_READING_MARKER_DIRECTORY": str(finished_reading_markers),
         "COLD_READ_GRID_CELL_ATTEMPT_TIMEOUT_SECONDS": "2"})
     elapsed = time.monotonic() - started
+    # Read before anything else: a stub the grid left running could still write its marker later.
+    left_running = processes_mentioning(str(timed_out_stubs), str(repository))
+    finished_before_the_grid_returned = sorted(path.name for path in finished_reading_markers.glob("*"))
+    kill_processes_mentioning(str(timed_out_stubs), str(repository))
     failed_lines = lines_opening(result, "FAILED")
     check("every attempt past the limit, the Question 4 cell's included, is FAILED as timed out, "
           "with no RETRYING line",
@@ -1108,19 +1154,21 @@ try:
           and all(" — timed-out — timed out after 4 hours (stderr kept: " in line
                   for line in failed_lines),
           repr(result.stdout))
-    check("the run ends before the stubs would have finished, none landed, exit 1",
-          elapsed < stub_reading_seconds and result.returncode == 1
+    check("no timed-out cell's report is saved, none landed, exit 1",
+          result.returncode == 1
           and lines_opening(result, "saved:") == [] and "No report landed in" in result.stdout,
           f"elapsed {elapsed:.1f}s, exit {result.returncode}; stdout={result.stdout!r}")
     check("the grid checks for the timed-out cells, finds nothing, and prints no Tell the user line",
           lines_opening(result, "WRITE CHECK DID NOT RUN:") == []
           and lines_opening(result, "STRAY WRITE:") == []
           and "Tell the user:" not in result.stdout, repr(result.stdout))
-    time.sleep(stub_reading_seconds + 1 - elapsed if elapsed < stub_reading_seconds else 0)
     record_directory = record_directory_of(repository)
     check("the stopped stubs never wrote their reports",
           sorted(path.name for path in record_directory.glob("*.md")) == ["cold-read-reference-check.md"],
           sorted(path.name for path in record_directory.glob("*.md")))
+    check("the grid stopped every timed-out stub instead of waiting for it to finish",
+          finished_before_the_grid_returned == [], finished_before_the_grid_returned)
+    check("no timed-out stub or its launcher is left running", left_running == [], left_running)
 
     # --- Stopped cells that wrote outside their reports ------------------------
     # Every cell writes two files before it is stopped: a new file, and a committed one
@@ -1150,7 +1198,7 @@ try:
               for line in stray_lines), repr(stray_lines))
     check("a committed file gets a restore command run in the repository",
           any(line.startswith(f"STRAY WRITE: {TARGET_RELATIVE_PATH} ")
-              and f"`git -C {shlex.quote(str(resolved_repository))} restore --staged --worktree -- "
+              and f"`git -C {shlex.quote(str(resolved_repository))} --literal-pathspecs restore --staged --worktree -- "
                   f"{TARGET_RELATIVE_PATH}`" in line
               for line in stray_lines), repr(stray_lines))
     time.sleep(stub_reading_seconds)
@@ -1172,16 +1220,36 @@ try:
     time.sleep(stub_reading_seconds)
 
     # --- A cell that writes its report and then hangs is stopped, report deleted
-    hang_seconds = 30
+    # The clock jumps only once all eight have written, so no stub may exit before the last
+    # writes, however loaded the machine: each hangs until stopped. The deadline is this
+    # driver's, and short of a 600-second suite limit, so a grid that never stops them fails here.
+    hang_seconds = 86400
+    grid_deadline_seconds = 240
     repository = build_scratch_repository(scratch, "checkout-wrote-then-hung")
+    hung_after_writing_stubs = scratch / "stub-bin-wrote-then-hung"
+    attempt_limit_seconds = 3600
+    clock_launcher = scratch / "grid-with-clock-jumped-once-reports-exist.py"
+    clock_launcher.write_text(GRID_WITH_CLOCK_JUMPED_ONCE_REPORTS_EXIST, encoding="utf-8")
     started = time.monotonic()
-    result = run_grid(repository, stubs, {
-        "COLD_READ_GRID_TEST_STUB_HANG_AFTER_WRITING_REPORT_SECONDS": str(hang_seconds),
-        "COLD_READ_GRID_CELL_ATTEMPT_TIMEOUT_SECONDS": "3"})
+    try:
+        result = run_grid(repository, hung_after_writing_stubs, {
+            "COLD_READ_GRID_TEST_STUB_HANG_AFTER_WRITING_REPORT_SECONDS": str(hang_seconds),
+            "COLD_READ_GRID_CELL_ATTEMPT_TIMEOUT_SECONDS": str(attempt_limit_seconds)},
+            launcher_arguments_before_grid=(clock_launcher, 8, attempt_limit_seconds),
+            timeout_seconds=grid_deadline_seconds)
+    except subprocess.TimeoutExpired as expired:
+        result = subprocess.CompletedProcess(
+            expired.cmd, -signal.SIGKILL, f"the grid had not returned after {grid_deadline_seconds} s", "")
+    finally:
+        left_running = processes_mentioning(str(hung_after_writing_stubs), str(repository))
+        kill_processes_mentioning(str(hung_after_writing_stubs), str(repository))
     elapsed = time.monotonic() - started
+    check("the grid returned and left no hung stub or launcher running",
+          result.returncode != -signal.SIGKILL and left_running == [],
+          f"exit {result.returncode}; still running: {left_running}")
     failed_lines = lines_opening(result, "FAILED")
     check("a timed-out cell that had written its report: FAILED says the unfinished report is deleted",
-          elapsed < hang_seconds and lines_opening(result, "saved:") == []
+          lines_opening(result, "saved:") == []
           and len(failed_lines) == 8
           and all(" — timed-out — timed out after 4 hours (stderr kept: " in line
                   and line.endswith(".stderr.log); the unfinished report it had written is deleted")
@@ -1331,30 +1399,30 @@ try:
                   for stamp in terminology_stamps),
           repr(terminology_stamps))
 
-    # --- The agy cell is a defect-hunt on Gemini Argon at high ---------------
+    # --- The agy cell is a defect-hunt on Gemini Neon at high ---------------
     # agy serves only the fast tier, so the grid gives the model and effort.
-    agy_report = record_directory / "agy-hunt-gemini-4-argon-high.md" if record_directory else None
+    agy_report = record_directory / "agy-hunt-gemini-4-neon-high.md" if record_directory else None
     agy_stamp = (agy_report.read_text(encoding="utf-8").splitlines()[0]
                  if agy_report and agy_report.is_file() else "")
-    check("the agy cell runs defect-hunt on gemini-4-argon-high at high, tier fast",
-          agy_stamp.startswith("<!-- provenance: runtime=agy model=gemini-4-argon-high ")
+    check("the agy cell runs defect-hunt on gemini-4-neon-high at high, tier fast",
+          agy_stamp.startswith("<!-- provenance: runtime=agy model=gemini-4-neon-high ")
           and "effort=high cell=defect-hunt tier=fast " in agy_stamp
-          and effort_by_report.get("agy-hunt-gemini-4-argon-high.md") == "high",
+          and effort_by_report.get("agy-hunt-gemini-4-neon-high.md") == "high",
           f"stamp={agy_stamp!r}; efforts={effort_by_report!r}")
 
     # --- The agy cell fails both attempts: the other six stand ---------------
     repository = build_scratch_repository(scratch, "checkout-agy-cell-absent")
     result = run_grid(repository, stubs, {"COLD_READ_GRID_TEST_STUB_FAILURE_PLAN": json.dumps(
-        [{"fragment": "agy-hunt-gemini-4-argon-high.md", "attempts": 2}])})
+        [{"fragment": "agy-hunt-gemini-4-neon-high.md", "attempts": 2}])})
     check("an absent agy cell is RETRYING then FAILED from agy's own cause line",
           len(lines_opening(result, "RETRYING:")) == 1
-          and any(line.startswith("FAILED (exit 1): agy-hunt-gemini-4-argon-high — exit-1 — ")
+          and any(line.startswith("FAILED (exit 1): agy-hunt-gemini-4-neon-high — exit-1 — ")
                   for line in lines_opening(result, "FAILED")),
           repr(result.stdout))
     check("an absent agy cell leaves six of seven landed, exit 1",
           result.returncode == 1 and len(reviews_saved_lines(result)) == 6
           and "6 of 7 reports landed in" in result.stdout
-          and any(line.startswith("- agy-hunt-gemini-4-argon-high: exit-1 — ")
+          and any(line.startswith("- agy-hunt-gemini-4-neon-high: exit-1 — ")
                   for line in result.stdout.splitlines()),
           f"exit {result.returncode}; stdout={result.stdout!r}")
 
@@ -1793,8 +1861,181 @@ try:
           and "rm -r" not in edited_file_lines[0] and "restore" not in edited_file_lines[0],
           repr(edited_lines))
     check("a file untracked before the run is to be read itself, with no git diff, which would print nothing",
-          len(edited_file_lines) == 1 and "Read agent-draft.md itself, which git does not track," in edited_file_lines[0]
+          len(edited_file_lines) == 1
+          and f"Read {edited_repository / 'agent-draft.md'} itself, which git does not track," in edited_file_lines[0]
           and "diff" not in edited_file_lines[0], repr(edited_lines))
+
+    def repository_with_committed_file(name):
+        repository = (scratch / name).resolve()
+        repository.mkdir()
+
+        def run(*arguments):
+            return subprocess.run(["git", "-C", str(repository), "-c", "user.name=grid test",
+                                   "-c", "user.email=grid-test@example.invalid", *arguments],
+                                  capture_output=True, text=True)
+        run("init", "--quiet", "--initial-branch=main")
+        (repository / "tracked.md").write_text("Committed.\n", encoding="utf-8")
+        run("add", "tracked.md")
+        run("commit", "--quiet", "-m", "base")
+        return repository, run
+
+    def commands_in_line(line):
+        return re.findall(r"`(git -C [^`]+)`", line)
+
+    # `git rm --cached` of an edited tracked file, then a rewrite: status lists it as D and ??.
+    removed_repository, removed_git = repository_with_committed_file("checkout-stopped-cell-unstages-an-edited-file")
+    (removed_repository / "tracked.md").write_text("The agent's edit.\n", encoding="utf-8")
+    with mock.patch.object(grid_module.cell_common, "REPO_ROOT", removed_repository):
+        removed_baseline = grid_module.cell_common.working_tree_state()
+        removed_git("rm", "--cached", "--quiet", "tracked.md")
+        (removed_repository / "tracked.md").write_text("A reviewer's rewrite.\n", encoding="utf-8")
+        removed_lines = grid_module.stopped_cells_write_check_lines(
+            [scratch / "claude-hunt-deep.md"], removed_baseline, None, set())
+    removed_line = next((line for line in removed_lines if line.startswith("STRAY WRITE: tracked.md ")), "")
+    removed_commands = commands_in_line(removed_line)
+    check("a path that is both a staged deletion and untracked is given its cached diff and its absolute on-disk path",
+          len(removed_commands) == 1 and "-Committed." in subprocess.run(
+              shlex.split(removed_commands[0]), capture_output=True, text=True).stdout
+          and f"{removed_repository / 'tracked.md'}, the copy on disk" in removed_line, repr(removed_lines))
+
+    # A clean file a cell unstaged and rewrote is tracked at HEAD, so `rm` alone would not undo it.
+    clean_removed_repository, clean_removed_git = repository_with_committed_file(
+        "checkout-stopped-cell-unstages-a-clean-file")
+    with mock.patch.object(grid_module.cell_common, "REPO_ROOT", clean_removed_repository):
+        clean_removed_baseline = grid_module.cell_common.working_tree_state()
+        clean_removed_git("rm", "--cached", "--quiet", "tracked.md")
+        (clean_removed_repository / "tracked.md").write_text("A reviewer's rewrite.\n", encoding="utf-8")
+        clean_removed_lines = grid_module.stopped_cells_write_check_lines(
+            [scratch / "claude-hunt-deep.md"], clean_removed_baseline, None, set())
+    clean_removed_commands = commands_in_line(clean_removed_lines[0]) if clean_removed_lines else []
+    if clean_removed_commands:
+        subprocess.run(shlex.split(clean_removed_commands[0]), capture_output=True, text=True)
+    check("the undo given for a clean file unstaged and rewritten restores it, where rm would leave it deleted",
+          len(clean_removed_commands) == 1 and " restore " in clean_removed_commands[0]
+          and (clean_removed_repository / "tracked.md").read_text(encoding="utf-8") == "Committed.\n"
+          and clean_removed_git("status", "--porcelain").stdout == "", repr(clean_removed_lines))
+
+    # A glob character in a path must not widen the undo to a file with uncommitted edits.
+    glob_repository, glob_git = repository_with_committed_file("checkout-stopped-cell-unstages-a-glob-named-file")
+    (glob_repository / "chapter[1].md").write_text("Committed.\n", encoding="utf-8")
+    (glob_repository / "chapter1.md").write_text("Committed.\n", encoding="utf-8")
+    glob_git("add", "chapter[1].md", "chapter1.md")
+    glob_git("commit", "--quiet", "-m", "chapters")
+    (glob_repository / "chapter1.md").write_text("The agent's own edit.\n", encoding="utf-8")
+    with mock.patch.object(grid_module.cell_common, "REPO_ROOT", glob_repository):
+        glob_baseline = grid_module.cell_common.working_tree_state()
+        glob_git("rm", "--cached", "--quiet", "chapter[1].md")
+        (glob_repository / "chapter[1].md").write_text("A reviewer's rewrite.\n", encoding="utf-8")
+        glob_lines = grid_module.stopped_cells_write_check_lines(
+            [scratch / "claude-hunt-deep.md"], glob_baseline, None, set())
+    glob_commands = commands_in_line(glob_lines[0]) if glob_lines else []
+    if len(glob_commands) == 1:
+        subprocess.run(shlex.split(glob_commands[0]), capture_output=True, text=True)
+    check("the undo given for a path with a glob character restores that path and keeps another file's edits",
+          len(glob_commands) == 1
+          and (glob_repository / "chapter[1].md").read_text(encoding="utf-8") == "Committed.\n"
+          and (glob_repository / "chapter1.md").read_text(encoding="utf-8") == "The agent's own edit.\n",
+          repr(glob_lines))
+
+    # The fallback message's restore command, run as printed on a path with a glob character.
+    fallback_repository, fallback_git = repository_with_committed_file("fallback-undo-of-a-glob-named-file")
+    (fallback_repository / "chapter[1].md").write_text("Committed.\n", encoding="utf-8")
+    (fallback_repository / "chapter1.md").write_text("Committed.\n", encoding="utf-8")
+    fallback_git("add", "chapter[1].md", "chapter1.md")
+    fallback_git("commit", "--quiet", "-m", "chapters")
+    (fallback_repository / "chapter1.md").write_text("The agent's own edit.\n", encoding="utf-8")
+    (fallback_repository / "chapter[1].md").write_text("A reviewer's rewrite.\n", encoding="utf-8")
+    fallback_restore = re.search(r"`(git [^`]*restore [^`]*<path>[^`]*)`", grid_module.STOPPED_CELL_WRITE_CHECK_LINE)
+    if fallback_restore:
+        subprocess.run(["bash", "-c", fallback_restore.group(1).replace("<path>", shlex.quote("chapter[1].md"))],
+                       cwd=fallback_repository, capture_output=True, text=True)
+    check("the fallback message's restore command undoes a glob-named path and keeps another file's edit",
+          fallback_restore is not None
+          and (fallback_repository / "chapter[1].md").read_text(encoding="utf-8") == "Committed.\n"
+          and (fallback_repository / "chapter1.md").read_text(encoding="utf-8") == "The agent's own edit.\n",
+          repr(fallback_restore and fallback_restore.group(1)))
+
+    # The fallback message's two undo commands, filled in as it says, on a path holding single quotes and a space.
+    quoted_repository, quoted_git = repository_with_committed_file("fallback-undo-of-a-quote-named-file")
+    quoted_tracked, quoted_untracked = "don't won't.md", "can't shan't.md"
+    for neighbor in ("dont", "wont.md", "cant", "shant.md", quoted_tracked):
+        (quoted_repository / neighbor).write_text("Committed.\n", encoding="utf-8")
+    quoted_git("add", "dont", "wont.md", "cant", "shant.md", "--", quoted_tracked)
+    quoted_git("commit", "--quiet", "-m", "quote-named files")
+    for neighbor in ("dont", "wont.md", "cant", "shant.md"):
+        (quoted_repository / neighbor).write_text("The agent's own edit.\n", encoding="utf-8")
+    (quoted_repository / quoted_tracked).write_text("A reviewer's rewrite.\n", encoding="utf-8")
+    (quoted_repository / quoted_untracked).write_text("A reviewer's notes.\n", encoding="utf-8")
+    fallback_commands = re.findall(r"`((?:rm|git) [^`]*<path>[^`]*)`", grid_module.STOPPED_CELL_WRITE_CHECK_LINE)
+    for command in fallback_commands:
+        quoted_path = quoted_untracked if command.startswith("rm ") else quoted_tracked
+        subprocess.run(["bash", "-c", command.replace("<path>", shlex.quote(quoted_path))],
+                       cwd=quoted_repository, capture_output=True, text=True)
+    check("the fallback message's undo commands, given a shell-quoted path, act on that path and no other",
+          len(fallback_commands) == 2
+          and "as one shell-quoted argument" in grid_module.STOPPED_CELL_WRITE_CHECK_LINE
+          and (quoted_repository / quoted_tracked).read_text(encoding="utf-8") == "Committed.\n"
+          and not (quoted_repository / quoted_untracked).exists()
+          and all((quoted_repository / neighbor).read_text(encoding="utf-8") == "The agent's own edit.\n"
+                  for neighbor in ("dont", "wont.md", "cant", "shant.md")),
+          repr(fallback_commands))
+
+    # A conflict with a missing side: both diffs can print only `* Unmerged path`.
+    for missing_side_code, written in (("DD", "A reviewer's write.\n"), ("DU", "Incoming.\n")):
+        missing_repository, missing_git = repository_with_committed_file(
+            f"checkout-stopped-cell-overwrites-a-{missing_side_code}-conflict")
+        missing_git("checkout", "--quiet", "-b", "incoming")
+        if missing_side_code == "DD":
+            missing_git("mv", "tracked.md", "incoming-name.md")
+        else:
+            (missing_repository / "tracked.md").write_text("Incoming.\n", encoding="utf-8")
+            missing_git("add", "tracked.md")
+        missing_git("commit", "--quiet", "-m", "incoming")
+        missing_git("checkout", "--quiet", "main")
+        if missing_side_code == "DD":
+            missing_git("mv", "tracked.md", "our-name.md")
+        else:
+            missing_git("rm", "--quiet", "tracked.md")
+        missing_git("commit", "--quiet", "-m", "ours")
+        missing_git("merge", "--no-ff", "incoming")
+        missing_status = missing_git("status", "--porcelain", "--", "tracked.md").stdout
+        (missing_repository / "tracked.md").write_text("The agent's draft.\n", encoding="utf-8")
+        with mock.patch.object(grid_module.cell_common, "REPO_ROOT", missing_repository):
+            missing_baseline = grid_module.cell_common.working_tree_state()
+            (missing_repository / "tracked.md").write_text(written, encoding="utf-8")
+            missing_lines = grid_module.stopped_cells_write_check_lines(
+                [scratch / "claude-hunt-deep.md"], missing_baseline, None, set())
+        missing_line = next((line for line in missing_lines if line.startswith("STRAY WRITE: tracked.md ")), "")
+        check(f"a {missing_side_code} conflict path overwritten by a cell is given the copy on disk to read",
+              missing_status.startswith(missing_side_code)
+              and f"{missing_repository / 'tracked.md'}, the copy on disk" in missing_line,
+              repr((missing_status, missing_lines)))
+
+    # An already-conflicted file overwritten with either side: each side's diff shows the other's loss.
+    conflict_repository, conflict_git = repository_with_committed_file("checkout-stopped-cell-overwrites-a-conflict")
+    conflict_git("checkout", "--quiet", "-b", "incoming")
+    (conflict_repository / "tracked.md").write_text("Incoming.\n", encoding="utf-8")
+    conflict_git("commit", "--quiet", "-am", "incoming")
+    conflict_git("checkout", "--quiet", "main")
+    (conflict_repository / "tracked.md").write_text("Ours.\n", encoding="utf-8")
+    conflict_git("commit", "--quiet", "-am", "ours")
+    conflict_git("merge", "--no-ff", "incoming")
+    conflict_markers = (conflict_repository / "tracked.md").read_text(encoding="utf-8")
+    for written, other in (("Incoming.", "Ours."), ("Ours.", "Incoming.")):
+        (conflict_repository / "tracked.md").write_text(conflict_markers, encoding="utf-8")
+        with mock.patch.object(grid_module.cell_common, "REPO_ROOT", conflict_repository):
+            conflict_baseline = grid_module.cell_common.working_tree_state()
+            (conflict_repository / "tracked.md").write_text(f"{written}\n", encoding="utf-8")
+            conflict_lines = grid_module.stopped_cells_write_check_lines(
+                [scratch / "claude-hunt-deep.md"], conflict_baseline, None, set())
+        conflict_commands = commands_in_line(conflict_lines[0]) if conflict_lines else []
+        conflict_shown = "".join(subprocess.run(shlex.split(command), capture_output=True, text=True).stdout
+                                 for command in conflict_commands)
+        check(f"an unmerged path overwritten with the side {written} is given a diff against each side, "
+              "which together show the overwrite",
+              len(conflict_commands) == 2 and " diff --ours -- " in conflict_commands[0]
+              and " diff --theirs -- " in conflict_commands[1]
+              and f"-{other}" in conflict_shown and f"+{written}" in conflict_shown, repr(conflict_lines))
     check("once a file already changed before the run has changed again, no other path gets an undo command",
           len(other_lines) == 1 and "has changed or gone since: agent-draft.md." in other_lines[0]
           and "rm -r" not in other_lines[0] and "restore" not in other_lines[0],
@@ -1963,6 +2204,67 @@ try:
     with mock.patch.object(grid_module.cell_common.os, "killpg", side_effect=PermissionError):
         grid_module.cell_common.stop_process_tree(process)
         check("a group with no live member left still reaps its launcher", process.wait.called)
+
+    # --- A stray-write line from a timed-out cell reaches a piped reader at once ----
+    # The grid's stdout is a pipe, so a line not flushed waits in the buffer while the
+    # other cells run on, for hours at the real timeout. The cell still running exits
+    # only once its poll has read the line from the pipe, or after a poll budget.
+    flush_directory = scratch / "stray-write-line-flushed-while-a-cell-runs"
+    flush_directory.mkdir()
+    timed_out_report = flush_directory / "claude-hunt-deep.md"
+    timed_out_attempt = grid_module.start_attempt(
+        [sys.executable, "-c", "import time; time.sleep(120)"],
+        timed_out_report, 1, flush_directory / "claude-hunt-deep.stderr.log")
+    timed_out_attempt = timed_out_attempt._replace(started_at=time.monotonic() - 3600)
+    stray_line_for_the_pipe = "STRAY WRITE: notes-a-reviewer-left.md changed while the grid waited"
+    read_end, write_end = os.pipe()
+    os.set_blocking(read_end, False)
+    piped_stdout = io.TextIOWrapper(io.BufferedWriter(io.FileIO(write_end, "w")), encoding="utf-8")
+
+    class StillRunningCellUntilTheLineIsRead:
+        """A cell process that runs until the grid's pipe holds the stray-write line."""
+        returncode = None
+
+        def __init__(self, report_path):
+            self.report_path = report_path
+            self.read_so_far = b""
+            self.polls_left = 200
+            self.line_seen_while_running = False
+
+        def poll(self):
+            try:
+                self.read_so_far += os.read(read_end, 65536)
+            except BlockingIOError:
+                pass
+            self.line_seen_while_running = stray_line_for_the_pipe.encode() in self.read_so_far
+            self.polls_left -= 1
+            if not self.line_seen_while_running and self.polls_left > 0:
+                return None
+            self.report_path.write_text("STUB REVIEW\n", encoding="utf-8")
+            self.returncode = 0
+            return 0
+
+    running_report = flush_directory / "codex-hunt-deep.md"
+    running_stderr = flush_directory / "codex-hunt-deep.stderr.log"
+    running_stderr.write_text("", encoding="utf-8")
+    running_process = StillRunningCellUntilTheLineIsRead(running_report)
+    running_attempt = grid_module.CellAttempt(
+        running_report, ["unused"], 1, running_process, running_stderr, "", time.monotonic())
+    try:
+        with mock.patch.object(grid_module, "stopped_cells_write_check_lines",
+                               return_value=[stray_line_for_the_pipe]), \
+                mock.patch.object(sys, "stdout", piped_stdout):
+            grid_module.wait_for_cells(
+                {timed_out_report: timed_out_attempt, running_report: running_attempt},
+                lambda: None, cell_poll_interval_seconds=0.01,
+                cell_attempt_timeout_seconds=60)
+    finally:
+        if timed_out_attempt.process.returncode is None:
+            grid_module.cell_common.stop_process_tree(timed_out_attempt.process, grace_seconds=0.1)
+        piped_stdout.close()
+        os.close(read_end)
+    check("a timed-out cell's stray-write line reaches the grid's piped stdout while another cell still runs",
+          running_process.line_seen_while_running, repr(running_process.read_so_far))
 
     # --- The reference pre-pass: a web link is not a path, a bare name is looked up --
     reference_directory = scratch / "reference-pre-pass"
@@ -2699,7 +3001,7 @@ try:
            for runtime in ("claude", "codex")
            for pass_token, tier in (("hunt", "deep"), ("hunt", "second-strongest-model"),
                                     ("terminology", "deep"))]
-        + ["agy-hunt-gemini-4-argon-high.md"])
+        + ["agy-hunt-gemini-4-neon-high.md"])
     check("the set holds the seven cells, the Question 4 cell, the reference-integrity pre-pass and the stop marker",
           written_names == expected_names, written_names)
 
@@ -2805,7 +3107,7 @@ try:
     repository = build_scratch_repository(scratch, "full-run-count-agy-report-only")
     for day in ("2026-09-01", "2026-09-02", "2026-09-03"):
         seed_log_store_record(repository, f"cold-read-grid-test-target-{day}",
-                              ["agy-hunt-gemini-4-argon-high.md", "reference-check.md"])
+                              ["agy-hunt-gemini-4-neon-high.md", "reference-check.md"])
     result = run_grid(repository, stubs / "full-run-count-agy-report-only")
     check("runs whose only report is the agy cell's count toward the three",
           result.returncode == 2 and "refusing cold-read-full-run 4" in result.stderr,

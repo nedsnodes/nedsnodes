@@ -313,6 +313,17 @@ def run_covering_judge_unit_cases():
           judged("CLAIM 1 covered-by E5\nCLAIM 2 new\n")
           == (None, "it says E5 covers CLAIM 1, but E5 is not one of the unsettled entries it was given"))
 
+    with tempfile.TemporaryDirectory(prefix="overview-claim-check-test-") as temporary:
+        repository = Path(temporary)
+        expected = repository / claim_check.nn_architecture_overview_proposed_improvements_or_changes_file_path_from_page_path(OVERVIEW)
+        grandparent_was_missing = not expected.parent.parent.exists()
+        written = claim_check.write_fix_later_claims_to_proposed_improvements_or_changes_file(
+            repository, OVERVIEW, [claims[2]], "a" * 40, "report.md", for_regular_maintenance=True)
+        check("a fix-later claim is written to a new proposed-improvements-or-changes-file whose directory and its parent "
+              "do not exist yet",
+              grandparent_was_missing and written == expected and expected.is_file()
+              and "a new claim" in expected.read_text(encoding="utf-8"), written)
+
 
 def last_stdout_line(result):
     lines = result.stdout.strip().splitlines()

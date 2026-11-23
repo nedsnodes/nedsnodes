@@ -1289,10 +1289,13 @@ def successor_initial_agent_instructions_line_naming_waiting_approval_walk_item(
             return ()
         named_in_next_step = []
         for walk in walks:
-            # A name followed by -minutes.md and a file-name boundary is the walk's walk-minutes path; any other
-            # longer name, -minutes.md.bak included, is another file.
+            # The walk's name, alone or as its walk-minutes or walk-document file name, counts only where no
+            # file-name character follows, so -minutes.md.bak and -minutes.md~ name other files while
+            # -minutes.md:143, **name** and a sentence's closing period do not; a period followed by another
+            # file-name character continues the name.
             mention = re.search(rf"(?<![\w-]){re.escape(walk[0].name[:-len(walk_finder.MINUTES_SUFFIX)])}"
-                                rf"(?!(?!{re.escape(walk_finder.MINUTES_SUFFIX)}(?![\w-]|\.\w))[\w-])",
+                                rf"(?:{re.escape(walk_finder.MINUTES_SUFFIX)}|\.md)?"
+                                r"(?![\w~-]|\.[\w~-])",
                                 next_step)
             if mention:
                 named_in_next_step.append((mention.start(), walk))
@@ -1317,8 +1320,10 @@ def successor_initial_agent_instructions_line_naming_waiting_approval_walk_item(
         document = minutes.with_name(name + ".md")
         text = document.read_text(encoding="utf-8")
         spans = walk_finder.item_unit_spans(text, parser)
-        # Only the first-named item, because waiting_item_units returns units in walk-document order, and a later
-        # waiting item's heading may name the first item too.
+        # Every named item is checked, so that a missing or repeated heading is reported; the point is read from
+        # the first-named item's unit alone, because units come back in walk-document order, and a later waiting
+        # item's heading may name the first item too.
+        walk_finder.waiting_item_units(document, value, numbers, total, parser, spans)
         total, units = walk_finder.waiting_item_units(document, value, [number], total, parser, spans)
         point = walk_short_answer_hook.heading_points(text.split("\n"), units, parser).get(number)
     except Exception as error:

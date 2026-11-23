@@ -108,6 +108,8 @@ NO_WALK_MEANINGS = {
     "later": "Z means defer: postpone your last question or proposal and record it as a task.",
     "R": "R asks to see your last question or proposal again: show it in full",
     "E": "E means explain: run the explain skill, ",
+    "M": "M asks for more responses: the user wants to see every response he can give your last question",
+    "more responses": "More responses asks for more responses: the user wants to see every response",
     "approved": "Approved means approve: the user agrees with your last recommendation or proposal.",
     "approve": "Approve means approve: the user agrees with your last recommendation or proposal.",
     "approve as obvious": "AO means approve as obvious: the user agrees with your last recommendation",
@@ -170,9 +172,10 @@ class Case:
         path.write_text("".join(json.dumps(line) + "\n" for line in lines))
         return path
 
-    def run(self, prompt=None, stdin_text=None, transcript_path=None):
+    def run(self, prompt=None, stdin_text=None, transcript_path=None, process_cwd=None):
         """Run the hook. With no transcript_path, the transcript's one agent message shows the whole walk-document as
-        it now stands, so the hook's check that the user saw the waiting item passes."""
+        it now stands, so the hook's check that the user saw the waiting item passes. process_cwd, by default the
+        checkout, is the directory the hook process starts in, apart from the payload's cwd."""
         if transcript_path is None:
             document = self.walk / f"{WALK_NAME}.md"
             transcript_path = self.transcript(document.read_text() if document.is_file() else "")
@@ -181,7 +184,7 @@ class Case:
         return subprocess.run(
             [sys.executable, str(HOOK_SCRIPT)],
             input=json.dumps(payload) if stdin_text is None else stdin_text,
-            capture_output=True, text=True, cwd=self.checkout,
+            capture_output=True, text=True, cwd=self.checkout if process_cwd is None else process_cwd,
             env={**os.environ, "PATH": self.path, "FAKE_CLAUDE_MODE": self.model,
                  "FAKE_CLAUDE_CALLS": str(self.calls)})
 
@@ -411,6 +414,41 @@ def test_o_with_a_condition_or_more_text():
         check(f"{prompt!r} is O with its condition or added text",
               lines is not None and lines[1] == first
               and any(line.startswith("O asks for other options") for line in lines), f"lines {lines!r}")
+
+
+MORE_RESPONSES = "AO approve as obvious · Aa approve after an advisor check · Z defer · E explain · O other options"
+
+
+def test_m_shows_the_responses_the_closing_line_leaves_out_and_records_nothing():
+    case = Case(next_to_present="item 4 of 9")
+    for prompt in ("m", "M.", "more responses"):
+        lines = case.lines(prompt)
+        check(f"{prompt!r} on an open walk hands the agent the responses the closing line leaves out",
+              lines is not None
+              and lines[1].endswith("asks for more responses: the user is not answering item 4 of 9 yet, and wants "
+                                    "to see the responses its closing line leaves out.")
+              and lines[2].endswith(": " + MORE_RESPONSES)
+              and not any(" check" in line and "--" in line for line in lines[:3]), f"lines {lines!r}")
+    lines = Case().lines("m")
+    check("M with no approval-walk shows every response but M, A and D included, since no closing line shows them",
+          lines is not None and lines[-1].endswith(": A approve · AO approve as obvious · Aa approve after an advisor "
+                                                   "check · D disapprove · Z defer · E explain · O other options"),
+          f"lines {lines!r}")
+    for prompt in ("m", "more responses"):
+        result = case.run(prompt)
+        check(f"{prompt!r} on an open walk gets no line about running the check step",
+              result.returncode == 0 and result.stdout and "--user-reply-as-typed" not in result.stdout
+              and "check step" not in result.stdout, f"stdout {result.stdout!r}")
+    for prompt in ("more responses 4", "more responses item 4", "More responses 4."):
+        lines = case.lines(prompt)
+        check(f"{prompt!r} is not read as a numbered answer, so nothing tells the agent to record it",
+              lines is None or not any("check step" in line or "--user-reply-as-typed" in line
+                                       or line.startswith("The answer gives each item") for line in lines),
+              f"lines {lines!r}")
+    check("every response is on the closing line or in M's list, once",
+          sorted((LETTERS_AFTER_LINK + " · " + MORE_RESPONSES).split(" · "))
+          == sorted(["A approve", "AO approve as obvious", "Aa approve after an advisor check", "D disapprove",
+                     "Z defer", "E explain", "O other options", "M more responses"]))
 
 
 def test_o2_and_o3_approve_an_option_through_the_check_step():
@@ -656,8 +694,7 @@ def test_r_on_an_open_walk_goes_to_the_agent_and_does_not_block():
 
 PAGE_1 = "https://claude.ai/artifact/PageOfItem4Old"
 PAGE_2 = "https://claude.ai/artifact/PageOfItem4New"
-LETTERS_AFTER_LINK = ("A approve · AO approve as obvious · Aa approve after an advisor check · D disapprove · "
-                      "Z defer · E explain · O other options")
+LETTERS_AFTER_LINK = "A approve · D disapprove · M more responses"
 
 
 def page_line(answer, item, closing_line):
@@ -1844,8 +1881,8 @@ The alternative: every hook also writes a log line with the rule ID, agent-seat 
 
 Recommendation: ask the agent-seat reboot-test, which owns the Bash guards, to add rule IDs to every hook's messages, other agent-seats' hooks included, and to build the weekly count as a GHI 1058 job, in one pull request.
 
-[Item 47.2 of 68, The change](https://claude.ai/artifact/SXzwJaGtf7sXGpYVsH1eDr) · A approve · AO approve as obvious · Aa approve after an advisor check · D disapprove · Z defer · E explain · O other options"""
-ITEM_47_2_CLOSING_LINE = """[Item 47.2 of 68, The change](https://claude.ai/artifact/SXzwJaGtf7sXGpYVsH1eDr) · A approve · AO approve as obvious · Aa approve after an advisor check · D disapprove · Z defer · E explain · O other options"""
+[Item 47.2 of 68, The change](https://claude.ai/artifact/SXzwJaGtf7sXGpYVsH1eDr) · A approve · D disapprove · M more responses"""
+ITEM_47_2_CLOSING_LINE = """[Item 47.2 of 68, The change](https://claude.ai/artifact/SXzwJaGtf7sXGpYVsH1eDr) · A approve · D disapprove · M more responses"""
 
 
 def item_47_2_lines(prompt, shown_item):
@@ -2493,6 +2530,44 @@ def test_the_items_own_sub_step_heading_does_not_end_its_shown_text():
     lines = case.lines("a", case.transcript(f"{shown}\n\n{ITEM_4_CLOSING_LINE}"))
     check("an answer counts with no model call when the item's own sub-step heading comes before its decision lines",
           counted(lines) and not case.model_calls(), f"lines {lines!r}")
+
+
+def test_a_sub_step_heading_shared_with_an_earlier_item_does_not_end_its_shown_text():
+    for form, heading in (("an ATX", "### Items 3.1 and 4.1 of 9: shared defaults"),
+                          ("a setext", "Items 3.1 and 4.1 of 9: shared defaults\n---"),
+                          ("a comma and ampersand list", "### Items 3.1, 3.2 & 4.1 of 9: shared defaults"),
+                          ("a dash after its list", "### Items 3.1, 3.2 & 4.1 of 9 — Shared defaults")):
+        shown = DECISION_ITEM.replace("#new Hide", f"{heading}\n\n#new Hide")
+        case = decision_case(model="changed")
+        lines = case.lines("a", case.transcript(f"{shown}\n\n{ITEM_4_CLOSING_LINE}"))
+        check(f"an answer counts with no model call when {form} sub-step heading that names an earlier item first, "
+              "then this item, comes before its decision lines",
+              counted(lines) and not case.model_calls(), f"lines {lines!r}")
+
+
+def test_a_heading_opens_another_item_by_the_expanded_numbers_of_a_dotted_range():
+    hook = load_short_answer_hook_for_test()
+    for words, heading, expected in (
+            ("Items 5.1 and 4.4: other decisions", "Items 4.1 to 4.3: grouped", True),
+            ("Item 4.4: the next part", "Items 4.1 to 4.3: grouped", True),
+            ("Items 5.1 and 4.2: other decisions", "Items 4.1 to 4.3: grouped", False),
+            ("Item 4.2.1: a sub-step", "Items 4.1 to 4.3: grouped", False),
+            ("Item 11.2: a sub-step", "Items 10 to 12: grouped", False),
+            ("Item 13: the next item", "Items 10 to 12: grouped", True),
+            ("Items 5.1 to 6.2: a range across items", "Item 4: a filter", True),
+            ("Item 5 fixes a path", "Item 4: a filter", False),
+            ("Items 3.1, 3.2 & 4.1 — Shared defaults", "Item 4: a filter", False),
+            ("Items 3.1, 3.2 & 5.1 — Shared defaults", "Item 4: a filter", True),
+            ("Item 5 — the next item", "Item 4: a filter", True)):
+        check(f"`{words}` below `{heading}` {'opens another item' if expected else 'does not open another item'}",
+              hook.opens_another_item(words, heading) is expected, hook.opens_another_item(words, heading))
+
+
+def test_the_walk_finder_module_is_executed_once_however_many_headings_are_read():
+    hook = load_short_answer_hook_for_test()
+    first = hook.load_walk_finder()
+    hook.opens_another_item("Item 5: the next item", "Item 4: a filter")
+    check("the hook reuses the walk finder module it loaded", hook.load_walk_finder() is first)
 
 
 def test_a_recommendation_or_alternative_shown_without_its_label_goes_to_the_model():
@@ -3148,6 +3223,10 @@ def test_bump_on_an_open_walk_runs_check_bump_with_the_title_and_without_a_walk_
           and str(HOOK_SCRIPT.parent / "walk-me-through-answer-added-texts-cold-read-fast-read-check-and-close.py")
           in context,
           f"exit {result.returncode}, stdout {result.stdout!r}, stderr {result.stderr!r}")
+    result = case.run("Bump the code proposals", process_cwd=Case().checkout)
+    check("bump finds the approval-walk by the payload's cwd, not the directory the hook process starts in",
+          result.returncode == 0 and f"before item 4 of 9 of approval-walk {WALK_NAME}" in result.stdout,
+          f"exit {result.returncode}, stdout {result.stdout!r}, stderr {result.stderr!r}")
     result = Case().run("bump the code proposals")
     check("bump with no approval-walk open prints nothing",
           result.returncode == 0 and result.stdout == "" and result.stderr == "",
@@ -3155,6 +3234,57 @@ def test_bump_on_an_open_walk_runs_check_bump_with_the_title_and_without_a_walk_
     result = case.run("bump")
     check("bump with no title is not a bump and prints nothing",
           result.returncode == 0 and result.stdout == "", f"exit {result.returncode}, stdout {result.stdout!r}")
+
+
+NO_DECISION_SUB_STEP_DOCUMENT = """# A walk
+
+## Item 4 of 9: a filter
+
+### Item 4.1 of 9: What a filter does
+
+A filter hides old rows.
+
+[No decision here; type N or next to continue.](https://claude.ai/artifact/p41)
+
+### Item 4.2 of 9: The choice
+
+Recommendation: leave the filter out.
+
+## Item 5 of 9: the next item
+
+Recommendation: do the next thing.
+"""
+NO_DECISION_LINE = "[No decision here; type N or next to continue.](https://claude.ai/artifact/p41)"
+NO_DECISION_PAGES = ("#item_page item 4.1 of 9 https://claude.ai/artifact/p41\n"
+                     "#item_page item 4.2 of 9 https://claude.ai/artifact/p42\n")
+
+
+def test_an_answer_to_a_no_decision_sub_step_records_nothing():
+    case = Case(next_to_present="item 4.1 of 9", document=NO_DECISION_SUB_STEP_DOCUMENT)
+    case.minutes(NO_DECISION_PAGES + "#next_to_present item 4.1 of 9")
+    for prompt in ("a", "ao", "aa", "d", "m", "approve", "disapprove", "more responses", "4.1 a", "4.1 d", "all a",
+                   "a but fix it", "a if the tests pass"):
+        lines = case.lines(prompt, case.transcript("Here is the plan.", NO_DECISION_LINE))
+        text = "\n".join(lines or [])
+        check(f"{prompt!r} on a no-decision sub-step is not taken as an answer and is told the only choice",
+              "[rule walk-me-through-short-answer-not-recorded-because-sub-step-asks-for-no-decision-hook-message-rule]" in text
+              and NO_DECISION_LINE in text and "only choice" in text and "Do not run" in text
+              and "--user-reply-as-typed" not in text and "A approve" not in text, text)
+    check("no answer to a no-decision sub-step calls the model", case.model_calls() == [], case.model_calls())
+    text = "\n".join(case.lines("a but fix it", case.transcript("Here.")) or [])
+    check("words added to the answer are passed on", "fix it" in text, text)
+    text = "\n".join(case.lines("r", case.transcript("Here.")) or [])
+    check("R on a no-decision sub-step repeats the no-decision line", NO_DECISION_LINE in text
+          and "A approve" not in text, text)
+    check("N is left to the agent as a navigation word", case.lines("n", case.transcript("Here.")) is None, "")
+
+
+def test_an_answer_to_a_sub_step_that_asks_a_decision_still_counts():
+    case = Case(next_to_present="item 4.2 of 9", document=NO_DECISION_SUB_STEP_DOCUMENT)
+    case.minutes(NO_DECISION_PAGES + "#next_to_present item 4.2 of 9")
+    text = "\n".join(case.lines("a") or [])
+    check("A on the sub-step with a recommendation is still an approval",
+          "walk-me-through-short-answer-not-recorded-because-sub-step-asks-for-no-decision-hook-message-rule" not in text and "means approve" in text, text)
 
 
 def main():

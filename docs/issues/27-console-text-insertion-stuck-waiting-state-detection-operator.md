@@ -20,7 +20,7 @@ Two related operator-tooling capabilities from the communications backlog (pair 
 ## Added scope (walk 17 cluster 2, boss-ruled 2026-07-25)
 
 - The announce-an-action-then-go-idle failure: legacy agents repeatedly announced work, went idle, and needed a second wake — investigate the mechanism as part of stuck/waiting detection (it is the highest-frequency observed instance of the class).
-- First step of the detection work: VERIFY supported session/runtime state before building anything — the `~/.claude/sessions/<pid>.json` values (idle/busy/shell/waiting) are hypotheses to test against the current runtime, not a stable contract; prefer supported APIs or a versioned adapter.
+- First step of the detection work: VERIFY supported Claude Code agent-session state before building anything — the `~/.claude/sessions/<pid>.json` values (idle/busy/shell/waiting) are hypotheses to test against the current Claude Code version, not a stable contract; prefer supported APIs or a versioned adapter.
 
 ## Close condition
 

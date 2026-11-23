@@ -32,6 +32,10 @@ the subagents' own records (isSidechain), and harness-injected pseudo-prompts wi
 short agent acknowledgements that answer them — none of which the successor
 needs and all of which are large.
 
+The conversation-tail ends with one more User turn when the user queued
+messages the agent never read before the session was stopped, as
+claude_code_session_transcript_queued_user_messages_never_read_by_agent says; the complete dialog does not carry it.
+
 Kept as a third voice, Subagent: for each subagent the session dispatched,
 what it was asked and what it reported, never its own records. These subagent
 turns have the voice "subagent" even when the session's agent wrote them, as
@@ -372,6 +376,78 @@ def typed_slash_command(text: str, record):
     return f"{command_name} {words.group(1).strip()}"
 
 
+CONVERSATION_TAIL_QUEUED_USER_MESSAGES_NEVER_READ_BY_AGENT_INTRODUCTION = (
+    "Queued before the handoff and never read by your predecessor; "
+    "treat each message from here to the end as a reply to the dialog above."
+)
+# Another agent's message and a harness notification open with a tag; a paste the user queued does too.
+QUEUED_TEXT_OF_THE_USER_TAG_OPENINGS = ("<pasted_content",)
+
+
+def texts_shown_to_agent(record) -> list:
+    """Return each form in which a record shows the agent queued text: a prompt, its typed slash command, or an absorbed attachment."""
+    if not isinstance(record, dict) or record.get("isSidechain"):
+        return []
+    if record.get("type") == "attachment":
+        attachment = record.get("attachment")
+        if isinstance(attachment, dict) and attachment.get("type") == "queued_command":
+            prompt = attachment.get("prompt")
+            return [prompt.strip()] if isinstance(prompt, str) else []
+        return []
+    if record.get("type") != "user":
+        return []
+    content = (record.get("message") or {}).get("content")
+    if isinstance(content, str):
+        return [content.strip(), typed_slash_command(content.strip(), record) or ""]
+    return [joined_text_blocks(content).strip()]
+
+
+def claude_code_session_transcript_queued_user_messages_never_read_by_agent(transcript_path: Path) -> list:
+    """Return, in the order typed, the user's queued messages that no later record shows the agent reading.
+
+    A queue-operation "enqueue" adds a message; "remove" takes the first with its content away; "popAll"
+    returns every message to the input box; "dequeue", which names no content, takes the message that a
+    user record before the next agent record shows, or else the oldest. A later record showing a message's
+    exact text also counts as reading it. Messages opening with a tag are left out, except a paste.
+    """
+    records = []
+    with transcript_path.open("rb") as handle:
+        for raw_line in handle:
+            if len(raw_line) > MAXIMUM_RECORD_BYTES:
+                continue
+            try:
+                record = json.loads(raw_line)
+            except (json.JSONDecodeError, UnicodeDecodeError):
+                continue
+            if isinstance(record, dict) and not record.get("isSidechain"):
+                records.append(record)
+
+    pending = []
+    for index, record in enumerate(records):
+        if record.get("type") == "queue-operation":
+            operation = record.get("operation")
+            content = record.get("content")
+            if operation == "enqueue" and isinstance(content, str) and content.strip():
+                pending.append(content.strip())
+            elif operation == "remove" and isinstance(content, str) and content.strip() in pending:
+                pending.remove(content.strip())
+            elif operation == "popAll":
+                pending = []
+            elif operation == "dequeue" and pending:
+                shown = []
+                for later in records[index + 1:]:
+                    if later.get("type") == "assistant":
+                        break
+                    shown += texts_shown_to_agent(later)
+                pending.pop(next((position for position, text in enumerate(pending) if text in shown), 0))
+            continue
+        for text in texts_shown_to_agent(record):
+            if text in pending:
+                pending.remove(text)
+    return [text for text in pending
+            if not text.startswith("<") or text.startswith(QUEUED_TEXT_OF_THE_USER_TAG_OPENINGS)]
+
+
 def first_line_of(text: str) -> str:
     return text.splitlines()[0].strip() if text.splitlines() else ""
 
@@ -451,6 +527,7 @@ class ExtractionReport:
     skip_counts: dict
     companion_path: Path = None
     left_out_notes: list = field(default_factory=list)
+    queued_user_messages_never_read_by_agent: list = field(default_factory=list)
 
 
 def render_pointers(report: ExtractionReport) -> list:
@@ -579,6 +656,10 @@ def render_extraction(turns, report: ExtractionReport) -> str:
 
     for turn in turns:
         lines += render_turn(turn)
+    if report.queued_user_messages_never_read_by_agent:
+        lines += ["## User", "", CONVERSATION_TAIL_QUEUED_USER_MESSAGES_NEVER_READ_BY_AGENT_INTRODUCTION, ""]
+        for message in report.queued_user_messages_never_read_by_agent:
+            lines += [message, ""]
 
     lines += ["---", "", "Need more than this?"]
     lines += render_pointers(report)
@@ -730,6 +811,7 @@ def main(argv=None) -> int:
         total_turns=len(dialog),
         skip_counts=skip_counts,
         left_out_notes=turns_left_out_notes(turns),
+        queued_user_messages_never_read_by_agent=claude_code_session_transcript_queued_user_messages_never_read_by_agent(transcript_path),
     )
 
     for line in render_extraction_diagnostics(selected, report):

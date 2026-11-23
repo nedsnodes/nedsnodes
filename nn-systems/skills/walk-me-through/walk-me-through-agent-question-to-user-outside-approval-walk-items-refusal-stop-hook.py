@@ -642,7 +642,7 @@ def log_refusal(environment, entry):
     return None
 
 
-def closing_lines(pages, name, document_text, units, parser, numbers, new_total):
+def closing_lines(pages, name, document_text, units, waiting_units, parser, numbers, new_total):
     """(each waiting item's closing line, once the walk's count M is new_total, built by the answer
     hook's closing_line with the link of the item's newest `#item_page` line in pages, or NO_PAGE_LINK when the minutes
     record no page for it; the numbers of the items the minutes record no page for)."""
@@ -650,7 +650,10 @@ def closing_lines(pages, name, document_text, units, parser, numbers, new_total)
     without_page = [number for number in numbers if number not in pages]
     pages.update(dict.fromkeys(without_page, NO_PAGE_LINK))
     points = answer_hook.heading_points(document_text.split("\n"), units, parser)
-    walk = answer_hook.WalkState(name, None, numbers, new_total, {}, None, pages=pages, points=points)
+    no_decision_numbers = walk_finder.approval_walk_waiting_sub_step_numbers_whose_text_ends_with_no_decision_closing_line(
+        document_text, parser, waiting_units, numbers, units)
+    walk = answer_hook.WalkState(name, None, numbers, new_total, {}, None, pages=pages, points=points,
+                                 no_decision_numbers=no_decision_numbers)
     return [answer_hook.closing_line(number, walk) for number in numbers], without_page
 
 
@@ -759,9 +762,11 @@ def output_for(payload, environment, model=model_judgement):
     # Loaded only here, on the way to a refusal, so a reply that passes does not pay for it.
     check_and_close = load_module("walk_me_through_answer_added_texts_cold_read_fast_read_check_and_close",
                                   WALK_CHECK_PROGRAM)
-    closing, without_page = closing_lines(pages, name, document_text, units, parser, numbers, new_total)
+    closing, without_page = closing_lines(pages, name, document_text, units, waiting_units, parser, numbers,
+                                          new_total)
     # No item is added when the flagged text asks nothing, so that branch's closing line keeps the walk's count.
-    closing_no_item_added, _ = closing_lines(pages, name, document_text, units, parser, numbers, total)
+    closing_no_item_added, _ = closing_lines(pages, name, document_text, units, waiting_units, parser, numbers,
+                                             total)
     values = {"walk": name, "waiting_whole_item": waiting.split(".")[0], "sentence": sentence, "decided": decided,
               "waiting": waiting_label,
               "document": document, "waits_on_tag": check_and_close.WALK_WAITS_ON_TAG,

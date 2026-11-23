@@ -103,6 +103,10 @@ REVIEWER_PROGRAM_LOGIN_FILES = {
             pathlib.Path.home() / ".gemini" / "antigravity-cli" / "antigravity-oauth-token"),
 }
 
+# The Codex and agy launchers remove these from the reviewer's environment; the Claude cold-read-cell
+# runs without Bash, so it cannot run gh.
+COLD_READ_CELL_REVIEWER_PROGRAM_ENVIRONMENT_REMOVED_GITHUB_TOKEN_VARIABLES = ("GH_TOKEN", "GITHUB_TOKEN")
+
 
 def reviewer_program_login_files(except_program: str = None,
                                  only_present: bool = False) -> list:
@@ -1001,10 +1005,13 @@ def run_cell(
     per_model_run_timeout_seconds=None, parse_agent_binary_final_result_from_stdout_line=None,
     report_wait_after_result_line_seconds: float = 0.0,
     cold_read_cell_launcher_own_command_line_options_adder=None,
+    pass_cold_read_tier_to_invocation_builder: bool = False,
 ) -> int:
     """cold_read_cell_launcher_own_command_line_options_adder, when given, adds
     one launcher's own options to the parser, and invocation_builder then also
-    gets the parsed arguments as parsed_arguments=."""
+    gets the parsed arguments as parsed_arguments=. With
+    pass_cold_read_tier_to_invocation_builder, invocation_builder also gets the
+    cold-read-tier as tier=."""
     # Include failed attempts in the cell's total cost.
     cell_started_at = time.time()
     parser = build_argument_parser(
@@ -1058,6 +1065,8 @@ def run_cell(
     launcher_own_option_arguments = (
         {"parsed_arguments": args}
         if cold_read_cell_launcher_own_command_line_options_adder else {})
+    if pass_cold_read_tier_to_invocation_builder:
+        launcher_own_option_arguments["tier"] = args.tier
     build_invocation = (invocation_builder(effort, staging_directory, **launcher_own_option_arguments)
                         if stage_report_outside_checkout
                         else invocation_builder(effort, **launcher_own_option_arguments))
