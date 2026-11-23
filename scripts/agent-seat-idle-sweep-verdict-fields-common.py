@@ -2,8 +2,8 @@
 """The fields of one idle-sweep verdict, the JSON object scripts/agent-seat-idle-sweep-verdicts-print.py
 prints for each agent-seat, and the values its rule, decision and sentences may take.
 
-Not a program to run. The printing program takes eleven field names from here, rule, decision,
-text, if_every_sentence_backed, last_turn_ending_message, last_tool_call_at,
+Not a program to run. The printing program takes twelve field names from here, rule, decision,
+text, if_every_sentence_backed, last_turn_ending_message, last_tool_call_at, last_user_typed_at,
 successful_task_tool_calls_setting_prerequisites_or_blocked_by,
 tool_calls_since_start_of_earliest_turn_with_sentence_to_judge,
 open_tasks_with_prerequisites_or_blocked_by, and a background command's description and
@@ -31,6 +31,8 @@ LAST_TOOL_CALL_AT = "last_tool_call_at"
 # result names
 SUCCESSFUL_TASK_TOOL_CALLS_SETTING_PREREQUISITES_OR_BLOCKED_BY = (
     "successful_task_tool_calls_setting_prerequisites_or_blocked_by")
+# ISO time of the newest message the user typed in the agent-session's own transcript, or null
+LAST_USER_TYPED_AT = "last_user_typed_at"
 TURN_ENDED = "turn_ended"
 # [{"walk_minutes": path, "next_to_present": value}]
 APPROVAL_WALK_ITEMS_WAITING_ON_THE_USER = "approval_walk_items_waiting_on_the_user"
@@ -73,6 +75,7 @@ OPEN_TASKS_WITH_PREREQUISITES_OR_BLOCKED_BY = "open_tasks_with_prerequisites_or_
 
 ALWAYS_PRESENT = (AGENT_SEAT, SESSION_ID, TRANSCRIPT_PATH, CHECKED_AT, ERRORS, RULE)
 OPTIONAL = (DECISION, NOT_CHECKED, SUPERVISOR_LAST_POLL_AT, LAST_ACTIVITY, LAST_TOOL_CALL_AT,
+            LAST_USER_TYPED_AT,
             SUCCESSFUL_TASK_TOOL_CALLS_SETTING_PREREQUISITES_OR_BLOCKED_BY, TURN_ENDED,
             APPROVAL_WALK_ITEMS_WAITING_ON_THE_USER, IDLE, NOT_IDLE_BECAUSE, RUNNING,
             HANDOFF_DEFERRED_MARKER,

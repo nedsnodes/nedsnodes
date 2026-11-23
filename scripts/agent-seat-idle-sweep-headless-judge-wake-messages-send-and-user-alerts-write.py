@@ -26,7 +26,10 @@ Each invocation, under a lock that keeps two from overlapping:
    decide whether to message it, and write the message. The judge is not told of a background
    command whose verdict gives a `timeout_ends_at` not yet reached, since such work ends by itself, nor of a background command, subagent or workflow a rule 5 message
    has already named, since the sweep asks once about each; when something runs and all of it is
-   such work, the judge is not asked. A wait whose rule 2 messages named only
+   such work, the judge is not asked. Neither is it told of an open task a rule 5 message has
+   already reminded this agent-session of since the user last typed in it, and rule 3 does not send
+   again about the same put-off handoff in that time; when nothing else is left, nothing is sent. A
+   wait whose rule 2 messages named only
    promises to act after an event and hold sentences ends when the agent-seat has recorded, after each
    message, one task per sentence it and the later messages named, a message whose send failed
    included, each with a TaskCreate or TaskUpdate call whose result
@@ -53,9 +56,9 @@ does not end when the agent-seat only replies to a message in text; it ends when
 makes a tool call after the nudge that opened the wait or has nothing to do (rule 4), in either
 case only when no rule 2 message was sent on the wait, makes the task call a rule 2 message
 asked for, as step 5 says, stops at a usage limit (rule 1), starts a
-new agent-session, or spends tokens after the user was told. So an agent-seat that answers each
-rule 3 or rule 5 message with a tool call and goes idle again is nudged again, and never
-escalated, unless all that still runs has been asked about; a command that hangs after the one
+new agent-session, or spends tokens after the user was told. So an agent-seat that answers a
+rule 3 or rule 5 message with a tool call and goes idle again is nudged again only about something
+new, or once the user has typed, and is not escalated; a command that hangs after the one
 question about it reaches nobody until the agent-seat looks. One that answers a rule 2 message
 with a tool call and a fresh promise is escalated, because a tool call that ended a promise wait
 would let an agent-seat that makes a fresh promise at each rule 2 message be nudged again forever
@@ -90,6 +93,7 @@ import fcntl
 import importlib.util
 import json
 import os
+import re
 import shutil
 import signal
 import socket
@@ -202,6 +206,8 @@ TASK_CALL_SETTLED_KINDS = frozenset((fields.PROMISE_AFTER_EVENT, fields.HOLD))
 # On a rule 5 judge_answer event: the ids of the background commands, subagents and workflows its
 # message asked about, which no later rule 5 message asks about again.
 RUNNING_WORK_ASKED_ABOUT = "running_work_asked_about"
+# Logged after a rule 3 or rule 5 message reaches its sender: what it reminded the agent-seat of.
+REMINDER_SENT = "reminder_sent"
 # An event logged with each rule 2 message, carrying the sentences it names and their kinds.
 PROMISE_MESSAGE = "promise_message"
 # On an open wait: the rule 2 messages sent on it, [{"at", "kinds", "sentences"}], or None when one
@@ -272,7 +278,9 @@ You judge one idle agent-seat for the idle sweep, a program on ned-box. The agen
 spent no tokens for {idle_minutes} minutes, and its last turn has ended. Code could not settle the \
 case: something may be left for it to do, or it may rightly be waiting. The facts code found are in \
 the JSON below. An approval-walk item waiting on the user holds back only that walk, not the \
-agent-seat's other work.
+agent-seat's other work. The agent-seat knows what it is waiting on the user for: never mention \
+that wait in the message, and when waiting on the user is all that is left, such as an open task \
+that is the running of that approval-walk, send no message.
 
 Judge whether the agent-seat could act now. If it could, write it one short message saying what you \
 saw. Name each background command, workflow and subagent that has not finished or reported, \
@@ -439,6 +447,17 @@ class SweepLog:
         return {work_id for event in self.of_seat(seat, "judge_answer") if event.get("rule") == 5
                 and event.get("message_id") not in not_found
                 for work_id in event.get(RUNNING_WORK_ASKED_ABOUT, [])}
+
+    def reminded_subjects(self, seat, session_id, last_user_typed_at):
+        """What a rule 3 or rule 5 message has reminded this agent-session of since the user last
+        typed in it, less what a message the delivery check did not find named."""
+        not_found = {event["message_id"] for event in self.of_seat(seat, "delivery_checked")
+                     if not event["found"]}
+        typed = parse_time(last_user_typed_at) if last_user_typed_at else None
+        return {subject for event in self.of_seat(seat, REMINDER_SENT)
+                if event["session_id"] == session_id and event["message_id"] not in not_found
+                and (typed is None or parse_time(event["send_started_at"]) >= typed)
+                for subject in event["subjects"]}
 
     def checked_sentences(self, seat):
         return {(event["record_uuid"], event["sentence"])
@@ -1106,10 +1125,24 @@ class Sweep:
 
     def nudge(self, seat, verdict, rule, text, stretch):
         if rule == 3:
+            subject = f"handoff put off: {text}"
+            if subject in self.reminded_subjects(seat, verdict):
+                return
             self.start_wait(seat, verdict, stretch, text, 3)
-            self.send(seat, verdict, text, NUDGE)
+            self.reminder_sent(seat, verdict, self.send(seat, verdict, text, NUDGE), [subject])
         elif rule == 5:
             self.judge_idle_seat(seat, verdict, stretch)
+
+    def reminded_subjects(self, seat, verdict):
+        return self.log.reminded_subjects(seat, verdict[fields.SESSION_ID],
+                                          verdict.get(fields.LAST_USER_TYPED_AT))
+
+    def reminder_sent(self, seat, verdict, sent, subjects):
+        if sent:
+            self.record({"event": REMINDER_SENT, "agent_seat": seat,
+                         "session_id": verdict[fields.SESSION_ID], "subjects": subjects,
+                         "message_id": sent["message_id"],
+                         "send_started_at": sent["send_started_at"]})
 
     def facts(self, seat, verdict):
         running = verdict.get(fields.RUNNING) or {}
@@ -1170,6 +1203,13 @@ class Sweep:
         running_keys = ("running_subagents", "running_background_commands", "running_workflows")
         if any(all_facts[key] for key in running_keys) and not any(facts[key] for key in running_keys):
             return
+        reminded = self.reminded_subjects(seat, verdict)
+        open_tasks = all_facts["open_tasks_nothing_holds"] or []
+        facts["open_tasks_nothing_holds"] = [task for task in open_tasks
+                                             if open_task_subject(task) not in reminded]
+        if open_tasks and not facts["open_tasks_nothing_holds"] and not any(
+                facts[key] for key in running_keys):
+            return
         idle_minutes = int(seconds_between(stretch, self.now) // 60) if stretch else None
         prompt = IDLE_JUDGE_PROMPT.format(seat=seat, idle_minutes=idle_minutes,
                                           facts=json.dumps(facts, indent=1, ensure_ascii=False))
@@ -1182,6 +1222,8 @@ class Sweep:
         if send:
             self.start_wait(seat, verdict, stretch, answer["message"], 5)
             sent = self.send(seat, verdict, answer["message"], NUDGE)
+            self.reminder_sent(seat, verdict, sent, open_task_subjects_named_in(
+                facts["open_tasks_nothing_holds"], answer["message"]))
         # Work counts as asked about only once a message reached the agent-seat: a failed send
         # leaves it for a later sweep to hand to the judge again.
         self.record({"event": "judge_answer", "agent_seat": seat, "rule": 5,
@@ -1300,6 +1342,19 @@ def running_work_named_in(facts, message):
     ids += [entry["id"] for key in ("running_background_commands", "running_workflows")
             for entry in facts[key]]
     return sorted(work_id for work_id in set(ids) if work_id in message)
+
+
+def open_task_subject(task):
+    return f"open task: {task['id']}"
+
+
+def open_task_subjects_named_in(tasks, message):
+    """The reminder subjects of the open tasks the message names, by subject or as #id or (id); of
+    every task handed to the judge when it names none, so that a message saying only "your open
+    tasks" is not sent again."""
+    named = [task for task in tasks if task["subject"] in message
+             or re.search(rf"[#(]{re.escape(str(task['id']))}\b", message)]
+    return [open_task_subject(task) for task in named or tasks]
 
 
 def idle_judge_answer_problem(answer):

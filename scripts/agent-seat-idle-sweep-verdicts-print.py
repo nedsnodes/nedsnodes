@@ -89,6 +89,8 @@ interim_recognizer = threshold_hook.interim_recognizer
 TASK_NOTIFICATION_TASK_ID_PATTERN = threshold_hook.TASK_NOTIFICATION_TASK_ID_PATTERN
 transcript_lookup = _load("claude_code_session_transcript_lookup_and_text_search_common",
                           _SCRIPTS / "claude-code-session-transcript-lookup-and-text-search-common.py")
+user_messages = _load("search_user_messages_in_transcripts",
+                      _SCRIPTS / "search-user-messages-in-transcripts.py")
 
 IDLE_AFTER_SECONDS = 5 * 60
 LAUNCHED_SESSION_ID_KEY = "launched_session_id"
@@ -371,6 +373,7 @@ def tool_uses(record):
 class TranscriptFacts:
     def __init__(self):
         self.last_token_spend = None
+        self.last_user_typed = None
         self.last_model_turn_record = None
         self.turn_ended_after_last_model_turn_record = False
         self.turn_ending_messages = []   # (record, time, time of the prompt that began its turn)
@@ -535,6 +538,8 @@ def read_main_transcript(path):
             awaiting_turn_start = False
         if spends_tokens(record) and moment:
             facts.last_token_spend = max(filter(None, (facts.last_token_spend, moment)))
+        if moment and (user_messages.typed_by_user(record) or user_messages.queued_by_user(record)):
+            facts.last_user_typed = max(filter(None, (facts.last_user_typed, moment)))
         if is_model_turn_record(record):
             facts.last_model_turn_record = record
             facts.turn_ended_after_last_model_turn_record = False
@@ -853,6 +858,7 @@ def verdict_for_seat(seat, paths, now, since, checker, parser, usage_limit_recor
                                     "source": str(source) if last_spend else None}
         verdict[fields.LAST_TOOL_CALL_AT] = iso(max(
             (moment for moment, _, _ in facts.tool_calls if moment), default=None))
+        verdict[fields.LAST_USER_TYPED_AT] = iso(facts.last_user_typed)
         verdict[fields.SUCCESSFUL_TASK_TOOL_CALLS_SETTING_PREREQUISITES_OR_BLOCKED_BY] = [
             {"time": iso(moment), "name": name, "task": task_id}
             for moment, name, tool_input, task_id in facts.task_tool_calls
