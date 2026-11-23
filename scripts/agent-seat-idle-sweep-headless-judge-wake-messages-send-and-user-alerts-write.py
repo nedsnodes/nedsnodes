@@ -1000,7 +1000,7 @@ class Sweep:
                 # The check is not logged, so that the next read after the reset still holds the
                 # sentences the judge could not judge.
                 return
-            promise_text, promise_kinds, promise_sentences = promise or (None, None, None)
+            promise_text, promise_kinds, promise_sentences, promise_records = promise or (None, None, None, ())
             fallback = verdict.get(fields.IF_EVERY_SENTENCE_BACKED)
             if outcome == "all backed" and fallback is not None:
                 rule, text = fallback[fields.RULE], fallback.get(fields.TEXT)
@@ -1022,8 +1022,9 @@ class Sweep:
         # Every other sentence checked is logged, so that a second judge cannot answer
         # differently about it and add a wrong line to that message.
         if judged_sentences and paused and promise_text:
+            unbacked_keys = {(item["record_uuid"], item["sentence"]) for item in promise_records}
             self.sentences_checked(seat, [item for item in sentences_checked
-                                          if item["sentence"] not in promise_sentences])
+                                          if (item["record_uuid"], item["sentence"]) not in unbacked_keys])
         elif judged_sentences:
             self.sentences_checked(seat, sentences_checked)
             self.checked(seat, verdict, transcript_read_at, check_is_new)
@@ -1203,7 +1204,7 @@ class Sweep:
     def sentences(self, seat, verdict):
         """Rule 2: judge what code could not settle, and word one message naming every unbacked
         sentence. Returns ("unbacked", (the message, the sorted kinds of the sentences it names,
-        those sentences), the sentences checked), ("failed", None, []), ("paused", None, []) or
+        those sentences, their records), the sentences checked), ("failed", None, []), ("paused", None, []) or
         ("all backed", None, the sentences checked). The caller logs the sentences checked, except,
         when a pause a later launch starts holds back the promise message, the unbacked ones, which
         are judged again after the reset; a judge stopped by the pause logs none, and a failed judge
@@ -1250,7 +1251,7 @@ class Sweep:
             sentence=item["sentence"],
             minutes=int(seconds_between(item["time"], self.now) // 60) if item["time"] else "some")
             for item in unbacked), sorted({item["kind"] for item in unbacked}),
-            [item["sentence"] for item in unbacked]), new
+            [item["sentence"] for item in unbacked], unbacked), new
 
     def sentences_checked(self, seat, items):
         for item in items:
