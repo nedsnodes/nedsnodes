@@ -4,7 +4,8 @@
 Each case runs the program in a disposable git repository. A stand-in `claude`,
 first on PATH, logs the prompt it is given and prints a canned report, or, for
 a recheck prompt naming an assertion the case lists, that assertion's canned
-answer; the
+answer, or, for the prompt of the fresh-agent that judges whether an unsettled
+entry covers a claim, the case's canned judge answer; the
 repository's own scripts/md-drift-lint.py is a stand-in that exits as the case
 asks. No case runs a model or touches the log-store.
 
@@ -37,6 +38,7 @@ claim_check = importlib.util.module_from_spec(_spec)
 _spec.loader.exec_module(claim_check)
 
 OVERVIEW = "docs/nedsnodes-wiki/nedsnodes-example-architecture-overview.md"
+PROPOSALS = "nn-systems/example/docs/example-architecture-overview-proposed-improvements-or-changes-entries.md"
 CONTROL_VARIABLE = "OVERVIEW_CLAIM_CHECK_TEST_CONTROL_DIRECTORY"
 TIMEOUT_SECONDS = 120
 RECHECK_SLEEP_SECONDS = 3
@@ -53,7 +55,18 @@ answer = json.loads((control / "claude.json").read_text(encoding="utf-8"))
 for assertion, recheck in answer.get("rechecks", {{}}).items():
     if f"The assertion: {{assertion}}\\n" in prompt:
         answer = recheck
+if prompt.startswith({claim_check.UNSETTLED_ENTRY_COVERS_FIX_LATER_CLAIM_JUDGE_PROMPT_TEMPLATE[:60]!r}):
+    answer = answer.get("covering_judge", {{"stdout": "no judge answer was given for this case\\n"}})
 __import__("time").sleep(answer.get("sleep_seconds", 0))
+if "append_while_running" in answer:
+    with open(answer["append_while_running"]["path"], "a", encoding="utf-8") as changed:
+        changed.write(answer["append_while_running"]["text"])
+if "replace_while_running" in answer:
+    replaced = answer["replace_while_running"]
+    with open(replaced["path"], encoding="utf-8") as before:
+        text = before.read()
+    with open(replaced["path"], "w", encoding="utf-8") as after:
+        after.write(text.replace(replaced["old"], replaced["new"], 1))
 sys.stdout.write(answer["stdout"])
 sys.stderr.write(answer.get("stderr", ""))
 sys.exit(answer.get("exit_code", 0))
@@ -123,11 +136,14 @@ class Fixture:
         return self.commit("overview")
 
     def answer(self, *, claude_stdout=GOOD_REPORT, claude_exit=0, lint_stdout="", lint_exit=0,
-               claude_sleep=0, lint_sleep=0, rechecks=None):
-        """rechecks maps an assertion to the {"stdout", "exit_code"} the stand-in gives a recheck prompt naming it."""
+               claude_sleep=0, lint_sleep=0, rechecks=None, covering_judge=None):
+        """rechecks maps an assertion to the {"stdout", "exit_code"} the stand-in gives a recheck prompt naming it;
+        covering_judge is the {"stdout", "exit_code"} it gives the covering judge's prompt, with an optional
+        "append_while_running": {"path", "text"} that it appends to that file, or "replace_while_running":
+        {"path", "old", "new"} with which it replaces the first "old" in that file, before it answers."""
         (self.control / "claude.json").write_text(json.dumps(
             {"stdout": claude_stdout, "exit_code": claude_exit, "sleep_seconds": claude_sleep,
-             "rechecks": rechecks or {}}))
+             "rechecks": rechecks or {}, **({"covering_judge": covering_judge} if covering_judge else {})}))
         (self.control / "lint.json").write_text(json.dumps(
             {"stdout": lint_stdout, "exit_code": lint_exit, "sleep_seconds": lint_sleep}))
         for log in ("claude-calls.jsonl", "lint-calls.txt"):
@@ -229,11 +245,84 @@ def run_unit_cases():
     check("no VERDICT line is malformed", result("I could not check it.\n") == "malformed: no VERDICT line")
     check("a missing COUNTS line is malformed", result("VERDICT 1 supported: a\n") == "malformed: 0 COUNTS lines, not one")
     check("the how-to page matches the template, so callers must check nn-systems/<system>",
-          claim_check.nc_architecture_overview_described_system_name_from_page_path(
+          claim_check.nn_architecture_overview_described_system_name_from_page_path(
               "docs/nedsnodes-wiki/nedsnodes-how-to-write-an-architecture-overview.md") == "how-to-write-an")
     check("a proposed-improvements file beside an overview is not an overview path",
-          claim_check.nc_architecture_overview_described_system_name_from_page_path(
+          claim_check.nn_architecture_overview_described_system_name_from_page_path(
               "docs/nedsnodes-wiki/nedsnodes-handoff-architecture-overview-proposed-improvements-or-changes-x.md") is None)
+    check("an overview's one proposed-improvements-or-changes-file is in its system's docs/, outside the wiki folder",
+          claim_check.nn_architecture_overview_proposed_improvements_or_changes_file_path_from_page_path(OVERVIEW) == PROPOSALS)
+    check("the pointer line names the file and its directory in separate backtick spans, so md-drift-lint at an older "
+          "commit, where the file is missing, finds no path to check",
+          claim_check.overview_pointer_line_to_proposed_improvements_or_changes_file(OVERVIEW)
+          == "This document has proposed improvements or changes: read "
+             "`example-architecture-overview-proposed-improvements-or-changes-entries.md` in `nn-systems/example/docs/`.")
+
+
+ENTRIES_WITH_EACH_STATE = (
+    "# Proposed improvements or changes: the example overview\n\nAn introduction.\n\n"
+    "## E3 — possible problem: an assertion of the overview is contradicted\n\nClaim: the tool sets x, once\n"
+    "The claim check's evidence:\n> tool.py:1\nState: open\n\n"
+    "## E4 — improvement: an entry an overview writer recorded\n\nState: needs the user — a handler, 2026-11-20T10:00Z: decide x\n\n"
+    "## E5 — possible problem: an assertion of the overview is unsupported\n\nClaim: a settled claim\n"
+    "State: settled, not worth doing — a handler, 2026-11-20T10:00Z: the overview was fixed.\n\n"
+    "## E6 — improvement: an entry with no State line\n\nIt only says something.\n")
+
+
+def run_covering_judge_unit_cases():
+    unsettled_entries = claim_check.unsettled_entries_in_proposed_improvements_or_changes_file(ENTRIES_WITH_EACH_STATE)
+    check("unsettled entries are those whose State: line is not settled, needs the user included, each with its whole text up to the next entry",
+          sorted(unsettled_entries) == [3, 4] and unsettled_entries[3].startswith("## E3 ") and unsettled_entries[3].endswith("State: open")
+          and "## E4" not in unsettled_entries[3], unsettled_entries)
+    claims = [claim_check.Claim(1, "contradicted", claim_check.RANK_FIX_LATER, "the  tool sets x,\tonce", ""),
+              claim_check.Claim(2, "contradicted", claim_check.RANK_FIX_LATER, "a settled claim", ""),
+              claim_check.Claim(3, "unsupported", claim_check.RANK_FIX_LATER, "a new claim", ""),
+              claim_check.Claim(4, "unsupported", claim_check.RANK_FIX_LATER, "a new claim", ""),
+              claim_check.Claim(5, "contradicted", claim_check.RANK_NIT, "a nit", "")]
+    check("a fix-later claim held word for word in an entry of any state is not new; a repeated new claim is new once, "
+          "and a nit is never new",
+          [claim.number for claim in claim_check.fix_later_claims_not_yet_in_proposed_improvements_or_changes_file(ENTRIES_WITH_EACH_STATE, claims)]
+          == [3])
+
+    def judged(answer, claim_numbers=(1, 2), unsettled_entry_numbers=frozenset({3, 4})):
+        return claim_check.claim_number_to_covering_unsettled_entry_number_from_judge_answer(answer, list(claim_numbers), set(unsettled_entry_numbers))
+
+    check("a judge answer gives each covered claim its entry, leaves out new claims, and reads past blank lines",
+          judged("\nCLAIM 1 covered-by E4\n\nCLAIM 2 new\n\n") == ({1: 4}, None))
+    check("a judge answer that skips a claim is malformed",
+          judged("CLAIM 1 new\n") == (None, "it gives no answer for CLAIM 2"))
+    check("a judge answer that answers a claim twice is malformed",
+          judged("CLAIM 1 new\nCLAIM 1 covered-by E3\nCLAIM 2 new\n") == (None, "it answers CLAIM 1 twice"))
+    check("a judge answer that corrects a claim in a CLAIM line not in either form is malformed, not read as its first answer",
+          judged("CLAIM 1 covered-by E3\nCLAIM 1 new (correction)\nCLAIM 2 new\n")
+          == (None, "its line `CLAIM 1 new (correction)` is not `CLAIM <number> covered-by E<number>` "
+                    "or `CLAIM <number> new`, the only lines an answer may hold"))
+    for case, correction in (("an indented", "  CLAIM 1 new"), ("a bulleted", "- CLAIM 1 new"), ("a backticked", "`CLAIM 1 new`")):
+        check(f"a judge answer that corrects a claim in {case} CLAIM line is malformed, not read as its first answer",
+              judged(f"CLAIM 1 covered-by E3\n{correction}\nCLAIM 2 new\n")
+              == (None, f"its line `{correction.strip()}` is not `CLAIM <number> covered-by E<number>` "
+                        "or `CLAIM <number> new`, the only lines an answer may hold"))
+    check("a judge answer with a prose line is malformed",
+          judged("My reasoning: claim 1 repeats E3.\nCLAIM 1 covered-by E3\nCLAIM 2 new\n")
+          == (None, "its line `My reasoning: claim 1 repeats E3.` is not `CLAIM <number> covered-by E<number>` "
+                    "or `CLAIM <number> new`, the only lines an answer may hold"))
+    check("a judge answer about a claim it was not asked about is malformed",
+          judged("CLAIM 1 new\nCLAIM 2 new\nCLAIM 9 new\n") == (None, "it answers CLAIM 9, which it was not asked about"))
+    check("a judge answer naming an entry that is not one of the unsettled entries it was given, such as a settled one, is "
+          "malformed",
+          judged("CLAIM 1 covered-by E5\nCLAIM 2 new\n")
+          == (None, "it says E5 covers CLAIM 1, but E5 is not one of the unsettled entries it was given"))
+
+    with tempfile.TemporaryDirectory(prefix="overview-claim-check-test-") as temporary:
+        repository = Path(temporary)
+        expected = repository / claim_check.nn_architecture_overview_proposed_improvements_or_changes_file_path_from_page_path(OVERVIEW)
+        grandparent_was_missing = not expected.parent.parent.exists()
+        written = claim_check.write_fix_later_claims_to_proposed_improvements_or_changes_file(
+            repository, OVERVIEW, [claims[2]], "a" * 40, "report.md", for_regular_maintenance=True)
+        check("a fix-later claim is written to a new proposed-improvements-or-changes-file whose directory and its parent "
+              "do not exist yet",
+              grandparent_was_missing and written == expected and expected.is_file()
+              and "a new claim" in expected.read_text(encoding="utf-8"), written)
 
 
 def last_stdout_line(result):
@@ -251,9 +340,10 @@ MUST_FIX_REPORT = ("VERDICT 1 supported: the tool sets x\n  nn-systems/example/t
 
 
 def proposed_improvements_or_changes_files(fixture):
-    """Resolved, as the program prints them: the test sandbox's temporary directory is a symlink."""
-    return sorted(path.resolve() for path in (fixture.repository / Path(OVERVIEW).parent).glob(
-        Path(OVERVIEW).stem + claim_check.PROPOSED_IMPROVEMENTS_OR_CHANGES_INFIX + "*.md"))
+    """Every proposed-improvements-or-changes-file in the checkout, resolved, as the program prints them: the test
+    sandbox's temporary directory is a symlink."""
+    return sorted(path.resolve() for path in fixture.repository.rglob("*-proposed-improvements-or-changes*")
+                  if ".git" not in path.parts)
 
 
 def run_ranked_claim_cases(fixture, blob):
@@ -294,13 +384,14 @@ def run_ranked_claim_cases(fixture, blob):
           result.returncode == 0 and newest[1] == claim_check.OVERVIEW_WRITE_ARCHITECTURE_OVERVIEW_CLAIM_CHECK_RESULT_NO_MUST_FIX_CLAIM_REMAINS,
           (result, newest))
     entry = written[0].read_text() if len(written) == 1 else ""
-    check("the fix-later claim is written, with its evidence and an open state, to a file named by the check and the day",
-          len(written) == 1 and written[0].name.startswith(
-              Path(OVERVIEW).stem + "-proposed-improvements-or-changes-overview-write-claim-check-by-fresh-agent-")
+    check("the fix-later claim is written, with its evidence, its report and an open state, to the overview's one "
+          "file in its system's docs/, outside the wiki folder",
+          written == [(fixture.repository / PROPOSALS).resolve()]
+          and entry.startswith(f"# Proposed improvements or changes: {Path(OVERVIEW).name}\n")
           and "## E1 — possible problem: an assertion of the overview is contradicted" in entry
           and "\nClaim: the program exists\n" in entry and ">   FIRST-EVIDENCE-LINE" in entry
-          and "State: open" in entry and str(newest[0]) in entry, (written, entry))
-    pointer_line = claim_check.overview_pointer_line_to_proposed_improvements_or_changes_files(OVERVIEW)
+          and "State: open" in entry and str(newest[0]) in entry and fixture.code_commit in entry, (written, entry))
+    pointer_line = claim_check.overview_pointer_line_to_proposed_improvements_or_changes_file(OVERVIEW)
     check("with a fix-later file written and no pointer line, the next action says to commit the file, open the "
           "follow-up, add the pointer line and run again",
           last_stdout_line(result) == next_action_line(
@@ -308,9 +399,13 @@ def run_ranked_claim_cases(fixture, blob):
               + claim_check.NEXT_ACTION_SUFFIX_WHEN_FIX_LATER_CLAIMS_WRITTEN_TO_PROPOSED_IMPROVEMENTS_OR_CHANGES_FILE.format(path=written[0] if written else None)
               + claim_check.NEXT_ACTION_SUFFIX_WHEN_OVERVIEW_LACKS_PROPOSED_IMPROVEMENTS_OR_CHANGES_POINTER_LINE.format(line=pointer_line)), result.stdout)
 
+    calls_before = len(fixture.claude_calls())
     result = fixture.run()
-    check("a fix-later claim a file beside the overview already holds is not written again",
+    check("a fix-later claim the file already holds is not written again, and the file is left as it was, with no "
+          "covering judge run",
           result.returncode == 0 and proposed_improvements_or_changes_files(fixture) == written
+          and len(fixture.claude_calls()) == calls_before + 2
+          and written[0].read_text() == entry
           and last_stdout_line(result) == next_action_line(claim_check.NEXT_ACTION_WHEN_NO_MUST_FIX_CLAIM_REMAINS),
           result.stdout)
 
@@ -352,9 +447,10 @@ def run_ranked_claim_cases(fixture, blob):
                    rechecks={"alpha claim": {"stdout": recheck("contradicted must-fix", "alpha claim"),
                                              "sleep_seconds": RECHECK_SLEEP_SECONDS},
                              "beta claim": {"stdout": recheck("unsupported fix-later", "beta claim"),
-                                            "sleep_seconds": RECHECK_SLEEP_SECONDS}})
+                                            "sleep_seconds": RECHECK_SLEEP_SECONDS}},
+                   covering_judge={"stdout": "CLAIM 2 new\n"})
     result = fixture.run()
-    rechecks = fixture.claude_calls()[1:]
+    rechecks = [call for call in fixture.claude_calls()[1:] if "The assertion: " in call["stdin"]]
     starts = sorted(call["started"] for call in rechecks)
     # Run one after the other, the second recheck would start only after the first's sleep ended.
     check("the rechecks run in parallel: the second starts before the first has finished",
@@ -364,14 +460,15 @@ def run_ranked_claim_cases(fixture, blob):
           and sorted(("alpha claim" in call["stdin"], "beta claim" in call["stdin"]) for call in rechecks)
           == [(False, True), (True, False)] and newest_report()[1] == "must-fix claims remain: 1 must-fix, 1 fix-later, 0 nit",
           (result, rechecks))
-    second = [path for path in proposed_improvements_or_changes_files(fixture) if path not in written]
-    second_text = second[0].read_text() if len(second) == 1 else ""
-    check("a fix-later claim is written even when a must-fix claim remains, to a second file of the day, and the "
-          "next action names that file",
-          len(second) == 1 and second[0].name.endswith("-2.md") and "Claim: beta claim" in second_text
-          and "the program exists" not in second_text and "alpha claim" not in second_text
+    appended = written[0].read_text() if written else ""
+    check("a fix-later claim is appended to the same file as the next entry, even when a must-fix claim remains, and "
+          "the next action names that file",
+          proposed_improvements_or_changes_files(fixture) == written and appended.startswith(entry)
+          and "## E2 — possible problem: an assertion of the overview is unsupported" in appended
+          and "Claim: beta claim" in appended and appended.count("Claim: the program exists") == 1
+          and "alpha claim" not in appended
           and last_stdout_line(result).startswith(next_action_line(claim_check.NEXT_ACTION_WHEN_MUST_FIX_CLAIMS_REMAIN))
-          and str(second[0]) in last_stdout_line(result), result.stdout)
+          and str(written[0]) in last_stdout_line(result), (appended, result.stdout))
 
     for written_file in proposed_improvements_or_changes_files(fixture):
         written_file.unlink()
@@ -390,28 +487,126 @@ def run_ranked_claim_cases(fixture, blob):
           (with_pointer, result.stdout))
     for written_file in written:
         written_file.unlink()
+
     main_before = fixture.git("rev-parse", "refs/remotes/origin/main")
-    fixture.write(f"{Path(OVERVIEW).parent}/{Path(OVERVIEW).stem}-proposed-improvements-or-changes-"
-                  "overview-write-claim-check-by-fresh-agent-2026-01-01.md", "# earlier\n")
-    fixture.git("update-ref", "refs/remotes/origin/main", fixture.commit("an earlier file from the claim check on main"))
+    entries_without_claims = ("# Proposed improvements or changes: the example overview\n\n"
+                              "## E7 — improvement: an entry an overview writer recorded\n\nState: open")
+    fixture.write(PROPOSALS, entries_without_claims)
+    fixture.git("update-ref", "refs/remotes/origin/main", fixture.commit("the file on main, with no claim-check entry"))
     fixture.answer(claude_stdout="VERDICT 1 unsupported fix-later: epsilon claim\n"
-                                 "COUNTS supported=0 contradicted=0 unsupported=1\n")
+                                 "COUNTS supported=0 contradicted=0 unsupported=1\n",
+                   covering_judge={"stdout": "CLAIM 1 new\n"})
     result = fixture.run()
-    written = [path for path in proposed_improvements_or_changes_files(fixture) if "2026-01-01" not in path.name]
-    check("when origin/main already holds a file from the claim check, new claims ranked fix later go to regular "
-          "maintenance, not to another follow-up pull request",
-          result.returncode == 0 and len(written) == 1
-          and "Regular maintenance fixes them in the overview." in written[0].read_text()
+    appended = (fixture.repository / PROPOSALS).read_text()
+    check("when the file on origin/main holds no claim from the claim check, a follow-up pull request fixes the new "
+          "claims, appended after the highest entry number",
+          result.returncode == 0 and appended.startswith(entries_without_claims + "\n\n## E8 — possible problem:")
+          and "Claim: epsilon claim" in appended and "Fixed by: a follow-up pull request, in the overview." in appended
+          and last_stdout_line(result).startswith(next_action_line(
+              claim_check.NEXT_ACTION_WHEN_NO_MUST_FIX_CLAIM_REMAINS
+              + claim_check.NEXT_ACTION_SUFFIX_WHEN_FIX_LATER_CLAIMS_WRITTEN_TO_PROPOSED_IMPROVEMENTS_OR_CHANGES_FILE.format(
+                  path=(fixture.repository / PROPOSALS).resolve()))), (appended, result.stdout))
+
+    fixture.git("update-ref", "refs/remotes/origin/main", fixture.commit("the file on main, with a claim-check entry"))
+    fixture.answer(claude_stdout="VERDICT 1 unsupported fix-later: zeta claim\n"
+                                 "COUNTS supported=0 contradicted=0 unsupported=1\n",
+                   covering_judge={"stdout": "CLAIM 1 new\n"})
+    result = fixture.run()
+    appended = (fixture.repository / PROPOSALS).read_text()
+    check("when the file on origin/main already holds a claim from the claim check, new claims ranked fix later go "
+          "to regular maintenance, not to another follow-up pull request",
+          result.returncode == 0 and "## E9 — possible problem:" in appended and "Claim: zeta claim" in appended
+          and "Fixed by: regular maintenance, in the overview." in appended
           and last_stdout_line(result) == next_action_line(
               claim_check.NEXT_ACTION_WHEN_NO_MUST_FIX_CLAIM_REMAINS
               + claim_check.NEXT_ACTION_SUFFIX_WHEN_FOLLOW_UP_PULL_REQUEST_LEAVES_FIX_LATER_CLAIMS_TO_REGULAR_MAINTENANCE.format(
-                  path=written[0] if written else None)), (written, result.stdout))
-    check("without such a file on origin/main, the file says a follow-up pull request fixes its claims",
-          "A follow-up pull request fixes them in the overview." in entry, entry)
-    for written_file in proposed_improvements_or_changes_files(fixture):
-        written_file.unlink()
+                  path=(fixture.repository / PROPOSALS).resolve())), (appended, result.stdout))
+    check("without a claim from the claim check on origin/main, the entry says a follow-up pull request fixes it",
+          "Fixed by: a follow-up pull request, in the overview." in entry, entry)
+    (fixture.repository / PROPOSALS).unlink()
+    fixture.commit("remove the file")
     fixture.git("update-ref", "refs/remotes/origin/main", main_before)
     fixture.commit_overview()
+
+
+def run_covering_judge_cases(fixture):
+    """Run after run_ranked_claim_cases, which leaves no proposed-improvements-or-changes-file and origin/main at the
+    code commit."""
+    fixture.write(PROPOSALS, ENTRIES_WITH_EACH_STATE)
+    report = ("VERDICT 1 contradicted fix-later: the tool sets x once\n  COVERED-CLAIM-EVIDENCE\n"
+              "VERDICT 2 unsupported fix-later: the tool is fast\nVERDICT 3 unsupported fix-later: a settled claim\n"
+              "COUNTS supported=0 contradicted=1 unsupported=2\n")
+    fixture.answer(claude_stdout=report, covering_judge={"stdout": "CLAIM 1 covered-by E3\nCLAIM 2 new\n"})
+    result = fixture.run()
+    calls = fixture.claude_calls()
+    judge_prompt = calls[1]["stdin"] if len(calls) == 2 else ""
+    appended = (fixture.repository / PROPOSALS).read_text()
+    check("a claim the covering judge says an unsettled entry covers is not appended, and the run says which entry covers it",
+          result.returncode == 0 and appended.startswith(ENTRIES_WITH_EACH_STATE.rstrip("\n"))
+          and "Claim: the tool sets x once\n" not in appended and "Claim: the tool is fast" in appended
+          and "## E7 — possible problem: an assertion of the overview is unsupported" in appended
+          and f"the claim of VERDICT 1, ranked fix later, is not appended: unsettled entry E3 of {PROPOSALS} covers it"
+          in result.stdout, (result, appended))
+    check("the covering judge is asked only about claims new word for word, with their evidence, is shown only the "
+          "unsettled entries, and runs with no tools",
+          judge_prompt.startswith(claim_check.UNSETTLED_ENTRY_COVERS_FIX_LATER_CLAIM_JUDGE_PROMPT_TEMPLATE[:60])
+          and "CLAIM 1: the tool sets x once\n  COVERED-CLAIM-EVIDENCE\n" in judge_prompt
+          and "CLAIM 2: the tool is fast\n" in judge_prompt and "CLAIM 3" not in judge_prompt
+          and "## E3 " in judge_prompt and "## E4 " in judge_prompt and "## E5 " not in judge_prompt
+          and "## E6 " not in judge_prompt
+          and calls[1]["argv"][calls[1]["argv"].index("--tools") + 1] == "" and "--allowedTools" not in calls[1]["argv"],
+          calls)
+    newest = sorted(fixture.reports_written(), key=lambda path: path.stat().st_mtime)[-1]
+    check("the report holds the covering judge's answer after the claim check's report",
+          newest.read_text().endswith("covers each claim ranked fix later that it did not hold word for word\n\n"
+                                      "CLAIM 1 covered-by E3\nCLAIM 2 new\n"), newest.read_text())
+
+    fixture.write(PROPOSALS, ENTRIES_WITH_EACH_STATE)
+    count = len(fixture.reports_written())
+    for case, covering_judge, expected in (
+            ("a covering judge that fails", {"stdout": "", "exit_code": 1, "stderr": "usage limit reached"},
+             "usage limit reached"),
+            ("a covering judge whose answer skips a claim", {"stdout": "CLAIM 1 new\n"},
+             "it gives no answer for CLAIM 2"),
+            ("a covering judge that names an entry it was not given", {"stdout": "CLAIM 1 covered-by E5\nCLAIM 2 new\n"},
+             "E5 is not one of the unsettled entries it was given")):
+        fixture.answer(claude_stdout=report, covering_judge=covering_judge)
+        result = fixture.run()
+        check(f"{case} exits 4 with why, writes no report, leaves the file as it was, and ends with the next action for "
+              "exit 4",
+              result.returncode == 4 and expected in result.stderr and len(fixture.reports_written()) == count
+              and (fixture.repository / PROPOSALS).read_text() == ENTRIES_WITH_EACH_STATE
+              and last_stdout_line(result) == next_action_line(claim_check.NEXT_ACTION_BY_EXIT_CODE[4]),
+              (result, covering_judge))
+    settled_e3 = ENTRIES_WITH_EACH_STATE.replace("> tool.py:1\nState: open\n", "> tool.py:1\nState: settled by a handler meanwhile\n", 1)
+    for case, change, changed_text in (
+            ("another claim check appends an entry",
+             {"append_while_running": {"path": str(fixture.repository / PROPOSALS),
+                                       "text": "\n## E7 — possible problem: an assertion of the overview is unsupported\n\n"
+                                               "Claim: the tool is fast\nState: open\n"}},
+             ENTRIES_WITH_EACH_STATE + "\n## E7 — possible problem: an assertion of the overview is unsupported\n\n"
+                                       "Claim: the tool is fast\nState: open\n"),
+            ("a handler settles the entry the judge names",
+             {"replace_while_running": {"path": str(fixture.repository / PROPOSALS),
+                                        "old": "> tool.py:1\nState: open\n",
+                                        "new": "> tool.py:1\nState: settled by a handler meanwhile\n"}},
+             settled_e3)):
+        fixture.write(PROPOSALS, ENTRIES_WITH_EACH_STATE)
+        fixture.answer(claude_stdout=report, covering_judge={"stdout": "CLAIM 1 covered-by E3\nCLAIM 2 new\n", **change})
+        result = fixture.run()
+        check(f"when {case} while the covering judge runs, the run exits 4, writes no report, appends nothing and "
+              "says to run it again",
+              result.returncode == 4 and "changed while this claim check decided" in result.stderr
+              and len(fixture.reports_written()) == count
+              and (fixture.repository / PROPOSALS).read_text() == changed_text
+              and last_stdout_line(result) == next_action_line(claim_check.NEXT_ACTION_BY_EXIT_CODE[4]), result)
+    fixture.write(PROPOSALS, ENTRIES_WITH_EACH_STATE)
+    fixture.answer(claude_stdout=report, covering_judge={"stdout": "CLAIM 1 new\nCLAIM 2 new\n", "sleep_seconds": 5})
+    code, stderr = fixture.run_in_process_with_timeouts(fresh_agent_seconds=2)
+    check("a covering judge that runs past its timeout exits 4 and writes no report",
+          code == 4 and "could not run" in stderr and len(fixture.reports_written()) == count
+          and (fixture.repository / PROPOSALS).read_text() == ENTRIES_WITH_EACH_STATE, stderr)
+    (fixture.repository / PROPOSALS).unlink()
 
 
 def run_program_cases(fixture):
@@ -443,6 +638,7 @@ def run_program_cases(fixture):
           last_stdout_line(result) == next_action_line(claim_check.NEXT_ACTION_BY_EXIT_CODE[0]), result.stdout)
 
     run_ranked_claim_cases(fixture, blob)
+    run_covering_judge_cases(fixture)
 
     real_run_git = claim_check.run_git
 
@@ -618,7 +814,7 @@ def run_program_cases(fixture):
                              "--report-directory", str(fixture.reports)], cwd=fixture.repository,
                             env=fixture.environment, capture_output=True, text=True, timeout=TIMEOUT_SECONDS)
     check("a path with no nn-systems/<system> directory is refused as not an overview",
-          result.returncode == 1 and "is not an nc-architecture-overview" in result.stderr, result.stderr)
+          result.returncode == 1 and "is not an nn-architecture-overview" in result.stderr, result.stderr)
 
     fixture.commit_overview(checked_against=False)
     result = fixture.run()
@@ -648,6 +844,7 @@ def run_program_cases(fixture):
 
 def main():
     run_unit_cases()
+    run_covering_judge_unit_cases()
     with tempfile.TemporaryDirectory(prefix="overview-claim-check-test-") as temporary:
         run_program_cases(Fixture(Path(temporary)))
     print(f"{len(failures)} failed")

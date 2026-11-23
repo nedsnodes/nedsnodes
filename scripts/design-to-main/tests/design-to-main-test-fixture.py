@@ -45,7 +45,7 @@ COMPONENT = "widget-counter"
 COMPONENT_DIRECTORY = "scripts/widget-counter"
 # The design's GHI-MD, which the invocation names: before code exists the
 # design is refined there in place (section 9).
-DESIGN_PATH = "docs/issues/901-widget-counter-design.md"
+DESIGN_PATH = "docs/issues/901-widget-counter.tool.design.md"
 
 
 def git(repo, *args):
@@ -88,9 +88,9 @@ FILES_WRITTEN_BEFORE_EMITTING = "files_written_before_emitting"
 # 3). A case that wants other files, or none, names `named_files` itself.
 DEFAULT_ARTIFACT_OF_WRITING_STATE = {
     tables.DESIGN_WRITING: DESIGN_PATH,
-    tables.CONTRACT_REVISING: "%s/%s-contract.md" % (COMPONENT_DIRECTORY, COMPONENT),
+    tables.CONTRACT_REVISING: "%s/%s.tool.contract.md" % (COMPONENT_DIRECTORY, COMPONENT),
     tables.IMPLEMENTATION_WRITING: "%s/%s.py" % (COMPONENT_DIRECTORY, COMPONENT),
-    tables.TEST_DESIGN_WRITING: "%s/%s-test-design.md" % (COMPONENT_DIRECTORY, COMPONENT),
+    tables.TEST_DESIGN_WRITING: "%s/%s.tool.test-design.md" % (COMPONENT_DIRECTORY, COMPONENT),
     tables.TEST_WRITING: "%s/tests/%s-test.py" % (COMPONENT_DIRECTORY, COMPONENT),
 }
 

@@ -1093,6 +1093,13 @@ def run_cases_on_ned_box(workspace: Path):
           result.code == 0 and result.runner_calls[0]["argv"][-4:-2]
           == ["--save-recorded-inputs-to-directory", str(saved_inputs)]
           and not saved_inputs.exists(), repr(result))
+    read_only_inputs = workspace / "a-read-only-recorded-inputs-directory"
+    result = fixture.run(extra_arguments=["--also-leave-out-suites-whose-recorded-inputs-in-read-only-directory-match-checkout",
+                                          str(read_only_inputs)])
+    check("--also-leave-out-suites-whose-recorded-inputs-in-read-only-directory-match-checkout is passed through to the runner",
+          result.code == 0 and result.runner_calls[0]["argv"][-4:-2]
+          == ["--also-leave-out-suites-whose-recorded-inputs-in-read-only-directory-match-checkout", str(read_only_inputs)]
+          and not read_only_inputs.exists(), repr(result))
     commands_run = []
 
     def runner_that_is_not_started(command, run_from, monotonic, stream_to=None):

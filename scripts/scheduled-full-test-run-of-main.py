@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Run every nc-test-suite on main once a day on this machine, and record the result in the log-store.
+"""Run every nn-test-suite on main once a day on this machine, and record the result in the log-store.
 
 Usage:
   scripts/scheduled-full-test-run-of-main.py [--clone DIR] [--log-store-root DIR]
@@ -7,7 +7,7 @@ Usage:
                                          [--temporary-directory DIR]
                                          [--recorded-inputs-directory DIR]
 
-  --clone       the clone `git fetch origin` runs in and the worktree of main
+  --clone       the clone main is fetched into and the worktree of main
                 is made from; default, the clone this file is in
   --log-store-root
                 the log-store's root, a path on ned-box; default
@@ -44,9 +44,14 @@ runner's docstring calls the scheduled full run.
 
 WHAT ONE RUN DOES, in order.
 
-  1. `git fetch origin` in the clone. A failed fetch stops the run and is
-     written to the record.
-  2. Resolves refs/remotes/origin/main to its full commit hash and makes a
+  1. Fetches origin's main into SCHEDULED_FULL_TEST_RUN_FETCHED_MAIN_REF, a
+     ref only this program writes, with an empty --refmap, so the fetch
+     leaves refs/remotes/origin/main and FETCH_HEAD alone. Other cron jobs
+     fetch in the same clone at the same minute, and two fetches that both
+     update refs/remotes/origin/main can make one fail with "incorrect old
+     value provided". A failed fetch stops the run and is written to the
+     record.
+  2. Resolves that ref to its full commit hash and makes a
      detached worktree at that hash (`git worktree add --detach`), so no
      branch is made and nothing rests on FETCH_HEAD, which another agent's
      fetch can move. A worktree a killed run left at the same path is removed
@@ -214,6 +219,7 @@ SCHEDULED_FULL_TEST_RUN_RECORD_LOCAL_COPY_FILE_NAME_PREFIX = "scheduled-full-tes
 SCHEDULED_FULL_TEST_RUN_LOCK_FILE_NAME = "scheduled-full-test-run-of-main.lock"
 
 SCHEDULED_FULL_TEST_RUN_RUNNER_PATH_IN_WORKTREE = Path("scripts") / "run-all-test-suites.py"
+SCHEDULED_FULL_TEST_RUN_FETCHED_MAIN_REF = "refs/scheduled-full-test-run-of-main/main"
 
 # Read at runtime so tests can shorten it.
 SCHEDULED_FULL_TEST_RUN_LOCK_WAIT_BOUND_SECONDS = 3600
@@ -437,7 +443,7 @@ def write_record_command(log_store_root: str, machine: str, file_name: str) -> s
 def parse_arguments(argv):
     parser = argparse.ArgumentParser(
         prog=PROGRAM,
-        description="Run every nc-test-suite on main on this machine and record the result "
+        description="Run every nn-test-suite on main on this machine and record the result "
                     "in the log-store.")
     parser.add_argument("--clone", default=str(REPOSITORY_ROOT))
     parser.add_argument("--log-store-root", default=SCHEDULED_FULL_TEST_RUN_DEFAULT_LOG_STORE_ROOT)
@@ -484,7 +490,8 @@ def scheduled_full_test_run_under_lock(arguments, now, monotonic, on_ned_box, ma
     completed = None
     seconds_waiting_for_lock = 0
 
-    fetched = git(clone, "fetch", "origin")
+    fetched = git(clone, "fetch", "--no-write-fetch-head", "--refmap=", "origin",
+                  f"+refs/heads/main:{SCHEDULED_FULL_TEST_RUN_FETCHED_MAIN_REF}")
     if fetched.returncode != 0:
         steps_failed.append((
             f"not run — git fetch origin failed in {clone}: "
@@ -492,10 +499,11 @@ def scheduled_full_test_run_under_lock(arguments, now, monotonic, on_ned_box, ma
             "Fix what git reports, then run this again."))
     else:
         resolved = git(clone, "rev-parse", "--verify", "--quiet",
-                       "refs/remotes/origin/main^{commit}")
+                       f"{SCHEDULED_FULL_TEST_RUN_FETCHED_MAIN_REF}^{{commit}}")
         if resolved.returncode != 0 or not resolved.stdout.strip():
             steps_failed.append((
-                f"not run — git cannot resolve refs/remotes/origin/main in {clone}",
+                f"not run — git cannot resolve {SCHEDULED_FULL_TEST_RUN_FETCHED_MAIN_REF}, "
+                f"fetched from origin's main, in {clone}",
                 "Fix the clone's origin remote, then run this again."))
         else:
             commit = resolved.stdout.strip()

@@ -1,14 +1,15 @@
 #!/usr/bin/env python3
-"""Tests that a suite inside its nc-test-sandbox cannot escape it.
+"""Tests that a suite inside its nn-test-sandbox cannot escape it.
 
 A probe is run as a suite by scripts/run-all-test-suites.py's own run_one_suite,
 the path every suite takes: in a cgroup scope at low priority, with the input
 recorder, in a checkout that is a linked worktree, as merge-lane-2's head test
-runs and nc-mutation-testing use. The probe tries every escape. Each target is one
+runs and nn-mutation-testing use. The probe tries every escape. Each target is one
 this file made for the purpose: a file in the real home directory, a tmux server
 on a socket of its own, a listening socket in the session's runtime directory, a
 sleeper process, a scratch repository. If a protection were missing, the worst a
-probe can do is change those targets, and this file removes them afterwards. The
+probe can do is change those targets, and this file removes them afterwards; what a run
+killed with SIGKILL could not remove, the next run removes before it starts. The
 real credential files are only measured, never printed, and the machine's real
 listening sockets only connected to and closed.
 
@@ -29,6 +30,7 @@ import importlib.util
 import json
 import os
 import pathlib
+import re
 import shutil
 import socket
 import subprocess
@@ -91,7 +93,7 @@ MACHINE_SOCKETS_NAMED = (
     "/run/docker.sock", "/run/dbus/system_bus_socket", "/run/snapd.socket",
     "/run/systemd/io.systemd.Manager")
 # gnome-shell on ned-box serves displays :0 and :1; its authorization cookie lives in the
-# runtime directory, which the nc-test-sandbox hides.
+# runtime directory, which the nn-test-sandbox hides.
 X11_DISPLAYS_PROBED = (0, 1)
 PROBE_SUITE = "escape-probe-test.py"
 
@@ -314,7 +316,7 @@ for path in targets["late_sockets"]:
 
 def bwrap_unavailable_reason():
     if not sys.platform.startswith("linux"):
-        return f"{sys.platform} has no nc-test-sandbox; it is built with bwrap on Linux"
+        return f"{sys.platform} has no nn-test-sandbox; it is built with bwrap on Linux"
     if os.environ.get(runner.SIGNAL_SANDBOX_INSIDE_VARIABLE):
         return "this suite is already inside a sandbox, where bwrap cannot start again"
     if shutil.which("bwrap") is None:
@@ -349,6 +351,61 @@ def listening_unix_sockets_of_this_machine():
             kind = socket.SOCK_SEQPACKET if fields[4] == "0005" else socket.SOCK_STREAM
             found.add((fields[7], int(kind)))
     return sorted(found)
+
+
+TARGET_NAME_PREFIX = "run-all-test-suites-escape-test-"
+# Every name run_probe gives what it makes outside its scratch directory, so a later run
+# can find what a run killed before its cleanup left.
+TARGET_NAME_PATTERN = re.compile(
+    r"\.?" + re.escape(TARGET_NAME_PREFIX) + r"(\d+)(-unlisted|-log|-probe|-late\.sock|\.sock)?")
+# run_probe's mkdtemp directory, whose 8 characters are mkdtemp's, made only in /tmp.
+TMP_TARGET_NAME_PATTERN = re.compile(re.escape(TARGET_NAME_PREFIX) + r"(\d+)-[a-z0-9_]{8}")
+# The main-worktree case's checkout, made only in the home directory's .cache.
+CACHE_TARGET_NAME_PATTERN = re.compile(re.escape(TARGET_NAME_PREFIX) + r"(\d+)-main-worktree")
+
+
+def remove_targets_left_by_ended_runs(directories, tmp_directory, cache_directory):
+    """Remove each target in directories named for a process that no longer runs, or for
+    this process, whose PID an ended run may have had; return the paths removed. A name
+    run_probe makes only in /tmp or only in .cache counts only in tmp_directory or
+    cache_directory.
+
+    The runner ends a suite past its time limit, or every suite of a stopped run, with
+    SIGKILL, so run_probe's own cleanup never runs and the targets stay, among them a
+    directory in the real home directory holding a planted credential."""
+    removed = []
+    for directory in directories:
+        try:
+            entries = sorted(pathlib.Path(directory).iterdir())
+        except FileNotFoundError:
+            continue
+        for path in entries:
+            matched = TARGET_NAME_PATTERN.fullmatch(path.name)
+            if not matched and pathlib.Path(directory) == pathlib.Path(tmp_directory):
+                matched = TMP_TARGET_NAME_PATTERN.fullmatch(path.name)
+            if not matched and pathlib.Path(directory) == pathlib.Path(cache_directory):
+                matched = CACHE_TARGET_NAME_PATTERN.fullmatch(path.name)
+            if not matched:
+                continue
+            pid = int(matched.group(1))
+            if pid != os.getpid():
+                try:
+                    os.kill(pid, 0)
+                    continue
+                except ProcessLookupError:
+                    pass
+                except PermissionError:
+                    continue
+            # Another run starting at the same time may remove the same path first.
+            try:
+                if path.is_dir() and not path.is_symlink():
+                    shutil.rmtree(path)
+                else:
+                    path.unlink()
+            except FileNotFoundError:
+                continue
+            removed.append(str(path))
+    return removed
 
 
 @contextlib.contextmanager
@@ -386,14 +443,21 @@ def make_linked_worktree(scratch):
 
 
 def run_probe(scratch):
-    """Run the probe as a suite in its nc-test-sandbox, and check every target after."""
+    """Run the probe as a suite in its nn-test-sandbox, and check every target after."""
     sandbox_prefix, unconfined_because = runner.signal_sandbox()
     if not sandbox_prefix:
         print(f"SKIP  every escape case: the runner builds no sandbox here: {unconfined_because}")
         return
     home = pathlib.Path(runner.REAL_HOME_DIRECTORY_PATH_HIDDEN_BY_EMPTY_TMPFS_IN_TEST_SANDBOX)
     runtime = pathlib.Path(runner.XDG_RUNTIME_DIRECTORY_PATH_HIDDEN_BY_EMPTY_TMPFS_IN_TEST_SANDBOX)
-    name = f"run-all-test-suites-escape-test-{os.getpid()}"
+    name = f"{TARGET_NAME_PREFIX}{os.getpid()}"
+    left = remove_targets_left_by_ended_runs(
+        [home, home / ".cache", "/tmp", pathlib.Path("/tmp") / f"tmux-{os.getuid()}",
+         "/var/tmp", "/dev/shm", runtime],
+        tmp_directory="/tmp", cache_directory=home / ".cache")
+    if left:
+        print(f"removed {len(left)} target(s) runs killed before their cleanup left: "
+              + ", ".join(left))
 
     git_directory, checkout = make_linked_worktree(scratch)
     (checkout / PROBE_SUITE).write_text(X11_PROBE_SOURCE + PROBE_SOURCE)
@@ -584,7 +648,7 @@ def run_probe(scratch):
             except ValueError:
                 continue
             attempts[record["attempt"]] = record
-        check("the probe ran as a suite inside its nc-test-sandbox and reported",
+        check("the probe ran as a suite inside its nn-test-sandbox and reported",
               result["exit"] == 0 and len(attempts) > 40, (result["exit"], log_text[-1500:]))
         check("the probe ran in a cgroup scope of its own, as suites do, and its counters "
               "were read",
@@ -917,10 +981,107 @@ def check_blob_hashes_run_no_filter(scratch):
           not marker.exists() and hashes.get("file.txt") not in (None, "unknown"), hashes)
 
 
+def check_targets_of_a_killed_run_removed_by_the_next(scratch):
+    """What a run killed with SIGKILL planted is removed by the next run's start, while a
+    running run's targets and names this file never makes are kept."""
+    home, cache, tmp = scratch / "home", scratch / "cache", scratch / "tmp"
+    home.mkdir()
+    cache.mkdir()
+    tmp.mkdir()
+    planter = subprocess.Popen(
+        [sys.executable, "-c",
+         "import os, pathlib, sys, time\n"
+         "home, cache = pathlib.Path(sys.argv[1]), pathlib.Path(sys.argv[2])\n"
+         f"name = {TARGET_NAME_PREFIX!r} + str(os.getpid())\n"
+         "(home / f'.{name}-unlisted').mkdir()\n"
+         "(home / f'.{name}-unlisted' / 'oauth-token').write_text('planted-secret')\n"
+         "(cache / name).mkdir()\n"
+         "(cache / f'{name}-log').mkdir()\n"
+         "(cache / f'{name}-probe').write_text('')\n"
+         "(cache / f'{name}-main-worktree').mkdir()\n"
+         "print('planted', flush=True)\n"
+         "time.sleep(600)\n",
+         str(home), str(cache)],
+        stdout=subprocess.PIPE, text=True)
+    planted_line = planter.stdout.readline()
+    planter.kill()
+    planter.wait()
+    planter.stdout.close()
+    killed = TARGET_NAME_PREFIX + str(planter.pid)
+    killed_paths = [home / f".{killed}-unlisted", cache / killed, cache / f"{killed}-log",
+                    cache / f"{killed}-probe", cache / f"{killed}-main-worktree"]
+    running = subprocess.Popen(["sleep", "600"])
+    # A PID this process may not signal; os.kill is made to say so below.
+    unsignalable_pid = planter.pid + 1_000_000_000
+    real_kill = os.kill
+
+    def kill_refusing_the_unsignalable_pid(pid, signal_number):
+        if pid == unsignalable_pid:
+            raise PermissionError(1, "Operation not permitted")
+        return real_kill(pid, signal_number)
+
+    tmp_target = tmp / f"{killed}-abc_1234"
+    try:
+        kept = [home / f".{TARGET_NAME_PREFIX}{running.pid}-unlisted",
+                home / f".{TARGET_NAME_PREFIX}{unsignalable_pid}-unlisted",
+                home / f".{killed}-unlisted-by-someone-else", cache / f"{TARGET_NAME_PREFIX}notes",
+                cache / f"{killed}-abc_1234", home / f"{killed}-main-worktree",
+                tmp / f"{killed}-main-worktree"]
+        for path in kept:
+            path.mkdir()
+        tmp_target.mkdir()
+        own = cache / f"{TARGET_NAME_PREFIX}{os.getpid()}-log"
+        own.mkdir()
+        check("a run killed with SIGKILL leaves its targets, among them a planted credential",
+              planted_line == "planted\n" and all(path.exists() for path in killed_paths),
+              planted_line)
+        os.kill = kill_refusing_the_unsignalable_pid
+        try:
+            removed = remove_targets_left_by_ended_runs(
+                [home, cache, tmp, scratch / "missing"], tmp_directory=tmp, cache_directory=cache)
+        finally:
+            os.kill = real_kill
+        check("the next run removes every target the killed run left, its mkdtemp directory "
+              "in /tmp among them, and one named for its own PID",
+              not any(path.exists() for path in [*killed_paths, tmp_target, own])
+              and sorted(removed) == sorted(map(str, [*killed_paths, tmp_target, own])), removed)
+        check("the next run keeps a running run's targets, one named for a process it may not "
+              "signal, names this file never makes, a mkdtemp-like name outside /tmp, and a "
+              "main-worktree name outside .cache",
+              all(path.exists() for path in kept))
+
+        # Another run removes the same target between this run's listing and its removal.
+        raced = cache / f"{killed}-log"
+        raced.mkdir()
+        real_rmtree = shutil.rmtree
+
+        def rmtree_after_another_run_removed_it(path, *arguments, **keywords):
+            real_rmtree(path)
+            real_rmtree(path, *arguments, **keywords)
+
+        shutil.rmtree = rmtree_after_another_run_removed_it
+        try:
+            raced_removed = remove_targets_left_by_ended_runs(
+                [cache], tmp_directory=tmp, cache_directory=cache)
+            raised = None
+        except OSError as error:
+            raced_removed, raised = [], error
+        finally:
+            shutil.rmtree = real_rmtree
+        check("the next run passes over a target another run removed first",
+              raised is None and not raced.exists() and str(raced) not in raced_removed,
+              (raised, raced_removed))
+    finally:
+        running.kill()
+        running.wait()
+
+
 with tempfile.TemporaryDirectory() as scratch_name:
     check_runner_writes_and_reads_refuse_symbolic_links(pathlib.Path(scratch_name))
 with tempfile.TemporaryDirectory() as scratch_name:
     check_blob_hashes_run_no_filter(pathlib.Path(scratch_name))
+with tempfile.TemporaryDirectory() as scratch_name:
+    check_targets_of_a_killed_run_removed_by_the_next(pathlib.Path(scratch_name))
 
 unavailable = bwrap_unavailable_reason()
 if unavailable:

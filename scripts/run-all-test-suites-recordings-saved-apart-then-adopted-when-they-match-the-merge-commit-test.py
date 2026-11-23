@@ -16,11 +16,16 @@ the suite out. The after-merge test run selects by another store, which head tes
 never write: its stale recording selects the suite on the merge commit, where X's head
 test run passed it on the same files, until the merge adopts the store's matching
 recording into it; a suite that reads a file which differs since the commit the run
-selects since stays selected.
+selects since stays selected. A head test run given the after-merge test run's directory
+read-only leaves out a suite whose recording there matches the checkout, while the store
+still holds an outdated one, as the store does until that run ends; a recording there that
+does not match, and a directory that is missing or cannot be read, leave the selection as
+the store makes it, and the directory is never written.
 
 Run: python3 scripts/run-all-test-suites-recordings-saved-apart-then-adopted-when-they-match-the-merge-commit-test.py   (exit 0 = all passed)
 """
 
+import argparse
 import importlib.util
 import json
 import os
@@ -44,7 +49,7 @@ _git_environment_fixture = importlib.util.module_from_spec(_git_environment_fixt
 _git_environment_fixture_spec.loader.exec_module(_git_environment_fixture)
 _git_environment_fixture.remove_git_redirecting_environment_variables_from_this_process()
 
-# As inside a full run: the fixture suite runs unconfined, without an nc-test-sandbox, whose
+# As inside a full run: the fixture suite runs unconfined, without an nn-test-sandbox, whose
 # own tests are elsewhere.
 os.environ["RUN_ALL_TEST_SUITES_INSIDE_SIGNAL_SANDBOX"] = "1"
 
@@ -62,6 +67,51 @@ def check(name, condition, detail=""):
         failures.append(name)
         if detail:
             print("      " + str(detail).replace("\n", "\n      "))
+
+# Runs the runner with strace_usable() giving ANSWER, so that a case does not depend on
+# whether this machine can trace: the Mac, or a run under an outer strace, cannot.
+STRACE_ANSWER_DRIVER_TEMPLATE = r'''
+import importlib.util, sys
+program_path, *arguments = sys.argv[1:]
+spec = importlib.util.spec_from_file_location("run_all_test_suites", program_path)
+program = importlib.util.module_from_spec(spec)
+sys.argv = [program_path, *arguments]
+spec.loader.exec_module(program)
+program.strace_usable = lambda: ANSWER
+sys.exit(program.main())
+'''
+STRACE_UNUSABLE_DRIVER = STRACE_ANSWER_DRIVER_TEMPLATE.replace("ANSWER", "None")
+STRACE_USABLE_DRIVER = STRACE_ANSWER_DRIVER_TEMPLATE.replace("ANSWER", repr("/usr/bin/strace"))
+
+# Runs the runner with its save failing and, right after the run reads a recording, another
+# run's save replacing that file.
+SAVE_FAILS_AFTER_ANOTHER_RUN_SAVES_DRIVER = r'''
+import importlib.util, os, sys
+program_path, *arguments = sys.argv[1:]
+spec = importlib.util.spec_from_file_location("run_all_test_suites", program_path)
+program = importlib.util.module_from_spec(spec)
+sys.argv = [program_path, *arguments]
+spec.loader.exec_module(program)
+real_load_recording_and_identity = program.load_recording_and_identity
+replaced = []
+
+def load_then_another_run_saves(directory, suite):
+    found = real_load_recording_and_identity(directory, suite)
+    if not replaced and found[0] is not None:
+        replaced.append(directory)
+        target = program.recording_file_for(directory, suite)
+        newer = target.with_name(target.name + ".newer")
+        newer.write_text(target.read_text())
+        os.replace(newer, target)
+    return found
+
+def save_fails(directory, recording):
+    raise OSError("injected save failure")
+
+program.load_recording_and_identity = load_then_another_run_saves
+program.save_recording = save_fails
+sys.exit(program.main(arguments))
+'''
 
 
 def git(repo, *arguments):
@@ -99,9 +149,11 @@ class Scratch:
             commit(path, files, name)
         return path, git(path, "rev-parse", "HEAD")
 
-    def run(self, checkout, since=None, store="store", save_to=None):
+    def run(self, checkout, since=None, store="store", save_to=None, driver=None,
+            read_only=None, extra=()):
         self.runs += 1
-        command = [sys.executable, str(PROGRAM), "--checkout", str(checkout),
+        command = [sys.executable, *(["-c", driver] if driver else []), str(PROGRAM),
+                   "--checkout", str(checkout),
                    "--log-dir", str(self.root / f"logs-{self.runs}"),
                    "--lock-file", str(self.root / "run.lock"),
                    "--recorded-inputs-directory", str(self.root / store),
@@ -110,6 +162,11 @@ class Scratch:
             command += ["--only-suites-whose-recorded-inputs-changed-since", since]
         if save_to is not None:
             command += ["--save-recorded-inputs-to-directory", str(self.root / save_to)]
+        if read_only is not None:
+            command += [
+                "--also-leave-out-suites-whose-recorded-inputs-in-read-only-directory-match-checkout",
+                str(self.root / read_only)]
+        command += list(extra)
         return subprocess.run(command, capture_output=True, text=True, check=False,
                               stdin=subprocess.DEVNULL)
 
@@ -143,7 +200,295 @@ def x_merges_then_z_and_a_are_tested(save_apart):
     return scratch.run(a_checkout, since=m1), scratch, adopted
 
 
+def directory_contents(directory):
+    return {str(path.relative_to(directory)): path.read_bytes() if path.is_file() else None
+            for path in sorted(directory.rglob("*"))}
+
+
+def head_test_runs_while_the_after_merge_test_run_runs():
+    """Main moves from M0 to M1, which changes a file the suite reads; the store still holds
+    the recording made on M0, and the after-merge test run on M1 has saved its passing
+    recording in its own directory. Pull request A, on M1, changes a file the suite does not
+    read."""
+    scratch = Scratch()
+    main_checkout, _ = scratch.worktree("main-at-m0", scratch.m0)
+    scratch.run(main_checkout)
+    m1 = commit(scratch.repo, {"first.txt": "1\n"}, "M1")
+    merge_commit_checkout, _ = scratch.worktree("merge-commit", m1)
+    scratch.run(merge_commit_checkout, since=scratch.m0, store="after-merge")
+    after_merge = scratch.root / "after-merge"
+    matching = scratch.recording("after-merge")
+    a_checkout, _ = scratch.worktree("pr-a", m1, {"unread.txt": "a\n"})
+    store_reason = (f"SELECTED {SUITE}: its recording read another copy of first.txt than the "
+                    f"checkout holds, so what it reads here is unknown")
+    without = scratch.run(a_checkout, since=m1, save_to="pr-a-recordings")
+    check("reproduced: a head test run selecting by the store alone selects a suite whose "
+          "recording matching main is saved only where the after-merge test run saves",
+          selection_line(without) == store_reason, selection_line(without))
+
+    before = directory_contents(after_merge)
+    leaves_out = scratch.run(a_checkout, since=m1, save_to="pr-a-recordings",
+                             read_only="after-merge")
+    where = runner.recordings_directory_for(after_merge, scratch.repo)
+    check("given the after-merge test run's directory read-only, the head test run leaves "
+          "out the suite whose recording there matches the checkout, and says which "
+          "directory's recording left it out",
+          selection_line(leaves_out).startswith(
+              f"NOT SELECTED {SUITE}: its recording in {where}, which this run only reads, "
+              f"leaves it out: none of the") and leaves_out.returncode == 0,
+          selection_line(leaves_out) + leaves_out.stderr)
+    check("the head test run writes nothing in the directory it reads read-only",
+          directory_contents(after_merge) == before)
+
+    b_checkout, _ = scratch.worktree("pr-b", m1, {"first.txt": "b\n"})
+    reads_the_change = scratch.run(b_checkout, since=m1, save_to="pr-b-recordings",
+                                   read_only="after-merge")
+    check("a suite whose recording in the read-only directory reads a file the pull request "
+          "changes is still selected",
+          selection_line(reads_the_change) == f"SELECTED {SUITE}: it reads first.txt, which "
+          f"differs", selection_line(reads_the_change))
+    check("a head test run that runs the suite writes nothing in the directory it reads "
+          "read-only either",
+          directory_contents(after_merge) == before)
+
+    no_store_recording = scratch.run(a_checkout, since=m1, store="empty-store",
+                                     save_to="pr-a-recordings", read_only="after-merge")
+    check("a suite with no recording in the store is left out by its matching recording in "
+          "the read-only directory",
+          selection_line(no_store_recording).startswith(
+              f"NOT SELECTED {SUITE}: its recording in {where}, which this run only reads, "
+              f"leaves it out: none of the"), selection_line(no_store_recording))
+
+    strace_store = runner.recordings_directory_for(scratch.root / "strace-store", scratch.repo)
+    strace_store.mkdir(parents=True)
+    runner.recording_file_for(strace_store, SUITE).write_text(json.dumps(
+        {**matching, "reads": {**matching["reads"], "unread.txt": "0" * 40}}))
+    primary_shows_it = scratch.run(a_checkout, since=m1, store="strace-store",
+                                   save_to="pr-a-recordings", read_only="after-merge")
+    check("a suite whose store recording reads a file the pull request changes stays "
+          "selected, though its recording in the read-only directory lacks that file and "
+          "would leave it out",
+          selection_line(primary_shows_it) == f"SELECTED {SUITE}: it reads unread.txt, which "
+          f"differs", selection_line(primary_shows_it))
+
+    for name, changes in (("of a run that failed", {"exit": 1}),
+                          ("of a run that skipped a case without the mark", {"skipped_cases": 1}),
+                          ("of an older format",
+                           {"format": runner.RECORDED_INPUTS_FORMAT_VERSION - 1})):
+        unsettled_store = runner.recordings_directory_for(scratch.root / "unsettled-store",
+                                                          scratch.repo)
+        unsettled_store.mkdir(parents=True, exist_ok=True)
+        runner.recording_file_for(unsettled_store, SUITE).write_text(
+            json.dumps({**matching, **changes}))
+        result = scratch.run(a_checkout, since=m1, store="unsettled-store",
+                             save_to="pr-a-recordings", read_only="after-merge")
+        check(f"a suite whose store recording is {name} is left out by its matching recording "
+              f"in the read-only directory, as the --help text says",
+              selection_line(result).startswith(
+                  f"NOT SELECTED {SUITE}: its recording in {where}, which this run only reads, "
+                  f"leaves it out: none of the"), selection_line(result))
+
+    store_recordings = runner.recordings_directory_for(scratch.root / "store", scratch.repo)
+    store_recordings.mkdir(parents=True, exist_ok=True)
+    real_subprocess_run = runner.subprocess.run
+    hash_batches = []
+
+    def run_failing_the_second_hash_batch(command, *arguments, **options):
+        # The first batch hashes the store recordings' inputs, the second the read-only ones'.
+        if "--stdin-paths" in command:
+            hash_batches.append(command)
+            if len(hash_batches) == 2:
+                return subprocess.CompletedProcess(command, 128, "", "fatal: injected failure")
+        return real_subprocess_run(command, *arguments, **options)
+
+    runner.subprocess.run = run_failing_the_second_hash_batch
+    try:
+        selection = runner.suites_selected_since(
+            a_checkout, [SUITE], {SUITE: runner.load_recording(store_recordings, SUITE)}, m1,
+            runner.files_that_differ_since(a_checkout, m1), {},
+            {SUITE: runner.load_recording(where, SUITE)}, where)
+    finally:
+        runner.subprocess.run = real_subprocess_run
+    check("when git cannot hash the read-only recordings' inputs, the suite stays selected "
+          "for the store's reason",
+          len(hash_batches) == 2 and selection == [(SUITE, True, store_reason[len(
+              f"SELECTED {SUITE}: "):])], (hash_batches, selection))
+
+    for name, read_only, save_to, extra in (
+            ("where it saves recordings", "store", None, ()),
+            ("where it saves the lists of files only strace saw", "strace-lists",
+             "pr-a-recordings", ("--record-inputs-with-strace",))):
+        written_to = runner.recordings_directory_for(scratch.root / read_only, scratch.repo)
+        written_to.mkdir(parents=True, exist_ok=True)
+        before_refusal = directory_contents(scratch.root / read_only)
+        refused = scratch.run(a_checkout, since=m1, save_to=save_to, read_only=read_only,
+                              extra=extra, driver=STRACE_USABLE_DRIVER)
+        check(f"a run given as its read-only directory the directory {name} refuses, exit 2, "
+              f"says so and how to run again, and writes nothing there",
+              refused.returncode == 2
+              and f"{scratch.root / read_only}, but as given it would also write to that "
+                  f"directory" in refused.stderr
+              and "run the same command again with --" in refused.stderr
+              and directory_contents(scratch.root / read_only) == before_refusal,
+              (refused.returncode, refused.stderr))
+    both = scratch.run(a_checkout, since=m1, read_only="store", driver=STRACE_USABLE_DRIVER,
+                       extra=("--record-inputs-with-strace",
+                              "--suite-files-only-strace-saw-lists-directory",
+                              str(scratch.root / "store")))
+    check("a run that would write both its recordings and its strace lists to its read-only "
+          "directory names both, and both flags to add, in one refusal",
+          both.returncode == 2
+          and "with --save-recorded-inputs-to-directory <directory> added and "
+              "--suite-files-only-strace-saw-lists-directory <directory> changed"
+              in both.stderr,
+          both.stderr)
+    unchanged = scratch.run(a_checkout, since=m1, read_only="store",
+                            extra=("--leave-recorded-inputs-and-failure-history-unchanged",))
+    check("a run that writes no recordings may read the directory it selects by as its "
+          "read-only directory",
+          unchanged.returncode == 0, unchanged.stdout[-500:] + unchanged.stderr)
+
+    not_matching = runner.recordings_directory_for(scratch.root / "not-matching", scratch.repo)
+    not_matching.mkdir(parents=True)
+    for name, changes in (
+            ("made on another tree", {"reads": {**matching["reads"], "second.txt": "0" * 40}}),
+            ("of a run that failed", {"exit": 1}),
+            ("of a run that skipped a case without the mark", {"skipped_cases": 1})):
+        runner.recording_file_for(not_matching, SUITE).write_text(
+            json.dumps({**matching, **changes}))
+        result = scratch.run(a_checkout, since=m1, save_to="pr-a-recordings",
+                             read_only="not-matching")
+        check(f"a recording in the read-only directory {name} leaves the suite selected, for "
+              f"the store's reason",
+              selection_line(result) == store_reason, selection_line(result))
+
+    for name, read_only, prepare, restore in (
+            ("missing", "no-such-directory", lambda: None, lambda: None),
+            ("unreadable", "after-merge", lambda: where.chmod(0o000), lambda: where.chmod(0o755))):
+        prepare()
+        try:
+            result = scratch.run(a_checkout, since=m1, save_to="pr-a-recordings",
+                                 read_only=read_only)
+        finally:
+            restore()
+        check(f"a read-only directory that is {name} leaves the selection as the store makes "
+              f"it, and the run passes",
+              selection_line(result) == store_reason and result.returncode == 0,
+              selection_line(result) + result.stderr)
+    check("a missing read-only directory is not made",
+          not (scratch.root / "no-such-directory").exists())
+
+    for read_only, holds in (("store", "an outdated recording"),
+                             ("after-merge", "a matching recording")):
+        store_matches = scratch.run(merge_commit_checkout, since=m1, store="after-merge",
+                                    save_to="unread-recordings", read_only=read_only)
+        check(f"a suite whose store recording matches is left out by the store's recording "
+              f"when the read-only directory holds {holds}",
+              selection_line(store_matches).startswith(f"NOT SELECTED {SUITE}: none of the"),
+              selection_line(store_matches))
+
+
+
+def read_only_directory_overlap_is_judged_by_the_directory_and_by_what_this_run_writes():
+    """The overlap check compares directories, not their spellings, and counts the strace
+    lists only when this run writes them."""
+    scratch = Scratch()
+    m1 = commit(scratch.repo, {"first.txt": "1\n"}, "M1")
+    a_checkout, _ = scratch.worktree("pr-a", m1, {"unread.txt": "a\n"})
+    for save_to, name, extra, driver in (
+            ("pr-a-recordings-without-strace", "--record-inputs-with-strace is not given", (),
+             None),
+            ("pr-a-recordings-strace-unusable", "strace cannot be used",
+             ("--record-inputs-with-strace",), STRACE_UNUSABLE_DRIVER)):
+        result = scratch.run(a_checkout, since=m1, save_to=save_to,
+                             read_only="strace-lists", extra=extra, driver=driver)
+        check(f"a run whose read-only directory is its strace-lists directory is not refused "
+              f"when {name}",
+              result.returncode == 0 and "would also write to" not in result.stderr
+              and scratch.recording(save_to) is not None
+              and not [path for path in (scratch.root / "strace-lists").rglob("*")
+                       if path.is_file()],
+              (result.returncode, result.stderr[-800:]))
+
+    arguments = argparse.Namespace(leave_records_unchanged=False,
+                                   save_recorded_inputs_to_directory=None,
+                                   record_inputs_with_strace=False)
+    store = scratch.root / "spelled" / "abc"
+    store.mkdir(parents=True)
+    (scratch.root / "link-to-spelled").symlink_to(scratch.root / "spelled")
+    elsewhere = scratch.root / "elsewhere"
+    for name, read_only, saved in (
+            ("through a symlink", scratch.root / "link-to-spelled" / "abc", store),
+            ("not yet made, through ..", scratch.root / "new" / "x" / ".." / "abc",
+             scratch.root / "new" / "abc")):
+        try:
+            runner.refuse_read_only_recordings_directory_this_run_writes(
+                read_only, saved, elsewhere, arguments, None)
+            refused = False
+        except runner.CouldNotRun:
+            refused = True
+        check(f"one directory named by two spellings, {name}, is refused", refused, name)
+
+    def refused_as_one_directory(read_only, saved):
+        try:
+            runner.refuse_read_only_recordings_directory_this_run_writes(
+                read_only, saved, elsewhere, arguments, None)
+            return False
+        except runner.CouldNotRun:
+            return True
+
+    # Injected: this suite also runs on the Mac, whose default volume ignores case, so the
+    # swapped-case lookup fails there only by injection.
+    real_samefile = pathlib.Path.samefile
+
+    def on_case_sensitive_volume(path, other):
+        if pathlib.Path(other).name == path.name.swapcase() != path.name:
+            raise FileNotFoundError(other)
+        return real_samefile(path, other)
+
+    pathlib.Path.samefile = on_case_sensitive_volume
+    try:
+        refused = refused_as_one_directory(store / "MISSING", store / "missing")
+    finally:
+        pathlib.Path.samefile = real_samefile
+    check("on a case-sensitive volume, two missing directories differing in case are not "
+          "refused", not refused)
+
+    # Injected: ned-box's volumes are case-sensitive. A symlink stands for the second spelling
+    # of an existing directory, and resolve() keeps each spelling, as on a case-insensitive
+    # volume, where the target's root-commit subdirectory does not exist yet.
+    (scratch.root / "recordings-spelling-one").mkdir()
+    (scratch.root / "recordings-spelling-two").symlink_to(scratch.root / "recordings-spelling-one")
+    real_resolve = pathlib.Path.resolve
+    pathlib.Path.resolve = lambda self, strict=False: pathlib.Path(os.path.abspath(self))
+    try:
+        refused = refused_as_one_directory(scratch.root / "recordings-spelling-two" / "abc",
+                                           scratch.root / "recordings-spelling-one" / "abc")
+    finally:
+        pathlib.Path.resolve = real_resolve
+    check("a missing directory under two spellings of one existing directory is refused", refused)
+
+    # Injected: samefile() answers as a case-insensitive volume would, and still fails for a
+    # path that does not exist.
+    top = scratch.root.resolve()
+
+    def on_case_insensitive_volume(path):
+        return top / str(pathlib.Path(os.path.realpath(path)).relative_to(top)).lower()
+
+    pathlib.Path.samefile = lambda self, other: real_samefile(
+        on_case_insensitive_volume(self), on_case_insensitive_volume(other))
+    try:
+        refused = refused_as_one_directory(store / "ROOT", store / "root")
+    finally:
+        pathlib.Path.samefile = real_samefile
+    check("on a case-insensitive volume, a missing directory spelled in two cases is refused",
+          refused)
+
+
 def main():
+    head_test_runs_while_the_after_merge_test_run_runs()
+    read_only_directory_overlap_is_judged_by_the_directory_and_by_what_this_run_writes()
+
     result, scratch, _ = x_merges_then_z_and_a_are_tested(save_apart=False)
     check("reproduced: when every head test run saves into the store, a pull request built "
           "on the older main replaces the merged pull request's recording, and the next run "
@@ -177,6 +522,28 @@ def main():
                                                                     "HEAD"))
     runner.adopt_passing_recordings_that_match_the_checkout(
         merge_commit_checkout, scratch.root / "store", [scratch.root / "pr-x-recordings"])
+    adopted_again = runner.adopt_passing_recordings_that_match_the_checkout(
+        merge_commit_checkout, scratch.root / "store", [scratch.root / "pr-x-recordings"])
+    check("a suite whose recording where adoption saves already matches adopts none of the "
+          "matching recordings under the other directories",
+          adopted_again == [], adopted_again)
+    real_load_recording = runner.load_recording
+    loads = []
+
+    def load_recording_first_finding_none(directory, suite):
+        # As when another run saves the recording between adoption's two reads of one file.
+        loads.append(directory)
+        return None if len(loads) == 1 else real_load_recording(directory, suite)
+
+    runner.load_recording = load_recording_first_finding_none
+    try:
+        adopted_from_itself = runner.adopt_passing_recordings_that_match_the_checkout(
+            merge_commit_checkout, scratch.root / "store", [scratch.root / "store"])
+    finally:
+        runner.load_recording = real_load_recording
+    check("a matching recording under a directory that names the one adoption saves into is "
+          "not adopted into it from itself",
+          adopted_from_itself == [] and len(loads) == 2, (adopted_from_itself, loads))
     # Saving apart, so this run's own recording cannot answer the next run in place of adoption.
     before = scratch.run(merge_commit_checkout, since=x_head, store="after-merge-store",
                          save_to="unread-recordings")
@@ -219,19 +586,29 @@ def main():
     check("a recording of a run that failed is not adopted, even on its own tree",
           scratch.recording("pr-fails-recordings")["exit"] == 1 and adopted == [], adopted)
 
-    scratch.run(main_checkout, save_to="read-only-recordings")
-    saved_apart = next((scratch.root / "read-only-recordings").glob("*"))
-    store_before = scratch.recording("store")
-    saved_apart.chmod(0o555)
-    try:
-        result = scratch.run(main_checkout, save_to="read-only-recordings")
-    finally:
-        saved_apart.chmod(0o755)
-    check("a recording that cannot be saved apart leaves the store as it was, and says the "
-          "earlier recording where saves go could not be removed either",
-          f"inputs of {SUITE} not recorded: " in result.stdout
-          and f"Delete {saved_apart / (SUITE + '.json')} before the next run" in result.stdout
-          and scratch.recording("store") == store_before, result.stdout)
+    # One name sorts before "store" and one after, since the runner compares the two paths.
+    for save_to in ("read-only-recordings", "unwritable-recordings"):
+        scratch.run(main_checkout, save_to=save_to)
+        saved_apart = next((scratch.root / save_to).glob("*"))
+        store_before = scratch.recording("store")
+        saved_apart.chmod(0o555)
+        try:
+            result = scratch.run(main_checkout, save_to=save_to)
+        finally:
+            saved_apart.chmod(0o755)
+        check(f"a recording that cannot be saved apart, in {save_to}, leaves the store as it "
+              f"was, and says the earlier recording where saves go could not be removed either",
+              f"inputs of {SUITE} not recorded: " in result.stdout
+              and f"Delete {saved_apart / (SUITE + '.json')} before the next run" in result.stdout
+              and scratch.recording("store") == store_before, result.stdout)
+
+    result = scratch.run(main_checkout, save_to="store",
+                         driver=SAVE_FAILS_AFTER_ANOTHER_RUN_SAVES_DRIVER)
+    check("when the save directory given is the recordings directory, a failed save keeps the "
+          "recording another run saved after this run read it",
+          f"inputs of {SUITE} not recorded: injected save failure. The recording another run "
+          f"saved while this one ran is kept" in result.stdout
+          and scratch.recording("store") is not None, result.stdout + result.stderr)
 
     no_suites = scratch.root / "no-suites"
     no_suites.mkdir()

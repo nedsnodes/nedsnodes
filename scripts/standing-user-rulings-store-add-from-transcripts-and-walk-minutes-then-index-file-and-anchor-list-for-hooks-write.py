@@ -290,8 +290,16 @@ FAILED_LINE = "FAILED: {what}: {error}"
 OWNER_REPORT_INSTRUCTION = ("If it fails the same way at the next run, send prime-intellect, the agent-seat that owns "
                             "this program, the FAILED line above with SendMessage.")
 SOURCE_FAILED_INSTRUCTIONS = (
-    "The other transcripts and walk-minutes were read, and what they held was added; the file above is read "
-    "again from where it stopped at the next run.",
+    "The other transcripts and walk-minutes were read, and what they held was added; each file a FAILED line "
+    "above names is read again from where it stopped at the next run.",
+    OWNER_REPORT_INSTRUCTION,
+)
+SOURCE_PATH_MOVE_FAILED_INSTRUCTIONS = (
+    "No stored source path was changed; the next run tries the move again.",
+    OWNER_REPORT_INSTRUCTION,
+)
+NOT_THE_USERS_WORDS_CHECK_FAILED_INSTRUCTIONS = (
+    "No entry's status was changed; the next run checks every stored message of the user's again.",
     OWNER_REPORT_INSTRUCTION,
 )
 OUTPUT_FAILED_INSTRUCTIONS = (
@@ -381,13 +389,20 @@ class Repository:
         self.top_level_file = (re.compile(r"(?<![\w/.-])(" + "|".join(re.escape(p) for p in top_level)
                                           + r")(?![\w-])") if top_level else None)
 
+    def path_now(self, path):
+        """The path a path written before the project rename has on origin/main: as written when origin/main holds
+        it, as a file the rename kept under its old name; otherwise under the names the rename gave."""
+        if path in self.files:
+            return path
+        return convert_file_path_before_project_rename_to_path_after(path)
+
     def files_named(self, text):
         """The repository files a text names, each as its path on origin/main."""
         found = set()
         for token in PATH_TOKEN.findall(text):
-            parts = [part for part in convert_file_path_before_project_rename_to_path_after(token.strip("/")).split("/") if part]
+            parts = [part for part in token.strip("/").split("/") if part]
             for start in range(len(parts)):
-                candidate = "/".join(parts[start:])
+                candidate = self.path_now("/".join(parts[start:]))
                 if candidate in self.files:
                     found.add(candidate)
                     break
@@ -406,7 +421,7 @@ class Repository:
 
 
 # Transcripts, walk minutes and stored tags written before the project rename name files and directories by their old
-# names, and the move program leaves those records as they are.
+# names, and the project rename left those records as they were.
 _path_names_spec = importlib.util.spec_from_file_location(
     "project_rename_path_names_before_and_after_common",
     Path(__file__).resolve().with_name("project-rename-path-names-before-and-after-common.py"))
@@ -456,7 +471,6 @@ def tags_named_in(text, repository, default_seat, known_seats, files_are_tags):
 def anchors_of(tags, repository):
     anchors = set()
     for tag in tags:
-        tag = convert_file_path_before_project_rename_to_path_after(tag)
         if tag.startswith("GHI "):
             anchors.update("/" + path for path in repository.ghi_md_paths.get(int(tag.split(" ")[1]), ()))
         elif tag.startswith(("PR ", "task ")):
@@ -721,7 +735,7 @@ def index_lines(connection, repository, built_at):
     for entry_id, tag in connection.execute(
             "SELECT entry_tags.entry_id, tag FROM entry_tags JOIN entries USING (entry_id) WHERE state = ?",
             (STATE_STANDING,)):
-        tags_by_entry.setdefault(entry_id, set()).add(convert_file_path_before_project_rename_to_path_after(tag))
+        tags_by_entry.setdefault(entry_id, set()).add(repository.path_now(tag))
     rows = connection.execute(
         "SELECT entry_id, kind, said_at_utc, text, source_path, source_line FROM entries WHERE state = ? "
         "ORDER BY said_at_utc DESC, entry_id DESC", (STATE_STANDING,)).fetchall()
@@ -769,13 +783,15 @@ def run(log_store, agents_directory, repository_checkout):
         print("\n".join(error.instructions), file=sys.stderr)
         return EXIT_COULD_NOT_RUN
     started = utc_now_text()
-    source_failures, output_failures = [], []
+    # Each failure carries its own follow-up text, so none is printed under another failure's.
+    failures_with_instructions = []
     try:
         with connection:
             source_paths_moved_by_project_rename_update(connection)
     except sqlite3.Error as error:
-        source_failures.append(FAILED_LINE.format(
-            what="moving stored source paths to the names the project rename gave them", error=error))
+        failures_with_instructions.append((FAILED_LINE.format(
+            what="moving stored source paths to the names the project rename gave them", error=error),
+            SOURCE_PATH_MOVE_FAILED_INSTRUCTIONS))
     mirror_directory = log_store / MIRROR_DIRECTORY_NAME
     known_seats = known_agent_seats(agents_directory, mirror_directory)
     user_words_added = walk_added = 0
@@ -785,14 +801,16 @@ def run(log_store, agents_directory, repository_checkout):
                 with connection:
                     user_words_added += read_transcript(connection, machine, path, repository, known_seats)
             except (OSError, sqlite3.Error) as error:
-                source_failures.append(FAILED_LINE.format(what=f"transcript {path}", error=error))
+                failures_with_instructions.append((FAILED_LINE.format(what=f"transcript {path}", error=error),
+                                                   SOURCE_FAILED_INSTRUCTIONS))
     set_count = cleared_count = 0
     try:
         with connection:
             set_count, cleared_count = user_words_entries_not_the_users_words_status_set_and_clear(connection)
     except sqlite3.Error as error:
-        source_failures.append(FAILED_LINE.format(
-            what="checking again which user-words entries are a program's prompt", error=error))
+        failures_with_instructions.append((FAILED_LINE.format(
+            what="checking again which stored messages of the user's are a program's prompt", error=error),
+            NOT_THE_USERS_WORDS_CHECK_FAILED_INSTRUCTIONS))
     minutes_paths = (sorted(agents_directory.glob(f"*/docs/walk/{WALK_MINUTES_GLOB}"))
                      + sorted((log_store / SHIPPED_WALK_DIRECTORY_NAME).glob(WALK_MINUTES_GLOB)))
     for path in minutes_paths:
@@ -800,7 +818,8 @@ def run(log_store, agents_directory, repository_checkout):
             with connection:
                 walk_added += read_walk_minutes(connection, path, repository, known_seats)
         except (OSError, sqlite3.Error) as error:
-            source_failures.append(FAILED_LINE.format(what=f"walk-minutes {path}", error=error))
+            failures_with_instructions.append((FAILED_LINE.format(what=f"walk-minutes {path}", error=error),
+                                               SOURCE_FAILED_INSTRUCTIONS))
     built_at = utc_now_text()
     lines, anchors = index_lines(connection, repository, built_at)
     index_path, anchor_path = store_directory / INDEX_FILE_NAME, store_directory / ANCHOR_LIST_FILE_NAME
@@ -809,21 +828,19 @@ def run(log_store, agents_directory, repository_checkout):
         index_bytes = write_whole(index_path, lines)
         anchor_bytes = write_whole(anchor_path, anchors)
     except OSError as error:
-        output_failures.append(FAILED_LINE.format(what="the index file or the anchor list", error=error))
-    failures = source_failures + output_failures
+        failures_with_instructions.append((FAILED_LINE.format(what="the index file or the anchor list", error=error),
+                                           OUTPUT_FAILED_INSTRUCTIONS))
+    failures = [line for line, _ in failures_with_instructions]
     with connection:
         connection.execute("INSERT INTO index_program_runs (started_at_utc, finished_at_utc, user_words_added, "
                            "walk_minutes_user_rulings_added, failures) VALUES (?, ?, ?, ?, ?)",
                            (started, utc_now_text(), user_words_added, walk_added, "\n".join(failures) or None))
     connection.close()
-    for line in source_failures:
-        print(line, file=sys.stderr)
-    if source_failures:
-        print("\n".join(SOURCE_FAILED_INSTRUCTIONS), file=sys.stderr)
-    for line in output_failures:
-        print(line, file=sys.stderr)
-    if output_failures:
-        print("\n".join(OUTPUT_FAILED_INSTRUCTIONS), file=sys.stderr)
+    for instructions in dict.fromkeys(instructions for _, instructions in failures_with_instructions):
+        for line, its_instructions in failures_with_instructions:
+            if its_instructions == instructions:
+                print(line, file=sys.stderr)
+        print("\n".join(instructions), file=sys.stderr)
     print(SUMMARY_LINE.format(user_words=user_words_added, walk=walk_added, set_count=set_count,
                               cleared_count=cleared_count, index=index_path,
                               entries=len(lines) - 1, index_bytes=index_bytes, anchors_path=anchor_path,

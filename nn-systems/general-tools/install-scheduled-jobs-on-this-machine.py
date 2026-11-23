@@ -53,8 +53,9 @@ by, the interpreter its jobs run under, the reference clone they run from, and
 on the Mac the PATH a launchd job is given, because launchd's own has neither
 Homebrew nor ~/.local/bin. `jobs` names each job: its program, relative to the
 clone; its arguments; the file under the home directory that both of its
-output streams are appended to; and under `on`, for each machine that runs it,
-the scheduler and the schedule. A machine a job does not name does not run it.
+output streams are appended to; its `owner`, the agent-seat that owns it; and
+under `on`, for each machine that runs it, the scheduler and the schedule. A
+machine a job does not name does not run it.
 
 This program runs on whichever machine it is started on and installs only that
 machine's part. A machine whose platform and home directory match no entry is
@@ -119,16 +120,18 @@ which is how a new job is shown to run under launchd without waiting for its
 hour.
 
 AFTER EVERY PULL. Each machine's reference-checkout runs --install after
-every merge into it, from its post-merge hook, through
+every merge into it, then, when --install exits 0, --remove-not-in-table,
+from its post-merge hook, through
 install-scheduled-jobs-on-this-machine-after-reference-checkout-merge-and-report-install-failure-as-task-for-installer-owner-agent-seat.py,
-so a job added to or changed in the table is installed at the next pull.
+so a job added to or changed in the table is installed at the next pull, and
+a job dropped from the table is taken off.
 
-RETIRING A JOB. Take it off each machine that runs it, with --remove --job
-NAME, before the pull request that deletes it from the table merges: --remove
-finds a job's cron line and plist through the job's entry in the table. A job
-deleted from the table first stays installed, and running it every day is the
-cost of forgetting the order, so --check, run without --job, also reports each
-job this machine runs that no job of the table names for it, NOT IN THE TABLE:
+RETIRING A JOB. Delete its entry from the table, or the machine's placement
+from its entry, in a pull request: at the next pull into each machine's
+reference-checkout, --remove-not-in-table takes it off that machine. Do not
+run --remove --job NAME first: while the job's entry is still in the table,
+the --install after the next pull, whatever it merges, installs the job
+again. --check, run without --job, reports each job this machine runs that no job of the table names for it, NOT IN THE TABLE:
 a cron line whose command runs a program from the machine's clone, directly or
 through an interpreter, and is no cron job's line of the table — not a
 comment, not a line that sets a variable, and not a line that only reads or
@@ -246,6 +249,11 @@ def load_table(table_path: Path) -> dict:
             raise table_refusal(
                 table_path, f"gives job `{name}` a missing or wrongly typed `program`, `arguments`, "
                             f"`output` or `on`")
+        if not isinstance(job.get("owner"), str) or not job["owner"]:
+            raise table_refusal(
+                table_path, f"gives job `{name}` no `owner`, or an `owner` that is not a "
+                            f"non-empty string; add `\"owner\": \"<agent-seat>\"` naming the "
+                            f"agent-seat that owns the job")
         # Cron matching uses program filenames; duplicates would claim each other's lines.
         program_file_name = Path(job["program"]).name
         if name in names or program_file_name in program_file_names:
@@ -1056,7 +1064,8 @@ def check_mode(machine, placed, launch_agents_directory: Path, table_path: Path,
         print(f"When only some are retired, first add the others' entries to {table_path} "
               f"through a pull request.")
         print(f"When a job NOT IN THE TABLE should still run, add its entry to {table_path} "
-              f"through a pull request.")
+              f"through a pull request, before the next pull into this machine's "
+              f"reference-checkout, which takes off every job NOT IN THE TABLE.")
         if shares_a_line:
             print("When a retired job shares its crontab line with a job that is not the clone's, "
                   "ask the user to take the retired job off that line by hand in this machine's "
