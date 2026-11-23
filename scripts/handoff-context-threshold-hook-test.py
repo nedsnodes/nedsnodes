@@ -912,6 +912,7 @@ with tempfile.TemporaryDirectory() as workspace:
             ("gh pr checks 3101 --watch --interval 30", 0),
             ("gh run watch 12345", 0),
             ("python3 -u scripts/watch-open-pull-requests-hack.py --exit-after-first-poll-with-events", 0),
+            ("python3 scripts/watch-open-pull-requests-hack.py --poll-once-write-baseline", 75),
             ("cd /home/nedlern/x && until grep -q done out.txt; do sleep 5; done", 0),
             ("while kill -0 4242; do sleep 30; done", 0),
             ("sleep 120; echo finished", 75),

@@ -126,10 +126,10 @@ class Machine:
                                    + raw_tail)
         return project, transcript
 
-    def task(self, seat, task_id, status="pending", metadata=None, blocked_by=()):
+    def task(self, seat, task_id, status="pending", metadata=None, blocked_by=(), subject=None):
         directory = self.tasks / f"nedsnodes-{seat}-tasks"
         directory.mkdir(exist_ok=True)
-        task = {"id": task_id, "subject": f"task {task_id}", "status": status,
+        task = {"id": task_id, "subject": subject or f"task {task_id}", "status": status,
                 "blocks": [], "blockedBy": list(blocked_by)}
         if metadata:
             task["metadata"] = metadata
@@ -923,6 +923,22 @@ try:
     check("the same task once the due-task hook has raised it for that pull request: rule 4",
           verdicts["alpha"]["rule"] == 4 and verdicts["alpha"]["open_tasks_nothing_holds"] == [],
           verdicts["alpha"])
+    events_machine = Machine()
+    events_machine.seat("alpha", [user("go"), assistant("Done."), turn_end()])
+    _, verdicts, _ = events_machine.run()
+    check("no pull-request events task: an idle agent-seat is not woken (rule 4)",
+          verdicts["alpha"]["rule"] == 4, verdicts["alpha"])
+    events_task_subject = "Read the new pull-request events in the watcher's event file"
+    events_machine.task("alpha", "1", subject=events_task_subject)
+    _, verdicts, _ = events_machine.run()
+    check("an open pull-request events task goes to the sweep's judge, naming the task (rule 5)",
+          verdicts["alpha"]["rule"] == 5
+          and verdicts["alpha"]["open_tasks_nothing_holds"]
+          == [{"id": "1", "subject": events_task_subject}], verdicts["alpha"])
+    events_machine.task("alpha", "1", subject=events_task_subject, status="completed")
+    _, verdicts, _ = events_machine.run()
+    check("the events task completed: the idle agent-seat is not woken (rule 4)",
+          verdicts["alpha"]["rule"] == 4, verdicts["alpha"])
     machine.gh_responses.write_text("{}")
     machine.seat("beta", [user("go"), assistant("Done."), turn_end()])
     code, verdicts, _ = machine.run()

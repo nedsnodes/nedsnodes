@@ -67,9 +67,10 @@ one message for merge-lane-2: a file
 needs-a-look/pr<number>-<first 12 characters of the nn-head-commit>.txt under
 the state directory, <merge-lane-worktrees-and-outputs-directory>/merge-lane-ghi-md-edit-pull-requests-check-approve-and-merge-hold-list-reported-heads-and-needs-a-look-messages,
 by default /home/nedlern/nedsnodes-logs/seats/merge-lane-2/merge-helpers/merge-lane-ghi-md-edit-pull-requests-check-approve-and-merge-hold-list-reported-heads-and-needs-a-look-messages.
-merge-lane-2's watcher, scripts/watch-open-pull-requests-hack.py, prints one
-event line for each file in needs-a-look/ at every start until the file is
-moved; the watcher loads this program by its path and calls its function
+merge-lane-2's watcher, scripts/watch-open-pull-requests-hack.py, reports one
+event line for each file in needs-a-look/: at every start until the file is
+moved, or, run from cron with --poll-once, once per version of the file, in
+its event file; the watcher loads this program by its path and calls its function
 needs_a_look_directory() for the directory. merge-lane-2 moves the file into
 needs-a-look/handled/ as soon as it has read it, and handles the pull
 request after. Whether a pull

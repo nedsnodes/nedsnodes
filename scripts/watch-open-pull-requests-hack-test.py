@@ -1192,10 +1192,249 @@ def run_subprocess_cases():
               f"exit {exit_code}\n" + "\n".join(lines + watcher.error_lines))
 
 
+class PollOnceMachine:
+    """A scratch state directory, task list and scripted GitHub for --poll-once runs in-process."""
+
+    def __init__(self, scratch, token_file):
+        self.directory = scratch / "poll-once"
+        self.tasks = scratch / "tasks"
+        self.tasks.mkdir()
+        self.notices = scratch / "notices"
+        self.token_file = token_file
+        self.now = 1_800_000_000.0
+        self.poll = []
+        self.state_path = self.directory / watcher_module.POLL_STATE_FILE_NAME
+        self.events_path = self.directory / watcher_module.EVENTS_FILE_NAME
+
+    def time(self):
+        return self.now
+
+    def run(self, flag="--poll-once"):
+        saved = (watcher_module.time, watcher_module.fetch_open_pull_requests,
+                 list(watcher_module.SECRETS_TO_REDACT))
+        watcher_module.time = self
+        watcher_module.fetch_open_pull_requests = lambda _repo, _token: (
+            (None, self.poll) if isinstance(self.poll, str) else (self.poll, None))
+        errors = io.StringIO()
+        try:
+            with contextlib.redirect_stdout(io.StringIO()), contextlib.redirect_stderr(errors):
+                code = watcher_module.main([
+                    flag, "--token-file", str(self.token_file),
+                    "--poll-once-directory", str(self.directory),
+                    "--task-list-directory", str(self.tasks),
+                    "--needs-a-look-directory", str(self.notices)])
+        finally:
+            (watcher_module.time, watcher_module.fetch_open_pull_requests,
+             watcher_module.SECRETS_TO_REDACT[:]) = saved
+        self.errors = errors.getvalue()
+        return code
+
+    def task_files(self):
+        return sorted(self.tasks.glob("*.json"), key=lambda path: int(path.stem))
+
+    def tasks_read(self):
+        return [json.loads(path.read_text(encoding="utf-8")) for path in self.task_files()]
+
+    def complete_tasks(self):
+        for path in self.task_files():
+            task = json.loads(path.read_text(encoding="utf-8"))
+            task["status"] = "completed"
+            path.write_text(json.dumps(task), encoding="utf-8")
+
+    def event_lines(self):
+        return (self.events_path.read_text(encoding="utf-8").splitlines()
+                if self.events_path.exists() else [])
+
+
+def poll_once_pull_request(number, head="a", draft=False):
+    return {"number": number, "head_sha": head * 40, "title": "t", "is_draft": draft,
+            "author": "nedlern"}
+
+
+def run_poll_once_cases(scratch_root, token_file):
+    def machine_for(name):
+        scratch = scratch_root / name
+        scratch.mkdir()
+        return PollOnceMachine(scratch, token_file)
+
+    machine = machine_for("missing-state")
+    machine.poll = [poll_once_pull_request(1)]
+    code = machine.run()
+    check("--poll-once with no state file exits 1, writes no state and opens one task saying how "
+          "to repair it",
+          code == 1 and not machine.state_path.exists() and len(machine.tasks_read()) == 1
+          and "--poll-once-write-baseline" in machine.tasks_read()[0]["description"],
+          f"{code} {machine.tasks_read()}")
+    machine.run()
+    check("a second run with the state still missing opens no second task",
+          len(machine.tasks_read()) == 1, machine.tasks_read())
+
+    machine = machine_for("unreadable-state")
+    machine.directory.mkdir()
+    machine.state_path.write_text("{ not json", encoding="utf-8")
+    machine.poll = [poll_once_pull_request(1)]
+    code = machine.run()
+    check("an unreadable state file exits 1, is left as it was, and is not re-baselined",
+          code == 1 and machine.state_path.read_text(encoding="utf-8") == "{ not json"
+          and not machine.event_lines() and "cannot be read" in machine.tasks_read()[0]["description"],
+          f"{code} {machine.tasks_read()}")
+    check("--poll-once-write-baseline refuses to replace an existing state file",
+          machine.run("--poll-once-write-baseline") == 1
+          and machine.state_path.read_text(encoding="utf-8") == "{ not json", machine.errors)
+    machine.state_path.write_text(json.dumps({"pull_requests": {}, "notices": {}, "failed_polls": "x",
+                                              "event_lines_delivered": 0,
+                                              "last_events_task_opened_at": None}), encoding="utf-8")
+    check("a state file with a field of the wrong type exits 1",
+          machine.run() == 1 and "wrong type" in machine.errors, machine.errors)
+
+    machine = machine_for("quiet")
+    machine.poll = [poll_once_pull_request(1), poll_once_pull_request(2, draft=True)]
+    check("the baseline run exits 0 and raises no event",
+          machine.run("--poll-once-write-baseline") == 0 and not machine.event_lines(),
+          machine.errors)
+    machine.run()
+    before = machine.state_path.read_text(encoding="utf-8")
+    for _ in range(3):
+        machine.now += 60
+        code = machine.run()
+    check("a run that detects nothing new exits 0, appends no event and opens no task",
+          code == 0 and not machine.event_lines() and machine.tasks_read() == []
+          and machine.state_path.read_text(encoding="utf-8") == before,
+          f"{code} {machine.tasks_read()}")
+
+    machine.poll = [poll_once_pull_request(1, "b"), poll_once_pull_request(2),
+                    poll_once_pull_request(3)]
+    machine.now += 60
+    code = machine.run()
+    lines = machine.event_lines()
+    check("a new head, a draft marked ready and an opening between runs are each one event, and "
+          "open one task naming the lines",
+          code == 0 and len(lines) == 3 and "#1 NEW-HEAD" in lines[0] and "#2 READY" in lines[1]
+          and "#3 OPENED" in lines[2] and len(machine.tasks_read()) == 1
+          and f"lines 1 to 3 of {machine.events_path}" in machine.tasks_read()[0]["description"],
+          f"{lines} {machine.tasks_read()}")
+    machine.now += 60
+    machine.run()
+    check("the next run with nothing new repeats no event and opens no task",
+          len(machine.event_lines()) == 3 and len(machine.tasks_read()) == 1, machine.event_lines())
+
+    machine.poll = machine.poll + [poll_once_pull_request(4)]
+    machine.now += 60
+    machine.run()
+    check("a later event waits while the events task is open",
+          len(machine.event_lines()) == 4 and len(machine.tasks_read()) == 1, machine.tasks_read())
+    machine.complete_tasks()
+    machine.now += 60
+    machine.run()
+    check("once that task is completed, the event still waits until 20 minutes after the last "
+          "task opened", len(machine.tasks_read()) == 1, machine.tasks_read())
+    machine.now += watcher_module.SECONDS_BETWEEN_EVENTS_TASKS
+    machine.run()
+    check("after 20 minutes one new task names only the line not yet delivered",
+          len(machine.tasks_read()) == 2
+          and "lines 4 to 4 of" in machine.tasks_read()[1]["description"], machine.tasks_read())
+
+    machine = machine_for("failed-polls")
+    machine.poll = [poll_once_pull_request(1)]
+    machine.run("--poll-once-write-baseline")
+    machine.poll = "GitHub is down"
+    codes = [machine.run() for _ in range(watcher_module.FAILED_POLLS_BEFORE_FAILURE_TASK - 1)]
+    check("failed polls below the limit exit 1 and open no task",
+          set(codes) == {1} and machine.tasks_read() == [], machine.tasks_read())
+    machine.run()
+    machine.run()
+    check("the failed poll at the limit opens one task, and the next opens no other",
+          len(machine.tasks_read()) == 1
+          and "GitHub is down" in machine.tasks_read()[0]["description"], machine.tasks_read())
+    machine.complete_tasks()
+    machine.poll = [poll_once_pull_request(1), poll_once_pull_request(5)]
+    check("after the outage the kept state reports what opened during it",
+          machine.run() == 0 and any("#5 OPENED" in line for line in machine.event_lines()),
+          machine.event_lines())
+
+    machine = machine_for("notices")
+    machine.poll = []
+    machine.run("--poll-once-write-baseline")
+    machine.notices.mkdir()
+    (machine.notices / "pr1-abc.txt").write_text("look at this\n", encoding="utf-8")
+    machine.run()
+    machine.now += 60
+    machine.run()
+    check("a GHI-MD edit job notice is one event across runs, and says to move it",
+          sum("NEEDS A LOOK pr1-abc.txt: look at this" in line for line in machine.event_lines()) == 1
+          and "then move it:" in machine.event_lines()[0], machine.event_lines())
+
+    machine = machine_for("append-fails")
+    machine.poll = []
+    machine.run("--poll-once-write-baseline")
+    before = machine.state_path.read_text(encoding="utf-8")
+    machine.events_path.mkdir()
+    machine.poll = [poll_once_pull_request(1)]
+    code = machine.run()
+    check("when the event file cannot be written, the run exits 1, keeps the state so the event "
+          "is seen again, and opens a task",
+          code == 1 and machine.state_path.read_text(encoding="utf-8") == before
+          and "could not record" in machine.tasks_read()[0]["subject"] + machine.errors,
+          f"{code} {machine.errors}")
+
+    machine = machine_for("truncated-events")
+    machine.poll = []
+    machine.run("--poll-once-write-baseline")
+    machine.poll = [poll_once_pull_request(1)]
+    machine.run()
+    machine.events_path.write_text("", encoding="utf-8")
+    machine.complete_tasks()
+    code = machine.run()
+    check("an event file shorter than the lines delivered exits 1 and says it was truncated",
+          code == 1 and "truncated" in machine.errors, machine.errors)
+
+    machine = machine_for("no-task-list")
+    machine.poll = []
+    machine.run("--poll-once-write-baseline")
+    machine.tasks.rmdir()
+    machine.poll = [poll_once_pull_request(1)]
+    code = machine.run()
+    delivered = json.loads(machine.state_path.read_text(encoding="utf-8"))["event_lines_delivered"]
+    check("when the task cannot be written, the run exits 1 and the event stays undelivered",
+          code == 1 and delivered == 0 and len(machine.event_lines()) == 1, machine.errors)
+    machine.tasks.mkdir()
+    machine.poll = [poll_once_pull_request(1)]
+    code = machine.run()
+    check("the next run delivers the event that waited",
+          code == 0 and "lines 1 to 1 of" in machine.tasks_read()[0]["description"],
+          machine.tasks_read())
+
+    machine = machine_for("locked")
+    machine.poll = []
+    machine.run("--poll-once-write-baseline")
+    machine.poll = [poll_once_pull_request(1)]
+    with (machine.directory / watcher_module.LOCK_FILE_NAME).open("w", encoding="utf-8") as held:
+        watcher_module.fcntl.flock(held, watcher_module.fcntl.LOCK_EX)
+        code = machine.run()
+    check("a run that finds the lock held exits 0 and does nothing",
+          code == 0 and not machine.event_lines() and machine.tasks_read() == [], machine.errors)
+
+    machine = machine_for("bad-token")
+    machine.token_file = scratch_root / "no-such-token"
+    code = machine.run()
+    check("an unusable token exits 1 and opens a task",
+          code == 1 and "token" in machine.tasks_read()[0]["subject"], machine.tasks_read())
+
+    machine = machine_for("directory-unusable")
+    machine.directory.write_text("a file", encoding="utf-8")
+    code = machine.run()
+    check("a state directory that cannot be used exits 1 and opens a task",
+          code == 1 and "directory" in machine.tasks_read()[0]["subject"], machine.tasks_read())
+
+
 if __name__ == "__main__":
     run_unit_cases()
     run_needs_a_look_unit_cases()
     run_batch_events_cases()
+    with tempfile.TemporaryDirectory() as poll_once_scratch:
+        poll_once_token_file = Path(poll_once_scratch) / "token"
+        poll_once_token_file.write_text(FIXTURE_TOKEN, encoding="utf-8")
+        run_poll_once_cases(Path(poll_once_scratch), poll_once_token_file)
     run_subprocess_cases()
     print()
     if failures:

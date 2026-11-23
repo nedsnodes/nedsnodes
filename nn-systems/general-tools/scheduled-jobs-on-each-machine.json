@@ -235,6 +235,16 @@
         },
         "ned-box": {"scheduler": "cron", "schedule": "45 5 * * *"}
       }
+    },
+    {
+      "name": "watch-open-pull-requests-hack-poll-once",
+      "owner": "merge-lane-2",
+      "program": "scripts/watch-open-pull-requests-hack.py",
+      "arguments": ["--poll-once"],
+      "output": ".claude/watch-open-pull-requests-hack-poll-once.log",
+      "on": {
+        "ned-box": {"scheduler": "cron", "schedule": "* * * * *"}
+      }
     }
   ]
 }
