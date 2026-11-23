@@ -127,6 +127,7 @@ import shutil
 import subprocess
 import sys
 import time
+import xml.etree.ElementTree
 from pathlib import Path
 
 _common_spec = importlib.util.spec_from_file_location(
@@ -505,7 +506,7 @@ def suites_on_runner_lines(lines, prefix):
     return suites
 
 
-def merged_branch_author(worktree, merge_commit, environment):
+def merged_branch_last_commit_author_name_read(worktree, merge_commit, environment):
     """The author name of the merged branch's last commit, or None when git cannot read it."""
     author = subprocess.run(
         ["git", "-C", str(worktree), "log", "-1", "--format=%an", f"{merge_commit}^2"],
@@ -513,44 +514,100 @@ def merged_branch_author(worktree, merge_commit, environment):
     return author.stdout.strip() or None if author.returncode == 0 else None
 
 
-def repair_task_opened(arguments, merge_commit, author, new_suites):
-    """Open one repair task on author's list; return (agent-seat, task id, why none)."""
-    task_list = Path.home() / ".claude" / "tasks" / f"nedsnodes-{author}-tasks"
-    if not author or not task_list.is_dir() or not (Path.home() / "agents" / author).is_dir():
-        return None, None, (f"the merged branch's author, {author or 'unknown'}, has no task "
+def test_named(suite, test):
+    """A failed test as a reader sees it; a suite with no case lines is its own one test."""
+    return suite if test == suite else f"{suite}: {test}"
+
+
+def repair_task_opened(arguments, merge_commit, seat, failed_tests):
+    """Open one repair task on seat's list for {suite: {test: log}}; return (seat, id, why none)."""
+    task_list = Path.home() / ".claude" / "tasks" / f"nedsnodes-{seat}-tasks"
+    if not seat or not task_list.is_dir() or not (Path.home() / "agents" / seat).is_dir():
+        return None, None, (f"the merged branch's author, {seat or 'unknown'}, has no task "
                             f"list or no checkout on this machine")
-    named = " ".join(sorted(new_suites))
-    logs = "\n".join(f"- {suite}: {log}" for suite, log in sorted(new_suites.items()))
+    named = " ".join(sorted(failed_tests))
+    logs = "\n".join(f"- {test_named(suite, test)}: {log}"
+                     for suite, tests in sorted(failed_tests.items())
+                     for test, log in sorted(tests.items()))
+    count = sum(len(tests) for tests in failed_tests.values())
     description = (
         f"The after-merge test run of main at {merge_commit} failed, after pull request "
         f"{arguments.pull_request} merged. Merges go on while main fails, so this needs a fix "
-        f"on main.\n\nFailed suites and their logs:\n{logs}\n\n"
+        f"on main.\n\nFailed tests and their logs:\n{logs}\n\n"
         f"Reproduce in a detached worktree at origin/main: python3 scripts/run-all-test-suites.py "
         f"--only-suites-named {named}\n"
         f"Open a pull request that fixes the cause. Complete this task once it merges; the next "
-        f"after-merge test run then takes each passing suite off the record that "
+        f"after-merge test run then takes each passing test off the record that "
         f"scripts/merge-gate.sh shows.")
     try:
         task_id = task_write.agent_seat_task_list_new_pending_task_write(
             task_list, f"Main fails after pull request {arguments.pull_request}: fix "
-                       f"{len(new_suites)} failed test suite(s)", description)
+                       f"{count} failed test(s)", description)
     except OSError as error:
         return None, None, f"the repair task could not be written to {task_list}: {error}"
-    return author, task_id, None
+    return seat, task_id, None
 
 
-def failed_suites_kept_in_view(arguments, merge_commit, worktree, log_dir, environment, lines):
+def repair_task_no_longer_open(seat, task_id):
+    """True when the task is completed or gone; an unreadable task file counts as gone, because
+    a second repair task costs less than a failing test nobody is assigned."""
+    task_file = Path.home() / ".claude" / "tasks" / f"nedsnodes-{seat}-tasks" / f"{task_id}.json"
+    try:
+        return json.loads(task_file.read_text(encoding="utf-8")).get("status") == "completed"
+    except (OSError, ValueError, AttributeError):
+        return True
+
+
+def run_verdicts_by_suite(lines, junit_file, junit_required):
+    """{suite: {"failed": {test: log}, "passed": set of tests, or None when the suite passed}}, and
+    what went wrong reading junit_file, or None.
+
+    A failing suite the JUnit XML does not cover counts as the one test named for the suite."""
+    runner = common.run_all_test_suites
+    cases, error = {}, None
+    try:
+        for element in xml.etree.ElementTree.parse(junit_file).getroot().iter("testsuite"):
+            names = {case.get("name") for case in element.iter("testcase")}
+            failing = {case.get("name") for case in element.iter("testcase")
+                       if case.find("failure") is not None}
+            cases[element.get("name")] = (failing, names - failing)
+    except FileNotFoundError:
+        if junit_required:
+            error = f"{junit_file} does not exist"
+    except (OSError, xml.etree.ElementTree.ParseError) as caught:
+        error = f"{junit_file} could not be read: {caught}"
+    verdicts = {suite: {"failed": {}, "passed": None}
+                for suite in suites_on_runner_lines(lines, "PASS ")}
+    for suite, log in suites_on_runner_lines(lines, runner.FAILED_SUITE_LINE_PREFIX).items():
+        failing, passing = cases.get(suite, (set(), set()))
+        failing = failing or {suite}
+        # The runner's stand-in cases for a suite with no case lines, or one that failed after
+        # its last case line: not failing now means that failure has gone.
+        stand_ins = {suite, f"{suite} exit"} if suite in cases else set()
+        verdicts[suite] = {"failed": {test: log for test in failing},
+                           "passed": (passing | stand_ins) - failing}
+    return verdicts, error
+
+
+TELL_AUTHOR_AND_USER_THE_STOP_MESSAGE = (
+    "Tell the pull request's author, and the user, this message as printed, from its "
+    "STOP line through this line, with the FAIL and NOT RUN suite lines printed above "
+    "it, if any.")
+
+
+def failed_suites_kept_in_view(arguments, merge_commit, worktree, log_dir, environment, lines,
+                               failed_suites_were_the_only_problem):
     """Update the failed suites record from this run and a rerun of what it left out.
 
-    Return (every step worked, the suites this run newly failed, the line for its STOP message).
+    Return (every step worked, the {suite: {test: log}} this merge newly failed, the line for its
+    STOP message, or None when the STOP message's own instruction to tell the author and the
+    user applies).
     """
     runner = common.run_all_test_suites
-    failed = suites_on_runner_lines(lines, runner.FAILED_SUITE_LINE_PREFIX)
-    passed = set(suites_on_runner_lines(lines, "PASS "))
     worked = True
     tell_the_user = (
         "The merge is done and later merges are not held up, but merge-gate.sh may not show "
-        "suites failing on main until the record works.\n"
+        "tests failing on main until the record works.\n"
         "If the error names a cause you can fix, fix it; the next after-merge test run then "
         "records its own failures. This test run's failed suites, listed above, are not on the "
         "record, so send them to the pull request's author.\n"
@@ -558,13 +615,19 @@ def failed_suites_kept_in_view(arguments, merge_commit, worktree, log_dir, envir
         "updated on ned-box, so the merge gate may not show them. Merges go on.\", followed by "
         "the error. If you are a subagent, tell the agent that dispatched you instead.")
     try:
-        recorded = failed_suites_record.failed_suites_record_read()
-    except failed_suites_record.FailedSuitesRecordUnusable as error:
+        recorded = failed_suites_record.failed_after_merge_test_suites_on_main_record_read()
+    except failed_suites_record.FailedAfterMergeTestSuitesOnMainRecordFileUnreadableOrUnwritable as error:
         print(f"STOP: merged, but the failed suites record was not updated: {error}\n"
               f"{tell_the_user}")
         return False, {}, None
 
-    still_to_run = sorted(set(recorded) - passed - set(failed))
+    verdicts, junit_error = run_verdicts_by_suite(
+        lines, log_dir / runner.JUNIT_XML_FILE_NAME, failed_suites_were_the_only_problem)
+    if junit_error:
+        print(f"STOP: merged, but this test run's failed tests could not be named: {junit_error}\n"
+              f"{tell_the_user}")
+        worked = False
+    still_to_run = sorted(set(recorded) - set(verdicts))
     gone = set()
     if still_to_run:
         listed = subprocess.run(["git", "-C", str(worktree), "ls-files", "--", *still_to_run],
@@ -580,65 +643,155 @@ def failed_suites_kept_in_view(arguments, merge_commit, worktree, log_dir, envir
             gone = set(still_to_run) - tracked
             still_to_run = [suite for suite in still_to_run if suite in tracked]
     if still_to_run:
-        print(f"running again the {len(still_to_run)} suite(s) on the failed suites record that "
-              f"this test run did not run", flush=True)
+        print(f"rerunning the {len(still_to_run)} recorded failed suite(s) that this selective "
+              f"test run left out", flush=True)
+        rerun_log_dir = log_dir.with_name(log_dir.name + "-recorded-failed-suites")
         rerun = subprocess.run(
             [sys.executable, str(worktree / "scripts" / "run-all-test-suites.py"),
              "--only-suites-named", *still_to_run,
              "--leave-recorded-inputs-and-failure-history-unchanged",
-             "--log-dir", str(log_dir.with_name(log_dir.name + "-recorded-failed-suites"))],
+             "--log-dir", str(rerun_log_dir)],
             cwd=worktree, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True,
             env=environment, stdin=subprocess.DEVNULL)
         rerun_lines = rerun.stdout.splitlines()
-        if rerun.returncode not in (0, 1) or not any(
-                line.startswith(runner.SUMMARY_LINE_PREFIX) for line in rerun_lines):
+        rerun_failed_only = (
+            runner.run_all_test_suites_output_parse_whether_failed_suites_were_the_runs_only_problem(
+                rerun.returncode, rerun.stdout))
+        rerun_gave_every_verdict = rerun_failed_only or (
+            rerun.returncode == 0
+            and any(line.startswith(runner.SUMMARY_LINE_PREFIX) for line in rerun_lines))
+        if not rerun_gave_every_verdict:
             print(f"STOP: merged, but the recorded failed suites could not be run again: the "
                   f"runner exited {rerun.returncode}. They stay on the record. Its output was:\n"
                   f"{rerun.stdout.rstrip()}\n{tell_the_user}")
             worked = False
         else:
-            passed |= set(suites_on_runner_lines(rerun_lines, "PASS ")) & set(still_to_run)
+            rerun_verdicts, rerun_junit_error = run_verdicts_by_suite(
+                rerun_lines, rerun_log_dir / runner.JUNIT_XML_FILE_NAME, rerun_failed_only)
+            if rerun_junit_error:
+                print(f"STOP: merged, but the rerun's failed tests could not be named: "
+                      f"{rerun_junit_error}. They stay on the record.\n{tell_the_user}")
+                worked = False
+            else:
+                verdicts.update({suite: verdict for suite, verdict in rerun_verdicts.items()
+                                 if suite in still_to_run})
 
     opened = {}
+    opened_again = []
+    could_not_open_again = []
+    removed = []
+    undecided = {}
     now = time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())
 
+    def recorded_at_or_before_this_run(suite, test, fields):
+        # A run of an older commit says nothing about a failure a newer merge recorded.
+        ancestor = subprocess.run(
+            ["git", "-C", str(worktree), "merge-base", "--is-ancestor",
+             fields["commit"], merge_commit],
+            capture_output=True, text=True, env=environment, stdin=subprocess.DEVNULL)
+        if ancestor.returncode not in (0, 1):
+            undecided[test_named(suite, test)] = git_error(ancestor)
+        return ancestor.returncode == 0
+
     def change(suites):
-        for suite in passed | gone:
-            suites.pop(suite, None)
-        new_suites = {suite: log for suite, log in failed.items() if suite not in suites}
-        if not new_suites:
+        for suite in list(suites):
+            verdict = verdicts.get(suite)
+            if suite not in gone and verdict is None:
+                continue
+            tests = suites[suite]["failed_tests"]
+            for test, fields in list(tests.items()):
+                if ((suite in gone or verdict["passed"] is None or test in verdict["passed"])
+                        and recorded_at_or_before_this_run(suite, test, fields)):
+                    del tests[test]
+                    removed.append((suite, test, suite in gone))
+            if not tests:
+                del suites[suite]
+
+        new_tests, to_open_again = {}, {}
+        for suite, verdict in verdicts.items():
+            on_record = suites.get(suite, {}).get("failed_tests", {})
+            for test, log in verdict["failed"].items():
+                fields = on_record.get(test)
+                if fields is None:
+                    new_tests.setdefault(suite, {})[test] = log
+                elif (fields["repair_task_id"] is not None and repair_task_no_longer_open(
+                        fields["repair_task_agent_seat"], fields["repair_task_id"])):
+                    to_open_again.setdefault(fields["repair_task_agent_seat"], {}).setdefault(
+                        suite, {})[test] = log
+
+        for seat, tests_of_seat in sorted(to_open_again.items()):
+            _, task_id, why_none = repair_task_opened(arguments, merge_commit, seat, tests_of_seat)
+            if task_id is None:
+                could_not_open_again.append((seat, tests_of_seat, why_none))
+                continue
+            opened_again.append((seat, task_id, tests_of_seat))
+            for suite, tests in tests_of_seat.items():
+                for test in tests:
+                    suites[suite]["failed_tests"][test]["repair_task_id"] = task_id
+
+        if not new_tests:
             return
-        author = merged_branch_author(worktree, merge_commit, environment)
-        seat, task_id, why_none = repair_task_opened(arguments, merge_commit, author, new_suites)
-        opened.update(new_suites=new_suites, seat=seat, task_id=task_id, why_none=why_none)
-        for suite, log in new_suites.items():
-            suites[suite] = {"commit": merge_commit, "pull_request": arguments.pull_request,
-                             "log": log, "failed_at": now, "repair_task_agent_seat": seat,
-                             "repair_task_id": task_id}
+        author = merged_branch_last_commit_author_name_read(worktree, merge_commit, environment)
+        seat, task_id, why_none = repair_task_opened(arguments, merge_commit, author, new_tests)
+        opened.update(new_tests=new_tests, seat=seat, task_id=task_id, why_none=why_none)
+        for suite, tests in new_tests.items():
+            on_record = suites.setdefault(suite, {"failed_tests": {}})["failed_tests"]
+            for test, log in tests.items():
+                on_record[test] = {"commit": merge_commit, "pull_request": arguments.pull_request,
+                                   "log": log, "failed_at": now, "repair_task_agent_seat": seat,
+                                   "repair_task_id": task_id}
 
     try:
-        left = failed_suites_record.failed_suites_record_changed(change)
-    except failed_suites_record.FailedSuitesRecordUnusable as error:
+        left = failed_suites_record.failed_after_merge_test_suites_on_main_record_change_apply_under_lock(change)
+    except failed_suites_record.FailedAfterMergeTestSuitesOnMainRecordFileUnreadableOrUnwritable as error:
         print(f"STOP: merged, but the failed suites record was not updated: {error}\n"
               f"{tell_the_user}")
-        return False, opened.get("new_suites", {}), None
-    for suite in sorted((passed | gone) & set(recorded)):
-        print(f"{suite} left the failed suites record: "
-              f"{'git no longer lists it' if suite in gone else 'it passed'}")
+        return False, opened.get("new_tests", {}), None
+    for name, error in sorted(undecided.items()):
+        print(f"STOP: merged, but {name} stays on the failed suites record: git could not say "
+              f"whether its recorded commit is an ancestor of {merge_commit}: {error}\n"
+              f"{tell_the_user}")
+        worked = False
+    for suite, test, suite_gone in sorted(removed):
+        print(f"{test_named(suite, test)} left the failed suites record: "
+              f"{'git no longer lists it' if suite_gone else 'it passed'}")
+    for seat, task_id, tests_of_seat in opened_again:
+        names = ", ".join(test_named(suite, test) for suite, tests in sorted(tests_of_seat.items())
+                          for test in sorted(tests))
+        print(f"opened repair task #{task_id} on {seat}'s task list, because its earlier repair "
+              f"task is closed and these still fail: {names}")
+    for seat, tests_of_seat, why_none in could_not_open_again:
+        names = ", ".join(test_named(suite, test) for suite, tests in sorted(tests_of_seat.items())
+                          for test in sorted(tests))
+        print(f"STOP: merged, but {names} still fail(s), the repair task on {seat}'s task list is "
+              f"closed, and no new one could be opened: {why_none}.\n"
+              f"Ask the user: \"Main still fails {names}, and no new repair task could go to "
+              f"{seat}. I recommend that merge-lane-2 fixes it. Should it?\" If the user says "
+              f"yes, merge-lane-2 opens a pull request that fixes it; otherwise do what the user "
+              f"says. Merges go on meanwhile. If you are a subagent, ask the agent that "
+              f"dispatched you instead.")
+        worked = False
     notice = failed_suites_record.merge_gate_notice(left)
     if notice:
         print(notice)
-    new_suites = opened.get("new_suites", {})
-    if not new_suites:
+    new_tests = opened.get("new_tests", {})
+    if not new_tests:
         return worked, {}, None
     if opened["task_id"] is not None:
-        return worked, new_suites, (f"Repair task #{opened['task_id']} is on "
-                                    f"{opened['seat']}'s task list, so nothing needs sending. "
-                                    f"Go on with the next merge.")
-    suites_named = ", ".join(sorted(new_suites))
-    return False, new_suites, (
+        if not failed_suites_were_the_only_problem:
+            print(f"Repair task #{opened['task_id']} on {opened['seat']}'s task list covers only "
+                  f"the newly failed tests; the rest of this test run has no verdict.")
+            return worked, new_tests, None
+        return worked, new_tests, (f"Repair task #{opened['task_id']} is on "
+                                   f"{opened['seat']}'s task list, so nothing needs sending. "
+                                   f"Go on with the next merge.")
+    tests_named = ", ".join(test_named(suite, test) for suite, tests in sorted(new_tests.items())
+                            for test in sorted(tests))
+    tell_about_the_rest = ("" if failed_suites_were_the_only_problem
+                           else f"{TELL_AUTHOR_AND_USER_THE_STOP_MESSAGE}\n")
+    return False, new_tests, tell_about_the_rest + (
         f"No repair task was opened: {opened['why_none']}. Nobody is assigned to fix main.\n"
-        f"Ask the user: \"Main fails {suites_named} after pull request {arguments.pull_request}, "
+        f"Ask the user: \"Main fails {tests_named} after pull request {arguments.pull_request}, "
         f"and no repair task could go to its author. I recommend that merge-lane-2 fixes it. "
         f"Should it?\" If the user says yes, merge-lane-2 opens a pull request that fixes it; "
         f"otherwise do what the user says. Merges go on meanwhile. If you are a subagent, ask "
@@ -750,27 +903,29 @@ def after_merge_test_run(arguments, merge_commit):
                f"{run_all.stdout.rstrip()}")
     print(f"the test run's logs and test-run-report.txt: {log_dir}")
     exit_code = EXIT_MERGED if done_before_the_run else EXIT_MERGED_BUT_A_STEP_AFTER_THE_MERGE_NOT_DONE
+    failed_suites_were_the_only_problem = (
+        runner.run_all_test_suites_output_parse_whether_failed_suites_were_the_runs_only_problem(
+            run_all.returncode, run_all.stdout))
     record_worked, newly_failed, repair_line = failed_suites_kept_in_view(
-        arguments, merge_commit, worktree, log_dir, environment, lines)
+        arguments, merge_commit, worktree, log_dir, environment, lines,
+        failed_suites_were_the_only_problem)
     if not record_worked:
         exit_code = EXIT_MERGED_BUT_A_STEP_AFTER_THE_MERGE_NOT_DONE
-    only_recorded_suites_failed = (
-        run_all.returncode == 1 and summaries and record_worked and not newly_failed
-        and suites_on_runner_lines(lines, runner.FAILED_SUITE_LINE_PREFIX)
-        and not suites_on_runner_lines(lines, runner.NOT_RUN_SUITE_LINE_PREFIX))
-    if only_recorded_suites_failed:
+    if failed_suites_were_the_only_problem and record_worked and not newly_failed:
         print(f"the test run of main at {merge_commit} failed only suites already on the failed "
               f"suites record. The merge that first failed each one opened its repair task or "
               f"said to ask the user, so nothing is needed for them here. Go on with the next "
               f"merge, if there is one.")
+    elif run_all.returncode == 0 and newly_failed:
+        print(f"STOP: merged, and the test run of main at {merge_commit} passed, but the rerun of "
+              f"the recorded failed suites failed tests not on the record; they are listed "
+              f"above.\n" + (repair_line or TELL_AUTHOR_AND_USER_THE_STOP_MESSAGE))
+        exit_code = EXIT_MERGED_BUT_A_STEP_AFTER_THE_MERGE_NOT_DONE
     elif run_all.returncode != 0:
         print(f"STOP: merged, but the test run of main at {merge_commit} exited "
               f"{run_all.returncode}, so main may be broken; the failed suites, if any, are "
               f"listed above, each with its log.\n"
-              + (repair_line or
-                 "Tell the pull request's author, and the user, this message as printed, from its "
-                 "STOP line through this line, with the FAIL and NOT RUN suite lines printed above "
-                 "it, if any."))
+              + (repair_line or TELL_AUTHOR_AND_USER_THE_STOP_MESSAGE))
         exit_code = EXIT_MERGED_BUT_A_STEP_AFTER_THE_MERGE_NOT_DONE
     elif not summaries:
         print(f"STOP: merged, but the test run of main at {merge_commit} exited 0 and printed "

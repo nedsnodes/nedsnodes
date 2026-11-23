@@ -5050,6 +5050,10 @@ TEST_RUNNER_WHOLE_RUN_NOT_RUN_TO_THE_END_LINE_PREFIXES_FILE_PATH_AND_BARE_NAME_F
 RUN_STOPPED_AT_RUN_TIME_LIMIT_NOT_COUNTING_ADMISSION_WAITS_LINE_PREFIX = f"{NOT_RUN_TO_THE_END_LINE_PREFIX} — the run passed its run time limit"
 TEST_SUITE_ADMISSION_WAIT_CEILING_PASSED_LINE_PREFIX = (
     f"{NOT_RUN_TO_THE_END_LINE_PREFIX} — a suite could not get a test slot")
+MACHINE_CPU_AND_MEMORY_READINGS_STOPPED_BEFORE_RUN_END_LINE_PREFIX = f"{PROGRAM}: the machine's readings stopped"
+RUN_CASE_TIMES_SUITE_RESOURCES_JUNIT_XML_OR_FAILURE_HISTORY_NOT_WRITTEN_LINE_PREFIX = (
+    f"{PROGRAM}: the run's case times, suite resources, JUnit XML or failure history could not "
+    f"be written")
 
 
 def run_all_test_suites_output_parse_whether_the_run_ended_with_a_suite_failed_by_its_exit_code_or_signal(text):
@@ -5061,6 +5065,22 @@ def run_all_test_suites_output_parse_whether_the_run_ended_with_a_suite_failed_b
     if any(line.startswith(TEST_RUNNER_WHOLE_RUN_NOT_RUN_TO_THE_END_LINE_PREFIXES_FILE_PATH_AND_BARE_NAME_FORMS) for line in lines):
         return False
     return any(SUITE_FAILED_LINE.match(line) for line in lines)
+
+
+def run_all_test_suites_output_parse_whether_failed_suites_were_the_runs_only_problem(exit_code, text):
+    """True when the run reached its SUMMARY and its only reported problem is FAIL suites.
+
+    A new line reporting a whole-run problem must join the prefixes here, or a caller that
+    accepts known failed suites will not see that problem."""
+    lines = text.splitlines()
+    return (exit_code == EXIT_SOME_FAILED
+            and any(line.startswith(SUMMARY_LINE_PREFIX) for line in lines)
+            and any(line.startswith(FAILED_SUITE_LINE_PREFIX) for line in lines)
+            and not any(line.startswith((
+                NOT_RUN_SUITE_LINE_PREFIX,
+                *TEST_RUNNER_WHOLE_RUN_NOT_RUN_TO_THE_END_LINE_PREFIXES_FILE_PATH_AND_BARE_NAME_FORMS,
+                MACHINE_CPU_AND_MEMORY_READINGS_STOPPED_BEFORE_RUN_END_LINE_PREFIX,
+                RUN_CASE_TIMES_SUITE_RESOURCES_JUNIT_XML_OR_FAILURE_HISTORY_NOT_WRITTEN_LINE_PREFIX)) for line in lines))
 
 
 def run_all_test_suites_output_timed_out_suites_and_limits_parse(text):
@@ -5656,7 +5676,7 @@ def main(argv=None, platform=None):
             stopped_by = readings.failure_or_none()
             if stopped_by is not None:
                 records_failed = True
-                report.line(f"{PROGRAM}: the machine's readings stopped before the run ended: "
+                report.line(f"{MACHINE_CPU_AND_MEMORY_READINGS_STOPPED_BEFORE_RUN_END_LINE_PREFIX} before the run ended: "
                             f"{stopped_by!r}")
                 report.line(f"The suites' verdicts below stand, but "
                             f"{log_dir / MACHINE_CPU_AND_MEMORY_READINGS_FILE_NAME} is cut "
@@ -5673,8 +5693,7 @@ def main(argv=None, platform=None):
                         top, commit, branch_of_checkout(top), log_dir, results)
             except OSError as error:
                 records_failed = True
-                report.line(f"{PROGRAM}: the run's case times, suite resources, JUnit XML or "
-                            f"failure history could not be written: {error}")
+                report.line(f"{RUN_CASE_TIMES_SUITE_RESOURCES_JUNIT_XML_OR_FAILURE_HISTORY_NOT_WRITTEN_LINE_PREFIX}: {error}")
                 report.line("The suites' verdicts below stand, but their records are "
                             "missing, so this run exits 2 if every suite passed, and 1 if "
                             "any failed. Fix what it names, then run this again.")
