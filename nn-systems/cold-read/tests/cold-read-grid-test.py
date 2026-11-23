@@ -1824,8 +1824,80 @@ try:
           and "rm -r" not in edited_file_lines[0] and "restore" not in edited_file_lines[0],
           repr(edited_lines))
     check("a file untracked before the run is to be read itself, with no git diff, which would print nothing",
-          len(edited_file_lines) == 1 and "Read agent-draft.md itself, which git does not track," in edited_file_lines[0]
+          len(edited_file_lines) == 1
+          and f"Read {edited_repository / 'agent-draft.md'} itself, which git does not track," in edited_file_lines[0]
           and "diff" not in edited_file_lines[0], repr(edited_lines))
+
+    def repository_with_committed_file(name):
+        repository = (scratch / name).resolve()
+        repository.mkdir()
+
+        def run(*arguments):
+            return subprocess.run(["git", "-C", str(repository), "-c", "user.name=grid test",
+                                   "-c", "user.email=grid-test@example.invalid", *arguments],
+                                  capture_output=True, text=True)
+        run("init", "--quiet", "--initial-branch=main")
+        (repository / "tracked.md").write_text("Committed.\n", encoding="utf-8")
+        run("add", "tracked.md")
+        run("commit", "--quiet", "-m", "base")
+        return repository, run
+
+    def commands_in_line(line):
+        return re.findall(r"`(git -C [^`]+)`", line)
+
+    # `git rm --cached` of an edited tracked file, then a rewrite: status lists it as D and ??.
+    removed_repository, removed_git = repository_with_committed_file("checkout-stopped-cell-unstages-an-edited-file")
+    (removed_repository / "tracked.md").write_text("The agent's edit.\n", encoding="utf-8")
+    with mock.patch.object(grid_module.cell_common, "REPO_ROOT", removed_repository):
+        removed_baseline = grid_module.cell_common.working_tree_state()
+        removed_git("rm", "--cached", "--quiet", "tracked.md")
+        (removed_repository / "tracked.md").write_text("A reviewer's rewrite.\n", encoding="utf-8")
+        removed_lines = grid_module.stopped_cells_write_check_lines(
+            [scratch / "claude-hunt-deep.md"], removed_baseline, None, set())
+    removed_line = next((line for line in removed_lines if line.startswith("STRAY WRITE: tracked.md ")), "")
+    removed_commands = commands_in_line(removed_line)
+    check("a path that is both a staged deletion and untracked is given its cached diff and its absolute on-disk path",
+          len(removed_commands) == 1 and "-Committed." in subprocess.run(
+              shlex.split(removed_commands[0]), capture_output=True, text=True).stdout
+          and f"{removed_repository / 'tracked.md'}, the copy on disk" in removed_line, repr(removed_lines))
+
+    # A clean file a cell unstaged and rewrote is tracked at HEAD, so `rm` alone would not undo it.
+    clean_removed_repository, clean_removed_git = repository_with_committed_file(
+        "checkout-stopped-cell-unstages-a-clean-file")
+    with mock.patch.object(grid_module.cell_common, "REPO_ROOT", clean_removed_repository):
+        clean_removed_baseline = grid_module.cell_common.working_tree_state()
+        clean_removed_git("rm", "--cached", "--quiet", "tracked.md")
+        (clean_removed_repository / "tracked.md").write_text("A reviewer's rewrite.\n", encoding="utf-8")
+        clean_removed_lines = grid_module.stopped_cells_write_check_lines(
+            [scratch / "claude-hunt-deep.md"], clean_removed_baseline, None, set())
+    clean_removed_commands = commands_in_line(clean_removed_lines[0]) if clean_removed_lines else []
+    if clean_removed_commands:
+        subprocess.run(shlex.split(clean_removed_commands[0]), capture_output=True, text=True)
+    check("the undo given for a clean file unstaged and rewritten restores it, where rm would leave it deleted",
+          len(clean_removed_commands) == 1 and " restore " in clean_removed_commands[0]
+          and (clean_removed_repository / "tracked.md").read_text(encoding="utf-8") == "Committed.\n"
+          and clean_removed_git("status", "--porcelain").stdout == "", repr(clean_removed_lines))
+
+    # An already-conflicted file overwritten with the incoming side: only a diff against HEAD shows it.
+    conflict_repository, conflict_git = repository_with_committed_file("checkout-stopped-cell-overwrites-a-conflict")
+    conflict_git("checkout", "--quiet", "-b", "incoming")
+    (conflict_repository / "tracked.md").write_text("Incoming.\n", encoding="utf-8")
+    conflict_git("commit", "--quiet", "-am", "incoming")
+    conflict_git("checkout", "--quiet", "main")
+    (conflict_repository / "tracked.md").write_text("Ours.\n", encoding="utf-8")
+    conflict_git("commit", "--quiet", "-am", "ours")
+    conflict_git("merge", "incoming")
+    with mock.patch.object(grid_module.cell_common, "REPO_ROOT", conflict_repository):
+        conflict_baseline = grid_module.cell_common.working_tree_state()
+        (conflict_repository / "tracked.md").write_text("Incoming.\n", encoding="utf-8")
+        conflict_lines = grid_module.stopped_cells_write_check_lines(
+            [scratch / "claude-hunt-deep.md"], conflict_baseline, None, set())
+    conflict_commands = commands_in_line(conflict_lines[0]) if conflict_lines else []
+    conflict_shown = subprocess.run(shlex.split(conflict_commands[0]), capture_output=True,
+                                    text=True).stdout if len(conflict_commands) == 1 else ""
+    check("an unmerged path overwritten with one side is given the diff against HEAD, which shows the overwrite",
+          len(conflict_commands) == 1 and " diff HEAD -- " in conflict_commands[0]
+          and "-Ours." in conflict_shown and "+Incoming." in conflict_shown, repr(conflict_lines))
     check("once a file already changed before the run has changed again, no other path gets an undo command",
           len(other_lines) == 1 and "has changed or gone since: agent-draft.md." in other_lines[0]
           and "rm -r" not in other_lines[0] and "restore" not in other_lines[0],

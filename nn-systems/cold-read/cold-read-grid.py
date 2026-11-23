@@ -311,7 +311,16 @@ STRAY_WRITE_NO_UNDO_ALREADY_CHANGED = (
 STRAY_WRITE_ALREADY_CHANGED_TRACKED_READ = (
     "both `git -C {repository} diff --cached -- {path}`, its staged changes, and "
     "`git -C {repository} diff -- {path}`, its unstaged ones,")
-STRAY_WRITE_ALREADY_CHANGED_UNTRACKED_READ = "{path} itself, which git does not track,"
+STRAY_WRITE_ALREADY_CHANGED_UNTRACKED_READ = "{absolute_path} itself, which git does not track,"
+# `git rm --cached` of a file later rewritten is two status entries; neither diff above shows both.
+STRAY_WRITE_ALREADY_CHANGED_STAGED_DELETION_READ = (
+    "both `git -C {repository} diff --cached -- {path}`, its staged deletion, and "
+    "{absolute_path}, the copy on disk, which git does not track,")
+# For an unmerged path `diff --cached` prints only that it is unmerged, and the combined diff
+# can omit every hunk of a file overwritten with one side.
+STRAY_WRITE_ALREADY_CHANGED_UNMERGED_READ = (
+    "`git -C {repository} diff HEAD -- {path}`, since it has an unresolved merge conflict,")
+GIT_STATUS_UNMERGED_CODES = frozenset({"DD", "AU", "UD", "UA", "DU", "AA", "UU"})
 # A cell can move an already-edited file without git pairing the move as a rename (a plain
 # `mv`, or a `git mv` of a much-edited file), can re-create the old name afterwards, and can
 # move a file git tracks only as new or untracked out of git status altogether, so no path can
@@ -1000,7 +1009,10 @@ def stopped_cells_write_check_lines(stopped_report_paths: list, baseline,
         return [f"WRITE CHECK DID NOT RUN: {path.name} — "
                 + STOPPED_CELL_WRITE_CHECK_LINE.format(cell=cell_name_of(path), reason=reason)
                 for path in stopped_report_paths]
-    untracked = {entry.path for entry in entries if entry.code == "??"}
+    status_codes_by_path = {}
+    for entry in entries:
+        status_codes_by_path.setdefault(entry.path, set()).add(entry.code)
+    untracked = {path for path, codes in status_codes_by_path.items() if codes == {"??"}}
     changed_before = {name for name, _ in baseline}
     # Read from the launch side: a pre-launch path that is now different, gone or out
     # of git status is in no current entry, and an undo could delete what it held.
@@ -1018,13 +1030,17 @@ def stopped_cells_write_check_lines(stopped_report_paths: list, baseline,
                 else STRAY_WRITE_NO_UNDO_GONE_WHILE_CHANGES_MAY_HAVE_MOVED if touched
                 else STRAY_WRITE_UNDO_UNTRACKED if name in untracked
                 else STRAY_WRITE_UNDO_TRACKED)
-        what_to_read = (STRAY_WRITE_ALREADY_CHANGED_UNTRACKED_READ if name in untracked
+        codes = status_codes_by_path.get(name, set())
+        absolute_path = shlex.quote(str(cell_common.REPO_ROOT / name))
+        what_to_read = (STRAY_WRITE_ALREADY_CHANGED_UNMERGED_READ if codes & GIT_STATUS_UNMERGED_CODES
+                        else STRAY_WRITE_ALREADY_CHANGED_UNTRACKED_READ if name in untracked
+                        else STRAY_WRITE_ALREADY_CHANGED_STAGED_DELETION_READ if "??" in codes
                         else STRAY_WRITE_ALREADY_CHANGED_TRACKED_READ).format(
-            path=shlex.quote(name), repository=repository)
+            path=shlex.quote(name), repository=repository, absolute_path=absolute_path)
         lines.append(STOPPED_CELLS_STRAY_WRITE_LINE.format(
             path=name, cells=cells, undo=undo.format(
                 path=shlex.quote(name), repository=repository, what_to_read=what_to_read,
-                absolute_path=shlex.quote(str(cell_common.REPO_ROOT / name)),
+                absolute_path=absolute_path,
                 touched=", ".join(shlex.quote(name) for name in touched))))
     return lines
 
