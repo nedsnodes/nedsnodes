@@ -13,9 +13,7 @@ program dropped it.
 Run: python3 scripts/merge-lane-pull-request-head-test-run-on-merged-worktree-test.py
 """
 
-import contextlib
 import importlib.util
-import io
 import json
 import os
 import re
@@ -161,7 +159,7 @@ def check_commit_fetched_from_origin(review_tools, author, origin, main_commit):
     spec.loader.exec_module(program)
     environment = dict(os.environ)
     pull_head = git(origin, "rev-parse", "refs/pull/8/head")
-    # Separate processes, because the destination reference is named by process id.
+    references_before_overlap = git(review_tools, "for-each-ref")
     sources = [("refs/heads/main", main_commit), ("refs/pull/8/head", pull_head)] * 8
     def fetched_commits(pair):
         return subprocess.run(
@@ -171,25 +169,24 @@ def check_commit_fetched_from_origin(review_tools, author, origin, main_commit):
         results = list(pool.map(fetched_commits, sources))
     check("overlapping processes fetching different sources each get their own source's commit",
           results == [[commit] * 10 for _, commit in sources], repr(results[:2]))
+    check("overlapping fetches leave the references as they were",
+          git(review_tools, "for-each-ref") == references_before_overlap)
 
     real_git_output = program.git_output_or_failure
-    program.git_output_or_failure = lambda tools, command, environment: (
-        (None, "git update-ref failed: packed-refs.lock is held")
-        if command[0] == "update-ref" else real_git_output(tools, command, environment))
-    cleanup_stderr = io.StringIO()
-    with contextlib.redirect_stderr(cleanup_stderr):
-        commit, failure = program.commit_fetched_from_origin(
-            review_tools, "refs/heads/main", environment)
+    commands = []
+    def recording_git_output(tools, command, environment):
+        commands.append(command)
+        return real_git_output(tools, command, environment)
+    program.git_output_or_failure = recording_git_output
+    commit, failure = program.commit_fetched_from_origin(
+        review_tools, "refs/heads/main", environment)
     program.git_output_or_failure = real_git_output
-    left_behind = f"{program.FETCHED_COMMIT_REFERENCE_PREFIX}/{os.getpid()}"
-    check("a failed delete of the fetched reference keeps the commit read, and reports the "
-          "reference and that nothing need be done",
-          commit == main_commit and failure is None
-          and "packed-refs.lock is held" in cleanup_stderr.getvalue()
-          and left_behind in cleanup_stderr.getvalue()
-          and "Do nothing about this" in cleanup_stderr.getvalue(),
-          f"{commit!r} {failure!r} {cleanup_stderr.getvalue()!r}")
-    git(review_tools, "update-ref", "-d", left_behind)
+    fetches = [command for command in commands if command[0] == "fetch"]
+    check("the fetch names the commit with no destination, so no other run can see a "
+          "reference of this run's",
+          commit == main_commit and failure is None and len(fetches) == 1
+          and fetches[0][-1] == main_commit
+          and not any(command[0] == "update-ref" for command in commands), repr(commands))
 
     blob = git(author, "rev-parse", "HEAD:on-main.txt")
     git(author, "push", "-q", str(origin), f"{blob}:refs/pull/12/head")
@@ -524,11 +521,13 @@ def main():
                               f'exec {shlex.quote(shutil.which("git"))} "$@"\n')
         git_logger.chmod(0o755)
         completed, calls = run_program(scratch, helpers, {}, "7")
-        head_fetches = [line for line in git_calls_log.read_text().splitlines()
-                        if " fetch " in f" {line} " and "pull/7/head" in line]
+        git_fetches = [line for line in git_calls_log.read_text().splitlines()
+                       if " fetch " in f" {line} "]
+        head_fetches = [line for line in git_fetches if rebased_head in line]
         check("a run fetches the pull request's head once, so the rebuild needs no second "
               "request to origin",
               completed.returncode == 0 and len(head_fetches) == 1
+              and not any("pull/7/head" in line for line in git_fetches)
               and git(merged, "rev-parse", "HEAD^2") == rebased_head,
               f"exit {completed.returncode}, head fetches: {head_fetches}\n"
               f"{completed.stdout}{completed.stderr}")
@@ -611,7 +610,7 @@ def main():
         check("a review tools worktree that holds both programs but is not a git checkout "
               "exits 2 before any run, naming the git step that failed",
               completed.returncode == 2 and calls == []
-              and "not run: git cannot read the main commit: git fetch" in completed.stdout
+              and "not run: git cannot read the main commit: git ls-remote" in completed.stdout
               and str(not_a_checkout) in completed.stdout,
               f"exit {completed.returncode}\n{completed.stdout}{completed.stderr}")
     finally:

@@ -58,7 +58,6 @@ from pathlib import Path
 
 HEAD_TEST_RUNNER = Path("scripts") / "pull-request-head-test-run.py"
 MERGED_WORKTREE_REBUILD = Path("scripts") / "merge-lane-pull-request-head-and-merged-worktrees-rebuild.py"
-FETCHED_COMMIT_REFERENCE_PREFIX = "refs/merge-lane-head-test-run/fetched-by-process"
 
 _common_spec = importlib.util.spec_from_file_location(
     "merge_lane_pull_request_helpers_common", Path(__file__).resolve().with_name(
@@ -120,28 +119,22 @@ def git_output_or_failure(tools, command, environment):
 
 
 def commit_fetched_from_origin(tools, source, environment):
-    """Fetch source and return (the commit fetched, None), or (None, what failed)."""
-    # An empty --refmap leaves refs/remotes/origin/* alone, and a reference of this process's
-    # own keeps overlapping runs from contending for one ref.
-    destination = f"{FETCHED_COMMIT_REFERENCE_PREFIX}/{os.getpid()}"
+    """Fetch source's current commit and return (it, None), or (None, what failed)."""
+    listed, failure = git_output_or_failure(
+        tools, ["ls-remote", "--exit-code", "origin", source], environment)
+    if failure is not None:
+        return None, failure
+    commit = listed.split()[0]
+    # The fetch writes no reference: git's connectivity check reads every reference, so one
+    # that an overlapping run deletes during the check makes this fetch fail. An empty
+    # --refmap leaves refs/remotes/origin/* alone.
     _, failure = git_output_or_failure(
-        tools, ["fetch", "-q", "--no-write-fetch-head", "--refmap=", "origin",
-                f"+{source}:{destination}"], environment)
+        tools, ["fetch", "-q", "--no-write-fetch-head", "--no-tags", "--refmap=", "origin",
+                commit], environment)
     if failure is not None:
         return None, failure
-    commit, failure = git_output_or_failure(
-        tools, ["rev-parse", "--verify", f"{destination}^{{commit}}"], environment)
-    _, cleanup_failure = git_output_or_failure(tools, ["update-ref", "-d", destination],
-                                               environment)
-    if cleanup_failure is not None:
-        print(f"The fetched reference {destination} was left in the git checkout {tools}, "
-              f"because deleting it failed: {cleanup_failure}\n"
-              f"Do nothing about this: no program reads that reference, and this program "
-              f"continues with the commit it already read.",
-              file=sys.stderr, flush=True)
-    if failure is not None:
-        return None, failure
-    return commit, None
+    return git_output_or_failure(tools, ["rev-parse", "--verify", f"{commit}^{{commit}}"],
+                                 environment)
 
 
 def main_commit_to_test(arguments, environment):
