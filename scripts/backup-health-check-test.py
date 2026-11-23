@@ -4,9 +4,9 @@
 Run: python3 scripts/backup-health-check-test.py
 Prints one line per case and exits non-zero if any case fails.
 
-Every case builds a fake Timeshift layout in a temporary directory and points
-the checker at it with the three environment overrides, so nothing here reads or
-touches the real backup drive.
+Every case that runs the checker points it at a temporary directory, nearly all
+by building a fake Timeshift layout there and setting the three environment
+overrides, so nothing here reads or touches the real backup drive.
 
 Note the mount check: the checker uses os.path.ismount, and a temporary
 directory is never a mount point. So the "drive gone" state is the natural
@@ -23,6 +23,7 @@ import sys
 import tempfile
 import time
 from pathlib import Path
+from unittest import mock
 
 SCRIPT_PATH = Path(__file__).with_name("backup-health-check.py")
 
@@ -167,6 +168,20 @@ check("format_age pads minutes", module.format_age(4 * 3600 + 5 * 60) == "4h05m"
       module.format_age(4 * 3600 + 5 * 60))
 check("format_age days", module.format_age(3 * 86400 + 4 * 3600) == "3d4h",
       module.format_age(3 * 86400 + 4 * 3600))
+
+# ned-box runs the checker with no mount override, so the platform test alone decides
+# whether the checks run. The joined string is equal to "linux" but a different object,
+# as the real sys.platform is on CPython 3.14.
+with tempfile.TemporaryDirectory() as temporary_directory, \
+        mock.patch.dict(os.environ), \
+        mock.patch.object(sys, "platform", "".join(["li", "nux"])), \
+        mock.patch.object(module, "BACKUP_MOUNT", Path(temporary_directory) / "mount"), \
+        mock.patch.object(module, "TIMESHIFT_SNAPSHOT_DIRECTORY",
+                          Path(temporary_directory) / "snapshots"):
+    os.environ.pop("NEDSNODES_BACKUP_MOUNT", None)
+    headline, _ = module.diagnose()
+check("linux without the mount override still runs the checks",
+      headline == "BACKUP DRIVE GONE unknown", repr(headline))
 
 if failures:
     print(f"\n{len(failures)} case(s) failed: {', '.join(failures)}")
