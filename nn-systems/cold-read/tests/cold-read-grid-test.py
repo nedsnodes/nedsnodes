@@ -1910,13 +1910,38 @@ try:
     (fallback_repository / "chapter[1].md").write_text("A reviewer's rewrite.\n", encoding="utf-8")
     fallback_restore = re.search(r"`(git [^`]*restore [^`]*<path>[^`]*)`", grid_module.STOPPED_CELL_WRITE_CHECK_LINE)
     if fallback_restore:
-        subprocess.run(["bash", "-c", fallback_restore.group(1).replace("<path>", "chapter[1].md")],
+        subprocess.run(["bash", "-c", fallback_restore.group(1).replace("<path>", shlex.quote("chapter[1].md"))],
                        cwd=fallback_repository, capture_output=True, text=True)
     check("the fallback message's restore command undoes a glob-named path and keeps another file's edit",
           fallback_restore is not None
           and (fallback_repository / "chapter[1].md").read_text(encoding="utf-8") == "Committed.\n"
           and (fallback_repository / "chapter1.md").read_text(encoding="utf-8") == "The agent's own edit.\n",
           repr(fallback_restore and fallback_restore.group(1)))
+
+    # The fallback message's two undo commands, filled in as it says, on a path holding single quotes and a space.
+    quoted_repository, quoted_git = repository_with_committed_file("fallback-undo-of-a-quote-named-file")
+    quoted_tracked, quoted_untracked = "don't won't.md", "can't shan't.md"
+    for neighbor in ("dont", "wont.md", "cant", "shant.md", quoted_tracked):
+        (quoted_repository / neighbor).write_text("Committed.\n", encoding="utf-8")
+    quoted_git("add", "dont", "wont.md", "cant", "shant.md", "--", quoted_tracked)
+    quoted_git("commit", "--quiet", "-m", "quote-named files")
+    for neighbor in ("dont", "wont.md", "cant", "shant.md"):
+        (quoted_repository / neighbor).write_text("The agent's own edit.\n", encoding="utf-8")
+    (quoted_repository / quoted_tracked).write_text("A reviewer's rewrite.\n", encoding="utf-8")
+    (quoted_repository / quoted_untracked).write_text("A reviewer's notes.\n", encoding="utf-8")
+    fallback_commands = re.findall(r"`((?:rm|git) [^`]*<path>[^`]*)`", grid_module.STOPPED_CELL_WRITE_CHECK_LINE)
+    for command in fallback_commands:
+        quoted_path = quoted_untracked if command.startswith("rm ") else quoted_tracked
+        subprocess.run(["bash", "-c", command.replace("<path>", shlex.quote(quoted_path))],
+                       cwd=quoted_repository, capture_output=True, text=True)
+    check("the fallback message's undo commands, given a shell-quoted path, act on that path and no other",
+          len(fallback_commands) == 2
+          and "as one shell-quoted argument" in grid_module.STOPPED_CELL_WRITE_CHECK_LINE
+          and (quoted_repository / quoted_tracked).read_text(encoding="utf-8") == "Committed.\n"
+          and not (quoted_repository / quoted_untracked).exists()
+          and all((quoted_repository / neighbor).read_text(encoding="utf-8") == "The agent's own edit.\n"
+                  for neighbor in ("dont", "wont.md", "cant", "shant.md")),
+          repr(fallback_commands))
 
     # A conflict with a missing side: both diffs can print only `* Unmerged path`.
     for missing_side_code, written in (("DD", "A reviewer's write.\n"), ("DU", "Incoming.\n")):

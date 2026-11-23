@@ -287,9 +287,9 @@ STOPPED_CELL_WRITE_CHECK_LINE = (
     + cell_common.COLD_READ_CELL_STRAY_WRITE_CHECK_SKIPPED_IS_NOT_A_CLEAN_RESULT_PHRASE
     + ". Before "
     "you do anything else, read `git status` against the edits you know are your own. "
-    "Undo a change git status lists, by running `rm -r -- '<path>'` if it is untracked or "
-    f"`git --literal-pathspecs {STRAY_WRITE_RESTORE_ARGUMENTS} '<path>'` if it is tracked, keeping the "
-    "single quotes, only when its content shows a reviewer wrote "
+    "Undo a change git status lists, by running `rm -r -- <path>` if it is untracked or "
+    f"`git --literal-pathspecs {STRAY_WRITE_RESTORE_ARGUMENTS} <path>` if it is tracked, with <path> "
+    "replaced by the path as one shell-quoted argument, only when its content shows a reviewer wrote "
     "it, such as notes about the document under review. Ask the user about any other "
     "change you did not make, and whenever you are unsure.")
 
