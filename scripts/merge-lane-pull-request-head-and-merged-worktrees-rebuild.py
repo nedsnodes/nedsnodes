@@ -81,7 +81,9 @@ def main(argv=None):
     head_worktree = common.pull_request_head_worktree(arguments, number)
     merged_worktree = common.pull_request_merged_worktree(arguments, number)
     try:
-        git(checkout, "fetch", "-q", "origin", f"pull/{number}/head")
+        # A review pipeline sharing this checkout reads FETCH_HEAD after its own fetch.
+        git(checkout, "fetch", "-q", "--no-write-fetch-head", "origin",
+            f"pull/{number}/head")
         rebuilt = ((merged_worktree,) if arguments.merged_worktree_only
                    else (head_worktree, merged_worktree))
         for worktree in rebuilt:

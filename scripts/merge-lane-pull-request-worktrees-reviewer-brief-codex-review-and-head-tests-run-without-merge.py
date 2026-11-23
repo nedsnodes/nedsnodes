@@ -39,6 +39,7 @@ the pull request's, with those commits and all three directory options:
   2. merge-lane-pull-request-reviewer-brief-compose-with-facts.py <the filled-in copy>
   3. merge-lane-code-review-codex-cell-run-on-pull-request-head.py <n> <base>
   4. merge-lane-pull-request-head-test-run-on-merged-worktree.py <n> --head-commit <head>
+     --main-commit <main>
   5. merge-lane-pull-request-claude-reviewer-headless-run-and-review-post.py <n> <tag> <head>,
      which runs the Claude reviewer and posts its review, only when the entry's
      claude_reviewer is true; when it is false, step 5 is skipped and the output
@@ -249,12 +250,6 @@ def brief_specification_disagreement(checkout, specifications, number, head, mai
     return None
 
 
-def head_test_run_rerun_main_commit_note(arguments):
-    return (f"it merges the same head onto the commit {arguments.review_tools_worktree_at_main} "
-            f"has checked out when it runs, so once that worktree has moved it tests a different "
-            f"main from the reviewer brief's merged tree")
-
-
 def step_command(step, arguments, step_arguments):
     return [sys.executable, str(arguments.review_tools_worktree_at_main / "scripts" / step),
             *step_arguments, *common.directory_options_argv(arguments)]
@@ -411,7 +406,8 @@ def main(argv=None):
     steps = ((WORKTREES_REBUILD_STEP, [str(number), head_commit, main_commit]),
              (REVIEWER_BRIEF_STEP, [str(filled_in_specifications_file)]),
              (CODEX_REVIEW_STEP, [str(number), base]),
-             (HEAD_TEST_RUN_STEP, [str(number), "--head-commit", head_commit]),
+             (HEAD_TEST_RUN_STEP, [str(number), "--head-commit", head_commit,
+                                  "--main-commit", main_commit]),
              (CLAUDE_REVIEWER_STEP, [str(number), str(specifications[0]["tag"]), head_commit]))
     claude_reviewer = specifications[0]["claude_reviewer"]
     for position, (step, step_arguments) in enumerate(steps[:2], start=1):
@@ -452,9 +448,6 @@ def main(argv=None):
                         f"if it shows a posted review or cannot tell, check the pull request's "
                         f"reviews on GitHub; run the step alone, with the same commits, only "
                         f"when no review of it is posted: {command}")
-            if exit_code != 0 and step == HEAD_TEST_RUN_STEP:
-                return (f"step {position} exited {exit_code}: run it alone, to see its message; "
-                        f"{head_test_run_rerun_main_commit_note(arguments)}: {command}")
             if exit_code != 0:
                 return (f"step {position} exited {exit_code}: run it alone, with the same "
                         f"commits, to see its message: {command}")
@@ -490,17 +483,12 @@ def main(argv=None):
         rerun_commands = "\n".join(
             f"  step {position}: {shlex.join(step_command(step, arguments, step_arguments))}"
             for position, step, step_arguments in at_the_same_time if position in failed)
-        which_commits = ("the command uses the same commits"
-                         if not any(position in failed and step == HEAD_TEST_RUN_STEP
-                                    for position, step, _ in at_the_same_time)
-                         else f"each command uses the same commits, except that step 4's: "
-                              f"{head_test_run_rerun_main_commit_note(arguments)}")
         print(f"PR {number}: {'; '.join(what_it_did(position) for position in (3, 4, 5))}; "
               f"nothing was merged.\n"
               f"Act on each failed step's own message, in the lines above that start "
               f"\"step <n> of {len(STEPS)} | \".\n"
               f"If such a message says to run its step again, run that step alone with its "
-              f"command below, not this program: {which_commits}, and the "
+              f"command below, not this program: the command uses the same commits, and the "
               f"steps that exited 0 do not run again, so no second Claude review is posted:\n"
               f"{rerun_commands}", flush=True)
         return 1

@@ -16,6 +16,7 @@ Run: python3 scripts/merge-lane-pull-request-head-test-run-on-merged-worktree-te
 import importlib.util
 import json
 import os
+import re
 import shlex
 import shutil
 import subprocess
@@ -116,6 +117,10 @@ def build_review_tools_clone(scratch):
     return review_tools, author
 
 
+def without_main_commit(stdout):
+    return re.sub(r"; tested on main [0-9a-f]{12}$", "", stdout, flags=re.M)
+
+
 def run_program(scratch, helpers, exits, *pull_requests, review_tools=None, cwd=None):
     log = scratch / "head-test-run-calls.log"
     log.unlink(missing_ok=True)
@@ -130,6 +135,8 @@ def run_program(scratch, helpers, exits, *pull_requests, review_tools=None, cwd=
              "MERGE_LANE_HEAD_TEST_RUN_TEST_EXITS": json.dumps(exits)})
     calls = ([json.loads(line) for line in log.read_text().splitlines()]
              if log.exists() else [])
+    completed.stdout_naming_main = completed.stdout
+    completed.stdout = without_main_commit(completed.stdout)
     return completed, calls
 
 
@@ -216,7 +223,8 @@ def main():
         check("a line the run prints on stderr reaches the program's stderr while the run "
               "still runs, so a run stopped early has shown how far it got",
               first == "a progress line on stderr\n" and live.returncode == 0
-              and stdout == "PR 7 head test run: exit 0; SUMMARY: fake summary for pr7-merged\n",
+              and without_main_commit(stdout)
+              == "PR 7 head test run: exit 0; SUMMARY: fake summary for pr7-merged\n",
               f"exit {live.returncode}\n{first!r}\n{stdout}{rest}")
 
         # /dev/full fails every write with ENOSPC, as a full disk under the outputs does.
@@ -274,7 +282,7 @@ def main():
             except subprocess.TimeoutExpired:
                 both.kill()
                 stdout = "still running after 60 s"
-            lines = stdout.splitlines()
+            lines = without_main_commit(stdout).splitlines()
             rerun_lines = [line for line in lines if line.startswith(
                 "When you need the lost stderr, run the head test run for PR 9 again")]
             before_lines = [line for line in lines if line.startswith("Before you run it")]
@@ -314,7 +322,7 @@ def main():
         except subprocess.TimeoutExpired:
             unread.kill()
             stdout = "still running after 60 s"
-        lines = stdout.splitlines()
+        lines = without_main_commit(stdout).splitlines()
         check("when writing the run's stderr to the program's stderr fails, the run still "
               "goes to its end, its stderr file is whole, and the program says so with the "
               "run's process id, points at that file instead of a rerun, keeps the summary "
@@ -339,14 +347,38 @@ def main():
         git(review_tools, "worktree", "add", "-q", "--detach", str(head_worktree), "origin/main")
         (head_worktree / "a-reviewer-is-reading-this.txt").write_text("in use\n")
         stale_merged = git(merged, "rev-parse", "HEAD")
-        main_fix = commit_file(review_tools, "fixed-on-main.txt", "fixed\n")
+        pinned_main = git(review_tools, "rev-parse", "HEAD")
+        git(author, "checkout", "-q", "main")
+        main_fix = commit_file(author, "fixed-on-main.txt", "fixed\n")
+        git(author, "push", "-q", str(scratch / "origin.git"), "main:refs/heads/main")
+        git(review_tools, "fetch", "-q", "origin", "refs/pull/8/head")
+        fetch_head_before = (review_tools / ".git" / "FETCH_HEAD").read_text()
         completed, calls = run_program(scratch, helpers, {}, "7")
         detail = f"exit {completed.returncode}\n{completed.stdout}{completed.stderr}"
-        check("when the review tools worktree has moved past pr<n>-merged, the run tests a "
-              "rebuilt pr<n>-merged that holds that commit",
+        check("when origin's main has moved past the review tools worktree and pr<n>-merged, "
+              "a direct run tests a rebuilt pr<n>-merged on origin's main, and says so",
               completed.returncode == 0 and len(calls) == 1 and calls[0]["holds_main_fix"]
               and git(merged, "rev-parse", "HEAD") != stale_merged
-              and git(merged, "rev-parse", "HEAD^1") == main_fix, detail)
+              and git(merged, "rev-parse", "HEAD^1") == main_fix
+              and git(review_tools, "rev-parse", "HEAD") == pinned_main
+              and f"; tested on main {main_fix[:12]}\n" in completed.stdout_naming_main, detail)
+        check("a direct run's fetches of main and of the head leave FETCH_HEAD as it was",
+              (review_tools / ".git" / "FETCH_HEAD").read_text() == fetch_head_before, detail)
+        completed, calls = run_program(scratch, helpers, {}, "7", "--main-commit", pinned_main)
+        detail = f"exit {completed.returncode}\n{completed.stdout}{completed.stderr}"
+        check("--main-commit is the main merged onto, even when origin's main is newer",
+              completed.returncode == 0 and git(merged, "rev-parse", "HEAD^1") == pinned_main
+              and not calls[0]["holds_main_fix"]
+              and f"; tested on main {pinned_main[:12]}\n" in completed.stdout_naming_main, detail)
+        completed, calls = run_program(scratch, helpers, {}, "7", "--main-commit", "no-such-commit")
+        check("a --main-commit that names no commit exits 2 before any run",
+              completed.returncode == 2 and calls == []
+              and "not run: git cannot read the main commit: git rev-parse" in completed.stdout,
+              f"exit {completed.returncode}\n{completed.stdout}{completed.stderr}")
+        completed, calls = run_program(scratch, helpers, {}, "7")
+        detail = f"exit {completed.returncode}\n{completed.stdout}{completed.stderr}"
+        check("a run after --main-commit returns to origin's main",
+              completed.returncode == 0 and git(merged, "rev-parse", "HEAD^1") == main_fix, detail)
         check("the rebuild leaves pr<n>-head in place, for the reviewers running beside it",
               (head_worktree / "a-reviewer-is-reading-this.txt").exists(), detail)
 
@@ -372,7 +404,9 @@ def main():
               and "--head-commit" in completed.stderr,
               f"exit {completed.returncode}\n{completed.stdout}{completed.stderr}")
 
-        commit_file(review_tools, "conflict.txt", "from main\n")
+        git(author, "checkout", "-q", "main")
+        commit_file(author, "conflict.txt", "from main\n")
+        git(author, "push", "-q", str(scratch / "origin.git"), "main:refs/heads/main")
         completed, calls = run_program(scratch, helpers, {}, "11", "8")
         detail = f"exit {completed.returncode}\n{completed.stdout}{completed.stderr}"
         check("a rebuild that fails on a merge conflict runs no tests for that pull request, "
@@ -420,10 +454,10 @@ def main():
         (not_a_checkout / "scripts" / REBUILD_PROGRAM.name).symlink_to(REBUILD_PROGRAM)
         completed, calls = run_program(scratch, helpers, {}, "7", review_tools=not_a_checkout)
         check("a review tools worktree that holds both programs but is not a git checkout "
-              "exits 2 before any run, naming the commit git could not read",
+              "exits 2 before any run, naming the git step that failed",
               completed.returncode == 2 and calls == []
-              and f"not run: git cannot read the commit checked out in {not_a_checkout}"
-              in completed.stdout,
+              and "not run: git cannot read the main commit: git fetch" in completed.stdout
+              and str(not_a_checkout) in completed.stdout,
               f"exit {completed.returncode}\n{completed.stdout}{completed.stderr}")
     finally:
         shutil.rmtree(scratch, ignore_errors=True)

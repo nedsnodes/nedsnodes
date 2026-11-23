@@ -3,15 +3,18 @@
 
 Usage:
   scripts/merge-lane-pull-request-head-test-run-on-merged-worktree.py <pull request number>...
-      [--head-commit COMMIT] [--merge-lane-worktrees-and-outputs-directory DIR] [--merge-lane-review-worktrees-directory DIR] [--review-tools-worktree-at-main DIR]
+      [--head-commit COMMIT] [--main-commit COMMIT] [--merge-lane-worktrees-and-outputs-directory DIR] [--merge-lane-review-worktrees-directory DIR] [--review-tools-worktree-at-main DIR]
 
 For each pull request in turn, first rebuilds pr<n>-merged, with
 --review-tools-worktree-at-main's
-scripts/merge-lane-pull-request-head-and-merged-worktrees-rebuild.py, from the
-commit that worktree has checked out and the pull request's head on origin, or
---head-commit, which a caller reviewing one fixed head passes and which takes
-one pull request. pr<n>-head is left as it is, because reviewers may be reading
-it. When the rebuild fails, that pull request's tests do not run.
+scripts/merge-lane-pull-request-head-and-merged-worktrees-rebuild.py, from main
+and the pull request's head. Main is --main-commit, which a caller reviewing
+one pinned main passes, or else main's newest commit on origin. The head is the
+pull request's head on origin, or --head-commit, which a caller reviewing one
+fixed head passes and which takes one pull request. pr<n>-head is left as it
+is, because reviewers may be reading it. When the rebuild fails, that pull
+request's tests do not run. No fetch here writes FETCH_HEAD, because a review
+pipeline sharing the worktree reads FETCH_HEAD after its own fetch.
 
 Then runs --review-tools-worktree-at-main's
 scripts/pull-request-head-test-run.py, not the pull request's, so a pull
@@ -32,13 +35,14 @@ the call and exit 1, so no suite starts a real agent.
 pull-request-head-test-run.py waits for the machine's test lock itself, so
 nothing here retries.
 
-Prints one line per pull request with the run's exit code and SUMMARY line.
+Prints one line per pull request with the run's exit code, SUMMARY line and
+the main commit it tested.
 Exit codes: 0 every run exited 0 and every copy of its stderr was written;
 otherwise the code set by the first pull request that failed: 2 when its
 pr<n>-merged could not be rebuilt, or a copy of its run's stderr could not be
 written, even when the run exited nonzero, else its run's exit code; 2 also,
 before any run, when tripwire-bin/ or either program named above is missing
-from --review-tools-worktree-at-main, or git cannot read that worktree's commit.
+from --review-tools-worktree-at-main, or git cannot read the main commit.
 """
 
 import argparse
@@ -51,6 +55,7 @@ from pathlib import Path
 
 HEAD_TEST_RUNNER = Path("scripts") / "pull-request-head-test-run.py"
 MERGED_WORKTREE_REBUILD = Path("scripts") / "merge-lane-pull-request-head-and-merged-worktrees-rebuild.py"
+ORIGIN_MAIN_REFERENCE = "refs/merge-lane-head-test-run/origin-main"
 
 _common_spec = importlib.util.spec_from_file_location(
     "merge_lane_pull_request_helpers_common", Path(__file__).resolve().with_name(
@@ -69,12 +74,32 @@ def parse_arguments(argv):
     parser.add_argument("--head-commit",
                         help="the head to merge, instead of the pull request's head on origin; "
                              "takes one pull request")
+    parser.add_argument("--main-commit",
+                        help="the main commit to merge onto, instead of main's newest commit "
+                             "on origin")
     common.add_directory_options(parser, "hr/ and tripwire-bin/")
     arguments = parser.parse_args(argv)
     if arguments.head_commit and len(arguments.pull_requests) != 1:
         parser.error("--head-commit takes exactly one pull request; run this program once for "
                      "each pull request, or leave --head-commit out")
     return common.resolve_path_options(arguments)
+
+
+def main_commit_to_test(arguments, environment):
+    """Return (the main commit, None), or (None, what failed)."""
+    tools = arguments.review_tools_worktree_at_main
+    commands = [] if arguments.main_commit else [
+        ["fetch", "-q", "--no-write-fetch-head", "origin",
+         f"+refs/heads/main:{ORIGIN_MAIN_REFERENCE}"]]
+    commands.append(["rev-parse", "--verify",
+                     f"{arguments.main_commit or ORIGIN_MAIN_REFERENCE}^{{commit}}"])
+    for command in commands:
+        completed = subprocess.run(["git", "-C", str(tools), *command], capture_output=True,
+                                   text=True, env=environment, stdin=subprocess.DEVNULL)
+        if completed.returncode != 0:
+            return None, (f"git {' '.join(command)} in {tools} exited {completed.returncode}: "
+                          f"{completed.stderr.strip()}")
+    return completed.stdout.strip(), None
 
 
 def merged_worktree_rebuild_failure(arguments, number, main_commit, environment):
@@ -119,15 +144,12 @@ def main(argv=None):
             return 2
     environment = run_all_test_suites.environment_without_git_redirecting_variables()
     environment["PATH"] = f"{tripwire}{os.pathsep}{environment.get('PATH', '')}"
-    main_read = subprocess.run(
-        ["git", "-C", str(review_tools_worktree), "rev-parse", "--verify", "HEAD^{commit}"],
-        capture_output=True, text=True, env=environment, stdin=subprocess.DEVNULL)
-    if main_read.returncode != 0:
-        print(f"not run: git cannot read the commit checked out in {review_tools_worktree}: "
-              f"{main_read.stderr.strip()}\n"
-              f"Pass a --review-tools-worktree-at-main that is a checkout at main.")
+    main_commit, main_failure = main_commit_to_test(arguments, environment)
+    if main_failure is not None:
+        print(f"not run: git cannot read the main commit: {main_failure}\n"
+              f"Pass a --review-tools-worktree-at-main that is a checkout of this repository "
+              f"with origin set, and any --main-commit naming a commit it holds.")
         return 2
-    main_commit = main_read.stdout.strip()
 
     first_failure = 0
     for number in arguments.pull_requests:
@@ -217,7 +239,8 @@ def main(argv=None):
         summaries = [line for line in (outputs / "stdout").read_text().splitlines()
                      if line.startswith(run_all_test_suites.SUMMARY_LINE_PREFIX)]
         summary = summaries[-1] if summaries else f"no SUMMARY line; see {outputs}/stderr"
-        print(f"PR {number} head test run: exit {completed.returncode}; {summary}", flush=True)
+        print(f"PR {number} head test run: exit {completed.returncode}; {summary}; "
+              f"tested on main {main_commit[:12]}", flush=True)
         if completed.returncode != 0 and first_failure == 0:
             first_failure = completed.returncode
     return first_failure
