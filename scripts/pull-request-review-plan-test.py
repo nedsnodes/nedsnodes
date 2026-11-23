@@ -11,6 +11,7 @@ Run: python3 scripts/pull-request-review-plan-test.py
 Prints one line per case and exits non-zero if any case fails.
 """
 
+import ast
 import importlib.util
 import json
 import os
@@ -239,7 +240,20 @@ def refusal_has_expected_prefix(result):
     return result.returncode == 1 and result.stderr.startswith("pull-request-review-plan: ")
 
 
+def string_literal_reaches_printed_text(source, literal):
+    tree = ast.parse(source)
+    parents = {child: parent for parent in ast.walk(tree) for child in ast.iter_child_nodes(parent)}
+    node = next(node for node in ast.walk(tree) if isinstance(node, ast.Constant) and node.value == literal)
+    return review_plan_module.nearest_call_prints_its_argument(node, parents, set())
+
+
 def run_unit_cases():
+    check("a string assigned by a statement counts as printed text",
+          string_literal_reaches_printed_text('message = "text"', "text"))
+    check("a string compared inside a print call does not count as printed text",
+          not string_literal_reaches_printed_text('print(answer == "yes")', "yes"))
+    check("an operand of a + chain passes its text up to the print call",
+          string_literal_reaches_printed_text('print("text" + name)', "text"))
     fence_source = "prose\n  ````python\nvalue\n```\n~~~~\n ```` \nend\n~~~sh\nlast\n"
     check("fence detection includes openers, closers and unclosed blocks",
           review_plan_module.fenced_code_block_line_numbers_in_markdown(fence_source) == {2, 3, 4, 5, 6, 8, 9})
