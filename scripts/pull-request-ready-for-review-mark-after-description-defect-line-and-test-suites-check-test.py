@@ -44,6 +44,7 @@ def check(case_name, condition, detail=""):
 
 HEAD = "a" * 40
 OTHER = "b" * 40
+MERGE_BASE = "c" * 40
 BRANCH = "example-topic-branch"
 CHECKOUT = "/work/pull-request-checkout"
 URL = "https://github.com/example/example/pull/77"
@@ -70,11 +71,12 @@ def ancestors(*pairs):
 
 class FakeRunner:
     """Answers gh pr view, git rev-parse HEAD, git branch --show-current, git rev-parse --verify, git
-    merge-base --is-ancestor, git status, the test suite runner and gh pr ready; any of them can
-    be replaced by a behaviour(command) that returns or raises. Records each call."""
+    merge-base --is-ancestor, git status, git merge-base origin/main HEAD, the test suite runner
+    and gh pr ready; any of them can be replaced by a behaviour(command) that returns or raises.
+    Records each call."""
 
     def __init__(self, view=None, rev_parse=None, status=None, suites=None, ready=None,
-                 branch=None, has_commit=None, ancestor=None):
+                 branch=None, has_commit=None, ancestor=None, merge_base=None):
         self.behaviours = {
             "view": view or (lambda command: completed(command, 0, view_answer())),
             "rev-parse": rev_parse or (lambda command: completed(command, 0,
@@ -83,6 +85,7 @@ class FakeRunner:
             "has-commit": has_commit or (lambda command: completed(command, 0)),
             "ancestor": ancestor or ancestors(),
             "status": status or (lambda command: completed(command, 0, "")),
+            "merge-base": merge_base or (lambda command: completed(command, 0, MERGE_BASE + "\n")),
             "suites": suites or (lambda command: completed(command, 0)),
             "ready": ready or (lambda command: completed(command, 0)),
         }
@@ -101,7 +104,9 @@ class FakeRunner:
             kind = "ancestor"
         elif command == program.UNCOMMITTED_CHANGES_COMMAND:
             kind = "status"
-        elif command == program.selective_test_run_command(CHECKOUT):
+        elif command == program.MERGE_BASE_WITH_ORIGIN_MAIN_COMMAND:
+            kind = "merge-base"
+        elif command == program.selective_test_run_command(CHECKOUT, MERGE_BASE):
             kind = "suites"
         elif command[:3] == ["gh", "pr", "ready"]:
             kind = "ready"
@@ -145,17 +150,19 @@ def main():
     check("a draft with a defect line, its head checked out and passing suites is marked ready, "
           "the suites running before gh pr ready",
           status == program.EXIT_MARKED_READY
-          and runner.calls == ["view", "rev-parse", "status", "suites", "ready"]
+          and runner.calls == ["view", "rev-parse", "status", "merge-base", "suites", "ready"]
           and f"#77 ({URL}) is marked ready for review." in output
           and "merge-lane-2" not in output + errors,
           (status, runner.calls, output, errors))
     check("the test suites run with the checkout's own runner, selecting the suites whose recorded "
-          "inputs changed since origin/main",
-          program.selective_test_run_command(CHECKOUT) == [
+          "inputs changed since the checkout's merge base with origin/main, not since origin/main",
+          program.MERGE_BASE_WITH_ORIGIN_MAIN_COMMAND == ["git", "merge-base", "origin/main", "HEAD"]
+          and program.selective_test_run_command(CHECKOUT, MERGE_BASE) == [
               "python3", CHECKOUT + "/scripts/run-all-test-suites.py",
-              "--only-suites-whose-recorded-inputs-changed-since", "origin/main"]
-          and f"running {CHECKOUT}/scripts/run-all-test-suites.py" in output,
-          repr(program.selective_test_run_command(CHECKOUT)))
+              "--only-suites-whose-recorded-inputs-changed-since", MERGE_BASE]
+          and f"running {CHECKOUT}/scripts/run-all-test-suites.py "
+              f"--only-suites-whose-recorded-inputs-changed-since {MERGE_BASE}\n" in output,
+          output)
 
     # Already ready: nothing to do, nothing run.
     runner = FakeRunner(view=answers(view_answer(isDraft=False)))
@@ -190,7 +197,7 @@ def main():
              FakeRunner(rev_parse=answers(f"{CHECKOUT}\n{OTHER}\n"),
                         branch=answers("some-other-branch\n")),
              ["view", "rev-parse", "branch"],
-             [f"this checkout's HEAD, {'b' * 12}, is not #77 ({URL})'s pushed nc-head-commit, "
+             [f"this checkout's HEAD, {'b' * 12}, is not #77 ({URL})'s pushed nn-head-commit, "
               f"{'a' * 12}", f"This checkout is on branch some-other-branch, not the pull "
               f"request's branch {BRANCH}: run this again from the checkout that has {BRANCH} "
               "checked out; git worktree list names each checkout of this clone with its "
@@ -260,7 +267,7 @@ def main():
              FakeRunner(rev_parse=answers(f"{CHECKOUT}\n{OTHER}\n"),
                         has_commit=exits(1, "error: hash mismatch " + HEAD)),
              ["view", "rev-parse", "branch", "has-commit"],
-             ["looking for the pushed nc-head-commit in this checkout failed: git rev-parse "
+             ["looking for the pushed nn-head-commit in this checkout failed: git rev-parse "
               f"--verify exited with status 1: error: hash mismatch {HEAD}."]),
             ("a checkout with untracked files that are not ignored",
              FakeRunner(status=answers("?? notes.txt\n?? more.txt\n")),
@@ -284,8 +291,21 @@ def main():
             ("an empty description", FakeRunner(view=answers(view_answer(body=None))),
              ["view", "rev-parse", "status"],
              ["description has no line beginning \"#root_cause\""]),
+            ("a checkout whose merge base with origin/main git cannot find",
+             FakeRunner(merge_base=exits(128, "fatal: Not a valid object name origin/main\n")),
+             ["view", "rev-parse", "status", "merge-base"],
+             ["finding this checkout's merge base with origin/main failed: git merge-base "
+              "origin/main exited with status 128: fatal: Not a valid object name origin/main.",
+              "Nothing was changed on GitHub.",
+              "If git's error says origin/main is not a valid object name: run git fetch origin "
+              "main, then run this again.",
+              "If git gave any other error, or none: " + RETRY_LINE]),
+            ("a checkout with no merge base with origin/main", FakeRunner(merge_base=exits(1)),
+             ["view", "rev-parse", "status", "merge-base"],
+             ["git merge-base origin/main exited with status 1, printing no error.",
+              "If git gave any other error, or none: " + RETRY_LINE]),
             ("a failing test suite", FakeRunner(suites=exits(1)),
-             ["view", "rev-parse", "status", "suites"],
+             ["view", "rev-parse", "status", "merge-base", "suites"],
              ["the test suites exited with status 1, so #77",
               "The failing suites are named above.",
               "Fix the cause of each suite's failure and commit the fix; then push, and run "
@@ -295,7 +315,7 @@ def main():
               "then run this again; if it names nothing to do, tell the user, or the agent that "
               "dispatched you, what it printed."]),
             ("a test suite runner that stops before judging every suite",
-             FakeRunner(suites=exits(2)), ["view", "rev-parse", "status", "suites"],
+             FakeRunner(suites=exits(2)), ["view", "rev-parse", "status", "merge-base", "suites"],
              ["scripts/run-all-test-suites.py exited with status 2, before judging every suite, "
               "so #77",
               "Its error is above.", RETRY_LINE])]:
@@ -412,23 +432,23 @@ def main():
             ("the pushed commit is in the clone but cannot be read",
              FakeRunner(rev_parse=answers(f"{CHECKOUT}\n{OTHER}\n"),
                         has_commit=exits(128, "error: inflate: data stream error")),
-             ["looking for the pushed nc-head-commit in this checkout failed: git rev-parse "
+             ["looking for the pushed nn-head-commit in this checkout failed: git rev-parse "
               "--verify exited with status 128: error: inflate: data stream error.",
               "If git gave any other error: Run this command again once."]),
             ("git merge-base fails",
              FakeRunner(rev_parse=answers(f"{CHECKOUT}\n{OTHER}\n"),
                         ancestor=exits(128, "fatal: Not a valid commit name")),
-             ["comparing this checkout's HEAD with the pushed nc-head-commit failed: git "
+             ["comparing this checkout's HEAD with the pushed nn-head-commit failed: git "
               "merge-base --is-ancestor exited with status 128: fatal: Not a valid commit name.",
               "If git gave any other error: Run this command again once."]),
             ("git merge-base is killed by a signal",
              FakeRunner(rev_parse=answers(f"{CHECKOUT}\n{OTHER}\n"), ancestor=exits(-9)),
-             ["comparing this checkout's HEAD with the pushed nc-head-commit failed: git "
+             ["comparing this checkout's HEAD with the pushed nn-head-commit failed: git "
               "merge-base --is-ancestor exited with status -9, printing no error."]),
             ("git merge-base cannot be run",
              FakeRunner(rev_parse=answers(f"{CHECKOUT}\n{OTHER}\n"),
                         ancestor=raises(FileNotFoundError(2, "No such file", "git"))),
-             ["comparing this checkout's HEAD with the pushed nc-head-commit failed: git could "
+             ["comparing this checkout's HEAD with the pushed nn-head-commit failed: git could "
               "not be run ("]),
             ("git merge-base does not answer in time",
              FakeRunner(rev_parse=answers(f"{CHECKOUT}\n{OTHER}\n"),

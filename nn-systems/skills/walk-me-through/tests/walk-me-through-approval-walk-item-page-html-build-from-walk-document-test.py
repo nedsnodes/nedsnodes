@@ -130,6 +130,27 @@ def run_unit_cases(scratch):
     check("a sub-step's page holds the sub-step alone, its ### heading as the <h1>",
           result.returncode == 0 and "<h1>Item 4.1 of 9: the filter's default</h1>" in page
           and "Off by default." in page and "A filter would hide" not in page, page)
+    setext_sub_step = ("# A walk\n\n# Item 4 of 9: a filter\n\nA filter would hide old rows.\n\n"
+                       "Item 4.1 of 9: Recommendation: keep rows\n---\n\nOff by default.\n")
+    result, page = built(scratch, "4", document=setext_sub_step)
+    check("an item's page keeps a setext sub-step's heading a heading, not a paragraph a hook reads as a decision line",
+          result.returncode == 0 and "<h2>Item 4.1 of 9: Recommendation: keep rows</h2>" in page
+          and "Off by default." in page, page)
+    shared_setext_sub_step = ("# A walk\n\n# Item 4 of 9: a filter\n\nA filter would hide old rows.\n\n"
+                              "# Item 5 of 9: a sort\n\nSorting by date.\n\n"
+                              "Items 4.1 and 5.1 of 9: Recommendation: keep rows\nand dates\n---\n\n"
+                              "Item 4.1: Off by default.\n\nItem 5.1: Newest first.\n")
+    result, page = built(scratch, "4", document=shared_setext_sub_step)
+    check("an item's page keeps a setext sub-step heading it shares with another item's sub-step a heading, its "
+          "further line included, and carries only its own sub-step's lines",
+          result.returncode == 0 and "<h2>Items 4.1 and 5.1 of 9: Recommendation: keep rows<br />\nand dates</h2>" in page
+          and "Off by default." in page and "Newest first." not in page, page)
+    shared_setext_item = ("# A walk\n\nItems 5 and 6 of 9: two small corrections\nto one file\n===\n\n"
+                          "Item 5: fixes a path.\n\nItem 6: drops a sentence.\n")
+    result, page = built(scratch, "6", document=shared_setext_item)
+    check("an item under a setext heading it shares keeps the heading's further line, which the hook must see",
+          result.returncode == 0 and "to one file" in page and "drops a sentence" in page
+          and "fixes a path" not in page, page)
     result, page = built(scratch, "6")
     check("an item that shares a heading keeps its own lines under that heading",
           result.returncode == 0 and "<h1>Items 5 and 6 of 9: two small corrections</h1>" in page

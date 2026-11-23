@@ -48,19 +48,18 @@ WHAT IS PINNED HERE.
   - No credential file can be read from inside the cell (user-ruled
     2026-09-28). The stub is run by the launcher inside the machine's real
     sandbox -- sandbox-exec on macOS, bwrap on Linux -- and tries to read
-    canaries in a scratch home and the repository: one in each credential
-    directory, `.config/nedsnodes/`, `gh`'s login directory `.config/gh/`,
-    `.ssh/`, `.steam/` and `nedsmessenger/secrets/`, none named like a
-    credential, so only the rule for the directory covers them; `.token` and
-    `.env` files outside them; and an ordinary file. The directory canaries
-    come back without their content everywhere, the `.token` and `.env`
-    files only on macOS, whose sandbox takes a name pattern, and the
-    ordinary file with it. The same stub run directly reads every canary,
-    which is what shows the check can fail.
+    canaries in a scratch home and the repository: files at paths ned-box's
+    list of credential files names, each inside a folder the Mac denies;
+    files in those folders that the list does not name; `.token` and `.env`
+    files outside them; and an ordinary file. The listed files come back
+    without their content everywhere; the unlisted ones and the `.token` and
+    `.env` files only on macOS, whose sandbox takes folders and name
+    patterns; and the ordinary file with its content. The same stub run
+    directly reads every canary, which is what shows the check can fail.
     Claude's and Codex's login files in the scratch home are kept out too,
     and agy's own is still read, since masking it would log agy out
     (user-ruled 2026-09-29). These cases need the real sandbox program,
-    which cannot start inside the nc-test-sandbox, so they run only with
+    which cannot start inside the nn-test-sandbox, so they run only with
     --real-sandbox-cases-only, which
     nn-systems/cold-read/tests/cold-read-agy-cell-real-sandbox-test.py
     passes; every other case runs with the fixture's pass-through stand-in
@@ -68,6 +67,7 @@ WHAT IS PINNED HERE.
     launcher refuses, exit 64, and never starts agy.
 
   - The Google login. A GEMINI_API_KEY the caller set never reaches agy,
+    nor does a GH_TOKEN or GITHUB_TOKEN,
     and a key file at .config/nedsnodes/gemini-api.key in the scratch home
     is not read. When agy prints what the real agy prints with no login, the
     cell exits 1 and its cause line is logged-out, saying how to log agy in.
@@ -152,7 +152,8 @@ SHORT_CHAT_REMARK = "I have written the report to the path you gave me.\n"
 # "near_miss" writes the report one directory away from where it was asked,
 # "stdout" is the model's chat text, "dump_argv" and "dump_prompt" are paths
 # to record what the stub was launched with, "dump_key" is a path to record
-# GEMINI_API_KEY as agy received it (null when absent), "hang_writing_child_pid_to" is a path
+# GEMINI_API_KEY as agy received it (null when absent), "dump_github_tokens" is a path to
+# record GH_TOKEN and GITHUB_TOKEN as agy received them, "hang_writing_child_pid_to" is a path
 # to append the pid of a child the stub starts before both sleep past any
 # deadline a case sets, "exit_leaving_child_writing_pid_to" is a path to
 # append the pid of a child the stub starts, which keeps the stub's stdout
@@ -213,6 +214,9 @@ if "read_paths" in step:
 if "dump_key" in step:
     pathlib.Path(step["dump_key"]).write_text(
         json.dumps(os.environ.get("GEMINI_API_KEY")), encoding="utf-8")
+if "dump_github_tokens" in step:
+    pathlib.Path(step["dump_github_tokens"]).write_text(json.dumps(
+        [os.environ.get("GH_TOKEN"), os.environ.get("GITHUB_TOKEN")]), encoding="utf-8")
 if "dump_record_directory_descriptor_count" in step:
     record_directory = os.stat(report_path.parent)
     count = 0
@@ -263,7 +267,7 @@ failures = []
 # program, with no stand-in on PATH; REAL_SANDBOX_CASES_SUITE runs it so, and
 # is listed in scripts/run-all-test-suites.py's SUITES_RUN_WITHOUT_ANY_SANDBOX.
 # Without it every other case runs, with the fixture's pass-through stand-in
-# for the sandbox program on PATH, so this suite runs inside the nc-test-sandbox.
+# for the sandbox program on PATH, so this suite runs inside the nn-test-sandbox.
 REAL_SANDBOX_CASES_ONLY_FLAG = "--real-sandbox-cases-only"
 REAL_SANDBOX_CASES_ONLY = REAL_SANDBOX_CASES_ONLY_FLAG in sys.argv[1:]
 REAL_SANDBOX_CASES_SUITE = "nn-systems/cold-read/tests/cold-read-agy-cell-real-sandbox-test.py"
@@ -332,12 +336,17 @@ def scratch_home_for(stub_directory):
 
 
 def run_agy_cell(repository, stub_directory, plan, report_path, *arguments,
-                 tier="fast", path_override=None, gemini_api_key=None, pass_fds=()):
+                 tier="fast", path_override=None, gemini_api_key=None, pass_fds=(),
+                 github_token=None):
     install_stub_agy(stub_directory)
     environment = dict(os.environ)
     environment.pop("GEMINI_API_KEY", None)
     if gemini_api_key is not None:
         environment["GEMINI_API_KEY"] = gemini_api_key
+    for name in ("GH_TOKEN", "GITHUB_TOKEN"):
+        environment.pop(name, None)
+        if github_token is not None:
+            environment[name] = github_token
     environment["HOME"] = str(scratch_home_for(stub_directory))
     environment["PATH"] = (path_override if path_override is not None else
                            path_with_stub_agy_first(stub_directory, environment))
@@ -444,17 +453,18 @@ def credential_files_unreadable_inside_the_real_sandbox_cases(scratch, stubs):
     REAL_SANDBOX_CASES_ONLY_FLAG."""
     # --- No credential file is readable from inside the cell -------------
     # The canaries sit in the scratch home the launcher is given as HOME.
-    # Those in the credential directories carry no credential suffix, so
-    # only the directory rule -- bwrap's --tmpfs, sandbox-exec's subpath --
-    # keeps them out. The .token and .env files outside those directories
-    # are kept out by sandbox-exec's name pattern on macOS; bwrap takes no
-    # pattern, so on Linux they stay readable.
+    # On Linux bwrap masks only the files CREDENTIAL_FILES_ON_NED_BOX names;
+    # on macOS sandbox-exec denies the credential directories and name
+    # patterns, which also hold every listed canary here.
     repository = build_scratch_repository(scratch)
     report = report_path_for(repository, "credential-files")
     scratch_home = scratch_home_for(stubs)
     canary_text = "CANARY-NOT-A-SECRET-cold-read-agy-cell-test\n"
+    listed_canaries = tuple(scratch_home / relative for relative in (
+        ".config/nedsnodes/ubuntu-claude.token", ".config/gh/hosts.yml",
+        ".ssh/id_ed25519_mac_side_action", "nedsmessenger/.env",
+        "nedsmessenger/secrets/claude-oauth-token"))
     nedschorus_canary = scratch_home / ".config" / "nedsnodes" / "probe-canary"
-    gh_canary = scratch_home / ".config" / "gh" / "hosts.yml"
     ssh_canary = scratch_home / ".ssh" / "id_canary"
     steam_canary = scratch_home / ".steam" / "probe-canary"
     nedsmessenger_canary = scratch_home / "nedsmessenger" / "secrets" / "probe-canary"
@@ -469,13 +479,12 @@ def credential_files_unreadable_inside_the_real_sandbox_cases(scratch, stubs):
     claude_login_canary = scratch_home / ".claude" / ".credentials.json"
     codex_login_canary = scratch_home / ".codex" / "auth.json"
     agy_login_canary = scratch_home / ".gemini" / "antigravity-cli" / "antigravity-oauth-token"
-    credential_canaries = (nedschorus_canary, gh_canary, ssh_canary,
-                           steam_canary, nedsmessenger_canary,
-                           token_canary, env_canary,
-                           repository_token_canary, repository_env_canary,
+    mac_only_canaries = (nedschorus_canary, ssh_canary,
+                         steam_canary, nedsmessenger_canary,
+                         token_canary, env_canary,
+                         repository_token_canary, repository_env_canary)
+    credential_canaries = (*listed_canaries, *mac_only_canaries,
                            claude_login_canary, codex_login_canary)
-    name_pattern_canaries = (token_canary, env_canary,
-                             repository_token_canary, repository_env_canary)
     for canary in (*credential_canaries, ordinary_file, agy_login_canary):
         canary.parent.mkdir(parents=True, exist_ok=True)
         canary.write_text(canary_text, encoding="utf-8")
@@ -495,7 +504,7 @@ def credential_files_unreadable_inside_the_real_sandbox_cases(scratch, stubs):
                    capture_output=True, text=True, check=False)
     direct_reads = (json.loads(direct_reads_dump.read_text(encoding="utf-8"))
                     if direct_reads_dump.is_file() else {})
-    check("the control: the stub run directly reads all eleven credential canaries",
+    check("the control: the stub run directly reads every credential canary",
           all(direct_reads.get(str(path)) == canary_text
               for path in credential_canaries),
           repr(direct_reads))
@@ -508,20 +517,21 @@ def credential_files_unreadable_inside_the_real_sandbox_cases(scratch, stubs):
                   if cell_reads_dump.is_file() else {})
     check("a cell whose agy tries the canaries still exits 0",
           result.returncode == 0, f"exit {result.returncode}; stderr={result.stderr!r}")
-    for label, canary in (("a file in .config/nedsnodes/", nedschorus_canary),
-                          ("a file in gh's login directory .config/gh/", gh_canary),
-                          ("a file in .ssh/", ssh_canary),
+    for label, canary in (*((f"the listed credential file {canary.relative_to(scratch_home)}", canary)
+                            for canary in listed_canaries),
+                          ("an unlisted file in .config/nedsnodes/", nedschorus_canary),
+                          ("an unlisted file in .ssh/", ssh_canary),
                           ("a file in .steam/", steam_canary),
-                          ("a file in nedsmessenger/secrets/", nedsmessenger_canary),
+                          ("an unlisted file in nedsmessenger/secrets/", nedsmessenger_canary),
                           ("a .token file", token_canary),
                           ("a .env file", env_canary),
                           ("a .token file in the repository", repository_token_canary),
                           ("a .env file in the repository", repository_env_canary),
                           ("Claude's login file", claude_login_canary),
                           ("Codex's login file", codex_login_canary)):
-        if canary in name_pattern_canaries and sys.platform.startswith("linux"):
-            check(f"inside the cell on Linux, {label} outside the credential directories "
-                  "is read, since bwrap denies no name pattern",
+        if canary in mac_only_canaries and sys.platform.startswith("linux"):
+            check(f"inside the cell on Linux, {label} is read, since bwrap masks only "
+                  "the listed credential files",
                   cell_reads.get(str(canary)) == canary_text, repr(cell_reads))
             continue
         check(f"inside the cell, {label} cannot be read",
@@ -715,7 +725,7 @@ with tempfile.TemporaryDirectory() as scratch:
           f"exit {result.returncode}; stamp={stamp!r}; stderr={result.stderr!r}")
 
     print("Not run here: the credential-file cases need the real sandbox program, "
-          f"which cannot start in the nc-test-sandbox; {REAL_SANDBOX_CASES_SUITE} runs them")
+          f"which cannot start in the nn-test-sandbox; {REAL_SANDBOX_CASES_SUITE} runs them")
 
     # --- The Google login, not a Gemini API key -------------------------------
     gemini_api_key_file = scratch_home_for(stubs) / ".config" / "nedsnodes" / "gemini-api.key"
@@ -738,6 +748,19 @@ with tempfile.TemporaryDirectory() as scratch:
               f"exit {result.returncode}; key={received_key(key_dump)!r}; "
               f"stderr={result.stderr!r}")
     gemini_api_key_file.unlink()
+
+    repository = build_scratch_repository(scratch)
+    report = report_path_for(repository, "github-token-from-caller")
+    tokens_dump = scratch / "github-token-from-caller-tokens.json"
+    result = run_agy_cell(repository, stubs,
+                          {"*": {"report": "STUB AGY REVIEW\n",
+                                 "dump_github_tokens": str(tokens_dump)}},
+                          report, github_token="test-github-token-from-caller")
+    received_tokens = (json.loads(tokens_dump.read_text(encoding="utf-8"))
+                       if tokens_dump.is_file() else "NOT RUN")
+    check("github-token-from-caller: the cell exits 0 and agy is given no GH_TOKEN or GITHUB_TOKEN",
+          result.returncode == 0 and received_tokens == [None, None],
+          f"exit {result.returncode}; tokens={received_tokens!r}; stderr={result.stderr!r}")
 
     # What the real agy 1.4.7 printed on ned-box with ~/.gemini hidden; the URL is shortened.
     agy_logged_out_stderr = (

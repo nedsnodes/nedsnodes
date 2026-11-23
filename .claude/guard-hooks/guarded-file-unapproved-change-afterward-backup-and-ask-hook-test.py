@@ -1536,6 +1536,71 @@ def cases(scratch):
     check("the declined new file is not asked about again once it is deleted",
           world.run() == "", world.store_file(skill, "log"))
 
+    # -- a new file with no approved version, which origin/main does not hold, may be deleted
+    world = fresh(scratch, "new-file-deletion-offered")
+    stray = world.repo / ".claude" / "skills" / "stray" / "SKILL.md"
+    stray.parent.mkdir(parents=True)
+    stray.write_text("a skill no one approved\n")
+    offer = f"rm -- {stray}"
+    subagent_stop = "If you are any other subagent, stop"
+    message = world.run()
+    check("the ask about a new file that has no approved version and that origin/main does not "
+          "hold offers its deletion, before the line that stops a subagent",
+          offer in message and message.index(offer) < message.index(subagent_stop), message)
+    reminder = world.run()
+    check("the reminder about that new file offers its deletion, before the line that stops a "
+          "subagent",
+          "Reminder" in reminder and offer in reminder
+          and reminder.index(offer) < reminder.index(subagent_stop), reminder)
+    subprocess.run(offer.split(), check=True)
+    check("the offered rm settles the new file without asking the user, and the version it held "
+          "stays in the store",
+          world.run() == "" and world.approved_in_log(stray, "deleted", "deletion")
+          and len(world.versions(stray)) >= 1, world.store_file(stray, "log"))
+
+    # -- a file with an approved version is not offered for deletion
+    world = fresh(scratch, "approved-file-deletion-not-offered")
+    (world.repo / "CLAUDE.md").write_text("project v2\n")
+    message = world.run()
+    reminder = world.run()
+    check("neither the ask nor the reminder about a file with an approved version offers its "
+          "deletion",
+          "A guarded file changed" in message and "Reminder" in reminder
+          and "rm --" not in message and "rm --" not in reminder, (message, reminder))
+
+    # -- a new file at a path origin/main holds is not offered for deletion
+    world = fresh(scratch, "origin-main-path-deletion-not-offered")
+    page = world.repo / ".claude" / "skills" / "page" / "SKILL.md"
+    world.git("checkout", "-q", "-b", "reviewed")
+    page.parent.mkdir(parents=True)
+    page.write_text("the reviewed page\n")
+    world.git("add", ".")
+    world.git("commit", "-qm", "a reviewed pull request adds the page")
+    world.git("update-ref", "refs/remotes/origin/main", "reviewed")
+    world.git("checkout", "-q", "main")
+    world.git("branch", "-qD", "reviewed")
+    page.parent.mkdir(parents=True, exist_ok=True)
+    page.write_text("another version of the page\n")
+    message = world.run()
+    reminder = world.run()
+    check("neither the ask nor the reminder about a file whose path origin/main holds offers its "
+          "deletion",
+          "A guarded file changed" in message and "Reminder" in reminder
+          and "rm --" not in message and "rm --" not in reminder, (message, reminder))
+
+    # -- a new file the store keeps no copy of, as one a branch's HEAD commit holds, is not
+    # offered for deletion
+    world = fresh(scratch, "uncopied-new-file-deletion-not-offered")
+    committed = world.repo / ".claude" / "skills" / "committed" / "SKILL.md"
+    committed.parent.mkdir(parents=True)
+    committed.write_text("a committed skill no one approved\n")
+    world.git("add", ".")
+    world.git("commit", "-qm", "the agent commits a skill")
+    message = world.run()
+    check("the ask about a new file that the store keeps no copy of does not offer its deletion",
+          "A guarded file changed" in message and world.versions(committed) == ["log"]
+          and "rm --" not in message, (message, world.versions(committed)))
+
     # -- declining deletions whose folders are gone
     world = fresh(scratch, "deleted-folders")
     skills = world.repo / ".claude" / "skills"
@@ -1933,6 +1998,23 @@ def cases(scratch):
     check("a run with nothing to do but decisions to make again saves them",
           message == "" and "" in json.loads(state.read_text())["guarded"],
           (message, state.read_text()))
+
+    # -- cached decisions are dropped when the draft-place module the guard decides from changes,
+    # though the guard file itself does not
+    hook = load_hook_in_this_process()
+    copied_guard_hooks = Path(scratch) / "decision-cache-guard-hooks"
+    shutil.copytree(hook.GUARD_HOOKS_DIRECTORY, copied_guard_hooks)
+    hook.GUARD_HOOKS_DIRECTORY = copied_guard_hooks
+    world = fresh(scratch, "decision-cache-draft-place-module-changed")
+    decisions = {}
+    hook.checkout_files(world.repo, decisions)
+    decisions["made-up-cached-path"] = True
+    with open(copied_guard_hooks / "draft-document-place-directories-definition-and-membership-common.py",
+              "a") as module:
+        module.write("\n")
+    hook.checkout_files(world.repo, decisions)
+    check("a change to the guard's draft-place module drops the cached guard decisions",
+          "made-up-cached-path" not in decisions, decisions)
 
     # -- git's own work after a first run made while a merge was stopped, in a checkout with no
     # guarded file yet, is not asked about

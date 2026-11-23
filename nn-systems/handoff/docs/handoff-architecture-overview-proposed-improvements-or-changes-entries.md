@@ -1000,3 +1000,16 @@ Goes wrong when: a reader takes the assertion as exact.
 The claim check's evidence:
 > Files read: scripts/worktree-owner-file-read-and-write.py (usage :47-54), scripts/agent-seat-worktree-create-with-owner-file.py, scripts/git-client-side-hooks-post-checkout-new-worktree-owner-file-write.py, scripts/worktree-owner-file-one-time-backfill-for-existing-worktrees-with-none.py, nn-systems/handoff/uncommitted-work-snapshots.py. Searches: Grep `"write", "--agent-(seat|session)"|'write', '--agent` in *.py finds only the module and its test. Grep for `worktree-owner-file-read-and-write.py (write|show)` finds only text telling a person or agent to run `write` (post-checkout program :67, backfill :58, :254). Programs that make a worktree call the module's functions in-process (uncommitted-work-snapshot-hook.py:135, uncommitted-work-snapshots.py:906) rather than run the commands. So the commands' starters are a person or an agent that a failure message sends there, not a program.
 State: open
+
+## E85 — possible problem: an assertion of the overview is contradicted
+
+Claim: A first prompt given on the handoff-supervisor's command line reaches the agent-session ending with a line the handoff-supervisor adds, which `search-user-messages-in-transcripts.py` uses to tell that prompt from the user's words.
+Found by: the overview claim check of 2026-11-22 against commit 207496674d80fc7463c7e967e341cb065405f1ec; its report is /home/nedlern/nedsnodes-logs/overview-write-architecture-overview-claim-check-reports/nedsnodes-handoff-architecture-overview/02bdaad64ba6c71ffdd42af729a5923f5125e48a-2026-11-22T09-07-46-069758Z.md.
+Fixed by: regular maintenance, in the overview.
+Goes wrong when: a reader takes the assertion as exact.
+The claim check's evidence:
+> - The line is added at the end of the given prompt: nn-systems/handoff/handoff-supervisor.py:313-315 `return f"{first_prompt}\n\n{FIRST_PROMPT_FROM_LAUNCH_COMMAND_NOT_TYPED_BY_THE_USER_LINE}"`.
+> - But the prompt then has the leftovers appended after that line, because a first prompt has no next-step heading: :2829-2831, and :1957-1958 `if not next_step_heading:` / `return f"{prompt}\n\n{inserted}"`. So whenever the agent-seat has a leftover, the prompt that reaches the agent-session does not end with the line.
+> - The reader checks containment, not the ending: scripts/search-user-messages-in-transcripts.py:54 `# Each phrase is inside every prompt of one kind, wherever it falls in that prompt.` and :70 `or any(phrase in text for phrase in LAUNCH_PROMPT_PHRASES))`.
+> - "Ending with" is loose wording. It would mislead only a reader who wrote a new end-of-text check without looking at the existing reader.
+State: open

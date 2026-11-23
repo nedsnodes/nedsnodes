@@ -26,7 +26,8 @@ It prints one JSON object per agent-seat, one per line. Each holds what the late
 without reading anything again: the session id, the transcript path, the last time a token was
 spent and the file that showed it, what is running and since when, Workflow-tool runs included, each
 background command with the description of the Bash call that started it and, when its command line
-starts with coreutils `timeout <duration>`, the time that timeout stops it (a subagent that reported and
+starts with coreutils `timeout <duration>` and runs nothing after the timed command except through a
+pipe, the time that timeout stops it (a subagent that reported and
 stopped while background commands it launched still run gets the time of its report under
 `stopped_at` and a list of those commands under `own_running_background_commands`), the matched sentences with the code's reading of each, the agent-seat's last message, the tool calls a judge of the sentences
 looks through, the rule that applies and its decision.
@@ -106,6 +107,8 @@ TIMEOUT_COMMAND_LINE_START_PATTERN = re.compile(
     r"\s*timeout(?:\s+(?:-[fpv]+|--(?:foreground|preserve-status|verbose)"
     r"|--(?:kill-after|signal)(?:=|\s+)\S+|-[ks]\s*\S+))*"
     r"\s+(?P<number>\d+(?:\.\d*)?|\.\d+)(?P<unit>[smhd]?)\s")
+HERE_DOCUMENT_OPERATOR_PATTERN = re.compile(
+    r"<<(?!<)(?P<tabs_stripped>-?)[ \t]*(?P<delimiter>'[^'\n]*'|\"[^\"\n]*\"|[^\s;&|<>()]+)")
 SECONDS_BY_TIMEOUT_DURATION_UNIT = {"": 1, "s": 1, "m": 60, "h": 3600, "d": 86400}
 HANDOFF_PUT_OFF_TEXT = ("Your handoff was put off at {time} and nothing is running now. "
                         "Is now a good time to hand off?")
@@ -341,6 +344,13 @@ def is_usage_limit(record):
     return record.get("type") == "assistant" and record.get("apiError") == USAGE_LIMIT_API_ERROR
 
 
+def usage_limit_reset_time(record):
+    """The reset time, in Unix seconds, that a usage-limit record carries, or None when it carries
+    none. Its text, such as "resets 1am (America/Los_Angeles)", is for people and is not read."""
+    resets_at = (record.get("quotaLimits") or {}).get("resetsAt")
+    return resets_at if isinstance(resets_at, (int, float)) else None
+
+
 def message_text(record):
     content = (record.get("message") or {}).get("content")
     if isinstance(content, str):
@@ -412,12 +422,86 @@ class BackgroundCommandCalls:
 
 
 def timeout_seconds_of_command_line(command):
-    """The duration of the coreutils `timeout` a command line starts with, in seconds; None when it
-    starts with none, and 0 for a duration of 0, which disables the timeout."""
+    """The duration of the coreutils `timeout` a command line starts with, in seconds, when that
+    timeout stops the whole line; 0 for a duration of 0, which disables the timeout. None when the
+    line starts with no timeout, or goes on past the timed command with a `;`, `&&`, `||`, `&` or
+    line break, since the shell runs what follows outside the timeout. A pipe is allowed: once the
+    timeout stops the first command, the rest of the pipeline reads the end of its input. Not
+    handled, so each keeps a deadline although work runs outside the timeout: a command
+    substitution the outer shell runs before the timeout starts, as in `timeout 1h echo "$(a)"`; a
+    comment holding a lone `'` or `)` before a line break, or a `<<`; an ANSI-C string, as in
+    `$'it\\'s'; b`; odd nesting, as in `"$(b ")")" ; c`; a `$(...)` in an unquoted here-document's
+    body, which the outer shell runs before the timeout starts; a delimiter partly quoted, as in
+    `<<'END'OF`, whose body is read to a line `END`, not `ENDOF`; a here-document inside
+    parentheses, as in `cat < <(cat <<'EOF'`, whose body is read for quotes and can hide a later
+    `;`; a `<<` that is a shift, as in `${PWD:1<<2}`, which is read as a here-document whose body
+    hides the next line; and a delimiter line continued with a backslash. Also not handled, but the
+    other way, dropping the deadline although nothing runs outside the timeout: a `;` with only a
+    comment or a here-document body after it, as in `timeout 5m sleep 0; # done`."""
     match = TIMEOUT_COMMAND_LINE_START_PATTERN.match(command)
-    if not match:
+    if not match or command_line_runs_another_command_after(command[match.end():]):
         return None
     return float(match["number"]) * SECONDS_BY_TIMEOUT_DURATION_UNIT[match["unit"]]
+
+
+def command_line_runs_another_command_after(text):
+    """Whether shell text holds a `;`, `&&`, `||`, `&` or line break outside quotes and parentheses
+    with a command after it. The `&` of a redirection, as in `2>&1`, `&>` or `|&`, does not count,
+    nor does a line of a here-document's body, which is the timed command's input."""
+    quote = None
+    depth = 0
+    index = 0
+    here_document_delimiters = []
+    while index < len(text):
+        character = text[index]
+        if quote is None and depth == 0 and character == "\n" and here_document_delimiters:
+            index = end_of_here_document_bodies(text, index, here_document_delimiters)
+            here_document_delimiters = []
+            continue
+        here_document_operator = HERE_DOCUMENT_OPERATOR_PATTERN.match(text, index) \
+            if quote is None and depth == 0 and text[index - 1:index] != "<" else None
+        if here_document_operator:
+            here_document_delimiters.append((
+                re.sub(r"['\"\\]", "", here_document_operator["delimiter"]),
+                bool(here_document_operator["tabs_stripped"])))
+            index = here_document_operator.end()
+            continue
+        if quote == "'":
+            quote = None if character == "'" else quote
+        elif quote == '"':
+            if character == "\\":
+                index += 1
+            elif character == '"':
+                quote = None
+        elif character == "\\":
+            index += 1
+        elif character in "'\"":
+            quote = character
+        elif character == "(":
+            depth += 1
+        elif character == ")":
+            depth -= 1
+        elif depth == 0 and (character in ";\n" or text[index:index + 2] == "||"
+                             or (character == "&" and (index == 0 or text[index - 1] not in "<>|")
+                                 and text[index + 1:index + 2] != ">")) \
+                and text[index + 1:].strip(" \t\n;&"):
+            return True
+        index += 1
+    return False
+
+
+def end_of_here_document_bodies(text, index, delimiters):
+    """The index of the line break that ends the last of the here-document bodies starting after
+    the line break at `index`, or the text's end when a body has no closing delimiter line."""
+    for delimiter, tabs_stripped in delimiters:
+        while index < len(text):
+            line_end = text.find("\n", index + 1)
+            line_end = len(text) if line_end == -1 else line_end
+            line = text[index + 1:line_end]
+            index = line_end
+            if (line.lstrip("\t") if tabs_stripped else line) == delimiter:
+                break
+    return index
 
 
 def task_notification_carrier_text(record):
@@ -713,9 +797,12 @@ def rules_three_to_five(verdict, put_off_at, checker, task_directory,
         return {fields.RULE: 3, fields.DECISION: fields.WAKE_HANDOFF_PUT_OFF,
                 fields.TEXT: HANDOFF_PUT_OFF_TEXT.format(time=iso(put_off_at))}
     if not running and not verdict["handoff_deferred_marker"]:
+        # A condition the shared GitHub budget skipped may be met, so it leaves the verdict to rule 5.
+        skipped_before = len(checker.conditions_skipped_for_budget)
         verdict["open_tasks_nothing_holds"] = open_tasks_nothing_holds(
             task_directory, checker, due_task_raise_state_directory)
-        if not verdict["open_tasks_nothing_holds"]:
+        if (not verdict["open_tasks_nothing_holds"]
+                and len(checker.conditions_skipped_for_budget) == skipped_before):
             return {fields.RULE: 4, fields.DECISION: fields.NO_WAKE}
     return {fields.RULE: 5, fields.DECISION: fields.JUDGE}
 
@@ -812,12 +899,10 @@ def verdict_for_seat(seat, paths, now, since, checker, parser, usage_limit_recor
             return verdict
 
         if limit and last.get("uuid") not in usage_limit_records_skipped:
-            quota = last.get("quotaLimits") or {}
-            resets_at = quota.get("resetsAt")
+            resets_at = usage_limit_reset_time(last)
             verdict["usage_limit"] = {
                 "record_uuid": last.get("uuid"), "resets_at": resets_at,
-                "reset_time_passed": isinstance(resets_at, (int, float))
-                and now.timestamp() >= resets_at,
+                "reset_time_passed": resets_at is not None and now.timestamp() >= resets_at,
                 "account_now_logged_in": logged_in_account(paths.claude_json)}
             verdict.update({fields.RULE: 1, fields.DECISION: fields.SESSION_LIMIT})
             return verdict
