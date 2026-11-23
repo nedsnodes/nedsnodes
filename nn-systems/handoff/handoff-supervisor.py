@@ -1289,12 +1289,13 @@ def successor_initial_agent_instructions_line_naming_waiting_approval_walk_item(
             return ()
         named_in_next_step = []
         for walk in walks:
-            # The walk's name, alone or as its walk-minutes or walk-document file name, ends where whitespace, the
-            # text's end, or sentence punctuation before either follows; any longer name, such as -minutes.md.bak
-            # or -minutes.md~, is another file.
+            # The walk's name, alone or as its walk-minutes or walk-document file name, counts only where no
+            # file-name character follows, so -minutes.md.bak and -minutes.md~ name other files while
+            # -minutes.md:143, **name** and a sentence's closing period do not; a period followed by another
+            # file-name character continues the name.
             mention = re.search(rf"(?<![\w-]){re.escape(walk[0].name[:-len(walk_finder.MINUTES_SUFFIX)])}"
                                 rf"(?:{re.escape(walk_finder.MINUTES_SUFFIX)}|\.md)?"
-                                r"""(?:'s)?(?=$|\s|[.,;:!?)\]'"`]+(?:\s|$))""",
+                                r"(?![\w~-]|\.[\w~-])",
                                 next_step)
             if mention:
                 named_in_next_step.append((mention.start(), walk))

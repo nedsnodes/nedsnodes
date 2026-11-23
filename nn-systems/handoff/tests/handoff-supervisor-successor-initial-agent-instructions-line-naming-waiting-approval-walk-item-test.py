@@ -209,6 +209,17 @@ def run_walk_minutes_cases(workspace):
         root, f"Compare docs/walk/fixture-older-walk-minutes.md~, then continue approval-walk {WALK}.")
     check("two open walks, the next step naming an editor backup of one's walk-minutes before the other walk: the other",
           editor_backup_first == expected, repr(editor_backup_first))
+    line_reference = lines_for(root, "Read docs/walk/fixture-older-walk-minutes.md:143 and continue.")
+    check("two open walks, the next step naming one's walk-minutes with a line reference: that one",
+          line_reference == older_line, repr(line_reference))
+    line_range = lines_for(root, f"Read docs/walk/fixture-older-walk-minutes.md:143-150, then {WALK}.")
+    check("two open walks, the next step naming one's walk-minutes with a line range first: that one",
+          line_range == older_line, repr(line_range))
+    bold = lines_for(root, f"Continue approval-walk **fixture-older-walk** at item 1, not {WALK}.")
+    check("two open walks, the next step naming one in bold first: that one", bold == older_line, repr(bold))
+    curly_quoted = lines_for(root, f"Continue approval-walk \u201cfixture-older-walk\u201d at item 1, not {WALK}.")
+    check("two open walks, the next step naming one in curly quotes first: that one",
+          curly_quoted == older_line, repr(curly_quoted))
     sentence_end = lines_for(root, "Read docs/walk/fixture-older-walk-minutes.md.")
     check("two open walks, the next step ending a sentence with one's walk-minutes path: that one",
           sentence_end == older_line, repr(sentence_end))
