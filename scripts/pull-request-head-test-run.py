@@ -258,7 +258,7 @@ def stream_for_the_runners_output():
 def parse_arguments(argv):
     parser = argparse.ArgumentParser(
         prog=PROGRAM,
-        description="Run the nc-test-suites a pull request's head reaches and file the test "
+        description="Run the nn-test-suites a pull request's head reaches and file the test "
                     "log in the log-store under the head's commit hash.")
     parser.add_argument("--checkout", default=str(REPOSITORY_ROOT))
     parser.add_argument("--since", metavar="COMMIT")
@@ -269,6 +269,7 @@ def parse_arguments(argv):
     parser.add_argument("--temporary-directory")
     parser.add_argument("--recorded-inputs-directory")
     parser.add_argument("--save-recorded-inputs-to-directory")
+    parser.add_argument("--also-leave-out-suites-whose-recorded-inputs-in-read-only-directory-match-checkout")
     return parser.parse_args(argv)
 
 
@@ -356,6 +357,9 @@ def main(argv=None, now=None, monotonic=time.monotonic) -> int:
         if arguments.save_recorded_inputs_to_directory:
             command += ["--save-recorded-inputs-to-directory",
                         arguments.save_recorded_inputs_to_directory]
+        if arguments.also_leave_out_suites_whose_recorded_inputs_in_read_only_directory_match_checkout:
+            command += ["--also-leave-out-suites-whose-recorded-inputs-in-read-only-directory-match-checkout",
+                        arguments.also_leave_out_suites_whose_recorded_inputs_in_read_only_directory_match_checkout]
         try:
             completed, seconds_waiting_for_lock, lock_never_released = (
                 scheduled_run.run_test_suite_runner_waiting_for_the_machine_lock(

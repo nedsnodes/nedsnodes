@@ -30,7 +30,7 @@ it creates anything, the grid lists the cold-read-records in the log-store and
 in this checkout, counts those that froze this document, under its present
 path or an earlier one `git log --follow` shows, and hold a grid report written
 after the commit on origin/main's first-parent line that last changed the
-document -- for a merged nc-topic-branch, the merge, not the topic's own commit --
+document -- for a merged nn-topic-branch, the merge, not the topic's own commit --
 prints
 "cold-read-full-run N of 3", and refuses a fourth. A flag saying the user
 decided to run again or to change the design makes the run number 1, and the
@@ -296,15 +296,38 @@ STOPPED_CELLS_STRAY_WRITE_LINE = (
     "STRAY WRITE: {path} changed after the cells launched. The grid checked for the stopped "
     "cells {cells}, whose own check never runs, and cannot tell who changed it. {undo}")
 STRAY_WRITE_UNDO_UNTRACKED = (
-    "If its content shows a reviewer wrote it, delete it: `rm -r -- {path}`. "
+    "If its content shows a reviewer wrote it, delete it: `rm -r -- {absolute_path}`. "
     "Ask the user about it if you did not make it and are unsure.")
 STRAY_WRITE_UNDO_TRACKED = (
-    "If its content shows a reviewer wrote it, undo it: `git restore --staged --worktree -- {path}`. "
+    "If its content shows a reviewer wrote it, undo it: "
+    "`git -C {repository} restore --staged --worktree -- {path}`. "
     "Ask the user about it if you did not make it and are unsure.")
 STRAY_WRITE_NO_UNDO_ALREADY_CHANGED = (
     "It already had uncommitted changes before the cells launched, so no undo command is given: "
-    "one would also undo those. Read `git diff -- {path}` against the edits you know are your own, "
+    "one would also undo those. Read {what_to_read} against the edits you know are your own, and ask "
+    "the user about any change you did not make.")
+# Two diffs, not `diff HEAD`: a cell that writes the HEAD text back over a staged-and-edited
+# file leaves the working tree equal to HEAD, so only the working tree against the index shows it.
+STRAY_WRITE_ALREADY_CHANGED_TRACKED_READ = (
+    "both `git -C {repository} diff --cached -- {path}`, its staged changes, and "
+    "`git -C {repository} diff -- {path}`, its unstaged ones,")
+STRAY_WRITE_ALREADY_CHANGED_UNTRACKED_READ = "{path} itself, which git does not track,"
+# A cell can move an already-edited file without git pairing the move as a rename (a plain
+# `mv`, or a `git mv` of a much-edited file), can re-create the old name afterwards, and can
+# move a file git tracks only as new or untracked out of git status altogether, so no path can
+# be shown to be free of those edits once any already-edited file has changed or gone.
+STRAY_WRITE_NO_UNDO_MAY_HOLD_MOVED_CHANGES = (
+    "No undo command is given. A file with uncommitted changes from before the cells launched "
+    "has changed or gone since: {touched}. A stopped cell may have moved those changes into {path}, "
+    "so an undo of {path} could delete them. Read {path} against the edits you know are your own, "
     "and ask the user about any change you did not make.")
+STRAY_WRITE_NO_UNDO_GONE_WHILE_CHANGES_MAY_HAVE_MOVED = (
+    "No undo command is given for any path, because a file with uncommitted changes from before "
+    "the cells launched has changed or gone since: {touched}, and a stopped cell may have moved "
+    "those changes. {path} is gone; `git -C {repository} diff HEAD -- {path}` shows what it held. "
+    "The index may still hold the moved changes under {path}, and an undo would discard them; "
+    "`git -C {repository} diff --cached -- {path}` shows any copy the index holds. Ask the user before you "
+    "restore {path}, and about any change you did not make.")
 STOPPED_CELL_LINE = "{report}: stopped before it finished{deleted}."
 WORKING_TREE_SNAPSHOT_NOT_TAKEN_REASON = "its snapshot of the working tree before the cells launched failed ({error})"
 WORKING_TREE_CHECK_FAILED_REASON = "git status failed when it checked ({error})"
@@ -499,8 +522,7 @@ def full_run_history_since_count_start(frozen_paths: set, landed_at, listing: li
     for line in listing:
         path, _, mtime = line.rpartition("\t")
         directory, _, inside = path.partition("/")
-        # An interrupted shipment's staging copy holds the same files as its record.
-        if directory.startswith(record_shipper.STAGING_DIRECTORY_PREFIX):
+        if record_shipper.cold_read_records_entry_name_is_shipment_staging_directory(directory):
             continue
         record = records.setdefault(directory, {"frozen": False, "reported": None, "marked": None,
                                                 "inside_design_to_main": False, "stopped": None})
@@ -956,16 +978,20 @@ def working_tree_snapshot_or_failure_reason() -> tuple:
 def stopped_cells_write_check_lines(stopped_report_paths: list, baseline,
                                     baseline_failure_reason, already_reported: set) -> list:
     """Return a line per path changed since the baseline and not yet reported, each with
-    its undo command, or, when no check can run, a line per stopped cell saying so."""
+    its undo command, or, when no check can run, a line per stopped cell saying so.
+    A path that leaves the snapshot after the baseline gets no line of its own, such as an
+    already-untracked file a stopped cell deletes, or a changed tracked file it resets to HEAD;
+    it withholds every undo command instead. A gitignored file is in no snapshot, so a cell
+    that moves one to a path git does not ignore gets an undo command for that path."""
     reason = None if baseline is not None else (
         baseline_failure_reason or "no snapshot of the working tree was taken before the cells launched")
     if baseline is not None:
         try:
-            changed = sorted({name for name, _ in cell_common.working_tree_state() - baseline})
-            untracked = {entry.path for entry in git_machine_readable_output.status_entries(
+            current = cell_common.working_tree_state()
+            changed = sorted({name for name, _ in current - baseline})
+            entries = git_machine_readable_output.status_entries(
                 git_machine_readable_output.run_git(
                     cell_common.REPO_ROOT, ["status", "--porcelain", "-z", "--untracked-files=all"]))
-                if entry.code == "??"}
         except (cell_common.WriteDetectorUnavailable,
                 git_machine_readable_output.GitCommandFailed) as error:
             reason = WORKING_TREE_CHECK_FAILED_REASON.format(
@@ -974,18 +1000,32 @@ def stopped_cells_write_check_lines(stopped_report_paths: list, baseline,
         return [f"WRITE CHECK DID NOT RUN: {path.name} — "
                 + STOPPED_CELL_WRITE_CHECK_LINE.format(cell=cell_name_of(path), reason=reason)
                 for path in stopped_report_paths]
+    untracked = {entry.path for entry in entries if entry.code == "??"}
     changed_before = {name for name, _ in baseline}
+    # Read from the launch side: a pre-launch path that is now different, gone or out
+    # of git status is in no current entry, and an undo could delete what it held.
+    touched = sorted({name for name, _ in baseline - current})
     cells = ", ".join(cell_name_of(path) for path in stopped_report_paths)
+    repository = shlex.quote(str(cell_common.REPO_ROOT))
     lines = []
     for name in changed:
         if name in already_reported:
             continue
         already_reported.add(name)
         undo = (STRAY_WRITE_NO_UNDO_ALREADY_CHANGED if name in changed_before
+                else STRAY_WRITE_NO_UNDO_MAY_HOLD_MOVED_CHANGES
+                if touched and os.path.lexists(cell_common.REPO_ROOT / name)
+                else STRAY_WRITE_NO_UNDO_GONE_WHILE_CHANGES_MAY_HAVE_MOVED if touched
                 else STRAY_WRITE_UNDO_UNTRACKED if name in untracked
                 else STRAY_WRITE_UNDO_TRACKED)
+        what_to_read = (STRAY_WRITE_ALREADY_CHANGED_UNTRACKED_READ if name in untracked
+                        else STRAY_WRITE_ALREADY_CHANGED_TRACKED_READ).format(
+            path=shlex.quote(name), repository=repository)
         lines.append(STOPPED_CELLS_STRAY_WRITE_LINE.format(
-            path=name, cells=cells, undo=undo.format(path=shlex.quote(name))))
+            path=name, cells=cells, undo=undo.format(
+                path=shlex.quote(name), repository=repository, what_to_read=what_to_read,
+                absolute_path=shlex.quote(str(cell_common.REPO_ROOT / name)),
+                touched=", ".join(shlex.quote(name) for name in touched))))
     return lines
 
 

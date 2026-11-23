@@ -63,7 +63,9 @@ The cycle, per reincarnation:
      a count of the first prompts that have listed it, such as "(listed in 2
      first prompt(s))"; the branches the first-prompt list deleted go above
      the leftovers' opening sentence, under a line that opens with their
-     heading (launch_prompt_with_leftovers_before_the_next_step).
+     heading, and so does a part that lists no entry, so the sentence is
+     shown only when an entry follows it
+     (launch_prompt_with_leftovers_before_the_next_step).
   6. Keep the current and previous handoff and conversation-tail; delete older ones.
 
 The handoff file the agent writes (simple `key: value` lines):
@@ -123,6 +125,13 @@ every agent-session it starts, to the token of the GitHub account the agent-seat
 (agent_seat_github_account_lookup_and_token_file_read), replacing any GH_TOKEN it inherited. Every way
 an agent-seat is started runs this program, so this is the one place that decides the
 account.
+
+Terminal capture: at every start, a restart onto main's code at a session-handoff included,
+once it holds its lock, the supervisor runs `tmux pipe-pane` on its own tmux pane, so the pane's
+output from then on is appended to a new file in the agent-seat terminal captures directory
+(agent-seat-terminal-captures-common.py beside this file says where, and how the file is named),
+and prints one line saying where, or why the terminal is not captured. A failed start of the
+terminal capture never stops the agent-seat.
 """
 
 import argparse
@@ -270,6 +279,12 @@ agent_seat_worktrees_and_branches_list = importlib.util.module_from_spec(
     _agent_seat_worktrees_and_branches_list_spec)
 _agent_seat_worktrees_and_branches_list_spec.loader.exec_module(
     agent_seat_worktrees_and_branches_list)
+
+_agent_seat_terminal_captures_spec = importlib.util.spec_from_file_location(
+    "agent_seat_terminal_captures_common",
+    Path(__file__).resolve().with_name("agent-seat-terminal-captures-common.py"))
+agent_seat_terminal_captures = importlib.util.module_from_spec(_agent_seat_terminal_captures_spec)
+_agent_seat_terminal_captures_spec.loader.exec_module(agent_seat_terminal_captures)
 
 # One loaded copy, so the GitCommandFailed checkout_freshness_catch_up raises is the class caught here.
 git_machine_readable_output = checkout_freshness_catch_up.git_output
@@ -443,7 +458,12 @@ def launch_time_git_sync_report_in_prompt(launch_time_git_sync_report: str,
                                           branch_state_instruction: str = "") -> str:
     """The report as the prompt carries it: a report of several lines, such as a git
     failure's next steps, stands as its own paragraph instead of running on from the
-    sentence before it."""
+    sentence before it. A report that the checkout holds all of main after a fetch asks
+    the successor for nothing, so only the branch-state instruction, if any, stands in its
+    place; the console still prints the report."""
+    # Decided from the sync's outcome, never its text: a git error can quote any phrase.
+    if getattr(launch_time_git_sync_report, "checkout_has_main_after_a_fetch", False):
+        return branch_state_instruction
     text = launch_time_git_sync_report + branch_state_instruction_after(
         launch_time_git_sync_report, branch_state_instruction)
     return f"\n\n{text}\n\n" if "\n" in launch_time_git_sync_report else text
@@ -1241,12 +1261,15 @@ def load_module_from_path(name: str, path: Path):
     return module
 
 
-def successor_initial_agent_instructions_line_naming_waiting_approval_walk_item(working_directory: Path) -> tuple:
+def successor_initial_agent_instructions_line_naming_waiting_approval_walk_item(working_directory: Path,
+                                                                                next_step: str = "") -> tuple:
     """Return the first prompt's line naming the open approval-walk's waiting item and its last page link, or no
     lines when no approval-walk is open or every one is paused; never block launch.
 
-    The walk is the one with the latest walk-minutes, by modification time, among the open ones in
-    working_directory's docs/walk/, as /walk-me-through chooses when several are open. When the walk-minutes'
+    The walk is the open one in working_directory's docs/walk/ that next_step names first, by its name or its
+    walk-minutes' file name, since the next step's first action comes first; when next_step names none, the one
+    with the latest walk-minutes, by modification time, as /walk-me-through chooses when several are open. When
+    the walk-minutes'
     `#next_to_present` line names several items, the line names the first, where the walk resumes. When the
     walk-document cannot be read, the line names the item from the walk-minutes alone, without its point, and
     says why; its count then lacks `of M` when the `#next_to_present` line gives none, so the `#item_page` line
@@ -1264,7 +1287,19 @@ def successor_initial_agent_instructions_line_naming_waiting_approval_walk_item(
                  if not walk[3]]
         if not walks:
             return ()
-        minutes, value, _, _ = max(walks, key=lambda walk: walk[0].stat().st_mtime)
+        named_in_next_step = []
+        for walk in walks:
+            # A name followed by -minutes.md and a file-name boundary is the walk's walk-minutes path; any other
+            # longer name, -minutes.md.bak included, is another file.
+            mention = re.search(rf"(?<![\w-]){re.escape(walk[0].name[:-len(walk_finder.MINUTES_SUFFIX)])}"
+                                rf"(?!(?!{re.escape(walk_finder.MINUTES_SUFFIX)}(?![\w-]|\.\w))[\w-])",
+                                next_step)
+            if mention:
+                named_in_next_step.append((mention.start(), walk))
+        if named_in_next_step:
+            minutes, value, _, _ = min(named_in_next_step, key=lambda named: named[0])[1]
+        else:
+            minutes, value, _, _ = max(walks, key=lambda walk: walk[0].stat().st_mtime)
         name = minutes.name[:-len(walk_finder.MINUTES_SUFFIX)]
         numbers, total = walk_finder.parse_items(value)
         number = numbers[0]
@@ -1282,8 +1317,10 @@ def successor_initial_agent_instructions_line_naming_waiting_approval_walk_item(
         document = minutes.with_name(name + ".md")
         text = document.read_text(encoding="utf-8")
         spans = walk_finder.item_unit_spans(text, parser)
-        total, _ = walk_finder.waiting_item_units(document, value, numbers, total, parser, spans)
-        point = walk_short_answer_hook.heading_points(text.split("\n"), spans, parser).get(number)
+        # Only the first-named item, because waiting_item_units returns units in walk-document order, and a later
+        # waiting item's heading may name the first item too.
+        total, units = walk_finder.waiting_item_units(document, value, [number], total, parser, spans)
+        point = walk_short_answer_hook.heading_points(text.split("\n"), units, parser).get(number)
     except Exception as error:
         print(f"handoff-supervisor: waiting approval-walk item's walk-document unreadable: "
               f"{type(error).__name__}: {error}")
@@ -1311,9 +1348,11 @@ def build_ignition_prompt(extract_path: Path, handoff_fields: dict,
         ITEMS_NEEDING_THE_USER_IN_ONE_APPROVAL_WALK_INSTRUCTION,
         *waiting_approval_walk_item,
     ]
-    if launch_time_git_sync_report:
-        lines.append(launch_time_git_sync_report_in_prompt(launch_time_git_sync_report,
-                                                           branch_state_instruction))
+    git_sync_text = (launch_time_git_sync_report_in_prompt(launch_time_git_sync_report,
+                                                           branch_state_instruction)
+                     if launch_time_git_sync_report else "")
+    if git_sync_text:
+        lines.append(git_sync_text)
     lines.extend(overview_refresh_due)
     lines.extend(memory_review_due)
     roster = spawned_subagent_roster_from(handoff_fields)
@@ -1356,6 +1395,10 @@ class DialogIgnitionPlan:
     extract_path: Path
     handoff_fields: dict
     predecessor_session_directory: Optional[Path] = None
+
+    @property
+    def next_step(self) -> str:
+        return next_step_from(self.handoff_fields)
 
     def compose(self, launch_time_git_sync_report: str,
                 overview_refresh_due: tuple = (),
@@ -1419,9 +1462,11 @@ class IgnitionPlanWithoutConversationTail:
                   + ITEMS_NEEDING_THE_USER_IN_ONE_APPROVAL_WALK_INSTRUCTION)
         for line in waiting_approval_walk_item:
             prompt += " " + line
-        if launch_time_git_sync_report:
-            prompt += " " + launch_time_git_sync_report_in_prompt(launch_time_git_sync_report,
-                                                                  branch_state_instruction)
+        git_sync_text = (launch_time_git_sync_report_in_prompt(launch_time_git_sync_report,
+                                                               branch_state_instruction)
+                         if launch_time_git_sync_report else "")
+        if git_sync_text:
+            prompt += " " + git_sync_text
         for line in overview_refresh_due:
             prompt += " " + line
         for line in memory_review_due:
@@ -1472,6 +1517,17 @@ def run_git_here(arguments: list, working_directory: Path, timeout: int = 60):
 # The handoff-supervisor restarts itself on main's code only after a report holding one of these.
 LAUNCH_TIME_GIT_SYNC_REPORT_PHRASE_CURRENT_WITH_MAIN = " is current with main"
 LAUNCH_TIME_GIT_SYNC_REPORT_PHRASE_FAST_FORWARDED_TO_MAIN = " fast-forwarded to main"
+
+
+class LaunchTimeGitSyncReport(str):
+    """A launch-time-git-sync report's text, with the sync's outcome beside it: whether the fetch
+    of origin succeeded and the checkout then held all of main. A plain str report has no such
+    outcome, so it counts as not holding main."""
+
+    def __new__(cls, text: str, checkout_has_main_after_a_fetch: bool):
+        report = super().__new__(cls, text)
+        report.checkout_has_main_after_a_fetch = checkout_has_main_after_a_fetch
+        return report
 
 
 def launch_time_git_sync(working_directory: Path) -> str:
@@ -1552,9 +1608,13 @@ def launch_time_git_sync(working_directory: Path) -> str:
         if is_ancestor("origin/main", "HEAD"):
             ahead = answer(["rev-list", "--count", "origin/main..HEAD"], 30)
             if ahead == "0":
-                return f"launch-time-git-sync: {branch}{LAUNCH_TIME_GIT_SYNC_REPORT_PHRASE_CURRENT_WITH_MAIN}{fetch_note}"
-            return (f"launch-time-git-sync: {branch} is {ahead} commit(s) ahead of main and has all of "
-                    f"it — nothing to pull{fetch_note}")
+                return LaunchTimeGitSyncReport(
+                    f"launch-time-git-sync: {branch}{LAUNCH_TIME_GIT_SYNC_REPORT_PHRASE_CURRENT_WITH_MAIN}{fetch_note}",
+                    checkout_has_main_after_a_fetch=fetched.returncode == 0)
+            return LaunchTimeGitSyncReport(
+                f"launch-time-git-sync: {branch} is {ahead} commit(s) ahead of main and has all of "
+                f"it — nothing to pull{fetch_note}",
+                checkout_has_main_after_a_fetch=fetched.returncode == 0)
 
         if not is_ancestor("HEAD", "origin/main"):
             ahead = answer(["rev-list", "--count", "origin/main..HEAD"], 30)
@@ -1576,7 +1636,9 @@ def launch_time_git_sync(working_directory: Path) -> str:
     except git.GitCommandFailed as error:
         return (f"launch-time-git-sync: {branch}{LAUNCH_TIME_GIT_SYNC_REPORT_PHRASE_FAST_FORWARDED_TO_MAIN} (its new commit could not be "
                 f"read: {error}){fetch_note}\n{launch_time_git_sync_git_failure_next_steps(error)}")
-    return f"launch-time-git-sync: {branch}{LAUNCH_TIME_GIT_SYNC_REPORT_PHRASE_FAST_FORWARDED_TO_MAIN} ({tip}){fetch_note}"
+    return LaunchTimeGitSyncReport(
+        f"launch-time-git-sync: {branch}{LAUNCH_TIME_GIT_SYNC_REPORT_PHRASE_FAST_FORWARDED_TO_MAIN} ({tip}){fetch_note}",
+        checkout_has_main_after_a_fetch=fetched.returncode == 0)
 
 
 class OverviewCheckGitFailure(Exception):
@@ -1628,7 +1690,7 @@ def overview_refresh_due_lines(working_directory: Path,
                   f"{handoff_architecture_overview_refresh_user_shown_mark.SYSTEM_NAME_PATTERN}, "
                   f"the system-name pattern "
                   f"nn-systems/handoff/handoff-architecture-overview-refresh-user-shown-mark.py "
-                  f"accepts, so its nc-architecture-overview is not checked; the other systems "
+                  f"accepts, so its nn-architecture-overview is not checked; the other systems "
                   f"still are.\n"
                   f"If nn-systems/{printable} holds a system's programs, propose to the user a "
                   f"name for it that matches, to be renamed in a pull request; otherwise "
@@ -1877,20 +1939,24 @@ def forget_leftover_prompt_listing_counts(counts_path: Path) -> None:
 def launch_prompt_with_leftovers_before_the_next_step(prompt: str, leftover_parts: tuple,
                                                       counts_path: Path) -> str:
     """The prompt with the leftovers between its opening and its next step, or after it when it
-    has no next step. Branches the list deleted go above the leftovers' opening sentence, which
-    asks the agent to act on each leftover below it, because they need nothing."""
+    has no next step. The leftovers' opening sentence asks the agent to act on each leftover
+    below it, so only parts that list an entry go below it; branches the list deleted, and parts
+    that list no entry, such as a failure that carries its own instruction or the line on what
+    open tasks hold, go above it."""
     heading_start = agent_seat_worktrees_and_branches_list.ALREADY_DELETED_HEADING_START
-    listed_parts, deleted_parts = [], []
+    listed_parts, deleted_parts, parts_with_no_entry = [], [], []
     for part in leftover_parts:
         # Only a line that opens with the heading starts the deleted block: an entry's commit
         # subject may quote the heading's words.
         found = re.search("^" + re.escape(heading_start), part, re.MULTILINE)
         listed = part[:found.start()] if found else part
-        if listed.strip():
+        if any(line.startswith(LEFTOVER_ENTRY_PREFIXES) for line in listed.split("\n")):
             listed_parts.append(listed.rstrip("\n"))
+        elif listed.strip():
+            parts_with_no_entry.append(listed.rstrip("\n"))
         if found:
             deleted_parts.append(part[found.start():])
-    blocks = deleted_parts
+    blocks = deleted_parts + parts_with_no_entry
     leftovers = "\n\n".join(listed_parts)
     if leftovers:
         blocks.append(LEFTOVERS_BEFORE_THE_NEXT_STEP_SENTENCE + "\n\n"
@@ -2738,7 +2804,8 @@ def supervise_sessions(settings: SupervisorSettings) -> int:
                 choose_branch_state_instruction_from_working_directory_push_state(
                     settings.working_directory))
             waiting_approval_walk_item = (
-                successor_initial_agent_instructions_line_naming_waiting_approval_walk_item(settings.working_directory))
+                successor_initial_agent_instructions_line_naming_waiting_approval_walk_item(
+                    settings.working_directory, ignition_plan.next_step))
             prompt = ignition_plan.compose(
                 launch_time_git_sync_report, overview_refresh_due, memory_review_due,
                 branch_state_instruction=branch_state_instruction,
@@ -3029,6 +3096,9 @@ def main(argv=None) -> int:
         print(f"handoff-supervisor: startup stopped: {error}", file=sys.stderr)
         return 4
 
+    print(f"handoff-supervisor: "
+          f"{agent_seat_terminal_captures.agent_seat_terminal_capture_start_in_this_tmux_pane(settings.agent)}",
+          flush=True)
     try:
         return supervise_sessions(settings)
     finally:
