@@ -717,6 +717,18 @@ def test_the_waiting_item_read_step_does_not_refuse_a_status_claim_in_an_item_se
           described(result))
 
 
+def test_the_waiting_item_read_step_still_stops_an_item_rated_none_when_an_earlier_item_has_the_unclosed_settling():
+    case = Case(document=marks_document("cold-read-research is offline.\n#not_asked_touches\n")
+                .replace("#case_against weak: the page grows.", "#case_against none."))
+    with case.minutes.open("a") as minutes:
+        minutes.write("item 2 of 9: settled without asking the user, not asked, case against none #case_against_none "
+                      "(2026-11-22 00:00Z), which makes its change. Fast reads:\n")
+    result = case.run(WAITING_ITEM_READ_STEP_NAME)
+    check("an unclosed settling of item 2 does not count as the settling of waiting item 3, also rated none",
+          result.returncode == 0 and "item 3 of 9 is not to be shown to the user" in result.stdout
+          and "check --not-asked none" in result.stdout, described(result))
+
+
 def test_the_waiting_item_read_step_names_and_reads_the_first_undecided_numbered_sub_step_of_the_item_named():
     case = Case(document=marks_document(words_of_body(300)))
     case.run(WAITING_ITEM_READ_STEP_NAME)
