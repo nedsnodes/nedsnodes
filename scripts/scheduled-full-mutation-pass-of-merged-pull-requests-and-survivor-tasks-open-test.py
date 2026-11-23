@@ -586,6 +586,12 @@ def run_carry_on_and_job_failure_task_cases():
         fixture.run(step)
         check("the same failed step again opens no second task", len(job_failure_tasks(fixture))
               == 1, job_failure_tasks(fixture))
+        fixture.run({merge: {"exit": 2, "stderr": "mutation-testing: not run — disk is full"}})
+        tasks = job_failure_tasks(fixture)
+        check("a different failure with the same subject rewrites the open task's description "
+              "with the new diagnosis, opening no second task",
+              len(tasks) == 1 and "disk is full" in tasks[0]["description"]
+              and "cosmic-ray is missing" not in tasks[0]["description"], tasks)
 
     # An error the program does not handle still writes the record, opens a task with its
     # traceback, and exits 4.

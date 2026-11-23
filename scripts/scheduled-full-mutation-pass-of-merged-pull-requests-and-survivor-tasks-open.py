@@ -268,7 +268,8 @@ after its merge commit, the sign that the first pass no longer keeps up and
 that it must run fewer mutants; and a merge with mutants the mutation testing
 program reports ERRORED, whose suites gave no verdict on them (ERRORED
 MUTANTS below). A failed step's task has the first line of its message as
-its subject; the task of an untestable merge, a carried-on merge or a merge
+its subject, cut to 200 characters, so two failures can share it, and each
+run rewrites the open task's description with its own failure; the task of an untestable merge, a carried-on merge or a merge
 with ERRORED mutants names the merge; an untestable merge's task also names
 the failing suites, and asks for the merge's changed lines to be
 mutation-tested at a later main commit where they pass.
@@ -1611,10 +1612,12 @@ def main_under_lock(arguments):
             f"of {started.strftime('%Y-%m-%d %H:%M')} UTC, so the merges after the failed step "
             f"were not mutation-tested. It said:\n\n{failure}\n\n"
             f"Its record: {record_citation}\n"
-            f"Do what the failure says. The next nightly run tries the step again, and opens no "
-            f"second task while this one is open with the same subject.\n"
+            f"Do what the failure says. The next nightly run tries the step again. While this "
+            f"task is open, a failure with this subject rewrites this description and opens no "
+            f"second task; a failure with another subject opens its own task.\n"
             f"Mark this task completed once a run gets past the step; to check sooner, run it by "
-            f"hand on ned-box: {RUN_BY_HAND}")))
+            f"hand on ned-box: {RUN_BY_HAND}"),
+            True))
     checked_at = time.time()
     overdue = [(merge, merged_at) for merge, merged_at in untested_merges_and_times
                if checked_at - merged_at
