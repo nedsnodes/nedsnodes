@@ -202,7 +202,8 @@ def agy_stream_json_stdout_line_final_result_event_parse_to_exit_code_and_respon
     return exit_code, str(result.get("response") or "")
 
 
-AGY_ENVIRONMENT_REMOVED_VARIABLES = ("GEMINI_API_KEY", "GH_TOKEN", "GITHUB_TOKEN")
+AGY_ENVIRONMENT_REMOVED_VARIABLES = (
+    "GEMINI_API_KEY", *common.COLD_READ_CELL_REVIEWER_PROGRAM_ENVIRONMENT_REMOVED_GITHUB_TOKEN_VARIABLES)
 
 
 def agy_environment_copy_without_gemini_api_key_or_github_token(environment) -> dict:
