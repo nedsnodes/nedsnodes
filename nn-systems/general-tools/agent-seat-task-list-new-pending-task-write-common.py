@@ -21,7 +21,7 @@ from pathlib import Path
 TASK_FILE_NAME_PATTERN = re.compile(r"[1-9][0-9]*\.json")
 TASK_HIGH_WATER_MARK_FILE_NAME = ".highwatermark"
 # The open-pull-request watcher writes this subject, and the idle sweep wakes merge-lane-2 on it.
-MERGE_LANE_2_PULL_REQUEST_EVENTS_TASK_SUBJECT = (
+AGENT_SEAT_TASK_LIST_MERGE_LANE_2_READ_PULL_REQUEST_EVENTS_TASK_SUBJECT_LINE = (
     "Read the new pull-request events in the watcher's event file")
 
 

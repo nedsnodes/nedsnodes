@@ -739,7 +739,7 @@ def open_pull_request_events_task(seat, tasks_root):
             # Claude Code may be replacing the file or have deleted it since the listing.
             continue
         if (isinstance(task, dict) and task.get("status") != "completed"
-                and task.get("subject") == agent_seat_task_list.MERGE_LANE_2_PULL_REQUEST_EVENTS_TASK_SUBJECT):
+                and task.get("subject") == agent_seat_task_list.AGENT_SEAT_TASK_LIST_MERGE_LANE_2_READ_PULL_REQUEST_EVENTS_TASK_SUBJECT_LINE):
             return {"id": path.stem}
     return None
 
@@ -1245,7 +1245,7 @@ class Sweep:
         sent = self.send(seat, verdict, text, NUDGE)
         self.record({"event": "judge_answer", "agent_seat": seat, "rule": 5,
                      "session_id": verdict[fields.SESSION_ID], "last_activity": stretch,
-                     "send": True, "reason": "an open pull-request events task, decided by code",
+                     "send": bool(sent), "reason": "an open pull-request events task, decided by code",
                      "failed": False, RUNNING_WORK_ASKED_ABOUT: [],
                      PULL_REQUEST_EVENTS_TASK_ID: task["id"],
                      **({"message_id": sent["message_id"]} if sent else {})})

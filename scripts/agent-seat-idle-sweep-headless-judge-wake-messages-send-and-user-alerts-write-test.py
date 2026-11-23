@@ -2668,6 +2668,20 @@ machine.run(0)
 check("a wake whose send fails is reported to the sweep's owner, and its wait stays open to escalate",
       not machine.events("message_sent") and machine.events("wait_step")[-1]["step"] == "nudge"
       and machine.owner_tasks() != [], machine.events())
+check("a wake whose send fails is logged as not sent",
+      [event["send"] for event in machine.events("judge_answer")] == [False],
+      machine.events("judge_answer"))
+machine = Machine()
+machine.seat(EVENTS_SEAT, DONE_TURN)
+directory = machine.tasks / f"nedsnodes-{EVENTS_SEAT}-tasks"
+directory.mkdir()
+(directory / "1.json").write_text(json.dumps({"id": "1", "subject": EVENTS_TASK_SUBJECT,
+                                              "status": "pending", "blocks": [], "blockedBy": []}))
+machine.script(sent_ok(EVENTS_SEAT))
+machine.run(0)
+check("a wake whose send succeeds is logged as sent",
+      [event["send"] for event in machine.events("judge_answer")] == [True],
+      machine.events("judge_answer"))
 
 if failures:
     print(f"{len(failures)} case(s) failed")

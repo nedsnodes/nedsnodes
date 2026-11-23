@@ -461,13 +461,13 @@ def events_task_opened_when_due(state, state_path, events_path, task_list_direct
             f"the event file {events_path} holds {total} lines, but {delivered} were already "
             f"delivered, so it was truncated. Restore it, or set event_lines_delivered in "
             f"{state_path} to {total} once you have read what it holds.")
-    if total == delivered or open_task_with_subject_exists(task_list_directory, agent_seat_task_list.MERGE_LANE_2_PULL_REQUEST_EVENTS_TASK_SUBJECT):
+    if total == delivered or open_task_with_subject_exists(task_list_directory, agent_seat_task_list.AGENT_SEAT_TASK_LIST_MERGE_LANE_2_READ_PULL_REQUEST_EVENTS_TASK_SUBJECT_LINE):
         return None
     last_opened = state["last_events_task_opened_at"]
     if last_opened is not None and now - last_opened < WATCH_OPEN_PULL_REQUESTS_MINIMUM_SECONDS_BETWEEN_EVENTS_TASKS:
         return None
     task_id = agent_seat_task_list.agent_seat_task_list_new_pending_task_write(
-        task_list_directory, agent_seat_task_list.MERGE_LANE_2_PULL_REQUEST_EVENTS_TASK_SUBJECT,
+        task_list_directory, agent_seat_task_list.AGENT_SEAT_TASK_LIST_MERGE_LANE_2_READ_PULL_REQUEST_EVENTS_TASK_SUBJECT_LINE,
         f"Read lines {delivered + 1} to {total} of {events_path}. Act on them, and mark this task "
         f"completed.")
     state["event_lines_delivered"] = total
