@@ -268,6 +268,9 @@ def reviews_saved_lines(result):
 # whose report name contains COLD_READ_GRID_TEST_STUB_FAST_REPORT_NAME_FRAGMENT,
 # which does not wait. One fast cell that edits the target while six slow
 # ones read is how a case moves the target mid-run.
+# COLD_READ_GRID_TEST_STUB_FINISHED_READING_MARKER_DIRECTORY, when set, gets a file
+# named for the report once that wait ends. The grid deletes a stopped cell's report
+# but not this file, so the file shows the cell outlived its time limit.
 # COLD_READ_GRID_TEST_STUB_SHIP_RECORD_FIRST_LINE_FILE, when set, is a file outside
 # the scratch repository: the fast cell runs the real shipper on its record
 # before writing its report, as the pre-remove hook does when an agent-seat
@@ -361,7 +364,11 @@ sleep_seconds = float(os.environ.get("COLD_READ_GRID_TEST_STUB_SLEEP_SECONDS") o
 fast_fragment = os.environ.get("COLD_READ_GRID_TEST_STUB_FAST_REPORT_NAME_FRAGMENT")
 if sleep_seconds and not (fast_fragment and fast_fragment in given.name):
     time.sleep(sleep_seconds)
-ship_line_file = os.environ.get("COLD_READ_GRID_TEST_STUB_SHIP_RECORD_FIRST_LINE_FILE")
+finished_marker_directory = os.environ.get("COLD_READ_GRID_TEST_STUB_FINISHED_READING_MARKER_DIRECTORY")
+if finished_marker_directory:
+    pathlib.Path(finished_marker_directory).mkdir(parents=True, exist_ok=True)
+    (pathlib.Path(finished_marker_directory) / given.name).touch()
+ship_line_file =os.environ.get("COLD_READ_GRID_TEST_STUB_SHIP_RECORD_FIRST_LINE_FILE")
 if ship_line_file and fast_fragment and fast_fragment in given.name:
     import subprocess
     shipped = subprocess.run(
@@ -1122,9 +1129,11 @@ try:
     # The limit is shortened to seconds; every stub reads for longer than that.
     stub_reading_seconds = 8
     repository = build_scratch_repository(scratch, "checkout-attempts-timed-out")
+    finished_reading_markers = scratch / "timed-out-stubs-finished-reading-markers"
     started = time.monotonic()
     result = run_grid(repository, stubs, {
         "COLD_READ_GRID_TEST_STUB_SLEEP_SECONDS": str(stub_reading_seconds),
+        "COLD_READ_GRID_TEST_STUB_FINISHED_READING_MARKER_DIRECTORY": str(finished_reading_markers),
         "COLD_READ_GRID_CELL_ATTEMPT_TIMEOUT_SECONDS": "2"})
     elapsed = time.monotonic() - started
     failed_lines = lines_opening(result, "FAILED")
@@ -1134,8 +1143,7 @@ try:
           and all(" — timed-out — timed out after 4 hours (stderr kept: " in line
                   for line in failed_lines),
           repr(result.stdout))
-    # A stub left to finish would have landed its report, so no saved line shows each was stopped.
-    check("the run ends before the stubs would have finished, none landed, exit 1",
+    check("no timed-out cell's report is saved, none landed, exit 1",
           result.returncode == 1
           and lines_opening(result, "saved:") == [] and "No report landed in" in result.stdout,
           f"elapsed {elapsed:.1f}s, exit {result.returncode}; stdout={result.stdout!r}")
@@ -1148,6 +1156,9 @@ try:
     check("the stopped stubs never wrote their reports",
           sorted(path.name for path in record_directory.glob("*.md")) == ["cold-read-reference-check.md"],
           sorted(path.name for path in record_directory.glob("*.md")))
+    check("the grid stopped every timed-out stub instead of waiting for it to finish",
+          not finished_reading_markers.exists() or not any(finished_reading_markers.iterdir()),
+          sorted(path.name for path in finished_reading_markers.glob("*")))
 
     # --- Stopped cells that wrote outside their reports ------------------------
     # Every cell writes two files before it is stopped: a new file, and a committed one
@@ -1199,7 +1210,9 @@ try:
     time.sleep(stub_reading_seconds)
 
     # --- A cell that writes its report and then hangs is stopped, report deleted
-    hang_seconds = 30
+    # The clock jumps only once all eight have written, so no stub may exit before the last
+    # writes, however loaded the machine. This bound also ends the case if the grid never stops them.
+    hang_seconds = 600
     repository = build_scratch_repository(scratch, "checkout-wrote-then-hung")
     attempt_limit_seconds = 3600
     clock_launcher = scratch / "grid-with-clock-jumped-once-reports-exist.py"
