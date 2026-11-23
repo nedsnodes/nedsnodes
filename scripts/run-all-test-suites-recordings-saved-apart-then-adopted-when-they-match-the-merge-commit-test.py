@@ -402,7 +402,10 @@ def read_only_directory_overlap_is_judged_by_the_directory_and_by_what_this_run_
                              read_only="strace-lists", extra=extra, driver=driver)
         check(f"a run whose read-only directory is its strace-lists directory is not refused "
               f"when {name}",
-              result.returncode != 2 and "would also write to" not in result.stderr,
+              result.returncode == 0 and "would also write to" not in result.stderr
+              and scratch.recording("pr-a-recordings") is not None
+              and not [path for path in (scratch.root / "strace-lists").rglob("*")
+                       if path.is_file()],
               (result.returncode, result.stderr[-800:]))
 
     arguments = argparse.Namespace(leave_records_unchanged=False,
@@ -424,19 +427,48 @@ def read_only_directory_overlap_is_judged_by_the_directory_and_by_what_this_run_
             refused = True
         check(f"one directory named by two spellings, {name}, is refused", refused, name)
 
-    # Injected: ned-box's volumes are case-sensitive, so a case-insensitive one, as on the Mac,
-    # is stood for by samefile() reporting what that volume would.
-    real_samefile = pathlib.Path.samefile
-    pathlib.Path.samefile = lambda self, other: str(self).lower() == str(other).lower()
+    def refused_as_one_directory(read_only, saved):
+        try:
+            runner.refuse_read_only_recordings_directory_this_run_writes(
+                read_only, saved, elsewhere, arguments, None)
+            return False
+        except runner.CouldNotRun:
+            return True
+
+    check("on a case-sensitive volume, two missing directories differing in case are not "
+          "refused",
+          not refused_as_one_directory(store / "MISSING", store / "missing"))
+
+    # Injected: ned-box's volumes are case-sensitive. A symlink stands for the second spelling
+    # of an existing directory, and resolve() keeps each spelling, as on a case-insensitive
+    # volume, where the target's root-commit subdirectory does not exist yet.
+    (scratch.root / "recordings").mkdir()
+    (scratch.root / "Recordings").symlink_to(scratch.root / "recordings")
+    real_resolve = pathlib.Path.resolve
+    pathlib.Path.resolve = lambda self, strict=False: pathlib.Path(os.path.abspath(self))
     try:
-        runner.refuse_read_only_recordings_directory_this_run_writes(
-            scratch.root / "Recordings", scratch.root / "recordings", elsewhere, arguments, None)
-        refused = False
-    except runner.CouldNotRun:
-        refused = True
+        refused = refused_as_one_directory(scratch.root / "Recordings" / "abc",
+                                           scratch.root / "recordings" / "abc")
+    finally:
+        pathlib.Path.resolve = real_resolve
+    check("a missing directory under two spellings of one existing directory is refused", refused)
+
+    # Injected: samefile() answers as a case-insensitive volume would, and still fails for a
+    # path that does not exist.
+    real_samefile = pathlib.Path.samefile
+    top = scratch.root.resolve()
+
+    def on_case_insensitive_volume(path):
+        return top / str(pathlib.Path(os.path.realpath(path)).relative_to(top)).lower()
+
+    pathlib.Path.samefile = lambda self, other: real_samefile(
+        on_case_insensitive_volume(self), on_case_insensitive_volume(other))
+    try:
+        refused = refused_as_one_directory(store / "ROOT", store / "root")
     finally:
         pathlib.Path.samefile = real_samefile
-    check("on a case-insensitive volume, two spellings of one directory are refused", refused)
+    check("on a case-insensitive volume, a missing directory spelled in two cases is refused",
+          refused)
 
 
 def main():
