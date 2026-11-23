@@ -6719,7 +6719,7 @@ def walk_copies(root):
 
 def test_each_run_saves_a_changed_walk_document_once_and_keeps_the_newest_twenty():
     case = Case()
-    root = case.root / "walk-document-copies"
+    root = case.root / ".walk-document-copies"
     document = case.minutes.with_name(f"{WALK_NAME}.md")
     flags = ("--walk-document-copies-directory", str(root))
     first_text = document.read_bytes()
@@ -6741,6 +6741,19 @@ def test_each_run_saves_a_changed_walk_document_once_and_keeps_the_newest_twenty
     check("no temporary file is left", not list((root / WALK_NAME).glob("*.tmp")))
 
 
+def test_a_copy_whose_stamp_is_taken_gets_a_new_name_and_the_other_copy_is_kept():
+    program = load_program()
+    case = Case()
+    copies = case.root / "copies-with-a-taken-stamp"
+    copies.mkdir()
+    taken = copies / "2026-11-23T01-02-03.000004Z.md"
+    taken.write_bytes(b"the other run's copy")
+    times = iter([datetime.datetime(2026, 11, 23, 1, 2, 3, 4), datetime.datetime(2026, 11, 23, 1, 2, 3, 5)])
+    claimed = program.walk_document_copy_unused_timestamped_path_claim_by_creating_empty_file(copies, lambda: next(times))
+    check("a taken stamp moves the copy to a new name", claimed.name == "2026-11-23T01-02-03.000005Z.md", claimed.name)
+    check("the copy already at the taken stamp is unchanged", taken.read_bytes() == b"the other run's copy")
+
+
 def test_a_copy_that_cannot_be_saved_is_reported_and_the_answer_is_still_recorded():
     case = Case()
     blocked = case.root / "a-file-where-the-copies-directory-would-go"
@@ -6755,7 +6768,7 @@ def test_a_run_pointed_at_other_records_writes_no_copy_without_being_told_where(
     case = Case()
     result = case.run("check")
     check("the run succeeds with no copy", result.returncode == 0, described(result))
-    check("no copy folder appears in the case", not list(case.root.rglob("walk-document-copies")))
+    check("no copy folder appears in the case", not list(case.root.rglob(".walk-document-copies")))
 
 
 def main():

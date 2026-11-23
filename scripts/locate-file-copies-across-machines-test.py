@@ -420,6 +420,7 @@ with scratch() as directory:
     write(base / "box/handoffs/report-draft-handoff.md", "zeta", NOW - 20)
     write(base / "mac/agents/seat-a/node_modules/pkg/report-draft.md", "eps")
     write(base / "mac/Projects/old/.git/report-draft-in-git-dir.md", "eta")
+    write(base / "box/logs/.walk-document-copies/a-walk/report-draft-saved.md", "kappa")
     write(base / "mac/Projects/a-report-draft-dir/notes.md", "theta")
     write(base / "outside/target.md", "iota")
     (base / "mac/tmp/report-draft-link.md").symlink_to(base / "outside/target.md")
@@ -453,6 +454,12 @@ with scratch() as directory:
           "(5 bytes)" in stdout and "(4 bytes)" in stdout, stdout)
     check("a node_modules tree is not searched",
           "node_modules" not in same + other, stdout)
+    check("a saved walk-document copy is not listed",
+          "report-draft-saved" not in stdout, stdout)
+    check("the walk check program's copies folder has the name this program skips",
+          'WALK_DOCUMENT_COPIES_DIRECTORY_NAME = ".walk-document-copies"' in (
+              pathlib.Path(__file__).resolve().parent.parent / "nn-systems/skills/walk-me-through"
+              / "walk-me-through-answer-added-texts-cold-read-fast-read-check-and-close.py").read_text())
     check("nothing inside a .git directory is listed",
           "report-draft-in-git-dir" not in stdout, stdout)
     check("a directory whose name holds the stem is not listed, nor its "

@@ -1877,8 +1877,13 @@ def log_store_fixture(tmp):
 with tempfile.TemporaryDirectory() as tmp:
     store, (exact_copy, older_rename, newer_rename, unrelated) = log_store_fixture(tmp)
 
+    saved_copy = store / ".walk-document-copies" / "a-walk" / "pr-main-process-design.md"
+    saved_copy.parent.mkdir(parents=True)
+    saved_copy.write_text("a saved walk-document copy\n")
     here = RunsLocallyRefusesSsh([])
     report = finder.search_log_store("docs/drafts/pr-main-process-design.md", str(store), "nedlern@ned-box", here)
+    check("log-store: a saved walk-document copy is not reported", str(saved_copy) not in "\n".join(report.lines),
+          "\n".join(report.lines))
     listed = [l.strip() for l in report.lines if l.startswith("    ")]
     check("log-store, store here: the copy at the wanted path makes it FOUND, and the renamed copies are listed with it",
           report.status == FOUND and any(str(older_rename) in l for l in listed)

@@ -254,11 +254,12 @@ code 0, since the report was written.
 
 Each run of CHECK, CLOSE and the waiting-item step first saves the open
 walk's walk-document, as it stands, to the log-store's
-walk-document-copies/<walk name>/, named by the time in UTC, keeping the newest
+`.walk-document-copies/<walk name>/`, named by the time in UTC, keeping the newest
 20 of that walk. It saves nothing when the document is byte for byte the newest
 copy, so runs that change nothing do not push older versions out. The folder is
 none of the kinds scripts/log-store-past-discussions-regex-search-newest-first.py
-searches. A copy that cannot be saved is printed after the step's own output,
+searches, its dot keeps it out of `rg`, and scripts/locate-file-copies-across-machines.py
+and scripts/find-deleted-path-across-backups.py skip it. A copy that cannot be saved is printed after the step's own output,
 with exit 2 if the step would have exited 0; the step itself still runs.
 
 CLOSE reads the last answer line CHECK wrote. When the `#next_to_present` line
@@ -666,7 +667,7 @@ COUNTS_NOT_LOGGED = (
     "The minutes record the answer, but the fast-read counts were not logged to {log}: {error}.",
     "Include this line in your next message to the user, and carry on as the lines above say.",
 )
-WALK_DOCUMENT_COPIES_DIRECTORY_NAME = "walk-document-copies"
+WALK_DOCUMENT_COPIES_DIRECTORY_NAME = ".walk-document-copies"
 WALK_DOCUMENT_COPIES_KEPT = 20
 WALK_DOCUMENT_COPY_NOT_SAVED = (
     "FAILED: no timestamped copy of the walk-document {document} was saved to the log-store: {error}.\n"
@@ -1340,6 +1341,17 @@ def reachable_log_store_records(record_shipper=None, ned_box_home=None, mac_moun
     return next((candidate for candidate in candidates if candidate.is_dir()), None), candidates
 
 
+def walk_document_copy_unused_timestamped_path_claim_by_creating_empty_file(copies, utc_now):
+    """Create an empty file at a new stamped name, so that no other run's copy can be overwritten at that name."""
+    while True:
+        path = copies / f"{utc_now().strftime('%Y-%m-%dT%H-%M-%S.%fZ')}.md"
+        try:
+            os.close(os.open(path, os.O_CREAT | os.O_EXCL | os.O_WRONLY, 0o644))
+        except FileExistsError:
+            continue
+        return path
+
+
 def save_walk_document_copy_to_log_store(arguments):
     """Save the open walk's walk-document; return what went wrong, or None. A walk this cannot find is the step's
     own refusal to report."""
@@ -1376,12 +1388,12 @@ def save_walk_document_copy_to_log_store(arguments):
         existing = sorted(copies.glob("*.md"))
         if existing and existing[-1].read_bytes() == content:
             return None
-        stamp = datetime.datetime.now(datetime.timezone.utc).strftime("%Y-%m-%dT%H-%M-%S.%fZ")
         handle, temporary = tempfile.mkstemp(suffix=".tmp", dir=copies)
         with os.fdopen(handle, "wb") as file:
             file.write(content)
         os.chmod(temporary, 0o644)  # mkstemp's 0600 would differ from the log-store's other files.
-        os.replace(temporary, copies / f"{stamp}.md")
+        os.replace(temporary, walk_document_copy_unused_timestamped_path_claim_by_creating_empty_file(
+            copies, lambda: datetime.datetime.now(datetime.timezone.utc)))
         temporary = None
         for old in sorted(copies.glob("*.md"))[:-WALK_DOCUMENT_COPIES_KEPT]:
             old.unlink()
