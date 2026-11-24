@@ -437,8 +437,11 @@ def remove_targets_left_by_ended_runs(target_name_pattern_by_directory):
                 if is_the_type_run_probe_makes is stat.S_ISDIR:
                     shutil.rmtree(path)
                 else:
-                    path.unlink()
-            except (FileNotFoundError, IsADirectoryError):
+                    try:
+                        path.unlink()
+                    except IsADirectoryError:
+                        continue
+            except FileNotFoundError:
                 continue
             removed.append(str(path))
     return removed
@@ -1138,8 +1141,11 @@ def check_targets_of_a_killed_run_removed_by_the_next(scratch):
 
         real_unlink = pathlib.Path.unlink
 
+        lookups_of_replaced = []
+
         def lstat_seeing_a_file_where_a_directory_now_is(path, *arguments, **keywords):
-            if pathlib.Path(path) == replaced:
+            if pathlib.Path(path) == replaced and not lookups_of_replaced:
+                lookups_of_replaced.append(path)
                 return regular_file_status
             return real_lstat(path, *arguments, **keywords)
 
@@ -1183,8 +1189,24 @@ def check_targets_of_a_killed_run_removed_by_the_next(scratch):
             shutil.rmtree = real_rmtree
         check("the next run fails when it cannot remove a stale directory a killed run left",
               raised is not None, raised)
+
+        # A child of the stale directory turns into a directory partway through its removal.
+        def rmtree_finding_a_child_turned_directory(path, *arguments, **keywords):
+            raise IsADirectoryError(errno.EISDIR, os.strerror(errno.EISDIR),
+                                    str(pathlib.Path(path) / "child"))
+
+        shutil.rmtree = rmtree_finding_a_child_turned_directory
+        try:
+            remove_targets_left_by_ended_runs({cache: CACHE_TARGET_NAME_PATTERN})
+            raised = None
+        except IsADirectoryError as error:
+            raised = error
+        finally:
+            shutil.rmtree = real_rmtree
+        check("the next run fails when a stale directory's removal stops partway",
+              raised is not None, raised)
         real_rmtree(unremovable)
-        shutil.rmtree(replaced)
+        shutil.rmtree(replaced, ignore_errors=True)
 
         # The map is built as run_probe builds it, from a simulated writable-directory scan.
         scan_found = scratch / "scan-found"
