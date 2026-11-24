@@ -1845,6 +1845,26 @@ def run_cases_of_two_writers_at_once(workspace: Path):
           and files_left == ["a-head.txt"], f"{code_of_the_first} {files_left}")
 
 
+def run_cases_of_the_commit_the_run_was_asked_to_test(workspace: Path):
+    fixture = Fixture(workspace / "asked-to-test-a-commit")
+    other_commit = fixture.merge_base
+    refused = fixture.run(extra_arguments=("--refuse-unless-checkout-head-is-commit", other_commit))
+    check("a checkout at another commit than the one asked for is refused with exit 2, runs no "
+          "suite, writes no record, and says what to do",
+          refused.code == 2 and refused.runner_calls == [] and fixture.record_files() == []
+          and f"is {fixture.head}, not {other_commit}" in refused.stderr
+          and "Run `pgrep -af merge-lane-pull-request-head-test-run-on-merged-worktree.py`."
+          in refused.stderr
+          and "repeat the pgrep command once a minute" in refused.stderr
+          and "When it lists none for that pull request, run scripts/merge-lane-pull-request-"
+              "head-test-run-on-merged-worktree.py again with that pull request number"
+          in refused.stderr,
+          repr(refused))
+    passed = fixture.run(extra_arguments=("--refuse-unless-checkout-head-is-commit", fixture.head))
+    check("a checkout at the commit asked for runs as usual",
+          passed.code == 0 and len(passed.runner_calls) == 1, repr(passed))
+
+
 def run_cases_as_a_program(workspace: Path):
     """The program run as a reviewer runs it: its own process, its real clock
     and wait, the moment taken from the machine. ned-box is the fake ssh on
@@ -2083,6 +2103,7 @@ with tempfile.TemporaryDirectory() as temporary_directory:
     run_cases_of_what_the_write_command_holds()
     run_cases_of_the_two_byte_counts(workspace_root)
     run_cases_of_two_writers_at_once(workspace_root)
+    run_cases_of_the_commit_the_run_was_asked_to_test(workspace_root)
     run_cases_as_a_program(workspace_root)
     run_cases_of_stderr_that_cannot_be_written(workspace_root)
     run_cases_of_a_git_status_that_fails_after_a_warning(workspace_root)

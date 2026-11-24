@@ -239,6 +239,8 @@ def main():
                   "--log-store-root", str(helpers / "hr" / "pr7" / "log-store"),
                   "--temporary-directory", str(helpers / "hr" / "pr7" / "tmp"),
                   "--since", git(review_tools, "rev-parse", "origin/main"),
+                  "--refuse-unless-checkout-head-is-commit",
+                  git(review_worktrees_directory(helpers) / "pr7-merged", "rev-parse", "HEAD"),
                   "--recorded-inputs-directory", str(helpers / "hr" / "store"),
                   "--save-recorded-inputs-to-directory",
                   str(helpers / "hr" / "pr7" / "recorded-inputs"),
@@ -619,6 +621,18 @@ def main():
         check("a review tools worktree without pull-request-head-test-run.py exits 2 before any run",
               completed.returncode == 2 and calls == []
               and "pull-request-head-test-run.py is missing" in completed.stdout,
+              f"exit {completed.returncode}\n{completed.stdout}{completed.stderr}")
+
+        no_commit_line_tools = scratch / "rebuild-prints-no-merged-commit"
+        shutil.copytree(review_tools, no_commit_line_tools, symlinks=True)
+        (no_commit_line_tools / "scripts" / REBUILD_PROGRAM.name).unlink()
+        (no_commit_line_tools / "scripts" / REBUILD_PROGRAM.name).write_text(
+            'print("PR 7: rebuilt, with no line naming the merged commit")\n')
+        completed, calls = run_program(scratch, helpers, {}, "7",
+                                       review_tools=no_commit_line_tools)
+        check("a rebuild that names no merged commit runs no test and exits 2",
+              completed.returncode == 2 and calls == []
+              and "cannot tell which commit it would test" in completed.stdout,
               f"exit {completed.returncode}\n{completed.stdout}{completed.stderr}")
 
         not_a_checkout = scratch / "holds-both-programs-but-is-not-a-git-checkout"
