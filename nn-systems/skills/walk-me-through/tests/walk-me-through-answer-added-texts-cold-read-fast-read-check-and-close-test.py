@@ -12,6 +12,7 @@ cold-read-fast-read.py with stub models, to show the check reads that
 program's own output. The exit code is asserted on every case.
 """
 
+import argparse
 import contextlib
 import datetime
 import importlib.util
@@ -614,7 +615,7 @@ def test_marks_whose_texts_are_read_whole_are_not_refused():
 def test_the_waiting_item_read_step_refuses_a_mark_whose_text_would_not_be_read_whole():
     case = Case(document=marks_document('#new "The page lists\none poem."\n'))
     result = case.run(WAITING_ITEM_READ_STEP_NAME)
-    command = (f"python3 {PROGRAM} {WAITING_ITEM_READ_STEP_NAME} --after-fixes-reread-only-when-facts-change "
+    command = (f"python3 {shlex.quote(str(PROGRAM))} {WAITING_ITEM_READ_STEP_NAME} --after-fixes-reread-only-when-facts-change "
                f"--cwd {shlex.quote(str(case.checkout.resolve()))}")
     check("the waiting-item read step refuses a mark whose text runs on, before any read, and names itself to rerun",
           result.returncode == 1
@@ -639,23 +640,24 @@ def words_of_body(count):
     return "\n".join(" ".join(words[start:start + 10]) for start in range(0, count, 10)) + "\n"
 
 
-def test_the_waiting_item_read_step_refuses_an_item_over_300_words_and_reads_it_once_split_into_sub_steps():
+def test_the_waiting_item_read_step_refuses_an_item_over_500_words_and_reads_it_once_split_into_sub_steps():
     # Two words of the body follow a `###` that is no sub-step heading: one in fenced code, one in a quotation.
-    body = (words_of_body(301 - MARKS_DOCUMENT_WORDS_OUTSIDE_BODY - 2) + "\n```\n### code\n```\n\n> ### quoted\n")
+    body = (words_of_body(501 - MARKS_DOCUMENT_WORDS_OUTSIDE_BODY - 2) + "\n```\n### code\n```\n\n> ### quoted\n")
     case = Case(document=marks_document(body))
     result = case.run(WAITING_ITEM_READ_STEP_NAME)
-    command = (f"python3 {PROGRAM} {WAITING_ITEM_READ_STEP_NAME} --after-fixes-reread-only-when-facts-change "
+    command = (f"python3 {shlex.quote(str(PROGRAM))} {WAITING_ITEM_READ_STEP_NAME} --after-fixes-reread-only-when-facts-change "
                f"--cwd {shlex.quote(str(case.checkout.resolve()))}")
-    check("the read step refuses an item of 301 words, counting code and marker lines, before any read",
+    check("the read step refuses an item of 501 words, counting code and marker lines, before any read",
           result.returncode == 1
           and "the text from line 3 of the walk-document" in result.stderr
-          and "`## Item 3 of 9: the opening sentence`, has 301 words, over the limit of 300 words" in result.stderr
-          and "\nSplit that text into `###` sub-steps, each within 300 words" in result.stderr
+          and "`## Item 3 of 9: the opening sentence`, has 501 words, over the limit of 500 words" in result.stderr
+          and "\nSplit that text into `###` sub-steps, each within 500 words" in result.stderr
+          and "paragraph opening \"Limit each item to 500 words\" says" in result.stderr
           and f"\nThen run `{command}` again.\n" in result.stderr
           and case.calls.read_text() == "" and not case.reads().exists(), described(result))
     document = case.checkout / "docs" / "walk" / f"{WALK_NAME}.md"
     document.write_text(document.read_text().replace(
-        "word150 ", "\n### The second half\n\nword150 ").replace("word0 ", "### The first half\n\nword0 "))
+        "word250 ", "\n### The second half\n\nword250 ").replace("word0 ", "### The first half\n\nword0 "))
     again = case.run(*shlex.split(command)[2:-2])
     check("once the item is split into `###` sub-steps, each counted on its own, the command the refusal gave reads it",
           again.returncode == 0 and "had to be run now" in again.stdout, described(again))
@@ -666,7 +668,7 @@ def test_the_waiting_item_read_step_refuses_an_item_stating_a_system_status_unti
     document = case.checkout / "docs" / "walk" / f"{WALK_NAME}.md"
     before = document.read_text()
     result = case.run(WAITING_ITEM_READ_STEP_NAME)
-    command = f"python3 {PROGRAM} {WAITING_ITEM_READ_STEP_NAME} --cwd {shlex.quote(str(case.checkout.resolve()))}"
+    command = f"python3 {shlex.quote(str(PROGRAM))} {WAITING_ITEM_READ_STEP_NAME} --cwd {shlex.quote(str(case.checkout.resolve()))}"
     flag = "--possibly-stale-system-status-claims-rechecked"
     check("the read step refuses an item stating a status, before any read and leaving the item as it was, and "
           "gives each line the agent acts on",
@@ -730,11 +732,11 @@ def test_the_waiting_item_read_step_still_stops_an_item_rated_none_when_an_earli
 
 
 def test_the_waiting_item_read_step_names_and_reads_the_first_undecided_numbered_sub_step_of_the_item_named():
-    case = Case(document=marks_document(words_of_body(300)))
+    case = Case(document=marks_document(words_of_body(500)))
     case.run(WAITING_ITEM_READ_STEP_NAME)
     document = case.checkout / "docs" / "walk" / f"{WALK_NAME}.md"
     document.write_text(document.read_text().replace(
-        "word150 ", "\n### Item 3.2 of 9: the second half\n\nword150 ").replace(
+        "word250 ", "\n### Item 3.2 of 9: the second half\n\nword250 ").replace(
         "word0 ", "### Item 3.1 of 9: the first half\n\nword0 "))
     result = case.run(WAITING_ITEM_READ_STEP_NAME, "--after-fixes-reread-only-when-facts-change")
     items_read = [json.loads(outcome.read_text())["item"] for outcome in case.reads().glob("*-outcome.json")]
@@ -764,11 +766,11 @@ def test_the_waiting_item_read_step_names_and_reads_the_first_undecided_numbered
 
 
 def test_the_waiting_item_read_step_leaves_the_walk_minutes_as_they_were_when_the_sub_step_it_moves_to_is_refused():
-    case = Case(document=marks_document(words_of_body(300)))
+    case = Case(document=marks_document(words_of_body(500)))
     case.run(WAITING_ITEM_READ_STEP_NAME)
     document = case.checkout / "docs" / "walk" / f"{WALK_NAME}.md"
     document.write_text(document.read_text().replace(
-        "word150 ", "\n### Item 3.2 of 9: the second half\n\nword150 ").replace(
+        "word250 ", "\n### Item 3.2 of 9: the second half\n\nword250 ").replace(
         "word0 ", "### Item 3.1 of 9: the first half\n\nword0 "))
     case.run(WAITING_ITEM_READ_STEP_NAME, "--after-fixes-reread-only-when-facts-change")
     for copy in case.reads().glob("*.md"):
@@ -950,35 +952,35 @@ def test_the_waiting_item_read_step_keeps_the_text_read_before_the_item_was_spli
           again.returncode == 0 and document.read_text().count("Withdrawn version") == 1, described(again))
 
 
-def test_the_waiting_item_read_step_reads_an_item_of_300_words_leaving_out_its_approval_walk_item_lines():
+def test_the_waiting_item_read_step_reads_an_item_of_500_words_leaving_out_its_approval_walk_item_lines():
     body = ("#approval_walk_item_first_entered 2026-11-12\n- #approval_walk_item_waits_on the opening paragraph\n\n"
-            + words_of_body(300 - MARKS_DOCUMENT_WORDS_OUTSIDE_BODY))
+            + words_of_body(500 - MARKS_DOCUMENT_WORDS_OUTSIDE_BODY))
     case = Case(document=marks_document(body))
     result = case.run(WAITING_ITEM_READ_STEP_NAME)
-    check("the read step reads an item of exactly 300 words, its `#approval_walk_item_` lines not counted",
+    check("the read step reads an item of exactly 500 words, its `#approval_walk_item_` lines not counted",
           result.returncode == 0 and "had to be run now" in result.stdout
-          and "word284" in case.calls.read_text(), described(result))
+          and "word484" in case.calls.read_text(), described(result))
 
 
 def test_the_waiting_item_read_step_counts_each_numbered_sub_step_of_the_item_the_minutes_name():
     document = ("# A walk\n\n## Item 3 of 9: the opening sentence\n\n### Item 3.1 of 9: the first half\n\n"
-                + words_of_body(320) + "\n### Item 3.2 of 9: the second half\n\nShort.\n\n"
+                + words_of_body(520) + "\n### Item 3.2 of 9: the second half\n\nShort.\n\n"
                 "#case_against weak: the page grows.\n\nRecommendation: change it.\n")
     case = Case(document=document)
     result = case.run(WAITING_ITEM_READ_STEP_NAME)
     check("with `#next_to_present item 3 of 9`, the read step refuses the item's over-long numbered sub-step 3.1",
           result.returncode == 1 and "the text from line 5 of the walk-document" in result.stderr
-          and "`### Item 3.1 of 9: the first half`, has 327 words" in result.stderr
+          and "`### Item 3.1 of 9: the first half`, has 527 words" in result.stderr
           and case.calls.read_text() == "", described(result))
 
 
 def test_the_waiting_item_read_step_counts_a_detail_heading_below_a_sub_step_as_part_of_its_text():
-    body = words_of_body(160) + "\n#### Details\n\n" + words_of_body(160)
+    body = words_of_body(260) + "\n#### Details\n\n" + words_of_body(260)
     case = Case(document=marks_document(body))
     result = case.run(WAITING_ITEM_READ_STEP_NAME)
-    check("a `####` heading starts no sub-step, so 160 words, `#### Details` and 160 words are refused as one text",
+    check("a `####` heading starts no sub-step, so 260 words, `#### Details` and 260 words are refused as one text",
           result.returncode == 1 and "the text from line 3 of the walk-document" in result.stderr
-          and "has 336 words" in result.stderr and case.calls.read_text() == "", described(result))
+          and "has 536 words" in result.stderr and case.calls.read_text() == "", described(result))
 
 
 def test_the_waiting_item_read_step_counts_each_item_of_a_shared_heading_on_its_own():
@@ -993,24 +995,24 @@ def test_the_waiting_item_read_step_counts_each_item_of_a_shared_heading_on_its_
 
 
 def test_the_waiting_item_read_step_counts_the_text_of_a_shared_heading_above_its_first_item():
-    document = ("# A walk\n\n## Items 6 and 7 of 9: two short items\n\n" + words_of_body(400)
+    document = ("# A walk\n\n## Items 6 and 7 of 9: two short items\n\n" + words_of_body(600)
                 + "\n**Item 6 of 9:** the first.\n\nShort.\n\n#case_against weak: one.\n\nRecommendation: do one.\n\n"
                 "**Item 7 of 9:** the second.\n\nShort.\n\n#case_against weak: two.\n\nRecommendation: do two.\n")
     case = Case(next_to_present="items 6 and 7 of 9", document=document)
     result = case.run(WAITING_ITEM_READ_STEP_NAME)
-    check("400 words between a shared heading and its first item are counted as one more text, and refused",
+    check("600 words between a shared heading and its first item are counted as one more text, and refused",
           result.returncode == 1 and "the text from line 3 of the walk-document" in result.stderr
-          and "has 409 words" in result.stderr and case.calls.read_text() == "", described(result))
+          and "has 609 words" in result.stderr and case.calls.read_text() == "", described(result))
 
 
 def test_the_waiting_item_read_step_leaves_out_an_older_version_sub_step_of_the_same_number():
     document = ("# A walk\n\n## Item 3 of 9: the older version\n\nOld.\n\n### Item 3.1 of 9: the older first half\n\n"
-                + words_of_body(320) + "\n## Item 3 of 10: the opening sentence\n\nNew.\n\n"
+                + words_of_body(520) + "\n## Item 3 of 10: the opening sentence\n\nNew.\n\n"
                 "### Item 3.1 of 10: the first half\n\nShort.\n\n"
                 "#case_against weak: the page grows.\n\nRecommendation: change it.\n")
     case = Case(next_to_present="item 3 of 10", document=document)
     result = case.run(WAITING_ITEM_READ_STEP_NAME)
-    check("with `#next_to_present item 3 of 10`, an older `3.1 of 9` of 320 words elsewhere is not counted",
+    check("with `#next_to_present item 3 of 10`, an older `3.1 of 9` of 520 words elsewhere is not counted",
           result.returncode == 0 and "had to be run now" in result.stdout, described(result))
 
 
@@ -1532,44 +1534,44 @@ def test_the_waiting_item_read_step_leaves_out_an_older_sub_step_below_a_later_i
     document = ("# A walk\n\n## Item 3 of 10: the opening sentence\n\nNew.\n\n### Item 3.1 of 10: the first half\n\n"
                 "Short.\n\n#case_against weak: the page grows.\n\nRecommendation: change it.\n\n"
                 "## Item 4 of 10: the next item\n\nNext.\n\n### Item 3.1 of 9: the older first half\n\n"
-                + words_of_body(320))
+                + words_of_body(520))
     case = Case(next_to_present="item 3 of 10", document=document)
     result = case.run(WAITING_ITEM_READ_STEP_NAME)
-    check("the sub-steps of item 3 end at item 4, so an older `3.1 of 9` of 320 words below item 4 is not counted",
+    check("the sub-steps of item 3 end at item 4, so an older `3.1 of 9` of 520 words below item 4 is not counted",
           result.returncode == 0 and "had to be run now" in result.stdout, described(result))
 
 
 def test_the_waiting_item_read_step_leaves_out_the_text_of_a_shared_heading_when_one_item_of_it_is_named():
-    document = ("# A walk\n\n## Items 6 and 7 of 9: two short items\n\n" + words_of_body(400)
+    document = ("# A walk\n\n## Items 6 and 7 of 9: two short items\n\n" + words_of_body(600)
                 + "\n**Item 6 of 9:** the first.\n\nShort.\n\n#case_against weak: one.\n\nRecommendation: do one.\n\n"
                 "**Item 7 of 9:** the second.\n\nShort.\n\n#case_against weak: two.\n\nRecommendation: do two.\n")
     case = Case(next_to_present="item 6 of 9", document=document)
     result = case.run(WAITING_ITEM_READ_STEP_NAME)
-    check("with only item 6 named, the 400 words above its opening are not shown, so are not counted",
+    check("with only item 6 named, the 600 words above its opening are not shown, so are not counted",
           result.returncode == 0 and "had to be run now" in result.stdout, described(result))
 
 
 def test_the_waiting_item_read_step_counts_the_sub_steps_of_each_item_of_a_shared_heading():
     document = ("# A walk\n\n## Items 6 and 7 of 9: two short items\n\n**Item 6 of 9:** the first.\n\nShort.\n\n"
                 "**Item 7 of 9:** the second.\n\nShort.\n\n### Item 6.1 of 9: the first's detail\n\nShort.\n\n"
-                "### Item 7.1 of 9: the second's detail\n\n" + words_of_body(320)
+                "### Item 7.1 of 9: the second's detail\n\n" + words_of_body(520)
                 + "\n#case_against weak: two.\n\nRecommendation: do both.\n")
     case = Case(next_to_present="items 6 and 7 of 9", document=document)
     result = case.run(WAITING_ITEM_READ_STEP_NAME)
-    check("with items 6 and 7 named, sub-step 7.1 after sub-step 6.1 is counted, and its 320 words refused",
-          result.returncode == 1 and "`### Item 7.1 of 9: the second's detail`, has 3" in result.stderr
+    check("with items 6 and 7 named, sub-step 7.1 after sub-step 6.1 is counted, and its 520 words refused",
+          result.returncode == 1 and "`### Item 7.1 of 9: the second's detail`, has 5" in result.stderr
           and case.calls.read_text() == "", described(result))
 
 
 def test_the_waiting_item_read_step_counts_the_text_of_a_heading_shared_by_sub_steps_above_the_first():
     document = ("# A walk\n\n## Item 3 of 9: the opening sentence\n\nShort.\n\n### Items 3.1 and 3.2 of 9: both halves\n\n"
-                + words_of_body(400) + "\n**Item 3.1 of 9:** the first half.\n\nShort.\n\n"
+                + words_of_body(600) + "\n**Item 3.1 of 9:** the first half.\n\nShort.\n\n"
                 "**Item 3.2 of 9:** the second half.\n\nShort.\n\n"
                 "#case_against weak: the page grows.\n\nRecommendation: change it.\n")
     case = Case(document=document)
     result = case.run(WAITING_ITEM_READ_STEP_NAME)
-    check("400 words between a heading shared by sub-steps 3.1 and 3.2 and the first of them are refused",
-          result.returncode == 1 and "`### Items 3.1 and 3.2 of 9: both halves`, has 40" in result.stderr
+    check("600 words between a heading shared by sub-steps 3.1 and 3.2 and the first of them are refused",
+          result.returncode == 1 and "`### Items 3.1 and 3.2 of 9: both halves`, has 60" in result.stderr
           and case.calls.read_text() == "", described(result))
 
 
@@ -1909,7 +1911,7 @@ def test_a_capitalised_marker_is_read_and_closed():
 
 def read_next_item_line(case, item):
     """The last line close prints when it names the next item."""
-    return (f"Then run `python3 {PROGRAM} approval-walk-waiting-item-cold-read-fast-read --cwd {shlex.quote(str(case.checkout.resolve()))}`, "
+    return (f"Then run `python3 {shlex.quote(str(PROGRAM))} approval-walk-waiting-item-cold-read-fast-read --cwd {shlex.quote(str(case.checkout.resolve()))}`, "
             f"which gives {item}, the item the minutes' `#next_to_present` line now names, its cold-read-fast-read, "
             "and do what it prints before you present it.")
 
@@ -2349,7 +2351,7 @@ def test_close_holds_the_answer_for_a_waiting_new_item():
                            "until he answers item 5 of 9.")
           and lines[1] == NEXT_MESSAGE_LINES_HEADER
           and sum("fast read had to be run" in line for line in lines) == 2
-          and lines[-1] == (f"Then run `python3 {PROGRAM} approval-walk-waiting-item-cold-read-fast-read --cwd "
+          and lines[-1] == (f"Then run `python3 {shlex.quote(str(PROGRAM))} approval-walk-waiting-item-cold-read-fast-read --cwd "
                             f"{shlex.quote(str(case.checkout.resolve()))}`, which gives item 5 of 9 its "
                             "cold-read-fast-read, do what it prints, and present item 5 of 9. When the close step records the user's approval or disapproval "
                             "of item 5 of 9, it records the same outcome for item 3 of 9; after a deferral, a move on "
@@ -5289,7 +5291,7 @@ def test_a_read_that_fails_in_the_read_step_says_not_to_present_the_item():
           result.returncode == 1 and lines[0] == "FAILED: the stand-in cold-read-cell failed twice"
           and lines[1].startswith("item 3 of 5 has had no cold-read-fast-read of its text as it stands, so do not "
                                   "present it yet")
-          and lines[2] == (f"Run `python3 {PROGRAM} {WAITING_ITEM_READ} --cwd "
+          and lines[2] == (f"Run `python3 {shlex.quote(str(PROGRAM))} {WAITING_ITEM_READ} --cwd "
                            f"{shlex.quote(str(case.checkout.resolve()))}` again once."), described(result))
     retried = case.run(WAITING_ITEM_READ)
     check("the read step after a failed read reads the item, naming no read ahead",
@@ -5305,7 +5307,7 @@ def test_a_stop_signal_that_cannot_remove_the_read_steps_scratch_directory_gives
           "command, naming the walk's checkout",
           result.returncode == -signal.SIGTERM and result.stderr.rstrip("\n").split("\n")[-1] == (
               "item 3 of 5 has had no cold-read-fast-read of its text as it stands: then run "
-              f"`python3 {PROGRAM} {WAITING_ITEM_READ} --cwd {shlex.quote(str(case.checkout.resolve()))}` again, "
+              f"`python3 {shlex.quote(str(PROGRAM))} {WAITING_ITEM_READ} --cwd {shlex.quote(str(case.checkout.resolve()))}` again, "
               "and present item 3 of 5 only after it."), described(result))
     for directory in case.temporary_directory.iterdir():
         if (directory / "locked").exists():
@@ -5819,7 +5821,7 @@ def test_the_read_step_refuses_an_item_whose_earlier_read_texts_copy_is_missing(
     copies[0].unlink()
     result = case.run(WAITING_ITEM_READ)
     report = case.records / f"{WALK_NAME}-item-3-of-5-2026-10-17" / "cold-read-fast-read.md"
-    command = f"python3 {PROGRAM} {WAITING_ITEM_READ} --cwd {shlex.quote(str(case.checkout.resolve()))}"
+    command = f"python3 {shlex.quote(str(PROGRAM))} {WAITING_ITEM_READ} --cwd {shlex.quote(str(case.checkout.resolve()))}"
     lines = result.stderr.rstrip("\n").split("\n")
     check("the read step refuses an item whose earlier read text has no copy, writing nothing and reading nothing",
           result.returncode == 1 and document.read_text() == before and times_read(case, ITEM_3_HEADING) == 1
@@ -6637,6 +6639,12 @@ def test_bump_refuses_an_item_no_heading_has_or_one_already_shown_writing_nothin
           missing.returncode == 1 and "no item heading in the walk-document" in missing.stderr
           and "`four`" in missing.stderr and f"`{check_command_for(case, '--bump', 'two')}`" in missing.stderr,
           described(missing))
+    indented = Case(next_to_present="item 1 of 9", document=bump_walk().replace("\n## two", "\n  ## two"))
+    missing_indented = indented.run("check", "--bump", "four", reply="bump four")
+    check("check --bump's refusal names an unshown item by its title when that item's heading is indented",
+          missing_indented.returncode == 1
+          and f"`{check_command_for(indented, '--bump', 'two')}`" in missing_indented.stderr,
+          described(missing_indented))
     shown = case.run("check", "--bump", "one", reply="bump one")
     check("check --bump refuses the waiting item, which has been shown and is not decided",
           shown.returncode == 1 and "`## Item 1 of 9: one`" in shown.stderr
@@ -6657,7 +6665,7 @@ def test_bump_refuses_while_the_last_answer_has_no_close_line_writing_nothing():
           "to run again",
           answered.returncode == 0 and bumped.returncode == 1
           and "hold the user's answer to item 1 of 9, which check wrote and close has not yet recorded" in bumped.stderr
-          and f"Run `python3 {PROGRAM} close --cwd {top}` first and do what it prints, except reading and presenting "
+          and f"Run `python3 {shlex.quote(str(PROGRAM))} close --cwd {top}` first and do what it prints, except reading and presenting "
               "the item it names next: in place of that, run "
               f"`{check_command_for(case, '--bump', 'three', '--user-reply-as-typed', 'bump three')}` and do what it "
               "prints" in bumped.stderr,
@@ -6701,11 +6709,12 @@ def withheld_for_finding_outcomes(case, result, item="item 3 of 5"):
             and "has findings with no recorded outcome, 2 of 2." in result.stdout
             and "  Q2.1: `three`: unclear." in lines and "  Q4.1: `three` — code could count it." in lines
             and (report is None or (
-                f"python3 {case.stand_in} --record-finding-outcomes-in-cold-read-record {report.parent} \\"
+                f"python3 {shlex.quote(str(case.stand_in))} --record-finding-outcomes-in-cold-read-record "
+                f"{shlex.quote(str(report.parent))} \\"
                 in lines))
             and "  --finding-outcome 'Q2.1=<applied, or declined: reason>' \\" in lines
             and "  --finding-outcome 'Q4.1=<applied, or declined: reason>'" in lines
-            and lines[-1].startswith(f"Then run `python3 {PROGRAM} {WAITING_ITEM_READ} {AFTER_FIXES} --cwd ")
+            and lines[-1].startswith(f"Then run `python3 {shlex.quote(str(PROGRAM))} {WAITING_ITEM_READ} {AFTER_FIXES} --cwd ")
             and not any(line.startswith(("Present ", "Then present ")) for line in lines))
 
 
@@ -6771,8 +6780,299 @@ def test_the_read_step_says_so_when_its_reads_report_cannot_be_read_for_finding_
           and times_read(case, "## Item 3 of 5: three") == 2, described(read_again))
 
 
+def program_copy_in_checkout_path_holding_a_space(root):
+    """A copy of the program in a directory tree whose path holds a space. The program file is a real copy because
+    the program prints its own path resolved, so a symbolic link would print the path without the space; the files
+    it loads are linked."""
+    real_top = PROGRAM.parents[3]
+    top = root / "checkout path with a space"
+    directory = top / PROGRAM.relative_to(real_top).parent
+    directory.mkdir(parents=True)
+    for name in (".claude", "scripts"):
+        (top / name).symlink_to(real_top / name)
+    for parent in (real_top / "nn-systems", real_top / "nn-systems" / "skills", PROGRAM.parent):
+        for entry in parent.iterdir():
+            copy = top / parent.relative_to(real_top) / entry.name
+            if entry != PROGRAM and not copy.exists():
+                copy.symlink_to(entry)
+    shutil.copy2(PROGRAM, directory / PROGRAM.name)
+    return directory / PROGRAM.name
+
+
+def printed_program_commands(result):
+    """Each backquoted `python3 ...` command in what the program printed."""
+    return re.findall(r"`(python3 [^`]+)`", result.stdout + result.stderr)
+
+
+def each_printed_command_names_a_file(result):
+    commands = printed_program_commands(result)
+    return bool(commands) and all(Path(shlex.split(command)[1]).is_file() for command in commands)
+
+
+def run_printed_command(case, command):
+    """Run a command the program printed through a shell, as an agent does, with the case's test doubles added."""
+    return subprocess.run(
+        ["bash", "-c", command + " " + shlex.join(case_paths(case)[2:] + ["--gh-program", str(case.gh)])],
+        capture_output=True, text=True, cwd=case.root,
+        env=dict(os.environ, STAND_IN_MODE="", STAND_IN_CALLS=str(case.calls),
+                 STAND_IN_ARGUMENTS=str(case.fast_read_arguments), STAND_IN_RECORDS=str(case.records),
+                 TMPDIR=str(case.temporary_directory), GH_STAND_IN_CALLS=str(case.gh_calls)))
+
+
+def printed_command_with(result, words):
+    return next((command for command in printed_program_commands(result) if words in command), "false")
+
+
+def check_every_printed_command_from_a_path_holding_a_space():
+    case = item_read_case()
+    checked = case.run("check")
+    check("from a path holding a space, check prints a close command naming the program",
+          each_printed_command_names_a_file(checked), described(checked))
+    closed = run_printed_command(case, printed_command_with(checked, " close "))
+    case.wait_for_reads_ahead()
+    check("from a path holding a space, the printed close command runs and prints a read-step command",
+          closed.returncode == 0 and each_printed_command_names_a_file(closed), described(closed))
+    read = run_printed_command(case, printed_command_with(closed, WAITING_ITEM_READ))
+    case.wait_for_reads_ahead()
+    check("from a path holding a space, the printed read-step command runs, and each command it prints names a file",
+          read.returncode == 0 and each_printed_command_names_a_file(read), described(read))
+    reread = run_printed_command(case, printed_command_with(read, AFTER_FIXES))
+    case.wait_for_reads_ahead()
+    check("from a path holding a space, the read-step command with its after-fixes flag runs",
+          reread.returncode == 0, described(reread))
+
+    held = Case()
+    held.run("check")
+    with open(held.minutes, "a") as minutes:
+        minutes.write("#next_to_present item 5 of 9\n")
+    held_close = held.run("close")
+    check("from a path holding a space, close holding an answer prints a read-step command that parses to the program",
+          held_close.returncode == 0 and each_printed_command_names_a_file(held_close), described(held_close))
+
+    bumped_case = Case(next_to_present="item 1 of 9", document=bump_walk())
+    bumped = bumped_case.run("check", "--bump", "three", reply="bump three")
+    check("from a path holding a space, check --bump prints a read-step command that parses to the program",
+          bumped.returncode == 0 and each_printed_command_names_a_file(bumped), described(bumped))
+
+    refused_case = Case(next_to_present="item 1 of 9", document=bump_walk())
+    refused_case.run("check")
+    refused = refused_case.run("check", "--bump", "three", reply="bump three")
+    refused_close = run_printed_command(refused_case, printed_command_with(refused, " close "))
+    refused_case.wait_for_reads_ahead()
+    check("from a path holding a space, a refused check --bump prints a close command that runs",
+          refused.returncode == 1 and each_printed_command_names_a_file(refused) and refused_close.returncode == 0,
+          described(refused) + described(refused_close))
+
+    unordered = Case(next_to_present="item 1 of 9",
+                     document=bump_walk().replace(f"{CATEGORY_TAG}must_fix_now", ""))
+    order_refused = unordered.run(WAITING_ITEM_READ)
+    check("from a path holding a space, the refusal of an unusable walk order prints a command naming the program",
+          order_refused.returncode == 1 and each_printed_command_names_a_file(order_refused), described(order_refused))
+
+    not_shipped_case = Case()
+    not_shipped = not_shipped_case.run("check", mode="record-not-shipped")
+    # Parsed and not run: the real shipper would copy the case's record to the log-store.
+    ship = shlex.split(printed_command_with(not_shipped, "cold-read-record-ship.py"))
+    check("from a path holding a space, the command that ships an unshipped record parses to the shipper and the "
+          "record", len(ship) == 3 and Path(ship[1]).is_file() and Path(ship[2]).is_dir(), described(not_shipped))
+
+
+def check_read_step_retry_after_failed_scratch_removal_drops_only_the_after_fixes_flag():
+    global SUITE_ROOT
+    # The checkout path and the recheck value both hold the flag's text, which only the flag itself may lose.
+    SUITE_ROOT = SUITE_ROOT / f"path {AFTER_FIXES} holding the flag"
+    SUITE_ROOT.mkdir()
+    case = item_read_case()
+    answered_and_closed(case)
+    rechecked_flag = "--possibly-stale-system-status-claims-rechecked"
+    rechecked = f"ran git status at 10:00 with {AFTER_FIXES} in mind"
+    stopped = case.run(WAITING_ITEM_READ, AFTER_FIXES, rechecked_flag, rechecked, mode="stopped-unremovable SIGTERM")
+    for directory in case.temporary_directory.iterdir():
+        if (directory / "locked").exists():
+            (directory / "locked").chmod(0o700)  # Else the suite's own removal leaves it behind.
+    retry = printed_command_with(stopped, WAITING_ITEM_READ)
+    words = shlex.split(retry)
+    check("the retry a failed scratch removal prints drops the after-fixes flag and keeps --cwd and the recheck value "
+          "whole, each holding the flag's text",
+          stopped.returncode == -signal.SIGTERM and AFTER_FIXES not in words
+          and words[2:] == [WAITING_ITEM_READ, rechecked_flag, rechecked, "--cwd", str(case.checkout.resolve())],
+          described(stopped))
+    ran = run_printed_command(case, retry)
+    case.wait_for_reads_ahead()
+    check("the retry a failed scratch removal prints runs from a path holding a space", ran.returncode == 0,
+          described(ran))
+
+
+def test_every_printed_command_runs_from_a_checkout_path_holding_a_space():
+    global PROGRAM, SUITE_ROOT
+    program, suite_root = PROGRAM, SUITE_ROOT
+    root = suite_root / "suite root with a space"
+    root.mkdir()
+    try:
+        PROGRAM, SUITE_ROOT = program_copy_in_checkout_path_holding_a_space(root), root
+        check_every_printed_command_from_a_path_holding_a_space()
+        check_read_step_retry_after_failed_scratch_removal_drops_only_the_after_fixes_flag()
+    finally:
+        PROGRAM, SUITE_ROOT = program, suite_root
+
+
 def stopped_by_sigterm(*_):
     raise SystemExit(1)  # So main()'s finally removes the suite's scratch directory.
+
+
+def walk_copies(root):
+    return sorted((root / WALK_NAME).glob("*.md")) if (root / WALK_NAME).is_dir() else []
+
+
+def test_each_run_saves_a_changed_walk_document_once_and_keeps_the_newest_twenty():
+    case = Case()
+    root = case.root / "walk-document-copies"
+    document = case.minutes.with_name(f"{WALK_NAME}.md")
+    flags = ("--walk-document-copies-directory", str(root))
+    first_text = document.read_bytes()
+    case.run("check", *flags)
+    check("a run saves the walk-document", [path.read_bytes() for path in walk_copies(root)] == [first_text])
+    before = walk_copies(root)
+    case.run("check", *flags)
+    check("a run with the document unchanged saves no copy", walk_copies(root) == before)
+    (root / WALK_NAME / "2000-01-01T00-00-00.000000Z.md").write_bytes(b"oldest")
+    for number in range(1, 21):
+        (root / WALK_NAME / f"2000-01-02T00-00-{number:02}.000000Z.md").write_bytes(b"old")
+    changed = first_text + b"\nchanged\n"
+    document.write_bytes(changed)
+    case.run("check", *flags)
+    kept = walk_copies(root)
+    check("only the newest 20 copies are kept", len(kept) == 20, str(len(kept)))
+    check("the oldest copy is the one removed", not (root / WALK_NAME / "2000-01-01T00-00-00.000000Z.md").exists())
+    check("the changed document is the newest copy", kept[-1].read_bytes() == changed)
+    check("no temporary file is left", not list((root / WALK_NAME).glob("*.tmp")))
+
+
+def test_two_copies_with_one_stamp_keep_both():
+    program = load_program()
+    case = Case()
+    root = case.root / "copies-with-one-stamp"
+    arguments = argparse.Namespace(cwd=str(case.checkout), walk_document_copies_directory=root, cold_read_records=None,
+                                   counts_log=None)
+    document = case.minutes.with_name(f"{WALK_NAME}.md")
+
+    class OneInstant(datetime.datetime):
+        @classmethod
+        def now(cls, tz=None):
+            return cls(2026, 11, 23, 1, 2, 3, 4, tzinfo=tz)
+
+    real_mkstemp = program.tempfile.mkstemp
+
+    def mkstemp_reusing_one_name(*_, dir, **__):
+        path = Path(dir) / "reused-suffix.tmp"
+        return os.open(path, os.O_CREAT | os.O_WRONLY | os.O_TRUNC, 0o600), str(path)
+
+    real_datetime = program.datetime.datetime
+    program.datetime.datetime = OneInstant
+    program.tempfile.mkstemp = mkstemp_reusing_one_name
+    try:
+        document.write_bytes(b"first version\n")
+        first = program.walk_me_through_walk_document_timestamped_copy_save_on_ned_box_and_oldest_copies_prune(arguments)
+        document.write_bytes(b"second version\n")
+        second = program.walk_me_through_walk_document_timestamped_copy_save_on_ned_box_and_oldest_copies_prune(arguments)
+    finally:
+        program.datetime.datetime = real_datetime
+        program.tempfile.mkstemp = real_mkstemp
+    check("both saves report success", first is None and second is None, f"{first} {second}")
+    check("both versions are kept", sorted(path.read_bytes() for path in walk_copies(root))
+          == [b"first version\n", b"second version\n"])
+
+
+def default_location_arguments(case, **overrides):
+    values = dict(cwd=str(case.checkout), walk_document_copies_directory=None, cold_read_records=None, counts_log=None)
+    return argparse.Namespace(**{**values, **overrides})
+
+
+def with_log_store_at(program, log_store, action):
+    records = log_store / "cold-read-records"
+    records.mkdir(parents=True, exist_ok=True)
+    real_lookup = program.reachable_log_store_records
+    program.reachable_log_store_records = lambda: (records, [records])
+    try:
+        return action()
+    finally:
+        program.reachable_log_store_records = real_lookup
+
+
+def test_a_default_run_saves_under_the_log_store_on_ned_box_and_through_the_mac_mount():
+    program = load_program()
+    case = Case()
+    save = program.walk_me_through_walk_document_timestamped_copy_save_on_ned_box_and_oldest_copies_prune
+    for label, log_store in (("ned-box", case.root / "home" / "nedsnodes-logs"),
+                             ("the Mac mount", case.root / "Volumes" / "nedhome" / "nedsnodes-logs")):
+        problem = with_log_store_at(program, log_store, lambda: save(default_location_arguments(case)))
+        check(f"a default save through {label} succeeds", problem is None, str(problem))
+        check(f"a default save through {label} lands in the log-store's copies folder",
+              len(walk_copies(log_store / "walk-document-copies")) == 1)
+
+
+def test_a_run_given_other_records_or_counts_saves_nothing_to_the_default_location():
+    program = load_program()
+    case = Case()
+    save = program.walk_me_through_walk_document_timestamped_copy_save_on_ned_box_and_oldest_copies_prune
+    for label, overrides in (("records", {"cold_read_records": [case.root / "other-records"]}),
+                             ("counts", {"counts_log": case.root / "other-counts.tsv"})):
+        log_store = case.root / f"log-store-for-{label}"
+        problem = with_log_store_at(program, log_store, lambda: save(default_location_arguments(case, **overrides)))
+        check(f"a run given other {label} reports no problem", problem is None, str(problem))
+        check(f"a run given other {label} saves nothing", not (log_store / "walk-document-copies").exists())
+
+
+def test_the_read_ahead_worker_step_saves_no_copy():
+    program = load_program()
+    case = Case()
+    log_store = case.root / "log-store-for-the-worker"
+    real_worker = program.read_ahead_worker
+    program.read_ahead_worker = lambda _arguments: 0
+    try:
+        code = with_log_store_at(program, log_store,
+                                 lambda: program.main([program.READ_AHEAD_WORKER_STEP, "--cwd", str(case.checkout)]))
+    finally:
+        program.read_ahead_worker = real_worker
+    check("the worker step exits 0", code == 0, str(code))
+    check("the worker step saves no copy", not (log_store / "walk-document-copies").exists())
+
+
+def test_a_failed_publish_leaves_no_copy_at_a_final_name():
+    program = load_program()
+    case = Case()
+    root = case.root / "copies-whose-publish-fails"
+    arguments = argparse.Namespace(cwd=str(case.checkout), walk_document_copies_directory=root, cold_read_records=None,
+                                   counts_log=None)
+
+    def failing_replace(*_):
+        raise OSError("publish failed")
+
+    real_replace = program.os.replace
+    program.os.replace = failing_replace
+    try:
+        problem = program.walk_me_through_walk_document_timestamped_copy_save_on_ned_box_and_oldest_copies_prune(arguments)
+    finally:
+        program.os.replace = real_replace
+    check("the failed publish is reported", problem is not None and "publish failed" in problem, str(problem))
+    check("no file is left in the copies folder", list((root / WALK_NAME).iterdir()) == [])
+
+
+def test_a_copy_that_cannot_be_saved_is_reported_and_the_answer_is_still_recorded():
+    case = Case()
+    blocked = case.root / "a-file-where-the-copies-directory-would-go"
+    blocked.write_text("")
+    result = case.run("check", "--walk-document-copies-directory", str(blocked))
+    check("the failed copy is reported", "FAILED: no timestamped copy" in result.stderr, described(result))
+    check("a failed copy exits 2 when the step succeeded", result.returncode == 2, described(result))
+    check("the answer is still recorded", "the user answered" in case.minutes.read_text(), case.minutes.read_text())
+
+
+def test_a_run_pointed_at_other_records_writes_no_copy_without_being_told_where():
+    case = Case()
+    result = case.run("check")
+    check("the run succeeds with no copy", result.returncode == 0, described(result))
+    check("no copy folder appears in the case", not list(case.root.rglob("walk-document-copies")))
 
 
 def main():
