@@ -43,12 +43,15 @@ crash_recovery = importlib.util.module_from_spec(_crash_recovery_spec)
 _crash_recovery_spec.loader.exec_module(crash_recovery)
 handoff_supervisor = crash_recovery.supervisor
 
+_handoff_extract_conversation_spec = importlib.util.spec_from_file_location(
+    "handoff_extract_conversation", Path(__file__).resolve().parent / "handoff-extract-conversation.py")
+handoff_extract_conversation = importlib.util.module_from_spec(_handoff_extract_conversation_spec)
+_handoff_extract_conversation_spec.loader.exec_module(handoff_extract_conversation)
+
 DEFAULT_PROJECTS_DIR = os.path.expanduser("~/.claude/projects")
 WRAPPED_BLOCK = re.compile(r"\A\s*<[a-z-]+>.*</[a-z-]+>\s*\Z", re.DOTALL)
 PROGRAM_PROMPT_ENTRYPOINT = "sdk-cli"
 COMPACTION_SUMMARY_OPENING = "This session is being continued from a previous conversation"
-# The two notices Claude Code writes when the user presses Escape.
-INTERRUPT_NOTICE_PATTERN = re.compile(r"\[Request interrupted by user( for tool use)?\]")
 FIRST_PROMPT_FOR_AGENT_SEAT_WITHOUT_A_HANDOFF_PATTERN = re.compile(
     re.escape(handoff_supervisor.FIRST_PROMPT_FOR_AGENT_SEAT_WITHOUT_A_HANDOFF_TEMPLATE).replace(re.escape("{agent}"), ".+?"))
 FRESH_SESSION_FROM_CONVERSATION_TAIL_PROMPT_PATTERN = re.compile(
@@ -148,8 +151,8 @@ def is_interrupt_notice(record):
         return False
     # The message's whole text, so that a prompt the user typed holding a notice, pasted or in a
     # block of its own after his words, is still his.
-    return bool(INTERRUPT_NOTICE_PATTERN.fullmatch(
-        "".join(text for text in texts if isinstance(text, str)).strip()))
+    return handoff_extract_conversation.text_is_whole_interrupt_notice(
+        "".join(text for text in texts if isinstance(text, str)))
 
 
 def assistant_text(record):
