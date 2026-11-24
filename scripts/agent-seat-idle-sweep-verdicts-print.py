@@ -154,7 +154,7 @@ _GERUNDS = (
     "kicking off|firing|queueing|queuing|retrying|amending|squashing|"
     "reopening|resolving|patching|implementing|scanning|comparing|inspecting|"
     "confirming|re-?dispatching|re-?pushing|relaunching|notifying|pinging|"
-    "handing|staging|finishing"
+    "handing|staging|finishing|going on with"
 )
 _FILLER = (r"(?:(?:now|then|first|next|go ahead and|go|quickly|also|immediately|just|"
            r"straight away|right away|actually|instead|again)\s+)*")

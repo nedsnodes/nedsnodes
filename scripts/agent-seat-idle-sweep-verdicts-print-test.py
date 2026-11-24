@@ -371,6 +371,7 @@ try:
          "announced_action"),
         ("I'm checking item 11 of the merged walk against the design as it now stands.",
          "announced_action"),
+        ("I'm going on with item 2 while the tests run.", "announced_action"),
         ("I'll write it up as the next item.", "announced_action"),
         ("I'll fix the cases such as those listed below.", "announced_action"),
         ("I'll add them as those two items.", "announced_action"),
