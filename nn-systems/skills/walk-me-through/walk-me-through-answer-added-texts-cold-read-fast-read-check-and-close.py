@@ -666,6 +666,7 @@ COUNTS_NOT_LOGGED = (
 )
 WALK_DOCUMENT_COPIES_DIRECTORY_IN_LOG_STORE = "walk-document-copies"
 WALK_DOCUMENT_COPIES_KEPT = 20
+WALK_DOCUMENT_COPY_NAME = re.compile(r"\d{4}-\d{2}-\d{2}T\d{2}-\d{2}-\d{2}\.\d{6}Z(-[0-9a-f]{16})?\.md")
 WALK_DOCUMENT_COPY_NOT_SAVED = (
     "FAILED: no timestamped copy of the walk-document {document} was saved on ned-box: {error}.\n"
     "This step's own work is not affected by that failure.\n"
@@ -1374,19 +1375,24 @@ def walk_me_through_walk_document_timestamped_copy_save_on_ned_box_and_oldest_co
         copies = copies_root / walk_name
         copies.mkdir(parents=True, exist_ok=True)
         content = document.read_bytes()
-        existing = sorted(copies.glob("*.md"))
-        if existing and existing[-1].read_bytes() == content:
-            return None
-        stamp = datetime.datetime.now(datetime.timezone.utc).strftime("%Y-%m-%dT%H-%M-%S.%fZ")
-        # The content hash keeps two versions saved with one stamp from replacing each other.
-        final_name = f"{stamp}-{hashlib.sha256(content).hexdigest()[:16]}.md"
-        handle, temporary = tempfile.mkstemp(suffix=".tmp", dir=copies)
-        with os.fdopen(handle, "wb") as file:
-            file.write(content)
-        os.chmod(temporary, 0o644)  # mkstemp's 0600 would keep the copy from other users of the mount.
-        os.replace(temporary, copies / final_name)
-        temporary = None
-        for old in sorted(copies.glob("*.md"))[:-WALK_DOCUMENT_COPIES_KEPT]:
+
+        def saved_copies():
+            # Only the names this program gives; a note or recovered file kept in the folder is never pruned.
+            return sorted(path for path in copies.iterdir() if WALK_DOCUMENT_COPY_NAME.fullmatch(path.name))
+
+        existing = saved_copies()
+        if not existing or existing[-1].read_bytes() != content:
+            stamp = datetime.datetime.now(datetime.timezone.utc).strftime("%Y-%m-%dT%H-%M-%S.%fZ")
+            # The content hash keeps two versions saved with one stamp from replacing each other.
+            final_name = f"{stamp}-{hashlib.sha256(content).hexdigest()[:16]}.md"
+            handle, temporary = tempfile.mkstemp(suffix=".tmp", dir=copies)
+            with os.fdopen(handle, "wb") as file:
+                file.write(content)
+            os.chmod(temporary, 0o644)  # mkstemp's 0600 would keep the copy from other users of the mount.
+            os.replace(temporary, copies / final_name)
+            temporary = None
+        # Pruned even when nothing was saved, so a prune that failed last run is finished once its error clears.
+        for old in saved_copies()[:-WALK_DOCUMENT_COPIES_KEPT]:
             old.unlink(missing_ok=True)
     except OSError as error:
         if temporary is not None:

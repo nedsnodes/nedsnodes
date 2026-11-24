@@ -6948,6 +6948,27 @@ def test_each_run_saves_a_changed_walk_document_once_and_keeps_the_newest_twenty
     check("no temporary file is left", not list((root / WALK_NAME).glob("*.tmp")))
 
 
+def test_an_unchanged_run_finishes_the_prune_and_keeps_files_the_program_did_not_name():
+    case = Case()
+    root = case.root / "walk-document-copies"
+    folder = root / WALK_NAME
+    folder.mkdir(parents=True)
+    document = case.minutes.with_name(f"{WALK_NAME}.md")
+    for number in range(1, 22):
+        (folder / f"2000-01-02T00-00-{number:02}.000000Z-{number:016x}.md").write_bytes(b"old")
+    (folder / "2000-01-03T00-00-00.000000Z-ffffffffffffffff.md").write_bytes(document.read_bytes())
+    (folder / "recovered-by-hand.md").write_bytes(b"a note someone keeps here")
+    case.run("check", "--walk-document-copies-directory", str(root))
+    kept = sorted(path.name for path in folder.iterdir())
+    check("a run with the document unchanged saves no new copy",
+          "2000-01-03T00-00-00.000000Z-ffffffffffffffff.md" == kept[-2], str(kept))
+    check("a run with the document unchanged still prunes to the newest 20", len(kept) == 21, str(len(kept)))
+    check("the two oldest copies are the ones removed",
+          not (folder / "2000-01-02T00-00-02.000000Z-0000000000000002.md").exists()
+          and (folder / "2000-01-02T00-00-03.000000Z-0000000000000003.md").exists())
+    check("a file the program did not name is kept", (folder / "recovered-by-hand.md").exists())
+
+
 def test_two_copies_with_one_stamp_keep_both():
     program = load_program()
     case = Case()
