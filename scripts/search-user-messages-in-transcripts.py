@@ -147,9 +147,10 @@ def is_interrupt_notice(record):
     else:
         return False
     # The message's whole text, so that a prompt the user typed holding a notice, pasted or in a
-    # block of its own after his words, is still his.
+    # block of its own after his words, is still his. Joined as typed_by_user joins them, so that
+    # blocks an image splits cannot spell a notice that typed_by_user would not read as one.
     return bool(INTERRUPT_NOTICE_PATTERN.fullmatch(
-        "".join(text for text in texts if isinstance(text, str)).strip()))
+        "\n".join(text for text in texts if isinstance(text, str)).strip()))
 
 
 def assistant_text(record):

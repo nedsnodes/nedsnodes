@@ -327,6 +327,13 @@ check("a prompt the user typed with an interrupt notice in a later text block is
       not search_module.is_interrupt_notice({"type": "user", "message": {"content": [
           {"type": "text", "text": "Please carry on."},
           {"type": "text", "text": "[Request interrupted by user]"}]}}))
+split_by_image = {"type": "user", "message": {"content": [
+    {"type": "text", "text": "[Request interrupted"},
+    {"type": "image", "source": {"type": "base64", "media_type": "image/png", "data": ""}},
+    {"type": "text", "text": " by user]"}]}}
+check("a prompt the user typed whose text blocks, split by an image, spell a notice only when joined with no separator"
+      " is not a notice",
+      not search_module.is_interrupt_notice(split_by_image))
 
 
 def search(directory, *arguments):
