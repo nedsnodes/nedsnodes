@@ -7038,16 +7038,51 @@ def test_an_unchanged_run_finishes_the_prune_and_keeps_files_the_program_did_not
     for number in range(1, 22):
         (folder / f"2000-01-02T00-00-{number:02}.000000Z-{number:016x}.md").write_bytes(b"old")
     (folder / "2000-01-03T00-00-00.000000Z-ffffffffffffffff.md").write_bytes(document.read_bytes())
-    (folder / "recovered-by-hand.md").write_bytes(b"a note someone keeps here")
+    # Each sorts before every real copy, so a prune that counted it would delete it first.
+    not_named_by_the_program = ("1999-notes.md", "0000-00-00T00-00-00.000000Z.md", "recovered-by-hand.md")
+    for name in not_named_by_the_program:
+        (folder / name).write_bytes(b"a note someone keeps here")
     case.run("check", "--walk-document-copies-directory", str(root))
-    kept = sorted(path.name for path in folder.iterdir())
+    kept = sorted(path.name for path in folder.iterdir() if path.name not in not_named_by_the_program)
     check("a run with the document unchanged saves no new copy",
-          "2000-01-03T00-00-00.000000Z-ffffffffffffffff.md" == kept[-2], str(kept))
-    check("a run with the document unchanged still prunes to the newest 20", len(kept) == 21, str(len(kept)))
+          "2000-01-03T00-00-00.000000Z-ffffffffffffffff.md" == kept[-1], str(kept))
+    check("a run with the document unchanged still prunes to the newest 20", len(kept) == 20, str(len(kept)))
     check("the two oldest copies are the ones removed",
           not (folder / "2000-01-02T00-00-02.000000Z-0000000000000002.md").exists()
           and (folder / "2000-01-02T00-00-03.000000Z-0000000000000003.md").exists())
-    check("a file the program did not name is kept", (folder / "recovered-by-hand.md").exists())
+    for name in not_named_by_the_program:
+        check(f"a file the program did not name, {name}, is kept", (folder / name).exists())
+
+
+def test_a_prune_that_fails_says_the_copy_is_saved():
+    program = load_program()
+    case = Case()
+    root = case.root / "copies-whose-prune-fails"
+    folder = root / WALK_NAME
+    folder.mkdir(parents=True)
+    for number in range(1, 22):
+        (folder / f"2000-01-02T00-00-{number:02}.000000Z-{number:016x}.md").write_bytes(b"old")
+    arguments = argparse.Namespace(cwd=str(case.checkout), walk_document_copies_directory=root, cold_read_records=None,
+                                   counts_log=None)
+    save = program.walk_me_through_walk_document_timestamped_copy_save_on_ned_box_and_oldest_copies_prune
+    real_unlink = program.Path.unlink
+
+    def failing_unlink(self, *_, **__):
+        raise OSError("unlink failed")
+
+    program.Path.unlink = failing_unlink
+    try:
+        saved = save(arguments)
+        unchanged = save(arguments)
+    finally:
+        program.Path.unlink = real_unlink
+    document = case.minutes.with_name(f"{WALK_NAME}.md")
+    for label, problem in (("after a save", saved), ("with the document unchanged", unchanged)):
+        check(f"a failed prune {label} is reported as a failed prune",
+              problem is not None and "is saved on ned-box, but its oldest copies were not pruned: unlink failed"
+              in problem and "no timestamped copy" not in problem, str(problem))
+    check("the copy is saved though the prune failed",
+          [path.read_bytes() for path in walk_copies(root)][-1] == document.read_bytes())
 
 
 def test_two_copies_with_one_stamp_keep_both():
