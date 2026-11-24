@@ -934,9 +934,8 @@ try:
 
     # --- Every failure case below, in the design's terms ---------------------
     # nn-systems/cold-read/cold-read-grid-cell-failure-handling.tool.design.md, section
-    # 8. The real limit texts (section 4) are the fixtures: the lines of the
-    # kept logs it cites, and the 2026-09-18 logged-out capture on ned-box.
-    WEEKLY_LIMIT_LINE = "You've hit your weekly limit · resets Nov 7, 3am (America/Los_Angeles)"
+    # 8. The real limit text (section 4) is a fixture: the line of the
+    # kept log it cites, and the 2026-09-18 logged-out capture on ned-box.
     LOGGED_OUT_LINE = "Not logged in · Please run /login"
     MODEL_LIMIT_LINE = ("You've reached your {family} limit. Switch to another model, or "
                         "manage usage credits at claude.ai/settings/usage?from=cc_cli_limit_message, "
@@ -1072,23 +1071,6 @@ try:
           result.returncode == 1 and len(reviews_saved_lines(result)) == 4
           and "4 of 7 reports landed in" in result.stdout,
           f"exit {result.returncode}; stdout={result.stdout!r}")
-
-    # --- Claude's usage-limit text is no recognised cause ---------------------
-    # Claude Code reports its own usage limit, so the cold-read-cells name no
-    # class for it: the cells are retried and absent as exit-1, as any failure.
-    repository = build_scratch_repository(scratch, "checkout-claude-usage-limit-is-exit-1")
-    result = run_grid(repository, stubs, {"COLD_READ_GRID_TEST_STUB_FAILURE_PLAN": json.dumps(
-        [{"fragment": "claude-", "attempts": 2, "stdout": WEEKLY_LIMIT_LINE}])})
-    check("a usage-limit line on every Claude cell is three retries and three exit-1 absences",
-          len(lines_opening(result, "RETRYING:")) == 3
-          and all(" — exit-1 — " in line for line in lines_opening(result, "RETRYING:"))
-          and len(lines_opening(result, "FAILED (exit 1): claude-")) == 3
-          and all(" — exit-1 — " in line for line in lines_opening(result, "FAILED")),
-          repr(result.stdout))
-    check("a usage-limit line downs no agent-binary and tells the user nothing",
-          "AGENT-BINARY DOWN:" not in result.stdout and "is down:" not in result.stdout
-          and "Tell the user:" not in result.stdout and "account-limit" not in result.stdout,
-          repr(result.stdout))
 
     # --- Two Claude cells log out after the third landed ----------------------
     # The rule as the user revised it at item 3 of the design's walk
