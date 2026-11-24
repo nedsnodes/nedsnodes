@@ -834,7 +834,7 @@ def answers_file_answers_every_finding_of_round(path, finding_count, review_subm
     return set(range(1, finding_count + 1)) <= entries.keys()
 
 
-def pull_request_fix_round_answers_kept_copies_directory_path_for_round_review(worktree, number, round_review_id):
+def pull_request_fix_round_answers_kept_copies_directory_path_named_by_changes_requested_review(worktree, number, round_review_id):
     """Where this round's copies of the answers file go: in the common git directory, because removing a linked
     worktree deletes its own git directory; one directory per round, named by the changes-requested review the
     round answers, which a rerun shares and a later round on the same frozen-head does not, so that a brief names
@@ -882,7 +882,7 @@ def answers_file_text_kept_in_new_copy(path, kept_copies_directory):
     return kept
 
 
-def answers_file_written_and_round_copies_oldest_first(path, finding_count, kept_copies_directory):
+def fix_round_answers_file_placeholder_line_per_finding_write_and_earlier_files_kept_copies_list_oldest_first(path, finding_count, kept_copies_directory):
     """Write the answers file as answers_file_with_one_line_per_finding_write does, and return every whole copy
     of the round, oldest first."""
     # Listed before the write, so that a directory that cannot be listed stops the brief with nothing changed, and
@@ -1005,10 +1005,10 @@ def print_brief(number, reviewer_login):
     worktree = topic_worktree_at_frozen_head(number, reviewer_login, branch, frozen_head, len(findings) + len(nits),
                                              review_submitted_at)
     answers_path = worktree / ANSWERS_FILE_NAME_FORMAT.format(number=number)
-    kept_copies_directory = pull_request_fix_round_answers_kept_copies_directory_path_for_round_review(
+    kept_copies_directory = pull_request_fix_round_answers_kept_copies_directory_path_named_by_changes_requested_review(
         worktree, number, round_review_id
     )
-    kept_copies = answers_file_written_and_round_copies_oldest_first(answers_path, len(findings) + len(nits),
+    kept_copies = fix_round_answers_file_placeholder_line_per_finding_write_and_earlier_files_kept_copies_list_oldest_first(answers_path, len(findings) + len(nits),
                                                                      kept_copies_directory)
     lines = [
         f"Fix-round brief for pull request {url}",

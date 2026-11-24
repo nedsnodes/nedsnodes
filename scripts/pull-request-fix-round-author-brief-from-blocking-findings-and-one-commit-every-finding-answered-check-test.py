@@ -2207,7 +2207,7 @@ def answers_write_failure_cases(root, repository, _base, frozen_head):
 
     removed_worktree = root / "worktree-removed-after-a-copy"
     git(repository, "worktree", "add", "-q", "--detach", str(removed_worktree), frozen_head)
-    surviving_directory = program.pull_request_fix_round_answers_kept_copies_directory_path_for_round_review(
+    surviving_directory = program.pull_request_fix_round_answers_kept_copies_directory_path_named_by_changes_requested_review(
         removed_worktree, NUMBER, 11
     )
     answers.write_text("1. An answer the worktree's removal must not delete.\n")
@@ -2226,12 +2226,12 @@ def answers_write_failure_cases(root, repository, _base, frozen_head):
         surviving_directory.chmod(0o755)
     check("answers kept: a copies directory that cannot be listed fails instead of reading as empty",
           error is not None and "could not list the kept copies" in error, str(error))
-    round_one = program.pull_request_fix_round_answers_kept_copies_directory_path_for_round_review(
+    round_one = program.pull_request_fix_round_answers_kept_copies_directory_path_named_by_changes_requested_review(
         repository, NUMBER, 11)
     check("answers kept: two rounds on one frozen-head get two copies directories, and a rerun of a round its own",
-          round_one != program.pull_request_fix_round_answers_kept_copies_directory_path_for_round_review(
+          round_one != program.pull_request_fix_round_answers_kept_copies_directory_path_named_by_changes_requested_review(
               repository, NUMBER, 12)
-          and round_one == program.pull_request_fix_round_answers_kept_copies_directory_path_for_round_review(
+          and round_one == program.pull_request_fix_round_answers_kept_copies_directory_path_named_by_changes_requested_review(
               repository, NUMBER, 11), str(round_one))
     overlap_directory = root / "overlapping-runs-copies"
     other_run_answers = root / "other-run-answers.md"
@@ -2246,7 +2246,7 @@ def answers_write_failure_cases(root, repository, _base, frozen_head):
 
     program.answers_file_with_one_line_per_finding_write = write_after_other_run_copied
     try:
-        named = program.answers_file_written_and_round_copies_oldest_first(answers, 1, overlap_directory)
+        named = program.fix_round_answers_file_placeholder_line_per_finding_write_and_earlier_files_kept_copies_list_oldest_first(answers, 1, overlap_directory)
     finally:
         program.answers_file_with_one_line_per_finding_write = real_write
     check("answers kept: a run that finds only placeholders still names the copy an overlapping run made after "
