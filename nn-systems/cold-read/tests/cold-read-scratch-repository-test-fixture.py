@@ -35,6 +35,7 @@ keeps its own.
 import importlib.util
 import os
 import shutil
+import site
 import subprocess
 import sys
 from pathlib import Path
@@ -162,7 +163,9 @@ def cold_read_fast_read_scratch_repository_whose_stub_agy_answers_in_chat(scratc
     # A scratch HOME, so the agy cell's sandbox masks paths in it, not the real home's.
     home = scratch / "fast-read-scratch-home"
     home.mkdir()
-    environment = dict(os.environ, HOME=str(home),
+    # The per-user site-packages are found from HOME, so a scratch HOME hides the pinned
+    # libraries and the program under test would run a pip install, which can time out.
+    environment = dict(os.environ, HOME=str(home), PYTHONUSERBASE=site.getuserbase(),
                        PATH=f"{stubs}{os.pathsep}{os.environ.get('PATH', '')}",
                        COLD_READ_RECORD_SHIP_DESTINATION=str(ship_destination))
     # A suite run inside an agent-session must not write that session's ID beside the report.

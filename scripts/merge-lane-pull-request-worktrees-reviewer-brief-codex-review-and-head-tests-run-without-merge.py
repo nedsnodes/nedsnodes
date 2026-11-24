@@ -38,7 +38,8 @@ the pull request's, with those commits and all three directory options:
   1. merge-lane-pull-request-head-and-merged-worktrees-rebuild.py <n> <head> <main>
   2. merge-lane-pull-request-reviewer-brief-compose-with-facts.py <the filled-in copy>
   3. merge-lane-code-review-codex-cell-run-on-pull-request-head.py <n> <base>
-  4. merge-lane-pull-request-head-test-run-on-merged-worktree.py <n>
+  4. merge-lane-pull-request-head-test-run-on-merged-worktree.py <n> --head-commit <head>
+     --main-commit <main>
   5. merge-lane-pull-request-claude-reviewer-headless-run-and-review-post.py <n> <tag> <head>,
      which runs the Claude reviewer and posts its review, only when the entry's
      claude_reviewer is true; when it is false, step 5 is skipped and the output
@@ -52,7 +53,8 @@ is, and each line of steps 3 to 5 prefixed with its step's number, as in
 "step 4 of 5 | ", because their lines interleave. When one of steps 3 to 5
 fails, the output names each step that failed with its exit code, says what
 each other step did, and gives each failed step's own command, with the same
-commits, for running that step alone: running this program again would run
+commits, for running that step
+alone: running this program again would run
 the other steps again, and post a second Claude review. If this program is
 interrupted while steps run, it stops them: steps 3 and 4 get SIGKILL, and step
 5 gets SIGTERM, so that it stops the Claude reviewer before any review is
@@ -403,7 +405,8 @@ def main(argv=None):
     steps = ((WORKTREES_REBUILD_STEP, [str(number), head_commit, main_commit]),
              (REVIEWER_BRIEF_STEP, [str(filled_in_specifications_file)]),
              (CODEX_REVIEW_STEP, [str(number), base]),
-             (HEAD_TEST_RUN_STEP, [str(number)]),
+             (HEAD_TEST_RUN_STEP, [str(number), "--head-commit", head_commit,
+                                  "--main-commit", main_commit]),
              (CLAUDE_REVIEWER_STEP, [str(number), str(specifications[0]["tag"]), head_commit]))
     claude_reviewer = specifications[0]["claude_reviewer"]
     for position, (step, step_arguments) in enumerate(steps[:2], start=1):

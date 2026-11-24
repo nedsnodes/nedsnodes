@@ -16,9 +16,10 @@ Run it from the pull request's own checkout, with its nn-head-commit checked out
    description has none;
 4. runs the test suites whose recorded inputs changed since the checkout's merge base with
    origin/main, so a change main made after the branch started selects no suite unless a suite's
-   newer recording read main's copy of a file, in a scratch worktree of the pushed nn-head-commit,
-   with that worktree's own scripts/run-all-test-suites.py, waiting for the machine's test lock
-   where the runner takes one, and refuses when any fails;
+   recording no longer matches the checkout, as when a recording made on main read main's copy of
+   a file or listed a new file this checkout lacks, in a scratch worktree of the pushed
+   nn-head-commit, with that worktree's own scripts/run-all-test-suites.py, waiting for the
+   machine's test lock where the runner takes one, and refuses when any fails;
 5. reads the pull request again, and refuses when its nn-head-commit is no longer the commit
    tested;
 6. marks the pull request ready for review with gh pr ready.

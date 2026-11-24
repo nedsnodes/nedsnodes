@@ -234,8 +234,8 @@ whose sandbox gets a writable copy-on-write overlay of the repository's git
 directory) and SUITES_WHOSE_TEST_SANDBOX_SHARES_THE_MACHINE_NETWORK (suites
 whose sandbox keeps the machine's network). The three are read from the
 scripts/run-all-test-suites.py of the checkout whose suites the run tests,
-parsed and never run, and from this file only when that checkout has none;
-the report names the file. A run refuses, exit 2, when that file does not
+parsed and never run, and from this file for each list that checkout lacks;
+the report names each file that supplied a list. A run refuses, exit 2, when that file does not
 assign each of the three a literal dict.
 A suite bwrap reports as exiting 128+N is reported as killed by signal N;
 sandbox-exec replaces itself with the suite, so a suite's exit passes through.
@@ -1058,6 +1058,9 @@ SUITES_RUN_WITHOUT_ANY_SANDBOX = {
     "nn-systems/general-tools/tests/agent-seat-worktree-create-with-owner-file-claude-code-worktree-create-hook-real-claude-code-test.py":
         "it runs the real claude, which needs the real HOME it is logged in from and an "
         "agent-seat of this machine, and the sandbox's HOME is empty",
+    "scripts/agent-seat-idle-sweep-list-agents-ref-formula-matches-installed-claude-code-test.py":
+        "it compares refs computed from ~/.claude/sessions, which the sandbox's HOME hides because "
+        "those records sit beside the agent-sessions' peer keys, with the refs in their transcripts",
 }
 
 SUITES_THAT_RUN_THE_REAL_CLAUDE_CLI = {
@@ -1868,13 +1871,14 @@ def checkout_top_directory(given):
 
 
 def suite_sandbox_lists_read_from_checkout_under_test(top):
-    """Return ({list name: {suite: reason}}, the file they came from) for the checkout under test.
+    """Return ({list name: {suite: reason}}, where they came from) for the checkout under test.
 
     The lists name the checkout's suites by path, so they come from the checkout's own copy
     of this program: a pull request head test run runs main's runner on the merged tree, and
     a pull request that renames a listed suite renames its entry too. That copy is parsed,
     never run, so none of the checkout's code runs in this program. A checkout without the
-    file, such as a test's scratch checkout, gets this program's own lists."""
+    file, such as a test's scratch checkout, gets this program's own lists. Where they came
+    from names each file that supplied a list, for the report."""
     source_file = top / "scripts" / "run-all-test-suites.py"
     try:
         source = source_file.read_text(encoding="utf-8")
@@ -1959,6 +1963,9 @@ def suite_sandbox_lists_read_from_checkout_under_test(top):
             f"level, so which sandbox each suite runs in is unknown.\n"
             f"In {source_file}, assign each of {', '.join(unreadable)} once, at the top level, "
             f"a dict written out literally, then rerun the command you ran.")
+    if len(supplied_by_this_program) == len(SUITE_SANDBOX_LIST_NAMES_READ_FROM_CHECKOUT_UNDER_TEST):
+        return found, (f"{Path(__file__).resolve()}, since {source_file} lacks every list or "
+                       f"assigns each a set")
     if supplied_by_this_program:
         return found, (f"{source_file}, and in {Path(__file__).resolve()} for "
                        f"{', '.join(supplied_by_this_program)}, which the checkout lacks or "
@@ -4250,13 +4257,51 @@ def recordings_directory_for(given, top):
     return Path(given).expanduser() / min(roots.stdout.split())[:16]
 
 
+def nearest_existing_directory_and_names_below_it(path):
+    existing = path.resolve()
+    missing_names = []
+    while not os.path.exists(existing) and existing != existing.parent:
+        missing_names.insert(0, existing.name)
+        existing = existing.parent
+    return existing, missing_names
+
+
+def volume_ignores_case(directory):
+    for place in (directory, *directory.parents):
+        swapped_name = place.name.swapcase()
+        if swapped_name != place.name:
+            try:
+                return place.samefile(place.with_name(swapped_name))
+            except OSError:
+                return False
+    return False
+
+
 def same_directory(first, second):
-    """Whether two paths name one directory, as a case-insensitive volume or a symlink may hide."""
+    """Whether two paths name one directory, as a case-insensitive volume or a symlink may hide.
+
+    Not handled when a path is missing:
+    - The nearest existing directory is a mount point: the parent volume's case rule answers, so
+      a run may write into the read-only directory, or two distinct directories may be refused.
+    - On a case-sensitive volume, a sibling symlink named the swapped-case spelling, such as
+      `foo -> FOO`, reads as a case-insensitive volume, so a valid run is refused.
+    - Another run creates the destination between the two ancestor lookups: two identical paths
+      can compare as different, so a run may write into the read-only directory.
+    - casefold() merges names a volume keeps distinct, such as `straße` and `strasse` on exFAT,
+      so a valid run is refused."""
     try:
         return first.samefile(second)
     except OSError:
-        # A path that does not exist yet is compared as spelled once resolved.
-        return first.resolve() == second.resolve()
+        # resolve() keeps the spelling of a missing path, so a case difference survives it.
+        first_existing, first_missing = nearest_existing_directory_and_names_below_it(first)
+        second_existing, second_missing = nearest_existing_directory_and_names_below_it(second)
+        if not first_existing.samefile(second_existing):
+            return False
+        if first_missing == second_missing:
+            return True
+        return (volume_ignores_case(first_existing)
+                and [name.casefold() for name in first_missing]
+                == [name.casefold() for name in second_missing])
 
 
 def refuse_read_only_recordings_directory_this_run_writes(read_only_dir, saved_recordings_dir,
