@@ -251,9 +251,6 @@ supervisor_module = search_module.handoff_supervisor
 with tempfile.TemporaryDirectory() as directory:
     handoffs = Path(directory)
     no_handoff_yet = supervisor_module.FIRST_PROMPT_FOR_AGENT_SEAT_WITHOUT_A_HANDOFF_TEMPLATE.format(agent="MD-skills")
-    # The copied lines quote the user's old words; the prompt that carries them is still a program's.
-    conversation_tail = handoffs / "alpha-dialog-0003.md"
-    conversation_tail.write_text("## User\n\nyes, approved\n", encoding="utf-8")
     launch_prompts = [
         recover_module.write_resume_prompt(handoffs, "alpha").read_text(),
         recover_module.write_resume_prompt(handoffs, "alpha", unreplied_successor=True).read_text(),
@@ -270,11 +267,6 @@ with tempfile.TemporaryDirectory() as directory:
         supervisor_module.build_ignition_prompt(
             handoffs / "alpha-dialog-0003.md",
             {"next-step": "Do the work.", "written-at": "2026-11-01T19:27:02Z"}),
-        supervisor_module.successor_initial_agent_instructions_ending_with_conversation_tail_last_lines(
-            supervisor_module.build_ignition_prompt(
-                handoffs / "alpha-dialog-0003.md",
-                {"next-step": "Do the work.", "written-at": "2026-11-01T19:27:02Z"}),
-            conversation_tail),
         supervisor_module.IgnitionPlanWithoutConversationTail(next_step="Do the work.").compose(""),
         supervisor_module.IgnitionPlanWithoutConversationTail(
             next_step="Do the work.", occasion="login", unextracted_session_id="s1",
