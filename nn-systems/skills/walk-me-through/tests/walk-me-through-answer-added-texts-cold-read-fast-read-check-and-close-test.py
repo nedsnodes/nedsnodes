@@ -12,6 +12,7 @@ cold-read-fast-read.py with stub models, to show the check reads that
 program's own output. The exit code is asserted on every case.
 """
 
+import argparse
 import contextlib
 import datetime
 import importlib.util
@@ -6910,6 +6911,161 @@ def test_every_printed_command_runs_from_a_checkout_path_holding_a_space():
 
 def stopped_by_sigterm(*_):
     raise SystemExit(1)  # So main()'s finally removes the suite's scratch directory.
+
+
+def walk_copies(root):
+    return sorted((root / WALK_NAME).glob("*.md")) if (root / WALK_NAME).is_dir() else []
+
+
+def test_each_run_saves_a_changed_walk_document_once_and_keeps_the_newest_twenty():
+    case = Case()
+    root = case.root / "walk-document-copies"
+    document = case.minutes.with_name(f"{WALK_NAME}.md")
+    flags = ("--walk-document-copies-directory", str(root))
+    first_text = document.read_bytes()
+    case.run("check", *flags)
+    check("a run saves the walk-document", [path.read_bytes() for path in walk_copies(root)] == [first_text])
+    before = walk_copies(root)
+    case.run("check", *flags)
+    check("a run with the document unchanged saves no copy", walk_copies(root) == before)
+    (root / WALK_NAME / "2000-01-01T00-00-00.000000Z.md").write_bytes(b"oldest")
+    for number in range(1, 21):
+        (root / WALK_NAME / f"2000-01-02T00-00-{number:02}.000000Z.md").write_bytes(b"old")
+    changed = first_text + b"\nchanged\n"
+    document.write_bytes(changed)
+    case.run("check", *flags)
+    kept = walk_copies(root)
+    check("only the newest 20 copies are kept", len(kept) == 20, str(len(kept)))
+    check("the oldest copy is the one removed", not (root / WALK_NAME / "2000-01-01T00-00-00.000000Z.md").exists())
+    check("the changed document is the newest copy", kept[-1].read_bytes() == changed)
+    check("no temporary file is left", not list((root / WALK_NAME).glob("*.tmp")))
+
+
+def test_two_copies_with_one_stamp_keep_both():
+    program = load_program()
+    case = Case()
+    root = case.root / "copies-with-one-stamp"
+    arguments = argparse.Namespace(cwd=str(case.checkout), walk_document_copies_directory=root, cold_read_records=None,
+                                   counts_log=None)
+    document = case.minutes.with_name(f"{WALK_NAME}.md")
+
+    class OneInstant(datetime.datetime):
+        @classmethod
+        def now(cls, tz=None):
+            return cls(2026, 11, 23, 1, 2, 3, 4, tzinfo=tz)
+
+    real_mkstemp = program.tempfile.mkstemp
+
+    def mkstemp_reusing_one_name(*_, dir, **__):
+        path = Path(dir) / "reused-suffix.tmp"
+        return os.open(path, os.O_CREAT | os.O_WRONLY | os.O_TRUNC, 0o600), str(path)
+
+    real_datetime = program.datetime.datetime
+    program.datetime.datetime = OneInstant
+    program.tempfile.mkstemp = mkstemp_reusing_one_name
+    try:
+        document.write_bytes(b"first version\n")
+        first = program.walk_me_through_walk_document_timestamped_copy_save_on_ned_box_and_oldest_copies_prune(arguments)
+        document.write_bytes(b"second version\n")
+        second = program.walk_me_through_walk_document_timestamped_copy_save_on_ned_box_and_oldest_copies_prune(arguments)
+    finally:
+        program.datetime.datetime = real_datetime
+        program.tempfile.mkstemp = real_mkstemp
+    check("both saves report success", first is None and second is None, f"{first} {second}")
+    check("both versions are kept", sorted(path.read_bytes() for path in walk_copies(root))
+          == [b"first version\n", b"second version\n"])
+
+
+def default_location_arguments(case, **overrides):
+    values = dict(cwd=str(case.checkout), walk_document_copies_directory=None, cold_read_records=None, counts_log=None)
+    return argparse.Namespace(**{**values, **overrides})
+
+
+def with_log_store_at(program, log_store, action):
+    records = log_store / "cold-read-records"
+    records.mkdir(parents=True, exist_ok=True)
+    real_lookup = program.reachable_log_store_records
+    program.reachable_log_store_records = lambda: (records, [records])
+    try:
+        return action()
+    finally:
+        program.reachable_log_store_records = real_lookup
+
+
+def test_a_default_run_saves_under_the_log_store_on_ned_box_and_through_the_mac_mount():
+    program = load_program()
+    case = Case()
+    save = program.walk_me_through_walk_document_timestamped_copy_save_on_ned_box_and_oldest_copies_prune
+    for label, log_store in (("ned-box", case.root / "home" / "nedsnodes-logs"),
+                             ("the Mac mount", case.root / "Volumes" / "nedhome" / "nedsnodes-logs")):
+        problem = with_log_store_at(program, log_store, lambda: save(default_location_arguments(case)))
+        check(f"a default save through {label} succeeds", problem is None, str(problem))
+        check(f"a default save through {label} lands in the log-store's copies folder",
+              len(walk_copies(log_store / "walk-document-copies")) == 1)
+
+
+def test_a_run_given_other_records_or_counts_saves_nothing_to_the_default_location():
+    program = load_program()
+    case = Case()
+    save = program.walk_me_through_walk_document_timestamped_copy_save_on_ned_box_and_oldest_copies_prune
+    for label, overrides in (("records", {"cold_read_records": [case.root / "other-records"]}),
+                             ("counts", {"counts_log": case.root / "other-counts.tsv"})):
+        log_store = case.root / f"log-store-for-{label}"
+        problem = with_log_store_at(program, log_store, lambda: save(default_location_arguments(case, **overrides)))
+        check(f"a run given other {label} reports no problem", problem is None, str(problem))
+        check(f"a run given other {label} saves nothing", not (log_store / "walk-document-copies").exists())
+
+
+def test_the_read_ahead_worker_step_saves_no_copy():
+    program = load_program()
+    case = Case()
+    log_store = case.root / "log-store-for-the-worker"
+    real_worker = program.read_ahead_worker
+    program.read_ahead_worker = lambda _arguments: 0
+    try:
+        code = with_log_store_at(program, log_store,
+                                 lambda: program.main([program.READ_AHEAD_WORKER_STEP, "--cwd", str(case.checkout)]))
+    finally:
+        program.read_ahead_worker = real_worker
+    check("the worker step exits 0", code == 0, str(code))
+    check("the worker step saves no copy", not (log_store / "walk-document-copies").exists())
+
+
+def test_a_failed_publish_leaves_no_copy_at_a_final_name():
+    program = load_program()
+    case = Case()
+    root = case.root / "copies-whose-publish-fails"
+    arguments = argparse.Namespace(cwd=str(case.checkout), walk_document_copies_directory=root, cold_read_records=None,
+                                   counts_log=None)
+
+    def failing_replace(*_):
+        raise OSError("publish failed")
+
+    real_replace = program.os.replace
+    program.os.replace = failing_replace
+    try:
+        problem = program.walk_me_through_walk_document_timestamped_copy_save_on_ned_box_and_oldest_copies_prune(arguments)
+    finally:
+        program.os.replace = real_replace
+    check("the failed publish is reported", problem is not None and "publish failed" in problem, str(problem))
+    check("no file is left in the copies folder", list((root / WALK_NAME).iterdir()) == [])
+
+
+def test_a_copy_that_cannot_be_saved_is_reported_and_the_answer_is_still_recorded():
+    case = Case()
+    blocked = case.root / "a-file-where-the-copies-directory-would-go"
+    blocked.write_text("")
+    result = case.run("check", "--walk-document-copies-directory", str(blocked))
+    check("the failed copy is reported", "FAILED: no timestamped copy" in result.stderr, described(result))
+    check("a failed copy exits 2 when the step succeeded", result.returncode == 2, described(result))
+    check("the answer is still recorded", "the user answered" in case.minutes.read_text(), case.minutes.read_text())
+
+
+def test_a_run_pointed_at_other_records_writes_no_copy_without_being_told_where():
+    case = Case()
+    result = case.run("check")
+    check("the run succeeds with no copy", result.returncode == 0, described(result))
+    check("no copy folder appears in the case", not list(case.root.rglob("walk-document-copies")))
 
 
 def main():
