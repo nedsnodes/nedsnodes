@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Run the full mutation pass on each pull request merged into main since the last run, on at most 12 of its mutants first and on the rest as time allows, open a task for each line with surviving mutants, and recheck each open task on main.
+"""Run the full mutation pass on each pull request merged into main since the last run, on at most 12 of its mutants first and on the rest as time allows, keep one task for the surviving mutants of each source file, and recheck each open task on main.
 
 Usage:
   scripts/scheduled-full-mutation-pass-of-merged-pull-requests-and-survivor-tasks-open.py
@@ -22,9 +22,14 @@ under --log-store-root, which is where
 the --recorded-mutant-killed-check of
 scripts/mutation-testing-changed-lines-quick-or-full-pass-survivors.py, the
 mutation testing program, reads it from. A survivor task is a task this
-program opens for the surviving mutants of one line; its subject starts
-`Surviving mutants in <file>:<line>: ` (`Surviving mutant in` in a task an
-earlier version opened). The task's owner is the agent-seat whose task list
+program opens for the surviving mutants of one source file; its subject is
+`Mutation-testing defects: surviving mutants in <file> (<L> lines, <M>
+mutants); add tests that kill them, or record why no test can`, where M counts
+the mutants it lists and L the lines their diffs change, a diff with no hunk
+counting as a line of its own. A per-line survivor task is one an earlier
+version opened for the surviving mutants of one line, whose subject starts
+`Surviving mutants in <file>:<line>: ` or `Surviving mutant in <file>:<line>: `.
+The task's owner is the agent-seat whose task list
 holds it (TASKS below). The state file is state.json in --state-directory: the
 last main commit mutation-tested, under last_tested_main_commit, and, under
 tasks_opened, each surviving mutant's key with the agent-seat and id of the
@@ -48,7 +53,8 @@ WHAT ONE RUN DOES, in order.
   3. Reads the state file. With no state file, it writes one naming
      origin/main and tests nothing: the merges after that commit are tested
      from the next run on.
-  4. Checks that each survivor task the state names still holds each of its
+  4. Folds the per-line survivor tasks (FOLDING PER-LINE TASKS below), then
+     checks that each survivor task the state names still holds each of its
      mutants: the task file is still on its owner's task list and not marked
      completed. A task whose description no longer names a mutant's diff file,
      as after an agent rewrites the description, still holds the mutant unless
@@ -96,15 +102,15 @@ WHAT ONE RUN DOES, in order.
      MUTANT_WORKERS_AT_MOST, 4, a quarter of ned-box's 16 cores, which leaves
      the rest for reviews and other work; each worker has a worktree of its
      own, and its suites still wait for the suite runner's admission.
-  7. Opens a survivor task for each line with surviving mutants (TASKS
-     below), and one job failure task for the merge's ERRORED mutants (JOB
+  7. Adds each line with surviving mutants to its source file's survivor task,
+     opening that task when the file has none (TASKS below), and one job failure task for the merge's ERRORED mutants (JOB
      FAILURE TASKS below), then records the commit as tested, and, when
      mutants of it were not run, under merges_with_mutants_not_run in the
      state, so a merge has its first pass once. No ERRORED mutant is run
      again.
   8. The second pass, when the first pass reached every merge: runs the
-     mutants not run, newest merge first (THE TWO PASSES below), and opens
-     their survivor tasks.
+     mutants not run, newest merge first (THE TWO PASSES below), and gives
+     their survivors tasks as step 7 does.
   9. Opens a task for each failure of the run (JOB FAILURE TASKS below).
   10. Writes the record (THE RECORD below), in full over any written at step
      4 or 5, and prints its citation.
@@ -144,8 +150,8 @@ still going after --merge-timeout-seconds or, when sooner, once half of
 --second-pass-stops-starting-mutants-seconds-before-next-scheduled-run has
 passed since that time; the merge then keeps its place under
 merges_with_mutants_not_run, and the run exits
-EXIT_MERGE_CARRIED_ON_TO_NEXT_RUN. After each merge the second pass opens the
-survivor tasks of the mutants it ran, as step 7 does, and writes the merge's
+EXIT_MERGE_CARRIED_ON_TO_NEXT_RUN. After each merge the second pass gives the
+surviving mutants it ran tasks, as step 7 does, and writes the merge's
 new mutants_not_run_count; a merge with none left leaves the state, and a
 merge a suite now fails on with no mutant applied is recorded as untestable
 (AN UNTESTABLE MERGE below) and leaves it too. The second pass never changes
@@ -191,22 +197,25 @@ writes no readable JSON, a
 mutant's diff or task that cannot be written, and an error this program does
 not handle, whose traceback the record keeps.
 The commit it stopped at is not recorded as tested, so the next run tries it
-again; a line already given a task is not given a second one, since a line
-counts as given a task when the state names a task for each of its surviving
-mutants or when its owner's list holds a survivor task for the line not
-marked completed, which covers a task opened just before a write of the state
+again; a mutant already given a task is not given a second one, since a
+mutant counts as given a task when the state names a task for it or when the
+survivor task for its file on its owner's list, not marked completed, names
+its diff file, which covers a task written just before a write of the state
 or the `.highwatermark` failed. The record names the failure, and the run
 exits EXIT_STEP_FAILED. A changed file with no suite is named in the record
 and gets no task.
 
-TASKS. The surviving mutants of one merge are grouped by file and line, and
-each line gets at most one survivor task. A mutant the state already names is
-left out of its line's group, and a line whose group is then empty gets no
-task. The owner is the author `git blame` gives the line at the merge, since
+TASKS. The surviving mutants of one merge are grouped by source file and by
+the owner of each line, and each group goes to one survivor task. A mutant
+the state already names is left out of its group, and a group that is then
+empty gets no task. The owner is the author `git blame` gives the line at the
+merge, since
 each agent-seat commits under its own name; when that agent-seat has no task
 list directory or no checkout under --agent-seats-directory, as after it is
 retired, the owner is merge-lane-2, the agent-seat
-SURVIVOR_TASK_AGENT_SEAT_WHEN_LINE_AUTHOR_IS_RETIRED_OR_UNKNOWN names. Before
+SURVIVOR_TASK_AGENT_SEAT_WHEN_LINE_AUTHOR_IS_RETIRED_OR_UNKNOWN names, so the
+lines of one file written by two agent-seats go to a task on each one's list.
+Before
 a task is opened or rewritten, each new mutant's diff file is written. A task
 is a Claude Code task file, `<id>.json` in the task list directory
 `nedsnodes-<owner>-tasks` under --task-lists-directory, with the keys id,
@@ -215,19 +224,35 @@ the highest of the list's task ids and its `.highwatermark`, as Claude Code
 numbers a new task; the file is linked into place only where no file of that
 name exists, and the `.highwatermark` is raised to it, so a task Claude Code
 creates at the same moment is not overwritten. The description names how
-many of the line's mutants survived and their cosmic-ray operators, shows each
-mutant's diff and diff file, and gives this task's command: the mutation
+many of the file's mutants survived and their cosmic-ray operators, shows each
+mutant's line, diff and diff file, by line, and gives this task's command: the mutation
 testing program's --recorded-mutant-killed-check with every diff file the
 task lists. It asks the owner to add a test that kills the mutants and put
 the command's output in the pull request, or to end the line with a `#
 pragma: no mutate` comment saying why no test can, which every mutation pass
-then skips; and to leave the task open for the recheck to complete. A line
+then skips; and to leave the task open for the recheck to complete. A file
 whose owner's list holds a survivor task for it not marked completed gets no
 second task: that task is rewritten to list its mutants the state names and
-the line's new ones, with one command for them all, and the state names that
-task for each. A task Claude Code rewrites at the same moment as this
+the file's new ones, with one command for them all and its subject's counts
+made true, and the state names that task for each. A new mutant never joins
+a per-line survivor task. A task Claude Code rewrites at the same moment as this
 program can lose either rewrite; the next run's recheck then lists again each
 mutant the state gives the task.
+
+FOLDING PER-LINE TASKS. On each task list under --task-lists-directory, the
+per-line survivor tasks marked pending are folded, per source file, into the
+list's open survivor task for that file, or, when it has none, into the
+lowest-numbered of them. That task keeps its other keys, such as its metadata
+and status, gains every blocker any of them has, and is rewritten with the
+file's subject and a description listing each mutant the state gives any of
+them, and each mutant whose diff file one of their descriptions names and the
+state gives no other task. The others are marked completed, each saying which
+task it was merged into, and the state names the kept task for each mutant.
+A per-line survivor task in progress, which an agent-seat is working on, is
+not folded; the recheck keeps its per-line subject, with its count made true.
+A task or diff file that cannot be read or written stops the run: the next
+run's step 4 moves each mutant whose task was already marked completed to the
+task that names it.
 
 THE RECHECK runs, for each survivor task the state names, the mutation
 testing program's --recorded-mutant-killed-check with every diff file the
@@ -236,11 +261,12 @@ state gives the task, --head origin/main and
 killed, or no longer existing because its replaced lines are gone from main
 or its line ends with a `# pragma: no mutate` comment, leaves the task and
 the state. A task with no mutant left is marked completed, with a line saying
-why at the end of its description. A task with fewer mutants left, or whose
+why at the end of its description. A task with fewer mutants left, whose
+subject's counts are not those of the mutants left, or whose
 description does not give the command for exactly the mutants left or does
 not end with SURVIVOR_TASK_DESCRIPTION_LAST_LINE_LEAVE_TASK_OPEN_FOR_NIGHTLY_RECHECK,
-"Leave this task open: the nightly mutation pass completes it once no mutant
-it lists survives on main, or the line is gone or ends with a `# pragma: no
+"Leave this task open: the nightly mutation pass completes it once each mutant
+it lists is killed on main, or its line is gone or ends with a `# pragma: no
 mutate` comment.",
 as in a task an earlier version opened, is rewritten to list only them; its
 other keys, status included, are kept. A mutant the program could not judge
@@ -433,10 +459,14 @@ SURVIVOR_TASKS_NOT_RECHECKED_TASK_SUBJECT = (
 RUN_RECORD_NOT_WRITTEN_TASK_SUBJECT = "Nightly full mutation pass: a run's record was not written"
 DEFAULT_SURVIVOR_TASK_RECORDED_MUTANT_KILLED_CHECK_TIMEOUT_SECONDS = 2 * 3600
 RECORDED_MUTANT_KILLED_CHECK_FLAG = "--recorded-mutant-killed-check"
-SURVIVOR_TASK_SUBJECT_PLACE = re.compile(r"Surviving mutants? in (\S+:[0-9]+): ")
+SURVIVOR_TASK_SUBJECT_SOURCE_FILE = re.compile(
+    r"Mutation-testing defects: surviving mutants in (\S+) \([0-9]+ lines, [0-9]+ mutants\); ")
+# The optional "s" matches the subject of a task opened for a single mutant.
+PER_LINE_SURVIVOR_TASK_SUBJECT_PLACE = re.compile(r"Surviving mutants? in ((\S+):[0-9]+): ")
+SURVIVING_MUTANT_DIFF_FILE_NAME = re.compile(r"\b([0-9a-f]{64})\.diff\b")
 SURVIVOR_TASK_DESCRIPTION_LAST_LINE_LEAVE_TASK_OPEN_FOR_NIGHTLY_RECHECK = (
-    "Leave this task open: the nightly mutation pass completes it once no mutant it lists "
-    "survives on main, or the line is gone or ends with a `# pragma: no mutate` comment.")
+    "Leave this task open: the nightly mutation pass completes it once each mutant it lists is "
+    "killed on main, or its line is gone or ends with a `# pragma: no mutate` comment.")
 SECONDS_FOR_MUTATION_TESTING_PROGRAM_TO_CLEAN_UP_AFTER_SIGTERM = 120
 
 EXIT_ALL_DONE = 0
@@ -581,22 +611,98 @@ def task_names_mutant(task, key):
     return task is not None and f"{key}.diff" in str(task.get("description", ""))
 
 
-def task_on_list_open_for_line(list_directory, place):
-    """(id, task) of a task on the list, not marked completed, whose subject names the
-    file:line `place`, or None. Raises OSError."""
-    # The trailing colon keeps scripts/a.py:74 from matching a task for scripts/a.py:745; the
-    # optional "s" matches the subject of a task opened for a single mutant.
-    subject = re.compile(rf"Surviving mutants? in {re.escape(place)}:")
+def task_files_on_list_lowest_id_first(list_directory):
     if not list_directory.is_dir():
-        return None
-    for path in sorted(list_directory.iterdir(), key=lambda path: path.name):
-        if not TASK_FILE_NAME_PATTERN.fullmatch(path.name):
-            continue
+        return []
+    return sorted((path for path in list_directory.iterdir()
+                   if TASK_FILE_NAME_PATTERN.fullmatch(path.name)),
+                  key=lambda path: int(path.stem))
+
+
+def task_on_list_open_for_source_file(list_directory, source_file):
+    """(id, task) of the lowest-numbered task on the list, not marked completed, whose subject
+    is the survivor task subject for `source_file`, or None. Raises OSError."""
+    for path in task_files_on_list_lowest_id_first(list_directory):
         task = task_file_read(path)
-        if task is not None and task.get("status") != "completed" \
-                and subject.match(str(task.get("subject", ""))):
+        if task is None or task.get("status") == "completed":
+            continue
+        named = SURVIVOR_TASK_SUBJECT_SOURCE_FILE.match(str(task.get("subject", "")))
+        if named and named[1] == source_file:
             return int(path.stem), task
     return None
+
+
+def per_line_survivor_tasks_folded_into_one_task_per_source_file(state, arguments, record,
+                                                                  record_citation):
+    """On each task list, fold the pending tasks whose subject is the per-line one an earlier
+    version wrote into one task per source file: the list's open survivor task for the file,
+    or else the lowest-numbered of them, which keeps its other keys. That task is rewritten to
+    hold the mutants of them all, and the others are marked completed. The state in memory
+    then names that task for each of those mutants; the caller writes it. A task in progress
+    is left as it is, since an agent-seat is working on it. Raises OSError."""
+    root = arguments.task_lists_directory
+    list_directories = sorted(path for path in root.iterdir()
+                              if path.is_dir() and path.name.startswith("nedsnodes-")
+                              and path.name.endswith("-tasks")) if root.is_dir() else []
+    for list_directory in list_directories:
+        agent_seat = list_directory.name[len("nedsnodes-"):-len("-tasks")]
+        per_file, per_line = {}, {}
+        for path in task_files_on_list_lowest_id_first(list_directory):
+            task = task_file_read(path)
+            if task is None or task.get("status") == "completed":
+                continue
+            subject = str(task.get("subject", ""))
+            named = SURVIVOR_TASK_SUBJECT_SOURCE_FILE.match(subject)
+            if named:
+                per_file.setdefault(named[1], (int(path.stem), task))
+                continue
+            named = PER_LINE_SURVIVOR_TASK_SUBJECT_PLACE.match(subject)
+            if named and task.get("status") == "pending":
+                per_line.setdefault(named[2], []).append((int(path.stem), task))
+        for source_file, folded in per_line.items():
+            kept_id, kept_task = per_file.get(source_file) or folded[0]
+            gathered = dict([(kept_id, kept_task), *folded])
+            keys = dict.fromkeys(key for key, given in state["tasks_opened"].items()
+                                 if given["agent_seat"] == agent_seat
+                                 and given["task_id"] in gathered)
+            # A diff file a description names that the state does not give to another task is
+            # held too, so the recheck tracks it from now on.
+            for task in gathered.values():
+                for key in SURVIVING_MUTANT_DIFF_FILE_NAME.findall(
+                        str(task.get("description", ""))):
+                    given = state["tasks_opened"].get(key)
+                    if (given is None and mutant_diff_file_path(arguments.log_store_root,
+                                                                key).is_file()) \
+                            or (given is not None and given["agent_seat"] == agent_seat
+                                and given["task_id"] in gathered):
+                        keys[key] = None
+            diff_files = [mutant_diff_file_path(arguments.log_store_root, key) for key in keys]
+            diffs = [(diff_file.read_text(encoding="utf-8"), diff_file) for diff_file in diff_files]
+            others = [task_id for task_id in gathered if task_id != kept_id]
+            agent_seat_task_list_task_file_rewrite(list_directory / f"{kept_id}.json", dict(
+                kept_task,
+                subject=survivor_task_subject(source_file, [diff for diff, _ in diffs]),
+                description=survivor_task_description(
+                    f"The scheduled full mutation pass found mutants that no test kills in "
+                    f"{source_file}. This task holds each of them still tracked, from the "
+                    f"per-line tasks "
+                    + ", ".join(f"#{task_id}" for task_id, _ in folded) + ".",
+                    diffs, record_citation),
+                blockedBy=list(dict.fromkeys(blocker for task in gathered.values()
+                                             for blocker in task.get("blockedBy", [])))))
+            for task_id in others:
+                task = gathered[task_id]
+                agent_seat_task_list_task_file_rewrite(list_directory / f"{task_id}.json", dict(
+                    task, status="completed", description=(
+                        f"{task.get('description', '')}\n\nMerged into task #{kept_id}, the one "
+                        f"task for the surviving mutants in {source_file}, by the scheduled "
+                        f"full mutation pass. Its record: {record_citation}")))
+            for key in keys:
+                state["tasks_opened"][key] = {"agent_seat": agent_seat, "task_id": kept_id}
+            record.append("FOLDED per-line task(s) "
+                          + ", ".join(f"#{task_id}" for task_id, _ in folded)
+                          + f" into task #{kept_id} on {agent_seat}'s task list, the one task "
+                          f"for {source_file}, which now holds {len(keys)} surviving mutant(s)")
 
 
 def task_ids_on_list_open_naming_mutant(list_directory, key):
@@ -682,25 +788,51 @@ def survivor_task_recorded_mutant_killed_check_command_line(diff_files):
             + " ".join(shlex.quote(str(diff_file)) for diff_file in diff_files))
 
 
-def survivor_task_subject(place, count):
+def recorded_mutant_line_number(diff):
+    """The line a mutant's diff changes, as the diff recorded it, or None when the diff has no
+    hunk."""
+    _, hunks = mutation_testing.recorded_mutant_module_path_and_hunks(diff)
+    if not hunks:
+        return None
+    old_start, old, new = hunks[0]
+    return old_start + mutation_testing.hunk_shared_context_line_counts(old, new)[0]
+
+
+def survivor_task_subject(source_file, diffs):
+    """The subject of the task for the surviving mutants of one source file, counting the lines
+    their diffs change; a diff with no hunk counts as a line of its own."""
+    lines = [recorded_mutant_line_number(diff) for diff in diffs]
+    line_count = len({line for line in lines if line is not None}) + lines.count(None)
+    return (f"Mutation-testing defects: surviving mutants in {source_file} ({line_count} lines, "
+            f"{len(diffs)} mutants); add tests that kill them, or record why no test can")
+
+
+def per_line_survivor_task_subject(place, count):
+    """The subject of a task an earlier version opened for one file:line `place`, which a task
+    in progress keeps."""
     return (f"Surviving mutants in {place}: {count}; add a test that kills them, or record why no "
             f"test can")
 
 
 def survivor_task_description(opening, diffs_and_diff_files, record_citation):
-    """The description of a task for the surviving mutants of one line: `opening`, then each
-    (diff, diff file), in the order of their diff files, then this task's command and what to
-    do."""
-    shown = sorted(diffs_and_diff_files, key=lambda pair: str(pair[1]))
+    """The description of a task for surviving mutants: `opening`, then each (diff, diff file),
+    by line, then this task's command and what to do."""
+    shown = sorted(((recorded_mutant_line_number(diff), diff, diff_file)
+                    for diff, diff_file in diffs_and_diff_files),
+                   key=lambda shown: (shown[0] or 0, str(shown[2])))
     count = len(shown)
-    mutants = "\n\n".join(f"Mutant {number} of {count}, in {diff_file}:\n{diff.rstrip()}"
-                          for number, (diff, diff_file) in enumerate(shown, start=1))
+    mutants = "\n\n".join(
+        f"Mutant {number} of {count}"
+        + (f", on line {line}" if line is not None else "") + f", in {diff_file}:\n{diff.rstrip()}"
+        for number, (line, diff, diff_file) in enumerate(shown, start=1))
+    command = survivor_task_recorded_mutant_killed_check_command_line(
+        sorted((diff_file for _, _, diff_file in shown), key=str))
     return (
         f"{opening} A surviving mutant means the code can be changed this way while every suite "
         f"that reads the file still passes, so a defect there would go unnoticed. One test often "
         f"kills every mutant of a line.\n\n"
         f"{mutants}\n\n"
-        f"This task's command: {survivor_task_recorded_mutant_killed_check_command_line(diff_file for _, diff_file in shown)}\n"
+        f"This task's command: {command}\n"
         f"If a test can tell a mutant from the code: write that test, run this task's command on "
         f"your branch, and open a pull request with the test, putting the command's output in its "
         f"description.\n"
@@ -964,19 +1096,27 @@ def survivor_task_rechecked_write(task_file, diff_files, surviving_diff_files, m
             f"{main_commit[:12]}, every mutant this task listed is killed or no longer exists. "
             f"Its record: {record_citation}")))
         return "completed"
-    if len(surviving_diff_files) == len(diff_files) and survivor_task_is_current(description,
-                                                                                 diff_files):
+    subject = str(task.get("subject", ""))
+    diffs = [(diff_file.read_text(encoding="utf-8"), diff_file)
+             for diff_file in surviving_diff_files]
+    source_file_named = SURVIVOR_TASK_SUBJECT_SOURCE_FILE.match(subject)
+    place_named = PER_LINE_SURVIVOR_TASK_SUBJECT_PLACE.match(subject)
+    if source_file_named:
+        place = source_file_named[1]
+        subject = survivor_task_subject(place, [diff for diff, _ in diffs])
+    elif place_named:
+        place = place_named[1]
+        subject = per_line_survivor_task_subject(place, len(diffs))
+    else:
+        place = "the code the diffs below show"
+    if len(surviving_diff_files) == len(diff_files) and subject == task.get("subject") \
+            and survivor_task_is_current(description, diff_files):
         return "unchanged"
-    place_named = SURVIVOR_TASK_SUBJECT_PLACE.match(str(task.get("subject", "")))
-    place = place_named[1] if place_named else "the line the diffs below show"
-    updated = dict(task, description=survivor_task_description(
-        f"The scheduled full mutation pass found mutants that no test kills in {place}; on main "
-        f"at {main_commit[:12]}, {len(surviving_diff_files)} of them still survive.",
-        [(diff_file.read_text(encoding="utf-8"), diff_file)
-         for diff_file in surviving_diff_files], record_citation))
-    if place_named:
-        updated["subject"] = survivor_task_subject(place, len(surviving_diff_files))
-    agent_seat_task_list_task_file_rewrite(task_file, updated)
+    agent_seat_task_list_task_file_rewrite(task_file, dict(
+        task, subject=subject, description=survivor_task_description(
+            f"The scheduled full mutation pass found mutants that no test kills in {place}; on "
+            f"main at {main_commit[:12]}, {len(diffs)} of them still survive.",
+            diffs, record_citation)))
     return "rewritten to list only the surviving mutants"
 
 
@@ -1238,16 +1378,18 @@ def test_one_merge(arguments, state, state_file, merge, record, record_citation,
         if mutant_key(mutant) not in already_handled:
             survived_by_line.setdefault((mutant["module_path"], mutant["line"]),
                                         []).append(mutant)
+    # Each line's owner is its author, so one source file's lines can go to tasks on two lists.
+    by_task = {}
     for (module_path, line), mutants in survived_by_line.items():
-        place = f"{module_path}:{line}"
         not_given = []
         for mutant in mutants:
             given = state["tasks_opened"].get(mutant_key(mutant))
             if given is None:
                 not_given.append(mutant)
             else:
-                record.append(f"  SURVIVED {place} {mutant['operator']}: already given task "
-                              f"#{given['task_id']} on {given['agent_seat']}'s task list")
+                record.append(f"  SURVIVED {module_path}:{line} {mutant['operator']}: already "
+                              f"given task #{given['task_id']} on {given['agent_seat']}'s task "
+                              f"list")
         if not not_given:
             continue
         blame = git_or_raise(arguments.clone, "blame", "--porcelain", "-L", f"{line},{line}",
@@ -1256,12 +1398,19 @@ def test_one_merge(arguments, state, state_file, merge, record, record_citation,
                        if blame_line.startswith("author ")), "")
         owner, owner_reason = task_list_owner(author, arguments.task_lists_directory,
                                               arguments.agent_seats_directory)
+        bucket = by_task.setdefault((owner, module_path), {"mutants": [], "not_written": []})
+        bucket["mutants"] += not_given
+        if owner_reason is not None:
+            bucket["not_written"].append(f"Agent-seat {author} wrote line {line}; this task is "
+                                         f"on your list because {owner_reason}.")
+    for (owner, module_path), bucket in by_task.items():
+        not_given = bucket["mutants"]
         list_directory = arguments.task_lists_directory / f"nedsnodes-{owner}-tasks"
         mutants_and_diff_files = [
             (mutant, mutant_diff_file_path(arguments.log_store_root, mutant_key(mutant)))
             for mutant in not_given]
         try:
-            found = task_on_list_open_for_line(list_directory, place)
+            found = task_on_list_open_for_source_file(list_directory, module_path)
             # A mutant whose diff file the open task already names was added to it by a run
             # stopped before it wrote the state.
             to_add = [(mutant, diff_file) for mutant, diff_file in mutants_and_diff_files
@@ -1273,18 +1422,19 @@ def test_one_merge(arguments, state, state_file, merge, record, record_citation,
                 operators = {}
                 for mutant in not_given:
                     operators[mutant["operator"]] = operators.get(mutant["operator"], 0) + 1
-                whose = ("You wrote the line." if owner_reason is None
-                         else f"Agent-seat {author} wrote the line; this task is on your list "
-                              f"because {owner_reason}.")
+                whose = " ".join(bucket["not_written"]) or "You wrote these lines."
                 description = survivor_task_description(
                     f"The scheduled full mutation pass found {len(not_given)} mutant(s) that no "
-                    f"test kills in {place} (cosmic-ray operators, with how many mutants each: "
+                    f"test kills in {module_path} (cosmic-ray operators, with how many mutants "
+                    f"each: "
                     + ", ".join(f"{operator} ({number})" for operator, number in operators.items())
-                    + f"), a line merged into main in {merge[:12]} ({merge_subject}). {whose}",
+                    + f"), on lines merged into main in {merge[:12]} ({merge_subject}). {whose}",
                     [(mutant["diff"], diff_file) for mutant, diff_file in mutants_and_diff_files],
                     record_citation)
                 task_id = agent_seat_task_list_new_pending_task_write(
-                    list_directory, survivor_task_subject(place, len(not_given)), description)
+                    list_directory,
+                    survivor_task_subject(module_path, [mutant["diff"] for mutant in not_given]),
+                    description)
             elif to_add:
                 found_id, found_task = found
                 listed = {mutant_diff_file_path(arguments.log_store_root, key): None
@@ -1292,42 +1442,36 @@ def test_one_merge(arguments, state, state_file, merge, record, record_citation,
                           if (given["agent_seat"], given["task_id"]) == (owner, found_id)}
                 listed.update((diff_file, mutant["diff"])
                               for mutant, diff_file in mutants_and_diff_files)
+                diffs = [(diff if diff is not None else diff_file.read_text(encoding="utf-8"),
+                          diff_file) for diff_file, diff in listed.items()]
                 description = survivor_task_description(
                     f"The scheduled full mutation pass found mutants that no test kills in "
-                    f"{place}; merge {merge[:12]} ({merge_subject}) added {len(to_add)} of them "
-                    f"to this task.",
-                    [(diff if diff is not None else diff_file.read_text(encoding="utf-8"),
-                      diff_file) for diff_file, diff in listed.items()], record_citation)
+                    f"{module_path}; merge {merge[:12]} ({merge_subject}) added {len(to_add)} of "
+                    f"them to this task.", diffs, record_citation)
                 agent_seat_task_list_task_file_rewrite(list_directory / f"{found_id}.json", dict(
-                    found_task, subject=survivor_task_subject(place, len(listed)),
+                    found_task, subject=survivor_task_subject(module_path,
+                                                              [diff for diff, _ in diffs]),
                     description=description))
         except OSError as error:
             raise StepFailed(
                 f"merge {merge[:12]}: no task could be opened on {owner}'s task list, or "
-                f"rewritten there, for the {len(not_given)} surviving mutant(s) in {place} "
+                f"rewritten there, for the {len(not_given)} surviving mutant(s) in {module_path} "
                 f"({type(error).__name__}: {error}). No later merge is tested until this one "
-                f"is. The next run tries this merge again, and gives no line of it a second "
+                f"is. The next run tries this merge again, and gives no mutant of it a second "
                 f"task.\n"
                 f"Fix what the error names, such as a task list directory that does not exist "
                 f"or a file that cannot be written, then run this program again on ned-box: "
                 f"{RUN_BY_HAND}") from error
-        if found is None:
-            for mutant in not_given:
-                state["tasks_opened"][mutant_key(mutant)] = {"agent_seat": owner,
-                                                             "task_id": task_id}
-                record.append(f"  SURVIVED {place} {mutant['operator']}: task #{task_id} "
-                              f"opened on {owner}'s task list")
-            write_state(state_file, state)
-            continue
-        found_id = found[0]
+        task_id = task_id if found is None else found[0]
         added_keys = {mutant_key(mutant) for mutant, _ in to_add}
         for mutant in not_given:
             key = mutant_key(mutant)
-            state["tasks_opened"][key] = {"agent_seat": owner, "task_id": found_id}
-            record.append(f"  SURVIVED {place} {mutant['operator']}: "
-                          + (f"added to task #{found_id}, open for this line,"
-                             if key in added_keys else f"already given task #{found_id}")
-                          + f" on {owner}'s task list")
+            state["tasks_opened"][key] = {"agent_seat": owner, "task_id": task_id}
+            done = (f"task #{task_id} opened" if found is None
+                    else f"added to task #{task_id}, open for this file," if key in added_keys
+                    else f"already given task #{task_id}")
+            record.append(f"  SURVIVED {module_path}:{mutant['line']} {mutant['operator']}: "
+                          f"{done} on {owner}'s task list")
         write_state(state_file, state)
     errored_already_reported = set(
         not_run_before.get(ERRORED_MUTANT_KEYS_ALREADY_REPORTED_STATE_KEY, ()))
@@ -1530,6 +1674,18 @@ def main_under_lock(arguments):
                             arguments.clone, "log", "--first-parent", "--reverse",
                             "--format=%H %ct", f"{last}..{main_commit}").splitlines())]
             tasks_before = dict(state["tasks_opened"])
+            try:
+                per_line_survivor_tasks_folded_into_one_task_per_source_file(
+                    state, arguments, record, record_citation)
+            except OSError as error:
+                raise StepFailed(
+                    f"the per-line survivor tasks could not be folded into one task per source "
+                    f"file, because a task file or a diff file could not be read or written "
+                    f"({type(error).__name__}: {error}). Nothing was tested.\n"
+                    f"Fix what the error names. A task already rewritten or marked completed "
+                    f"needs nothing done: the next run's step 4 points the state at the task "
+                    f"that holds each mutant. Then run this program again on ned-box: "
+                    f"{RUN_BY_HAND}") from error
             lost = lost_tasks_reported(state, arguments, record)
             # A run killed later writes no record, so the lost tasks reach one before the
             # state stops naming them.
