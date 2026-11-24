@@ -2,7 +2,7 @@
 
 This page is the project's overview and design document for turning the bulk of NedsNodes into nodes and state machines. It does not teach what a state machine is. It says how they relate to this project and its plans, how the work will be done, and what is still undecided.
 
-**Status.** Pending the user's review, in `docs/nedsnodes-wiki/queue/`: a wiki page needs the user's approval before it moves to `docs/nedsnodes-wiki/`. No GHI is filed and nothing here is built. It carries out the user-rulings of approval-walk nodes-design-forks-2026-11-21, whose walk-minutes are `nedlern@ned-box:/home/nedlern/nedsnodes-logs/walk/nodes-design-forks-2026-11-21-minutes.md`; an item number below, such as "item 4", is an item of that approval-walk. Where the user has not decided something, this design says so and lists it in section 13.
+**Status.** Pending the user's review, in `docs/nedsnodes-wiki/queue/`: a wiki page needs the user's approval before it moves to `docs/nedsnodes-wiki/`. No GHI is filed and nothing here is built. It carries out the user-rulings of approval-walk nodes-design-forks-2026-11-21, whose walk-minutes are `nedlern@ned-box:/home/nedlern/nedsnodes-logs/walk/nodes-design-forks-2026-11-21-minutes.md`; an item number below, such as "item 4", is an item of that approval-walk. Where the user has not decided something, this design says so and lists it in section 13. The approval page, `docs/nedsnodes-wiki/nedsnodes-which-changes-need-the-users-approval.md`, gains an exception that covers this page: "An edit to a wiki page whose plan the user has approved, carrying out a general instruction he gave for that page, for each part of the edit that makes no decision he has not made; the commit message quotes his instruction, the agent brings him the other parts, and, unlike the other exceptions, the agent tells him in one line what changed." (user-ruling of 2026-11-24).
 
 ## 1. The goal
 
@@ -290,4 +290,3 @@ The user has no "strong opinions" on order beyond easy parts first. Each step is
 13. Should a Stop hook refuse to end a turn until a discussion that changes a waiting approval-walk item is in the walk-minutes, with the session-handoff deferred until then?
 14. Should each approval-walk item carry a lasting `#approval_walk_item_id` line?
 15. GHI 2505 is not the first slice: the tool contract and runner are built first, then background work, then GHI 2505's approval-walk half as the first large machine, and its pull-request half follows.
-16. Does the user's approval of this page's direction cover later edits made from a general instruction, or does each wiki edit still need his review? He said on 2026-11-23: "we may have to change the rule".
