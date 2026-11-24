@@ -34,7 +34,7 @@ order, each line once, so a sub-step's lines that item 12's own already hold are
 
 The text is rendered with the shared
 CommonMark parser, each line break kept, as the walk-document shows it. A paragraph that opens with
-`Recommendation:` gets the class `rec`, and one that opens with `#approval_walk` gets the class `tag`.
+`Recommendation:` gets the class `rec`.
 
 LINKS BETWEEN PAGES. The walk-minutes, the walk-document's sibling `<walk name>-minutes.md`, record each page's link
 on an `#item_page` line, read through the walk finder's approval_walk_item_page_link_lines_oldest_first_from_walk_minutes. Above its heading,
@@ -59,7 +59,9 @@ item's newest `#item_page` link, if any.
 
 It does not copy the files an item links into the page: each link stays as the walk-document writes it, so a
 `file:///Volumes/nedhome/...` link opens only on the user's Mac. Of the lines the paragraphs above put on the page,
-it leaves none out, the hashtag lines meant for agents included. HTML in the walk-document is shown as text, so a placeholder such as `<walk name>`
+it leaves out only each line that opens with `#approval_walk_item_`, such as `#approval_walk_item_first_entered`,
+`#approval_walk_item_in_category_fix_next` or `#approval_walk_item_waits_on`, which the walk check program writes
+for agents; other hashtag lines, such as `#case_against`, stay. HTML in the walk-document is shown as text, so a placeholder such as `<walk name>`
 written outside backquotes shows as written. It refuses an item number
 that no heading names or that more than one heading names. It overwrites the output file without asking.
 """
@@ -75,7 +77,6 @@ HERE = Path(__file__).resolve().parent
 HEAD_STYLES_AND_FONTS_FILE = HERE / "walk-me-through-approval-walk-item-page-html-head-styles-and-fonts.html"
 FINDER_FILE = HERE / "walk-me-through-approval-walk-minutes-and-walk-document-item-finder-common.py"
 RECOMMENDATION_CLASS = "rec"
-TAG_CLASS = "tag"
 UNSAFE_LINK_SCHEMES = ("javascript:", "vbscript:", "data:")
 
 # Messages follow docs/nedsnodes-wiki/nedsnodes-how-to-write-a-tool-message-to-agent-such-as-a-hook-refusal-or-script-error.md.
@@ -150,7 +151,7 @@ def item_lines_and_count(walk_finder, document, text, number, parser):
         raise Refused(SEVERAL_HEADINGS.format(document=document, number=number, headings=headings))
     (unit,) = naming
     heading, body = walk_finder.approval_walk_item_heading_and_item_page_body_lines(text, parser, units, unit, number)
-    return body, heading, unit[1]
+    return [line for line in body if not walk_finder.APPROVAL_WALK_ITEM_TAG_LINE.match(line)], heading, unit[1]
 
 
 def whole_item_links(item_page_lines, walk_finder):
@@ -196,8 +197,6 @@ def rendered_item_html(parser, heading, body):
             content = tokens[index + 1].content
             if content.startswith("Recommendation:"):
                 token.attrSet("class", RECOMMENDATION_CLASS)
-            elif content.startswith("#approval_walk"):
-                token.attrSet("class", TAG_CLASS)
     options = type(parser.options)({**parser.options, "breaks": True})
     return f"<h1>{heading_html}</h1>\n" + parser.renderer.render(tokens, options, {})
 

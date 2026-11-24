@@ -101,12 +101,12 @@ in a comment is never an item's start, a marker, a recommendation or a recorded
 answer.
 
 AN ITEM'S TEXT. approval_walk_item_heading_and_item_page_body_lines gives the
-lines of an item that the item page builder puts on its page.
+lines of an item, from which the item page builder builds its page.
 approval_walk_item_text_as_shown_to_user gives the item's text as the user is
-shown it, from which the short-answer hook reads the decision-bearing lines
-the user must have been shown before his answer to the item counts: the same
-lines without the `#approval_walk_item_` lines, which the check program writes
-for agents. The
+shown it, on its page and in the agent's message, from which the short-answer
+hook reads the decision-bearing lines the user must have been shown before his
+answer to the item counts: the same lines without the `#approval_walk_item_`
+lines, which the check program writes for agents. The
 short-answer hook drops each running count's `of M` only when it compares,
 because M changes when items are added to the walk.
 
@@ -773,8 +773,8 @@ def approval_walk_item_sub_step_units_below_item_in_walk_document(all_units, uni
 
 def approval_walk_item_heading_and_item_page_body_lines(text, parser, all_units, unit, number):
     """Return (the heading line of unit without its deferred note, the body lines) of item number of the walk-document
-    text, whose unit of all_units, as item_unit_spans gives them, is unit, as the item page builder puts them on the
-    item's page and its docstring says: a Withdrawn version left out, an item that shares a heading keeping only its
+    text, whose unit of all_units, as item_unit_spans gives them, is unit, as the item page builder's docstring says,
+    the `#approval_walk_item_` lines included: a Withdrawn version left out, an item that shares a heading keeping only its
     own lines, and the item's sub-steps after its own lines."""
     lines = text.split("\n")
     heading = approval_walk_item_heading_with_deferred_note_removed(lines[unit[3]])

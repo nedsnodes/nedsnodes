@@ -268,6 +268,8 @@ def test_a_reply_ending_with_the_closing_line_passes_and_one_without_it_is_sent_
     check("the reminder names the walk, its walk-document and its minutes",
           "poem-page-2026-10-12" in reason and str(case.walk / "poem-page-2026-10-12.md") in reason
           and str(case.walk / "poem-page-2026-10-12-minutes.md") in reason, reason)
+    check("the reminder has the agent show an unseen item without its `#approval_walk_item_` lines",
+          "leaving out each line that opens with `#approval_walk_item_`" in reason, reason)
 
 
 def test_the_closing_lines_shown_are_the_ones_the_answer_hook_builds():

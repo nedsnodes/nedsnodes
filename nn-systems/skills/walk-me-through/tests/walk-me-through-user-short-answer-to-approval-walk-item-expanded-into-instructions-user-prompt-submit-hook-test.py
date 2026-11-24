@@ -436,7 +436,8 @@ def test_o_asks_for_option_2_and_option_3_paragraphs():
               and ("Below the two paragraphs, add this line: \"Answer O2 or O3 to take that option; A still takes "
                    "the recommendation, and the other answers work as before.\"") in lines
               and lines[-1] == ("Then republish the item's page as its new version, and show the item again in full, "
-                                "word for word as the walk-document has it.")
+                                "word for word as the walk-document has it, leaving out each line that opens with "
+                                "`#approval_walk_item_`.")
               and not any(line.startswith("The hook could not read") for line in lines), f"lines {lines!r}")
     lines = Case().lines("o")
     check("O with no approval-walk asks for the two options in the reply",
