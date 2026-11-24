@@ -7038,7 +7038,8 @@ def test_an_unchanged_run_finishes_the_prune_and_keeps_files_the_program_did_not
     for number in range(1, 22):
         (folder / f"2000-01-02T00-00-{number:02}.000000Z-{number:016x}.md").write_bytes(b"old")
     (folder / "2000-01-03T00-00-00.000000Z-ffffffffffffffff.md").write_bytes(document.read_bytes())
-    # Each sorts before every real copy, so a prune that counted it would delete it first.
+    # The first two sort before every real copy, so a prune that counted them would delete them first; the last sorts
+    # after them, and the check that no new copy was saved is what shows it was not counted as the newest copy.
     not_named_by_the_program = ("1999-notes.md", "0000-00-00T00-00-00.000000Z.md", "recovered-by-hand.md")
     for name in not_named_by_the_program:
         (folder / name).write_bytes(b"a note someone keeps here")
@@ -7083,6 +7084,38 @@ def test_a_prune_that_fails_says_the_copy_is_saved():
               in problem and "no timestamped copy" not in problem, str(problem))
     check("the copy is saved though the prune failed",
           [path.read_bytes() for path in walk_copies(root)][-1] == document.read_bytes())
+
+
+def test_a_listing_that_fails_after_the_copy_is_published_says_the_copy_is_saved():
+    program = load_program()
+    case = Case()
+    root = case.root / "copies-whose-listing-fails-after-the-save"
+    arguments = argparse.Namespace(cwd=str(case.checkout), walk_document_copies_directory=root, cold_read_records=None,
+                                   counts_log=None)
+    save = program.walk_me_through_walk_document_timestamped_copy_save_on_ned_box_and_oldest_copies_prune
+    real_iterdir, real_replace = program.Path.iterdir, program.os.replace
+    replaced = []
+
+    def recording_replace(source, destination):
+        real_replace(source, destination)
+        replaced.append(destination)
+
+    def iterdir_failing_once_the_copy_is_published(self):
+        if replaced:
+            raise OSError("listing failed")
+        return real_iterdir(self)
+
+    program.Path.iterdir, program.os.replace = iterdir_failing_once_the_copy_is_published, recording_replace
+    try:
+        problem = save(arguments)
+    finally:
+        program.Path.iterdir, program.os.replace = real_iterdir, real_replace
+    check("the copy was published before the listing failed", len(replaced) == 1, str(replaced))
+    check("a listing that fails after the copy is published is reported as a failed prune",
+          problem is not None and "is saved on ned-box, but its oldest copies were not pruned: listing failed"
+          in problem and "no timestamped copy" not in problem, str(problem))
+    check("the copy is on disk", [path.read_bytes() for path in walk_copies(root)]
+          == [case.minutes.with_name(f"{WALK_NAME}.md").read_bytes()])
 
 
 def test_two_copies_with_one_stamp_keep_both():

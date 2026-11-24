@@ -1517,7 +1517,8 @@ def reachable_log_store_records(record_shipper=None, ned_box_home=None, mac_moun
 
 
 def is_walk_document_copy_name(name):
-    """Only a name this program could give: a note or recovered file kept in the folder is never pruned."""
+    """Only a name this program could give: a note or recovered file kept in the folder is never pruned. A name with
+    non-ASCII digits, which `\\d` and strptime both accept, is not told apart from one the program wrote."""
     match = WALK_DOCUMENT_COPY_NAME.fullmatch(name)
     if match is None:
         return False
@@ -1551,6 +1552,7 @@ def walk_me_through_walk_document_timestamped_copy_save_on_ned_box_and_oldest_co
     if not document.is_file():
         return None
     temporary = None
+    written = False
     try:
         copies_root = arguments.walk_document_copies_directory
         if copies_root is None:
@@ -1576,13 +1578,16 @@ def walk_me_through_walk_document_timestamped_copy_save_on_ned_box_and_oldest_co
             os.chmod(temporary, 0o644)  # mkstemp's 0600 would keep the copy from other users of the mount.
             os.replace(temporary, copies / final_name)
             temporary = None
-            existing = saved_copies()
+            written = True
     except OSError as error:
         if temporary is not None:
             with contextlib.suppress(OSError):
                 os.unlink(temporary)
         return WALK_DOCUMENT_COPY_NOT_SAVED.format(document=document, error=error)
     try:
+        # Listed again here, not in the save's try: once the copy is published, a failure is a failed prune.
+        if written:
+            existing = saved_copies()
         # Pruned even when nothing was saved, so a prune that failed last run is finished once its error clears.
         for old in existing[:-WALK_DOCUMENT_COPIES_KEPT]:
             old.unlink(missing_ok=True)
