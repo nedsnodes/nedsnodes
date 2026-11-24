@@ -4857,10 +4857,8 @@ with tempfile.TemporaryDirectory() as scratch:
         {name: None for name in module.SUITE_SANDBOX_LIST_NAMES_READ_FROM_CHECKOUT_UNDER_TEST}),
         encoding="utf-8")
     _, all_fallback_source = module.suite_sandbox_lists_read_from_checkout_under_test(checkout)
-    lists_file.write_text(checkout_runner_source(
-        {name: None for name in module.SUITE_SANDBOX_LIST_NAMES_READ_FROM_CHECKOUT_UNDER_TEST}
-        | {REAL_CLAUDE: "SUITES_THAT_RUN_THE_REAL_CLAUDE_CLI = {\"scripts/a-test.py\"}\n"}),
-        encoding="utf-8")
+    lists_file.write_text("SUITES_THAT_RUN_THE_REAL_CLAUDE_CLI = {\"scripts/a-test.py\"}\n",
+                          encoding="utf-8")
     _, set_and_lacking_source = module.suite_sandbox_lists_read_from_checkout_under_test(checkout)
 check("when the checkout lacks one list, the lists' source names the checkout's file and this "
       "program for that list",

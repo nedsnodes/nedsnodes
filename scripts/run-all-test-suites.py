@@ -238,8 +238,12 @@ SUITES_THAT_RUN_THE_REAL_CLAUDE_CLI, names the suites
 from the scripts/run-all-test-suites.py of the checkout whose suites the run
 tests, parsed and never run. A list that file lacks, or assigns the set it
 was before it became a dict, as an older checkout does, is taken from this
-file instead; the report names each file that supplied a list. A run refuses, exit 2, when that file binds one of the four any other
-way, such as to a dict not written out literally.
+file instead; the report names each file that supplied a list. A run refuses, exit 2, when the last
+top-level assignment to one of the four gives it a value not written out literally, such as a dict
+built by a call, or when the file binds it only by another statement, such as a `for` loop, an
+augmented assignment or an assignment inside an `if` block. Such a statement after a literal
+assignment is not seen, and neither is a `def`, `class` or `import ... as` of the name, which
+leaves the list to be taken from this file.
 A suite bwrap reports as exiting 128+N is reported as killed by signal N;
 sandbox-exec replaces itself with the suite, so a suite's exit passes through.
 
