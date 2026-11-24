@@ -187,6 +187,12 @@ _session_handoff_field_names_spec = importlib.util.spec_from_file_location(
 session_handoff_field_names = importlib.util.module_from_spec(_session_handoff_field_names_spec)
 _session_handoff_field_names_spec.loader.exec_module(session_handoff_field_names)
 
+_remote_control_name_common_spec = importlib.util.spec_from_file_location(
+    "handoff_remote_control_name_common",
+    Path(__file__).with_name("handoff-remote-control-name-carried-from-claude-ai-rename-common.py"))
+remote_control_name_common = importlib.util.module_from_spec(_remote_control_name_common_spec)
+_remote_control_name_common_spec.loader.exec_module(remote_control_name_common)
+
 _worth_resuming_spec = importlib.util.spec_from_file_location(
     "seat_transcript_worth_resuming",
     SCRIPTS_DIRECTORY / "agent-seat-transcript-worth-resuming-common.py")
@@ -2155,9 +2161,10 @@ def launch_agent_session(agent_command: str, session_id: str, working_directory:
     flag = "--resume" if resume else "--session-id"
     command = [agent_command, flag, session_id]
     if remote_control_name:
-        command += ["--remote-control", remote_control_name,
-                    "--name", remote_control_name,
-                    "--remote-control-session-name-prefix", remote_control_name]
+        # The = form, because a name the user gives in claude.ai can start with dashes.
+        command += [f"--remote-control={remote_control_name}",
+                    f"--name={remote_control_name}",
+                    f"--remote-control-session-name-prefix={remote_control_name}"]
     if appended_system_prompt_file:
         command += ["--append-system-prompt-file", appended_system_prompt_file]
     # The test stub reads the final argument as the prompt, so no flag may follow it.
@@ -2475,6 +2482,36 @@ def handoff_supervisor_not_restarted_on_main_code_notice(
             f"{RESTART_PROGRAM_PATH_FROM_HOME} {seat}", on_the_mac))
 
 
+def remote_control_name_for_launch(agent_seat: str, handoff_directory: Path) -> str:
+    """Return the stored Remote Control name; an unreadable name file must not stop a launch."""
+    try:
+        return remote_control_name_common.stored_remote_control_name(handoff_directory, agent_seat)
+    except OSError as error:
+        print(f"handoff-supervisor: launching under the agent-seat name {agent_seat}, because its "
+              f"stored Remote Control name could not be read: {error}", file=sys.stderr)
+        return agent_seat
+
+
+def successor_notice_with_remote_control_rename(settings: SupervisorSettings, successor_notice: str,
+                                                retiring_session_id: Optional[str]) -> str:
+    """Store a rename the retiring agent-session's last turn end did not, and add its instruction."""
+    if not retiring_session_id:
+        return successor_notice
+    transcript_path = (project_directory_for_working_directory(settings.working_directory)
+                       / f"{retiring_session_id}.jsonl")
+    try:
+        rename = remote_control_name_common.store_remote_control_name_when_transcript_title_changed(
+            settings.handoff_directory, settings.agent, transcript_path)
+    except OSError as error:
+        print(f"handoff-supervisor: a claude.ai rename of agent-seat {settings.agent}, if there was "
+              f"one, was not carried to the successor: {error}", file=sys.stderr)
+        return successor_notice
+    if rename is None:
+        return successor_notice
+    instruction = remote_control_name_common.remote_control_rename_instruction(rename)
+    return f"{successor_notice} {instruction}" if successor_notice else instruction
+
+
 def handoff_supervisor_restart_arguments_build(settings: SupervisorSettings) -> list:
     """The argv of the restarted handoff-supervisor, built from the settings so that
     flags describing only the first start, such as --resume-session-id, are left out."""
@@ -2658,6 +2695,8 @@ def supervise_sessions(settings: SupervisorSettings) -> int:
             retiring_session_id = (
                 retiring_session_id_from_handoff_writer_or_tracked_launch(tracked_session_id, boot_fields)
                 if tracked_session_id else None)
+            successor_notice = successor_notice_with_remote_control_rename(
+                settings, successor_notice, retiring_session_id)
             successor_session_id, ignition_plan = (
                 carry_over_to_successor(settings, retiring_session_id, boot_fields, generation)
                 if retiring_session_id else (None, None)
@@ -2770,7 +2809,8 @@ def supervise_sessions(settings: SupervisorSettings) -> int:
             leftover_prompt_listing_counts_path(settings.handoff_directory, settings.agent))
         process = launch_agent_session(
             settings.agent_command, session_id, settings.working_directory, launch_prompt,
-            resume=next_launch_resumes_the_session, remote_control_name=settings.agent,
+            resume=next_launch_resumes_the_session,
+            remote_control_name=remote_control_name_for_launch(settings.agent, settings.handoff_directory),
             appended_system_prompt_file=appended_system_prompt_file,
             handoff_supervisor_agent_name=settings.agent,
             update_timeout_seconds=settings.agent_update_timeout_seconds,
@@ -2861,6 +2901,8 @@ def supervise_sessions(settings: SupervisorSettings) -> int:
 
         retiring_session_id = retiring_session_id_from_handoff_writer_or_tracked_launch(
             session_id, handoff_fields)
+        successor_notice = successor_notice_with_remote_control_rename(
+            settings, successor_notice, retiring_session_id)
         successor_session_id, ignition_plan = carry_over_to_successor(
             settings, retiring_session_id, handoff_fields, generation
         )
@@ -2881,7 +2923,8 @@ def main(argv=None) -> int:
     )
     parser.add_argument("--agent", required=True,
                         help="agent name; names the handoff and state files, and the Remote "
-                             "Control name the session answers to. That name is how agents on "
+                             "Control name the session answers to until the user renames it in "
+                             "claude.ai. That name is how agents on "
                              "OTHER machines address this seat, so it has to be unique across "
                              "the whole fleet, not just this machine")
     parser.add_argument("--cd", default=".", help="the agent's worktree")
