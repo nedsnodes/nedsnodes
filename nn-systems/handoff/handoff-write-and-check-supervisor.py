@@ -57,16 +57,16 @@ in either direction, or when the next step names its id or its subject. The
 high-water mark is raised before anything is removed, so Claude Code never
 gives a removed task's id to a new task, which would overwrite the
 log-store's copy. A prune that fails keeps the tasks and prints one line;
-it never stops the handoff, and the next handoff tries again.
-
-A line that asks the agent to act, because the subagents could not be listed,
-the handoff-deferral's refused commands could not be read, or the prune
-failed, is also written into the handoff as a numbered
-session-handoff-writer-warning field, and the handoff-supervisor shows each
-to the successor: the old session ends seconds after the write, before it
-can act on a printed line. It runs before
+it never stops the handoff, and the next handoff tries again. It runs before
 the handoff is written because the handoff-supervisor ends this session
 seconds after the file appears.
+
+When the subagents still working cannot be listed, the handoff-deferral's
+refused commands cannot be read, or the prune fails, a warning worded for the
+successor is written into the handoff as a numbered
+session-handoff-writer-warning field, which the handoff-supervisor shows the
+successor; the console still prints the problem, but the old session ends
+seconds after the write, before it can act on it.
 
 The liveness report is part of this script rather than a second command
 because the two are one decision: a handoff nobody is watching must not stop
@@ -361,32 +361,39 @@ def spawned_subagent_field_lines(roster) -> list:
     return lines
 
 
+def spawned_subagent_roster_not_derived(cause: str):
+    """Return (no field lines, console status, warning for the successor) when the roster cannot be derived."""
+    return [], (f"spawned-subagent roster: not derived — {cause}. The successor is told to find "
+                "the subagents in this session's dialog."), (
+        f"The writer script could not list the subagents still working ({cause}). Find in the "
+        "dialog of the session you are replacing each subagent it started that had not reported "
+        "back, and re-commission any whose work is unfinished.")
+
+
 def spawned_subagent_roster_for_this_session(working_directory: Path):
-    """Return (roster field lines, console status, whether the status is a writer warning), reporting
-    failures without blocking handoff."""
+    """Return (roster field lines, console status, warning for the successor or ""), never blocking the handoff."""
     session_id = os.environ.get("CLAUDE_CODE_SESSION_ID", "")
     if not session_id:
-        return [], ("spawned-subagent roster: not derived — CLAUDE_CODE_SESSION_ID is unset, so this "
-                    "script cannot find the transcript. Name any subagents in the next step by hand."), True
+        return spawned_subagent_roster_not_derived(
+            "CLAUDE_CODE_SESSION_ID is unset, so the transcript cannot be found")
     try:
         transcript_path = find_session_transcript(session_id, working_directory)
         if transcript_path is None:
-            return [], (f"spawned-subagent roster: not derived — no single transcript found for session "
-                        f"{session_id} under {PROJECTS_ROOT}. Name any subagents in the next step by hand."), True
+            return spawned_subagent_roster_not_derived(
+                f"no single transcript found for session {session_id} under {PROJECTS_ROOT}")
         roster = spawned_subagent_roster(transcript_path)
     except Exception as error:  # noqa: BLE001 - the roster never blocks a handoff
-        return [], (f"spawned-subagent roster: not derived — {type(error).__name__}: {error}. "
-                    "Name any subagents in the next step by hand."), True
+        return spawned_subagent_roster_not_derived(f"{type(error).__name__}: {error}")
     if not roster:
-        return [], "spawned-subagent roster: this session spawned no subagents", False
+        return [], "spawned-subagent roster: this session spawned no subagents", ""
     still_working = still_working_subagent_entries(roster)
     if not still_working:
         return [], (f"spawned-subagent roster: all {len(roster)} spawned subagent(s) had "
                     "ended by this handoff; none recorded (ended subagents are not "
-                    "carried, ruled 2026-08-29)"), False
+                    "carried, ruled 2026-08-29)"), ""
     return (spawned_subagent_field_lines(still_working),
             f"spawned-subagent roster: {len(still_working)} still-working subagent(s) "
-            f"recorded for the successor, of {len(roster)} spawned", False)
+            f"recorded for the successor, of {len(roster)} spawned", "")
 
 
 def background_task_launches_by_id(transcript_path: Path, task_ids) -> dict:
@@ -485,30 +492,35 @@ def handoff_deferral_field_lines(refused_commands) -> list:
     return lines
 
 
+def handoff_deferral_refused_commands_not_read(cause: str):
+    """Return (no field lines, console status, warning for the successor) when the refused commands cannot be read."""
+    return [], (f"handoff-deferral: the refused cold-read-full-run commands are not listed ({cause}). "
+                "The successor is told to find them in this session's dialog."), (
+        f"The writer script could not read the cold-read-full-run commands a hook refused during the "
+        f"handoff-deferral of the session you are replacing ({cause}). Find any such refused command "
+        "in that session's dialog, and run it, unless the dialog shows it is no longer needed.")
+
+
 def handoff_deferral_fields_for_this_session(handoff_directory: Path):
-    """Return (field lines, console status, whether the status is a writer warning) for the
+    """Return (field lines, console status, warning for the successor or "") for the
     cold-read-full-run commands the handoff-deferral's hook refused.
 
-    Never raises: a file that cannot be read is named in the status, which tells the agent to add
-    the commands to the next step by hand.
+    Never raises: a file that cannot be read becomes the warning, so the successor finds the
+    commands in the dialog; the agent never reruns this script, which would replace the handoff.
     """
     session_id = os.environ.get("CLAUDE_CODE_SESSION_ID", "")
     if not session_id:
-        return [], ("handoff-deferral: not read, because CLAUDE_CODE_SESSION_ID is unset and this "
-                    "script cannot find the file of refused commands without it. If a hook refused "
-                    "a cold-read-full-run since this session's handoff was deferred, name it in the "
-                    "next step, and run this script again."), True
+        return handoff_deferral_refused_commands_not_read(
+            "CLAUDE_CODE_SESSION_ID is unset, so the file of refused commands cannot be found")
     try:
         refused_commands = deferred_marker_files.cold_read_full_run_commands_refused_during_handoff_deferral_read(
             handoff_directory, session_id)
     except deferred_marker_files.ColdReadFullRunCommandsRefusedDuringHandoffDeferralUnreadable as error:
-        return [], (f"handoff-deferral: the refused cold-read-full-run commands are not listed "
-                    f"({error}). Find them in this session's dialog, and run this script again "
-                    "with a next step that names them."), True
+        return handoff_deferral_refused_commands_not_read(str(error))
     if not refused_commands:
-        return [], "handoff-deferral: no refused cold-read-full-run command to record", False
+        return [], "handoff-deferral: no refused cold-read-full-run command to record", ""
     return (handoff_deferral_field_lines(refused_commands),
-            f"handoff-deferral: {len(refused_commands)} refused cold-read-full-run command(s) recorded", False)
+            f"handoff-deferral: {len(refused_commands)} refused cold-read-full-run command(s) recorded", "")
 
 
 def background_tasks_past_wait_limit_still_running(transcript_path: Path, deferral_began_at=None,
@@ -649,8 +661,6 @@ TASK_FILE_NAME_PATTERN = re.compile(r"[1-9][0-9]*\.json")
 TASK_HIGH_WATER_MARK_FILE_NAME = ".highwatermark"
 LOG_STORE_TASK_FILE_COPIES_HASH_SSH_TIMEOUT_SECONDS = 30
 COMPLETED_TASKS_PRUNED_LABEL = "completed tasks pruned:"
-# Every prune line that ends with it reports a failure, and so is a writer warning.
-TELL_USER_THIS_PRUNE_LINE_SENTENCE = "Tell the user this line in your last message before you wait."
 
 
 def tasks_mirror_row():
@@ -770,16 +780,25 @@ def raise_task_high_water_mark(list_directory: Path, highest_id: int) -> None:
         raise
 
 
+class PruneFailureLine(str):
+    """A prune report of a failure the user must hear, which becomes a warning for the successor."""
+
+
 def prune_completed_tasks(next_step_text: str):
-    """Remove completed tasks the log-store holds; return (the console line, whether it is a writer
-    warning), never raise."""
+    """Remove completed tasks the log-store holds; return (console line, warning for the successor or ""), never raise."""
     try:
-        line = COMPLETED_TASKS_PRUNED_LABEL + " " + prune_completed_tasks_unguarded(next_step_text)
+        report = prune_completed_tasks_unguarded(next_step_text)
     except Exception as error:  # noqa: BLE001 - the prune never blocks a handoff
-        line = (f"{COMPLETED_TASKS_PRUNED_LABEL} failed, every completed task kept — "
-                f"{type(error).__name__}: {error}. The next handoff tries again. "
-                + TELL_USER_THIS_PRUNE_LINE_SENTENCE)
-    return line, TELL_USER_THIS_PRUNE_LINE_SENTENCE in line
+        report = PruneFailureLine(f"failed, every completed task kept — {type(error).__name__}: {error}. "
+                                  "The next handoff tries again.")
+    line = f"{COMPLETED_TASKS_PRUNED_LABEL} {report}"
+    if not isinstance(report, PruneFailureLine):
+        return line, ""
+    return line, (f"The writer script's prune of completed tasks from this agent-seat's task list failed: "
+                  f"\"{line}\" Where that line names a step that fixes the cause, take it. Tell the user, "
+                  "in your first message: \"At the last session-handoff, the prune of completed tasks from "
+                  "my task list failed, so they stay in the list until a later session-handoff prunes "
+                  f"them; the cause: {report}\"")
 
 
 def prune_completed_tasks_unguarded(next_step_text: str) -> str:
@@ -790,9 +809,10 @@ def prune_completed_tasks_unguarded(next_step_text: str) -> str:
     relative, store_directory = tasks_mirror_row()
     list_directory = Path.home() / relative / list_name
     if not list_directory.is_dir():
-        return (f"not run — {TASK_LIST_ENVIRONMENT_VARIABLE} is {list_id}, but there is no task "
-                f"folder at {list_directory}. If Claude Code has moved where it keeps task lists, "
-                "this prune has stopped working. " + TELL_USER_THIS_PRUNE_LINE_SENTENCE)
+        return PruneFailureLine(
+            f"not run — {TASK_LIST_ENVIRONMENT_VARIABLE} is {list_id}, but there is no task "
+            f"folder at {list_directory}. If Claude Code has moved where it keeps task lists, "
+            "this prune has stopped working.")
 
     tasks = {}
     for path in list_directory.iterdir():
@@ -805,8 +825,8 @@ def prune_completed_tasks_unguarded(next_step_text: str) -> str:
             if not isinstance(task, dict):
                 raise ValueError("it does not hold a JSON object")
         except (OSError, ValueError) as error:
-            return (f"kept every completed task in {list_name}, because the task file {path} "
-                    f"could not be read ({error}). " + TELL_USER_THIS_PRUNE_LINE_SENTENCE)
+            return PruneFailureLine(f"kept every completed task in {list_name}, because the task file "
+                                    f"{path} could not be read ({error}).")
         tasks[int(path.stem)] = (path, content, task)
     if not tasks:
         return f"no tasks in {list_name}"
@@ -856,10 +876,10 @@ def prune_completed_tasks_unguarded(next_step_text: str) -> str:
             copy_task_files_to_log_store(host, list_directory, store_list_directory, candidate_names)
             store_hashes = log_store_copy_sha256_of_each_task_file(host, store_list_directory, candidate_names)
     except LogStoreUnreachable as error:
-        return (f"kept every completed task in {list_name}, because the log-store copy at "
-                f"{store_text} could not be checked ({error}). Check that ned-box is up and that "
-                f"`ssh {host} true` works; the next handoff prunes them. "
-                + TELL_USER_THIS_PRUNE_LINE_SENTENCE)
+        return PruneFailureLine(
+            f"kept every completed task in {list_name}, because the log-store copy at "
+            f"{store_text} could not be checked ({error}). Check that ned-box is up and that "
+            f"`ssh {host} true` works; the next handoff prunes them.")
     except LogStoreCopyFailedOnLogStoreSide as error:
         # ssh worked, so the ssh remedy would send the reader the wrong way.
         if error.unreadable_names is not None:
@@ -871,9 +891,10 @@ def prune_completed_tasks_unguarded(next_step_text: str) -> str:
                 "rsync's message, in the parentheses, says what failed. Check on ned-box yourself, with "
                 f"`ls -ld {store_list_directory}` and `df -h {store_list_directory}`, that nedlern "
                 "can write there and the disk has room")
-        return (f"kept every completed task in {list_name}, because ned-box answered but the "
-                f"log-store copy at {store_text} could not be {failed} ({error}). {remedy}; the next "
-                "handoff prunes them. " + TELL_USER_THIS_PRUNE_LINE_SENTENCE)
+        return PruneFailureLine(
+            f"kept every completed task in {list_name}, because ned-box answered but the "
+            f"log-store copy at {store_text} could not be {failed} ({error}). {remedy}; the next "
+            "handoff prunes them.")
     verified = [task_id for task_id in candidates
                 if store_hashes.get(tasks[task_id][0].name)
                 == hashlib.sha256(tasks[task_id][1]).hexdigest()]
@@ -885,10 +906,10 @@ def prune_completed_tasks_unguarded(next_step_text: str) -> str:
     try:
         raise_task_high_water_mark(list_directory, max(tasks))
     except OSError as error:
-        return (f"removed nothing from {list_name}, because the high-water mark "
-                f"{list_directory / TASK_HIGH_WATER_MARK_FILE_NAME} could not be raised ({error}); "
-                "without it Claude Code could give a removed task's id to a new task. "
-                + TELL_USER_THIS_PRUNE_LINE_SENTENCE)
+        return PruneFailureLine(
+            f"removed nothing from {list_name}, because the high-water mark "
+            f"{list_directory / TASK_HIGH_WATER_MARK_FILE_NAME} could not be raised ({error}); "
+            "without it Claude Code could give a removed task's id to a new task.")
     removed, unlink_failures = 0, []
     for task_id in verified:
         try:
@@ -901,7 +922,7 @@ def prune_completed_tasks_unguarded(next_step_text: str) -> str:
     line = (f"removed {removed} of {len(completed)} completed tasks from {list_name}; kept "
             f"{len(completed) - removed} ({', '.join(kept_parts)}); removed tasks stay at {store_text}")
     if unlink_failures:
-        line += f". Could not remove {'; '.join(unlink_failures)}. " + TELL_USER_THIS_PRUNE_LINE_SENTENCE
+        return PruneFailureLine(line + f". Could not remove {'; '.join(unlink_failures)}.")
     return line
 
 
@@ -1040,20 +1061,17 @@ def write_handoff_and_report_supervisor(argv) -> int:
         return 2
 
     counter = next_restart_counter(handoff_path, state_path)
-    spawned_subagent_lines, roster_report, roster_report_is_warning = spawned_subagent_roster_for_this_session(
+    spawned_subagent_lines, roster_report, roster_warning = spawned_subagent_roster_for_this_session(
         seat_directory)
     background_task_lines, background_task_report = background_task_fields_for_this_session(
         seat_directory)
-    handoff_deferral_lines, handoff_deferral_report, handoff_deferral_report_is_warning = (
+    handoff_deferral_lines, handoff_deferral_report, handoff_deferral_warning = (
         handoff_deferral_fields_for_this_session(handoff_directory))
     past_wait_limit_lines, past_wait_limit_report = background_task_past_wait_limit_fields_for_this_session(
         handoff_directory, seat_directory)
-    prune_report, prune_report_is_warning = prune_completed_tasks(next_step_text)
-    # The handoff-supervisor ends this session seconds after the write, so the successor acts on these.
-    writer_warnings = [report for report, is_warning in ((roster_report, roster_report_is_warning),
-                                                         (handoff_deferral_report, handoff_deferral_report_is_warning),
-                                                         (prune_report, prune_report_is_warning))
-                       if is_warning]
+    prune_report, prune_warning = prune_completed_tasks(next_step_text)
+    # Written for the successor, because the handoff-supervisor ends this session seconds after the file appears.
+    writer_warnings = [warning for warning in (roster_warning, handoff_deferral_warning, prune_warning) if warning]
     write_handoff_file(handoff_path, next_step, counter, arguments.ask_user_before_restart, seat_directory,
                        spawned_subagent_lines=spawned_subagent_lines,
                        verbatim_lines=verbatim_lines,

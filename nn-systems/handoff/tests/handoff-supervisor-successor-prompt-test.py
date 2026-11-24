@@ -2810,20 +2810,22 @@ def run_session_handoff_writer_warning_cases(recent: str):
     fields = {
         "written-at": recent,
         "next-step": "merge the queue",
-        "session-handoff-writer-warning-2": "completed tasks pruned: failed. Tell the user this line.",
-        "session-handoff-writer-warning-1": "spawned-subagent roster: not derived. Name any subagents by hand.",
+        "session-handoff-writer-warning-2": "The prune failed. Tell the user.",
+        "session-handoff-writer-warning-1": "The writer script could not list the subagents. Find them.",
     }
     prompt = supervisor.build_ignition_prompt(Path("/tmp/d.md"), fields)
-    expected = supervisor.SESSION_HANDOFF_WRITER_WARNINGS_SENTENCE_TEMPLATE.format(
+    expected = supervisor.SESSION_HANDOFF_WRITER_WARNINGS_SHOWN_TO_SUCCESSOR_SENTENCE_TEMPLATE.format(
         warning_count=2,
-        joined_warnings="spawned-subagent roster: not derived. Name any subagents by hand.; "
-                        "completed tasks pruned: failed. Tell the user this line.")
+        joined_warnings="The writer script could not list the subagents. Find them. The prune failed. Tell the user.")
     check("the successor is shown each writer warning, in writer order", expected in prompt, prompt)
+    check("the joined writer warnings carry no doubled punctuation",
+          ".;" not in expected and ".." not in prompt[prompt.index(expected):prompt.index(expected) + len(expected) + 2],
+          prompt)
     check("the writer warnings come before the next step",
           prompt.index(expected) < prompt.index("merge the queue"), prompt)
     quiet = supervisor.build_ignition_prompt(Path("/tmp/d.md"), {"written-at": recent, "next-step": "go"})
     check("a session-handoff with no writer warning adds no warning sentence",
-          "the writer script printed" not in quiet, quiet)
+          "the writer script found" not in quiet, quiet)
 
 
 def run_spawned_subagent_roster_cases(workspace: Path, recent: str):

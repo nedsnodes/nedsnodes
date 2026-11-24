@@ -1365,8 +1365,8 @@ def run_roster_never_blocks_a_handoff_cases(workspace: Path):
     """A roster that cannot be derived must not cost the seat its handoff.
 
     Same principle as the branch-protection audit: the failure is reported on
-    the console, where the retiring agent can act on it by naming its
-    subagents in the next step by hand.
+    the console and written into the handoff as a warning for the successor,
+    which finds the subagents in the dialog of the session it replaces.
     """
     home = workspace / "fake-home"
     projects = home / ".claude" / "projects" / "-fixture-project"
@@ -1438,13 +1438,15 @@ def run_roster_never_blocks_a_handoff_cases(workspace: Path):
           "next-step: carry on" in missing_body, missing_body)
     check("a missing transcript writes no roster field",
           "spawned-subagent-" not in missing_body, missing_body)
-    check("a missing transcript tells the agent to name its subagents by hand",
-          "not derived" in missing.stdout and "by hand" in missing.stdout, missing.stdout)
+    check("a missing transcript is reported on the console, saying the successor is told",
+          "not derived" in missing.stdout and "The successor is told to find the subagents" in missing.stdout,
+          missing.stdout)
     missing_warning = writer.supervisor.parse_handoff_file(
         handoffs / "rostermissingcase-handoff.md").get("session-handoff-writer-warning-1", "")
-    check("a subagent roster that could not be derived is written into the handoff as a writer warning",
-          missing_warning.startswith("spawned-subagent roster: not derived") and "by hand" in missing_warning,
-          missing_body)
+    check("a subagent roster that could not be derived is a writer warning worded for the successor",
+          missing_warning.startswith("The writer script could not list the subagents still working")
+          and "re-commission" in missing_warning
+          and "by hand" not in missing_warning and "next step" not in missing_warning, missing_warning)
 
     # The session's transcript in two project folders, neither keyed: no one of them is the session's.
     two_folders_session_id = "00000000-0000-4000-8000-0000000002f0"
@@ -1858,10 +1860,12 @@ def run_completed_task_prune_cases(workspace: Path):
     # The fixture runs with no session id, so the roster's warning comes first.
     prune_warning = next((value for key, value in writer.supervisor.parse_handoff_file(
         fixture.handoffs / "prunecase-handoff.md").items()
-        if key.startswith("session-handoff-writer-warning-") and value.startswith("completed tasks pruned:")), "")
-    check("a failed prune is written into the handoff as a writer warning, as one line",
-          prune_warning.startswith("completed tasks pruned: removed nothing")
-          and prune_warning.endswith(writer.TELL_USER_THIS_PRUNE_LINE_SENTENCE), prune_warning)
+        if key.startswith("session-handoff-writer-warning-") and "prune of completed tasks" in value), "")
+    check("a failed prune is a writer warning that quotes the line and asks the successor to tell the "
+          "user in its first message",
+          "\"completed tasks pruned: removed nothing" in prune_warning
+          and "Tell the user, in your first message:" in prune_warning
+          and "last message before you wait" not in prune_warning, prune_warning)
     check("a high-water mark that could not be written leaves no partial file behind",
           not (fixture.list_directory / ".highwatermark.partial").exists(), line)
 
@@ -1894,7 +1898,12 @@ def run_completed_task_prune_cases(workspace: Path):
         line = prune_line(fixture.run())
         check(f"a task file that is {slug} stops the prune with every task kept, and the line names it",
               fixture.present("6.json") and fixture.present("7.json") and "could not be read" in line
-              and "7.json" in line and "Tell the user" in line, line)
+              and "7.json" in line, line)
+        check(f"a task file that is {slug} becomes a writer warning asking the successor to tell the user",
+              any("7.json" in value and "Tell the user, in your first message:" in value
+                  for key, value in writer.supervisor.parse_handoff_file(fixture.handoffs / "prunecase-handoff.md").items()
+                  if key.startswith("session-handoff-writer-warning-")),
+              handoff_text(fixture.handoffs, "prunecase"))
 
     fixture = PruneFixture(workspace, "open-task-unreadable")
     fixture.task("1.json", task_bytes(1, "completed", blocks=[2]))
@@ -1943,6 +1952,11 @@ def run_completed_task_prune_cases(workspace: Path):
     check("with no task list id, the prune says it did not run and the handoff is written",
           fixture.present("1.json") and "not run" in line and "CLAUDE_CODE_TASK_LIST_ID" in line
           and fixture.handoff_written(), line)
+    check("a prune with no task list to prune is not a writer warning",
+          not any("prune of completed tasks" in value
+                  for key, value in writer.supervisor.parse_handoff_file(fixture.handoffs / "prunecase-handoff.md").items()
+                  if key.startswith("session-handoff-writer-warning-")),
+          handoff_text(fixture.handoffs, "prunecase"))
 
     fixture = PruneFixture(workspace, "no-folder")
     completed = fixture.run(CLAUDE_CODE_TASK_LIST_ID="list-with-no-folder")
@@ -1950,6 +1964,11 @@ def run_completed_task_prune_cases(workspace: Path):
     check("a task list id whose folder is missing names the path it looked for",
           f"no task folder at {fixture.home / '.claude' / 'tasks' / 'list-with-no-folder'}" in line
           and fixture.handoff_written(), line)
+    check("a task list whose folder is missing is a writer warning",
+          any("no task folder" in value
+              for key, value in writer.supervisor.parse_handoff_file(fixture.handoffs / "prunecase-handoff.md").items()
+              if key.startswith("session-handoff-writer-warning-")),
+          handoff_text(fixture.handoffs, "prunecase"))
 
     fixture = PruneFixture(workspace, "refused")
     fixture.task("1.json", task_bytes(1, "completed"))
@@ -2276,21 +2295,23 @@ def run_handoff_deferral_fields_cases(workspace: Path):
     check("an unreadable file of refused commands still writes the handoff, with no deferral field",
           "next-step: carry on" in bad_refused_body
           and "during-handoff-deferral-" not in bad_refused_body, bad_refused_body)
-    check("an unreadable file of refused commands is reported, with what to do",
+    check("an unreadable file of refused commands is reported on the console, saying the successor is told",
           "handoff-deferral: the refused cold-read-full-run commands are not listed" in bad_refused.stdout
-          and "run this script again" in bad_refused.stdout, bad_refused.stdout)
-    check("an unreadable file of refused commands is written into the handoff as a writer warning",
-          writer.supervisor.parse_handoff_file(handoffs / "badrefusedcase-handoff.md")
-          .get("session-handoff-writer-warning-1", "").startswith(
-              "handoff-deferral: the refused cold-read-full-run commands are not listed"),
-          bad_refused_body)
+          and "The successor is told to find them" in bad_refused.stdout, bad_refused.stdout)
+    bad_refused_warning = writer.supervisor.parse_handoff_file(
+        handoffs / "badrefusedcase-handoff.md").get("session-handoff-writer-warning-1", "")
+    check("an unreadable file of refused commands is a writer warning worded for the successor",
+          bad_refused_warning.startswith("The writer script could not read the cold-read-full-run commands")
+          and "run this script again" not in bad_refused_warning, bad_refused_warning)
     clear()
 
     unidentified = run_writer(handoffs, "carry on\n", "--agent", "deferralnosessioncase",
                               environment_overrides={"HOME": str(home), "CLAUDE_CODE_SESSION_ID": ""})
-    check("with no session id, the writer says it could not read the refused commands, with what to do",
-          "handoff-deferral: not read, because CLAUDE_CODE_SESSION_ID is unset" in unidentified.stdout
-          and "run this script again" in unidentified.stdout, unidentified.stdout)
+    check("with no session id, the writer says it could not read the refused commands, and that the "
+          "successor is told",
+          "handoff-deferral: the refused cold-read-full-run commands are not listed (CLAUDE_CODE_SESSION_ID "
+          "is unset" in unidentified.stdout and "The successor is told to find them" in unidentified.stdout,
+          unidentified.stdout)
     run_threshold_hook_defer_then_fire_then_writer_case(workspace)
     run_launch_after_skipped_lines_case(workspace)
 

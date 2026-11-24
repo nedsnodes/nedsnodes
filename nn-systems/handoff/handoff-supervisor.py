@@ -620,13 +620,10 @@ BACKGROUND_TASKS_PAST_WAIT_LIMIT_SENTENCE_TEMPLATE = (
     "wait-limit table only when you find no such way."
 )
 
-SESSION_HANDOFF_WRITER_WARNINGS_SENTENCE_TEMPLATE = (
-    "When the session you are replacing wrote its session-handoff, the writer script printed "
-    "{warning_count} warning(s) addressed to that session, which ended before it could act on them: "
-    "{joined_warnings}. Act on each yourself: where a warning says to name something in the next "
-    "step or to run the writer script again, find what it names in the dialog you read first or in "
-    "that session's transcript, and carry it on; where it says to tell the user a line, tell the "
-    "user that line in your first message."
+# Each warning is whole sentences the writer script wrote for the successor, so they are joined with a space.
+SESSION_HANDOFF_WRITER_WARNINGS_SHOWN_TO_SUCCESSOR_SENTENCE_TEMPLATE = (
+    "When the session you are replacing wrote its session-handoff, the writer script found "
+    "{warning_count} problem(s) that session ended too soon to act on; act on each: {joined_warnings}"
 )
 
 COLD_READ_FULL_RUN_COMMANDS_REFUSED_DURING_HANDOFF_DEFERRAL_SENTENCE_TEMPLATE = (
@@ -1361,8 +1358,8 @@ def build_ignition_prompt(extract_path: Path, handoff_fields: dict,
             command_count=len(refused_commands), joined_commands="; ".join(refused_commands)))
     writer_warnings = numbered_field_values_from(handoff_fields, SESSION_HANDOFF_WRITER_WARNING_FIELD_PREFIX)
     if writer_warnings:
-        lines.append(SESSION_HANDOFF_WRITER_WARNINGS_SENTENCE_TEMPLATE.format(
-            warning_count=len(writer_warnings), joined_warnings="; ".join(writer_warnings)))
+        lines.append(SESSION_HANDOFF_WRITER_WARNINGS_SHOWN_TO_SUCCESSOR_SENTENCE_TEMPLATE.format(
+            warning_count=len(writer_warnings), joined_warnings=" ".join(writer_warnings)))
     preamble = " ".join(lines)
     if handoff_fields.get(NEXT_STEP_BLOCK_UNTERMINATED_FIELD):
         preamble += UNTERMINATED_NEXT_STEP_BLOCK_NOTE
