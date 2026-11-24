@@ -124,7 +124,8 @@ def load_module(name, path):
 def record_text(record):
     message = record.get("message")
     if not isinstance(message, dict):
-        return None
+        # AttributeError, which both callers of typed_by_user handle as a failed transcript read.
+        raise AttributeError(f"a transcript record's message is a {type(message).__name__}, not an object")
     content = message.get("content")
     if isinstance(content, str):
         return content
@@ -201,7 +202,14 @@ def headless(environment):
 
 def output_for(payload, environment, user_alerts=None):
     """Return the hook's output for the payload as a dict, or None."""
-    if sys.platform != "linux" or headless(environment) or not typed_by_user(payload):
+    if sys.platform != "linux" or headless(environment):
+        return None
+    try:
+        typed = typed_by_user(payload)
+    except AttributeError:
+        # A record record_text cannot read; the short-answer hook falls back the same way and reports the error.
+        typed = not (payload.get("prompt") or "").lstrip().startswith(NOT_TYPED_PROMPT_OPENINGS)
+    if not typed:
         return None
     user_alerts = user_alerts or load_module(
         "user_alerts_pending_and_claimed_files_write_claim_release_and_delete_common", ALERTS_MODULE_FILE)
