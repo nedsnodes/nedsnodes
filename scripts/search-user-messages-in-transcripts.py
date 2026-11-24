@@ -47,6 +47,8 @@ DEFAULT_PROJECTS_DIR = os.path.expanduser("~/.claude/projects")
 WRAPPED_BLOCK = re.compile(r"\A\s*<[a-z-]+>.*</[a-z-]+>\s*\Z", re.DOTALL)
 PROGRAM_PROMPT_ENTRYPOINT = "sdk-cli"
 COMPACTION_SUMMARY_OPENING = "This session is being continued from a previous conversation"
+# The two notices Claude Code writes when the user presses Escape.
+INTERRUPT_NOTICE_PATTERN = re.compile(r"\[Request interrupted by user( for tool use)?\]")
 FIRST_PROMPT_FOR_AGENT_SEAT_WITHOUT_A_HANDOFF_PATTERN = re.compile(
     re.escape(handoff_supervisor.FIRST_PROMPT_FOR_AGENT_SEAT_WITHOUT_A_HANDOFF_TEMPLATE).replace(re.escape("{agent}"), ".+?"))
 FRESH_SESSION_FROM_CONVERSATION_TAIL_PROMPT_PATTERN = re.compile(
@@ -144,7 +146,8 @@ def is_interrupt_notice(record):
                  if isinstance(block, dict) and block.get("type") == "text"]
     else:
         return False
-    return any(isinstance(text, str) and text.lstrip().startswith("[Request interrupted")
+    # The whole notice, so that a prompt the user typed opening with a pasted notice is still his.
+    return any(isinstance(text, str) and INTERRUPT_NOTICE_PATTERN.fullmatch(text.strip())
                for text in texts)
 
 

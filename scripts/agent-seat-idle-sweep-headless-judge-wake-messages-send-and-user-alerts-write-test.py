@@ -2636,6 +2636,18 @@ check("rule 5: a message the user typed while the agent-seat was mid-turn counts
       [task["id"] for task in facts.get("open_tasks_nothing_holds", [])] == ["1"], facts)
 
 machine = one_reminder_of_task_1()
+untimed_queued = queued_by_the_user("Also this.", at(11))
+del untimed_queued["timestamp"]
+machine.append("alpha", untimed_queued, user([{"type": "text", "text": "[Request interrupted by user]"}],
+                                             at(11.2)),
+               typed_by_the_user("Also this.", at(11.3)), assistant("On it.", when=at(11.4)),
+               turn_end(at(11.4)))
+_, facts = judge_asked_at(machine, 30)
+check("rule 5: a message the user queued, logged with no time and re-sent after an interrupt, counts "
+      "as the user typing at the re-send",
+      [task["id"] for task in facts.get("open_tasks_nothing_holds", [])] == ["1"], facts)
+
+machine = one_reminder_of_task_1()
 machine.task("alpha", "2")
 _, facts = judge_asked_at(machine, 20)
 check("rule 5: a new open task is raised, without the one already reminded of",

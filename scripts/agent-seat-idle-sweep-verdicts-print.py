@@ -538,6 +538,9 @@ def read_main_transcript(path):
     # An interrupt notice is a user record the user did not type, and a queued message re-sent
     # after an interrupt was typed once, when it was queued.
     turn_reader = user_messages.TurnReader()
+    # A queued message can be logged with no time; its re-send after an interrupt, which the turn
+    # reader drops as the same message, then carries the only time it has.
+    untimed_user_text = None
     for record in transcript_records(path):
         moment = parse_time(record.get("timestamp"))
         task_id_by_succeeded_tool_use_id.update(succeeded_task_tool_result_task_ids(record))
@@ -547,16 +550,20 @@ def read_main_transcript(path):
         if spends_tokens(record) and moment:
             facts.last_token_spend = max(filter(None, (facts.last_token_spend, moment)))
         turn = turn_reader.turn(record)
-        if moment and turn and turn[0] == "user":
+        if turn and turn[0] == "user":
+            untimed_user_text = None if moment else turn[1]
+        if moment and ((turn and turn[0] == "user") or (
+                untimed_user_text is not None
+                and user_messages.typed_by_user(record) == untimed_user_text)):
             facts.last_user_typed = max(filter(None, (facts.last_user_typed, moment)))
+            untimed_user_text = None
         if is_model_turn_record(record):
             facts.last_model_turn_record = record
             facts.turn_ended_after_last_model_turn_record = False
         if record.get("type") == "assistant" and message_text(record).strip():
             newest_text_record = (record, moment, turn_started_at)
         if ((record.get("type") == "system" and record.get("subtype") == "turn_duration")
-                or (record.get("type") == "user"
-                    and message_text(record).strip().startswith("[Request interrupted by user"))):
+                or user_messages.is_interrupt_notice(record)):
             facts.turn_ended_after_last_model_turn_record = True
             awaiting_turn_start = True
             turn_started_at = None
