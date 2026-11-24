@@ -118,6 +118,17 @@ with tempfile.TemporaryDirectory() as scratch_name:
           and other_seats_name.exists() and impossible_date.exists()
           and "deleted 1 capture(s)" in output, output)
 
+    store_with_a_directory_named_as_a_capture = scratch / "store-with-a-directory-named-as-a-capture"
+    oldest_capture = capture_file(store_with_a_directory_named_as_a_capture, "a-seat", "20261001T000000Z-a-seat-terminal-capture.log", 10)
+    real_newest_capture = capture_file(store_with_a_directory_named_as_a_capture, "a-seat", "20261002T000000Z-a-seat-terminal-capture.log", 10)
+    directory_named_as_a_newer_capture = store_with_a_directory_named_as_a_capture / "a-seat" / "20261003T000000Z-a-seat-terminal-capture.log"
+    directory_named_as_a_newer_capture.mkdir()
+    exit_code, output = run(["--captures-directory", str(store_with_a_directory_named_as_a_capture)])
+    check("a directory named as a still newer capture does not take the newest capture's place: the "
+          "real newest capture stays and only the older one is deleted",
+          exit_code == 0 and not oldest_capture.exists() and real_newest_capture.exists()
+          and directory_named_as_a_newer_capture.is_dir() and "deleted 1 capture(s)" in output, output)
+
     exit_code, output = run(["--captures-directory", str(scratch / "never-made")])
     check("a captures directory that does not exist is not a failure: exit 0, nothing deleted",
           exit_code == 0 and "deleted 0 capture(s)" in output and "FAILED" not in output, output)
