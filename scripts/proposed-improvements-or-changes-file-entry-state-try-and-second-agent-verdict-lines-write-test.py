@@ -386,6 +386,51 @@ code, _, err = run(path, *VERDICT)
 case("a verdict on a Try line naming no sources is refused", code == 1 and "names no sources" in err)
 case("no second agent runs for a Try line naming no sources", second_agent_calls() == [])
 
+# A user-ruling on an entry that needs the user: one write adds the line and sets the State line.
+WAITING_TEXT = FILE_TEXT.replace("Goes wrong when: a closed GHI's decision changes without the user.\nState: open",
+                                 "Goes wrong when: a closed GHI's decision changes without the user.\nState: needs the user — h, t: decide")
+RULING = ["user-ruling", "E1", "--where", "approval-walk w, item 3", "--words", "keep it", "--by", "s"]
+path = fresh(WAITING_TEXT)
+code, _, _ = run(path, *RULING, "--state", "open")
+case("a ruling setting the entry open exits 0", code == 0)
+case("a ruling setting the entry open writes the line and the State line", entry(path, "E1")[2:] == [
+    "State: open", "User-ruling — the user, 2026-11-10T12:00Z, approval-walk w, item 3: keep it"])
+case("a ruling leaves the other entry alone", entry(path, "E2") == ["## E2 — improvement: remove the unused flag", "Gain: a smaller tool.", "State: open"])
+path = fresh(WAITING_TEXT)
+code, _, _ = run(path, *RULING, "--state", "settled")
+case("a ruling settling the entry writes the line and the settled State line", code == 0 and entry(path, "E1")[2:] == [
+    "State: settled, by the user's ruling — s, 2026-11-10T12:00Z: approval-walk w, item 3",
+    "User-ruling — the user, 2026-11-10T12:00Z, approval-walk w, item 3: keep it"])
+for name, text in (("an open entry", FILE_TEXT),
+                   ("a settled entry", FILE_TEXT.replace("changes without the user.\nState: open",
+                                                         "changes without the user.\nState: settled, done — h, t: removed")),
+                   ("an entry with no State line", FILE_TEXT.replace("changes without the user.\nState: open\n",
+                                                                     "changes without the user.\n"))):
+    path = fresh(text)
+    code, _, err = run(path, *RULING, "--state", "open")
+    case(f"a ruling on {name} is refused", code == 1 and "REFUSED:" in err and "does not need the user" in err
+         and path.read_text(encoding="utf-8") == text)
+for option, value, expected in (("--words", "", "is empty"), ("--words", " ", "is empty"),
+                                ("--words", "keep it\nState: settled", "line break"),
+                                ("--where", "", "is empty"), ("--where", "walk\nitem 3", "line break")):
+    path = fresh(WAITING_TEXT)
+    arguments = list(RULING)
+    arguments[arguments.index(option) + 1] = value
+    code, _, err = run(path, *arguments, "--state", "open")
+    case(f"a ruling with {option} {value!r} is refused", code == 1 and expected in err
+         and path.read_text(encoding="utf-8") == WAITING_TEXT)
+
+# The try count restarts at the line the user-ruling subcommand writes.
+path = fresh()
+for number in range(3):
+    run(path, "try", "E1", "--by", "h", "--found", f"try {number}", "--source", "PR 5")
+run(path, "needs-the-user", "E1", "--because", "three-tries", "--by", "h", "--why", "decide x")
+code, out, _ = run(path, *RULING, "--state", "open")
+case("after a ruling, show counts no tries", code == 0 and "E1: State: open; tries since the user last decided: 0 of 3" in out)
+code, _, _ = run(path, "try", "E1", "--by", "h", "--found", "after the ruling", "--source", "PR 5")
+case("a try after the ruling is try 1", code == 0
+     and entry(path, "E1")[-1] == "Try 1 — h, 2026-11-10T12:00Z: after the ruling — sources read: PR 5")
+
 # Show.
 path = fresh()
 code, out, _ = run(path, "show")

@@ -6,8 +6,9 @@ in docs/issues/1132-concerns-about-a-ghi-are-handled-by-agents.md forbid.
 The handler is the forked subagent that settles a file's entries by
 docs/agents/queue/proposed-improvements-or-changes-file-reviewer-entries-settling-subagent-instructions.md.
 It changes the file only through this program, which
-touches nothing but an entry's State line, its Try lines and its
-"Second agent:" lines, so an entry's own text is never rewritten.
+touches nothing but an entry's State line, its Try lines, its
+"Second agent:" lines and its User-ruling lines, so an entry's own text is
+never rewritten.
 
 Subcommands, each on one file:
 
@@ -46,6 +47,14 @@ Subcommands, each on one file:
                   <why>"; `--because three-tries` is refused unless the
                   entry has MAXIMUM_TRIES tries since its last user-ruling
                   line.
+  user-ruling     run by the agent-seat that brought an entry that needs the
+                  user to him: adds "User-ruling — the user, <time>, <where>:
+                  <his words>" under the entry and, in the same write,
+                  rewrites the State line as "State: open" or, with
+                  `--state settled`, as "State: settled, by the user's
+                  ruling — <by>, <time>: <where>". The only change made to an
+                  entry whose State line says "needs the user"; refused for
+                  any other entry.
 
 Lines are recognised by how they open, as handlers have written them:
 "State:", "Try" followed by a space or a colon, "Second agent:", and
@@ -53,10 +62,9 @@ Lines are recognised by how they open, as handlers have written them:
 which rule 4 counts tries again. An entry runs from its "## E<n>" heading to
 the next heading of level one or two. New lines go after the entry's last line that is not blank.
 
-Every subcommand but show is refused on an entry whose
+Every subcommand but show and user-ruling is refused on an entry whose
 State line is not "State: open": a settled entry is never changed, and an
-entry that needs the user waits until his decision is recorded and the
-entry is set open again.
+entry that needs the user takes only user-ruling.
 
 The file is named by its path on this machine, or in the form
 nedlern@ned-box:<path> that scripts/ghi-issue-write.py prints for a file in
@@ -146,6 +154,10 @@ NEEDS_THE_USER_REASONS = {
     "user-ruling-change": "a question whether a user-ruling should change",
     "three-tries": "still open after 3 tries",
 }
+# Not in SETTLED_KINDS, so `settle --kind` cannot claim a ruling the user never made.
+USER_RULING_SETTLED_KIND = "by the user's ruling"
+NEEDS_THE_USER_STATE_OPENING = "State: needs the user"
+USER_RULING_STATES = ("open", "settled")
 THIRD_TRY_DISAGREEMENT_WHY = "the last try found the entry not worth doing, and the second agent disagreed"
 
 
@@ -282,7 +294,7 @@ def refuse_unless_open(block, entry):
     if state is not None and not state.startswith(OPEN_STATE_OPENING):
         raise Refused(
             f"Entry {entry} is not open ({state}), so nothing was changed.\n"
-            "A settled entry is never changed. An entry that needs the user waits until the agent-seat that brought it to him records his decision under it and sets its State line back to open.")
+            "A settled entry is never changed. An entry that needs the user waits for his ruling, which the agent-seat that brought it to him records with this program's user-ruling subcommand.")
 
 
 def add_try(lines, entries, by, found, sources):
@@ -414,6 +426,21 @@ def needs_the_user(lines, entry, because, by, why):
     return lines
 
 
+def record_user_ruling(lines, entry, where, words, state, by):
+    spans = entry_spans(lines)
+    current = state_line(entry_lines(lines, spans, entry))
+    if current is None or not current.startswith(NEEDS_THE_USER_STATE_OPENING):
+        raise Refused(
+            f"Entry {entry} does not need the user ({current or 'no State line'}), so no ruling was recorded and nothing was changed.\n"
+            "A User-ruling line goes only under an entry whose State line says \"needs the user\".\n"
+            "If you meant another entry, run `show` on the file and give that entry's id.")
+    time = now()
+    new_state = "State: open" if state == "open" else f"State: settled, {USER_RULING_SETTLED_KIND} — {by}, {time}: {where}"
+    lines.insert(insertion_index(lines, spans, entry), f"{USER_RULING_LINE_OPENING} — the user, {time}, {where}: {words}")
+    replace_state(lines, spans, entry, new_state)
+    return lines
+
+
 def show(lines) -> str:
     spans = entry_spans(lines)
     out = []
@@ -467,19 +494,30 @@ def parser():
     command.add_argument("--because", required=True, choices=sorted(NEEDS_THE_USER_REASONS))
     command.add_argument("--by", required=True)
     command.add_argument("--why", required=True)
+    command = commands.add_parser("user-ruling")
+    command.add_argument("file")
+    command.add_argument("entry")
+    command.add_argument("--where", required=True, help="where the user ruled, such as an approval-walk's name and item")
+    command.add_argument("--words", required=True, help="the user's words")
+    command.add_argument("--state", required=True, choices=USER_RULING_STATES)
+    command.add_argument("--by", required=True)
     return top
 
 
 def main(argv=None) -> int:
     arguments = parser().parse_args(argv)
     try:
-        for name in ("found", "how", "why", "by", "source"):
+        for name in ("found", "how", "why", "by", "source", "where", "words"):
             value = getattr(arguments, name, None)
             if value is not None and any("\n" in part or "\r" in part
                                          for part in (value if isinstance(value, list) else [value])):
                 raise Refused(
                     f"--{name} holds a line break, so nothing was changed: each value is written as part of one line,\n"
                     "and a second line could be read as a State, Try or Second agent line. Give it on one line.")
+        for name in ("where", "words"):
+            value = getattr(arguments, name, None)
+            if value is not None and not value.strip():
+                raise Refused(f"--{name} is empty, so nothing was changed: the User-ruling line needs it. Give it on one line.")
         for source in getattr(arguments, "source", None) or []:
             if not source.strip() or TRY_SOURCES_SEPARATOR.strip() in source:
                 raise Refused(
@@ -517,6 +555,8 @@ def main(argv=None) -> int:
                 f"{SECOND_AGENT_MODEL} run through `claude -p` for {arguments.by}", arguments.by)
         elif arguments.command == "settle":
             lines = settle(lines, arguments.entry, arguments.kind, arguments.by, arguments.how)
+        elif arguments.command == "user-ruling":
+            lines = record_user_ruling(lines, arguments.entry, arguments.where, arguments.words, arguments.state, arguments.by)
         else:
             lines = needs_the_user(lines, arguments.entry, arguments.because, arguments.by, arguments.why)
         write_replacing(path, lines, ending)
