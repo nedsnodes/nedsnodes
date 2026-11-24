@@ -1397,6 +1397,21 @@ def main():
 
         routes = default_routes(STACKED_AND_NOT)
         routes["pr merge"] = merge_502
+        routes["api-read-branch"] = [{"stdout": json.dumps({"name": BRANCH})},
+                                     {"exit": 1, "stderr": "gh: Branch not found (HTTP 404)\n"}]
+        routes["api-delete-branch"] = {"exit": 1,
+                                       "stderr": "gh: Reference does not exist (HTTP 422)\n"}
+        exit_code, output, _, _, _ = run_case(
+            scratch, "merged-branch-gone-before-its-delete", [(GATE_PASSED, 0)], routes)
+        check("a branch that GitHub deletes between the program's read and its delete is "
+              "found gone by a second read, and the program exits 0 without a STOP",
+              exit_code == 0 and f"the branch {BRANCH} is gone from GitHub" in output
+              and "STOP" not in output
+              and len(runner_calls(scratch, "merged-branch-gone-before-its-delete")) == 1,
+              f"exit {exit_code}\n{output}")
+
+        routes = default_routes(STACKED_AND_NOT)
+        routes["pr merge"] = merge_502
         routes["api-read-branch"] = {"exit": 1, "stderr": "HTTP 502\n"}
         exit_code, output, _, _, _ = run_case(
             scratch, "merged-branch-unread", [(GATE_PASSED, 0)], routes)

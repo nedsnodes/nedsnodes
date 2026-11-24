@@ -209,9 +209,6 @@ GHI_GUIDE_AGENT_ALLOWED_TOOLS = "Read,Grep,Glob"
 # NM's three-watchdog machinery is deliberately not carried over (design:
 # "version 1 here starts with one timeout").
 ASK_TIMEOUT_SECONDS = int(os.environ.get("GHI_GUIDE_AGENT_ASK_TIMEOUT_SECONDS", "300"))
-# A cold start reads every file an open issue links to, so an ask that
-# cold-starts gets this much more time, once.
-COLD_START_EXTRA_SECONDS = ghi_issue_write.GHI_GUIDE_AGENT_COLD_START_EXTRA_SECONDS
 
 # A claude that cannot authenticate says so in its JSON result's `result` field
 # ("Failed to authenticate: OAuth session expired and could not be refreshed",
@@ -231,7 +228,7 @@ LOGGED_OUT_REMEDY = (f" — the claude on {AGENT_BOX} is logged out; run `claude
 # not finish instead of the box's real refresh error, and both land the caller on the
 # ghi-write skill's fallback ladder.
 # The Mac cannot know whether the box will cold-start, so it allows for one.
-SSH_TIMEOUT_SECONDS = ASK_TIMEOUT_SECONDS + COLD_START_EXTRA_SECONDS + 120
+SSH_TIMEOUT_SECONDS = ASK_TIMEOUT_SECONDS + ghi_issue_write.GHI_GUIDE_AGENT_COLD_START_EXTRA_SECONDS + 120
 
 # Reincarnation-trigger constants (design § Verify at build's Constants list).
 CLOSES_SINCE_BIRTH_THRESHOLD = 20
@@ -786,10 +783,10 @@ def ask(question: str, include_closed: bool, seat_dir: Path, repo: str,
 
     def turn(prompt, resume_session_id, cold_start=False):
         """A claude turn that can only spend what the ask has left; the
-        cold-start turn first adds COLD_START_EXTRA_SECONDS to it."""
+        cold-start turn first adds ghi_issue_write.GHI_GUIDE_AGENT_COLD_START_EXTRA_SECONDS to it."""
         nonlocal deadline
         if cold_start:
-            deadline += COLD_START_EXTRA_SECONDS
+            deadline += ghi_issue_write.GHI_GUIDE_AGENT_COLD_START_EXTRA_SECONDS
         remaining = deadline - time.monotonic()
         if remaining <= 0:
             return None, (f"the ask's {timeout_seconds}s budget was already spent "
