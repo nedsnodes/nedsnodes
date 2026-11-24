@@ -4,7 +4,9 @@ A, `approved`, `37.4 r` or `1 a 2 d`, into context naming what the answer
 means and the approval-walk item it answers.
 
 Each case runs the hook as a subprocess, its real stdin-to-stdout path, in a
-scratch checkout this suite made. The exit code is asserted on every case. The
+scratch checkout this suite made, started through
+nn-systems/general-tools/python-program-run-as-main-from-cached-bytecode-test-launcher.py so it is compiled
+once; the case that runs it from outside the checkout starts it directly. The exit code is asserted on every case. The
 model call is never real: a fake `claude` first on PATH records each call and
 answers as the case's model mode sets it.
 """
@@ -32,6 +34,10 @@ _git_environment_fixture.remove_git_redirecting_environment_variables_from_this_
 
 HOOK_SCRIPT = (Path(__file__).resolve().parents[1]
                / "walk-me-through-user-short-answer-to-approval-walk-item-expanded-into-instructions-user-prompt-submit-hook.py")
+# Every case starts the hook; through this launcher its 1,900 lines are compiled once, not at every start.
+HOOK_START = [sys.executable, str(Path(__file__).resolve().parents[3] / "general-tools"
+                                  / "python-program-run-as-main-from-cached-bytecode-test-launcher.py"),
+              str(HOOK_SCRIPT)]
 SUITE_ROOT = Path(tempfile.mkdtemp(prefix="short-answer-expansion-hook-test-")).resolve()
 WALK_NAME = "reboot-test-older-open-items-2026-10-15"
 EXPANDED_RULE_ID_OPENING = "[rule walk-me-through-short-answer-expanded-into-instructions] "
@@ -196,7 +202,7 @@ class Case:
         payload = {"hook_event_name": "UserPromptSubmit", "session_id": "test-session",
                    "cwd": str(self.checkout), "prompt": prompt, "transcript_path": str(transcript_path)}
         return subprocess.run(
-            [sys.executable, str(HOOK_SCRIPT)],
+            HOOK_START,
             input=json.dumps(payload) if stdin_text is None else stdin_text,
             capture_output=True, text=True, cwd=self.checkout if process_cwd is None else process_cwd,
             env={**ATTENDANCE_CHECK.environment_without_agent_session_attendance_variables(os.environ),
