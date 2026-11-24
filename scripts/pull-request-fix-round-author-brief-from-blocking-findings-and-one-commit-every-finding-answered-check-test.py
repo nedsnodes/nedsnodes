@@ -939,7 +939,8 @@ def stopped_round_cases(root, repository, made, frozen_head, dated_routes, submi
           "names, its arguments copied from its line, where its cd goes, prints the brief",
           line == f"cd {made} && python3 scripts/{PROGRAM.name} {NUMBER}" and code == 0
           and answers.read_text() == "1. \n2. \n", line + err + out)
-    kept_directory = Path(git(made, "rev-parse", "--absolute-git-dir")) / "fix-round-answers-kept-copies"
+    kept_directory = (Path(git(made, "rev-parse", "--path-format=absolute", "--git-common-dir"))
+                      / "fix-round-answers-kept-copies" / f"pull-request-{NUMBER}-frozen-head-{frozen_head}")
     shutil.rmtree(kept_directory, ignore_errors=True)
     write_answers(GOOD_ANSWERS, -60)
     code, out, err = run(root, repository, dated_routes)
@@ -960,9 +961,15 @@ def stopped_round_cases(root, repository, made, frozen_head, dated_routes, submi
     count = len(list(kept_directory.iterdir()))
     write_answers("1. \n\n2. \n", 60)
     code, out, err = run(root, repository, dated_routes)
-    check("answers kept: a file holding only numbered lines and blank lines gets no copy and no line in the brief",
-          code == 0 and len(list(kept_directory.iterdir())) == count and "copied it unchanged" not in out, err + out)
+    check("answers kept: a rerun that finds a blank file makes no copy and still names every copy of the round",
+          code == 0 and len(list(kept_directory.iterdir())) == count == 2
+          and all(f"copied it unchanged to {path}" in out for path in kept_directory.iterdir()), err + out)
     shutil.rmtree(kept_directory)
+    write_answers("1. \n\n2. \n", 60)
+    code, out, err = run(root, repository, dated_routes)
+    check("answers kept: a file holding only numbered lines and blank lines, with no copy kept, gets no line in the "
+          "brief",
+          code == 0 and not kept_directory.exists() and "copied it unchanged" not in out, err + out)
     kept_directory.write_text("a file where the directory of copies goes")
     write_answers(partial, 60)
     code, out, err = run(root, repository, dated_routes)
@@ -2095,7 +2102,7 @@ def move_cases(root, _repository, _base, _frozen_head):
     check("move-finish: refuses a new topic branch that holds no change", code == 1 and "nothing to move" in err, err)
 
 
-def answers_write_failure_cases(root, _repository, _base, _frozen_head):
+def answers_write_failure_cases(root, repository, _base, frozen_head):
     specification = importlib.util.spec_from_file_location("fix_round_program", PROGRAM)
     program = importlib.util.module_from_spec(specification)
     specification.loader.exec_module(program)
@@ -2145,6 +2152,43 @@ def answers_write_failure_cases(root, _repository, _base, _frozen_head):
     check("answers kept: the write goes through a unique file named so the ignore line covers it, beside the answers",
           answers.read_text() == "1. \n2. \n"
           and {"prefix": "answers-", "suffix": ".md", "dir": directory} in made, str(made))
+
+    taken_directory = directory / "taken"
+    taken_directory.mkdir()
+    taken = taken_directory / "answers-forced.md"
+    taken.write_text("an earlier copy")
+    answers.write_text("1. A later answer.\n")
+
+    def mkstemp_drawing_a_taken_name(**_arguments):
+        name = taken_directory / "answers-forced.incomplete"
+        return os.open(name, os.O_CREAT | os.O_EXCL | os.O_WRONLY), str(name)
+
+    program.tempfile.mkstemp = mkstemp_drawing_a_taken_name
+    try:
+        error = None
+        try:
+            program.answers_file_with_one_line_per_finding_write(answers, 1, taken_directory)
+        except program.StepFailed as failure:
+            error = str(failure)
+    finally:
+        program.tempfile.mkstemp = real_mkstemp
+    check("answers kept: a copy that draws a name already taken fails, leaves the earlier copy and the answers file "
+          "whole, and leaves no partial copy",
+          error is not None and "could not write the answers file" in error
+          and taken.read_text() == "an earlier copy" and answers.read_text() == "1. A later answer.\n"
+          and [path.name for path in taken_directory.iterdir()] == ["answers-forced.md"], str(error))
+
+    removed_worktree = root / "worktree-removed-after-a-copy"
+    git(repository, "worktree", "add", "-q", "--detach", str(removed_worktree), frozen_head)
+    surviving_directory = program.pull_request_fix_round_answers_kept_copies_directory_path_for_frozen_head(
+        removed_worktree, NUMBER, frozen_head
+    )
+    answers.write_text("1. An answer the worktree's removal must not delete.\n")
+    surviving = program.answers_file_text_kept_in_new_copy(answers, surviving_directory)
+    git(repository, "worktree", "remove", "--force", str(removed_worktree))
+    check("answers kept: a copy outlives the removal of the linked worktree it was made for",
+          surviving.read_text() == "1. An answer the worktree's removal must not delete.\n", str(surviving))
+    shutil.rmtree(surviving_directory)
 
 
 def move_failure_after_push_cases(root, _repository, _base, _frozen_head):

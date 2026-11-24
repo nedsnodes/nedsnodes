@@ -832,6 +832,20 @@ def answers_file_answers_every_finding_of_round(path, finding_count, review_subm
     return set(range(1, finding_count + 1)) <= entries.keys()
 
 
+def pull_request_fix_round_answers_kept_copies_directory_path_for_frozen_head(worktree, number, frozen_head):
+    """Where this round's copies of the answers file go: in the common git directory, because removing a linked
+    worktree deletes its own git directory; one directory per round, so that a brief names only this round's copies."""
+    common = git(["-C", str(worktree), "rev-parse", "--path-format=absolute", "--git-common-dir"]).strip()
+    return Path(common) / ANSWERS_KEPT_COPIES_DIRECTORY_NAME / f"pull-request-{number}-frozen-head-{frozen_head}"
+
+
+def answers_kept_copies_oldest_first(kept_copies_directory):
+    """Every whole copy in kept_copies_directory, oldest first."""
+    if not kept_copies_directory.is_dir():
+        return []
+    return sorted(kept_copies_directory.glob("*.md"), key=lambda copy: (copy.stat().st_mtime_ns, copy.name))
+
+
 def answers_file_text_kept_in_new_copy(path, kept_copies_directory):
     """The new file in kept_copies_directory that now holds path's bytes, or None when path is missing or holds
     only blank lines and "<n>." lines, so that nothing is lost when path is then replaced."""
@@ -848,7 +862,9 @@ def answers_file_text_kept_in_new_copy(path, kept_copies_directory):
     try:
         with os.fdopen(descriptor, "wb") as copy:
             copy.write(data)
-        os.replace(incomplete, kept)
+        # link, not replace: it fails when the name is taken, so an earlier copy is never overwritten.
+        os.link(incomplete, kept)
+        os.unlink(incomplete)
     except OSError:
         os.unlink(incomplete)
         raise
@@ -965,15 +981,16 @@ def print_brief(number, reviewer_login):
     worktree = topic_worktree_at_frozen_head(number, reviewer_login, branch, frozen_head, len(findings) + len(nits),
                                              review_submitted_at)
     answers_path = worktree / ANSWERS_FILE_NAME_FORMAT.format(number=number)
-    kept_answers = answers_file_with_one_line_per_finding_write(
-        answers_path, len(findings) + len(nits),
-        Path(git(["-C", str(worktree), "rev-parse", "--absolute-git-dir"]).strip()) / ANSWERS_KEPT_COPIES_DIRECTORY_NAME)
+    kept_copies_directory = pull_request_fix_round_answers_kept_copies_directory_path_for_frozen_head(
+        worktree, number, frozen_head
+    )
+    answers_file_with_one_line_per_finding_write(answers_path, len(findings) + len(nits), kept_copies_directory)
     lines = [
         f"Fix-round brief for pull request {url}",
         f"Frozen-head: {frozen_head}",
         f"The round's reviews: {review_link}",
     ]
-    if kept_answers:
+    for kept_answers in answers_kept_copies_oldest_first(kept_copies_directory):
         lines.append(f"The answers file held text, which may be numbered for another round, so this program copied it "
                      f"unchanged to {kept_answers} and wrote a new answers file. Read that copy, and copy into the "
                      "new file each answer that still answers a finding below, under that finding's number.")
