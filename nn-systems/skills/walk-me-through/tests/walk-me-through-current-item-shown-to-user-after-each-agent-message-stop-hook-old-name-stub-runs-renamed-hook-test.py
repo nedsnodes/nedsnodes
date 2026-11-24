@@ -46,8 +46,7 @@ This approval-walk settles one question. It has 2 items.
 The page goes in the wiki. Recommendation: Y.
 """
 PAGE = "https://claude.ai/artifact/PageOfItem2"
-CLOSING_LINE = (f"[Item 2 of 2, where the page lives]({PAGE}) · A approve · AO approve as obvious · "
-                "Aa approve after an advisor check · D disapprove · Z defer · E explain · O other options")
+CLOSING_LINE = f"[Item 2 of 2, where the page lives]({PAGE}) · A approve · D disapprove · M more responses"
 
 failures = []
 

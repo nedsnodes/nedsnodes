@@ -127,6 +127,16 @@ Codex cold read on Linux can leave empty `.codex` and `.agents` directories
 at the checkout's root (seen once, in the scratch repository, not in the
 checkout); git ignores empty directories, and nothing reads them.
 
+CODEX GETS NO GITHUB TOKEN FROM ITS CALLER. This program removes GH_TOKEN
+and GITHUB_TOKEN from the environment it starts codex with; an agent-seat's
+supervisor sets GH_TOKEN to the agent-seat's own GitHub token. On ned-box,
+with both gone and the gh login file denied, the reviewer reaches GitHub as an
+anonymous visitor: it can read public pages, within GitHub's limits on
+unauthenticated requests, and cannot read a private repository. How gh behaves
+inside the Mac sandbox is said once, beside CREDENTIAL_DIRECTORIES in
+nn-systems/cold-read/cold-read-cell-common.py. This program has no fallback for
+either machine.
+
 WHY THE CODEX MEMORY STORE IS OFF FOR REVIEW CELLS: written once, in
 scripts/code-review-codex-cell.py's docstring, under that heading.
 
@@ -143,6 +153,7 @@ nothing else in the cold-read-cell depends on it.
 """
 
 import importlib.util
+import os
 import pathlib
 import sys
 
@@ -167,6 +178,12 @@ TIER_TO_REASONING_EFFORT = {
 }
 
 
+# "priority" is the id `codex debug models` gives the Fast tier: twice the speed, more usage.
+TIER_TO_SERVICE_TIER = {
+    "deep": "priority",
+}
+
+
 CREDENTIAL_DENYING_PERMISSION_PROFILE = "cold-read-no-credentials"
 
 
@@ -176,7 +193,7 @@ def credential_denying_permission_profile_arguments(platform: str = sys.platform
         CREDENTIAL_DENYING_PERMISSION_PROFILE, ":workspace", platform, network=True)
 
 
-def invocation_builder(effort: str, report_staging_directory: pathlib.Path = None):
+def invocation_builder(effort: str, report_staging_directory: pathlib.Path = None, tier: str = None):
     """Return a callback producing (argv, stdin text) for each model and prompt."""
     # Codex takes a positional prompt; None tells the runner to close stdin explicitly.
     def build_invocation(model: str, prompt: str):
@@ -191,6 +208,8 @@ def invocation_builder(effort: str, report_staging_directory: pathlib.Path = Non
         if model:
             command += ["-m", model]
         command += ["-c", f"model_reasoning_effort={effort}"]
+        if tier in TIER_TO_SERVICE_TIER:
+            command += ["-c", f'service_tier="{TIER_TO_SERVICE_TIER[tier]}"']
         command += ["-c", 'web_search="live"']
         command.append(prompt)
         return command, None
@@ -219,6 +238,10 @@ def main() -> int:
         invocation_builder=invocation_builder,
         recognised_failure_texts_for_model=recognised_failure_texts_for_model,
         stage_report_outside_checkout=True,
+        child_environment={
+            name: value for name, value in os.environ.items()
+            if name not in common.COLD_READ_CELL_REVIEWER_PROGRAM_ENVIRONMENT_REMOVED_GITHUB_TOKEN_VARIABLES},
+        pass_cold_read_tier_to_invocation_builder=True,
     )
 
 
