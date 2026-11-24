@@ -4953,9 +4953,17 @@ module.write_case_times_suite_resources_and_junit_xml_of_run(junit_directory, [
      "skips": ["SKIP  case s: no Mac"],
      "cases": [dict(case_line("FAIL", "case a: x"), seconds=0.5, ended=0.5, unix_time=0.0)]},
     {"suite": "scripts/b-test.py", "exit": 2, "seconds": 0.0, "log": clean_log, "skips": [],
-     "cases": [], "test sandbox did not start": True}])
+     "cases": [], "test sandbox did not start": True},
+    {"suite": "scripts/c-test.py", "exit": 0, "seconds": 1.0, "log": clean_log, "skips": [],
+     "cases": [dict(case_line("FAIL", "double(3)"), seconds=0.5, ended=0.5, unix_time=0.0),
+               dict(case_line("PASS", "case c"), seconds=0.5, ended=1.0, unix_time=0.0)]}])
 junit_root = xml.etree.ElementTree.parse(junit_directory / "junit.xml").getroot()
 junit_suites = {element.get("name"): element for element in junit_root.iter("testsuite")}
+check("the JUnit XML gives a suite that exits 0 no failure, even for a FAIL case line it printed",
+      junit_suites["scripts/c-test.py"].get("failures") == "0"
+      and not any(case.find("failure") is not None
+                  for case in junit_suites["scripts/c-test.py"].iter("testcase")),
+      xml.etree.ElementTree.tostring(junit_suites["scripts/c-test.py"]))
 check("the JUnit XML names each skipped case, and says whether each suite ran to the end and "
       "was judged",
       [(case.get("name"), case.find("skipped") is not None)
