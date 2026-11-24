@@ -23,7 +23,7 @@ The user's overview of NedsNodes describes "many modular building blocks that fi
 
 ### 1.2 Work already planned that this page must fit
 
-- **[GHI 2505, Pull requests, their reviews and approval-walks held as one state machine over one schema and one store, so code tracks their state and agents are handed only the steps that need judgment](https://github.com/nedsnodes/nedsnodes/issues/2505).** The user asked for it on 2026-11-03 and said "it's going to affect almost everything. Well, it's going to affect a lot". It holds these records in one store, moves them with one machine in code, and makes the Markdown walk-minutes generated views. It is a large part of this plan already written down, with real failures as evidence: a review decision kept in prose that the fix-round program could not see, and ten programs parsing `#next_to_present`. This page supplies what GHI 2505 leaves generic, namely the tool contract, the machine format and the runner. GHI 2505 supplies the records for its domain. Two points need the user: whether it is the first slice, and how its one store fits the record this page keeps for each state-machine-run (open questions 4 and 16).
+- **[GHI 2505, Pull requests, their reviews and approval-walks held as one state machine over one schema and one store, so code tracks their state and agents are handed only the steps that need judgment](https://github.com/nedsnodes/nedsnodes/issues/2505).** The user asked for it on 2026-11-03 and said "it's going to affect almost everything. Well, it's going to affect a lot". It holds these records in one store, moves them with one machine in code, and makes the Markdown walk-minutes generated views. It is a large part of this plan already written down, with real failures as evidence: a review decision kept in prose that the fix-round program could not see, and ten programs parsing `#next_to_present`. This page supplies what GHI 2505 leaves generic, namely the tool contract, the machine format and the runner. GHI 2505 supplies the records for its domain. Two points need the user: whether it is the first slice, and how its one store fits the record this page keeps for each state-machine-run (open questions 4 and 15).
 - **[GHI 972, A small HTTP service with SQLite on ned-box keeps one record of every agent-seat on both machines](https://github.com/nedsnodes/nedsnodes/issues/972).** Its nn-shared-database is GHI 2505's first candidate for that store.
 - **[GHI 282, Build the design-to-main state machine: the Python machine, its per-state agent-instructions, and the nine items the design defers to the build](https://github.com/nedsnodes/nedsnodes/issues/282).** Deferred (section 12).
 
@@ -120,7 +120,7 @@ A counter is data the state-machine-run keeps. No counter node is needed (item 1
 
 The `agent` field names an agent that stays the same across the state-machine-run's rounds, so `write` resumes the same writer (section 7). The runner adds one to a loop's counter each time that output state occurs, and goes to `at_limit` when the count reaches the limit, so this example does at most two cold reads.
 
-**Data between nodes.** `start` takes the state-machine-run's input as JSON. A node's input on stdin is the previous node's output, unless its `input` field names an earlier node's output. A `machine` node passes its input to the child and returns the child's last output. A `parallel` node's output is one JSON object keyed by branch name. Any node may set `timeout_seconds`, and a node past its timeout ends in `timed-out`.
+**Data between nodes.** `start` takes the state-machine-run's input as JSON. A node's input on stdin is the previous node's output, unless its `input` field names an earlier node's output. A `machine` node passes its input to the child and returns the child's last output. A `parallel` node's output is one JSON object keyed by branch name. Every node except a `user` node sets `timeout_seconds`, and the lint fails one that does not; a program lists each node whose limit is far above or close to its slowest logged runs; a node stopped at its limit gets a record of its last output and whether it had gone silent; and each node maps `timed-out` to its own next node, such as one retry under a loop limit, or to an end state that sends the agent-seat's interactive agent one message (user-ruling of 2026-11-24). For the build, the user's guidance is that a first limit is the writing agent's estimate times about 4 ("we'll have to start with defaults, which can be very generous"), and that a node reports progress rather than a timer heartbeat, so that silence means no progress ("it shouldn't just be a timer heartbeat, it should be like a progress thing, and if it's no progress, it should stop emitting").
 
 A lint, run as a test, reads each machine and fails when a node is unreachable, an output state has no transition, a loop has no limit, a transition names a node that does not exist, an output's schema does not fit the input schema of the node that receives it, a non-idempotent node has no `interrupted` transition, or a tool imports the runner or reads a machine file (item 4, and section 3's rule that a tool does not know its machine). The lint needs the machine as data, which is why the user approved JSON over python-statemachine.
 
@@ -228,8 +228,8 @@ Proposed transitions for `background-task-check`:
 |---|---|
 | `finished` | End: the successor reads the output |
 | `failed` | Rerun the task once, then bring it to the agent |
-| `running-under-wait-limit` | The runner holds the state; a later `next` runs the node again |
-| `past-wait-limit` | Open question 5 |
+| `running` | The runner holds the state; the detached task runs as a node with its own `timeout_seconds`, inside the wrapper that stops it at that limit and calls `next` when it ends (section 5) |
+| `timed-out` | Rerun the task once under a loop limit, then bring it to the agent |
 | `could-not-run` | Report to the agent |
 
 Item 67 also promised a report of how long session-handoffs were held at high context, from past records. That report is not yet written (section 12, step 5).
@@ -266,7 +266,7 @@ The user has no "strong opinions" on order beyond easy parts first. Each step is
 4. Build the runner and lint, extracted from the two step programs, with the JSONL record.
 5. Build the first use, background work, and write the report on session-handoffs held at high context.
 6. Test the state-machine-user-answer-node mechanism of section 6.
-7. Move approval-walks onto the runner, with GHI 2505's records if the user makes it this slice, then cold reads and reviews (open questions 2 and 16).
+7. Move approval-walks onto the runner, with GHI 2505's records if the user makes it this slice, then cold reads and reviews (open questions 2 and 15).
 8. Review the remaining programs a few at a time, as section 11 says.
 
 **Deferred: design-to-main.** The user decided on 2026-11-23 to defer all continued work on design-to-main until other parts have stabilized, and to keep what this design raised about it in [GHI 282, Build the design-to-main state machine: the Python machine, its per-state agent-instructions, and the nine items the design defers to the build](https://github.com/nedsnodes/nedsnodes/issues/282). No step above changes or depends on it. Its code and design stay as they are.
@@ -279,16 +279,15 @@ The user has no "strong opinions" on order beyond easy parts first. Each step is
 2. Which comes first after the runner: background work, as item 67 approved, or approval-walks, which the user said on 2026-11-23 "we could do" first?
 3. The project's one JSON Schema library is python-jsonschema 4.26.0, pinned, with `types-jsonschema` for mypy.
 4. Each state-machine-run's record is one JSONL file in the log-store on ned-box; a state-machine-run on the Mac waits while ned-box cannot be reached.
-5. When a detached task passes its wait-limit, does the machine keep waiting, stop and rerun the task, or ask the user?
-6. A transition has no general guard; a loop limit is the only condition on it, and a node that must choose from data reports a different output state.
-7. The runner's schema check rests on the user's approval of item 4; no node adds its own validation, and `CLAUDE.md`'s two conditions for a guard stay as they are.
-8. Should the code-prompt-code bullet of `CLAUDE.md` name its two kinds, cpc-tool and cpc-node?
-9. Should create-GHI and edit-GHI write their own rerun task, reversing the user-ruling of 2026-10-10?
-10. Did the user's remark "The code prompt code, it seems like it's just adding some formalism" point at the term? Items 10.1 and 10.2 have since kept and extended the term.
-11. Should one shared function print a test file's verdict line and exit with its code?
-12. Should the shared skip function take the cause from a fixed set and write the reason's opening itself?
-13. Should the approval-walk's check program hand out its bookkeeping one step at a time, each step validated before the next?
-14. Should a Stop hook refuse to end a turn until a discussion that changes a waiting approval-walk item is in the walk-minutes, with the session-handoff deferred until then?
-15. Should each approval-walk item carry a lasting `#approval_walk_item_id` line?
-16. GHI 2505 is not the first slice: the tool contract and runner are built first, then background work, then GHI 2505's approval-walk half as the first large machine, and its pull-request half follows.
-17. Does the user's approval of this page's direction cover later edits made from a general instruction, or does each wiki edit still need his review? He said on 2026-11-23: "we may have to change the rule".
+5. A transition has no general guard; a loop limit is the only condition on it, and a node that must choose from data reports a different output state.
+6. The runner's schema check rests on the user's approval of item 4; no node adds its own validation, and `CLAUDE.md`'s two conditions for a guard stay as they are.
+7. Should the code-prompt-code bullet of `CLAUDE.md` name its two kinds, cpc-tool and cpc-node?
+8. Should create-GHI and edit-GHI write their own rerun task, reversing the user-ruling of 2026-10-10?
+9. Did the user's remark "The code prompt code, it seems like it's just adding some formalism" point at the term? Items 10.1 and 10.2 have since kept and extended the term.
+10. Should one shared function print a test file's verdict line and exit with its code?
+11. Should the shared skip function take the cause from a fixed set and write the reason's opening itself?
+12. Should the approval-walk's check program hand out its bookkeeping one step at a time, each step validated before the next?
+13. Should a Stop hook refuse to end a turn until a discussion that changes a waiting approval-walk item is in the walk-minutes, with the session-handoff deferred until then?
+14. Should each approval-walk item carry a lasting `#approval_walk_item_id` line?
+15. GHI 2505 is not the first slice: the tool contract and runner are built first, then background work, then GHI 2505's approval-walk half as the first large machine, and its pull-request half follows.
+16. Does the user's approval of this page's direction cover later edits made from a general instruction, or does each wiki edit still need his review? He said on 2026-11-23: "we may have to change the rule".
