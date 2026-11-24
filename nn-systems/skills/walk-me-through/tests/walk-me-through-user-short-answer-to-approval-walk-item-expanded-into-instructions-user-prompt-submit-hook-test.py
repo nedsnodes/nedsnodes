@@ -3269,18 +3269,15 @@ def test_items_under_a_shared_heading_with_no_openings_and_no_recommendation_lin
 
 def test_bump_on_an_open_walk_runs_check_bump_with_the_title_and_without_a_walk_prints_nothing():
     case = Case(next_to_present="item 4 of 9")
-    result = case.run("Bump the code proposals ")
+    result = case.run("Bump the code proposals ", process_cwd=Case().checkout)
     context = json.loads(result.stdout)["hookSpecificOutput"]["additionalContext"] if result.stdout else ""
-    check("bump and a title tell the agent to run check --bump with that title and the reply as typed",
+    check("bump and a title, with the hook process started in another checkout, find the approval-walk by the "
+          "payload's cwd and tell the agent to run check --bump with that title and the reply as typed",
           result.returncode == 0
           and f"before item 4 of 9 of approval-walk {WALK_NAME}" in context
           and "check --bump 'the code proposals' --user-reply-as-typed 'Bump the code proposals'" in context
           and str(HOOK_SCRIPT.parent / "walk-me-through-answer-added-texts-cold-read-fast-read-check-and-close.py")
           in context,
-          f"exit {result.returncode}, stdout {result.stdout!r}, stderr {result.stderr!r}")
-    result = case.run("Bump the code proposals", process_cwd=Case().checkout)
-    check("bump finds the approval-walk by the payload's cwd, not the directory the hook process starts in",
-          result.returncode == 0 and f"before item 4 of 9 of approval-walk {WALK_NAME}" in result.stdout,
           f"exit {result.returncode}, stdout {result.stdout!r}, stderr {result.stderr!r}")
     result = Case().run("bump the code proposals")
     check("bump with no approval-walk open prints nothing",
@@ -3382,10 +3379,16 @@ def test_settled_line_unreadable_transcript_falls_back_to_the_prompts_opening():
     (case.walk / f"{WALK_NAME}-minutes.md").write_bytes(b"#next_to_present item 4 of 9\n\xff\xfe")
     result = case.run("take the other option", transcript_path=transcript)
     lines = context_lines(result)
-    check("with the walk state and the transcript both unreadable, the reply names both failures",
+    check("with the walk state and the transcript both unreadable, the reply names both failures, and both make the "
+          "last line, the settled line, depend on them",
           result.returncode == 0 and len(lines) == 3 and "reading the approval-walk state failed" in lines[0]
-          and "could not tell who wrote this prompt" in lines[1] and lines[2] == SETTLED_LINE,
-          f"exit {result.returncode}, stdout {result.stdout!r}")
+          and "If an item is waiting, the last line applies" in lines[0] and "next line" not in lines[0]
+          and "could not tell who wrote this prompt" in lines[1] and "the last line does not apply" in lines[1]
+          and lines[2] == SETTLED_LINE, f"exit {result.returncode}, stdout {result.stdout!r}")
+    check("the failed-read opening says a paused approval-walk has no item waiting",
+          bool(lines) and "unless an `#approval_walk_paused` line follows that line, which means no item is waiting"
+          in lines[0],
+          lines[0] if lines else "no lines")
     result = case.run("<task-notification>a task ended</task-notification>", transcript_path=transcript)
     check("a task notice with an unreadable transcript prints nothing",
           result.returncode == 0 and result.stdout == "", f"stdout {result.stdout!r}")
@@ -3403,8 +3406,63 @@ def test_settled_line_not_shown_for_an_a_from_a_headless_session_or_another_agen
         records.write(json.dumps({"type": "user", "turnOrigin": "peer",
                                   "message": {"role": "user", "content": "a"}}) + "\n")
     result = case.run("a", transcript_path=transcript)
-    check("an A the transcript shows another agent-seat sent has no settled line",
-          SETTLED_LINE not in context_lines(result), result.stdout)
+    check("an A the transcript shows another agent-seat sent has no settled line, exits 0 and keeps A's lines",
+          result.returncode == 0 and SETTLED_LINE not in context_lines(result)
+          and any(line.startswith("A means approve") for line in context_lines(result)),
+          f"exit {result.returncode}, stdout {result.stdout!r}, stderr {result.stderr!r}")
+
+
+def test_settled_line_shown_for_a_numbered_answer_that_approves_only_some_parts():
+    case = Case(next_to_present="item 4 of 9", document=PARTS_DOCUMENT)
+    for prompt in ("1 a 2 d", "1 d 2 a 3 d"):
+        result = case.run(prompt)
+        check(f"{prompt!r}, which approves one part and disapproves another, shows the settled line",
+              result.returncode == 0 and SETTLED_LINE in context_lines(result),
+              f"exit {result.returncode}, stdout {result.stdout!r}")
+    result = case.run("1 d 2 d 3 d")
+    check("'1 d 2 d 3 d', which approves no part, has no settled line", SETTLED_LINE not in context_lines(result),
+          result.stdout)
+
+
+def test_settled_line_a_transcript_record_whose_message_is_a_string_counts_as_a_failed_read():
+    case = Case(next_to_present="item 4 of 9")
+    document = (case.walk / f"{WALK_NAME}.md").read_text()
+    transcript = case.transcript(document)
+    with open(transcript, "a", encoding="utf-8") as records:
+        records.write(json.dumps({"type": "user", "turnOrigin": "user", "message": "a"}) + "\n")
+    result = case.run("a", transcript_path=transcript)
+    lines = context_lines(result)
+    check("an A whose newest turnOrigin record has a string message exits 0 and keeps A's lines",
+          result.returncode == 0 and any(line.startswith("A means approve") for line in lines),
+          f"exit {result.returncode}, stdout {result.stdout!r}, stderr {result.stderr!r}")
+    result = case.run("take the other option", transcript_path=transcript)
+    lines = context_lines(result)
+    check("a reply in his own words with that record names the failed transcript read and exits 0",
+          result.returncode == 0 and len(lines) == 3 and "could not tell who wrote this prompt" in lines[1]
+          and "AttributeError" in lines[1] and lines[2] == SETTLED_LINE,
+          f"exit {result.returncode}, stdout {result.stdout!r}, stderr {result.stderr!r}")
+
+
+def test_own_words_output_given_the_walk_state_already_read_does_not_read_it_again():
+    import types
+    hook = load_module_by_path("short_answer_hook_under_test", HOOK_SCRIPT)
+    hook.agent_session_unattended = lambda: False
+
+    def read_again():
+        raise AssertionError("the approval-walk state was read a second time")
+    hook.load_walk_finder = read_again
+    payload = {"prompt": "repeat 99", "cwd": "/nonexistent"}
+    walk = types.SimpleNamespace(item="item 4 of 9", name=WALK_NAME)
+    try:
+        output = hook.own_words_output(payload, walk)
+        context = output["hookSpecificOutput"]["additionalContext"].split("\n")
+    except Exception as error:
+        context = [repr(error)]
+    check("given read_walk's result, own_words_output names its item and does not read the walk again",
+          context[0].endswith(f"item 4 of 9 of approval-walk {WALK_NAME} is waiting for the user's answer, and his "
+                              "reply is in his own words.") and context[-1] == SETTLED_LINE, f"context {context!r}")
+    output = hook.own_words_output(payload, None)
+    check("given read_walk's result of no open walk, own_words_output prints nothing", output is None, repr(output))
 
 
 def test_settled_line_follows_every_line_of_an_answer_typed_on_several_lines():
