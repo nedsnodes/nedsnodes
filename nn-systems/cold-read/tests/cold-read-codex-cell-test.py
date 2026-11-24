@@ -45,6 +45,10 @@ launcher's list holds the logged-out text alone, and a codex whose stderr
 carries the captured 401 line leaves the cell naming `cause: logged-out` in
 its own stderr, the line the grid lifts.
 
+The service tier is pinned for both cases: the deep tier asks codex for the
+Fast service tier, and the second-strongest-model tier asks for no service
+tier.
+
 Everything else about this cell — the model and effort pins, the memory store
 being off for the launch, the stray-write detector, the provenance stamp's
 fields — is NOT covered here; this file was written for the exit-code seam
@@ -130,7 +134,7 @@ if os.environ.get("COLD_READ_CODEX_CELL_TEST_STUB_GITHUB_TOKENS_PATH"):
     import json
     with open(os.environ["COLD_READ_CODEX_CELL_TEST_STUB_GITHUB_TOKENS_PATH"], "w",
               encoding="utf-8") as tokens_handle:
-        json.dump({name: os.environ.get(name) for name in ("GH_TOKEN", "GITHUB_TOKEN")},
+        json.dump([name for name in ("GH_TOKEN", "GITHUB_TOKEN") if name in os.environ],
                   tokens_handle)
 report_path = os.environ["COLD_READ_CODEX_CELL_TEST_STUB_REPORT_PATH"]
 # A report outside the checkout is written into the directory the cell adds.
@@ -360,11 +364,8 @@ with tempfile.TemporaryDirectory() as scratch:
                           "--cell", "defect-hunt", "--tier", "deep", "--target", str(target),
                           caller_github_tokens={github_token_variable: "a-token-codex-must-not-see"},
                           github_tokens_path=tokens_dump)
-        received_tokens = (json.loads(tokens_dump.read_text(encoding="utf-8"))
-                           if tokens_dump.is_file() else None)
-        # Names only: a token the test did not set would otherwise be printed.
-        received_names = (None if received_tokens is None else
-                          sorted(name for name, value in received_tokens.items() if value is not None))
+        received_names = (json.loads(tokens_dump.read_text(encoding="utf-8"))
+                          if tokens_dump.is_file() else None)
         check(f"a caller's {github_token_variable} does not reach codex",
               result.returncode == 0 and received_names == [],
               f"exit {result.returncode}; codex received {received_names!r}; "

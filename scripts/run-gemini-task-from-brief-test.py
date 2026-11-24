@@ -166,7 +166,7 @@ class GeminiTaskTests(unittest.TestCase):
         self.assertNotIn("test-key-from-caller", self.log.read_text())
 
     def test_unknown_model_stops_before_task(self):
-        result = self.run_cli(extra=("-m", "gemini-4-krypton-high"))
+        result = self.run_cli(extra=("-m", "gemini-4-neon"))
         self.assertEqual(result.returncode, 1)
         self.assertIn("unknown model", result.stderr)
         self.assertIn("gemini-4-neon-high", result.stderr)

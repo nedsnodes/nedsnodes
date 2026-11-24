@@ -38,12 +38,18 @@ messages it has already checked; by default it checks only the last one, and
 account change, since that needs the account recorded when the limit was first seen; it reports
 the account now logged in; --usage-limit-record-uuid-to-ignore names a limit record rule 1 no
 longer applies to, which the second build-slice decides from its log. It runs on ned-box and reads
-only ned-box's files, so it does not see the Mac's agent-seats.
+only ned-box's files, so it does not see the Mac's agent-seats. It does not tell a sentence that
+assesses an action from one that promises it: a sentence that opens with an announced-action
+phrase and names a time can read as `promise_after_event`, as
+"Going on with item 2 tomorrow sounds risky." does, so rule 2 can send an unbacked-promise nudge
+for it without the judge.
 
 How it fails: when a file it must read cannot be read, or is not UTF-8 or JSON where a whole line
 is expected, or `gh` cannot answer, the agent-seat's line carries the failure under "errors" and
 "rule" is null, every other agent-seat is still reported, and the program exits 1. A task file
 that does not hold a task with an id is such a failure, when rule 4 reads the task list. A
+prerequisite left unasked because the GitHub time budget was spent is not a failure: the line names
+it under "github_conditions_skipped_for_budget", and rule 5 applies instead of rule 4. A
 failure it does not expect, such as a file that changes between two reads of it, stops the program
 with a traceback and exit 1. A transcript's last line that Claude Code is still writing is
 skipped, except when it holds the key of a subagent or background-command launch: that is then a
@@ -89,6 +95,8 @@ interim_recognizer = threshold_hook.interim_recognizer
 TASK_NOTIFICATION_TASK_ID_PATTERN = threshold_hook.TASK_NOTIFICATION_TASK_ID_PATTERN
 transcript_lookup = _load("claude_code_session_transcript_lookup_and_text_search_common",
                           _SCRIPTS / "claude-code-session-transcript-lookup-and-text-search-common.py")
+user_messages = _load("search_user_messages_in_transcripts",
+                      _SCRIPTS / "search-user-messages-in-transcripts.py")
 
 IDLE_AFTER_SECONDS = 5 * 60
 LAUNCHED_SESSION_ID_KEY = "launched_session_id"
@@ -154,7 +162,7 @@ _GERUNDS = (
     "kicking off|firing|queueing|queuing|retrying|amending|squashing|"
     "reopening|resolving|patching|implementing|scanning|comparing|inspecting|"
     "confirming|re-?dispatching|re-?pushing|relaunching|notifying|pinging|"
-    "handing|staging|finishing"
+    "handing|staging|finishing|going on with"
 )
 _FILLER = (r"(?:(?:now|then|first|next|go ahead and|go|quickly|also|immediately|just|"
            r"straight away|right away|actually|instead|again)\s+)*")
@@ -371,6 +379,7 @@ def tool_uses(record):
 class TranscriptFacts:
     def __init__(self):
         self.last_token_spend = None
+        self.last_user_typed = None
         self.last_model_turn_record = None
         self.turn_ended_after_last_model_turn_record = False
         self.turn_ending_messages = []   # (record, time, time of the prompt that began its turn)
@@ -431,9 +440,9 @@ def timeout_seconds_of_command_line(command):
     substitution the outer shell runs before the timeout starts, as in `timeout 1h echo "$(a)"`; a
     comment holding a lone `'` or `)` before a line break, or a `<<`; an ANSI-C string, as in
     `$'it\\'s'; b`; odd nesting, as in `"$(b ")")" ; c`; a `$(...)` the outer shell runs,
-    before the timeout starts, in an unquoted here-document's body when no `;` follows the
-    here-document's operator, as in `timeout 1h cat <<EOF` with the body line `$(a)`; a delimiter
-    partly quoted, as in `<<'END'OF`, whose body is read to a line `END`, not `ENDOF`; a
+    before the timeout starts, in an unquoted here-document's body when the scanner finds no
+    other command after the timed one, as in `timeout 1h cat <<EOF` with the body line `$(a)`; a
+    delimiter partly quoted, as in `<<'END'OF`, whose body is read to a line `END`, not `ENDOF`; a
     here-document inside parentheses, as in `cat < <(cat <<'EOF'`, whose body is read for quotes
     and can hide a later `;`; a `<<` shift outside `$((...))` that the scanner reads as a
     here-document operator, as in `${PWD:1<<2}`, whose body then hides the next line; and a
@@ -527,6 +536,9 @@ def read_main_transcript(path):
     awaiting_turn_start = True
     task_tool_calls = []                 # (tool use id, (time, name, input))
     task_id_by_succeeded_tool_use_id = {}
+    # An interrupt notice is a user record the user did not type, and a queued message re-sent
+    # after an interrupt was typed once, when it was queued.
+    turn_reader = user_messages.TurnReader()
     for record in transcript_records(path):
         moment = parse_time(record.get("timestamp"))
         task_id_by_succeeded_tool_use_id.update(succeeded_task_tool_result_task_ids(record))
@@ -535,14 +547,16 @@ def read_main_transcript(path):
             awaiting_turn_start = False
         if spends_tokens(record) and moment:
             facts.last_token_spend = max(filter(None, (facts.last_token_spend, moment)))
+        turn = turn_reader.turn(record)
+        if moment and turn and turn[0] == "user":
+            facts.last_user_typed = max(filter(None, (facts.last_user_typed, moment)))
         if is_model_turn_record(record):
             facts.last_model_turn_record = record
             facts.turn_ended_after_last_model_turn_record = False
         if record.get("type") == "assistant" and message_text(record).strip():
             newest_text_record = (record, moment, turn_started_at)
         if ((record.get("type") == "system" and record.get("subtype") == "turn_duration")
-                or (record.get("type") == "user"
-                    and message_text(record).strip().startswith("[Request interrupted by user"))):
+                or user_messages.is_interrupt_notice(record)):
             facts.turn_ended_after_last_model_turn_record = True
             awaiting_turn_start = True
             turn_started_at = None
@@ -796,16 +810,23 @@ def tool_calls_since_start_of_earliest_turn_with_sentence_to_judge(facts, judged
 def rules_three_to_five(verdict, put_off_at, checker, task_directory,
                         due_task_raise_state_directory):
     running = any(verdict["running"].values())
-    if verdict["handoff_deferred_marker"] and not running:
-        return {fields.RULE: 3, fields.DECISION: fields.WAKE_HANDOFF_PUT_OFF,
-                fields.TEXT: HANDOFF_PUT_OFF_TEXT.format(time=iso(put_off_at))}
-    if not running and not verdict["handoff_deferred_marker"]:
-        # A condition the shared GitHub budget skipped may be met, so it leaves the verdict to rule 5.
+    if not running:
+        # The checker is shared by every agent-seat, so only the skips appended here are this one's.
         skipped_before = len(checker.conditions_skipped_for_budget)
-        verdict["open_tasks_nothing_holds"] = open_tasks_nothing_holds(
-            task_directory, checker, due_task_raise_state_directory)
-        if (not verdict["open_tasks_nothing_holds"]
-                and len(checker.conditions_skipped_for_budget) == skipped_before):
+        try:
+            verdict["open_tasks_nothing_holds"] = open_tasks_nothing_holds(
+                task_directory, checker, due_task_raise_state_directory)
+        finally:
+            # A gh failure raises after the scan, so the skips it made are named even then.
+            skipped = dict.fromkeys(checker.conditions_skipped_for_budget[skipped_before:])
+            if skipped:
+                verdict[fields.GITHUB_CONDITIONS_SKIPPED_FOR_BUDGET] = [
+                    {"kind": kind, "number": number} for kind, number in skipped]
+        if verdict["handoff_deferred_marker"]:
+            return {fields.RULE: 3, fields.DECISION: fields.WAKE_HANDOFF_PUT_OFF,
+                    fields.TEXT: HANDOFF_PUT_OFF_TEXT.format(time=iso(put_off_at))}
+        # A condition the shared GitHub budget skipped may be met, so it leaves the verdict to rule 5.
+        if not skipped and not verdict["open_tasks_nothing_holds"]:
             return {fields.RULE: 4, fields.DECISION: fields.NO_WAKE}
     return {fields.RULE: 5, fields.DECISION: fields.JUDGE}
 
@@ -853,10 +874,15 @@ def verdict_for_seat(seat, paths, now, since, checker, parser, usage_limit_recor
                                     "source": str(source) if last_spend else None}
         verdict[fields.LAST_TOOL_CALL_AT] = iso(max(
             (moment for moment, _, _ in facts.tool_calls if moment), default=None))
+        verdict[fields.LAST_USER_TYPED_AT] = iso(facts.last_user_typed)
         verdict[fields.SUCCESSFUL_TASK_TOOL_CALLS_SETTING_PREREQUISITES_OR_BLOCKED_BY] = [
             {"time": iso(moment), "name": name, "task": task_id}
             for moment, name, tool_input, task_id in facts.task_tool_calls
             if moment and sets_prerequisites_or_blocked_by(tool_input)]
+        verdict[fields.IDLE_SWEEP_VERDICT_FIELD_LISTING_SUCCESSFUL_TASK_UPDATE_TOOL_CALLS_SETTING_ADD_BLOCKS_WITH_BLOCKED_TASKS] = [
+            {"time": iso(moment), "blocked_tasks": [str(task) for task in tool_input["addBlocks"]]}
+            for moment, _, tool_input, _ in facts.task_tool_calls
+            if moment and tool_input.get("addBlocks")]
 
         last = facts.last_model_turn_record or {}
         limit = is_usage_limit(last)

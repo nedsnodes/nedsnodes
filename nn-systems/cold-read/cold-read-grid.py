@@ -1017,7 +1017,8 @@ def stopped_cells_write_check_lines(stopped_report_paths: list, baseline,
                 for path in stopped_report_paths]
     status_codes_by_path = {}
     for entry in entries:
-        status_codes_by_path.setdefault(entry.path, set()).add(entry.code)
+        for path in filter(None, (entry.path, entry.origin_path)):
+            status_codes_by_path.setdefault(path, set()).add(entry.code)
     untracked = {path for path, codes in status_codes_by_path.items() if codes == {"??"}}
     changed_before = {name for name, _ in baseline}
     # Read from the launch side: a pre-launch path that is now different, gone or out

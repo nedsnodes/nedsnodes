@@ -341,6 +341,9 @@ in the nedschorus repository, which this machine also clones:
   `scripts/sanity-check-record-ship.py`
 - `walk/` -- approval-walk files, named by the walk-me-through skill, shipped
   by `nn-systems/skills/walk-me-through/walk-files-ship.py`
+- `walk-document-copies/` -- timestamped copies of each open walk's walk-document, the newest
+  20 of each walk, written by
+  `nn-systems/skills/walk-me-through/walk-me-through-answer-added-texts-cold-read-fast-read-check-and-close.py`
 - `agent-session-files-by-machine/` -- each machine's session transcripts, handoffs,
   task lists, seat-briefs and global CLAUDE.md, mirrored by
   `scripts/transcript-mirror-to-log-store.py`
