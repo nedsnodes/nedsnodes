@@ -124,6 +124,8 @@ The `agent` field names an agent that stays the same across the state-machine-ru
 
 A lint, run as a test, reads each machine and fails when a node is unreachable, an output state has no transition, a loop has no limit, a transition names a node that does not exist, an output's schema does not fit the input schema of the node that receives it, a non-idempotent node has no `interrupted` transition, or a tool imports the runner or reads a machine file (item 4, and section 3's rule that a tool does not know its machine). The lint needs the machine as data, which is why the user approved JSON over python-statemachine.
 
+A loop needs no count limit when it passes through a `user` node whose output states other than `answered` all go to end states; the lint fails any other loop without a limit, including a branch of the loop that skips the `user` node.
+
 ## 5. The runner
 
 One runner has three commands (item 4):
