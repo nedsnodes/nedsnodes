@@ -171,12 +171,6 @@ NED_BOX_GHI_MD_EDIT_PULL_REQUESTS_MERGE_LINE = (
     "*/5 * * * * /usr/bin/python3 /home/nedlern/Projects/nedsnodes/scripts/"
     "merge-lane-ghi-md-edit-pull-requests-provisional-additions-only-check-approve-and-merge.py >> "
     "/home/nedlern/.claude/merge-lane-ghi-md-edit-pull-requests-provisional-additions-only-check-approve-and-merge.log 2>&1")
-# The scheduled full mutation pass of merged pull requests, on ned-box alone.
-NED_BOX_SCHEDULED_FULL_MUTATION_PASS_LINE = (
-    "30 0 * * * /usr/bin/python3 /home/nedlern/Projects/nedsnodes/scripts/"
-    "scheduled-full-mutation-pass-of-merged-pull-requests-and-survivor-tasks-open.py >> "
-    "/home/nedlern/.claude/scheduled-full-mutation-pass-of-merged-pull-requests-and-survivor-"
-    "tasks-open.log 2>&1")
 MAC_GUARDED_FILE_PRUNE_PLIST = {
     "Label": "com.nedsnodes.guarded-file-versions-and-approvals-store-removed-checkout-"
              "copies-prune",
@@ -343,8 +337,8 @@ check("the table's jobs are the two typed by hand before this program, the workt
       "cleanup, ned-box's crash restart watcher, ned-box's agent-seat idle sweep, ned-box's Remote Control reconnect watcher, the "
       "scheduled owner check of the work-snapshot hook, the session dialogs refresh, the "
       "guarded-file store's prune, the nn-shared-database's backup and its copy to the "
-      "Mac, the deletion of exited agent-sessions' temp folders, the scheduled full "
-      "mutation pass, the no-sandbox test suites' run on main, the GHI-MD edit pull "
+      "Mac, the deletion of exited agent-sessions' temp folders, the no-sandbox test "
+      "suites' run on main, the GHI-MD edit pull "
       "requests' check, approval and merge, the daily search for credential files no "
       "cold-read-cell is denied, the weekly count of each hook rule ID in both machines' "
       "transcripts, the one count of cold-read-fast-read finding outcomes, the deletion of "
@@ -370,8 +364,6 @@ check("the table's jobs are the two typed by hand before this program, the workt
                             "nn-shared-database-newest-backup-copy-to-mac",
                             "nn-shared-database-nightly-backup-with-integrity-check",
                             "no-sandbox-test-suites-run-on-main-in-a-quiet-gap",
-                            "scheduled-full-mutation-pass-of-merged-pull-requests-and-survivor-"
-                            "tasks-open",
                             "scheduled-full-test-run-of-main",
                             "transcript-mirror-to-log-store",
                             "uncommitted-work-snapshot-hook-scheduled-check-that-real-claude-session-is-recorded-as-owner",
@@ -466,16 +458,6 @@ check("the deletion of old agent-seat terminal captures runs at 05:45 by cron on
       in terminal_captures_delete_documentation,
       installer.cron_line(ned_box, terminal_captures_delete,
                           terminal_captures_delete["on"]["ned-box"]))
-full_mutation_pass = real_jobs[
-    "scheduled-full-mutation-pass-of-merged-pull-requests-and-survivor-tasks-open"]
-check("the scheduled full mutation pass runs on ned-box alone, at 00:30, and its program "
-      "documents the table's line",
-      list(full_mutation_pass["on"]) == ["ned-box"]
-      and installer.cron_line(ned_box, full_mutation_pass, full_mutation_pass["on"]["ned-box"])
-      == NED_BOX_SCHEDULED_FULL_MUTATION_PASS_LINE
-      and f"    {NED_BOX_SCHEDULED_FULL_MUTATION_PASS_LINE}\n"
-      in (REPOSITORY_ROOT / full_mutation_pass["program"]).read_text(encoding="utf-8"),
-      installer.cron_line(ned_box, full_mutation_pass, full_mutation_pass["on"]["ned-box"]))
 no_sandbox_suites = real_jobs["no-sandbox-test-suites-run-on-main-in-a-quiet-gap"]
 check("the no-sandbox test suites' run on main runs on ned-box alone, every 10 minutes, and its "
       "program documents the table's line and names this installer",
@@ -541,8 +523,6 @@ check("--print as ned-box prints ned-box's cron lines from the real table and ru
           "scheduled-full-test-run-of-main — cron line:", NED_BOX_FULL_TEST_RUN_LINE,
           "no-sandbox-test-suites-run-on-main-in-a-quiet-gap — cron line:",
           NED_BOX_NO_SANDBOX_SUITES_LINE,
-          "scheduled-full-mutation-pass-of-merged-pull-requests-and-survivor-tasks-open — cron "
-          "line:", NED_BOX_SCHEDULED_FULL_MUTATION_PASS_LINE,
           "clean-worktrees — cron line:", NED_BOX_CLEAN_LINE,
           "handoff-agent-crash-watcher — cron line:",
           NED_BOX_CRASH_RESTART_WATCHER_LINE,

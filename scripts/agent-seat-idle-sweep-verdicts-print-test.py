@@ -371,6 +371,7 @@ try:
          "announced_action"),
         ("I'm checking item 11 of the merged walk against the design as it now stands.",
          "announced_action"),
+        ("I'm going on with item 2 while the tests run.", "announced_action"),
         ("I'll write it up as the next item.", "announced_action"),
         ("I'll fix the cases such as those listed below.", "announced_action"),
         ("I'll add them as those two items.", "announced_action"),
@@ -1133,6 +1134,25 @@ try:
               {"time": "2026-11-02T11:40:00Z", "name": "TaskUpdate", "task": "3"}],
           verdicts["alpha"])
     machine = Machine()
+    machine.seat("alpha", [user("go"),
+                           assistant(tool=("TaskUpdate", {"taskId": "2", "addBlocks": ["1", "3"]}),
+                                     at="2026-11-02T11:40:00Z", tool_id="t-blocks"),
+                           task_result("Updated task #2 blocks", at="2026-11-02T11:40:01Z",
+                                       tool_id="t-blocks"),
+                           assistant(tool=("TaskUpdate", {"taskId": "9", "addBlocks": ["4"]}),
+                                     at="2026-11-02T11:41:00Z", tool_id="t-failed"),
+                           task_result("Task not found", at="2026-11-02T11:41:01Z",
+                                       tool_id="t-failed"),
+                           assistant("Done.", at="2026-11-02T11:48:00Z"), turn_end()])
+    _, verdicts, _ = machine.run()
+    check("each addBlocks call whose result shows success lists the tasks it blocks; a failed one does "
+          "not, and neither counts as setting what the calling task waits on",
+          verdicts["alpha"].get(
+              "idle_sweep_verdict_field_listing_successful_task_update_tool_calls_setting_add_blocks_with_blocked_tasks")
+          == [{"time": "2026-11-02T11:40:00Z", "blocked_tasks": ["1", "3"]}]
+          and verdicts["alpha"].get("successful_task_tool_calls_setting_prerequisites_or_blocked_by") == [],
+          verdicts["alpha"])
+    machine = Machine()
     machine.seat("alpha", [user("go"), assistant(tool=("TaskCreate", {"subject": "plain"})),
                            assistant("Done."), turn_end()])
     _, verdicts, _ = machine.run()
@@ -1241,10 +1261,44 @@ try:
     checker.started -= program.due_task_hook.GH_CALLS_TOTAL_BUDGET_SECONDS
     verdict = {"running": {}, "handoff_deferred_marker": False}
     decision = program.rules_three_to_five(verdict, None, checker, budget_tasks, budget_tasks)
-    check("a prerequisite the GitHub budget left unasked: rule 5, not rule 4's no wake",
+    check("a prerequisite the GitHub budget left unasked: rule 5, not rule 4's no wake, and the "
+          "verdict names it",
           decision == {fields.RULE: 5, fields.DECISION: fields.JUDGE}
-          and set(checker.conditions_skipped_for_budget) == {("pr_merged", 50)},
-          (decision, checker.conditions_skipped_for_budget))
+          and set(checker.conditions_skipped_for_budget) == {("pr_merged", 50)}
+          and verdict.get(fields.GITHUB_CONDITIONS_SKIPPED_FOR_BUDGET)
+          == [{"kind": "pr_merged", "number": 50}],
+          (decision, checker.conditions_skipped_for_budget, verdict))
+    # The same checker, as the sweep shares it, for an agent-seat checked after that skip.
+    verdict = {"running": {}, "handoff_deferred_marker": False}
+    decision = program.rules_three_to_five(verdict, None, checker, Path(tempfile.mkdtemp(
+        dir=str(SUITE_ROOT))), budget_tasks)
+    check("an agent-seat checked after another's budget skip, with no task and no skip of its own: "
+          "rule 4, and the verdict names no skip",
+          decision == {fields.RULE: 4, fields.DECISION: fields.NO_WAKE}
+          and fields.GITHUB_CONDITIONS_SKIPPED_FOR_BUDGET not in verdict, (decision, verdict))
+    failing_tasks = Path(tempfile.mkdtemp(dir=str(SUITE_ROOT)))
+    for task_id, number in (("1", 51), ("2", 52)):
+        (failing_tasks / f"{task_id}.json").write_text(json.dumps(
+            {"id": task_id, "subject": f"task {task_id}", "status": "pending", "blockedBy": [],
+             "metadata": {"prerequisites": [{"pr_merged": number}]}}))
+    checker = program.due_task_hook.GitHubConditionChecker({}, 0)
+
+    def gh_times_out_and_spends_the_budget(kind, number, timeout_seconds):
+        checker.started -= program.due_task_hook.GH_CALLS_TOTAL_BUDGET_SECONDS
+        return {"gh_failure": f"gh did not answer within {timeout_seconds:g} seconds"}
+    checker.ask_gh = gh_times_out_and_spends_the_budget
+    verdict = {"running": {}, "handoff_deferred_marker": False}
+    try:
+        program.rules_three_to_five(verdict, None, checker, failing_tasks, failing_tasks)
+        message = None
+    except program.ReadFailure as error:
+        message = str(error)
+    check("a gh call that times out, then a prerequisite the spent budget skips: the read failure, "
+          "and the verdict still names the skip",
+          message is not None and message.startswith("GitHub could not say whether")
+          and len(verdict.get(fields.GITHUB_CONDITIONS_SKIPPED_FOR_BUDGET) or []) == 1
+          and verdict[fields.GITHUB_CONDITIONS_SKIPPED_FOR_BUDGET][0]["number"] in (51, 52),
+          (message, verdict))
     machine = Machine()
     machine.seat("alpha", [user("go"), assistant("Done."), turn_end()])
     machine.seat("beta", [user("go"), assistant("Done."), turn_end()])

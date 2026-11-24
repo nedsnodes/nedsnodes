@@ -13,7 +13,9 @@ Each invocation, under a lock that keeps two from overlapping:
    checked.
 2. Takes slice 1's verdict for each agent-seat, by calling verdict_for_seat in
    scripts/agent-seat-idle-sweep-verdicts-print.py, which is the only reader of the transcripts,
-   walk-minutes and task lists.
+   walk-minutes and task lists. Each prerequisite a verdict names as not asked of GitHub because
+   the time budget for GitHub calls was spent is logged, at every invocation that skips it, as a
+   github_conditions_skipped_for_budget event.
 3. When `oauthAccount.accountUuid` in ~/.claude.json differs from the account last logged, sends
    every agent-seat with a running agent-session the account-change notice, through one headless
    agent-session; for an agent-seat idle at a usage limit, that notice is its limit wake.
@@ -28,7 +30,12 @@ Each invocation, under a lock that keeps two from overlapping:
    once in 15 minutes for one task. The judge is not told of a background
    command whose verdict gives a `timeout_ends_at` not yet reached, since such work ends by itself, nor of a background command, subagent or workflow a rule 5 message
    has already named, since the sweep asks once about each; when something runs and all of it is
-   such work, the judge is not asked. A wait whose rule 2 messages named only
+   such work, the judge is not asked. Neither is it told of an open task a rule 5 message has
+   already raised in this agent-session since the user last typed in it, unless the agent-seat has
+   since recorded something the task waits on, and rule 3 does not send again about the same
+   put-off handoff in that time, leaving the open tasks to the judge; when nothing else is left,
+   nothing is sent. A
+   wait whose rule 2 messages named only
    promises to act after an event and hold sentences ends when the agent-seat has recorded, after each
    message, one task per sentence it and the later messages named, a message whose send failed
    included, each with a TaskCreate or TaskUpdate call whose result
@@ -59,9 +66,9 @@ does not end when the agent-seat only replies to a message in text; it ends when
 makes a tool call after the nudge that opened the wait or has nothing to do (rule 4), in either
 case only when no rule 2 message was sent on the wait, makes the task call a rule 2 message
 asked for, as step 5 says, stops at a usage limit (rule 1), starts a
-new agent-session, or spends tokens after the user was told. So an agent-seat that answers each
-rule 3 or rule 5 message with a tool call and goes idle again is nudged again, and never
-escalated, unless all that still runs has been asked about; a command that hangs after the one
+new agent-session, or spends tokens after the user was told. So an agent-seat that answers a
+rule 3 or rule 5 message with a tool call and goes idle again is nudged again only about something
+new, or once the user has typed, and is not escalated; a command that hangs after the one
 question about it reaches nobody until the agent-seat looks. One that answers a rule 2 message
 with a tool call and a fresh promise is escalated, because a tool call that ended a promise wait
 would let an agent-seat that makes a fresh promise at each rule 2 message be nudged again forever
@@ -219,6 +226,8 @@ TASK_CALL_SETTLED_KINDS = frozenset((fields.PROMISE_AFTER_EVENT, fields.HOLD))
 # On a rule 5 judge_answer event: the ids of the background commands, subagents and workflows its
 # message asked about, which no later rule 5 message asks about again.
 RUNNING_WORK_ASKED_ABOUT = "running_work_asked_about"
+# Logged after a rule 3 or rule 5 message reaches its sender: what it reminded the agent-seat of.
+REMINDER_SENT = "reminder_sent"
 # An event logged with each rule 2 message, carrying the sentences it names and their kinds.
 PROMISE_MESSAGE = "promise_message"
 # On an open wait: the rule 2 messages sent on it, [{"at", "kinds", "sentences"}], or None when one
@@ -232,10 +241,16 @@ FAILED_PROMISE_MESSAGES = "failed_promise_messages"
 
 SEND_ANSWER_SCHEMA = {"type": "object", "required": ["sent", "reason"],
                       "properties": {"sent": {"type": "boolean"}, "reason": {"type": "string"}}}
+OPEN_TASK_IDS_RAISED = "open_task_ids_raised"
 IDLE_JUDGE_ANSWER_SCHEMA = {
-    "type": "object", "required": ["send", "message", "reason"],
+    "type": "object", "required": ["send", "message", "reason", OPEN_TASK_IDS_RAISED],
     "properties": {"send": {"type": "boolean"}, "message": {"type": "string"},
-                   "reason": {"type": "string"}}}
+                   "reason": {"type": "string"},
+                   OPEN_TASK_IDS_RAISED: {
+                       "type": "array", "items": {"type": "string"},
+                       "description": "The id of each task in open_tasks_nothing_holds that the "
+                                      "message raises; empty when send is false or the message "
+                                      "raises none."}}}
 SENTENCES_ANSWER_SCHEMA = {
     "type": "object", "required": ["sentences"],
     "properties": {"sentences": {"type": "array", "items": {
@@ -289,7 +304,9 @@ You judge one idle agent-seat for the idle sweep, a program on ned-box. The agen
 spent no tokens for {idle_minutes} minutes, and its last turn has ended. Code could not settle the \
 case: something may be left for it to do, or it may rightly be waiting. The facts code found are in \
 the JSON below. An approval-walk item waiting on the user holds back only that walk, not the \
-agent-seat's other work.
+agent-seat's other work. The agent-seat knows what it is waiting on the user for: never mention \
+that wait in the message, and when waiting on the user is all that is left, such as an open task \
+that is the running of that approval-walk, send no message.
 
 Judge whether the agent-seat could act now. If it could, write it one short message saying what you \
 saw. Name each background command, workflow and subagent that has not finished or reported, \
@@ -456,6 +473,28 @@ class SweepLog:
         return {work_id for event in self.of_seat(seat, "judge_answer") if event.get("rule") == 5
                 and event.get("message_id") not in not_found
                 for work_id in event.get(RUNNING_WORK_ASKED_ABOUT, [])}
+
+    def reminded_subjects(self, seat, session_id, last_user_typed_at, last_held_at):
+        """What a rule 3 or rule 5 message has reminded this agent-session of since the user last
+        typed in it, less what a message the delivery check did not find named and what
+        last_held_at, {subject: time}, shows was held after the message arrived."""
+        not_found = {event["message_id"] for event in self.of_seat(seat, "delivery_checked")
+                     if not event["found"]}
+        # Typing or a hold while the sender runs, before the message arrives, has not answered it:
+        # until the delivery check gives the time it arrived, the time the send was logged stands in.
+        received_at = {event["message_id"]: event["received_at"]
+                       for event in self.of_seat(seat, "delivery_checked") if event.get("received_at")}
+        typed = parse_time(last_user_typed_at) if last_user_typed_at else None
+        reminded = set()
+        for event in self.of_seat(seat, REMINDER_SENT):
+            if event["session_id"] != session_id or event["message_id"] in not_found:
+                continue
+            arrived = parse_time(received_at.get(event["message_id"], event["at"]))
+            if typed is not None and arrived < typed:
+                continue
+            reminded.update(subject for subject in event["subjects"]
+                            if subject not in last_held_at or last_held_at[subject] < arrived)
+        return reminded
 
     def checked_sentences(self, seat):
         return {(event["record_uuid"], event["sentence"])
@@ -1012,10 +1051,11 @@ class Sweep:
                 self.read_failure(seat, str(error))
                 continue
             same_session = verdict.get(fields.SESSION_ID) == sent["session_id"]
-            if not found and same_session and verdict.get(fields.TURN_ENDED) is False:
+            if found is None and same_session and verdict.get(fields.TURN_ENDED) is False:
                 continue  # the turn running at the send has not ended; it may yet read the message
             self.record({"event": "delivery_checked", "agent_seat": seat,
-                         "message_id": sent["message_id"], "found": found})
+                         "message_id": sent["message_id"], "found": found is not None,
+                         **({"received_at": iso(found)} if found else {})})
             if not found:
                 self.failed = True
                 self.owning_agent_seat_task(
@@ -1223,8 +1263,14 @@ class Sweep:
 
     def nudge(self, seat, verdict, rule, text, stretch):
         if rule == 3:
+            subject = f"handoff put off: {text}"
+            if subject in self.reminded_subjects(seat, verdict):
+                if verdict.get(fields.OPEN_TASKS_NOTHING_HOLDS):
+                    self.judge_idle_seat(seat, {**verdict, fields.HANDOFF_DEFERRED_MARKER: None},
+                                         stretch)
+                return
             self.start_wait(seat, verdict, stretch, text, 3)
-            self.send(seat, verdict, text, NUDGE)
+            self.reminder_sent(seat, verdict, self.send(seat, verdict, text, NUDGE), [subject])
         elif rule == 5:
             events_task = open_pull_request_events_task(seat, self.paths.tasks_root)
             if events_task:
@@ -1249,6 +1295,28 @@ class Sweep:
                      "failed": False, RUNNING_WORK_ASKED_ABOUT: [],
                      PULL_REQUEST_EVENTS_TASK_ID: task["id"],
                      **({"message_id": sent["message_id"]} if sent else {})})
+
+    def reminded_subjects(self, seat, verdict):
+        last_held_at = {}
+        holds = [(call["time"], call["task"]) for call in verdict.get(
+            fields.SUCCESSFUL_TASK_TOOL_CALLS_SETTING_PREREQUISITES_OR_BLOCKED_BY) or []]
+        holds += [(call["time"], task) for call in verdict.get(
+            fields.IDLE_SWEEP_VERDICT_FIELD_LISTING_SUCCESSFUL_TASK_UPDATE_TOOL_CALLS_SETTING_ADD_BLOCKS_WITH_BLOCKED_TASKS) or []
+            for task in call["blocked_tasks"]]
+        for time, task in holds:
+            moment = parse_time(time)
+            if moment:
+                subject = open_task_subject(task)
+                last_held_at[subject] = max(moment, last_held_at.get(subject, moment))
+        return self.log.reminded_subjects(seat, verdict[fields.SESSION_ID],
+                                          verdict.get(fields.LAST_USER_TYPED_AT), last_held_at)
+
+    def reminder_sent(self, seat, verdict, sent, subjects):
+        if sent:
+            self.record({"event": REMINDER_SENT, "agent_seat": seat,
+                         "session_id": verdict[fields.SESSION_ID], "subjects": subjects,
+                         "message_id": sent["message_id"],
+                         "send_started_at": sent["send_started_at"]})
 
     def facts(self, seat, verdict):
         running = verdict.get(fields.RUNNING) or {}
@@ -1309,18 +1377,28 @@ class Sweep:
         running_keys = ("running_subagents", "running_background_commands", "running_workflows")
         if any(all_facts[key] for key in running_keys) and not any(facts[key] for key in running_keys):
             return
+        reminded = self.reminded_subjects(seat, verdict)
+        open_tasks = all_facts["open_tasks_nothing_holds"] or []
+        facts["open_tasks_nothing_holds"] = [task for task in open_tasks
+                                             if open_task_subject(task["id"]) not in reminded]
+        if open_tasks and not facts["open_tasks_nothing_holds"] and not any(
+                facts[key] for key in running_keys):
+            return
         idle_minutes = int(seconds_between(stretch, self.now) // 60) if stretch else None
         prompt = IDLE_JUDGE_PROMPT.format(seat=seat, idle_minutes=idle_minutes,
                                           facts=json.dumps(facts, indent=1, ensure_ascii=False))
         outcome = run_headless(prompt, IDLE_JUDGE_ANSWER_SCHEMA, "", self.working_directory,
                                self.timeout_seconds)
-        problem = outcome.error or idle_judge_answer_problem(outcome.answer)
+        problem = outcome.error or idle_judge_answer_problem(
+            outcome.answer, [task["id"] for task in facts["open_tasks_nothing_holds"] or []])
         answer = outcome.answer or {}
         send = not problem and answer["send"]
         sent = False
         if send:
             self.start_wait(seat, verdict, stretch, answer["message"], 5)
             sent = self.send(seat, verdict, answer["message"], NUDGE)
+            self.reminder_sent(seat, verdict, sent, [open_task_subject(task_id)
+                                                     for task_id in answer[OPEN_TASK_IDS_RAISED]])
         # Work counts as asked about only once a message reached the agent-seat: a failed send
         # leaves it for a later sweep to hand to the judge again.
         self.record({"event": "judge_answer", "agent_seat": seat, "rule": 5,
@@ -1440,11 +1518,19 @@ def running_work_named_in(facts, message):
     return sorted(work_id for work_id in set(ids) if work_id in message)
 
 
-def idle_judge_answer_problem(answer):
+def open_task_subject(task_id):
+    return f"open task: {task_id}"
+
+
+def idle_judge_answer_problem(answer, open_task_ids):
     if not isinstance(answer.get("send"), bool) or not isinstance(answer.get("message"), str) or (
             answer["send"] and not answer["message"].strip()):
         return f"the judge's answer does not give send true or false, with a message when true: " \
                f"{json.dumps(answer)[:500]}"
+    raised = answer.get(OPEN_TASK_IDS_RAISED)
+    if not isinstance(raised, list) or any(task_id not in open_task_ids for task_id in raised):
+        return f"the judge's answer does not list, in {OPEN_TASK_IDS_RAISED}, only ids of the " \
+               f"open tasks it was given, {open_task_ids}: {json.dumps(answer)[:500]}"
     return None
 
 
@@ -1460,8 +1546,8 @@ def message_received(record):
 
 
 def message_in_transcript(path, text, sent_at):
-    """Whether a record by which the agent-seat received a message, written at or after the send,
-    holds the text, compared with all runs of whitespace made one space."""
+    """The time of the first record by which the agent-seat received a message, written at or after
+    the send, that holds the text, compared with all runs of whitespace made one space; or None."""
     needle = " ".join(text.split())
     for record in verdicts_print.transcript_records(path):
         if not message_received(record):
@@ -1470,8 +1556,8 @@ def message_in_transcript(path, text, sent_at):
         if moment is None or (sent_at - moment).total_seconds() > DELIVERY_CLOCK_SLACK_SECONDS:
             continue
         if any(needle in " ".join(value.split()) for value in strings_in(record)):
-            return True
-    return False
+            return moment
+    return None
 
 
 def strings_in(value):
@@ -1508,10 +1594,18 @@ def sweep(arguments, now):
         since = parse_time(check["transcript_read_at"]) if check else None
         read_times[seat] = run.current()
         verdict = verdicts_print.verdict_for_seat(seat, paths, now, since, checker, parser, skipped)
+        budget_skips = list(verdict.get(fields.GITHUB_CONDITIONS_SKIPPED_FOR_BUDGET, []))
         if since and verdict.get(fields.SESSION_ID) not in (None, check["session_id"]):
             verdict = verdicts_print.verdict_for_seat(seat, paths, now, None, checker, parser,
                                                       skipped)
+            # The reread decides the wake, but the first read's skips happened too.
+            budget_skips += [condition for condition
+                             in verdict.get(fields.GITHUB_CONDITIONS_SKIPPED_FOR_BUDGET, [])
+                             if condition not in budget_skips]
         verdicts[seat] = verdict
+        if budget_skips:
+            run.record({"event": fields.GITHUB_CONDITIONS_SKIPPED_FOR_BUDGET, "agent_seat": seat,
+                        "conditions": budget_skips})
     run.account_change(verdicts)
     run.delivery_checks(verdicts)
     for seat, verdict in verdicts.items():

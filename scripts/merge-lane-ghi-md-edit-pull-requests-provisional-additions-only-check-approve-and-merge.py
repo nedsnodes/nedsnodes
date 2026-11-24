@@ -259,6 +259,16 @@ def gh_bytes(environment, *arguments):
     return completed.stdout
 
 
+def merge_output_last_lines(output):
+    """The merge program's last lines, from its STOP line on when it printed one."""
+    lines = output.splitlines()
+    start = len(lines) - MERGE_OUTPUT_LINES_IN_MESSAGE
+    stops = [index for index, line in enumerate(lines) if line.startswith("STOP:")]
+    if stops:
+        start = min(start, stops[-1])
+    return "\n".join(lines[max(start, 0):])
+
+
 def gh_json(environment, *arguments):
     output = gh_bytes(environment, *arguments).decode("utf-8", errors="replace")
     try:
@@ -513,7 +523,7 @@ class Invocation:
              *common.directory_options_argv(self.arguments)],
             stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True,
             stdin=subprocess.DEVNULL, cwd=CHECKOUT)
-        last_lines = "\n".join(merge.stdout.splitlines()[-MERGE_OUTPUT_LINES_IN_MESSAGE:])
+        last_lines = merge_output_last_lines(merge.stdout)
         if merge.returncode == 0:
             say(f"pull request {number} ({path}) merged: "
                 f"{(merge.stdout.splitlines() or [''])[-1]}")

@@ -58,7 +58,6 @@ from pathlib import Path
 
 HEAD_TEST_RUNNER = Path("scripts") / "pull-request-head-test-run.py"
 MERGED_WORKTREE_REBUILD = Path("scripts") / "merge-lane-pull-request-head-and-merged-worktrees-rebuild.py"
-FETCHED_COMMIT_REFERENCE_PREFIX = "refs/merge-lane-head-test-run/fetched-by-process"
 
 _common_spec = importlib.util.spec_from_file_location(
     "merge_lane_pull_request_helpers_common", Path(__file__).resolve().with_name(
@@ -81,7 +80,7 @@ def main_commit_option_value(value):
 def head_commit_option_value(value):
     # A branch name could move before a printed rerun command is used, and an empty shell
     # variable must not fall back to the pull request's head on origin.
-    if not re.fullmatch(r"[0-9a-f]{40}", value):
+    if not re.fullmatch(r"[0-9a-fA-F]{40}", value):
         raise argparse.ArgumentTypeError(
             f"{value!r} is not a full 40-character commit hash, so no suite ran.\n"
             "Pass the commit's full hash, or leave the option out to use the pull request's "
@@ -120,23 +119,25 @@ def git_output_or_failure(tools, command, environment):
 
 
 def commit_fetched_from_origin(tools, source, environment):
-    """Fetch source and return (the commit fetched, None), or (None, what failed)."""
-    # An empty --refmap leaves refs/remotes/origin/* alone, and a reference of this process's
-    # own keeps overlapping runs from contending for one ref.
-    destination = f"{FETCHED_COMMIT_REFERENCE_PREFIX}/{os.getpid()}"
+    """Fetch source's current commit and return (it, None), or (None, what failed)."""
+    listed, failure = git_output_or_failure(
+        tools, ["ls-remote", "--exit-code", "origin", source], environment)
+    if failure is not None:
+        return None, failure
+    # ls-remote also lists references whose names merely end in source.
+    commit = next((row.split()[0] for row in listed.splitlines() if row.split()[1:] == [source]),
+                  None)
+    if commit is None:
+        return None, (f"git ls-remote origin {source} in {tools} listed no reference named "
+                      f"exactly {source}.")
+    # The fetch writes no reference: git's connectivity check reads every reference, so one
+    # that an overlapping run deletes during the check makes this fetch fail.
     _, failure = git_output_or_failure(
-        tools, ["fetch", "-q", "--no-write-fetch-head", "--refmap=", "origin",
-                f"+{source}:{destination}"], environment)
+        tools, ["fetch", "-q", "--no-write-fetch-head", "origin", commit], environment)
     if failure is not None:
         return None, failure
-    commit, failure = git_output_or_failure(
-        tools, ["rev-parse", "--verify", f"{destination}^{{commit}}"], environment)
-    if failure is not None:
-        return None, failure
-    _, failure = git_output_or_failure(tools, ["update-ref", "-d", destination], environment)
-    if failure is not None:
-        return None, failure
-    return commit, None
+    return git_output_or_failure(tools, ["rev-parse", "--verify", f"{commit}^{{commit}}"],
+                                 environment)
 
 
 def main_commit_to_test(arguments, environment):

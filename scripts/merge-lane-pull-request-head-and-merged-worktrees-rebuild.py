@@ -5,8 +5,8 @@ Usage:
   scripts/merge-lane-pull-request-head-and-merged-worktrees-rebuild.py <pull request number>
       <nn-head-commit> <main commit> [--merged-worktree-only] [--merge-lane-worktrees-and-outputs-directory DIR] [--merge-lane-review-worktrees-directory DIR] [--review-tools-worktree-at-main DIR]
 
-Fetches the pull request's head from origin, then makes pr<n>-head at the
-nn-head-commit and pr<n>-merged at the main commit with the nn-head-commit merged
+Fetches the pull request's head from origin unless the nn-head-commit is already
+local, then makes pr<n>-head at the nn-head-commit and pr<n>-merged at the main commit with the nn-head-commit merged
 in, as merge-lane-2, always with a merge commit. A worktree already at either
 path is removed first, with any changes in it. --merged-worktree-only makes
 pr<n>-merged alone and leaves pr<n>-head as it is, because reviewers may be
@@ -81,10 +81,13 @@ def main(argv=None):
     head_worktree = common.pull_request_head_worktree(arguments, number)
     merged_worktree = common.pull_request_merged_worktree(arguments, number)
     try:
-        # A review pipeline sharing this checkout reads FETCH_HEAD after its own fetch.
-        git(checkout, "fetch", "-q", "--no-write-fetch-head", "origin",
-            f"pull/{number}/head")
-        rebuilt = ((merged_worktree,) if arguments.merged_worktree_only
+        try:
+            git(checkout, "cat-file", "-e", f"{arguments.head_commit}^{{commit}}")
+        except GitStepFailed:
+            # A review pipeline sharing this checkout reads FETCH_HEAD after its own fetch.
+            git(checkout, "fetch", "-q", "--no-write-fetch-head", "origin",
+                f"pull/{number}/head")
+        rebuilt =((merged_worktree,) if arguments.merged_worktree_only
                    else (head_worktree, merged_worktree))
         for worktree in rebuilt:
             if worktree.exists():
@@ -113,8 +116,7 @@ def main(argv=None):
               f"with main {arguments.main_commit[:8]} in: {conflict}\n"
               f"The pull request's author clears a conflict with main, not merge-lane-2 and "
               f"not the user.\n"
-              f"Confirm it from {checkout}, which holds the nn-head-commit because this "
-              f"program just fetched it there:\n"
+              f"Confirm it from {checkout}, which holds the nn-head-commit:\n"
               f"cd {checkout} && python3 scripts/branch-conflict-check.py --head {head_full} "
               f"--pull-request {number}\n"
               f"If that reports VERDICT: CONFLICT, send pull request {number} back to its "
