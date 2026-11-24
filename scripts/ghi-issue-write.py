@@ -454,7 +454,13 @@ GH_TIMEOUT_SECONDS = 120
 # Beyond the pre-push conflict check's own limit: the hook's other checks and
 # git sending the branch.
 PUSH_TIME_MARGIN_SECONDS = 120
-ADJUDICATION_TIMEOUT_SECONDS = 420
+# What a ghi-guide-agent cold start adds to an ask's budget: it reads
+# issues-open.md and about 220 linked files, and past ghi-guide-agent sessions
+# took a 90th percentile of 8.2 s from one Read to the next. Kept here, not
+# in scripts/ghi-guide-agent-ask.py, because that script imports this one.
+GHI_GUIDE_AGENT_COLD_START_EXTRA_SECONDS = 1800
+# The ask's 300 s budget and 120 s of ssh slack, plus a cold start's extra.
+ADJUDICATION_TIMEOUT_SECONDS = 420 + GHI_GUIDE_AGENT_COLD_START_EXTRA_SECONDS
 # scripts/ghi-guide-agent-ask.py's GHI_GUIDE_AGENT_ANSWER_NOT_USABLE_MESSAGE_OPENING.
 # Copied rather than imported, because this program runs that one as a
 # subprocess and loads nothing from it; ghi-issue-write-test.py checks the two
