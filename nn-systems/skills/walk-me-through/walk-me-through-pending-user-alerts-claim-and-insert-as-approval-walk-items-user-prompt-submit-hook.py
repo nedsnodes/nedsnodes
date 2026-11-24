@@ -122,7 +122,10 @@ def load_module(name, path):
 
 
 def record_text(record):
-    content = (record.get("message") or {}).get("content")
+    message = record.get("message")
+    if not isinstance(message, dict):
+        return None
+    content = message.get("content")
     if isinstance(content, str):
         return content
     if isinstance(content, list):
