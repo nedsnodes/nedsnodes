@@ -836,13 +836,20 @@ COUNTS_NOT_LOGGED = (
 )
 WALK_DOCUMENT_COPIES_DIRECTORY_IN_LOG_STORE = "walk-document-copies"
 WALK_DOCUMENT_COPIES_KEPT = 20
-WALK_DOCUMENT_COPY_NAME = re.compile(r"\d{4}-\d{2}-\d{2}T\d{2}-\d{2}-\d{2}\.\d{6}Z(-[0-9a-f]{16})?\.md")
+WALK_DOCUMENT_COPY_STAMP_FORMAT = "%Y-%m-%dT%H-%M-%S.%fZ"
+WALK_DOCUMENT_COPY_NAME = re.compile(r"(\d{4}-\d{2}-\d{2}T\d{2}-\d{2}-\d{2}\.\d{6}Z)(-[0-9a-f]{16})?\.md")
 WALK_DOCUMENT_COPY_NOT_SAVED = (
     "FAILED: no timestamped copy of the walk-document {document} was saved on ned-box: {error}.\n"
     "This step's own work is not affected by that failure.\n"
     "Go on with the walk: the next run of this program tries the copy again.\n"
     "If the failure repeats, tell the user, because until a copy lands a bad edit to the walk-document cannot be "
     "undone from one.")
+WALK_DOCUMENT_COPIES_NOT_PRUNED = (
+    "FAILED: the timestamped copy of the walk-document {document} is saved on ned-box, but its oldest copies were "
+    "not pruned: {error}.\n"
+    "This step's own work is not affected by that failure.\n"
+    "Go on with the walk: the next run of this program finishes the prune.\n"
+    "If the failure repeats, tell the user, because the copies folder then grows past {kept} copies.")
 LOG_STORE_UNREACHABLE = ("this machine reaches the log-store at neither {paths}, so its cold-read-records were "
                          "not searched either")
 RECORDS_NOT_SHIPPED = (
@@ -1522,6 +1529,19 @@ def reachable_log_store_records(record_shipper=None, ned_box_home=None, mac_moun
     return next((candidate for candidate in candidates if candidate.is_dir()), None), candidates
 
 
+def is_walk_document_copy_name(name):
+    """Only a name this program could give: a note or recovered file kept in the folder is never pruned. A name with
+    non-ASCII digits, which `\\d` and strptime both accept, is not told apart from one the program wrote."""
+    match = WALK_DOCUMENT_COPY_NAME.fullmatch(name)
+    if match is None:
+        return False
+    try:
+        datetime.datetime.strptime(match.group(1), WALK_DOCUMENT_COPY_STAMP_FORMAT)
+    except ValueError:
+        return False
+    return True
+
+
 def walk_me_through_walk_document_timestamped_copy_save_on_ned_box_and_oldest_copies_prune(arguments):
     """Save the open walk's walk-document; return what went wrong, or None. A walk this cannot find is the step's
     own refusal to report."""
@@ -1545,6 +1565,7 @@ def walk_me_through_walk_document_timestamped_copy_save_on_ned_box_and_oldest_co
     if not document.is_file():
         return None
     temporary = None
+    written = False
     try:
         copies_root = arguments.walk_document_copies_directory
         if copies_root is None:
@@ -1557,12 +1578,11 @@ def walk_me_through_walk_document_timestamped_copy_save_on_ned_box_and_oldest_co
         content = document.read_bytes()
 
         def saved_copies():
-            # Only the names this program gives; a note or recovered file kept in the folder is never pruned.
-            return sorted(path for path in copies.iterdir() if WALK_DOCUMENT_COPY_NAME.fullmatch(path.name))
+            return sorted(path for path in copies.iterdir() if is_walk_document_copy_name(path.name))
 
         existing = saved_copies()
         if not existing or existing[-1].read_bytes() != content:
-            stamp = datetime.datetime.now(datetime.timezone.utc).strftime("%Y-%m-%dT%H-%M-%S.%fZ")
+            stamp = datetime.datetime.now(datetime.timezone.utc).strftime(WALK_DOCUMENT_COPY_STAMP_FORMAT)
             # The content hash keeps two versions saved with one stamp from replacing each other.
             final_name = f"{stamp}-{hashlib.sha256(content).hexdigest()[:16]}.md"
             handle, temporary = tempfile.mkstemp(suffix=".tmp", dir=copies)
@@ -1571,14 +1591,21 @@ def walk_me_through_walk_document_timestamped_copy_save_on_ned_box_and_oldest_co
             os.chmod(temporary, 0o644)  # mkstemp's 0600 would keep the copy from other users of the mount.
             os.replace(temporary, copies / final_name)
             temporary = None
-        # Pruned even when nothing was saved, so a prune that failed last run is finished once its error clears.
-        for old in saved_copies()[:-WALK_DOCUMENT_COPIES_KEPT]:
-            old.unlink(missing_ok=True)
+            written = True
     except OSError as error:
         if temporary is not None:
             with contextlib.suppress(OSError):
                 os.unlink(temporary)
         return WALK_DOCUMENT_COPY_NOT_SAVED.format(document=document, error=error)
+    try:
+        # Listed again here, not in the save's try: once the copy is published, a failure is a failed prune.
+        if written:
+            existing = saved_copies()
+        # Pruned even when nothing was saved, so a prune that failed last run is finished once its error clears.
+        for old in existing[:-WALK_DOCUMENT_COPIES_KEPT]:
+            old.unlink(missing_ok=True)
+    except OSError as error:
+        return WALK_DOCUMENT_COPIES_NOT_PRUNED.format(document=document, error=error, kept=WALK_DOCUMENT_COPIES_KEPT)
     return None
 
 
