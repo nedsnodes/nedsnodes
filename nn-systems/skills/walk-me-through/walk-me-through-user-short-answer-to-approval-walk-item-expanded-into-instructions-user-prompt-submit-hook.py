@@ -292,13 +292,14 @@ WALK_ME_THROUGH_HOOK_AGENT_CONTEXT_OPENING_WHEN_APPROVAL_WALK_STATE_READ_FAILED_
     "The hook could not tell whether an approval-walk item is waiting for the user's answer, because reading the "
     "approval-walk state failed: {error}. Find out yourself: the last `#next_to_present` line in each of the "
     "checkout's docs/walk/*-minutes.md names its waiting item, and a value other than `none` or `closed` marks the "
-    "approval-walk open. If an item is waiting, the next line applies; if none is, it does not.")
+    "approval-walk open, unless an `#approval_walk_paused` line follows that line, which means no item is waiting. "
+    "If an item is waiting, the last line applies; if none is, it does not.")
 WALK_ME_THROUGH_HOOK_AGENT_CONTEXT_OPENING_WHEN_APPROVAL_WALK_ITEM_WAITING_AND_PROMPT_AUTHOR_UNKNOWN_LINE = (
     "[rule walk-me-through-hook-instruction-to-agent-rewrite-approval-walk-item-when-discussion-settled-on-non-recommended-option] "
     "{item} of approval-walk {walk} is waiting for the user's answer.")
 WALK_ME_THROUGH_HOOK_AGENT_CONTEXT_WHEN_TRANSCRIPT_READ_FAILED_AND_PROMPT_AUTHOR_UNKNOWN_LINE = (
     "The hook could not read the transcript {path}, so it could not tell who wrote this prompt: {error}. "
-    "If the user did not type this prompt, the next line does not apply.")
+    "If the user did not type this prompt, the last line does not apply.")
 ANSWERS_THAT_APPROVE = ("A", "AO", "AA")
 PENDING_USER_ALERTS_HOOK_FILE = HERE / "walk-me-through-pending-user-alerts-claim-and-insert-as-approval-walk-items-user-prompt-submit-hook.py"
 ATTENDANCE_CHECK_FILE = CHECKOUT / "nn-systems" / "general-tools" / "agent-session-unattended-by-user-check-common.py"
@@ -1156,7 +1157,7 @@ def output_for(payload):
     except Exception as error:
         walk, walk_error = None, error
     if named_item_missing(answer, walk, walk_error):
-        return own_words_output(payload)
+        return own_words_output(payload, (walk, walk_error))
     no_decision_context = no_decision_sub_step_answer_context(answer, walk)
     if no_decision_context:
         return {"hookSpecificOutput": {"hookEventName": "UserPromptSubmit", "additionalContext": no_decision_context}}
@@ -1201,17 +1202,30 @@ def prompt_typed_by_user_and_transcript_read_error(payload):
     alerts_hook = load_module_by_path("walk_me_through_pending_user_alerts_hook", PENDING_USER_ALERTS_HOOK_FILE)
     try:
         return alerts_hook.typed_by_user(payload), None
-    except (OSError, ValueError) as error:
+    # AttributeError: a record whose message is not an object, which counts as a failed read.
+    except (OSError, ValueError, AttributeError) as error:
         return not payload["prompt"].lstrip().startswith(alerts_hook.NOT_TYPED_PROMPT_OPENINGS), error
 
 
-def own_words_output(payload):
+def own_words_output(payload, walk_read=None):
     """The output for a prompt that is no short answer: the settled-discussion line while an item waits, else None.
-    Reads only the walk-minutes, not the walk-document, whose faults concern the answer forms."""
+    Reads only the walk-minutes, not the walk-document, whose faults concern the answer forms. walk_read, when given,
+    is (read_walk's result, the error it raised or None), so the approval-walk state is not read a second time."""
     if not (payload.get("prompt") or "").strip():
         return None
     if agent_session_unattended():
         return None
+    if walk_read is not None:
+        walk, walk_error = walk_read
+        if walk_error is None and walk is None:
+            return None
+        if walk_error is None:
+            waiting = {"item": walk.item, "walk": walk.name}
+            opening = WALK_ME_THROUGH_HOOK_AGENT_CONTEXT_OPENING_WHEN_APPROVAL_WALK_ITEM_WAITING_AND_USER_REPLY_NOT_SHORT_ANSWER_LINE.format(**waiting)
+            opening_author_unknown = WALK_ME_THROUGH_HOOK_AGENT_CONTEXT_OPENING_WHEN_APPROVAL_WALK_ITEM_WAITING_AND_PROMPT_AUTHOR_UNKNOWN_LINE.format(**waiting)
+        else:
+            opening = opening_author_unknown = WALK_ME_THROUGH_HOOK_AGENT_CONTEXT_OPENING_WHEN_APPROVAL_WALK_STATE_READ_FAILED_AND_USER_REPLY_NOT_SHORT_ANSWER_LINE.format(error=repr(walk_error))
+        return own_words_context(payload, opening, opening_author_unknown)
     try:
         walk_finder = load_walk_finder()
         top = walk_finder.checkout_top(Path(payload.get("cwd") or os.getcwd()))
@@ -1228,6 +1242,11 @@ def own_words_output(payload):
         opening_author_unknown = WALK_ME_THROUGH_HOOK_AGENT_CONTEXT_OPENING_WHEN_APPROVAL_WALK_ITEM_WAITING_AND_PROMPT_AUTHOR_UNKNOWN_LINE.format(**waiting)
     except Exception as error:
         opening = opening_author_unknown = WALK_ME_THROUGH_HOOK_AGENT_CONTEXT_OPENING_WHEN_APPROVAL_WALK_STATE_READ_FAILED_AND_USER_REPLY_NOT_SHORT_ANSWER_LINE.format(error=repr(error))
+    return own_words_context(payload, opening, opening_author_unknown)
+
+
+def own_words_context(payload, opening, opening_author_unknown):
+    """own_words_output's output once the opening for the waiting item, or for a failed read, is known."""
     typed, transcript_error = prompt_typed_by_user_and_transcript_read_error(payload)
     if not typed:
         return None

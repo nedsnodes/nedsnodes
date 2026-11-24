@@ -640,23 +640,24 @@ def words_of_body(count):
     return "\n".join(" ".join(words[start:start + 10]) for start in range(0, count, 10)) + "\n"
 
 
-def test_the_waiting_item_read_step_refuses_an_item_over_300_words_and_reads_it_once_split_into_sub_steps():
+def test_the_waiting_item_read_step_refuses_an_item_over_500_words_and_reads_it_once_split_into_sub_steps():
     # Two words of the body follow a `###` that is no sub-step heading: one in fenced code, one in a quotation.
-    body = (words_of_body(301 - MARKS_DOCUMENT_WORDS_OUTSIDE_BODY - 2) + "\n```\n### code\n```\n\n> ### quoted\n")
+    body = (words_of_body(501 - MARKS_DOCUMENT_WORDS_OUTSIDE_BODY - 2) + "\n```\n### code\n```\n\n> ### quoted\n")
     case = Case(document=marks_document(body))
     result = case.run(WAITING_ITEM_READ_STEP_NAME)
     command = (f"python3 {shlex.quote(str(PROGRAM))} {WAITING_ITEM_READ_STEP_NAME} --after-fixes-reread-only-when-facts-change "
                f"--cwd {shlex.quote(str(case.checkout.resolve()))}")
-    check("the read step refuses an item of 301 words, counting code and marker lines, before any read",
+    check("the read step refuses an item of 501 words, counting code and marker lines, before any read",
           result.returncode == 1
           and "the text from line 3 of the walk-document" in result.stderr
-          and "`## Item 3 of 9: the opening sentence`, has 301 words, over the limit of 300 words" in result.stderr
-          and "\nSplit that text into `###` sub-steps, each within 300 words" in result.stderr
+          and "`## Item 3 of 9: the opening sentence`, has 501 words, over the limit of 500 words" in result.stderr
+          and "\nSplit that text into `###` sub-steps, each within 500 words" in result.stderr
+          and "paragraph opening \"Limit each item to 500 words\" says" in result.stderr
           and f"\nThen run `{command}` again.\n" in result.stderr
           and case.calls.read_text() == "" and not case.reads().exists(), described(result))
     document = case.checkout / "docs" / "walk" / f"{WALK_NAME}.md"
     document.write_text(document.read_text().replace(
-        "word150 ", "\n### The second half\n\nword150 ").replace("word0 ", "### The first half\n\nword0 "))
+        "word250 ", "\n### The second half\n\nword250 ").replace("word0 ", "### The first half\n\nword0 "))
     again = case.run(*shlex.split(command)[2:-2])
     check("once the item is split into `###` sub-steps, each counted on its own, the command the refusal gave reads it",
           again.returncode == 0 and "had to be run now" in again.stdout, described(again))
@@ -731,11 +732,11 @@ def test_the_waiting_item_read_step_still_stops_an_item_rated_none_when_an_earli
 
 
 def test_the_waiting_item_read_step_names_and_reads_the_first_undecided_numbered_sub_step_of_the_item_named():
-    case = Case(document=marks_document(words_of_body(300)))
+    case = Case(document=marks_document(words_of_body(500)))
     case.run(WAITING_ITEM_READ_STEP_NAME)
     document = case.checkout / "docs" / "walk" / f"{WALK_NAME}.md"
     document.write_text(document.read_text().replace(
-        "word150 ", "\n### Item 3.2 of 9: the second half\n\nword150 ").replace(
+        "word250 ", "\n### Item 3.2 of 9: the second half\n\nword250 ").replace(
         "word0 ", "### Item 3.1 of 9: the first half\n\nword0 "))
     result = case.run(WAITING_ITEM_READ_STEP_NAME, "--after-fixes-reread-only-when-facts-change")
     items_read = [json.loads(outcome.read_text())["item"] for outcome in case.reads().glob("*-outcome.json")]
@@ -765,11 +766,11 @@ def test_the_waiting_item_read_step_names_and_reads_the_first_undecided_numbered
 
 
 def test_the_waiting_item_read_step_leaves_the_walk_minutes_as_they_were_when_the_sub_step_it_moves_to_is_refused():
-    case = Case(document=marks_document(words_of_body(300)))
+    case = Case(document=marks_document(words_of_body(500)))
     case.run(WAITING_ITEM_READ_STEP_NAME)
     document = case.checkout / "docs" / "walk" / f"{WALK_NAME}.md"
     document.write_text(document.read_text().replace(
-        "word150 ", "\n### Item 3.2 of 9: the second half\n\nword150 ").replace(
+        "word250 ", "\n### Item 3.2 of 9: the second half\n\nword250 ").replace(
         "word0 ", "### Item 3.1 of 9: the first half\n\nword0 "))
     case.run(WAITING_ITEM_READ_STEP_NAME, "--after-fixes-reread-only-when-facts-change")
     for copy in case.reads().glob("*.md"):
@@ -951,35 +952,35 @@ def test_the_waiting_item_read_step_keeps_the_text_read_before_the_item_was_spli
           again.returncode == 0 and document.read_text().count("Withdrawn version") == 1, described(again))
 
 
-def test_the_waiting_item_read_step_reads_an_item_of_300_words_leaving_out_its_approval_walk_item_lines():
+def test_the_waiting_item_read_step_reads_an_item_of_500_words_leaving_out_its_approval_walk_item_lines():
     body = ("#approval_walk_item_first_entered 2026-11-12\n- #approval_walk_item_waits_on the opening paragraph\n\n"
-            + words_of_body(300 - MARKS_DOCUMENT_WORDS_OUTSIDE_BODY))
+            + words_of_body(500 - MARKS_DOCUMENT_WORDS_OUTSIDE_BODY))
     case = Case(document=marks_document(body))
     result = case.run(WAITING_ITEM_READ_STEP_NAME)
-    check("the read step reads an item of exactly 300 words, its `#approval_walk_item_` lines not counted",
+    check("the read step reads an item of exactly 500 words, its `#approval_walk_item_` lines not counted",
           result.returncode == 0 and "had to be run now" in result.stdout
-          and "word284" in case.calls.read_text(), described(result))
+          and "word484" in case.calls.read_text(), described(result))
 
 
 def test_the_waiting_item_read_step_counts_each_numbered_sub_step_of_the_item_the_minutes_name():
     document = ("# A walk\n\n## Item 3 of 9: the opening sentence\n\n### Item 3.1 of 9: the first half\n\n"
-                + words_of_body(320) + "\n### Item 3.2 of 9: the second half\n\nShort.\n\n"
+                + words_of_body(520) + "\n### Item 3.2 of 9: the second half\n\nShort.\n\n"
                 "#case_against weak: the page grows.\n\nRecommendation: change it.\n")
     case = Case(document=document)
     result = case.run(WAITING_ITEM_READ_STEP_NAME)
     check("with `#next_to_present item 3 of 9`, the read step refuses the item's over-long numbered sub-step 3.1",
           result.returncode == 1 and "the text from line 5 of the walk-document" in result.stderr
-          and "`### Item 3.1 of 9: the first half`, has 327 words" in result.stderr
+          and "`### Item 3.1 of 9: the first half`, has 527 words" in result.stderr
           and case.calls.read_text() == "", described(result))
 
 
 def test_the_waiting_item_read_step_counts_a_detail_heading_below_a_sub_step_as_part_of_its_text():
-    body = words_of_body(160) + "\n#### Details\n\n" + words_of_body(160)
+    body = words_of_body(260) + "\n#### Details\n\n" + words_of_body(260)
     case = Case(document=marks_document(body))
     result = case.run(WAITING_ITEM_READ_STEP_NAME)
-    check("a `####` heading starts no sub-step, so 160 words, `#### Details` and 160 words are refused as one text",
+    check("a `####` heading starts no sub-step, so 260 words, `#### Details` and 260 words are refused as one text",
           result.returncode == 1 and "the text from line 3 of the walk-document" in result.stderr
-          and "has 336 words" in result.stderr and case.calls.read_text() == "", described(result))
+          and "has 536 words" in result.stderr and case.calls.read_text() == "", described(result))
 
 
 def test_the_waiting_item_read_step_counts_each_item_of_a_shared_heading_on_its_own():
@@ -994,24 +995,24 @@ def test_the_waiting_item_read_step_counts_each_item_of_a_shared_heading_on_its_
 
 
 def test_the_waiting_item_read_step_counts_the_text_of_a_shared_heading_above_its_first_item():
-    document = ("# A walk\n\n## Items 6 and 7 of 9: two short items\n\n" + words_of_body(400)
+    document = ("# A walk\n\n## Items 6 and 7 of 9: two short items\n\n" + words_of_body(600)
                 + "\n**Item 6 of 9:** the first.\n\nShort.\n\n#case_against weak: one.\n\nRecommendation: do one.\n\n"
                 "**Item 7 of 9:** the second.\n\nShort.\n\n#case_against weak: two.\n\nRecommendation: do two.\n")
     case = Case(next_to_present="items 6 and 7 of 9", document=document)
     result = case.run(WAITING_ITEM_READ_STEP_NAME)
-    check("400 words between a shared heading and its first item are counted as one more text, and refused",
+    check("600 words between a shared heading and its first item are counted as one more text, and refused",
           result.returncode == 1 and "the text from line 3 of the walk-document" in result.stderr
-          and "has 409 words" in result.stderr and case.calls.read_text() == "", described(result))
+          and "has 609 words" in result.stderr and case.calls.read_text() == "", described(result))
 
 
 def test_the_waiting_item_read_step_leaves_out_an_older_version_sub_step_of_the_same_number():
     document = ("# A walk\n\n## Item 3 of 9: the older version\n\nOld.\n\n### Item 3.1 of 9: the older first half\n\n"
-                + words_of_body(320) + "\n## Item 3 of 10: the opening sentence\n\nNew.\n\n"
+                + words_of_body(520) + "\n## Item 3 of 10: the opening sentence\n\nNew.\n\n"
                 "### Item 3.1 of 10: the first half\n\nShort.\n\n"
                 "#case_against weak: the page grows.\n\nRecommendation: change it.\n")
     case = Case(next_to_present="item 3 of 10", document=document)
     result = case.run(WAITING_ITEM_READ_STEP_NAME)
-    check("with `#next_to_present item 3 of 10`, an older `3.1 of 9` of 320 words elsewhere is not counted",
+    check("with `#next_to_present item 3 of 10`, an older `3.1 of 9` of 520 words elsewhere is not counted",
           result.returncode == 0 and "had to be run now" in result.stdout, described(result))
 
 
@@ -1533,44 +1534,44 @@ def test_the_waiting_item_read_step_leaves_out_an_older_sub_step_below_a_later_i
     document = ("# A walk\n\n## Item 3 of 10: the opening sentence\n\nNew.\n\n### Item 3.1 of 10: the first half\n\n"
                 "Short.\n\n#case_against weak: the page grows.\n\nRecommendation: change it.\n\n"
                 "## Item 4 of 10: the next item\n\nNext.\n\n### Item 3.1 of 9: the older first half\n\n"
-                + words_of_body(320))
+                + words_of_body(520))
     case = Case(next_to_present="item 3 of 10", document=document)
     result = case.run(WAITING_ITEM_READ_STEP_NAME)
-    check("the sub-steps of item 3 end at item 4, so an older `3.1 of 9` of 320 words below item 4 is not counted",
+    check("the sub-steps of item 3 end at item 4, so an older `3.1 of 9` of 520 words below item 4 is not counted",
           result.returncode == 0 and "had to be run now" in result.stdout, described(result))
 
 
 def test_the_waiting_item_read_step_leaves_out_the_text_of_a_shared_heading_when_one_item_of_it_is_named():
-    document = ("# A walk\n\n## Items 6 and 7 of 9: two short items\n\n" + words_of_body(400)
+    document = ("# A walk\n\n## Items 6 and 7 of 9: two short items\n\n" + words_of_body(600)
                 + "\n**Item 6 of 9:** the first.\n\nShort.\n\n#case_against weak: one.\n\nRecommendation: do one.\n\n"
                 "**Item 7 of 9:** the second.\n\nShort.\n\n#case_against weak: two.\n\nRecommendation: do two.\n")
     case = Case(next_to_present="item 6 of 9", document=document)
     result = case.run(WAITING_ITEM_READ_STEP_NAME)
-    check("with only item 6 named, the 400 words above its opening are not shown, so are not counted",
+    check("with only item 6 named, the 600 words above its opening are not shown, so are not counted",
           result.returncode == 0 and "had to be run now" in result.stdout, described(result))
 
 
 def test_the_waiting_item_read_step_counts_the_sub_steps_of_each_item_of_a_shared_heading():
     document = ("# A walk\n\n## Items 6 and 7 of 9: two short items\n\n**Item 6 of 9:** the first.\n\nShort.\n\n"
                 "**Item 7 of 9:** the second.\n\nShort.\n\n### Item 6.1 of 9: the first's detail\n\nShort.\n\n"
-                "### Item 7.1 of 9: the second's detail\n\n" + words_of_body(320)
+                "### Item 7.1 of 9: the second's detail\n\n" + words_of_body(520)
                 + "\n#case_against weak: two.\n\nRecommendation: do both.\n")
     case = Case(next_to_present="items 6 and 7 of 9", document=document)
     result = case.run(WAITING_ITEM_READ_STEP_NAME)
-    check("with items 6 and 7 named, sub-step 7.1 after sub-step 6.1 is counted, and its 320 words refused",
-          result.returncode == 1 and "`### Item 7.1 of 9: the second's detail`, has 3" in result.stderr
+    check("with items 6 and 7 named, sub-step 7.1 after sub-step 6.1 is counted, and its 520 words refused",
+          result.returncode == 1 and "`### Item 7.1 of 9: the second's detail`, has 5" in result.stderr
           and case.calls.read_text() == "", described(result))
 
 
 def test_the_waiting_item_read_step_counts_the_text_of_a_heading_shared_by_sub_steps_above_the_first():
     document = ("# A walk\n\n## Item 3 of 9: the opening sentence\n\nShort.\n\n### Items 3.1 and 3.2 of 9: both halves\n\n"
-                + words_of_body(400) + "\n**Item 3.1 of 9:** the first half.\n\nShort.\n\n"
+                + words_of_body(600) + "\n**Item 3.1 of 9:** the first half.\n\nShort.\n\n"
                 "**Item 3.2 of 9:** the second half.\n\nShort.\n\n"
                 "#case_against weak: the page grows.\n\nRecommendation: change it.\n")
     case = Case(document=document)
     result = case.run(WAITING_ITEM_READ_STEP_NAME)
-    check("400 words between a heading shared by sub-steps 3.1 and 3.2 and the first of them are refused",
-          result.returncode == 1 and "`### Items 3.1 and 3.2 of 9: both halves`, has 40" in result.stderr
+    check("600 words between a heading shared by sub-steps 3.1 and 3.2 and the first of them are refused",
+          result.returncode == 1 and "`### Items 3.1 and 3.2 of 9: both halves`, has 60" in result.stderr
           and case.calls.read_text() == "", described(result))
 
 
@@ -4975,6 +4976,87 @@ ANSWER_FLAGS_TAKING_A_REPLY = {"--obvious": (), "--after-advisor": (), "--disapp
                                "--moved-on-no-decision": (), "--option": ("2",), "--part-answer": ("1=A",)}
 
 
+def no_answer_rows_printed(result):
+    """The lines of the read step's stdout that are rows of the no-answer table."""
+    return [line for line in result.stdout.splitlines()
+            if line.startswith("- ") and ("Its evidence passes" in line or "Only evidence is missing" in line
+                                          or "could not be checked" in line)]
+
+
+def test_help_prints_every_row_of_the_no_answer_table():
+    usage = subprocess.run([sys.executable, str(PROGRAM), "--help"], capture_output=True, text=True).stdout
+    for value in (1, 2, 3, 4, 5, 6, 7, "none", "weak-cost-only", "weak-alters-earlier-approved-text-only"):
+        check(f"--help lists the no-answer table's row --not-asked {value}",
+              f"\n  --not-asked {value}: " in usage, usage[-3000:])
+    check("--help lists the handoff row with its citation",
+          '\n  --already-decided "the user-ruling on the handoff\'s internals in '
+          'nn-systems/handoff/handoff.system.design.md": ' in usage, usage[-3000:])
+    check("--help carries the rule to ask the advisor and to show the item on a refusal",
+          "ask the advisor whether a later ruling or another open item overtakes it; if the program refuses, the "
+          "advisor objects or the advisor call fails, show the item." in usage, usage[-3000:])
+
+
+def test_read_step_offers_a_row_that_lacks_only_an_evidence_line_with_the_line_to_add_and_its_command():
+    case = rated_none_case(touches="", rating=WEAK_COST_ONLY)
+    result = case.run(WAITING_ITEM_READ)
+    rows = no_answer_rows_printed(result)
+    kind_5 = [row for row in rows if row.startswith("- kind 5:")]
+    check("an item with no evidence lines is offered kind 5, naming the line to add and the command to run after",
+          len(kind_5) == 1 and "Only evidence is missing" in kind_5[0] and "#not_asked_source" in kind_5[0]
+          and check_command_for(case, "--not-asked", "5") in kind_5[0], described(result))
+    cost_only = [row for row in rows if row.startswith("- case against weak, cost only:")]
+    check("an item rated weak with no touches line is offered weak-cost-only, naming the touches line",
+          len(cost_only) == 1 and "#not_asked_touches" in cost_only[0]
+          and check_command_for(case, "--not-asked", "weak-cost-only") in cost_only[0], described(result))
+    check("an item rated weak is not offered the row for a case against rated none",
+          not any(row.startswith("- case against none:") for row in rows), described(result))
+
+
+def test_read_step_offers_a_passing_row_and_leaves_out_a_row_the_change_itself_fails():
+    case = rated_none_case(rating=WEAK_COST_ONLY)
+    result = case.run(WAITING_ITEM_READ)
+    check("a row whose evidence passes is printed with its exact command",
+          any(row.startswith("- case against weak, cost only:") and "Its evidence passes" in row
+              and check_command_for(case, "--not-asked", "weak-cost-only") in row
+              for row in no_answer_rows_printed(result)), described(result))
+    case = rated_none_case(touches="#not_asked_touches tools/counter.py CLAUDE.md\n\n", rating=WEAK_COST_ONLY,
+                           files=("CLAUDE.md",))
+    result = case.run(WAITING_ITEM_READ)
+    check("a row refused for a guarded Markdown file, which no evidence line cures, is not printed",
+          not any(row.startswith("- case against weak, cost only:") for row in no_answer_rows_printed(result)),
+          described(result))
+
+
+def test_read_step_reports_a_row_whose_check_fails_and_still_offers_the_others():
+    case = rated_none_case(touches="#not_asked_touches tools/counter.py\n\n#not_asked_unused old_reader\n\n",
+                           rating=WEAK_COST_ONLY)
+    result = case.run(WAITING_ITEM_READ, environment=stubbed_git_failing_on(case, "grep"))
+    rows = no_answer_rows_printed(result)
+    check("a `git grep` that fails while checking kind 3 is reported on that row, which is not offered as passing",
+          any(row.startswith("- kind 3: its evidence could not be checked") and "fatal: stub grep failure" in row
+              for row in rows)
+          or any("- kind 3: its evidence could not be checked" in line for line in result.stdout.splitlines()),
+          described(result))
+    check("the other rows are still offered", any(row.startswith("- case against weak, cost only:") for row in rows),
+          described(result))
+
+
+def test_read_step_offers_the_handoff_row_only_for_an_item_naming_the_handoff():
+    document = RATED_NONE_DOCUMENT.replace("print the poem count after the list",
+                                           "shorten the session-handoff file's opening").replace(
+        "#case_against none.\n\nRecommendation: print it.",
+        f"#case_against {WEAK_COST_ONLY}\n\nRecommendation: print it.", 1)
+    result = Case(next_to_present="item 1 of 3", document=document).run(WAITING_ITEM_READ)
+    check("an item naming the session-handoff is offered the handoff row with --already-decided and its citation",
+          any(row.startswith("- the handoff's own internals:") and "--already-decided" in row
+              and "nn-systems/handoff/handoff.system.design.md" in row for row in no_answer_rows_printed(result)),
+          described(result))
+    result = rated_none_case(rating=WEAK_COST_ONLY).run(WAITING_ITEM_READ)
+    check("an item that does not name the handoff is not offered the handoff row",
+          not any(row.startswith("- the handoff's own internals:") for row in no_answer_rows_printed(result)),
+          described(result))
+
+
 def test_every_answer_flag_is_covered_by_the_rerun_command_cases():
     usage = subprocess.run([sys.executable, str(PROGRAM), "--help"], capture_output=True, text=True)
     group = re.search(r"\[(--obvious[^\]]*)\]", " ".join(usage.stdout.split()))
@@ -5175,7 +5257,7 @@ def test_close_reads_the_item_after_the_next_one_ahead_and_the_read_step_uses_it
                             "later and it recommends now: then run "
                             f"`{check_command_for(case, '--now-over-later-already-decided')}`, then the "
                             "close command it prints.")
-          and f"{WAITING_ITEM_READ} {AFTER_FIXES} --cwd" in lines[2], described(first))
+          and f"{WAITING_ITEM_READ} {AFTER_FIXES} --cwd" in lines[-3], described(first))
     answered_and_closed(case)
     ahead = case.run(WAITING_ITEM_READ)
     check("the read step hands over the read ahead of an unchanged item without reading it again",
@@ -6638,6 +6720,12 @@ def test_bump_refuses_an_item_no_heading_has_or_one_already_shown_writing_nothin
           missing.returncode == 1 and "no item heading in the walk-document" in missing.stderr
           and "`four`" in missing.stderr and f"`{check_command_for(case, '--bump', 'two')}`" in missing.stderr,
           described(missing))
+    indented = Case(next_to_present="item 1 of 9", document=bump_walk().replace("\n## two", "\n  ## two"))
+    missing_indented = indented.run("check", "--bump", "four", reply="bump four")
+    check("check --bump's refusal names an unshown item by its title when that item's heading is indented",
+          missing_indented.returncode == 1
+          and f"`{check_command_for(indented, '--bump', 'two')}`" in missing_indented.stderr,
+          described(missing_indented))
     shown = case.run("check", "--bump", "one", reply="bump one")
     check("check --bump refuses the waiting item, which has been shown and is not decided",
           shown.returncode == 1 and "`## Item 1 of 9: one`" in shown.stderr
