@@ -164,9 +164,24 @@ def test_ripgrep_that_cannot_run_is_a_failure(root):
           result.stdout + result.stderr)
 
 
-def test_a_transcript_that_cannot_be_read_is_a_failure(root):
+def test_a_dialog_whose_transcript_is_gone_is_named_for_the_agent_to_read(root):
     store = Store(root)
     dialog = store.session("lost", [agent_record(f"## {ITEM_6_TITLE}"), user_record("yes")], write_transcript=False)
+    result = store.run("--title", ITEM_6_TITLE, "--item-number", "6")
+    check("a dialog naming the title whose transcript is not in the log-store is named for the agent to read, "
+          "and is no failure",
+          result.returncode == 0 and result.stderr == ""
+          and f"its transcript " in result.stdout and f'read its "## User" turns in {dialog} yourself.' in result.stdout,
+          result.stdout + result.stderr)
+
+
+def test_a_transcript_that_cannot_be_read_is_a_failure(root):
+    store = Store(root)
+    dialog = store.session("unreadable", [agent_record(f"## {ITEM_6_TITLE}"), user_record("yes")])
+    transcript = (store.log_store / "agent-session-files-by-machine" / "ned-box" / "projects" / PROJECT_KEY
+                  / "unreadable.jsonl")
+    transcript.unlink()
+    transcript.mkdir()
     result = store.run("--title", ITEM_6_TITLE, "--item-number", "6")
     check("a dialog naming the title whose transcript cannot be read prints a FAILED line naming both and exits 2",
           result.returncode == 2 and "FAILED: could not read the transcript " in result.stderr

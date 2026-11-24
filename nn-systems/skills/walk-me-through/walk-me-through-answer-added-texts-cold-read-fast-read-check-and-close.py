@@ -2986,6 +2986,8 @@ def approval_walk_item_title_user_messages_in_earlier_agent_sessions_lines(walk_
         title = item_title(walk_finder, heading.split("\n", 1)[0])
         if title and title not in titles:
             titles.append(title)
+    if not titles:
+        return []
     words = [word for title in titles for word in ("--title", title)]
     words += [word for number in numbers for word in ("--item-number", number)]
     result = subprocess.run([sys.executable, str(TITLE_SEARCH_PROGRAM), *words], capture_output=True, text=True,

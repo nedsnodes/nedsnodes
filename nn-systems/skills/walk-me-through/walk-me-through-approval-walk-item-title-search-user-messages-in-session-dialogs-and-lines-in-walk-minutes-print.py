@@ -23,7 +23,8 @@ the whole agent-session and not only near the title, since the user's ruling can
 each after an excerpt of the agent message it answers, with the dialog's file and line, or the transcript's when
 the dialog does not hold the message. Messages are told from the agent's and from a program's prompts by
 search-user-messages-in-transcripts.py's speaker test, so an agent-session in which the user typed nothing, one a
-program started, is skipped and counted in the first line printed. Several messages the user typed in a row follow
+program started, is skipped and counted in the first line printed. An agent-session whose transcript is not in the
+log-store gets one line naming its dialog, for the agent to read. Several messages the user typed in a row follow
 one excerpt of the agent message before them. Then each walk-minutes line that names a title, with its file and line.
 
 FROM THE MAC. When the log-store is not on this machine and this machine is not ned-box, ned-box's copy of this
@@ -148,8 +149,15 @@ def session_lines(root, dialog, title_lines, failures):
     machine, project_key = search.session_parts(dialog, root)
     transcript = search.session_transcript(root, {"path": str(dialog), "machine": machine,
                                                   "project_key": project_key})
+    seat = search.seat_from_project_key(project_key)
+    named_at = (f"Agent-session {transcript.stem} ({', '.join(filter(None, [seat, machine]))}), its dialog naming the "
+                f"title at line(s) {', '.join(str(number) for number in title_lines)}")
     try:
         turns = transcript_turns(transcript)
+    except FileNotFoundError:
+        # Some dialogs outlive their transcripts in the log-store; no rerun brings the transcript back.
+        return [f"{named_at}: its transcript {transcript} is not in the log-store, so the user's messages in it cannot "
+                f"be told from programs' prompts here; read its \"## User\" turns in {dialog} yourself."]
     except OSError as error:
         failures.append(f"could not read the transcript {transcript} of the session dialog {dialog}, which names "
                         f"the item's title, so the user's messages in it were not printed: {error}")
@@ -162,9 +170,7 @@ def session_lines(root, dialog, title_lines, failures):
         failures.append(f"could not read the session dialog {dialog} after ripgrep searched it, so its messages are "
                         f"cited by the transcript's lines: {error}")
         lines = []
-    seat = search.seat_from_project_key(project_key)
-    printed = [f"Agent-session {transcript.stem} ({', '.join(filter(None, [seat, machine]))}), its dialog naming the "
-               f"title at line(s) {', '.join(str(number) for number in title_lines)}:"]
+    printed = [f"{named_at}:"]
     agent = shown_agent = None
     start = 0
     for voice, text, number in turns:
