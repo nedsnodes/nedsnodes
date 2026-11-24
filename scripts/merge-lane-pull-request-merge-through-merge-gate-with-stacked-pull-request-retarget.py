@@ -380,6 +380,13 @@ def merged_branch_deleted(branch, environment):
     deletion = run(["gh", "api", f"repos/{REPOSITORY}/git/refs/heads/{branch}",
                     "-X", "DELETE"], environment)
     if deletion.returncode != 0:
+        # GitHub's own deletion for the merge can remove the branch between the read and the
+        # delete; a second read tells that apart from a delete that failed, whatever error
+        # text the delete got.
+        reread = run(["gh", "api", path], environment)
+        if reread.returncode != 0 and "HTTP 404" in reread.stderr:
+            print(f"the branch {branch} is gone from GitHub")
+            return EXIT_MERGED
         print(f"STOP: merged, but the branch {branch} is still on GitHub and could not be "
               f"deleted: {gh_error(deletion)}\n"
               f"Delete it: {by_hand}\n"

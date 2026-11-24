@@ -2,8 +2,9 @@
 """The fields of one idle-sweep verdict, the JSON object scripts/agent-seat-idle-sweep-verdicts-print.py
 prints for each agent-seat, and the values its rule, decision and sentences may take.
 
-Not a program to run. The printing program takes twelve field names from here, rule, decision,
+Not a program to run. The printing program takes thirteen field names from here, rule, decision,
 text, if_every_sentence_backed, last_turn_ending_message, last_tool_call_at, last_user_typed_at,
+github_conditions_skipped_for_budget,
 successful_task_tool_calls_setting_prerequisites_or_blocked_by,
 tool_calls_since_start_of_earliest_turn_with_sentence_to_judge,
 open_tasks_with_prerequisites_or_blocked_by, and a background command's description and
@@ -67,6 +68,10 @@ SENTENCES = "sentences"
 OPEN_TASKS_NOTHING_HOLDS = "open_tasks_nothing_holds"  # [{"id", "subject"}]
 # Set with rule 3 only: why open_tasks_nothing_holds could not be read, which leaves it null
 OPEN_TASKS_NOTHING_HOLDS_NOT_READ_BECAUSE = "open_tasks_nothing_holds_not_read_because"
+# [{"kind", "number"}], once each, at rules 3 to 5: each prerequisite of an open task, such as
+# {"kind": "pr_merged", "number": 50}, that was not asked of GitHub because the due-task hook's
+# GitHubConditionChecker had spent its time budget, so the task it holds may be free; absent when none
+GITHUB_CONDITIONS_SKIPPED_FOR_BUDGET = "github_conditions_skipped_for_budget"
 TEXT = "text"                              # code's text to send as written, at rule 3
 IF_EVERY_SENTENCE_BACKED = "if_every_sentence_backed"  # {"rule", "decision", maybe "text"}
 # {"record_uuid", "time", "text"} or null, at rules 2 to 5
@@ -88,8 +93,8 @@ OPTIONAL = (DECISION, NOT_CHECKED, SUPERVISOR_LAST_POLL_AT, LAST_ACTIVITY, LAST_
             TURN_ENDED,
             APPROVAL_WALK_ITEMS_WAITING_ON_THE_USER, IDLE, NOT_IDLE_BECAUSE, RUNNING,
             HANDOFF_DEFERRED_MARKER,
-            USAGE_LIMIT, SENTENCES, OPEN_TASKS_NOTHING_HOLDS, OPEN_TASKS_NOTHING_HOLDS_NOT_READ_BECAUSE, TEXT,
-            IF_EVERY_SENTENCE_BACKED,
+            USAGE_LIMIT, SENTENCES, OPEN_TASKS_NOTHING_HOLDS, OPEN_TASKS_NOTHING_HOLDS_NOT_READ_BECAUSE,
+            GITHUB_CONDITIONS_SKIPPED_FOR_BUDGET, TEXT, IF_EVERY_SENTENCE_BACKED,
             LAST_TURN_ENDING_MESSAGE,
             TOOL_CALLS_SINCE_START_OF_EARLIEST_TURN_WITH_SENTENCE_TO_JUDGE,
             OPEN_TASKS_WITH_PREREQUISITES_OR_BLOCKED_BY)

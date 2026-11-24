@@ -139,7 +139,8 @@ The finish step does not judge those lines, so it exits 0 when every step succee
 skipped a check; the agent reads the printed lines and does what they say.
 
 Exit codes: 0 brief or replace steps printed, round passes or move step done; 1 the review or the round breaks
-a rule, said on stderr; 2 gh, git or the answers file could not be read, the answers file could not be written, the conflict check could not answer,
+a rule, said on stderr; 2 gh, git or the answers file could not be read, the answers file could not be written, the
+kept copies of the answers file could not be listed, the conflict check could not answer,
 the new shared names could not be listed, the worktree creator failed, or the suite runner stopped before
 judging every suite, said on stderr.
 """
@@ -212,6 +213,7 @@ ROUND_RECORD_FORMAT = ("Fix-round answered without a commit: frozen-head {frozen
 ROUND_RECORD_PATTERN = re.compile(r"Fix-round answered without a commit: frozen-head ([0-9a-f]+), "
                                   r"reviews (\d+(?: \d+)*)\.")
 ANSWER_START_PATTERN = re.compile(r"^(\d+)\.\s+(\S.*)$")
+ANSWER_PLACEHOLDER_LINE_PATTERN = re.compile(rb"^\s*\d+\.\s*$")
 MOVED_TO_PULL_REQUEST_PREFIX = "Moved to pull request "
 MOVED_TO_PULL_REQUEST_PREFIX_PATTERN = re.compile(
     re.escape(MOVED_TO_PULL_REQUEST_PREFIX.rstrip()) + r"\b", re.IGNORECASE)
@@ -261,6 +263,7 @@ PULL_REQUEST_FIX_ROUND_CHECK_TEST_SUITES_ALSO_FAILING_AT_FROZEN_HEAD_RECORD_FILE
 # The answers file waits in the git directory while the new topic branch is checked out, so no commit
 # or check made there can pick it up.
 ANSWERS_SET_ASIDE_DIRECTORY_NAME = "fix-round-answers-set-aside"
+ANSWERS_KEPT_COPIES_DIRECTORY_NAME = "fix-round-answers-kept-copies"
 # What gh pr view prints on stderr for a number or URL that names no pull request.
 PULL_REQUEST_NOT_FOUND_MARKER = "Could not resolve to a PullRequest"
 GH_TIMEOUT_SECONDS = 60
@@ -830,13 +833,72 @@ def answers_file_answers_every_finding_of_round(path, finding_count, review_subm
     return set(range(1, finding_count + 1)) <= entries.keys()
 
 
-def answers_file_with_one_line_per_finding_write(path, finding_count):
-    """Write the answers file with a line "<n>. " per finding, which read_answers reads as no entry until the agent
-    writes the answer after it."""
+def pull_request_fix_round_answers_kept_copies_directory_path_for_frozen_head(worktree, number, frozen_head):
+    """Where this round's copies of the answers file go: in the common git directory, because removing a linked
+    worktree deletes its own git directory; one directory per round, so that a brief names only this round's copies."""
+    common = git(["-C", str(worktree), "rev-parse", "--path-format=absolute", "--git-common-dir"]).strip()
+    return Path(common) / ANSWERS_KEPT_COPIES_DIRECTORY_NAME / f"pr-{number}-frozen-head-{frozen_head}"
+
+
+def answers_kept_copies_oldest_first(kept_copies_directory):
+    """Every whole copy in kept_copies_directory, oldest first; none when the directory is missing."""
     try:
-        path.write_text("".join(f"{index}. \n" for index in range(1, finding_count + 1)))
+        try:
+            names = os.listdir(kept_copies_directory)
+        except FileNotFoundError:
+            return []
+        copies = [kept_copies_directory / name for name in names if name.endswith(".md")]
+        return sorted(copies, key=lambda copy: (copy.stat().st_mtime_ns, copy.name))
     except OSError as error:
-        raise StepFailed(f"could not write the answers file {path}: {error}") from None
+        raise StepFailed(f"could not list the kept copies of the answers file in {kept_copies_directory}: "
+                         f"{error}") from None
+
+
+def answers_file_text_kept_in_new_copy(path, kept_copies_directory):
+    """The new file in kept_copies_directory that now holds path's bytes, or None when path is missing or holds
+    only blank lines and "<n>." lines, so that nothing is lost when path is then replaced."""
+    try:
+        data = path.read_bytes()
+    except FileNotFoundError:
+        return None
+    if all(not line.strip() or ANSWER_PLACEHOLDER_LINE_PATTERN.match(line) for line in data.splitlines()):
+        return None
+    kept_copies_directory.mkdir(parents=True, exist_ok=True)
+    # The .incomplete name keeps a copy cut short by a killed run from passing for a whole one.
+    descriptor, incomplete = tempfile.mkstemp(prefix=f"{path.stem}-", suffix=".incomplete", dir=kept_copies_directory)
+    kept = Path(incomplete).with_suffix(path.suffix)
+    try:
+        with os.fdopen(descriptor, "wb") as copy:
+            copy.write(data)
+        # link, not replace: it fails when the name is taken, so an earlier copy is never overwritten.
+        os.link(incomplete, kept)
+        os.unlink(incomplete)
+    except OSError:
+        os.unlink(incomplete)
+        raise
+    return kept
+
+
+def answers_file_with_one_line_per_finding_write(path, finding_count, kept_copies_directory):
+    """Write the answers file with a line "<n>. " per finding, which read_answers reads as no entry until the agent
+    writes the answer after it; return the new copy of the text it replaced, or None when it made none."""
+    kept = None
+    try:
+        kept = answers_file_text_kept_in_new_copy(path, kept_copies_directory)
+        # A unique name, because two brief runs can overlap; .md, so that the ignore line covers a file a killed
+        # run leaves.
+        descriptor, temporary = tempfile.mkstemp(prefix=f"{path.stem}-", suffix=".md", dir=path.parent)
+        try:
+            with os.fdopen(descriptor, "w") as new_file:
+                new_file.write("".join(f"{index}. \n" for index in range(1, finding_count + 1)))
+            os.replace(temporary, path)
+        except OSError:
+            os.unlink(temporary)
+            raise
+    except OSError as error:
+        copy_note = f" A copy of its text is in {kept}." if kept else ""
+        raise StepFailed(f"could not write the answers file {path}: {error}.{copy_note}") from None
+    return kept
 
 
 def topic_worktree_at_frozen_head(number, reviewer_login, branch, frozen_head, finding_count, review_submitted_at):
@@ -927,12 +989,23 @@ def print_brief(number, reviewer_login):
     worktree = topic_worktree_at_frozen_head(number, reviewer_login, branch, frozen_head, len(findings) + len(nits),
                                              review_submitted_at)
     answers_path = worktree / ANSWERS_FILE_NAME_FORMAT.format(number=number)
-    answers_file_with_one_line_per_finding_write(answers_path, len(findings) + len(nits))
+    kept_copies_directory = pull_request_fix_round_answers_kept_copies_directory_path_for_frozen_head(
+        worktree, number, frozen_head
+    )
+    # Listed before the write, so that a directory that cannot be listed stops the brief with nothing changed.
+    kept_copies = answers_kept_copies_oldest_first(kept_copies_directory)
+    kept = answers_file_with_one_line_per_finding_write(answers_path, len(findings) + len(nits), kept_copies_directory)
+    if kept is not None:
+        kept_copies.append(kept)
     lines = [
         f"Fix-round brief for pull request {url}",
         f"Frozen-head: {frozen_head}",
         f"The round's reviews: {review_link}",
     ]
+    for kept_answers in kept_copies:
+        lines.append(f"The answers file held text, which may be numbered for another round, so this program copied it "
+                     f"unchanged to {kept_answers} and wrote a new answers file. Read that copy, and copy into the "
+                     "new file each answer that still answers a finding below, under that finding's number.")
     if fix_round_number == ADVISOR_FIX_ROUND_NUMBER:
         lines += ["", ADVISOR_FIX_ROUND_INSTRUCTION]
     lines += [
