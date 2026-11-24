@@ -280,13 +280,26 @@ class Case:
         return record
 
     def run(self, step, *flags, mode="", counts_log=None, fast_read_program=None, environment=None,
-            ignored_signal=None, reply="a", wait_for_reads_ahead=True):
+            ignored_signal=None, reply="a", wait_for_reads_ahead=True, decline_printed_rows=True):
         """Run the program; a check gets `--user-reply-as-typed reply` unless reply is None or the flags
-        hold --not-asked or a reply of their own. Unless told not to, wait for the reads ahead it started."""
+        hold --not-asked or a reply of their own. Unless told not to, wait for the reads ahead it started.
+        A read step that withholds the item for its no-answer table rows is, unless decline_printed_rows is
+        false, run again declining each, as an agent whose item fits no row does, so that a test of something else
+        sees the item handed over; the result then joins both runs' output and has the second run's exit code."""
         result = self.run_only(step, *flags, mode=mode, counts_log=counts_log, fast_read_program=fast_read_program,
                                environment=environment, ignored_signal=ignored_signal, reply=reply)
         if wait_for_reads_ahead:
             self.wait_for_reads_ahead()
+        rows = printed_row_ids(result)
+        if decline_printed_rows and step == WAITING_ITEM_READ and ROWS_WITHHELD in result.stdout \
+                and ROW_OUTCOME not in flags:
+            again = self.run_only(step, *flags, *row_outcome_flags(*rows), mode=mode, counts_log=counts_log,
+                                  fast_read_program=fast_read_program, environment=environment,
+                                  ignored_signal=ignored_signal, reply=reply)
+            if wait_for_reads_ahead:
+                self.wait_for_reads_ahead()
+            result = subprocess.CompletedProcess(again.args, again.returncode, result.stdout + again.stdout,
+                                                 result.stderr + again.stderr)
         return result
 
     def run_only(self, step, *flags, mode, counts_log, fast_read_program, environment, ignored_signal, reply):
@@ -3995,7 +4008,8 @@ def test_an_item_of_no_kind_rated_weak_settled_as_alters_earlier_approved_text_o
           and "cannot be settled without asking the user as case against weak, alters earlier approved text only, because:"
               in result.stderr
           and "or the case against names anything besides the user's earlier word-for-word approval of the text the "
-              "change alters, present item 1 of 3" in result.stderr
+              "change alters, run the read step again and do what it prints before you present item 1 of 3"
+              in result.stderr
           and f"{check_command_for(case, '--not-asked', 'weak-alters-earlier-approved-text-only')}` again"
               in result.stderr
           and case.minutes.read_text() == before, described(result))
@@ -4998,7 +5012,7 @@ def test_help_prints_every_row_of_the_no_answer_table():
 
 def test_read_step_offers_a_row_that_lacks_only_an_evidence_line_with_the_line_to_add_and_its_command():
     case = rated_none_case(touches="", rating=WEAK_COST_ONLY)
-    result = case.run(WAITING_ITEM_READ)
+    result = case.run(WAITING_ITEM_READ, decline_printed_rows=False)
     rows = no_answer_rows_printed(result)
     kind_5 = [row for row in rows if row.startswith("- kind 5:")]
     check("an item with no evidence lines is offered kind 5, naming the line to add and the command to run after",
@@ -5014,14 +5028,14 @@ def test_read_step_offers_a_row_that_lacks_only_an_evidence_line_with_the_line_t
 
 def test_read_step_offers_a_passing_row_and_leaves_out_a_row_the_change_itself_fails():
     case = rated_none_case(rating=WEAK_COST_ONLY)
-    result = case.run(WAITING_ITEM_READ)
+    result = case.run(WAITING_ITEM_READ, decline_printed_rows=False)
     check("a row whose evidence passes is printed with its exact command",
           any(row.startswith("- case against weak, cost only:") and "Its evidence passes" in row
               and check_command_for(case, "--not-asked", "weak-cost-only") in row
               for row in no_answer_rows_printed(result)), described(result))
     case = rated_none_case(touches="#not_asked_touches tools/counter.py CLAUDE.md\n\n", rating=WEAK_COST_ONLY,
                            files=("CLAUDE.md",))
-    result = case.run(WAITING_ITEM_READ)
+    result = case.run(WAITING_ITEM_READ, decline_printed_rows=False)
     check("a row refused for a guarded Markdown file, which no evidence line cures, is not printed",
           not any(row.startswith("- case against weak, cost only:") for row in no_answer_rows_printed(result)),
           described(result))
@@ -5030,7 +5044,7 @@ def test_read_step_offers_a_passing_row_and_leaves_out_a_row_the_change_itself_f
 def test_read_step_reports_a_row_whose_check_fails_and_still_offers_the_others():
     case = rated_none_case(touches="#not_asked_touches tools/counter.py\n\n#not_asked_unused old_reader\n\n",
                            rating=WEAK_COST_ONLY)
-    result = case.run(WAITING_ITEM_READ, environment=stubbed_git_failing_on(case, "grep"))
+    result = case.run(WAITING_ITEM_READ, environment=stubbed_git_failing_on(case, "grep"), decline_printed_rows=False)
     rows = no_answer_rows_printed(result)
     check("a `git grep` that fails while checking kind 3 is reported on that row, which is not offered as passing",
           any(row.startswith("- kind 3: its evidence could not be checked") and "fatal: stub grep failure" in row
@@ -5047,7 +5061,7 @@ def test_read_step_offers_a_removal_that_lacks_only_its_touches_line_while_the_r
     case = rated_none_case(touches="#not_asked_unused old_reader\n\n", rating=WEAK_COST_ONLY,
                            files=("tools/old_reader.py",))
     (case.checkout / "tools" / "old_reader.py").write_text("def old_reader():\n    return 0\n")
-    result = case.run(WAITING_ITEM_READ)
+    result = case.run(WAITING_ITEM_READ, decline_printed_rows=False)
     kind_3 = [row for row in no_answer_rows_printed(result) if row.startswith("- kind 3:")]
     check("a removal with an unused line and no touches line is offered kind 3 as lacking only the touches line",
           len(kind_3) == 1 and "Only evidence is missing" in kind_3[0] and "#not_asked_touches" in kind_3[0]
@@ -5059,15 +5073,136 @@ def test_read_step_offers_the_handoff_row_only_for_an_item_naming_the_handoff():
                                            "shorten the session-handoff file's opening").replace(
         "#case_against none.\n\nRecommendation: print it.",
         f"#case_against {WEAK_COST_ONLY}\n\nRecommendation: print it.", 1)
-    result = Case(next_to_present="item 1 of 3", document=document).run(WAITING_ITEM_READ)
+    result = Case(next_to_present="item 1 of 3", document=document).run(WAITING_ITEM_READ, decline_printed_rows=False)
     check("an item naming the session-handoff is offered the handoff row with --already-decided and its citation",
           any(row.startswith("- the handoff's own internals:") and "--already-decided" in row
               and "nn-systems/handoff/handoff.system.design.md" in row for row in no_answer_rows_printed(result)),
           described(result))
-    result = rated_none_case(rating=WEAK_COST_ONLY).run(WAITING_ITEM_READ)
+    result = rated_none_case(rating=WEAK_COST_ONLY).run(WAITING_ITEM_READ, decline_printed_rows=False)
     check("an item that does not name the handoff is not offered the handoff row",
           not any(row.startswith("- the handoff's own internals:") for row in no_answer_rows_printed(result)),
           described(result))
+
+
+ROWS_WITHHELD = "no-answer table rows printed above have no recorded outcome"
+ROW_ID = re.compile(r"Row id: `([^`]+)`\.$")
+ROW_OUTCOME = "--no-answer-table-row-outcome"
+
+
+def printed_row_ids(result):
+    """The row ids of the no-answer table rows the read step printed."""
+    return [match[1] for match in map(ROW_ID.search, result.stdout.splitlines()) if match]
+
+
+def row_outcome_flags(*rows):
+    return [word for row in rows for word in (ROW_OUTCOME, f"{row}=declined: it does not fit this item")]
+
+
+def read_step_with_every_printed_row_declined(case, *flags):
+    """Run the read step, then run it again declining every row it printed, as an agent whose item fits no row does;
+    return the second run's result."""
+    rows = printed_row_ids(case.run(WAITING_ITEM_READ, *flags, decline_printed_rows=False))
+    return case.run(WAITING_ITEM_READ, *flags, *row_outcome_flags(*rows))
+
+
+def presents(result, item):
+    return f"present {item}" in result.stdout.lower()
+
+
+def test_the_read_step_withholds_an_item_while_a_printed_no_answer_table_row_has_no_outcome():
+    case = rated_none_case(rating=WEAK_COST_ONLY)
+    result = case.run(WAITING_ITEM_READ, decline_printed_rows=False)
+    rows = printed_row_ids(result)
+    check("the read step prints each no-answer table row with its row id",
+          "weak-cost-only" in rows and len(rows) == len(no_answer_rows_printed(result)), described(result))
+    check("an item with a printed row that has no outcome is not handed over to be presented, and the step exits 1",
+          result.returncode == 1 and not presents(result, "item 1 of 3")
+          and "item 1 of 3 is not handed over to be presented yet" in result.stdout, described(result))
+    check("the step prints the read step command declining each printed row",
+          all(f"{ROW_OUTCOME} '{row}=declined: <reason>'" in result.stdout for row in rows), described(result))
+    result = case.run(WAITING_ITEM_READ, *row_outcome_flags(*rows[1:]))
+    check("a list that leaves out a printed row is refused, recording nothing, and the item is not handed over",
+          result.returncode == 1 and f"No outcome is given for row `{rows[0]}`" in result.stderr
+          and not list(case.reads().glob("*-no-answer-table-row-outcomes.json"))
+          and not presents(result, "item 1 of 3"), described(result))
+    result = case.run(WAITING_ITEM_READ, *row_outcome_flags(*rows, "kind-99"))
+    check("a list naming a row not printed is refused, recording nothing",
+          result.returncode == 1 and "names row `kind-99`, which is not a row printed for item 1 of 3" in result.stderr
+          and not list(case.reads().glob("*-no-answer-table-row-outcomes.json")), described(result))
+    result = case.run(WAITING_ITEM_READ, *row_outcome_flags(*rows, rows[0]))
+    check("a list naming a row twice is refused", result.returncode == 1
+          and f"gives row `{rows[0]}` an outcome a second time" in result.stderr, described(result))
+    result = case.run(WAITING_ITEM_READ, *row_outcome_flags(*rows[1:]), ROW_OUTCOME, f"{rows[0]}=declined:")
+    check("a decline with no reason is refused", result.returncode == 1
+          and "is not written <row id>=declined: <reason>" in result.stderr, described(result))
+
+
+def test_the_read_step_hands_over_an_item_once_every_printed_row_is_declined():
+    case = rated_none_case(rating=WEAK_COST_ONLY)
+    result = read_step_with_every_printed_row_declined(case)
+    check("an item whose every printed row is declined is handed over to be presented",
+          result.returncode == 0 and "Then present item 1 of 3" in result.stdout, described(result))
+    check("the read step run again hands it over with no row outcome given, since every row has its outcome",
+          presents(case.run(WAITING_ITEM_READ, AFTER_FIXES), "item 1 of 3"))
+    (case.checkout / "docs" / "walk" / f"{WALK_NAME}.md").write_text(
+        (case.checkout / "docs" / "walk" / f"{WALK_NAME}.md").read_text().replace("print it.", "print it now.", 1))
+    result = case.run(WAITING_ITEM_READ, AFTER_FIXES, decline_printed_rows=False)
+    check("once the item's text changes, its rows need outcomes again", result.returncode == 1
+          and not presents(result, "item 1 of 3"), described(result))
+
+
+def test_after_fixes_with_no_read_withholds_the_item_while_a_row_of_its_changed_text_has_no_outcome():
+    case = rated_none_case(rating=WEAK_COST_ONLY)
+    read_step_with_every_printed_row_declined(case)
+    document = case.checkout / "docs" / "walk" / f"{WALK_NAME}.md"
+    document.write_text(document.read_text().replace("## Item 1 of 3: print the poem count after the list\n",
+                                                     "## Item 1 of 3: print the poem count after the list\n\n"
+                                                     "This item asks little.\n", 1))
+    result = case.run(WAITING_ITEM_READ, AFTER_FIXES, decline_printed_rows=False)
+    check(f"{AFTER_FIXES} after a wording fix runs no read and still withholds the item while a row printed for its "
+          "changed text has no outcome, exit 1",
+          result.returncode == 1 and "item 1 of 3: no new cold-read-fast-read: " in result.stdout
+          and ROWS_WITHHELD in result.stdout and not presents(result, "item 1 of 3"), described(result))
+    result = case.run(WAITING_ITEM_READ, AFTER_FIXES, *row_outcome_flags(*printed_row_ids(result)))
+    check(f"{AFTER_FIXES} with every row declined hands the item over with no read",
+          result.returncode == 0 and "Present item 1 of 3" in result.stdout, described(result))
+
+
+def test_a_rows_command_that_settles_the_item_hands_nothing_over_and_the_walk_moves_on():
+    case = rated_none_case(rating=WEAK_COST_ONLY)
+    case.run(WAITING_ITEM_READ)
+    settled = case.run("check", "--not-asked", "weak-cost-only")
+    closed = case.run("close")
+    check("the row's command settles item 1 of 3 and close moves `#next_to_present` past it, presenting nothing",
+          settled.returncode == 0 and closed.returncode == 0 and marker(case) == "#next_to_present item 2 of 3"
+          and "settled without asking the user, not asked, case against weak, cost only" in case.minutes.read_text()
+          and not presents(closed, "item 1 of 3"),
+          described(settled) + described(closed) + case.minutes.read_text())
+
+
+def test_a_refused_not_asked_check_records_its_row_declined():
+    case = rated_none_case(rating=WEAK_COST_ONLY)
+    case.run(WAITING_ITEM_READ, decline_printed_rows=False)
+    refused_check = case.run("check", "--not-asked", "5")
+    check("a `check --not-asked 5` refusal says it is recorded as row 5 declined",
+          refused_check.returncode == 1 and "row `5` declined" in refused_check.stderr, described(refused_check))
+    result = case.run(WAITING_ITEM_READ, AFTER_FIXES, decline_printed_rows=False)
+    check("the read step then asks for an outcome for every printed row but row 5",
+          f"{ROW_OUTCOME} '5=declined" not in result.stdout
+          and f"{ROW_OUTCOME} 'weak-cost-only=declined" in result.stdout, described(result))
+    result = case.run(WAITING_ITEM_READ, AFTER_FIXES,
+                      *row_outcome_flags(*(row for row in printed_row_ids(result) if row != "5")))
+    check("declining the other rows then hands the item over", presents(result, "item 1 of 3"), described(result))
+
+
+def test_a_refused_not_asked_check_whose_decline_cannot_be_recorded_says_so():
+    case = rated_none_case(rating=WEAK_COST_ONLY)
+    case.reads().write_text("a file where the directory would be\n")
+    refused_check = case.run("check", "--not-asked", "5")
+    check("a refusal whose decline cannot be written says so and tells the agent to record it itself",
+          refused_check.returncode == 1 and "could not be recorded as item 1 of 3's no-answer table row `5` declined"
+          in refused_check.stderr and "cannot be settled without asking the user as kind 5" in refused_check.stderr,
+          described(refused_check))
 
 
 def test_every_answer_flag_is_covered_by_the_rerun_command_cases():
@@ -6916,6 +7051,18 @@ def run_printed_command(case, command):
                  TMPDIR=str(case.temporary_directory), GH_STAND_IN_CALLS=str(case.gh_calls)))
 
 
+def printed_row_outcomes_command(result):
+    """The read step command, with its continuation lines, that the program printed to decline the item's
+    no-answer table rows, each reason filled in; "false" when it printed none."""
+    lines = result.stdout.split("\n")
+    first = next((index for index, line in enumerate(lines)
+                  if line.startswith("python3 ") and line.endswith(" \\") and WAITING_ITEM_READ in line), None)
+    if first is None:
+        return "false"
+    end = next(index for index in range(first, len(lines)) if not lines[index].endswith(" \\"))
+    return "\n".join(lines[first:end + 1]).replace("<reason>", "it does not fit this item")
+
+
 def printed_command_with(result, words):
     return next((command for command in printed_program_commands(result) if words in command), "false")
 
@@ -6929,10 +7076,16 @@ def check_every_printed_command_from_a_path_holding_a_space():
     case.wait_for_reads_ahead()
     check("from a path holding a space, the printed close command runs and prints a read-step command",
           closed.returncode == 0 and each_printed_command_names_a_file(closed), described(closed))
-    read = run_printed_command(case, printed_command_with(closed, WAITING_ITEM_READ))
+    withheld = run_printed_command(case, printed_command_with(closed, WAITING_ITEM_READ))
     case.wait_for_reads_ahead()
     check("from a path holding a space, the printed read-step command runs, and each command it prints names a file",
-          read.returncode == 0 and each_printed_command_names_a_file(read), described(read))
+          withheld.returncode == 1 and ROWS_WITHHELD in withheld.stdout and each_printed_command_names_a_file(withheld),
+          described(withheld))
+    read = run_printed_command(case, printed_row_outcomes_command(withheld))
+    case.wait_for_reads_ahead()
+    check("from a path holding a space, the printed command declining the item's no-answer table rows runs, and each "
+          "command it prints names a file", read.returncode == 0 and each_printed_command_names_a_file(read),
+          described(read))
     reread = run_printed_command(case, printed_command_with(read, AFTER_FIXES))
     case.wait_for_reads_ahead()
     check("from a path holding a space, the read-step command with its after-fixes flag runs",
@@ -6996,8 +7149,11 @@ def check_read_step_retry_after_failed_scratch_removal_drops_only_the_after_fixe
           described(stopped))
     ran = run_printed_command(case, retry)
     case.wait_for_reads_ahead()
-    check("the retry a failed scratch removal prints runs from a path holding a space", ran.returncode == 0,
-          described(ran))
+    declined = run_printed_command(case, printed_row_outcomes_command(ran))
+    case.wait_for_reads_ahead()
+    check("the retry a failed scratch removal prints runs from a path holding a space, and so does the command it "
+          "prints declining the item's no-answer table rows", ROWS_WITHHELD in ran.stdout and declined.returncode == 0,
+          described(ran) + described(declined))
 
 
 def test_every_printed_command_runs_from_a_checkout_path_holding_a_space():
