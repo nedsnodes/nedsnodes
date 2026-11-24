@@ -123,7 +123,7 @@ Each part ships as its tests pass. Parts 1 to 4 ship in this order; part 5 needs
 
 ## Next action
 
-prime-intellect builds the build order's parts in turn. Part 1, the store and the index program, merged on 2026-11-03 in PR [Standing user-rulings store: the index program, its store, index file and anchor list, and the first load (GHI 2118 build step 1)](https://github.com/nedsnodes/nedsnodes/pull/2194). The job that runs the index program each minute is not running yet: on 2026-11-07 ned-box's crontab had no line naming `scripts/standing-user-rulings-store-add-from-transcripts-and-walk-minutes-then-index-file-and-anchor-list-for-hooks-write.py`, and `git grep` of that file name over origin/main found it only in the script itself and its test. Part 2 is next.
+prime-intellect builds the build order's parts in turn. Part 1, the store and the index program, merged on 2026-11-03 in PR [Standing user-rulings store: the index program, its store, index file and anchor list, and the first load (GHI 2118 build step 1)](https://github.com/nedsnodes/nedsnodes/pull/2194). The job that runs the index program each minute, with `--failures-only`, is the entry of that program in `nn-systems/general-tools/scheduled-jobs-on-each-machine.json`, which ned-box's reference-checkout installs when it pulls the merge that adds it. Part 2 is next.
 
 ## Open questions for the user
 

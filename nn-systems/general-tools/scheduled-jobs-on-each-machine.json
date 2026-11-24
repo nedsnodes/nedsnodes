@@ -27,6 +27,16 @@
       }
     },
     {
+      "name": "standing-user-rulings-store-add-from-transcripts-and-walk-minutes-then-index-file-and-anchor-list-for-hooks-write",
+      "owner": "prime-intellect",
+      "program": "scripts/standing-user-rulings-store-add-from-transcripts-and-walk-minutes-then-index-file-and-anchor-list-for-hooks-write.py",
+      "arguments": ["--failures-only"],
+      "output": ".claude/standing-user-rulings-store-add-from-transcripts-and-walk-minutes-then-index-file-and-anchor-list-for-hooks-write.log",
+      "on": {
+        "ned-box": {"scheduler": "cron", "schedule": "* * * * *"}
+      }
+    },
+    {
       "name": "log-store-session-dialogs-refresh",
       "owner": "cold-read-research",
       "program": "scripts/log-store-session-dialogs-refresh-hack.py",
