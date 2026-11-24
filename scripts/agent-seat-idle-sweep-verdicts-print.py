@@ -38,7 +38,10 @@ messages it has already checked; by default it checks only the last one, and
 account change, since that needs the account recorded when the limit was first seen; it reports
 the account now logged in; --usage-limit-record-uuid-to-ignore names a limit record rule 1 no
 longer applies to, which the second build-slice decides from its log. It runs on ned-box and reads
-only ned-box's files, so it does not see the Mac's agent-seats.
+only ned-box's files, so it does not see the Mac's agent-seats. It does not tell a sentence that
+assesses an action from one that promises it: a sentence that opens with an announced-action
+phrase and names a time, such as "Going on with item 2 tomorrow sounds risky.", reads as
+`promise_after_event`, so rule 2 can send an unbacked-promise nudge for it without the judge.
 
 How it fails: when a file it must read cannot be read, or is not UTF-8 or JSON where a whole line
 is expected, or `gh` cannot answer, the agent-seat's line carries the failure under "errors" and
