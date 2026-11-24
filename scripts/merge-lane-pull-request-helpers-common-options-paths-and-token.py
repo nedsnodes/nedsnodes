@@ -32,6 +32,7 @@ REPOSITORY = _repository_names.REPOSITORY
 DEFAULT_MERGE_LANE_WORKTREES_AND_OUTPUTS_DIRECTORY = Path(
     "/home/nedlern/nedsnodes-logs/seats/merge-lane-2/merge-helpers")
 REVIEW_WORKTREES_DIRECTORY_UNDER_HOME = Path(".cache") / "merge-lane-review-worktrees"
+MERGE_LANE_REBUILT_MERGED_WORKTREE_COMMIT_LINE_PREFIX = "merged commit: "
 # A clone or worktree of this repository, from which a missing review tools
 # worktree can be made.
 REPOSITORY_ROOT = Path(__file__).resolve().parents[1]

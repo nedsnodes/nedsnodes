@@ -262,6 +262,8 @@ def parse_arguments(argv):
                     "log in the log-store under the head's commit hash.")
     parser.add_argument("--checkout", default=str(REPOSITORY_ROOT))
     parser.add_argument("--since", metavar="COMMIT")
+    parser.add_argument("--refuse-unless-checkout-head-is-commit", metavar="FULL_HASH",
+                        help="exit 2 with no test run when the checkout's HEAD is another commit")
     parser.add_argument(
         "--log-store-root",
         default=scheduled_full_test_run_of_main.SCHEDULED_FULL_TEST_RUN_DEFAULT_LOG_STORE_ROOT)
@@ -290,6 +292,20 @@ def main(argv=None, now=None, monotonic=time.monotonic) -> int:
                         f"Pass --checkout the top directory of a checkout at the commit to test.")
         return EXIT_CHECKOUT_REFUSED
     head = resolved.stdout.strip()
+    expected = arguments.refuse_unless_checkout_head_is_commit
+    if expected is not None and head != expected:
+        write_to_stderr(f"{PROGRAM}: not run — HEAD of {checkout} is {head}, not {expected}, "
+                        f"the commit this run was asked to test, so no suite ran: a pass here "
+                        f"would be a pass on another commit. Another run may have rebuilt this "
+                        f"checkout.\n"
+                        f"Run `pgrep -af merge-lane-pull-request-head-test-run-on-merged-worktree.py`.\n"
+                        f"While it lists a run for the pull request of {checkout.name}, run it "
+                        f"again once a minute.\n"
+                        f"When it lists none for that pull request, run scripts/merge-lane-pull-"
+                        f"request-head-test-run-on-merged-worktree.py <pull request number> "
+                        f"again from the main checkout, with the options the last run had; it "
+                        f"rebuilds this checkout and tests the commit it builds.")
+        return EXIT_CHECKOUT_REFUSED
     differing, why_status_failed = first_tracked_file_that_differs(checkout)
     if why_status_failed is not None:
         write_to_stderr(f"{PROGRAM}: not run — git status failed in {checkout}: {why_status_failed}\n"

@@ -35,7 +35,8 @@ so a run stopped before it ends has shown how far it got. tripwire-bin/ goes fir
 the call and exit 1, so no suite starts a real agent.
 
 pull-request-head-test-run.py waits for the machine's test lock itself, so
-nothing here retries.
+nothing here retries. It is given the merged commit the rebuild made and refuses
+to test any other, because another run can rebuild the same pr<n>-merged first.
 
 Prints one line per pull request with the run's exit code, SUMMARY line and
 the main commit it tested.
@@ -160,8 +161,8 @@ def head_commit_to_test(arguments, number, environment):
     return commit, None
 
 
-def merged_worktree_rebuild_failure(arguments, number, head, main_commit, environment):
-    """Rebuild pr<n>-merged; return None, or what failed."""
+def merged_commit_rebuilt(arguments, number, head, main_commit, environment):
+    """Rebuild pr<n>-merged; return (the merged commit it built, None), or (None, what failed)."""
     tools = arguments.review_tools_worktree_at_main
     rebuild = subprocess.run(
         [sys.executable, str(tools / MERGED_WORKTREE_REBUILD), str(number), head, main_commit,
@@ -169,8 +170,16 @@ def merged_worktree_rebuild_failure(arguments, number, head, main_commit, enviro
         stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True, errors="replace",
         env=environment, stdin=subprocess.DEVNULL)
     if rebuild.returncode != 0:
-        return f"{MERGED_WORKTREE_REBUILD.name} exited {rebuild.returncode}:\n{rebuild.stdout.strip()}"
-    return None
+        return None, (f"{MERGED_WORKTREE_REBUILD.name} exited {rebuild.returncode}:\n"
+                      f"{rebuild.stdout.strip()}")
+    prefix = common.MERGE_LANE_REBUILT_MERGED_WORKTREE_COMMIT_LINE_PREFIX
+    commits = [line[len(prefix):] for line in rebuild.stdout.splitlines()
+               if line.startswith(prefix)]
+    if len(commits) != 1 or not re.fullmatch(r"[0-9a-f]{40}|[0-9a-f]{64}", commits[0]):
+        return None, (f"{MERGED_WORKTREE_REBUILD.name} exited 0 without one line giving the "
+                      f"full hash of the merged commit after {prefix!r}, so this run cannot "
+                      f"tell which commit it would test:\n{rebuild.stdout.strip()}")
+    return commits[0], None
 
 
 def main(argv=None):
@@ -202,9 +211,10 @@ def main(argv=None):
     first_failure = 0
     for number in arguments.pull_requests:
         head_commit, failure = head_commit_to_test(arguments, number, environment)
+        merged_commit = None
         if failure is None:
-            failure = merged_worktree_rebuild_failure(arguments, number, head_commit,
-                                                      main_commit, environment)
+            merged_commit, failure = merged_commit_rebuilt(arguments, number, head_commit,
+                                                           main_commit, environment)
         if failure is not None:
             print(f"PR {number} head test run: not run, because pr{number}-merged could not be "
                   f"rebuilt on main {main_commit[:12]}, so no suite ran for this pull request.\n"
@@ -223,6 +233,7 @@ def main(argv=None):
                  "--log-store-root", str(log_store),
                  "--temporary-directory", str(outputs / "tmp"),
                  "--since", main_commit,
+                 "--refuse-unless-checkout-head-is-commit", merged_commit,
                  "--recorded-inputs-directory",
                  str(common.merge_lane_head_test_run_recorded_inputs_store_directory(arguments)),
                  "--save-recorded-inputs-to-directory",

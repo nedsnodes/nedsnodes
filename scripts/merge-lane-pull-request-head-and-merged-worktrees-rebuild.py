@@ -10,7 +10,9 @@ local, then makes pr<n>-head at the nn-head-commit and pr<n>-merged at the main 
 in, as merge-lane-2, always with a merge commit. A worktree already at either
 path is removed first, with any changes in it. --merged-worktree-only makes
 pr<n>-merged alone and leaves pr<n>-head as it is, because reviewers may be
-reading it.
+reading it. Its last line of output, on success, gives the full hash of the merged commit
+it built. Another run can rebuild the same pr<n>-merged at any moment, so it exits 1 when the
+commit it reads back is not main merged with the nn-head-commit.
 
 Git runs in --review-tools-worktree-at-main. Every worktree of one repository shares its
 objects, so the fetched nn-head-commit is visible to the new worktrees.
@@ -74,6 +76,14 @@ def git(directory, *arguments):
     return completed.stdout.strip()
 
 
+def commit_is_main_merged_with_head(checkout, commit, main_full, head_full):
+    parents = git(checkout, "rev-list", "--parents", "-n", "1", commit).split()[1:]
+    if parents == [main_full, head_full]:
+        return True
+    # A head main already holds merges to main itself, with no new commit.
+    return commit == main_full and git(checkout, "merge-base", head_full, main_full) == head_full
+
+
 def main(argv=None):
     arguments = parse_arguments(argv)
     number = arguments.pull_request
@@ -109,8 +119,20 @@ def main(argv=None):
             git(merged_worktree, "merge", "--abort")
             raise HeadConflictsWithMain(", ".join(conflicted))
         head_short = git(checkout, "rev-parse", "--short", head_full)
-        merged_short = git(merged_worktree, "rev-parse", "--short", "HEAD")
-        merged_tree = git(merged_worktree, "rev-parse", "HEAD^{tree}")
+        merged_full = git(merged_worktree, "rev-parse", "--verify", "HEAD^{commit}")
+        main_full = git(checkout, "rev-parse", "--verify", f"{arguments.main_commit}^{{commit}}")
+        if not commit_is_main_merged_with_head(checkout, merged_full, main_full, head_full):
+            print(f"PR {number}: pr{number}-merged not usable: {merged_worktree} is at "
+                  f"{merged_full}, which is not main {main_full} merged with head {head_full}, "
+                  f"so another run rebuilt it while this one did, and a test run there would "
+                  f"test that run's commit.\n"
+                  f"Run `pgrep -af merge-lane-pull-request-head-test-run-on-merged-worktree.py`.\n"
+                  f"While it lists a run with the argument {number}, run it again once a minute.\n"
+                  f"When it lists none, run the command you ran that started this program "
+                  f"again, with the same options; it rebuilds pr{number}-merged.")
+            return 1
+        merged_short = git(checkout, "rev-parse", "--short", merged_full)
+        merged_tree = git(checkout, "rev-parse", f"{merged_full}^{{tree}}")
     except HeadConflictsWithMain as conflict:
         print(f"PR {number}: worktrees not rebuilt: head {arguments.head_commit[:8]} conflicts "
               f"with main {arguments.main_commit[:8]} in: {conflict}\n"
@@ -130,7 +152,8 @@ def main(argv=None):
               f"Otherwise, tell the user this message.")
         return 1
     print(f"PR {number}: head {head_short}, merged {merged_short} tree {merged_tree} "
-          f"on main {arguments.main_commit[:8]}")
+          f"on main {arguments.main_commit[:8]}\n"
+          f"{common.MERGE_LANE_REBUILT_MERGED_WORKTREE_COMMIT_LINE_PREFIX}{merged_full}")
     return 0
 
 

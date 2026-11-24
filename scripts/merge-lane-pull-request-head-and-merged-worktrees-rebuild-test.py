@@ -142,7 +142,9 @@ def main():
                   completed.stdout.strip() == (
                       f"PR 7: head {head_commit[:7]}, merged "
                       f"{git(merged_worktree, 'rev-parse', '--short', 'HEAD')} tree "
-                      f"{merged_tree} on main {main_commit[:8]}"), completed.stdout)
+                      f"{merged_tree} on main {main_commit[:8]}\n"
+                      f"merged commit: {git(merged_worktree, 'rev-parse', 'HEAD')}"),
+                  completed.stdout)
 
             (head_worktree / "left-behind.txt").write_text("a change in the old worktree\n")
             completed = run_program(helpers, checkout, "7", head_commit, main_commit)
@@ -151,6 +153,30 @@ def main():
                   and not (head_worktree / "left-behind.txt").exists()
                   and git(head_worktree, "rev-parse", "HEAD") == head_commit,
                   f"exit {completed.returncode}\n{completed.stdout}{completed.stderr}")
+
+        other_run_bin = scratch / "another-run-rebuilds-after-the-merge-bin"
+        other_run_bin.mkdir()
+        real_git = shutil.which("git")
+        (other_run_bin / "git").write_text(
+            f'#!/bin/sh\n"{real_git}" "$@"\nstatus=$?\n'
+            f'case " $* " in *" merge -q "*) "{real_git}" -C "$2" reset -q --hard {main_commit};; esac\n'
+            f'exit $status\n')
+        (other_run_bin / "git").chmod(0o755)
+        path_before = GIT_ENVIRONMENT.get("PATH", os.environ["PATH"])
+        GIT_ENVIRONMENT["PATH"] = f"{other_run_bin}{os.pathsep}{path_before}"
+        try:
+            completed = run_program(helpers, checkout, "7", head_commit, main_commit)
+        finally:
+            GIT_ENVIRONMENT["PATH"] = path_before
+        check("when another run replaces pr<n>-merged right after the merge, the rebuild exits "
+              "1 and gives no merged commit",
+              completed.returncode == 1 and "another run rebuilt it" in completed.stdout
+              and "Run `pgrep -af merge-lane-pull-request-head-test-run-on-merged-worktree.py`."
+              in completed.stdout
+              and "When it lists none, run the command you ran that started this program again"
+              in completed.stdout
+              and "merged commit:" not in completed.stdout,
+              f"exit {completed.returncode}\n{completed.stdout}{completed.stderr}")
 
         relative_helpers = scratch / "relative-helpers"
         completed = run_program(Path("relative-helpers"), Path("checkout"), "7", head_commit,
