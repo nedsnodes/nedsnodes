@@ -36,6 +36,7 @@ import subprocess
 import sys
 import tempfile
 import time
+import xml.etree.ElementTree
 
 # Before anything runs git: a run started with GIT_DIR set, or with another
 # variable that redirects git, must still build this suite's scratch
@@ -4893,6 +4894,79 @@ for how, replacement in (
     check(f"a checkout that {how} is refused, naming the list, rather than given the runner's "
           f"own list",
           isinstance(refused, module.CouldNotRun) and REAL_CLAUDE in str(refused), refused)
+
+
+
+def case_line(verdict, text):
+    return {"verdict": verdict, "name": text.split(": ", 1)[0] if verdict == "FAIL" else text,
+            "detail": "", "text": text}
+
+
+resolved = {case["text"]: (case["name"], case["detail"]) for case in
+            module.test_cases_with_failing_case_names_resolved_against_the_suites_other_case_names([
+                case_line("PASS", "--failures-only: prints Z"),
+                case_line("FAIL", "--failures-only: prints X: /tmp/a: gone"),
+                case_line("FAIL", "--failures-only: prints Y: status 2"),
+                case_line("FAIL", "plain: status 2"),
+                case_line("FAIL", "no detail")])}
+check("a failing case whose name holds ': ' keeps its whole name when another case's name "
+      "starts the same way, and a lone case's name ends at its first ': '",
+      resolved == {"--failures-only: prints Z": ("--failures-only: prints Z", ""),
+                   "--failures-only: prints X: /tmp/a: gone": ("--failures-only: prints X",
+                                                              "/tmp/a: gone"),
+                   "--failures-only: prints Y: status 2": ("--failures-only: prints Y",
+                                                           "status 2"),
+                   "plain: status 2": ("plain", "status 2"),
+                   "no detail": ("no detail", "")}, resolved)
+check("a SKIP line's case text drops SKIP and the this-machine-cannot-run-it mark",
+      module.skipped_case_line_text_without_skip_prefix_and_this_machine_cannot_run_marker("SKIP  [this machine cannot run it] case a: no Mac") == "case a: no Mac"
+      and module.skipped_case_line_text_without_skip_prefix_and_this_machine_cannot_run_marker("SKIP case b") == "case b")
+
+ran_to_the_end_directory = pathlib.Path(tempfile.mkdtemp(prefix="ran-to-the-end-"))
+crashed_log = ran_to_the_end_directory / "crashed.log"
+crashed_log.write_text("FAIL  case a: x\nTraceback (most recent call last):\n  boom\n")
+clean_log = ran_to_the_end_directory / "clean.log"
+clean_log.write_text("FAIL  case a: x\n      Traceback (most recent call last): quoted\n")
+failing_case = [case_line("FAIL", "case a: x")]
+for how, result, expected in (
+        ("passed", {"exit": 0, "cases": failing_case[:0] + [case_line("PASS", "case a")]}, True),
+        ("failed a case and exited", {"exit": 1, "cases": failing_case, "log": clean_log}, True),
+        ("printed no case line and failed", {"exit": 1, "cases": []}, True),
+        ("was killed by a signal", {"exit": -9, "cases": failing_case, "log": clean_log}, False),
+        ("passed its time limit", {"exit": 1, "cases": failing_case, "log": clean_log,
+                                   "timeout": {"limit": 1}}, False),
+        ("was NOT RUN", {"exit": 2, "cases": [], "test sandbox did not start": True}, False),
+        ("was stopped by the run", {"exit": -15, "cases": [], "stopped by": "run"}, False),
+        ("failed after its last case line", {"exit": 1, "cases": [case_line("PASS", "case a")]},
+         False),
+        ("printed an uncaught traceback", {"exit": 1, "cases": failing_case, "log": crashed_log},
+         False),
+        ("has an unreadable log", {"exit": 1, "cases": failing_case,
+                                   "log": ran_to_the_end_directory / "missing.log"}, False)):
+    check(f"a suite that {how} {'ran' if expected else 'did not run'} to the end",
+          module.test_suite_ran_to_the_end(result) is expected, result)
+
+junit_directory = ran_to_the_end_directory / "junit"
+junit_directory.mkdir()
+module.write_case_times_suite_resources_and_junit_xml_of_run(junit_directory, [
+    {"suite": "scripts/a-test.py", "exit": 1, "seconds": 1.0, "log": clean_log,
+     "skips": ["SKIP  case s: no Mac"],
+     "cases": [dict(case_line("FAIL", "case a: x"), seconds=0.5, ended=0.5, unix_time=0.0)]},
+    {"suite": "scripts/b-test.py", "exit": 2, "seconds": 0.0, "log": clean_log, "skips": [],
+     "cases": [], "test sandbox did not start": True}])
+junit_root = xml.etree.ElementTree.parse(junit_directory / "junit.xml").getroot()
+junit_suites = {element.get("name"): element for element in junit_root.iter("testsuite")}
+check("the JUnit XML names each skipped case, and says whether each suite ran to the end and "
+      "was judged",
+      [(case.get("name"), case.find("skipped") is not None)
+       for case in junit_suites["scripts/a-test.py"].iter("testcase")]
+      == [("case s: no Mac", True), ("case a", False)]
+      and junit_suites["scripts/a-test.py"].get("ran_to_the_end") == "true"
+      and junit_suites["scripts/a-test.py"].get("judged") == "true"
+      and junit_suites["scripts/b-test.py"].get("ran_to_the_end") == "false"
+      and junit_suites["scripts/b-test.py"].get("judged") == "false",
+      xml.etree.ElementTree.tostring(junit_root))
+shutil.rmtree(ran_to_the_end_directory)
 
 print()
 # The count is printed so a short run is visible on sight: a run that ends
