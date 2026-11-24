@@ -831,7 +831,7 @@ with tempfile.TemporaryDirectory() as workspace:
           "Approve the early change?" not in tail and f"{before_tail_introduction}\n\nearly reply" in tail
           and INTRODUCTION not in tail, tail)
 
-    # The shape of transcripts 608ae0eb, fcbc9268 and 8fe60f28: Claude Code delivers the peer message without its hop-chain.
+    # Claude Code delivers a queued peer message without the hop-chain attribute its enqueue record carries.
     path = write_transcript(workspace, "peer-delivered-without-hop-chain.jsonl", [
         *ordinary_records(), enqueue_record("./command-the-agent-ran.sh"),
         enqueue_record('<cross-session-message from="bridge:session_01" hop-chain="fce1498b" from-name="peer">\n'
