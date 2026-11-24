@@ -28,7 +28,9 @@ Each invocation, under a lock that keeps two from overlapping:
    decide whether to message it, and write the message. The judge is not told of a background
    command whose verdict gives a `timeout_ends_at` not yet reached, since such work ends by itself, nor of a background command, subagent or workflow a rule 5 message
    has already named, since the sweep asks once about each; when something runs and all of it is
-   such work, the judge is not asked. Neither is it told of an open task a rule 5 message has
+   such work, the judge is not asked. Code ends a rule 5 message with a list of the open tasks
+   the judge raised, and a task counts as raised only when the text sent lists it. Neither is
+   the judge told of an open task a rule 5 message has
    already raised in this agent-session since the user last typed in it, unless the agent-seat has
    since recorded something the task waits on, and rule 3 does not send again about the same
    put-off handoff in that time, leaving the open tasks to the judge; when nothing else is left,
@@ -241,9 +243,11 @@ IDLE_JUDGE_ANSWER_SCHEMA = {
                    "reason": {"type": "string"},
                    OPEN_TASK_IDS_RAISED: {
                        "type": "array", "items": {"type": "string"},
-                       "description": "The id of each task in open_tasks_nothing_holds that the "
-                                      "message raises; empty when send is false or the message "
-                                      "raises none."}}}
+                       "description": "The id of every task in open_tasks_nothing_holds that the "
+                                      "agent-seat could act on now, whether or not the message "
+                                      "names it: the program lists these tasks at the end of the "
+                                      "message. Empty when send is false or none could be acted "
+                                      "on."}}}
 SENTENCES_ANSWER_SCHEMA = {
     "type": "object", "required": ["sentences"],
     "properties": {"sentences": {"type": "array", "items": {
@@ -1347,10 +1351,16 @@ class Sweep:
         send = not problem and answer["send"]
         sent = False
         if send:
-            self.start_wait(seat, verdict, stretch, answer["message"], 5)
-            sent = self.send(seat, verdict, answer["message"], NUDGE)
-            self.reminder_sent(seat, verdict, sent, [open_task_subject(task_id)
-                                                     for task_id in answer[OPEN_TASK_IDS_RAISED]])
+            raised = [task for task in facts["open_tasks_nothing_holds"]
+                      if task["id"] in answer[OPEN_TASK_IDS_RAISED]]
+            message = answer["message"] + open_tasks_raised_listing(raised)
+            self.start_wait(seat, verdict, stretch, message, 5)
+            sent = self.send(seat, verdict, message, NUDGE)
+            # The listing, not the judge's own words, says which tasks the message covers, and a
+            # task the sender left out of the text sent was never reminded of.
+            self.reminder_sent(seat, verdict, sent, [
+                open_task_subject(task["id"]) for task in raised
+                if sent and open_task_listed_in(sent["text"], task["id"])])
         # Work counts as asked about only once a message reached the agent-seat: a failed send
         # leaves it for a later sweep to hand to the judge again.
         self.record({"event": "judge_answer", "agent_seat": seat, "rule": 5,
@@ -1472,6 +1482,18 @@ def running_work_named_in(facts, message):
 
 def open_task_subject(task_id):
     return f"open task: {task_id}"
+
+
+def open_tasks_raised_listing(tasks):
+    """The sentence code adds to a rule 5 message naming every open task the judge raised, or ""."""
+    if not tasks:
+        return ""
+    return " Open tasks nothing holds: " + "; ".join(
+        f'#{task["id"]} "{task.get("subject") or ""}"' for task in tasks) + "."
+
+
+def open_task_listed_in(text, task_id):
+    return re.search(rf"(?<![\w#])#{re.escape(task_id)}(?![\w])", text) is not None
 
 
 def idle_judge_answer_problem(answer, open_task_ids):
