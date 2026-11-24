@@ -280,7 +280,7 @@ The user has no "strong opinions" on order beyond easy parts first. Each step is
 5. If a resumed `claude -p` agent does not show in Remote Control, how does the user reach an agent inside a node?
 6. Each state-machine-run's record is one JSONL file in the log-store on ned-box; a state-machine-run on the Mac waits while ned-box cannot be reached.
 7. When a detached task passes its wait-limit, does the machine keep waiting, stop and rerun the task, or ask the user?
-8. Does a transition need general guards on state-machine-run data, or are loop limits enough until a real machine needs more?
+8. A transition has no general guard; a loop limit is the only condition on it, and a node that must choose from data reports a different output state.
 9. The runner's schema check rests on the user's approval of item 4; no node adds its own validation, and `CLAUDE.md`'s two conditions for a guard stay as they are.
 10. Should the code-prompt-code bullet of `CLAUDE.md` name its two kinds, cpc-tool and cpc-node?
 11. Should create-GHI and edit-GHI write their own rerun task, reversing the user-ruling of 2026-10-10?
