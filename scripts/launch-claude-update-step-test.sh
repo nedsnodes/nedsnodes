@@ -9,10 +9,12 @@ set -u
 
 SCRIPT_DIRECTORY=$(cd "$(dirname "$0")" && pwd)
 FAILURES=0
+PASSED=0
+echo "START $(date -u +%Y-%m-%dT%H:%M:%SZ)"
 
 check() {
     name="$1"; shift
-    if [ "$1" -eq 0 ]; then echo "PASS  $name"; else echo "FAIL  $name"; FAILURES=$((FAILURES + 1)); fi
+    if [ "$1" -eq 0 ]; then echo "PASS  $name"; PASSED=$((PASSED + 1)); else echo "FAIL  $name"; FAILURES=$((FAILURES + 1)); fi
 }
 
 WORKSPACE=$(mktemp -d)
@@ -324,5 +326,7 @@ check "the after-exit invocation pre-trusts inside the workspace, not the real H
     "$(grep -q 'seatprompt' "$WORKSPACE/home/.claude.json" 2>/dev/null; echo $?)"
 
 echo
-if [ "$FAILURES" -gt 0 ]; then echo "$FAILURES case(s) failed"; exit 1; fi
+END_LINE="END $(date -u +%Y-%m-%dT%H:%M:%SZ) passed=$PASSED failed=$FAILURES"
+if [ "$FAILURES" -gt 0 ]; then echo "$FAILURES case(s) failed"; echo "$END_LINE"; exit 1; fi
 echo "all cases passed"
+echo "$END_LINE"
