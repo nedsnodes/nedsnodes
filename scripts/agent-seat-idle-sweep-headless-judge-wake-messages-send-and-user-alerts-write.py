@@ -470,21 +470,24 @@ class SweepLog:
     def reminded_subjects(self, seat, session_id, last_user_typed_at, last_held_at):
         """What a rule 3 or rule 5 message has reminded this agent-session of since the user last
         typed in it, less what a message the delivery check did not find named and what
-        last_held_at, {subject: time}, shows was held after the message."""
+        last_held_at, {subject: time}, shows was held after the message arrived."""
         not_found = {event["message_id"] for event in self.of_seat(seat, "delivery_checked")
                      if not event["found"]}
-        # The user typing while the sender runs, before the message arrives, has not answered it:
+        # Typing or a hold while the sender runs, before the message arrives, has not answered it:
         # until the delivery check gives the time it arrived, the time the send was logged stands in.
         received_at = {event["message_id"]: event["received_at"]
                        for event in self.of_seat(seat, "delivery_checked") if event.get("received_at")}
         typed = parse_time(last_user_typed_at) if last_user_typed_at else None
-        return {subject for event in self.of_seat(seat, REMINDER_SENT)
-                if event["session_id"] == session_id and event["message_id"] not in not_found
-                and (typed is None
-                     or parse_time(received_at.get(event["message_id"], event["at"])) >= typed)
-                for subject in event["subjects"]
-                if subject not in last_held_at
-                or last_held_at[subject] < parse_time(event["send_started_at"])}
+        reminded = set()
+        for event in self.of_seat(seat, REMINDER_SENT):
+            if event["session_id"] != session_id or event["message_id"] in not_found:
+                continue
+            arrived = parse_time(received_at.get(event["message_id"], event["at"]))
+            if typed is not None and arrived < typed:
+                continue
+            reminded.update(subject for subject in event["subjects"]
+                            if subject not in last_held_at or last_held_at[subject] < arrived)
+        return reminded
 
     def checked_sentences(self, seat):
         return {(event["record_uuid"], event["sentence"])
@@ -1543,13 +1546,18 @@ def sweep(arguments, now):
         since = parse_time(check["transcript_read_at"]) if check else None
         read_times[seat] = run.current()
         verdict = verdicts_print.verdict_for_seat(seat, paths, now, since, checker, parser, skipped)
+        budget_skips = list(verdict.get(fields.GITHUB_CONDITIONS_SKIPPED_FOR_BUDGET, []))
         if since and verdict.get(fields.SESSION_ID) not in (None, check["session_id"]):
             verdict = verdicts_print.verdict_for_seat(seat, paths, now, None, checker, parser,
                                                       skipped)
+            # The reread decides the wake, but the first read's skips happened too.
+            budget_skips += [condition for condition
+                             in verdict.get(fields.GITHUB_CONDITIONS_SKIPPED_FOR_BUDGET, [])
+                             if condition not in budget_skips]
         verdicts[seat] = verdict
-        if verdict.get(fields.GITHUB_CONDITIONS_SKIPPED_FOR_BUDGET):
+        if budget_skips:
             run.record({"event": fields.GITHUB_CONDITIONS_SKIPPED_FOR_BUDGET, "agent_seat": seat,
-                        "conditions": verdict[fields.GITHUB_CONDITIONS_SKIPPED_FOR_BUDGET]})
+                        "conditions": budget_skips})
     run.account_change(verdicts)
     run.delivery_checks(verdicts)
     for seat, verdict in verdicts.items():
