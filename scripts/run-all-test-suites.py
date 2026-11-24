@@ -242,8 +242,8 @@ file instead; the report names each file that supplied a list. A run refuses, ex
 top-level assignment to one of the four gives it a value not written out literally, such as a dict
 built by a call, or when the file binds it only by another statement, such as a `for` loop, an
 augmented assignment or an assignment inside an `if` block. Such a statement after a literal
-assignment is not seen, and neither is a `def`, `class` or `import ... as` of the name, which
-leaves the list to be taken from this file.
+assignment is not seen, so the literal value is read. A `def`, `class` or `import ... as` of
+the name is not seen either, so the list is taken from this file as if the checkout lacked it.
 A suite bwrap reports as exiting 128+N is reported as killed by signal N;
 sandbox-exec replaces itself with the suite, so a suite's exit passes through.
 
