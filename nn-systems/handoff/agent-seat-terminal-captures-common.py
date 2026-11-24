@@ -44,6 +44,7 @@ LOG_STORE_AGENT_SESSION_FILES_BY_MACHINE_DIRECTORY = Path(
 # The transcript mirror copies the Mac's ~/.claude/<name> to the store's mac/<name>.
 AGENT_SEAT_TERMINAL_CAPTURES_DIRECTORY_UNDER_HOME_ON_A_MACHINE_WITHOUT_THE_LOG_STORE = Path(".claude") / AGENT_SEAT_TERMINAL_CAPTURES_DIRECTORY_NAME
 AGENT_SEAT_TERMINAL_CAPTURES_KEPT_DAYS = 7
+AGENT_SEAT_TERMINAL_CAPTURE_START_TIME_FORMAT = "%Y%m%dT%H%M%SZ"
 TMUX_PIPE_PANE_TIMEOUT_SECONDS = 30
 # tmux pipe-pane exits 0 before the shell it starts opens the file, so a file that cannot be
 # opened shows only as a file that never appears. The wait delays the agent-seat's launch.
@@ -81,8 +82,22 @@ def agent_seat_terminal_captures_directory_on_this_machine_find(hostname=None) -
 
 def agent_seat_terminal_capture_file_path_build(agent_seat_name: str, started_at: time.struct_time,
                                      directory: Path) -> Path:
-    started = time.strftime("%Y%m%dT%H%M%SZ", started_at)
-    return directory / agent_seat_name / f"{started}-{agent_seat_name}-terminal-capture.log"
+    return directory / agent_seat_name / _agent_seat_terminal_capture_file_name_build(agent_seat_name, started_at)
+
+
+def _agent_seat_terminal_capture_file_name_build(agent_seat_name: str, started_at: time.struct_time) -> str:
+    started = time.strftime(AGENT_SEAT_TERMINAL_CAPTURE_START_TIME_FORMAT, started_at)
+    return f"{started}-{agent_seat_name}-terminal-capture.log"
+
+
+def agent_seat_terminal_capture_file_name_matches_exact_format_for_agent_seat(file_name: str, agent_seat_name: str) -> bool:
+    """Return whether file_name is a name agent_seat_terminal_capture_file_path_build gives this agent-seat."""
+    try:
+        started_at = time.strptime(file_name.partition("-")[0], AGENT_SEAT_TERMINAL_CAPTURE_START_TIME_FORMAT)
+    except ValueError:
+        return False
+    # Rebuilding rejects what strptime tolerates, such as an unpadded month.
+    return _agent_seat_terminal_capture_file_name_build(agent_seat_name, started_at) == file_name
 
 
 def agent_seat_terminal_capture_start_in_this_tmux_pane(agent_seat_name: str) -> str:

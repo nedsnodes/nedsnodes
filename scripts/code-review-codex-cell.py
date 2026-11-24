@@ -9,6 +9,8 @@ must not drift are pinned:
 
   - model and reasoning effort, explicit (the tier convention of
     nn-systems/cold-read/cold-read-codex-cell.py: `deep` = gpt-6.2-sol at xhigh);
+  - the service tier, Fast, which `codex debug models` lists for gpt-6.2-sol
+    as service tier id "priority" -- see THE SERVICE TIER below;
   - the sandbox, read-only and denying every credential file, placed AFTER
     `review`, because the review's commands drop a profile placed before it
     -- see WHERE THE PERMISSION PROFILE GOES below, which also says how to
@@ -398,6 +400,16 @@ this exit code. Two things, both measured rather than assumed:
     codex is launched; it is recorded because it shows the behavior belongs
     to codex and is not an artifact of the empty diff.
 
+THE SERVICE TIER. codex-cli 0.169.1 has no flag for it; the config key
+`service_tier` sets it, and like the other overrides it goes AFTER `review`.
+Measured on ned-box, codex-cli 0.169.1: a `codex exec review
+--commit` run with `-c service_tier="priority"` after `review` recorded
+`"service_tier": "priority"` in the `thread_settings_applied` event of both
+session files it wrote, the parent's and the child thread's that holds the
+`turn_context` records; runs without the override record null there. The
+session files show only what Codex asked for: whether the service answered
+on the Fast tier is not recorded on this side.
+
 THE CANARY FOR THE PR REVIEWER INSTRUCTIONS. The question is whether
 Codex's review applies rules given as `developer_instructions` as it applies
 rules in a CLAUDE.md the checkout holds. Measured on ned-box,
@@ -459,6 +471,8 @@ CREDENTIAL_DENYING_PERMISSION_PROFILE = "code-review-no-credentials"
 # `deep` tier. gpt-6.2-sol needs codex-cli 0.169.1 or later.
 CODEX_MODEL = "gpt-6.2-sol"
 REASONING_EFFORT = "xhigh"
+# gpt-6.2-sol's Fast tier, "2x speed, increased usage".
+SERVICE_TIER = "priority"
 REVIEW_TIMEOUT_SECONDS = 1800
 
 # Main's copy for the merge-lane runner, which runs main's copy of this
@@ -660,6 +674,7 @@ def main(argv=None) -> int:
         *scope_flag,
         "-m", arguments.model,
         "-c", f"model_reasoning_effort={REASONING_EFFORT}",
+        "-c", f'service_tier="{SERVICE_TIER}"',
         "--output-last-message", str(output_path),
     ]
     try:

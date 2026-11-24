@@ -120,8 +120,9 @@ GEMINI_API_KEY from agy's environment, so that a key the caller holds cannot
 move agy's calls onto per-call billing. It also removes GH_TOKEN and
 GITHUB_TOKEN, which an agent-seat's supervisor sets to the agent-seat's own
 GitHub token; it leaves GH_ENTERPRISE_TOKEN and GITHUB_ENTERPRISE_TOKEN, which
-gh also reads, in place. On the Mac the sandbox leaves the keychain readable
-and denies ~/.config/gh. When agy finds no login, it prints
+gh also reads, in place. How gh behaves inside the Mac sandbox is said once,
+beside CREDENTIAL_DIRECTORIES in nn-systems/cold-read/cold-read-cell-common.py.
+When agy finds no login, it prints
 a line starting with AGY_MISSING_GOOGLE_LOGIN_STDERR_LINE_PREFIX, waits a
 minute for a login that cannot come headless, and exits 1; the cell's cause
 line is then logged-out, saying how to log agy in.
@@ -203,7 +204,8 @@ def agy_stream_json_stdout_line_final_result_event_parse_to_exit_code_and_respon
     return exit_code, str(result.get("response") or "")
 
 
-AGY_ENVIRONMENT_REMOVED_VARIABLES = ("GEMINI_API_KEY", "GH_TOKEN", "GITHUB_TOKEN")
+AGY_ENVIRONMENT_REMOVED_VARIABLES = (
+    "GEMINI_API_KEY", *common.COLD_READ_CELL_REVIEWER_PROGRAM_ENVIRONMENT_REMOVED_GITHUB_TOKEN_VARIABLES)
 
 
 def agy_environment_copy_without_gemini_api_key_or_github_token(environment) -> dict:

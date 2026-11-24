@@ -46,9 +46,10 @@ a Previous or Next link. When there is no Previous link, such as when the walk-m
 program prints why.
 
 The item after has no link yet when this item's first page is built, so that page cannot be given its Next link in the
-same invocation of the program; on a whole item's first page, built without --version, the program prints the command that builds
-the page its Previous link opens again, with --version set to that item's next version, to run once this item's page is
-published and its `#item_page` line recorded; that page then gets its Next link to this one. An item's `#item_page`
+same invocation of the program. On a whole item's first page, built without --version, when that page has a Previous
+link, the program prints the command that rebuilds the earlier item's page, the one the Previous link opens, with --version
+set to that item's next version, to run once this item's page is published and its `#item_page` line recorded; the earlier
+item's page then gets its Next link to this one. An item's `#item_page`
 lines with a link, read oldest first, count versions from 1, each one more than the line before or the version it
 states when that is higher, so the last line's version is the highest; the item's next version is one more.
 A stated version can skip ahead, because an agent may republish a page without recording a line for it, as when

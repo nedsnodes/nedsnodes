@@ -14,8 +14,9 @@ this program adds one line of its own to stderr, after the messages of agy or
 the sandbox program. GEMINI_API_KEY is removed from agy's environment, because
 a key is billed per call and agy's own Google login, in ~/.gemini, is not.
 GH_TOKEN and GITHUB_TOKEN are removed too; GH_ENTERPRISE_TOKEN and
-GITHUB_ENTERPRISE_TOKEN are left in place. On macOS the sandbox leaves the
-keychain readable and denies ~/.config/gh.
+GITHUB_ENTERPRISE_TOKEN are left in place. How gh behaves inside the macOS
+sandbox is said beside CREDENTIAL_DIRECTORIES in
+nn-systems/cold-read/cold-read-cell-common.py.
 
 The program's name describes the Linux sandbox; on macOS the home is not
 emptied, as the macOS paragraph below says.
