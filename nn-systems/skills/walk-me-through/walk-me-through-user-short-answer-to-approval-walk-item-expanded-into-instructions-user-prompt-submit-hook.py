@@ -448,7 +448,7 @@ MEANINGS = {
            "Below the two paragraphs, add this line: \"Answer O2 or O3 to take that option; A still takes the "
            "recommendation, and the other answers work as before.\"",
            "Then republish the item's page as its new version, and show the item again in full, word for word as "
-           "the walk-document has it."),
+           "the walk-document has it, leaving out each line that opens with `#approval_walk_item_`."),
           ("O asks for other options: the user is not answering your last recommendation or proposal yet, and "
            "wants two other options beside it.",
            "Show him two paragraphs: one opening \"Option 2:\", a simpler option, one that does the job with more "

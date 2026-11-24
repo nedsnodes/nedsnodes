@@ -227,7 +227,8 @@ NO_LINK_PROBLEM = (
     "the closing line for `Item {number} of {total}` has no link, but the walk-minutes record its page as {page}")
 REPLY_LACKS_CLOSING_LINE_INSTRUCTIONS = (
     "If he has not yet seen the item, show it in full, word for word as the walk-document {document} has it, "
-    "starting with its running count, as in `Item 4 of 9: <the point>`, before the closing line.",
+    "starting with its running count, as in `Item 4 of 9: <the point>`, before the closing line, leaving out each "
+    "line that opens with `#approval_walk_item_`, which the walk check program writes for agents.",
     "End your reply with each waiting item's closing line below, copied as it stands, on a line of its own, with "
     "nothing after it. " + NOT_IN_BACKTICKS + "\n{closing_lines}",
     "If the link you wrote is the item's current page, published with the Artifact tool, and the walk-minutes "

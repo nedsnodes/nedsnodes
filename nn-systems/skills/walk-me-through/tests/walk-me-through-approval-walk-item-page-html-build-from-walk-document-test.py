@@ -109,8 +109,8 @@ def run_page_cases(scratch):
     check("the walk's name is on the page", f'<div class="eyebrow">Approval-walk {WALK}</div>' in main, main)
     check("a paragraph opening with Recommendation: gets the class rec",
           '<p class="rec">Recommendation: change it.</p>' in main, main)
-    check("a paragraph opening with #approval_walk gets the class tag",
-          '<p class="tag">#approval_walk_item_first_entered 2026-11-05</p>' in main, main)
+    check("an `#approval_walk_item_first_entered` line is left off the page",
+          "#approval_walk_item_" not in main and "2026-11-05" not in main, main)
     check("a file:/// link stays a link to the file as written, since the page copies no file",
           '<a href="file:///Volumes/nedhome/agents/x/design.md">the design</a>' in main, main)
     check("a javascript: link is not made a link", 'href="javascript:' not in main, main)
@@ -238,7 +238,7 @@ def run_parent_with_sub_steps_case(scratch):
           < main.find("<h3>Item 45.2 of 46: refresh the rewrite, or drop it</h3>")
           < main.find("Current 45.2: the paused walk closes")
           < main.find('<p class="rec">Recommendation: refresh the rewrite.</p>')
-          and main.find("<h3>Item 45.1") > main.find("#approval_walk_item_in_category_fix_next") > 0, main)
+          and "#approval_walk_item_" not in main, main)
     check("the item's page leaves out every withdrawn version, of the item and of its sub-steps, and the next items",
           not any(text in main for text in ("Withdrawn", "withdrawn one", "withdrawn two", "Withdrawn three",
                                             "Withdrawn 45.1", "Withdrawn 45.2", "2026-11-12", "the item before",
@@ -626,9 +626,50 @@ def run_whole_item_links_case():
           links == {2: "https://claude.ai/artifact/Item2", 5: "www.example.com/item5"}, links)
 
 
+TAGGED_ITEM_AND_SUB_STEP = """# A walk
+
+## Item 2 of 3: the item before
+
+Recommendation: keep it.
+
+## Item 3 of 3: a tagged item
+
+#approval_walk_item_first_entered 2026-11-20
+
+#approval_walk_item_in_category_fix_next
+
+#approval_walk_item_waits_on the item before
+
+The item's own text.
+#approval_walk_item_waits_on a tag line right below a line of text
+
+Recommendation: change it.
+
+### Item 3.1 of 3: a tagged sub-step
+
+#approval_walk_item_in_category_must_fix_now
+
+  #approval_walk_item_waits_on an indented tag line
+
+The sub-step's text.
+"""
+
+
+def run_tag_lines_left_out_case(scratch):
+    for number, kept in (("3", ("The item's own text.", "Recommendation: change it.", "The sub-step's text.")),
+                         ("3.1", ("The sub-step's text.",))):
+        result, page = built(scratch, number, document=TAGGED_ITEM_AND_SUB_STEP)
+        main = page[page.find("<main>"):]
+        check(f"item {number}'s page leaves out every line opening with one of the three `#approval_walk_item_` tags, "
+              "the sub-step's included, and keeps the item's other text",
+              result.returncode == 0 and "#approval_walk_item_" not in main and "2026-11-20" not in main
+              and "tag line right below" not in main and all(text in main for text in kept), main)
+
+
 with tempfile.TemporaryDirectory() as temporary_directory:
     scratch = Path(temporary_directory)
     run_page_cases(scratch)
+    run_tag_lines_left_out_case(scratch)
     run_unit_cases(scratch)
     run_parent_with_sub_steps_case(scratch)
     run_sub_step_selection_cases(scratch)
