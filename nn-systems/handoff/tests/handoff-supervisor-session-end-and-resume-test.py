@@ -649,7 +649,7 @@ def run_handoff_worktree_cleanup_cases_without_git_redirection(workspace: Path):
     git_in(["add", "-A"], unlanded)
     git_in(["commit", "--quiet", "-m", "unlanded work"], unlanded)
     git_in(["branch", "orphaned-branch"], home)
-    # A worktree locked with `git worktree lock`, clean and landed, made a moment ago.
+    # A worktree locked with `git worktree lock`, clean and merged, made a moment ago.
     hand_locked = home / ".claude" / "worktrees" / "hand-locked-worktree"
     git_in(["worktree", "add", "--quiet", "-b", "hand-locked-branch", str(hand_locked)], home)
     git_in(["worktree", "lock", "--reason", "kept by hand", str(hand_locked)], home)
@@ -670,7 +670,7 @@ def run_handoff_worktree_cleanup_cases_without_git_redirection(workspace: Path):
           unlanded.exists() and "unlanded-branch" in branches, f"{report} {branches}")
     check("WORKTREE CLEANUP: a branch with no worktree and nothing beyond main is deleted",
           "orphaned-branch" not in branches, f"{report} {branches}")
-    check("WORKTREE CLEANUP: a locked worktree, clean and landed, is kept",
+    check("WORKTREE CLEANUP: a locked worktree, clean and merged, is kept",
           hand_locked.exists() and "hand-locked-branch" in branches,
           f"{report} {branches}")
     check("WORKTREE CLEANUP: the report counts what was removed and every branch deleted, "
