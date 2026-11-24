@@ -98,9 +98,10 @@ with tempfile.TemporaryDirectory() as directory:
           == "Should the wait-limit apply to every task?", by_id)
     check("the other entry of a pair is returned with an empty matched_by, and both entries name the pair",
           by_id.get(f"entry-{paired_other}", {}).get("matched_by") == []
-          and by_id[f"entry-{paired_other}"]["pair"] == {"pair_id": 1, "state": "unreviewed",
-                                                         "other_entry": f"entry-{tagged_old}"}
-          and by_id[f"entry-{tagged_old}"]["pair"]["other_entry"] == f"entry-{paired_other}", by_id)
+          and by_id[f"entry-{paired_other}"]["pairs"] == [{"pair_id": 1, "state": "unreviewed",
+                                                           "other_entry": f"entry-{tagged_old}"}]
+          and [pair["other_entry"] for pair in by_id[f"entry-{tagged_old}"]["pairs"]] == [f"entry-{paired_other}"]
+          and by_id[f"entry-{both}"]["pairs"] == [], by_id)
     check("each entry carries its link in the index file's form, its agent-seat and its tags",
           by_id[f"entry-{tagged_old}"]["link"] == f"nedlern@ned-box:/transcripts/t{tagged_old}.jsonl line {tagged_old}"
           and by_id[f"entry-{tagged_old}"]["agent_seat"] == "alpha-seat"
@@ -155,18 +156,64 @@ with tempfile.TemporaryDirectory() as directory:
           exit_code == 2 and f"the standing user-rulings store {program.store_path(broken)} cannot be read" in stderr
           and "Do not search the store or the transcripts by hand" in stderr, (exit_code, stderr))
 
-    real_entries_matched = program.entries_matched
+    real_find = program.find_standing_entries_by_tags_and_phrases_with_what_matched_each
 
-    def failing_entries_matched(connection, tags, phrases):
+    def failing_find(connection, tags, phrases, tag_now):
         raise program.sqlite3.OperationalError("database disk image is malformed")
-    program.entries_matched = failing_entries_matched
+    program.find_standing_entries_by_tags_and_phrases_with_what_matched_each = failing_find
     try:
         exit_code, _, _, stderr = run(["lookup", "--log-store", str(log_store), "--tag", "GHI 1"])
     finally:
-        program.entries_matched = real_entries_matched
+        program.find_standing_entries_by_tags_and_phrases_with_what_matched_each = real_find
     check("a store that opens but fails during the lookup exits 2 with the store's error",
           exit_code == 2 and "cannot be read: database disk image is malformed" in stderr, (exit_code, stderr))
 
+    not_a_checkout = Path(directory) / "not-a-checkout"
+    not_a_checkout.mkdir()
+    exit_code, header, _, stderr = run(["lookup", "--log-store", str(log_store), "--tag", "GHI 1",
+                                        "--repository-checkout", str(not_a_checkout)])
+    check("a repository checkout whose origin/main cannot be read exits 2, says the lookup needs it and how to fetch it",
+          exit_code == 2 and header is None and "git ls-tree of origin/main" in stderr
+          and "needs origin/main to give each stored tag" in stderr
+          and f"git -C {not_a_checkout} fetch origin main" in stderr and "Nothing was added" not in stderr,
+          (exit_code, stderr))
+
+    store.connection.close()
+
+# An entry tagged before the project rename keeps its old tag in the store; the index file shows it renamed, so a
+# lookup by the index file's tag must find it, and print the tag as the index file does.
+with tempfile.TemporaryDirectory() as directory:
+    log_store = Path(directory) / "logs"
+    store = Store(log_store)
+    old_tagged = store.add("Handoffs keep one file.", "2026-10-20T00:00:00Z", tags=("nc-systems/handoff/",))
+    new_tagged = store.add("Handoffs keep it still.", "2026-11-20T00:00:00Z", tags=("nn-systems/handoff/",))
+    exit_code, header, entries, stderr = run(["lookup", "--log-store", str(log_store), "--tag", "nn-systems/handoff/"])
+    by_id = {entry["id"]: entry for entry in entries}
+    check("a tag given as the index file shows it finds an entry the store tagged before the project rename, and "
+          "prints the tag renamed",
+          exit_code == 0 and set(by_id) == {f"entry-{old_tagged}", f"entry-{new_tagged}"}
+          and by_id[f"entry-{old_tagged}"]["tags"] == ["nn-systems/handoff/"]
+          and by_id[f"entry-{old_tagged}"]["matched_by"] == ["tag nn-systems/handoff/"], (exit_code, entries, stderr))
+    exit_code, header, entries, stderr = run(["lookup", "--log-store", str(log_store), "--tag", "nc-systems/handoff/"])
+    check("a tag given under its name from before the project rename finds the same entries",
+          exit_code == 0 and header["standing_entries_matched"] == 2, (exit_code, header, stderr))
+    store.connection.close()
+
+# An entry may be in more than one pair; a lookup that finds it returns the other entry of every pair.
+with tempfile.TemporaryDirectory() as directory:
+    log_store = Path(directory) / "logs"
+    store = Store(log_store)
+    found_entry = store.add("Run both.", "2026-11-20T00:00:00Z", tags=("GHI 5",))
+    first_other = store.add("Run one.", "2026-11-01T00:00:00Z")
+    second_other = store.add("Run none.", "2026-10-01T00:00:00Z")
+    store.pair(found_entry, first_other)
+    store.pair(found_entry, second_other)
+    exit_code, header, entries, stderr = run(["lookup", "--log-store", str(log_store), "--tag", "GHI 5"])
+    by_id = {entry["id"]: entry for entry in entries}
+    check("an entry in two pairs is returned with both pairs, and the other entry of each pair is returned",
+          exit_code == 0 and set(by_id) == {f"entry-{found_entry}", f"entry-{first_other}", f"entry-{second_other}"}
+          and [pair["other_entry"] for pair in by_id[f"entry-{found_entry}"]["pairs"]]
+          == [f"entry-{first_other}", f"entry-{second_other}"], (exit_code, entries, stderr))
     store.connection.close()
 
 # A ruling whose own words share no key phrase with the question, and whose tags differ from it, is found only
