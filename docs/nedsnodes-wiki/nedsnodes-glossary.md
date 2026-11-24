@@ -16,7 +16,7 @@ An entry that defines a kind of text, a change to text, or a check on text ends 
 - **/ghi-write** — a skill used before any write to a GitHub issue.
 - **/handoff** — a skill that writes the session-handoff a successor agent-session starts from, used when a system message says the agent-session has used the share of its context window set as the reincarnation threshold, or the user asks for a handoff.
 - **/overview-write** — the skill used to write, refresh or fix an nn-architecture-overview, and to run the program that checks its claims against the code.
-- **/pull-request-review-write** — a skill used before writing or revising a review on a pull request.
+- **/pull-request-review-write** — a skill used when starting a review of a pull request, and before writing or revising one.
 - **/sanity-check** — a skill used to improve designs.
 - **/start-agent-seat** — the skill used to start a new named agent-seat on ned-box, which covers choosing its name, the seat-brief the user approves, and its launch command.
 - **/walk-me-through** — a skill that presents complex material to the user one item or step at a time.
