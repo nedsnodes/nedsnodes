@@ -232,7 +232,8 @@ force-push and deletion blocked; and, since 2026-08-20, **one approving
 review is required for every merge** — enabled with the user present and
 drilled live on PR [catch-up hook: a git that never ran reports GIT_DID_NOT_RUN, not 1](https://github.com/nedsnodes/nedsnodes/pull/104). This is rung 1 at the account tier only: any
 process holding either credential can push, so "agents never push" is
-instructed, not impossible, until the gatekeeper's C2 credential design
+instructed, not impossible, until the main-gatekeeper's credential design,
+ruling C2 of `nn-systems/main-gatekeeper/main-gatekeeper.system.design.md`,
 lands. The restriction was proven live 2026-08-18 by a user-authorized
 fence test (a non-allow-listed push refused with GH006 while an
 unprotected control accepted the same credential and commit); the same
@@ -298,8 +299,7 @@ clutter. It now lives in the checked-in `.claude/settings.json` env
 block, reaching every agent-seat's worktree on both machines; the docs state
 it stops only the background check, leaving the launchers' explicit
 `claude update` working. The launch-time version check that was queued
-here closed 2026-08-22 without building a version check — State at
-close, item 4.
+here closed 2026-08-22 without building a version check.
 
 **R17. Shared machinery lives in the repository, self-updating at safe
 points — principle; two open gaps (recorded 2026-08-19).** The principle:
@@ -314,7 +314,8 @@ issue [Run named agents on the Ubuntu box, reachable from iTerm2 by name: launch
 launcher — the failure is recorded in a stamp file and nothing reads it
 (owned by `checkout-freshness-catch-up.py --reference-pull`, not by the
 launchers that call it). How each launcher wires freshening to launch is
-the launchers' own business; read the scripts, not this paragraph.
+the launchers' own business; read the scripts `scripts/launch-claude-ubuntu`
+and `scripts/launch-claude-mac`, not this paragraph.
 
 **R18. Agent-seat hosts are provisioned to survive disconnects — checklist
 ruled (2026-08-17).** Per host: (1) on systemd hosts, `loginctl
