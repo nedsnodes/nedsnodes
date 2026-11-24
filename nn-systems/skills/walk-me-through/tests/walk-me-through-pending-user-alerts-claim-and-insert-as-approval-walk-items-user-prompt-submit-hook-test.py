@@ -221,6 +221,16 @@ def run_not_typed_cases(root):
     check("a background-task notice claims nothing when the transcript's newest turn is the user's previous one",
           case.names("pending") == ["alert-a"], repr(case.names("claimed")))
 
+    case = Case(root, "string-message-record")
+    case.alert("alert-a")
+    with case.transcript.open("a", encoding="utf-8") as stream:
+        stream.write(json.dumps({"type": "user", "turnOrigin": "human", "message": "hello"}) + "\n")
+    result, context = case.run("hello")
+    check("a transcript record whose message is a string is a failed read, so a prompt that opens as no "
+          "program's message counts as typed: exits 0 and claims the alert",
+          result.returncode == 0 and case.names("claimed") == ["alert-a"],
+          result.stderr + repr(case.names("claimed")))
+
 
 def run_headless_cases(root):
     commission = "You are the independent reviewer for the nedschorus project. Review pull request 2891."

@@ -33,6 +33,7 @@ import pathlib
 import re
 import shutil
 import socket
+import stat
 import subprocess
 import sys
 import tempfile
@@ -361,19 +362,27 @@ PROBE_FILE_NAME = RUN_NAME + "-probe"
 # so a later run can find what a killed run left and keep an unrelated entry of a like name.
 # Each alternative holds one group, the PID.
 HOME_TARGET_NAME_PATTERN = re.compile(rf"\.{RUN_NAME}-unlisted|{PROBE_FILE_NAME}")
-CACHE_TARGET_NAME_PATTERN = re.compile(
-    rf"{RUN_NAME}|{RUN_NAME}-log|{RUN_NAME}-main-worktree|{PROBE_FILE_NAME}")
+CACHE_TARGET_NAME_PATTERN = re.compile(rf"{RUN_NAME}|{RUN_NAME}-log|{RUN_NAME}-main-worktree")
 # The 8 characters are mkdtemp's.
-TMP_TARGET_NAME_PATTERN = re.compile(rf"{RUN_NAME}-[a-z0-9_]{{8}}|{PROBE_FILE_NAME}")
+TMP_TARGET_NAME_PATTERN = re.compile(rf"{RUN_NAME}-[a-z0-9_]{{8}}")
 TMUX_TARGET_NAME_PATTERN = re.compile(RUN_NAME)
 VAR_TMP_TARGET_NAME_PATTERN = re.compile(rf"{RUN_NAME}-late\.sock|{PROBE_FILE_NAME}")
 DEV_SHM_TARGET_NAME_PATTERN = re.compile(PROBE_FILE_NAME)
 RUNTIME_TARGET_NAME_PATTERN = re.compile(rf"{RUN_NAME}\.sock|{PROBE_FILE_NAME}")
 
 
+def has_the_file_type_run_probe_makes(path, target_name_pattern):
+    mode = os.lstat(path).st_mode
+    if target_name_pattern is TMUX_TARGET_NAME_PATTERN or path.name.endswith(".sock"):
+        return stat.S_ISSOCK(mode)
+    if path.name.endswith("-probe"):
+        return stat.S_ISREG(mode)
+    return stat.S_ISDIR(mode)
+
+
 def remove_targets_left_by_ended_runs(target_name_pattern_by_directory):
-    """Remove each entry whose name its directory's pattern matches and whose PID is of a
-    process that no longer runs, or of this process, which an ended run may have had;
+    """Remove each entry whose name its directory's pattern matches, whose file type is the
+    one run_probe makes under that name, and whose PID is of a process that no longer runs, or of this process, which an ended run may have had;
     return the paths removed.
 
     The runner ends a suite past its time limit, or every suite of a stopped run, with
@@ -400,7 +409,9 @@ def remove_targets_left_by_ended_runs(target_name_pattern_by_directory):
                     continue
             # Another run starting at the same time may remove the same path first.
             try:
-                if path.is_dir() and not path.is_symlink():
+                if not has_the_file_type_run_probe_makes(path, target_name_pattern):
+                    continue
+                if stat.S_ISDIR(os.lstat(path).st_mode):
                     shutil.rmtree(path)
                 else:
                     path.unlink()
@@ -453,7 +464,10 @@ def run_probe(scratch):
     home = pathlib.Path(runner.REAL_HOME_DIRECTORY_PATH_HIDDEN_BY_EMPTY_TMPFS_IN_TEST_SANDBOX)
     runtime = pathlib.Path(runner.XDG_RUNTIME_DIRECTORY_PATH_HIDDEN_BY_EMPTY_TMPFS_IN_TEST_SANDBOX)
     name = f"{TARGET_NAME_PREFIX}{os.getpid()}"
+    writable_directories = [*runner.directories_this_account_can_create_files_in_hidden_in_test_sandbox(),
+                            str(home)]
     left = remove_targets_left_by_ended_runs({
+        **{directory: re.compile(PROBE_FILE_NAME) for directory in writable_directories},
         home: HOME_TARGET_NAME_PATTERN,
         home / ".cache": CACHE_TARGET_NAME_PATTERN,
         "/tmp": TMP_TARGET_NAME_PATTERN,
@@ -552,8 +566,6 @@ def run_probe(scratch):
     unlisted_credential.write_text("planted-secret")
     credential_files.append(str(unlisted_credential))
     probe_file_name = f"{name}-probe"
-    writable_directories = [*runner.directories_this_account_can_create_files_in_hidden_in_test_sandbox(),
-                            str(home)]
     late_sockets = [pathlib.Path("/var/tmp") / f"{name}-late.sock", canary_dir / "late.sock"]
     late_ready, late_made = "escape-test\tlate sockets ready", "escape-test\tlate sockets made"
     late_listeners = []
@@ -1006,7 +1018,7 @@ def check_targets_of_a_killed_run_removed_by_the_next(scratch):
          "(home / f'.{name}-unlisted' / 'oauth-token').write_text('planted-secret')\n"
          "(cache / name).mkdir()\n"
          "(cache / f'{name}-log').mkdir()\n"
-         "(cache / f'{name}-probe').write_text('')\n"
+         "(home / f'{name}-probe').write_text('')\n"
          "(cache / f'{name}-main-worktree').mkdir()\n"
          "print('planted', flush=True)\n"
          "time.sleep(600)\n",
@@ -1018,7 +1030,7 @@ def check_targets_of_a_killed_run_removed_by_the_next(scratch):
     planter.stdout.close()
     killed = TARGET_NAME_PREFIX + str(planter.pid)
     killed_paths = [home / f".{killed}-unlisted", cache / killed, cache / f"{killed}-log",
-                    cache / f"{killed}-probe", cache / f"{killed}-main-worktree"]
+                    home / f"{killed}-probe", cache / f"{killed}-main-worktree"]
     running = subprocess.Popen(["sleep", "600"])
     # A PID this process may not signal; os.kill is made to say so below.
     unsignalable_pid = planter.pid + 1_000_000_000
@@ -1031,16 +1043,31 @@ def check_targets_of_a_killed_run_removed_by_the_next(scratch):
 
     tmp_target = tmp / f"{killed}-abc_1234"
     var_tmp_target = var_tmp / f"{killed}-late.sock"
+    directory_named_like_a_late_socket = scratch / "var-tmp-holding-a-directory" / var_tmp_target.name
     try:
         kept = [home / f".{TARGET_NAME_PREFIX}{running.pid}-unlisted",
                 home / f".{TARGET_NAME_PREFIX}{unsignalable_pid}-unlisted",
                 home / f".{killed}-unlisted-by-someone-else", cache / f"{TARGET_NAME_PREFIX}notes",
                 cache / f"{killed}-abc_1234", home / f"{killed}-main-worktree",
-                tmp / f"{killed}-main-worktree", var_tmp / f"{killed}-log"]
+                tmp / f"{killed}-main-worktree", var_tmp / f"{killed}-log",
+                var_tmp / f"{killed}-probe"]
         for path in kept:
             path.mkdir()
+        directory_named_like_a_late_socket.mkdir(parents=True)
+        probe_named_files_where_run_probe_writes_none = [tmp / f"{killed}-probe",
+                                                         cache / f"{killed}-probe"]
+        for path in probe_named_files_where_run_probe_writes_none:
+            path.write_text("")
+        kept += [directory_named_like_a_late_socket, *probe_named_files_where_run_probe_writes_none]
         tmp_target.mkdir()
-        var_tmp_target.mkdir()
+        # A relative bind, because a scratch path can exceed the length a socket address allows.
+        working_directory = os.getcwd()
+        os.chdir(var_tmp)
+        try:
+            with socket.socket(socket.AF_UNIX, socket.SOCK_STREAM) as stale_socket:
+                stale_socket.bind(var_tmp_target.name)
+        finally:
+            os.chdir(working_directory)
         own = cache / f"{TARGET_NAME_PREFIX}{os.getpid()}-log"
         own.mkdir()
         check("a run killed with SIGKILL leaves its targets, among them a planted credential",
@@ -1051,6 +1078,7 @@ def check_targets_of_a_killed_run_removed_by_the_next(scratch):
             removed = remove_targets_left_by_ended_runs({
                 home: HOME_TARGET_NAME_PATTERN, cache: CACHE_TARGET_NAME_PATTERN,
                 tmp: TMP_TARGET_NAME_PATTERN, var_tmp: VAR_TMP_TARGET_NAME_PATTERN,
+                directory_named_like_a_late_socket.parent: VAR_TMP_TARGET_NAME_PATTERN,
                 scratch / "missing": DEV_SHM_TARGET_NAME_PATTERN})
         finally:
             os.kill = real_kill
@@ -1060,8 +1088,9 @@ def check_targets_of_a_killed_run_removed_by_the_next(scratch):
               and sorted(removed) == sorted(
                   map(str, [*killed_paths, tmp_target, var_tmp_target, own])), removed)
         check("the next run keeps a running run's targets, one named for a process it may not "
-              "signal, names this file never makes, a mkdtemp-like name outside /tmp, and "
-              "main-worktree and log names outside .cache",
+              "signal, names this file never makes, a mkdtemp-like name outside /tmp, "
+              "main-worktree and log names outside .cache, probe names in /tmp and .cache, "
+              "and a directory with a socket's or a probe file's name",
               all(path.exists() for path in kept))
 
         # Another run removes the same target between this run's listing and its removal.
