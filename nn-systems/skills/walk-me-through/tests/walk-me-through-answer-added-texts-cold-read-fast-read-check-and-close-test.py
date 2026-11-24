@@ -4976,6 +4976,100 @@ ANSWER_FLAGS_TAKING_A_REPLY = {"--obvious": (), "--after-advisor": (), "--disapp
                                "--moved-on-no-decision": (), "--option": ("2",), "--part-answer": ("1=A",)}
 
 
+def no_answer_rows_printed(result):
+    """The lines of the read step's stdout that are rows of the no-answer table."""
+    return [line for line in result.stdout.splitlines()
+            if line.startswith("- ") and ("Its evidence passes" in line or "Only evidence is missing" in line
+                                          or "could not be checked" in line)]
+
+
+def test_help_prints_every_row_of_the_no_answer_table():
+    usage = subprocess.run([sys.executable, str(PROGRAM), "--help"], capture_output=True, text=True).stdout
+    for value in (1, 2, 3, 4, 5, 6, 7, "none", "weak-cost-only", "weak-alters-earlier-approved-text-only"):
+        check(f"--help lists the no-answer table's row --not-asked {value}",
+              f"\n  --not-asked {value}: " in usage, usage[-3000:])
+    check("--help lists the handoff row with its citation",
+          '\n  --already-decided "the user-ruling on the handoff\'s internals in '
+          'nn-systems/handoff/handoff.system.design.md": ' in usage, usage[-3000:])
+    check("--help carries the rule to ask the advisor and to show the item on a refusal",
+          "ask the advisor whether a later ruling or another open item overtakes it; if the program refuses, the "
+          "advisor objects or the advisor call fails, show the item." in usage, usage[-3000:])
+
+
+def test_read_step_offers_a_row_that_lacks_only_an_evidence_line_with_the_line_to_add_and_its_command():
+    case = rated_none_case(touches="", rating=WEAK_COST_ONLY)
+    result = case.run(WAITING_ITEM_READ)
+    rows = no_answer_rows_printed(result)
+    kind_5 = [row for row in rows if row.startswith("- kind 5:")]
+    check("an item with no evidence lines is offered kind 5, naming the line to add and the command to run after",
+          len(kind_5) == 1 and "Only evidence is missing" in kind_5[0] and "#not_asked_source" in kind_5[0]
+          and check_command_for(case, "--not-asked", "5") in kind_5[0], described(result))
+    cost_only = [row for row in rows if row.startswith("- case against weak, cost only:")]
+    check("an item rated weak with no touches line is offered weak-cost-only, naming the touches line",
+          len(cost_only) == 1 and "#not_asked_touches" in cost_only[0]
+          and check_command_for(case, "--not-asked", "weak-cost-only") in cost_only[0], described(result))
+    check("an item rated weak is not offered the row for a case against rated none",
+          not any(row.startswith("- case against none:") for row in rows), described(result))
+
+
+def test_read_step_offers_a_passing_row_and_leaves_out_a_row_the_change_itself_fails():
+    case = rated_none_case(rating=WEAK_COST_ONLY)
+    result = case.run(WAITING_ITEM_READ)
+    check("a row whose evidence passes is printed with its exact command",
+          any(row.startswith("- case against weak, cost only:") and "Its evidence passes" in row
+              and check_command_for(case, "--not-asked", "weak-cost-only") in row
+              for row in no_answer_rows_printed(result)), described(result))
+    case = rated_none_case(touches="#not_asked_touches tools/counter.py CLAUDE.md\n\n", rating=WEAK_COST_ONLY,
+                           files=("CLAUDE.md",))
+    result = case.run(WAITING_ITEM_READ)
+    check("a row refused for a guarded Markdown file, which no evidence line cures, is not printed",
+          not any(row.startswith("- case against weak, cost only:") for row in no_answer_rows_printed(result)),
+          described(result))
+
+
+def test_read_step_reports_a_row_whose_check_fails_and_still_offers_the_others():
+    case = rated_none_case(touches="#not_asked_touches tools/counter.py\n\n#not_asked_unused old_reader\n\n",
+                           rating=WEAK_COST_ONLY)
+    result = case.run(WAITING_ITEM_READ, environment=stubbed_git_failing_on(case, "grep"))
+    rows = no_answer_rows_printed(result)
+    check("a `git grep` that fails while checking kind 3 is reported on that row, which is not offered as passing",
+          any(row.startswith("- kind 3: its evidence could not be checked") and "fatal: stub grep failure" in row
+              for row in rows)
+          or any("- kind 3: its evidence could not be checked" in line for line in result.stdout.splitlines()),
+          described(result))
+    check("the other rows are still offered", any(row.startswith("- case against weak, cost only:") for row in rows),
+          described(result))
+    check("the row that is not offered gives the failure alone, not the rerun of the command it withholds",
+          f"{check_command_for(case, '--not-asked', '3')}` again once" not in result.stdout, described(result))
+
+
+def test_read_step_offers_a_removal_that_lacks_only_its_touches_line_while_the_removed_name_is_still_in_files():
+    case = rated_none_case(touches="#not_asked_unused old_reader\n\n", rating=WEAK_COST_ONLY,
+                           files=("tools/old_reader.py",))
+    (case.checkout / "tools" / "old_reader.py").write_text("def old_reader():\n    return 0\n")
+    result = case.run(WAITING_ITEM_READ)
+    kind_3 = [row for row in no_answer_rows_printed(result) if row.startswith("- kind 3:")]
+    check("a removal with an unused line and no touches line is offered kind 3 as lacking only the touches line",
+          len(kind_3) == 1 and "Only evidence is missing" in kind_3[0] and "#not_asked_touches" in kind_3[0]
+          and check_command_for(case, "--not-asked", "3") in kind_3[0], described(result))
+
+
+def test_read_step_offers_the_handoff_row_only_for_an_item_naming_the_handoff():
+    document = RATED_NONE_DOCUMENT.replace("print the poem count after the list",
+                                           "shorten the session-handoff file's opening").replace(
+        "#case_against none.\n\nRecommendation: print it.",
+        f"#case_against {WEAK_COST_ONLY}\n\nRecommendation: print it.", 1)
+    result = Case(next_to_present="item 1 of 3", document=document).run(WAITING_ITEM_READ)
+    check("an item naming the session-handoff is offered the handoff row with --already-decided and its citation",
+          any(row.startswith("- the handoff's own internals:") and "--already-decided" in row
+              and "nn-systems/handoff/handoff.system.design.md" in row for row in no_answer_rows_printed(result)),
+          described(result))
+    result = rated_none_case(rating=WEAK_COST_ONLY).run(WAITING_ITEM_READ)
+    check("an item that does not name the handoff is not offered the handoff row",
+          not any(row.startswith("- the handoff's own internals:") for row in no_answer_rows_printed(result)),
+          described(result))
+
+
 def test_every_answer_flag_is_covered_by_the_rerun_command_cases():
     usage = subprocess.run([sys.executable, str(PROGRAM), "--help"], capture_output=True, text=True)
     group = re.search(r"\[(--obvious[^\]]*)\]", " ".join(usage.stdout.split()))
@@ -5097,6 +5191,9 @@ def test_the_read_step_presents_an_item_rated_none_that_is_shown_all_the_same():
         check(f"the read step reads and presents an item rated none {described_case}",
               result.returncode == 0 and "Then present item 22 of 26" in result.stdout
               and times_read(case, "## Item 22 of 26") == 1, described(result))
+        if "close has not closed" in described_case:
+            check(f"the read step offers no settling command for an item {described_case}, since rerunning it "
+                  "would record a second answer", not no_answer_rows_printed(result), described(result))
     case = rated_none_case(next_to_present="item 3 of 3")
     result = case.run(WAITING_ITEM_READ)
     check("the read step presents an item rated none that asks no decision, such as a summary item",
@@ -5176,7 +5273,7 @@ def test_close_reads_the_item_after_the_next_one_ahead_and_the_read_step_uses_it
                             "later and it recommends now: then run "
                             f"`{check_command_for(case, '--now-over-later-already-decided')}`, then the "
                             "close command it prints.")
-          and f"{WAITING_ITEM_READ} {AFTER_FIXES} --cwd" in lines[2], described(first))
+          and f"{WAITING_ITEM_READ} {AFTER_FIXES} --cwd" in lines[-3], described(first))
     answered_and_closed(case)
     ahead = case.run(WAITING_ITEM_READ)
     check("the read step hands over the read ahead of an unchanged item without reading it again",
@@ -6946,6 +7043,124 @@ def test_each_run_saves_a_changed_walk_document_once_and_keeps_the_newest_twenty
     check("the oldest copy is the one removed", not (root / WALK_NAME / "2000-01-01T00-00-00.000000Z.md").exists())
     check("the changed document is the newest copy", kept[-1].read_bytes() == changed)
     check("no temporary file is left", not list((root / WALK_NAME).glob("*.tmp")))
+
+
+def test_an_expired_copy_another_run_removed_first_counts_as_pruned():
+    program = load_program()
+    case = Case()
+    root = case.root / "copies-pruned-by-two-runs"
+    arguments = argparse.Namespace(cwd=str(case.checkout), walk_document_copies_directory=root, cold_read_records=None,
+                                   counts_log=None)
+    (root / WALK_NAME).mkdir(parents=True)
+    expired = [root / WALK_NAME / f"2000-01-01T00-00-{number:02}.000000Z.md" for number in range(3)]
+    for path in expired:
+        path.write_bytes(b"expired")
+    for number in range(1, 20):
+        (root / WALK_NAME / f"2000-01-02T00-00-{number:02}.000000Z.md").write_bytes(b"old")
+    real_unlink = Path.unlink
+
+    def unlink_after_another_run_removed_the_first_expired_copy(self, *args, **kwargs):
+        if self == expired[0]:
+            os.remove(self)
+        return real_unlink(self, *args, **kwargs)
+
+    Path.unlink = unlink_after_another_run_removed_the_first_expired_copy
+    try:
+        problem = program.walk_me_through_walk_document_timestamped_copy_save_on_ned_box_and_oldest_copies_prune(arguments)
+    finally:
+        Path.unlink = real_unlink
+    check("the save succeeds although another run removed an expired copy first", problem is None, str(problem))
+    check("the other expired copies are pruned", not any(path.exists() for path in expired))
+    check("the newest 20 copies are kept", len(walk_copies(root)) == 20, str(len(walk_copies(root))))
+
+
+def test_an_unchanged_run_finishes_the_prune_and_keeps_files_the_program_did_not_name():
+    case = Case()
+    root = case.root / "walk-document-copies"
+    folder = root / WALK_NAME
+    folder.mkdir(parents=True)
+    document = case.minutes.with_name(f"{WALK_NAME}.md")
+    for number in range(1, 22):
+        (folder / f"2000-01-02T00-00-{number:02}.000000Z-{number:016x}.md").write_bytes(b"old")
+    (folder / "2000-01-03T00-00-00.000000Z-ffffffffffffffff.md").write_bytes(document.read_bytes())
+    # The first two sort before every real copy, so a prune that counted them would delete them first; the last sorts
+    # after them, and the check that no new copy was saved is what shows it was not counted as the newest copy.
+    not_named_by_the_program = ("1999-notes.md", "0000-00-00T00-00-00.000000Z.md", "recovered-by-hand.md")
+    for name in not_named_by_the_program:
+        (folder / name).write_bytes(b"a note someone keeps here")
+    case.run("check", "--walk-document-copies-directory", str(root))
+    kept = sorted(path.name for path in folder.iterdir() if path.name not in not_named_by_the_program)
+    check("a run with the document unchanged saves no new copy",
+          "2000-01-03T00-00-00.000000Z-ffffffffffffffff.md" == kept[-1], str(kept))
+    check("a run with the document unchanged still prunes to the newest 20", len(kept) == 20, str(len(kept)))
+    check("the two oldest copies are the ones removed",
+          not (folder / "2000-01-02T00-00-02.000000Z-0000000000000002.md").exists()
+          and (folder / "2000-01-02T00-00-03.000000Z-0000000000000003.md").exists())
+    for name in not_named_by_the_program:
+        check(f"a file the program did not name, {name}, is kept", (folder / name).exists())
+
+
+def test_a_prune_that_fails_says_the_copy_is_saved():
+    program = load_program()
+    case = Case()
+    root = case.root / "copies-whose-prune-fails"
+    folder = root / WALK_NAME
+    folder.mkdir(parents=True)
+    for number in range(1, 22):
+        (folder / f"2000-01-02T00-00-{number:02}.000000Z-{number:016x}.md").write_bytes(b"old")
+    arguments = argparse.Namespace(cwd=str(case.checkout), walk_document_copies_directory=root, cold_read_records=None,
+                                   counts_log=None)
+    save = program.walk_me_through_walk_document_timestamped_copy_save_on_ned_box_and_oldest_copies_prune
+    real_unlink = program.Path.unlink
+
+    def failing_unlink(self, *_, **__):
+        raise OSError("unlink failed")
+
+    program.Path.unlink = failing_unlink
+    try:
+        saved = save(arguments)
+        unchanged = save(arguments)
+    finally:
+        program.Path.unlink = real_unlink
+    document = case.minutes.with_name(f"{WALK_NAME}.md")
+    for label, problem in (("after a save", saved), ("with the document unchanged", unchanged)):
+        check(f"a failed prune {label} is reported as a failed prune",
+              problem is not None and "is saved on ned-box, but its oldest copies were not pruned: unlink failed"
+              in problem and "no timestamped copy" not in problem, str(problem))
+    check("the copy is saved though the prune failed",
+          [path.read_bytes() for path in walk_copies(root)][-1] == document.read_bytes())
+
+
+def test_a_listing_that_fails_after_the_copy_is_published_says_the_copy_is_saved():
+    program = load_program()
+    case = Case()
+    root = case.root / "copies-whose-listing-fails-after-the-save"
+    arguments = argparse.Namespace(cwd=str(case.checkout), walk_document_copies_directory=root, cold_read_records=None,
+                                   counts_log=None)
+    save = program.walk_me_through_walk_document_timestamped_copy_save_on_ned_box_and_oldest_copies_prune
+    real_iterdir, real_replace = program.Path.iterdir, program.os.replace
+    replaced = []
+
+    def recording_replace(source, destination):
+        real_replace(source, destination)
+        replaced.append(destination)
+
+    def iterdir_failing_once_the_copy_is_published(self):
+        if replaced:
+            raise OSError("listing failed")
+        return real_iterdir(self)
+
+    program.Path.iterdir, program.os.replace = iterdir_failing_once_the_copy_is_published, recording_replace
+    try:
+        problem = save(arguments)
+    finally:
+        program.Path.iterdir, program.os.replace = real_iterdir, real_replace
+    check("the copy was published before the listing failed", len(replaced) == 1, str(replaced))
+    check("a listing that fails after the copy is published is reported as a failed prune",
+          problem is not None and "is saved on ned-box, but its oldest copies were not pruned: listing failed"
+          in problem and "no timestamped copy" not in problem, str(problem))
+    check("the copy is on disk", [path.read_bytes() for path in walk_copies(root)]
+          == [case.minutes.with_name(f"{WALK_NAME}.md").read_bytes()])
 
 
 def test_two_copies_with_one_stamp_keep_both():

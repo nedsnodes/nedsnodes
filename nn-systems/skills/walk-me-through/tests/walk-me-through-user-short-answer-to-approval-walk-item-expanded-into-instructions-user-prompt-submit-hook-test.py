@@ -3395,7 +3395,8 @@ def test_settled_line_unreadable_transcript_falls_back_to_the_prompts_opening():
           and "could not tell who wrote this prompt" in lines[1] and "the last line does not apply" in lines[1]
           and lines[2] == SETTLED_LINE, f"exit {result.returncode}, stdout {result.stdout!r}")
     check("the failed-read opening says a paused approval-walk has no item waiting",
-          "unless an `#approval_walk_paused` line follows that line, which means no item is waiting" in lines[0],
+          bool(lines) and "unless an `#approval_walk_paused` line follows that line, which means no item is waiting"
+          in lines[0],
           lines[0] if lines else "no lines")
     result = case.run("<task-notification>a task ended</task-notification>", transcript_path=transcript)
     check("a task notice with an unreadable transcript prints nothing",
@@ -3511,20 +3512,15 @@ def test_own_words_output_given_the_walk_state_already_read_does_not_read_it_aga
     payload = {"prompt": "repeat 99", "cwd": "/nonexistent"}
     walk = types.SimpleNamespace(item="item 4 of 9", name=WALK_NAME)
     try:
-        output = hook.own_words_output(payload, (walk, None))
+        output = hook.own_words_output(payload, walk)
         context = output["hookSpecificOutput"]["additionalContext"].split("\n")
     except Exception as error:
         context = [repr(error)]
     check("given read_walk's result, own_words_output names its item and does not read the walk again",
           context[0].endswith(f"item 4 of 9 of approval-walk {WALK_NAME} is waiting for the user's answer, and his "
                               "reply is in his own words.") and context[-1] == SETTLED_LINE, f"context {context!r}")
-    output = hook.own_words_output(payload, (None, None))
+    output = hook.own_words_output(payload, None)
     check("given read_walk's result of no open walk, own_words_output prints nothing", output is None, repr(output))
-    output = hook.own_words_output(payload, (None, OSError("unreadable minutes")))
-    context = output["hookSpecificOutput"]["additionalContext"].split("\n") if output else []
-    check("given read_walk's error, own_words_output opens with the failed read",
-          bool(context) and "reading the approval-walk state failed" in context[0] and "unreadable minutes" in context[0],
-          f"context {context!r}")
 
 
 def test_settled_line_follows_every_line_of_an_answer_typed_on_several_lines():
