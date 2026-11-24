@@ -857,10 +857,14 @@ def failed_suites_kept_in_view_cases(scratch):
         exit_code, output, _, _, _ = run_case(
             scratch, "failed-suite-record-unreadable", [(GATE_PASSED, 0)], default_routes([]),
             before_the_program_runs=unreadable)
-        check("an unreadable record exits 3, naming the file, and leaves it as it was",
+        check("an unreadable record exits 3, naming the file, and leaves it as it was; the "
+              "passing test run is not recorded as one that left no test failing, since the "
+              "record could not say whether main still fails a test",
               exit_code == 3 and "the failed suites record was not updated: could not read" in output
               and failed_suites_record_file(
-                  scratch / "failed-suite-record-unreadable").read_text() == "not json",
+                  scratch / "failed-suite-record-unreadable").read_text() == "not json"
+              and not newest_main_commit_left_no_test_failing_file(
+                  scratch / "failed-suite-record-unreadable").exists(),
               f"exit {exit_code}\n{output}")
 
         def lock_blocked(directory):
