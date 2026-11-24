@@ -122,7 +122,9 @@ def load_module(name, path):
 
 
 def record_text(record):
-    message = record.get("message")
+    if "message" not in record:
+        return None  # a metadata record, such as a system turn_duration record, which holds no text
+    message = record["message"]
     if not isinstance(message, dict):
         # AttributeError, which both callers of typed_by_user handle as a failed transcript read.
         raise AttributeError(f"a transcript record's message is a {type(message).__name__}, not an object")

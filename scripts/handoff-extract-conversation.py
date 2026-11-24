@@ -104,8 +104,16 @@ INJECTED_TEXT_PREFIXES = (
     "<bash-stdout>",
     "<bash-stderr>",
     "<system-reminder>",
-    "[Request interrupted",
 )
+
+# The two notices Claude Code writes when the user presses Escape. Only a message that is wholly one is a
+# notice: a prompt the user typed that opens with one, pasted, is his.
+INTERRUPT_NOTICE_PATTERN = re.compile(r"\[Request interrupted by user( for tool use)?\]")
+
+
+def text_is_whole_interrupt_notice(text):
+    """Whether the text, stripped, is exactly one of Claude Code's interrupt notices."""
+    return bool(INTERRUPT_NOTICE_PATTERN.fullmatch(text.strip()))
 
 # Short post-notification replies are acknowledgements; longer reactions may contain substantive analysis.
 MAXIMUM_ACKNOWLEDGEMENT_WORDS = 60
@@ -221,10 +229,11 @@ def read_dialog_turns(transcript_path: Path, drop_acknowledgements=True,
         elif turn["voice"] == "user":
             turn["timestamp"] = record.get("timestamp") or ""
             turn["line_index"] = index
-            if turn["text"].startswith(INJECTED_TEXT_PREFIXES):
+            interrupt_notice = text_is_whole_interrupt_notice(turn["text"])
+            if interrupt_notice or turn["text"].startswith(INJECTED_TEXT_PREFIXES):
                 skip_counts["injected"] += 1
                 following_injected_record = True
-                if turn["text"].startswith("[Request interrupted"):
+                if interrupt_notice:
                     interrupted_since_queued = True
             elif interrupted_since_queued and turn["text"] == carried_queued_text:
                 skip_counts["resent_after_interrupt"] += 1

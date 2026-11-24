@@ -1265,6 +1265,18 @@ def run_first_pass_and_second_pass_cases():
         check("cron's next start of the job reads the hour and the minute from the schedule",
               due == local(11, 11, 13, 5), (due, local(11, 11, 13, 5)))
 
+    try:
+        job.unix_time_cron_next_starts_this_program_on_ned_box(
+            job.SCHEDULED_JOBS_ON_EACH_MACHINE_JSON_FILE, time.time())
+        message = None
+    except job.StepFailed as error:
+        message = str(error)
+    check("the default scheduled-jobs table gives the job no schedule, and the step failure says "
+          "how to run the second pass by hand without adding the job back",
+          message is not None and "do not add it back" in message
+          and "--scheduled-jobs-on-each-machine-json-file <that file>" in message
+          and "Give the job" not in message, message)
+
     line = job.run_record_line_counting_mutants_not_run_and_naming_oldest_merge_with_one({NOT_RUN_KEY: {
         "b" * 40: {"merged_at_unix_seconds": 86400, "mutants_not_run_count": 3},
         "a" * 40: {"merged_at_unix_seconds": 2 * 86400, "mutants_not_run_count": 4}}}, 3.5 * 86400)
