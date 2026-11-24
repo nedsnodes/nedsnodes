@@ -26,7 +26,7 @@ A check asks "is everything right?": a linter, a conflict check, a citation chec
 
 A test file, a file whose name ends in `-test.py`, is a check like any other: it exits 0 when every test case passes, 1 when a test case fails, and 2 when it could not run. A file Python cannot start, such as one with a syntax error, exits 1 before any of the file's code runs, so the file's own top level never gets the chance to exit 2. So every test file prints a verdict line, as the section What every program prints with its code says, and `scripts/run-all-test-suites.py`, which runs the test files, reads an exit 1 with no verdict line as could not run, 2. Today the runner reads every nonzero code as a failure; reading the verdict line is work still to be done.
 
-A test file's verdict line is one exact hashtag line per outcome, as canary tests do with `#canary_pass` and `#canary_fail`. The exact form of each line is set by the wiki page on how a test reports its result, which the agent-seat MD-skills is writing.
+A test file's verdict line is one exact hashtag line per outcome. The exact form of each line is set by the wiki page [How a test suite reports its result](queue/nedsnodes-how-a-test-suite-reports-its-result.md), which also gives the canary tests' own lines, decided but not yet built.
 
 ## A program that searches or answers a question
 
