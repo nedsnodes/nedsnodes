@@ -2691,6 +2691,10 @@ def run_recorded_mutant_lines_on_main_traced_through_history_cases():
          [{path: "a\nb\nc\n" + unrelated + "p\nq\nr\n"},
           {path: "a\nedited\nc\n" + unrelated + "p\nq\nchanged\n"}],
          [one_line_hunk, (16, ["p", "q", "r"], ["p", "Q", "r"])], ("present", f"{path}:17")),
+        ("one hunk's line is gone and no commit on origin/main holds the other hunk, so the "
+         "mutant is not gone",
+         [{path: "a\nb\nc\n" + unrelated}, {path: "a\nedited\nc\n" + unrelated}],
+         [one_line_hunk, (16, ["never", "held", "here"], ["never", "HELD", "here"])], (None, None)),
     ]
     for name, versions, hunks, wanted in cases:
         with tempfile.TemporaryDirectory() as scratch_name:
