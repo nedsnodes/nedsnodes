@@ -60,8 +60,10 @@ EXIT_FOUND = 0
 EXIT_NOTHING_FOUND = 1
 EXIT_FAILED = 2
 FAILURES_CLOSING_LINE = (
-    "The user's messages printed above are real, but those in the records the FAILED lines name are missing, and "
-    "may decide the item. Tell the user what each FAILED line says.")
+    "The user's messages printed on stdout are real, but those in the records the FAILED lines name are missing, and "
+    "may decide the approval-walk item whose title was searched for.\n"
+    "Tell the user what each FAILED line says, word for word, and do not show the item until this search runs "
+    "without a FAILED line.")
 
 
 def load_search():
