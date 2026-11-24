@@ -1107,3 +1107,14 @@ Goes wrong when: a reader takes the assertion as exact.
 The claim check's evidence:
 > `nn-systems/handoff/handoff-asked-stop-typing-user-notice-user-prompt-submit-hook.py:94` `return os.environ.get(supervisor.HANDOFF_SUPERVISOR_AGENT_NAME_ENVIRONMENT_VARIABLE, "").strip()`. This hook also reads the first variable. It takes the name from the supervisor's constant, so a rename would not break it.
 State: open
+
+## E95 — possible problem: an assertion of the overview is contradicted
+
+Claim: "Transcripts under `~/.claude/projects/`: written by Claude Code; read by the extractor, the threshold hook, the post-compaction hook, the writer script, the handoff-supervisor, `agent-seat-transcript-worth-resuming-common.py`, `recover-crashed-seats.py`, the restart program, the agent-crash-watcher and the Remote Control reconnect watcher."
+Found by: the overview claim check of 2026-11-24 against commit 1f42f397daf844a568843b2a79dbfbc9e22735dd; its report is /home/nedlern/nedsnodes-logs/overview-write-architecture-overview-claim-check-reports/nedsnodes-handoff-architecture-overview/40b7e8debb1bd81ee40f7db58e6252af5fc4ab96-2026-11-24T10-55-19-144212Z.md.
+Fixed by: regular maintenance, in the overview.
+Goes wrong when: a reader takes the assertion as exact.
+The claim check's evidence:
+> - The list leaves out nn-systems/handoff/handoff-asked-stop-typing-user-notice-user-prompt-submit-hook.py, which reads the agent-session's transcript for its title: :10-13 `The line names the new agent-session by this agent-session's current title, the customTitle of the last custom-title record in its transcript`.
+> - The agent-crash-watcher reads no transcript itself. It only builds the folder path (nn-systems/handoff/handoff-agent-crash-watcher.py:1195) and reads transcripts only through recovery's `assess_seat` (:1187).
+State: open
