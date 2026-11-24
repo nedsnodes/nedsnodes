@@ -139,7 +139,8 @@ The finish step does not judge those lines, so it exits 0 when every step succee
 skipped a check; the agent reads the printed lines and does what they say.
 
 Exit codes: 0 brief or replace steps printed, round passes or move step done; 1 the review or the round breaks
-a rule, said on stderr; 2 gh, git or the answers file could not be read, the answers file could not be written, the conflict check could not answer,
+a rule, said on stderr; 2 gh, git or the answers file could not be read, the answers file could not be written, the
+kept copies of the answers file could not be listed, the conflict check could not answer,
 the new shared names could not be listed, the worktree creator failed, or the suite runner stopped before
 judging every suite, said on stderr.
 """
@@ -880,7 +881,7 @@ def answers_file_text_kept_in_new_copy(path, kept_copies_directory):
 
 def answers_file_with_one_line_per_finding_write(path, finding_count, kept_copies_directory):
     """Write the answers file with a line "<n>. " per finding, which read_answers reads as no entry until the agent
-    writes the answer after it."""
+    writes the answer after it; return the new copy of the text it replaced, or None when it made none."""
     kept = None
     try:
         kept = answers_file_text_kept_in_new_copy(path, kept_copies_directory)
@@ -897,6 +898,7 @@ def answers_file_with_one_line_per_finding_write(path, finding_count, kept_copie
     except OSError as error:
         copy_note = f" A copy of its text is in {kept}." if kept else ""
         raise StepFailed(f"could not write the answers file {path}: {error}.{copy_note}") from None
+    return kept
 
 
 def topic_worktree_at_frozen_head(number, reviewer_login, branch, frozen_head, finding_count, review_submitted_at):
@@ -990,13 +992,17 @@ def print_brief(number, reviewer_login):
     kept_copies_directory = pull_request_fix_round_answers_kept_copies_directory_path_for_frozen_head(
         worktree, number, frozen_head
     )
-    answers_file_with_one_line_per_finding_write(answers_path, len(findings) + len(nits), kept_copies_directory)
+    # Listed before the write, so that a directory that cannot be listed stops the brief with nothing changed.
+    kept_copies = answers_kept_copies_oldest_first(kept_copies_directory)
+    kept = answers_file_with_one_line_per_finding_write(answers_path, len(findings) + len(nits), kept_copies_directory)
+    if kept is not None:
+        kept_copies.append(kept)
     lines = [
         f"Fix-round brief for pull request {url}",
         f"Frozen-head: {frozen_head}",
         f"The round's reviews: {review_link}",
     ]
-    for kept_answers in answers_kept_copies_oldest_first(kept_copies_directory):
+    for kept_answers in kept_copies:
         lines.append(f"The answers file held text, which may be numbered for another round, so this program copied it "
                      f"unchanged to {kept_answers} and wrote a new answers file. Read that copy, and copy into the "
                      "new file each answer that still answers a finding below, under that finding's number.")

@@ -958,6 +958,22 @@ def stopped_round_cases(root, repository, made, frozen_head, dated_routes, submi
     check("answers kept: a partly answered file written after the review is in a second copy, the first unchanged",
           code == 0 and answers.read_text() == "1. \n2. \n" and [path.read_text() for path in new_copies] == [partial]
           and all(path.read_text() == text for path, text in kept_copies.items()), err + out)
+    check("answers kept: the brief names the earlier copy, then the copy it just made",
+          len(new_copies) == 1 and out.find(f"copied it unchanged to {next(iter(kept_copies))}")
+          < out.find(f"copied it unchanged to {new_copies[0]}") != -1, out)
+    copies_before = sorted(kept_directory.iterdir())
+    write_answers(partial, 60)
+    before = answers.read_bytes()
+    kept_directory.chmod(0o300)
+    try:
+        code, out, err = run(root, repository, dated_routes)
+        unchanged = answers.read_bytes() == before
+    finally:
+        kept_directory.chmod(0o755)
+    check("answers kept: a copies directory that can be written but not listed stops the brief with exit 2 before "
+          "the answers file changes, and no new copy is made",
+          code == 2 and unchanged and "could not list the kept copies" in err
+          and sorted(kept_directory.iterdir()) == copies_before, err + out)
     count = len(list(kept_directory.iterdir()))
     write_answers("1. \n\n2. \n", 60)
     code, out, err = run(root, repository, dated_routes)
@@ -974,7 +990,7 @@ def stopped_round_cases(root, repository, made, frozen_head, dated_routes, submi
     write_answers(partial, 60)
     code, out, err = run(root, repository, dated_routes)
     check("answers kept: when no copy can be made, the brief fails with exit 2 and leaves the answers file as it was",
-          code == 2 and out == "" and f"could not write the answers file {answers}" in err
+          code == 2 and out == "" and f"could not list the kept copies of the answers file in {kept_directory}" in err
           and answers.read_text() == partial, err + out)
     kept_directory.unlink()
     answers.unlink()
