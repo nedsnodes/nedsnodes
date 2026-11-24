@@ -1107,3 +1107,30 @@ Goes wrong when: a reader takes the assertion as exact.
 The claim check's evidence:
 > `nn-systems/handoff/handoff-asked-stop-typing-user-notice-user-prompt-submit-hook.py:94` `return os.environ.get(supervisor.HANDOFF_SUPERVISOR_AGENT_NAME_ENVIRONMENT_VARIABLE, "").strip()`. This hook also reads the first variable. It takes the name from the supervisor's constant, so a rename would not break it.
 State: open
+
+## E95 — possible problem: an assertion of the overview is contradicted
+
+Claim: When the still-working subagents or the handoff-deferral's refused commands cannot be read, or the prune fails, the writer writes a warning for the successor as a `session-handoff-writer-warning-<n>` field, "which the handoff-supervisor shows to the successor".
+Found by: the overview claim check of 2026-11-24 against commit 4b1b574e1657481ad0bc0a5cfa57e4e19c359d20; its report is /home/nedlern/nedsnodes-logs/overview-write-architecture-overview-claim-check-reports/nedsnodes-handoff-architecture-overview/9f987c0ec9aa2477812aa54f1cef23ec024abbdc-2026-11-24T21-50-52-725627Z.md.
+Fixed by: regular maintenance, in the overview.
+Goes wrong when: a reader takes the assertion as exact.
+The claim check's evidence:
+> - The writer half holds: writer:1074-1081.
+> - The handoff-supervisor shows the warnings only in `build_ignition_prompt`, at handoff-supervisor.py:1359-1362 `writer_warnings = numbered_field_values_from(handoff_fields, SESSION_HANDOFF_WRITER_WARNING_FIELD_PREFIX)`.
+> - When extraction fails, the successor's prompt comes from `IgnitionPlanWithoutConversationTail.compose` (:1410-1458), which adds the recovery note, approval-walk instruction, walk item, git-sync line, overview and memory lines and the next step, but no writer warnings. That path is taken at :2878-2881 `if successor_session_id is None: ... successor_session_id_and_ignition_plan_without_conversation_tail(`.
+> - So in that case the successor never sees the warnings. The same compose also drops the roster, the still-running and past-wait-limit tasks, and the refused cold-read commands.
+State: open
+
+## E96 — possible problem: an assertion of the overview is contradicted
+
+Claim: `<seat>-supervisor-state.json` is written only by the supervisor and read by "the writer script, resupervise-seat.py, recover-crashed-seats.py, restart-live-seats-at-login.py, the agent-crash-watcher, the restart program and scripts/agent-seat-idle-sweep-verdicts-print.py".
+Found by: the overview claim check of 2026-11-24 against commit 4b1b574e1657481ad0bc0a5cfa57e4e19c359d20; its report is /home/nedlern/nedsnodes-logs/overview-write-architecture-overview-claim-check-reports/nedsnodes-handoff-architecture-overview/9f987c0ec9aa2477812aa54f1cef23ec024abbdc-2026-11-24T21-50-52-725627Z.md.
+Fixed by: regular maintenance, in the overview.
+Goes wrong when: a reader takes the assertion as exact.
+The claim check's evidence:
+> - "Written only by" holds: restart-live-seats-at-login.py:48-50, and Grep `write_supervisor_state` finds it only in handoff-supervisor.py.
+> - The reader list, which names an outside reader and so reads as complete, misses three more readers:
+>   - scripts/agent-seat-idle-sweep-headless-judge-wake-messages-send-and-user-alerts-write.py:710 `path = verdicts_print.supervisor.supervisor_state_path(Path(handoff_directory).expanduser(), seat)`
+>   - scripts/merge-lane-open-prs-not-changes-requested-count-then-next-agent-seat-go-ahead-to-open-surviving-mutant-test-prs.py:275 `state_path = idle_sweep.verdicts_print.supervisor.supervisor_state_path(HANDOFF_DIRECTORY,`
+>   - scripts/save-uncommitted-scratch-worktrees-before-reboot.py:40 `whose ~/.claude/handoffs/<seat>-supervisor-state.json is still on this`
+State: open
