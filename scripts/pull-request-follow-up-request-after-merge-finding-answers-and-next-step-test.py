@@ -1491,13 +1491,17 @@ def test_waiting_for_user_ruling():
 PRINT_BLOCK = "print-follow-up-request-block-from-merge-lane-2-reviews"
 
 
-def print_block(reviews, comments, gh_failure=None, read_back=None, description="", replaced=None):
+def print_block(reviews, comments, gh_failure=None, read_back=None, description="", replaced=None,
+                author="another-seat-account"):
     """Run PRINT_BLOCK in process, gh answering with reviews and comments as one page each, or raising
     gh_failure; read_back replaces the block parser. `replaced` maps a replaced pull request's number to its
-    (description, reviews, comments). Return (exit code, stdout, stderr)."""
+    (description, reviews, comments); author is the login gh pr view prints for the pull request's author.
+    Return (exit code, stdout, stderr)."""
     pull_requests = {NUMBER: (description, reviews, comments), **(replaced or {})}
 
     def fake_gh(arguments, timeout_seconds=None):
+        if arguments[:2] == ["pr", "view"] and "body,author" in arguments:
+            return author + "\n" + pull_requests[int(arguments[2])][0] + "\n"
         if arguments[:2] == ["pr", "view"]:
             return (pull_requests[int(arguments[2])][0] if "body" in arguments else TITLE) + "\n"
         if gh_failure:
@@ -1556,19 +1560,24 @@ def test_print_block():
     posted_approval = {"state": program.load_script_beside_this_one(program.POSTING_PROGRAM_FILE_NAME)
                        .EVENT_STATES["COMMENT"], "body": "APPROVE\n\nThe review body."}
     code, out, err = print_block([merge_lane_review(1, **posted_approval)],
-                                 [merge_lane_comment(10, 1, "**fix-next** Rename it.")])
+                                 [merge_lane_comment(10, 1, "**fix-next** Rename it.")], author="ned-review-merge")
     check(f"{PRINT_BLOCK} reads merge-lane-2's approval posted as a COMMENT review on a pull request it opened",
           code == 0 and err == "" and out == (f"#follow_up_request pull request {NUMBER}\n"
                                                "1. fix-next: `scripts/thing.py:3`: Rename it.\n"), out + err)
-    code, out, err = print_block([merge_lane_review(1, state="COMMENTED", body="REQUEST_CHANGES\n\n**Blocking: 1**")],
+    code, out, err = print_block([merge_lane_review(1, **posted_approval)],
                                  [merge_lane_comment(10, 1, "**fix-next** Rename it.")])
+    check(f"{PRINT_BLOCK} does not read merge-lane-2's only review, a COMMENT review opening with APPROVE, as an "
+          "approval on a pull request another account opened",
+          code == 1 and out == "" and "has no approving review" in err, out + err)
+    code, out, err = print_block([merge_lane_review(1, state="COMMENTED", body="REQUEST_CHANGES\n\n**Blocking: 1**")],
+                                 [merge_lane_comment(10, 1, "**fix-next** Rename it.")], author="ned-review-merge")
     check(f"{PRINT_BLOCK} refuses when merge-lane-2's only COMMENT verdict requests changes",
           code == 1 and out == "" and "has no approving review" in err, out + err)
     code, out, err = print_block([merge_lane_review(1, state="CHANGES_REQUESTED"),
                                   merge_lane_review(2, state="COMMENTED", body="APPROVE\n\nA comment.")],
                                  [merge_lane_comment(10, 1, "**fix-next** Rename it.")])
-    check(f"{PRINT_BLOCK} does not read a COMMENT review that opens with APPROVE as an approval where merge-lane-2 "
-          "gives its verdicts their own review states",
+    check(f"{PRINT_BLOCK} does not read a COMMENT review that opens with APPROVE, after a CHANGES_REQUESTED review, "
+          "as an approval on a pull request another account opened",
           code == 1 and out == "" and "has no approving review" in err, out + err)
     code, out, err = print_block([merge_lane_review(1)], [merge_lane_comment(10, 1, "Rename it.")])
     check(f"{PRINT_BLOCK} refuses a merge-lane-2 comment with no mark, naming it, and says how to write the block "
@@ -1592,6 +1601,19 @@ def test_print_block():
     check(f"{PRINT_BLOCK} reports a review without its expected fields as FAILED with exit 2",
           code == 2 and err.startswith(f"FAILED: GitHub's reviews of pull request {NUMBER} were not in the "
                                        "expected shape: KeyError"), err)
+    without_state = merge_lane_review(2)
+    del without_state["state"]
+    code, out, err = print_block([without_state, merge_lane_review(1)],
+                                 [merge_lane_comment(10, 1, "**fix-next** Rename it.")])
+    check(f"{PRINT_BLOCK} prints the block when a merge-lane-2 review has no state but another review approves",
+          code == 0 and err == "" and out == (f"#follow_up_request pull request {NUMBER}\n"
+                                               "1. fix-next: `scripts/thing.py:3`: Rename it.\n"), out + err)
+    code, out, err = print_block([merge_lane_review(1, state="CHANGES_REQUESTED"), without_state],
+                                 [merge_lane_comment(10, 1, "**fix-next** Rename it.")])
+    check(f"{PRINT_BLOCK} prints nothing and fails with exit 2 when a merge-lane-2 review has no state and no "
+          "readable review approves",
+          code == 2 and out == "" and err.startswith("FAILED: GitHub returned a review by ned-review-merge without a "
+                                                     "state, so its verdict cannot be read: "), out + err)
     code, out, err = print_block([merge_lane_review(1)], [merge_lane_comment(10, 1, "**fix-next** Rename it.")],
                                  read_back=lambda text: [])
     check(f"{PRINT_BLOCK} prints nothing and fails with exit 2 when its block does not read back as itself",

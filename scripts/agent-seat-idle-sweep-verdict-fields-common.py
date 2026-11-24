@@ -2,8 +2,8 @@
 """The fields of one idle-sweep verdict, the JSON object scripts/agent-seat-idle-sweep-verdicts-print.py
 prints for each agent-seat, and the values its rule, decision and sentences may take.
 
-Not a program to run. The printing program takes twelve field names from here, rule, decision,
-text, if_every_sentence_backed, last_turn_ending_message, last_tool_call_at,
+Not a program to run. The printing program takes thirteen field names from here, rule, decision,
+text, if_every_sentence_backed, last_turn_ending_message, last_tool_call_at, last_user_typed_at,
 github_conditions_skipped_for_budget,
 successful_task_tool_calls_setting_prerequisites_or_blocked_by,
 tool_calls_since_start_of_earliest_turn_with_sentence_to_judge,
@@ -32,6 +32,13 @@ LAST_TOOL_CALL_AT = "last_tool_call_at"
 # result names
 SUCCESSFUL_TASK_TOOL_CALLS_SETTING_PREREQUISITES_OR_BLOCKED_BY = (
     "successful_task_tool_calls_setting_prerequisites_or_blocked_by")
+# [{"time", "blocked_tasks"}], oldest first: each TaskUpdate call in the agent-session's own
+# transcript that sets addBlocks and whose result shows it succeeded. Kept apart from the list above
+# because it holds other tasks, so it cannot back a promise about the task it updates.
+IDLE_SWEEP_VERDICT_FIELD_LISTING_SUCCESSFUL_TASK_UPDATE_TOOL_CALLS_SETTING_ADD_BLOCKS_WITH_BLOCKED_TASKS = (
+    "idle_sweep_verdict_field_listing_successful_task_update_tool_calls_setting_add_blocks_with_blocked_tasks")
+# ISO time of the newest message the user typed in the agent-session's own transcript, or null
+LAST_USER_TYPED_AT = "last_user_typed_at"
 TURN_ENDED = "turn_ended"
 # [{"walk_minutes": path, "next_to_present": value}]
 APPROVAL_WALK_ITEMS_WAITING_ON_THE_USER = "approval_walk_items_waiting_on_the_user"
@@ -78,7 +85,10 @@ OPEN_TASKS_WITH_PREREQUISITES_OR_BLOCKED_BY = "open_tasks_with_prerequisites_or_
 
 ALWAYS_PRESENT = (AGENT_SEAT, SESSION_ID, TRANSCRIPT_PATH, CHECKED_AT, ERRORS, RULE)
 OPTIONAL = (DECISION, NOT_CHECKED, SUPERVISOR_LAST_POLL_AT, LAST_ACTIVITY, LAST_TOOL_CALL_AT,
-            SUCCESSFUL_TASK_TOOL_CALLS_SETTING_PREREQUISITES_OR_BLOCKED_BY, TURN_ENDED,
+            LAST_USER_TYPED_AT,
+            SUCCESSFUL_TASK_TOOL_CALLS_SETTING_PREREQUISITES_OR_BLOCKED_BY,
+            IDLE_SWEEP_VERDICT_FIELD_LISTING_SUCCESSFUL_TASK_UPDATE_TOOL_CALLS_SETTING_ADD_BLOCKS_WITH_BLOCKED_TASKS,
+            TURN_ENDED,
             APPROVAL_WALK_ITEMS_WAITING_ON_THE_USER, IDLE, NOT_IDLE_BECAUSE, RUNNING,
             HANDOFF_DEFERRED_MARKER,
             USAGE_LIMIT, SENTENCES, OPEN_TASKS_NOTHING_HOLDS, GITHUB_CONDITIONS_SKIPPED_FOR_BUDGET, TEXT, IF_EVERY_SENTENCE_BACKED,

@@ -40,8 +40,9 @@ WHAT ONE RUN DOES, in order.
      scheduled-full-mutation-pass-of-merged-pull-requests-and-survivor-tasks-open.lock
      in --state-directory; while another run holds it, this run exits
      EXIT_ANOTHER_RUN_HOLDS_THE_LOCK having done nothing, and the next
-     scheduled run carries on. The command a job failure task gives for a
-     hand run of one merge takes the same lock, but waits for it instead of
+     scheduled run carries on. A hand run of one merge, the systemd-run
+     command that mutation_testing_hand_run_command() builds and a job
+     failure task prints, takes the same lock, but waits for it instead of
      exiting: that hand run resumes the kept sessions this program uses.
   2. Runs `git fetch origin main` in the clone and resolves origin/main.
   3. Reads the state file. With no state file, it writes one naming
@@ -116,7 +117,9 @@ seeds, so a merge carried on or run again has the same mutants chosen. The
 merge's kept cosmic-ray sessions (CARRYING A MERGE ON below) hold every mutant
 of the merge and the result of each mutant run: they are this program's record
 of which mutants are judged, and the mutation testing program runs no mutant
-that has a result there. A merge with mutants not run is recorded under
+that has a result there. That program runs at most one mutant of each changed
+line, and marks the line's others skipped (its ONE MUTANT PER CHANGED LINE),
+so a skipped mutant is not counted as not run. A merge with mutants not run is recorded under
 merges_with_mutants_not_run in the state, with merged_at_unix_seconds, the
 time of its commit, mutants_not_run_count, and
 surviving_mutant_keys_already_handled, the key of each surviving mutant an
@@ -147,7 +150,14 @@ new mutants_not_run_count; a merge with none left leaves the state, and a
 merge a suite now fails on with no mutant applied is recorded as untestable
 (AN UNTESTABLE MERGE below) and leaves it too. The second pass never changes
 last_tested_main_commit. No merge is dropped from merges_with_mutants_not_run
-for being old.
+for being old; but the second pass gives the mutation testing program its
+MUTANTS_WITH_NO_RESULT_IN_KEPT_COSMIC_RAY_SESSIONS_MARKED_SKIPPED_WHEN_HEAD_COMMIT_BEFORE_CUTOFF_COMMAND_LINE_FLAG, so it
+marks skipped every mutant with no result in the kept sessions of a merge
+committed before its
+KEPT_COSMIC_RAY_SESSION_MUTANTS_WITH_NO_RESULT_ALL_SKIPPED_WHEN_HEAD_COMMIT_UNIX_TIME_BEFORE_THIS_CUTOFF,
+and such a merge has none left, and leaves the state, the next time the second
+pass reaches it. The first pass never gives it, so a first pass stopped after
+it made its sessions resumes them.
 
 CARRYING A MERGE ON. Each merge's cosmic-ray sessions are kept in
 cosmic-ray-sessions-kept-for-unfinished-merges/<merge>
@@ -530,8 +540,9 @@ def read_state(state_file):
             f"If the file can be repaired by hand, repair it: it holds last_tested_main_commit, "
             f"a commit hash, and tasks_opened, an object, and may hold "
             f"{MERGES_WITH_MUTANTS_NOT_RUN_STATE_KEY}, an object that gives each merge an "
-            f"object holding merged_at_unix_seconds and mutants_not_run_count, both whole "
-            f"numbers, and surviving_mutant_keys_already_handled, a list, and may hold "
+            f"object of its own. Each merge's object holds merged_at_unix_seconds and "
+            f"mutants_not_run_count, both whole numbers, and "
+            f"surviving_mutant_keys_already_handled, a list, and may also hold "
             f"{ERRORED_MUTANT_KEYS_ALREADY_REPORTED_STATE_KEY}, a list.\n"
             f"Otherwise delete it: the next run then starts from origin/main, and merges since "
             f"the last good run go untested.") from error
@@ -1098,10 +1109,12 @@ def errored_mutants_job_failure_task_opened(arguments, merge, merge_subject, err
     except OSError as error:
         raise StepFailed(
             f"merge {merge[:12]} ({merge_subject}): {len(errored)} of its mutants ended "
-            f"ERRORED, but their job failure task could not be opened or added to on "
+            f"ERRORED, but the job failure task that names ERRORED mutants could not be "
+            f"opened, nor could the open one have them added to its description, on "
             f"{JOB_FAILURE_TASK_AGENT_SEAT}'s task list ({type(error).__name__}: {error}), so "
             f"the merge is not recorded as tested and no later merge is tested. The next run "
-            f"tries this merge again, and gives no surviving mutant a second task.\n"
+            f"tries this merge again and reports these ERRORED mutants in that task; the "
+            f"surviving mutants this run already gave tasks get none again.\n"
             f"Fix what the error names, such as a task list directory that does not exist, "
             f"then run this program again on ned-box: {RUN_BY_HAND}") from error
     for mutant in errored:
@@ -1133,7 +1146,8 @@ def test_one_merge(arguments, state, state_file, merge, record, record_citation,
     if in_second_pass:
         which_mutants_run_options = [
             mutation_testing.NO_MUTANT_STARTED_AFTER_UNIX_TIME_FLAG,
-            repr(second_pass_no_mutant_started_after_unix_time)]
+            repr(second_pass_no_mutant_started_after_unix_time),
+            mutation_testing.MUTANTS_WITH_NO_RESULT_IN_KEPT_COSMIC_RAY_SESSIONS_MARKED_SKIPPED_WHEN_HEAD_COMMIT_BEFORE_CUTOFF_COMMAND_LINE_FLAG]
         limit_seconds = second_pass_limit_seconds
         not_run_before = state[MERGES_WITH_MUTANTS_NOT_RUN_STATE_KEY][merge]
     parent = git_or_raise(arguments.clone, "rev-parse", "--verify", f"{merge}^1^{{commit}}")
@@ -1152,10 +1166,12 @@ def test_one_merge(arguments, state, state_file, merge, record, record_citation,
     exit_code, stdout, stderr = run_mutation_testing(
         arguments, merge, parent, json_file, workers, sessions_directory,
         which_mutants_run_options, limit_seconds)
-    # A hand run of a second pass merge takes no stop time, so it runs every mutant not run.
+    # A hand run of a second pass merge takes no stop time, so it runs every mutant not run that
+    # is not backlog.
     command_shown = mutation_testing_hand_run_command(
         arguments, merge, parent, workers, sessions_directory,
-        [] if in_second_pass else which_mutants_run_options)
+        [mutation_testing.MUTANTS_WITH_NO_RESULT_IN_KEPT_COSMIC_RAY_SESSIONS_MARKED_SKIPPED_WHEN_HEAD_COMMIT_BEFORE_CUTOFF_COMMAND_LINE_FLAG]
+        if in_second_pass else which_mutants_run_options)
     said = last_line_said(stdout, stderr)
     if exit_code is None:
         judged = count_of_mutants_judged_in_kept_cosmic_ray_sessions(sessions_directory)

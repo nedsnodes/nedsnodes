@@ -4842,6 +4842,33 @@ for how, source in older_checkout_sources:
               == own_real_claude_list[own_real_claude_suite],
               lists)
 
+# The report's source line names this program for each list it supplied, so it does not name
+# only a file that lacks the list the run used.
+with tempfile.TemporaryDirectory() as scratch:
+    checkout = pathlib.Path(scratch)
+    (checkout / "scripts").mkdir()
+    lists_file = checkout / "scripts" / "run-all-test-suites.py"
+    lists_file.write_text(checkout_runner_source({REAL_CLAUDE: None}), encoding="utf-8")
+    _, lacking_source = module.suite_sandbox_lists_read_from_checkout_under_test(checkout)
+    lists_file.write_text(checkout_runner_source({}), encoding="utf-8")
+    _, whole_source = module.suite_sandbox_lists_read_from_checkout_under_test(checkout)
+    lists_file.write_text(checkout_runner_source(
+        {name: None for name in module.SUITE_SANDBOX_LIST_NAMES_READ_FROM_CHECKOUT_UNDER_TEST}),
+        encoding="utf-8")
+    _, all_fallback_source = module.suite_sandbox_lists_read_from_checkout_under_test(checkout)
+check("when the checkout lacks one list, the lists' source names the checkout's file and this "
+      "program for that list",
+      lacking_source == (f"{lists_file}, and in {pathlib.Path(module.__file__).resolve()} for "
+                         f"{REAL_CLAUDE}, which the checkout lacks or assigns a set"),
+      lacking_source)
+check("when the checkout has every list, the lists' source is the checkout's file alone",
+      whole_source == str(lists_file), whole_source)
+check("when the checkout lacks every list, the lists' source is this program alone, not the "
+      "checkout's file, which supplied none",
+      all_fallback_source == (f"{pathlib.Path(module.__file__).resolve()}, since {lists_file} "
+                              f"lacks every list or assigns each a set"),
+      all_fallback_source)
+
 # A current checkout's list that this program cannot read is refused, not taken for an older
 # checkout's missing list.
 annotated = lists_read_from_checkout_whose_runner_is(checkout_runner_source({

@@ -252,6 +252,13 @@ counts line that cannot be written are each printed after the rest, saying the
 minutes record the answer, with exit 2; a changed target alone leaves the exit
 code 0, since the report was written.
 
+Each run of CHECK, CLOSE and the waiting-item step first saves the open
+walk's walk-document, as it stands, to `walk-document-copies/<walk name>/` in
+the log-store, named by the time in UTC and a hash of its content, keeping the
+newest 20 of that walk. It saves nothing when the document is byte for byte the newest
+copy, so runs that change nothing do not push older versions out. A copy that cannot be saved is printed after the step's own output,
+with exit 2 if the step would have exited 0; the step itself still runs.
+
 CLOSE reads the last answer line CHECK wrote. When the `#next_to_present` line
 still names that line's items, it records the answer: that it took effect, or,
 for answers to parts, a single line for the item naming each part's outcome,
@@ -398,7 +405,7 @@ the sha256 of that text unchanged, whitespace included. It first refuses,
 as CHECK does and before it starts any read, an item with a `#new` or
 `#new_if_d` mark whose text would not be read whole; then it refuses, also
 before any read, an item whose text up to its first `###` sub-step, or one of
-whose `###` sub-steps, holds more than 300 words, counting every run of
+whose `###` sub-steps, holds more than 500 words, counting every run of
 characters between spaces that holds a letter or a digit, on every line but
 those opening `#approval_walk_item_`. Then, for an item that is to be shown, it
 refuses, before any read, an item whose text states the
@@ -627,7 +634,7 @@ CHECK_JUDGEMENT_LINES = (
     "the flag `" + HOLD_ANSWER_FLAG + "`: it numbers the new item, holds {item}'s answer until the user answers "
     "it, and says when to present it.",
 )
-CHECK_CLOSE_LINE = "Then run `python3 {program} close --cwd {top}` and do what it prints."
+CHECK_CLOSE_LINE = "Then run `{command}` and do what it prints."
 BUMP_NOT_FOUND = (
     "check --bump refused: no item heading in the walk-document {document} has the title `{title}`, so nothing "
     "was bumped and nothing was written.\n"
@@ -643,7 +650,7 @@ BUMP_ANSWER_NOT_CLOSED = (
     "check --bump refused: the walk-minutes {minutes} hold the user's answer to {item}, which check wrote and close "
     "has not yet recorded, so nothing was bumped and nothing was written. If the bump went ahead, close would "
     "then take that answer as the answer to the item you bump as well.\n"
-    "Run `python3 {program} close --cwd {top}` first and do what it prints, except reading and presenting the item "
+    "Run `{close_command}` first and do what it prints, except reading and presenting the item "
     "it names next: in place of that, run `{bump_command}` and do what it prints, so that the item the user "
     "bumped is shown next.")
 BUMP_MINUTES = "Bumped by the user: {bumped} is shown next, before {waiting}, which waits again after it.{words}"
@@ -657,11 +664,19 @@ COUNTS_NOT_LOGGED = (
     "The minutes record the answer, but the fast-read counts were not logged to {log}: {error}.",
     "Include this line in your next message to the user, and carry on as the lines above say.",
 )
+WALK_DOCUMENT_COPIES_DIRECTORY_IN_LOG_STORE = "walk-document-copies"
+WALK_DOCUMENT_COPIES_KEPT = 20
+WALK_DOCUMENT_COPY_NOT_SAVED = (
+    "FAILED: no timestamped copy of the walk-document {document} was saved on ned-box: {error}.\n"
+    "This step's own work is not affected by that failure.\n"
+    "Go on with the walk: the next run of this program tries the copy again.\n"
+    "If the failure repeats, tell the user, because until a copy lands a bad edit to the walk-document cannot be "
+    "undone from one.")
 LOG_STORE_UNREACHABLE = ("this machine reaches the log-store at neither {paths}, so its cold-read-records were "
                          "not searched either")
 RECORDS_NOT_SHIPPED = (
     "The minutes record the answer, but the fast read of `{mark}` text {number} did not ship its record: {note}",
-    "The record stays at {record}; once ned-box can be reached, run `python3 {shipper} {record}`.",
+    "The record stays at {record}; once ned-box can be reached, run `{ship_command}`.",
     "If the line above says REFUSED, first rename {record} with a -2 suffix, or the next number not taken, "
     "and ship the renamed directory instead.",
     "Include these lines in your next message to the user, and carry on as the lines above say.",
@@ -672,13 +687,17 @@ FAST_READ_FAILED_LINES = (
     "answer the item another way.",
 )
 STOP_SIGNAL_SCRATCH_NOT_REMOVED_LINES = (
-    "{program} check: a {signal} stopped this check step while a cold-read-fast-read was running, so the "
-    "walk-minutes do not record the user's answer, and the scratch directory {directory}, which held the text "
-    "sent to that cold-read-fast-read, could not be removed: {error}\n"
+    "{program}: a {signal} stopped it while a cold-read-fast-read was running, and the scratch directory "
+    "{directory}, which held the text sent to that cold-read-fast-read, could not be removed: {error}\n"
     "Run `chmod -R u+rwX {quoted_directory} && rm -rf {quoted_directory}`, because nothing else removes that "
     "directory, and the disk it is on can fill.\n"
-    "Then run the same `python3 {quoted_program_path} check` command again, with the same answer, so that the "
-    "walk-minutes record his answer.")
+    "{after_removal}")
+STOP_SIGNAL_CHECK_AFTER_REMOVAL = ("The walk-minutes do not record the user's answer: then run `{command}` again, "
+                                   "with the same answer, so that they record it.")
+STOP_SIGNAL_READ_STEP_AFTER_REMOVAL = ("{item} has had no cold-read-fast-read of its text as it stands: then run "
+                                       "`{command}` again, and present {item} only after it.")
+STOP_SIGNAL_READ_AHEAD_AFTER_REMOVAL = ("The read step finds this read ended without an outcome, and runs the "
+                                        "cold-read-fast-read itself.")
 CHECK_MINUTES = ("{item}: the user answered {answered}{hashtag}{rating} ({date_and_time}){words}, which makes its change. "
                  "Fast reads:")
 CHECK_NOT_ASKED_MINUTES = ("{item}: settled without asking the user, {answered}{rating} ({date_and_time}), which makes "
@@ -863,7 +882,7 @@ WALK_ORDER_REFUSED = (
     "title>`, the other item's heading without its `##` and any `Item N of M: `, one line for each item it waits "
     "on; an item already decided counts as done. If items wait on each other in a circle, take out the waits-on "
     "line that is not a real prerequisite.\n"
-    "Then run `python3 {program} {step} --cwd {top}` again.\n"
+    "Then run `{command}` again.\n"
     "From now on, write the category line, and a waits-on line for each item it waits on, into every item when you "
     "add it to a walk-document.")
 CATEGORY_MISSING = "{item} has no `" + WALK_CATEGORY_TAG + "<category>` line."
@@ -1130,7 +1149,6 @@ FILE_EXTENSION_END = re.compile(r"\w\.[A-Za-z][A-Za-z0-9]{0,4}$")
 LETTER_ABBREVIATION = re.compile(r"(?:[A-Za-z]\.)+[A-Za-z]?")
 TOKEN_EDGE_PUNCTUATION = "\"'“”‘’()[]{}<>*_.,;:!?"
 FACTS_LISTED = 8
-READ_STEP_COMMAND = "python3 {program} " + WAITING_ITEM_READ_STEP + "{flags} --cwd {top}"
 CLOSE_READ_NEXT_ITEM = ("Then run `{command}`, which gives {next_item}, the item the minutes' `#next_to_present` "
                         "line now names, its cold-read-fast-read, and do what it prints before you present it.")
 ITEM_READ_USED = "{item}: its cold-read-fast-read, of its text as it stands, {how}: {report}{notes}"
@@ -1238,7 +1256,7 @@ READ_AHEAD_NOT_STARTED = ("No cold-read-fast-read could be started ahead for the
                           "from you now, since when that item waits its read step reads it or reports the problem "
                           "again. The problem: {problem}")
 GIT_LS_FILES_FAILED = "every changed word, since `git ls-files` failed in {top} ({error}) and file names were not known"
-APPROVAL_WALK_ITEM_WORD_LIMIT = 300
+APPROVAL_WALK_ITEM_WORD_LIMIT = 500
 # The user has not decided whether the hashtag marker lines, such as `#new`, `#new_if_d` and `#case_against`, and
 # the texts quoted on `#old` and `#new` lines count toward the limit; until he does, only a line opening with one
 # of these, which the item page shows apart from the item's text, is left out of the count.
@@ -1255,7 +1273,7 @@ APPROVAL_WALK_ITEM_OVER_WORD_LIMIT = (
     "breaks that holds a letter or a digit; every line of the item counts, heading, code and hashtag marker lines "
     "included, except a line opening with {left_out}, and each `###` sub-step, numbered or not, counts on its own.\n"
     "Split that text into `###` sub-steps, each within {limit} words, headed and ended as the walk-me-through skill's "
-    "paragraph opening \"Limit each item to 300 words\" says; do not cut the text down to fit, since the user wants "
+    "paragraph opening \"Limit each item to {limit} words\" says; do not cut the text down to fit, since the user wants "
     "long material broken into steps, not compressed.\n"
     "Then run `{command}` again.\n"
     "From now on, write each item and each sub-step within {limit} words when you write it into the walk-document.")
@@ -1323,6 +1341,61 @@ def reachable_log_store_records(record_shipper=None, ned_box_home=None, mac_moun
     return next((candidate for candidate in candidates if candidate.is_dir()), None), candidates
 
 
+def walk_me_through_walk_document_timestamped_copy_save_on_ned_box_and_oldest_copies_prune(arguments):
+    """Save the open walk's walk-document; return what went wrong, or None. A walk this cannot find is the step's
+    own refusal to report."""
+    if arguments.walk_document_copies_directory is None and (arguments.cold_read_records or arguments.counts_log):
+        return None  # A run pointed at other records or counts is a test's, and must not write to the real copies.
+    walk_finder = load_walk_finder()
+    top = walk_finder.checkout_top(Path(arguments.cwd))
+    walk_directory = top / walk_finder.WALK_DIRECTORY if top else None
+    if walk_directory is None or not walk_directory.is_dir():
+        return None
+    try:
+        walk = walk_finder.the_one_unclosed_approval_walk_including_paused(walk_directory,
+                                                                           walk_finder.markdown_parser())
+    except walk_finder.MoreThanOneUnclosedApprovalWalk:
+        return None
+    if walk is None:
+        return None
+    minutes = walk[0]
+    walk_name = minutes.name[:-len(walk_finder.MINUTES_SUFFIX)]
+    document = minutes.with_name(walk_name + ".md")
+    if not document.is_file():
+        return None
+    temporary = None
+    try:
+        copies_root = arguments.walk_document_copies_directory
+        if copies_root is None:
+            log_store_records, tried = reachable_log_store_records()
+            if log_store_records is None:
+                raise OSError(LOG_STORE_UNREACHABLE.format(paths=" or ".join(str(path) for path in tried)))
+            copies_root = log_store_records.parent / WALK_DOCUMENT_COPIES_DIRECTORY_IN_LOG_STORE
+        copies = copies_root / walk_name
+        copies.mkdir(parents=True, exist_ok=True)
+        content = document.read_bytes()
+        existing = sorted(copies.glob("*.md"))
+        if existing and existing[-1].read_bytes() == content:
+            return None
+        stamp = datetime.datetime.now(datetime.timezone.utc).strftime("%Y-%m-%dT%H-%M-%S.%fZ")
+        # The content hash keeps two versions saved with one stamp from replacing each other.
+        final_name = f"{stamp}-{hashlib.sha256(content).hexdigest()[:16]}.md"
+        handle, temporary = tempfile.mkstemp(suffix=".tmp", dir=copies)
+        with os.fdopen(handle, "wb") as file:
+            file.write(content)
+        os.chmod(temporary, 0o644)  # mkstemp's 0600 would keep the copy from other users of the mount.
+        os.replace(temporary, copies / final_name)
+        temporary = None
+        for old in sorted(copies.glob("*.md"))[:-WALK_DOCUMENT_COPIES_KEPT]:
+            old.unlink(missing_ok=True)
+    except OSError as error:
+        if temporary is not None:
+            with contextlib.suppress(OSError):
+                os.unlink(temporary)
+        return WALK_DOCUMENT_COPY_NOT_SAVED.format(document=document, error=error)
+    return None
+
+
 def the_open_walk(walk_finder, cwd):
     """Return (checkout top, minutes path, #next_to_present value, parser)."""
     top = walk_finder.checkout_top(Path(cwd))
@@ -1376,12 +1449,20 @@ def item_line_ranges(walk_finder, minutes, value, numbers, total, parser, named_
     text = document.read_text(encoding="utf-8")
     tokens = parser.parse(text)
     openings = walk_finder.item_opening_lines(text, parser, tokens)
+    lines = text.split("\n")
     ranges = []
-    for unit_numbers, unit_total, _, first, end in spans:
-        if len(numbers) == 1:
-            first, end = walk_finder.approval_walk_item_line_range_within_heading_shared_by_several_items(
-                openings, first, end, numbers[0], unit_numbers, unit_total)
-        ranges.append((first, end))
+    for unit in spans:
+        if len(numbers) == 1 and len(unit[0]) > 1:
+            own_first, _ = walk_finder.approval_walk_item_line_range_within_heading_shared_by_several_items(
+                openings, unit[3], unit[4], numbers[0], unit[0], unit[1])
+            # An item with no opening of its own starts at the shared opener, whose line can hold its recommendation;
+            # the ranges below it are the ones the item copy the user is shown reads, a setext heading's further
+            # lines included.
+            ranges += [(unit[3], unit[3] + 1)] if own_first == unit[3] else []
+            ranges += walk_finder.approval_walk_unit_heading_end_and_item_line_ranges_below_heading_line(
+                text, parser, lines, unit, [openings], [numbers[0]])[1]
+        else:
+            ranges.append(unit[3:])
     return document, text, tokens, ranges, spans
 
 
@@ -1559,6 +1640,9 @@ def new_marks(text, tokens, ranges, shown):
             code.update((number, token.map[1]) for number in range(*token.map))
         elif token.type == "paragraph_open":
             paragraphs.append(token.map)
+        elif token.type == "heading_open" and token.markup in ("=", "-"):
+            # A setext heading's lines above its underline read as one paragraph, which the item copy shows them as.
+            paragraphs.append([token.map[0], token.map[1] - 1])
     marks = []
     for first, end in ranges:
         for number in range(first, end):
@@ -1644,10 +1728,12 @@ STOP_SIGNALS = (signal.SIGTERM, signal.SIGHUP)
 
 
 @contextlib.contextmanager
-def scratch_directory_removed_on_every_exit():
+def scratch_directory_removed_on_every_exit(after_removal):
     """Make a scratch directory and yield its path; remove it when the block ends, however the block ends. A
     SIGTERM or SIGHUP during the block removes it and then ends the program as that signal's default does; one
-    the program was started with ignored, as under nohup, stays ignored.
+    the program was started with ignored, as under nohup, stays ignored. When that removal fails, the message
+    ends with after_removal, the caller's sentence saying what to run next, since only the caller knows the
+    command, its --cwd included, that redoes its step.
 
     The handler raises nothing: an exception raised inside subprocess's own code, between Popen._wait()'s lock
     acquire and its try, leaves the lock held, and the wait() that subprocess.run() then makes blocks forever.
@@ -1661,9 +1747,9 @@ def scratch_directory_removed_on_every_exit():
                 shutil.rmtree(directory)
             except OSError as error:
                 print(STOP_SIGNAL_SCRATCH_NOT_REMOVED_LINES.format(
-                    program=PROGRAM, signal=signal.Signals(number).name,
-                    quoted_program_path=shlex.quote(str(Path(__file__).resolve())), directory=directory,
-                    quoted_directory=shlex.quote(directory), error=error), file=sys.stderr)
+                    program=PROGRAM, signal=signal.Signals(number).name, directory=directory,
+                    quoted_directory=shlex.quote(directory), error=error, after_removal=after_removal),
+                    file=sys.stderr)
         signal.signal(number, signal.SIG_DFL)
         os.kill(os.getpid(), number)
 
@@ -1685,13 +1771,14 @@ def scratch_directory_removed_on_every_exit():
             signal.signal(number, handler)
 
 
-def run_fast_read(text, name, fast_read_program):
+def run_fast_read(text, name, fast_read_program, after_removal):
     """Fast-read the text from a scratch file; return (the report's directory, the lines the fast read printed
-    on stderr about an unshipped record or a changed target), or raise FastReadFailed.
+    on stderr about an unshipped record or a changed target), or raise FastReadFailed. after_removal is as
+    scratch_directory_removed_on_every_exit takes it.
 
     The scratch directory is removed on every exit, SIGTERM and SIGHUP included: the fast read keeps its own copy
     of the text in its record's target/, which is where a later check looks for it."""
-    with scratch_directory_removed_on_every_exit() as scratch:
+    with scratch_directory_removed_on_every_exit(after_removal) as scratch:
         target = Path(scratch) / f"{name}.md"
         target.write_text(text + "\n", encoding="utf-8")
         result = subprocess.run([sys.executable, str(fast_read_program), "--target", str(target),
@@ -1706,8 +1793,8 @@ def run_fast_read(text, name, fast_read_program):
     only_the_record_not_shipped = result.returncode == 1 and any(
         note.startswith(FAST_READ_RECORD_NOT_SHIPPED_MARKERS) for note in notes)
     if (result.returncode != 0 and not only_the_record_not_shipped) or not lines[-1]:
-        raise FastReadFailed(f"FAILED: {fast_read_program} --target {target} "
-                             f"{FAST_READ_WITHOUT_QUESTION_4_OPTION} exited {result.returncode} "
+        ran = shlex.join([str(fast_read_program), "--target", str(target), FAST_READ_WITHOUT_QUESTION_4_OPTION])
+        raise FastReadFailed(f"FAILED: {ran} exited {result.returncode} "
                              f"without naming a report; its stderr: {result.stderr.strip()[-500:]}")
     return Path(lines[-1]).parent, notes
 
@@ -1815,11 +1902,22 @@ def answer_check_commands(top):
     return "\n".join(commands)
 
 
+def step_command_with_cwd(top, step, *words):
+    """The command for one step of this program that it tells the agent to run. Every such command is built here,
+    shell-quoted, because each must survive a path holding a space and must name the walk's checkout with --cwd:
+    the agent may run it from another checkout, which it would otherwise act on instead. step may hold a flag, as
+    `close --hold-answer-until-new-item-answered` does."""
+    return shlex.join(["python3", str(Path(__file__).resolve()), *step.split(), *words, "--cwd", str(top)])
+
+
 def check_command_with_cwd(top, *words):
-    """The check command, with these flags and values, that this program tells the agent to run. Every such command
-    is built here, because each must name the walk's checkout with --cwd: the agent may run it from another
-    checkout, which it would otherwise check instead."""
-    return shlex.join(["python3", str(Path(__file__).resolve()), "check", *words, "--cwd", str(top)])
+    """The check command, with these flags and values, that this program tells the agent to run."""
+    return step_command_with_cwd(top, "check", *words)
+
+
+def read_step_command_with_cwd(top, *words):
+    """The waiting item's read-step command, with these flags and values, that this program tells the agent to run."""
+    return step_command_with_cwd(top, WAITING_ITEM_READ_STEP, *words)
 
 
 def check_words(arguments):
@@ -2142,7 +2240,7 @@ def check(arguments):
         append_to_minutes(minutes, [no_change.format(item=item, answered=answered_word(arguments, walk_finder),
                                                      rating=rated,
                                                      words=in_his_words, date_and_time=minutes_time(now))])
-        print(CHECK_CLOSE_LINE.format(program=Path(__file__).resolve(), top=shlex.quote(str(top))))
+        print(CHECK_CLOSE_LINE.format(command=step_command_with_cwd(top, "close")))
         return 0
     if unreadable:
         raise Failure(UNREADABLE_NEW_MARKS.format(item=item, document=document, problems="\n".join(unreadable),
@@ -2186,7 +2284,9 @@ def check(arguments):
             continue
         name = walk_fast_read_name(walk_name, item, mark, number)
         try:
-            record, notes = run_fast_read(text, name, arguments.fast_read_program)
+            record, notes = run_fast_read(text, name, arguments.fast_read_program,
+                                          STOP_SIGNAL_CHECK_AFTER_REMOVAL.format(
+                                              command=check_command_with_cwd(top, *check_words(arguments))))
         except FastReadFailed as failure:
             print("\n".join([failure.args[0]] + [
                 line.format(command=check_command_with_cwd(top, *check_words(arguments)))
@@ -2199,7 +2299,7 @@ def check(arguments):
         for note in notes:
             if note.startswith(FAST_READ_RECORD_NOT_SHIPPED_MARKERS):
                 problems += [line.format(mark=mark, number=number, note=note, record=record,
-                                         shipper=RECORD_SHIPPER_FILE)
+                                         ship_command=shlex.join(["python3", str(RECORD_SHIPPER_FILE), str(record)]))
                              for line in RECORDS_NOT_SHIPPED]
     if not texts:
         statuses.append(NO_PROPOSED_TEXT)
@@ -2219,7 +2319,7 @@ def check(arguments):
                    for line in NOT_ASKED_JUDGEMENT_LINES]
         if arguments.not_asked in NOT_ASKED_WEAK_GROUND_LABELS:
             output.append(NOT_ASKED_WEAK_JUDGEMENT_LINE.format(item=item))
-    output.append(CHECK_CLOSE_LINE.format(program=Path(__file__).resolve(), top=shlex.quote(str(top))))
+    output.append(CHECK_CLOSE_LINE.format(command=step_command_with_cwd(top, "close")))
     log = arguments.counts_log or (log_store_records.parent / COUNTS_LOG_FILE_NAME if log_store_records else None)
     try:
         if log is None:
@@ -2289,11 +2389,12 @@ def read_ahead_bound_to_item(reads, key, outcome, item):
     return bound
 
 
-def fast_read_outcome(text, name, fast_read_program):
+def fast_read_outcome(text, name, fast_read_program, after_removal):
     """Fast-read the text and return the outcome a read-ahead worker writes: done with the report and the fast
-    read's notes, or failed with its FAILED line."""
+    read's notes, or failed with its FAILED line. after_removal is as scratch_directory_removed_on_every_exit
+    takes it."""
     try:
-        record, notes = run_fast_read(text, name, fast_read_program)
+        record, notes = run_fast_read(text, name, fast_read_program, after_removal)
     except FastReadFailed as failure:
         return {"status": READ_FAILED, "failed": failure.args[0]}
     record_names = load_module("cold_read_record_names", RECORD_NAMES_FILE)
@@ -2306,7 +2407,9 @@ def read_ahead_worker(arguments):
     """The detached process close starts: fast-read the text kept at --text-file and write its outcome."""
     reads, key = arguments.text_file.parent, arguments.text_file.stem
     text = arguments.text_file.read_text(encoding="utf-8").rstrip("\n")
-    record_read(reads, key, arguments.item, text, fast_read_outcome(text, arguments.name, arguments.fast_read_program),
+    record_read(reads, key, arguments.item, text,
+                fast_read_outcome(text, arguments.name, arguments.fast_read_program,
+                                  STOP_SIGNAL_READ_AHEAD_AFTER_REMOVAL),
                 arguments.item_number_predicted)
     return 0
 
@@ -2611,7 +2714,8 @@ def unclosed_last_answer(walk_finder, minutes, parser):
     return None
 
 
-def item_read_findings_without_outcomes_lines(item, report, outcome_file, fast_read_program, command):
+def item_read_findings_without_outcomes_lines(item, report, outcome_file, fast_read_program, command,
+                                              command_reading_again):
     """The lines that withhold item from being presented while the report of its latest cold-read-fast-read has
     findings with no recorded outcome; empty when every finding has one or the report has none. Raise Failure when
     the report or its outcomes file cannot be read."""
@@ -2622,7 +2726,7 @@ def item_read_findings_without_outcomes_lines(item, report, outcome_file, fast_r
     except (OSError, ValueError) as error:
         raise Failure(ITEM_READ_FINDING_OUTCOMES_UNREADABLE.format(
             item=item, report=report, error=error, record=record, outcome_file=outcome_file, command=command,
-            read_again=command.replace(" " + AFTER_FIXES_FLAG, "")))
+            read_again=command_reading_again))
     if not missing:
         return []
     findings = finding_outcomes.cold_read_fast_read_record_findings(record)
@@ -2667,25 +2771,22 @@ def waiting_item_read(arguments, sub_step_of=None):
     if sub_step_of:
         value = sub_step_of[0]
     named, numbers, total = waiting_items(walk_finder, value, minutes)
-    program = Path(__file__).resolve()
     reads = item_reads_directory(walk_finder, minutes)
     rechecked = arguments.possibly_stale_system_status_claims_rechecked
     if rechecked is not None and not rechecked.strip():
         raise Failure(SYSTEM_STATUS_CLAIMS_RECHECKED_EMPTY)
     # Repeated in every command the step prints, so a rerun it asks for is not refused again for the same claims.
-    rechecked_flag = f" {SYSTEM_STATUS_CLAIMS_RECHECKED_FLAG} {shlex.quote(rechecked)}" if rechecked else ""
-    rerun = READ_STEP_COMMAND.format(
-        program=program,
-        flags=(" " + AFTER_FIXES_FLAG if arguments.after_fixes_reread_only_when_facts_change else "") + rechecked_flag,
-        top=shlex.quote(str(top)))
+    rechecked_words = [SYSTEM_STATUS_CLAIMS_RECHECKED_FLAG, rechecked] if rechecked else []
+    rerun = read_step_command_with_cwd(
+        top, *([AFTER_FIXES_FLAG] if arguments.after_fixes_reread_only_when_facts_change else []), *rechecked_words)
     # Before walk_document_items, which can write: a missing copy refuses with nothing written.
     earlier = earlier_read_texts_of_item(walk_finder, minutes, value, numbers, total, parser, reads, rerun)
     count, _, _, _, _ = walk_document_items(walk_finder, minutes, value, numbers, total, parser,
                                                 WAITING_ITEM_READ_STEP, top)
     total = total or count
     item = items_named(numbers, total)
-    command = READ_STEP_COMMAND.format(program=program, flags=" " + AFTER_FIXES_FLAG + rechecked_flag,
-                                       top=shlex.quote(str(top)))
+    command = read_step_command_with_cwd(top, AFTER_FIXES_FLAG, *rechecked_words)
+    command_reading_again = read_step_command_with_cwd(top, *rechecked_words)
     document, text = item_text(walk_finder, minutes, value, numbers, total, parser,
                                refused_unless_marks_read=(item, command))
     # Before the kept versions are written, so a refused item's document is left as it was.
@@ -2720,7 +2821,7 @@ def waiting_item_read(arguments, sub_step_of=None):
     if not_shown is not None:
         settle = check_command_with_cwd(top, "--not-asked", NOT_ASKED_RATED_NONE)
         print("\n".join(line.format(item=item, document=not_shown, command=settle,
-                                    read_command=command.replace(" " + AFTER_FIXES_FLAG, ""))
+                                    read_command=command_reading_again)
                         for line in RATED_NONE_NOT_SHOWN_LINES))
         return 0
     key = text_key(text)
@@ -2745,7 +2846,7 @@ def waiting_item_read(arguments, sub_step_of=None):
                     print(recheck_line)
                 withheld = item_read_findings_without_outcomes_lines(
                     item, latest[1]["report"], reads / f"{latest[0]}-outcome.json", arguments.fast_read_program,
-                    command)
+                    command, command_reading_again)
                 print("\n".join([ITEM_READ_NOT_RUN.format(item=item, report=latest[1]["report"])]
                                  + (withheld or [ITEM_READ_NOT_RUN_NEXT.format(
                                      item=item, now_over_later_command=check_command_with_cwd(top, NOW_OVER_LATER_FLAG))]
@@ -2754,13 +2855,15 @@ def waiting_item_read(arguments, sub_step_of=None):
                 return 1 if withheld else 0
             why = ITEM_READ_RUN_FACTS.format(report=latest[1]["report"], facts=", ".join(facts[:FACTS_LISTED]))
         walk_name = minutes.name[:-len(walk_finder.MINUTES_SUFFIX)]
-        outcome = fast_read_outcome(text, walk_fast_read_name(walk_name, item), arguments.fast_read_program)
+        outcome = fast_read_outcome(text, walk_fast_read_name(walk_name, item), arguments.fast_read_program,
+                                    STOP_SIGNAL_READ_STEP_AFTER_REMOVAL.format(
+                                        item=item, command=command_reading_again))
         reads.mkdir(exist_ok=True)
         (reads / f"{key}-started.json").unlink(missing_ok=True)
         record_read(reads, key, item, text, outcome)
         if outcome["status"] == READ_FAILED:
             print("\n".join([outcome["failed"]]
-                            + [line.format(item=item, command=command.replace(" " + AFTER_FIXES_FLAG, ""))
+                            + [line.format(item=item, command=command_reading_again)
                                for line in ITEM_READ_FAILED_LINES]))
             return 1
         how = ITEM_READ_HOW_RUN.format(why=why)
@@ -2768,7 +2871,8 @@ def waiting_item_read(arguments, sub_step_of=None):
         print(recheck_line)
     notes = "".join(STATUS_FAST_READ_NOTE.format(note=note) for note in outcome["notes"])
     withheld = item_read_findings_without_outcomes_lines(item, outcome["report"], reads / f"{key}-outcome.json",
-                                                         arguments.fast_read_program, command)
+                                                         arguments.fast_read_program, command,
+                                                         command_reading_again)
     print("\n".join([ITEM_READ_USED.format(item=item, how=how, report=outcome["report"], notes=notes)]
                     + [line.format(item=item, document=document, command=command,
                                    now_over_later_command=check_command_with_cwd(top, NOW_OVER_LATER_FLAG))
@@ -2832,8 +2936,7 @@ def walk_document_items(walk_finder, minutes, value, numbers, total, parser, ste
             units = walk_finder.item_unit_spans(stamped, parser)
             order, summary, placing = walk_document_order(walk_finder, stamped, units, parser, document, today)
     except WalkOrderUnusable as problem:
-        raise Failure(WALK_ORDER_REFUSED.format(problem=problem, program=Path(__file__).resolve(), step=step,
-                                                top=shlex.quote(str(top))))
+        raise Failure(WALK_ORDER_REFUSED.format(problem=problem, command=step_command_with_cwd(top, step)))
     if stamped != text:
         document.write_text(stamped, encoding="utf-8")
     count = walk_finder.approval_walk_item_total_shown_and_waiting_counted_from_walk_document(units)
@@ -3508,8 +3611,8 @@ def bump(arguments):
                                               *(["--user-reply-as-typed", arguments.user_reply_as_typed]
                                                 if arguments.user_reply_as_typed else []))
         raise Failure(BUMP_ANSWER_NOT_CLOSED.format(minutes=minutes, item=pending["item"],
-                                                    program=Path(__file__).resolve(),
-                                                    top=shlex.quote(str(top)), bump_command=bump_command))
+                                                    close_command=step_command_with_cwd(top, "close"),
+                                                    bump_command=bump_command))
     waiting, numbers, total = waiting_items(walk_finder, value, minutes)
     _, _, _, units, placing = walk_document_items(walk_finder, minutes, value, numbers, total, parser,
                                                   "check --bump", top, stamp=False)
@@ -3525,7 +3628,7 @@ def bump(arguments):
                      else BUMP_ALREADY_SHOWN_WAITING)
             raise Failure(BUMP_ALREADY_SHOWN.format(heading=lines[named[0][3]].strip(), document=document,
                                                     state=state))
-        example = next((lines[first][3:].strip() for first in placing), "the point of the item")
+        example = next((lines[first][3:].strip() for first in placing), "the point of the item")  # pragma: no mutate, [2:] or [3:] of a "## " heading strip to the same title
         raise Failure(BUMP_NOT_FOUND.format(document=document, title=arguments.bump.strip(),
                                             command=check_command_with_cwd(top, "--bump", example)))
     first, end = unshown[0][3], unshown[0][4]
@@ -3546,8 +3649,7 @@ def bump(arguments):
     append_to_minutes(minutes, [BUMP_MINUTES.format(bumped=bumped, waiting=waiting,
                                                     words=USER_WORDS.format(words=words) if words else ""),
                                 NEXT_MARKER_LINE.format(value=bumped)])
-    print(BUMP_DONE.format(bumped=bumped, waiting=waiting, command=READ_STEP_COMMAND.format(
-        program=Path(__file__).resolve(), flags="", top=shlex.quote(str(top)))))
+    print(BUMP_DONE.format(bumped=bumped, waiting=waiting, command=read_step_command_with_cwd(top)))
     return 0
 
 
@@ -3572,8 +3674,7 @@ def close(arguments):
         append_to_minutes(minutes, [CLOSE_HELD_MINUTES.format(item=item, new_item=waiting),
                                     NEXT_MARKER_LINE.format(value=value)])
         output = ([line.format(item=item, new_item=waiting) for line in CLOSE_HELD_LINES] + statuses
-                  + [CLOSE_HELD_NEXT.format(item=item, new_item=waiting, command=READ_STEP_COMMAND.format(
-                      program=Path(__file__).resolve(), flags="", top=shlex.quote(str(top))))])
+                  + [CLOSE_HELD_NEXT.format(item=item, new_item=waiting, command=read_step_command_with_cwd(top))])
         print("\n".join(output))
         return 0
     count, order, summary, units, placing = walk_document_items(walk_finder, minutes, value, waiting_numbers, total,
@@ -3676,8 +3777,8 @@ def close(arguments):
         not_started = start_read_ahead_of_item_after(walk_finder, top, minutes, parser, numbers, shown_total,
                                                      arguments.fast_read_program)
         output += [not_started] if not_started else []
-    output.append(CLOSE_READ_NEXT_ITEM.format(next_item=named, command=READ_STEP_COMMAND.format(
-        program=Path(__file__).resolve(), flags="", top=shlex.quote(str(top)))) if numbers else CLOSE_NO_NEXT_ITEM)
+    output.append(CLOSE_READ_NEXT_ITEM.format(next_item=named, command=read_step_command_with_cwd(top))
+                  if numbers else CLOSE_NO_NEXT_ITEM)
     # After the lines the agent must pass on to the user, so it is not passed on.
     output += waiting_on_item_prerequisite_lines(walk_finder, minutes, numbers, count, parser) if numbers else []
     # Last, so a gh that fails or hangs cannot keep the answer or the next item out of the minutes.
@@ -3748,15 +3849,21 @@ def main(argv=None):
                         help="a cold-read-records directory to search instead of the defaults; repeatable")
     parser.add_argument("--fast-read-program", type=Path, default=FAST_READ_PROGRAM)
     parser.add_argument("--counts-log", type=Path)
+    parser.add_argument("--walk-document-copies-directory", type=Path, help=argparse.SUPPRESS)
     parser.add_argument("--gh-program", default=GH_PROGRAM, help=argparse.SUPPRESS)
     parser.add_argument("--gh-timeout", type=float, default=GH_TIMEOUT_SECONDS, help=argparse.SUPPRESS)
     arguments = parser.parse_args(argv)
+    copy_problem = None if arguments.step == READ_AHEAD_WORKER_STEP else walk_me_through_walk_document_timestamped_copy_save_on_ned_box_and_oldest_copies_prune(arguments)
     try:
-        return {"check": check, "close": close, WAITING_ITEM_READ_STEP: waiting_item_read,
-                READ_AHEAD_WORKER_STEP: read_ahead_worker}[arguments.step](arguments)
+        exit_code = {"check": check, "close": close, WAITING_ITEM_READ_STEP: waiting_item_read,
+                     READ_AHEAD_WORKER_STEP: read_ahead_worker}[arguments.step](arguments)
     except Failure as failure:
         print(f"{PROGRAM} {arguments.step}: {failure.args[0]}", file=sys.stderr)
-        return 1
+        exit_code = 1
+    if copy_problem:
+        print(f"{PROGRAM} {arguments.step}: {copy_problem}", file=sys.stderr)
+        return exit_code or 2
+    return exit_code
 
 
 if __name__ == "__main__":

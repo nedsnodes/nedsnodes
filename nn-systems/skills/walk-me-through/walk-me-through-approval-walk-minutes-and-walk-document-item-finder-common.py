@@ -138,6 +138,11 @@ approval_walk_sub_step_no_decision_closing_line_page_link_or_none reads the
 line a sub-step that asks for no decision ends with, `[No decision here; type
 N or next to continue.](<page link>)`, alone on its line, or, for a sub-step
 whose publish failed, the same line without its link.
+approval_walk_waiting_sub_step_numbers_whose_text_ends_with_no_decision_closing_line
+says which waiting sub-steps ask for no decision: those whose text as shown
+ends with that line and holds no recommendation, so that the answer
+program's --moved-on-no-decision, which refuses an item with a recommendation,
+accepts each of them.
 
 Tool-messages-to-agent follow
 docs/nedsnodes-wiki/nedsnodes-how-to-write-a-tool-message-to-agent-such-as-a-hook-refusal-or-script-error.md.
@@ -186,8 +191,9 @@ ITEM_LABEL = re.compile(
     rf"^(?:(?P<bold>\*\*|__)item\s+(?P<bold_number>{WHOLE_NUMBER})(?:\s+of\s+(?P<total>\d+))?"
     rf"(?=\s*[:.,]|(?P=bold)\s*(?:[:.,\-–—]|$))"
     rf"|item\s+(?P<plain_number>{WHOLE_NUMBER})[:.](?=\s|$))", re.I)
+APPROVAL_WALK_SUB_STEP_ASKING_FOR_NO_DECISION_CLOSING_LINE_WORDS_WITHOUT_LINK = "No decision here; type N or next to continue."
 SUB_STEP_NO_DECISION_CLOSING_LINE = re.compile(
-    r"^\s*(?:\[No decision here; type N or next to continue\.\]\((\S+)\)|No decision here; type N or next to continue\.)\s*$")
+    rf"^\s*(?:\[{re.escape(APPROVAL_WALK_SUB_STEP_ASKING_FOR_NO_DECISION_CLOSING_LINE_WORDS_WITHOUT_LINK)}\]\((\S+)\)|{re.escape(APPROVAL_WALK_SUB_STEP_ASKING_FOR_NO_DECISION_CLOSING_LINE_WORDS_WITHOUT_LINK)})\s*$")
 CLOSING_LINE_LABEL = re.compile(rf"Items?\s+({NUMBER_LIST})\s+of\s+(\d+)(?:,\s.*)?", re.S)
 # Only right after the count, as in `(revised)` or `, revised:`, so a title that uses the word drops nothing.
 REVISED = re.compile(r"^[*_\s(,:;.\-\u2013\u2014]*revised\b", re.I)
@@ -468,6 +474,26 @@ def approval_walk_sub_step_no_decision_closing_line_page_link_or_none(line):
     if match is None:
         return None
     return match[1] or ITEM_PAGE_PUBLISH_FAILED
+
+
+def approval_walk_waiting_sub_step_numbers_whose_text_ends_with_no_decision_closing_line(
+        text, parser, waiting_units, numbers, all_units=None):
+    """The set of numbers that are sub-steps asking for no decision, as the module docstring's CLOSING LINES says, of
+    the walk-document text; waiting_units are waiting_item_units' units for numbers, and all_units item_unit_spans'
+    units of text when the caller has them already."""
+    sub_steps = [number for number in numbers if "." in number]
+    if not sub_steps:
+        return set()
+    all_units = item_unit_spans(text, parser) if all_units is None else all_units
+    found = set()
+    for number in sub_steps:
+        unit = next(unit for unit in waiting_units if number in unit[0])
+        shown = approval_walk_item_text_as_shown_to_user(text, parser, all_units, unit, number)
+        lines = [line for line in prose_lines(shown, parser) if line.strip()]
+        if (approval_walk_sub_step_no_decision_closing_line_page_link_or_none(lines[-1]) is not None
+                and approval_walk_item_last_recommendation_text_from_item_lines(lines) is None):
+            found.add(number)
+    return found
 
 
 def is_closed(value):
@@ -782,34 +808,48 @@ def own_lines_of_unit(text, parser, lines, unit, openings, own=None, keep_setext
     message that leaves that line out is not caught. Nor, with keep_setext_underline, is a further line such as
     `#new Hide rows.`: it stays heading text, and the short-answer hook, which skips headings, does not check that
     the message showed it."""
+    heading_end, ranges = approval_walk_unit_heading_end_and_item_line_ranges_below_heading_line(
+        text, parser, lines, unit, openings, own)
+    if heading_end > unit[3] + 1 and not keep_setext_underline:
+        # Read as the heading's own body, a further line such as `#new_if_d Show every row.` would sit above the
+        # underline and make a second heading; and the blank line keeps an indented code block below the
+        # underline a code block rather than that paragraph's last line.
+        lines = [*lines[:heading_end - 1], "", *lines[heading_end:]]
+    body = []
+    for start, stop in ranges:
+        body += ["", *lines[start:stop]]
+    return body
+
+
+def approval_walk_unit_heading_end_and_item_line_ranges_below_heading_line(text, parser, lines, unit, openings,
+                                                                          own=None):
+    """Return (the line after unit's heading, the (start, stop) line ranges below unit's heading line that belong to
+    the item numbers own of the item numbers unit names, in order and not overlapping), as own_lines_of_unit's
+    docstring says, for the walk-document text split into lines: the item copy the user is shown and the walk check
+    program's marks both read these ranges, so that a `#new` line the user is shown is a line the check reads.
+    Below a setext heading, the heading's further lines, up to its underline, come first, whatever own is."""
     numbers, total, _, first, end = unit
     opening = parser.parse("\n".join(lines[first:end]))
     heading_end = first + 1
     if (opening and opening[0].type == "heading_open"
             and opening[0].markup in ("=", "-") and opening[0].map[0] == 0):
         heading_end = first + opening[0].map[1]
-        if not keep_setext_underline:
-            # Read as the heading's own body, a further line such as `#new_if_d Show every row.` would sit above the
-            # underline and make a second heading; and the blank line keeps an indented code block below the
-            # underline a code block rather than that paragraph's last line.
-            lines = [*lines[:heading_end - 1], "", *lines[heading_end:]]
     if own is None:
-        ranges = [(first, end)]
+        own_ranges = [(first, end)]
     else:
         if not openings:
             openings.append(item_opening_lines(text, parser))
-        ranges = [approval_walk_item_line_range_within_heading_shared_by_several_items(
+        own_ranges = [approval_walk_item_line_range_within_heading_shared_by_several_items(
             openings[0], first, end, each, numbers, total) for each in own]
         # A number with no opening of its own would bring in the unit's lines above the first number's own opening.
-        ranges = ranges[:1] + [(start, stop) for start, stop in ranges[1:] if start != first]
+        own_ranges = own_ranges[:1] + [(start, stop) for start, stop in own_ranges[1:] if start != first]
     # A number with no opening of its own has a range that already holds the later numbers' ranges.
-    body, covered = (["", *lines[first + 1:heading_end]] if heading_end > first + 1 else []), heading_end
-    for start, stop in sorted(ranges):
+    ranges, covered = ([(first + 1, heading_end)] if heading_end > first + 1 else []), heading_end
+    for start, stop in sorted(own_ranges):
         if max(start, covered) < stop:
-            # Lines that go on straight from the heading's own lines stay one run with them, as in the walk-document.
-            body += [*([] if body and max(start, covered) == heading_end else [""]), *lines[max(start, covered):stop]]
+            ranges.append((max(start, covered), stop))
         covered = max(covered, stop)
-    return body
+    return heading_end, ranges
 
 
 def approval_walk_text_with_approval_walk_item_hashtag_lines_removed(text):

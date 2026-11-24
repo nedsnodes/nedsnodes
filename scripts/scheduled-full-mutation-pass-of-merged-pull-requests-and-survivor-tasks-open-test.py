@@ -836,7 +836,8 @@ def run_errored_mutants_cases():
               "exit 4, with the merge not recorded as tested",
               completed.returncode == job.EXIT_STEP_FAILED
               and f"merge {merge[:12]} (change scripts/thing.py): 1 of its mutants ended "
-                  f"ERRORED, but their job failure task could not be opened or added to on "
+                  f"ERRORED, but the job failure task that names ERRORED mutants could not be "
+                  f"opened, nor could the open one have them added to its description, on "
                   f"{job.JOB_FAILURE_TASK_AGENT_SEAT}'s task list (FileNotFoundError"
                   in completed.stderr
               and fixture.state_json()["last_tested_main_commit"] == start,
@@ -927,6 +928,8 @@ def option_value(call, option):
 
 AT_MOST_FLAG = "--mutants-run-at-most-shared-evenly-among-changed-files"
 STOP_FLAG = "--no-mutant-started-after-unix-time"
+BACKLOG_SKIPPED_FLAG = \
+    job.mutation_testing.MUTANTS_WITH_NO_RESULT_IN_KEPT_COSMIC_RAY_SESSIONS_MARKED_SKIPPED_WHEN_HEAD_COMMIT_BEFORE_CUTOFF_COMMAND_LINE_FLAG
 NOT_RUN_KEY = job.MERGES_WITH_MUTANTS_NOT_RUN_STATE_KEY
 
 
@@ -964,17 +967,22 @@ def run_first_pass_and_second_pass_cases():
         alpha_tasks = [json.loads(path.read_text()) for path in
                        sorted((fixture.tasks / "nedsnodes-alpha-tasks").glob("*.json"))]
         check("the first pass runs every waiting merge, oldest first, each with at most 12 "
-              "mutants shared among its changed files and no stop time",
+              "mutants shared among its changed files, no stop time, and its kept sessions "
+              "resumed rather than skipped as backlog",
               [(option_value(call, "--head"), option_value(call, AT_MOST_FLAG),
-                option_value(call, STOP_FLAG)) for call in calls[:3]]
-              == [(oldest, "12", None), (middle, "12", None), (newest, "12", None)]
+                option_value(call, STOP_FLAG), BACKLOG_SKIPPED_FLAG in call)
+               for call in calls[:3]]
+              == [(oldest, "12", None, False), (middle, "12", None, False),
+                  (newest, "12", None, False)]
               and job.FIRST_PASS_MUTANTS_RUN_PER_MERGE_AT_MOST == 12,
               f"calls={calls} rc={completed.returncode} err={completed.stderr}")
         check("the second pass follows the whole first pass and runs the merges with mutants "
-              "not run, newest first, with no cap, their own kept sessions, and the stop time "
-              "30 minutes before cron next starts the job",
-              [(option_value(call, "--head"), option_value(call, AT_MOST_FLAG)) for call in calls[3:]]
-              == [(newest, None), (oldest, None)]
+              "not run, newest first, with no cap, their own kept sessions, the waiting mutants "
+              "of a merge before the cutoff skipped as backlog, and the stop time 30 minutes "
+              "before cron next starts the job",
+              [(option_value(call, "--head"), option_value(call, AT_MOST_FLAG),
+                BACKLOG_SKIPPED_FLAG in call) for call in calls[3:]]
+              == [(newest, None, True), (oldest, None, True)]
               and all(float(option_value(call, STOP_FLAG)) == stop_wanted
                       and option_value(call, "--cosmic-ray-sessions-directory-kept-to-resume")
                       == str(fixture.state
