@@ -83,21 +83,13 @@ for merge-lane-2, which lists each waiting finding as still open, and which the 
 since a program cannot.
 
 remove-topic-branches-and-worktrees, in the author's checkout once the subagent has ended: remove each
-recorded worktree with git worktree remove, unless the agent harness still
-locks it (a lock reason starting HARNESS_LOCK_REASON_START), something else
-locks it, or it holds changed or untracked files; then delete each recorded
+recorded worktree with git worktree remove, unless it is locked or it holds
+changed or untracked files; then delete each recorded
 topic branch whose commits are all on a remote-tracking branch of origin.
 Every git command after the worktree list runs in the main worktree, the
 first git worktree list names, so the step works from any worktree of the
 checkout, one it removes included. Each worktree or branch left in place is printed with what the author should
 do, and the exit code is 1.
-
-In remove-topic-branches-and-worktrees, a lock in the form Claude Code writes,
-"claude agent agent-<id> (pid N start T)", whose claude process has ended, as
-scripts/worktree-owner-file-read-and-write.py's
-claude_code_subagent_worktree_lock_dispatching_process_running_state() finds it,
-is unlocked first, and the worktree is then judged as an unlocked one; while
-whether that process runs cannot be read, the lock is kept as the harness's.
 
 print-follow-up-request-block-from-merge-lane-2-reviews, run by merge-lane-2 after the merge: read every
 review of the pull request that merge-lane-2's GitHub account posted, with its inline comments, replies left out, and
@@ -160,7 +152,6 @@ def load_script_beside_this_one(file_name):
     return module
 
 
-owner_file = load_script_beside_this_one("worktree-owner-file-read-and-write.py")
 defect_line_reader = load_script_beside_this_one(
     "pull-request-description-defect-line-root-cause-status-and-follow-up-link-reader.py")
 pre_push_conflict_check = load_script_beside_this_one("git-client-side-hooks-pre-push-conflict-check.py")
@@ -182,7 +173,6 @@ SAVED_FINDINGS_FILE_NAME_FORMAT = "pull-request-{number}-non-blocking-findings.m
 TOPIC_BRANCHES_AND_WORKTREES_FILE_NAME_FORMAT = "pull-request-{number}-follow-up-topic-branches-and-worktrees.json"
 FINDING_ANSWERS_FILE_NAME_FORMAT = "pull-request-{number}-follow-up-finding-answers.json"
 FOLLOW_UP_PULL_REQUEST_TITLE_AND_DESCRIPTION_FILE_NAME = "follow-up-pull-request-title-and-description.md"
-HARNESS_LOCK_REASON_START = "claude agent"
 GH_TIMEOUT_SECONDS = 60
 # Short, as the title only adds to a sentence the user gets after a failure, which it must not hold up.
 TITLE_TIMEOUT_SECONDS = 15
@@ -883,23 +873,7 @@ def remove_topic_branches_and_worktrees(number):
         if worktree is None:
             continue
         reason = worktree.locked_reason
-        lock = owner_file.claude_code_subagent_worktree_lock_reason_parse(reason)
-        if lock is not None:
-            state, explanation = owner_file.claude_code_subagent_worktree_lock_dispatching_process_running_state(lock)
-            if state == owner_file.STOPPED:
-                git(path, ["worktree", "unlock", path])
-                print(f"Unlocked worktree {path}, since {explanation}.")
-                reason = None
-        if reason is not None and reason.startswith(HARNESS_LOCK_REASON_START):
-            left.append(f"Worktree {path} is locked by the agent harness (lock reason: {reason}), so "
-                        "remove-topic-branches-and-worktrees left it and the topic branches recorded with it: the subagent may still be running.\n"
-                        "Wait until the subagent has ended.\n"
-                        + pass_on_to_the_user(
-                            f"The agent harness still locks worktree {path} of the follow-up of "
-                            f"{build_followed_up_pull_request_citation_with_title_and_link(number)}, so remove-topic-branches-and-worktrees "
-                            "could not remove it.", "If the worktree is still locked when you end your turn, pass")
-                        + f"\n{SUBAGENT_LINE}")
-        elif reason is not None:
+        if reason is not None:
             locked = f"locked (lock reason: {reason or 'none given'})"
             left.append(f"Worktree {path} is {locked}, so remove-topic-branches-and-worktrees "
                         "left it and the topic branches recorded with it.\n"

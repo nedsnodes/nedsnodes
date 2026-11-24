@@ -119,8 +119,9 @@ call; the login draws on the user's subscription. agy's login lives under
 GEMINI_API_KEY from agy's environment, so that a key the caller holds cannot
 move agy's calls onto per-call billing. It also removes GH_TOKEN and
 GITHUB_TOKEN, so agy gets no GitHub token from its caller; an agent-seat's
-supervisor sets GH_TOKEN to the agent-seat's own GitHub token. On the Mac the
-sandbox leaves the keychain readable, so a gh login stored there still works inside it. When agy finds no login, it prints
+supervisor sets GH_TOKEN to the agent-seat's own GitHub token. How gh behaves
+inside the Mac sandbox is said once, beside CREDENTIAL_DIRECTORIES in
+nn-systems/cold-read/cold-read-cell-common.py. When agy finds no login, it prints
 a line starting with AGY_MISSING_GOOGLE_LOGIN_STDERR_LINE_PREFIX, waits a
 minute for a login that cannot come headless, and exits 1; the cell's cause
 line is then logged-out, saying how to log agy in.
