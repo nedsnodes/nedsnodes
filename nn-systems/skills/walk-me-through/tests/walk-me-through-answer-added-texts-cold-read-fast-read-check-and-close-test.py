@@ -614,7 +614,7 @@ def test_marks_whose_texts_are_read_whole_are_not_refused():
 def test_the_waiting_item_read_step_refuses_a_mark_whose_text_would_not_be_read_whole():
     case = Case(document=marks_document('#new "The page lists\none poem."\n'))
     result = case.run(WAITING_ITEM_READ_STEP_NAME)
-    command = (f"python3 {PROGRAM} {WAITING_ITEM_READ_STEP_NAME} --after-fixes-reread-only-when-facts-change "
+    command = (f"python3 {shlex.quote(str(PROGRAM))} {WAITING_ITEM_READ_STEP_NAME} --after-fixes-reread-only-when-facts-change "
                f"--cwd {shlex.quote(str(case.checkout.resolve()))}")
     check("the waiting-item read step refuses a mark whose text runs on, before any read, and names itself to rerun",
           result.returncode == 1
@@ -644,7 +644,7 @@ def test_the_waiting_item_read_step_refuses_an_item_over_300_words_and_reads_it_
     body = (words_of_body(301 - MARKS_DOCUMENT_WORDS_OUTSIDE_BODY - 2) + "\n```\n### code\n```\n\n> ### quoted\n")
     case = Case(document=marks_document(body))
     result = case.run(WAITING_ITEM_READ_STEP_NAME)
-    command = (f"python3 {PROGRAM} {WAITING_ITEM_READ_STEP_NAME} --after-fixes-reread-only-when-facts-change "
+    command = (f"python3 {shlex.quote(str(PROGRAM))} {WAITING_ITEM_READ_STEP_NAME} --after-fixes-reread-only-when-facts-change "
                f"--cwd {shlex.quote(str(case.checkout.resolve()))}")
     check("the read step refuses an item of 301 words, counting code and marker lines, before any read",
           result.returncode == 1
@@ -666,7 +666,7 @@ def test_the_waiting_item_read_step_refuses_an_item_stating_a_system_status_unti
     document = case.checkout / "docs" / "walk" / f"{WALK_NAME}.md"
     before = document.read_text()
     result = case.run(WAITING_ITEM_READ_STEP_NAME)
-    command = f"python3 {PROGRAM} {WAITING_ITEM_READ_STEP_NAME} --cwd {shlex.quote(str(case.checkout.resolve()))}"
+    command = f"python3 {shlex.quote(str(PROGRAM))} {WAITING_ITEM_READ_STEP_NAME} --cwd {shlex.quote(str(case.checkout.resolve()))}"
     flag = "--possibly-stale-system-status-claims-rechecked"
     check("the read step refuses an item stating a status, before any read and leaving the item as it was, and "
           "gives each line the agent acts on",
@@ -1909,7 +1909,7 @@ def test_a_capitalised_marker_is_read_and_closed():
 
 def read_next_item_line(case, item):
     """The last line close prints when it names the next item."""
-    return (f"Then run `python3 {PROGRAM} approval-walk-waiting-item-cold-read-fast-read --cwd {shlex.quote(str(case.checkout.resolve()))}`, "
+    return (f"Then run `python3 {shlex.quote(str(PROGRAM))} approval-walk-waiting-item-cold-read-fast-read --cwd {shlex.quote(str(case.checkout.resolve()))}`, "
             f"which gives {item}, the item the minutes' `#next_to_present` line now names, its cold-read-fast-read, "
             "and do what it prints before you present it.")
 
@@ -2349,7 +2349,7 @@ def test_close_holds_the_answer_for_a_waiting_new_item():
                            "until he answers item 5 of 9.")
           and lines[1] == NEXT_MESSAGE_LINES_HEADER
           and sum("fast read had to be run" in line for line in lines) == 2
-          and lines[-1] == (f"Then run `python3 {PROGRAM} approval-walk-waiting-item-cold-read-fast-read --cwd "
+          and lines[-1] == (f"Then run `python3 {shlex.quote(str(PROGRAM))} approval-walk-waiting-item-cold-read-fast-read --cwd "
                             f"{shlex.quote(str(case.checkout.resolve()))}`, which gives item 5 of 9 its "
                             "cold-read-fast-read, do what it prints, and present item 5 of 9. When the close step records the user's approval or disapproval "
                             "of item 5 of 9, it records the same outcome for item 3 of 9; after a deferral, a move on "
@@ -5289,7 +5289,7 @@ def test_a_read_that_fails_in_the_read_step_says_not_to_present_the_item():
           result.returncode == 1 and lines[0] == "FAILED: the stand-in cold-read-cell failed twice"
           and lines[1].startswith("item 3 of 5 has had no cold-read-fast-read of its text as it stands, so do not "
                                   "present it yet")
-          and lines[2] == (f"Run `python3 {PROGRAM} {WAITING_ITEM_READ} --cwd "
+          and lines[2] == (f"Run `python3 {shlex.quote(str(PROGRAM))} {WAITING_ITEM_READ} --cwd "
                            f"{shlex.quote(str(case.checkout.resolve()))}` again once."), described(result))
     retried = case.run(WAITING_ITEM_READ)
     check("the read step after a failed read reads the item, naming no read ahead",
@@ -5305,7 +5305,7 @@ def test_a_stop_signal_that_cannot_remove_the_read_steps_scratch_directory_gives
           "command, naming the walk's checkout",
           result.returncode == -signal.SIGTERM and result.stderr.rstrip("\n").split("\n")[-1] == (
               "item 3 of 5 has had no cold-read-fast-read of its text as it stands: then run "
-              f"`python3 {PROGRAM} {WAITING_ITEM_READ} --cwd {shlex.quote(str(case.checkout.resolve()))}` again, "
+              f"`python3 {shlex.quote(str(PROGRAM))} {WAITING_ITEM_READ} --cwd {shlex.quote(str(case.checkout.resolve()))}` again, "
               "and present item 3 of 5 only after it."), described(result))
     for directory in case.temporary_directory.iterdir():
         if (directory / "locked").exists():
@@ -5819,7 +5819,7 @@ def test_the_read_step_refuses_an_item_whose_earlier_read_texts_copy_is_missing(
     copies[0].unlink()
     result = case.run(WAITING_ITEM_READ)
     report = case.records / f"{WALK_NAME}-item-3-of-5-2026-10-17" / "cold-read-fast-read.md"
-    command = f"python3 {PROGRAM} {WAITING_ITEM_READ} --cwd {shlex.quote(str(case.checkout.resolve()))}"
+    command = f"python3 {shlex.quote(str(PROGRAM))} {WAITING_ITEM_READ} --cwd {shlex.quote(str(case.checkout.resolve()))}"
     lines = result.stderr.rstrip("\n").split("\n")
     check("the read step refuses an item whose earlier read text has no copy, writing nothing and reading nothing",
           result.returncode == 1 and document.read_text() == before and times_read(case, ITEM_3_HEADING) == 1
@@ -6657,7 +6657,7 @@ def test_bump_refuses_while_the_last_answer_has_no_close_line_writing_nothing():
           "to run again",
           answered.returncode == 0 and bumped.returncode == 1
           and "hold the user's answer to item 1 of 9, which check wrote and close has not yet recorded" in bumped.stderr
-          and f"Run `python3 {PROGRAM} close --cwd {top}` first and do what it prints, except reading and presenting "
+          and f"Run `python3 {shlex.quote(str(PROGRAM))} close --cwd {top}` first and do what it prints, except reading and presenting "
               "the item it names next: in place of that, run "
               f"`{check_command_for(case, '--bump', 'three', '--user-reply-as-typed', 'bump three')}` and do what it "
               "prints" in bumped.stderr,
@@ -6701,11 +6701,12 @@ def withheld_for_finding_outcomes(case, result, item="item 3 of 5"):
             and "has findings with no recorded outcome, 2 of 2." in result.stdout
             and "  Q2.1: `three`: unclear." in lines and "  Q4.1: `three` — code could count it." in lines
             and (report is None or (
-                f"python3 {case.stand_in} --record-finding-outcomes-in-cold-read-record {report.parent} \\"
+                f"python3 {shlex.quote(str(case.stand_in))} --record-finding-outcomes-in-cold-read-record "
+                f"{shlex.quote(str(report.parent))} \\"
                 in lines))
             and "  --finding-outcome 'Q2.1=<applied, or declined: reason>' \\" in lines
             and "  --finding-outcome 'Q4.1=<applied, or declined: reason>'" in lines
-            and lines[-1].startswith(f"Then run `python3 {PROGRAM} {WAITING_ITEM_READ} {AFTER_FIXES} --cwd ")
+            and lines[-1].startswith(f"Then run `python3 {shlex.quote(str(PROGRAM))} {WAITING_ITEM_READ} {AFTER_FIXES} --cwd ")
             and not any(line.startswith(("Present ", "Then present ")) for line in lines))
 
 
@@ -6769,6 +6770,142 @@ def test_the_read_step_says_so_when_its_reads_report_cannot_be_read_for_finding_
           read_again.returncode == 0 and "had to be run now" in read_again.stdout
           and last_line_above_prerequisite_entries(read_again).startswith("Then present item 3 of 5")
           and times_read(case, "## Item 3 of 5: three") == 2, described(read_again))
+
+
+def program_copy_in_checkout_path_holding_a_space(root):
+    """A copy of the program in a directory tree whose path holds a space. The program file is a real copy because
+    the program prints its own path resolved, so a symbolic link would print the path without the space; the files
+    it loads are linked."""
+    real_top = PROGRAM.parents[3]
+    top = root / "checkout path with a space"
+    directory = top / PROGRAM.relative_to(real_top).parent
+    directory.mkdir(parents=True)
+    for name in (".claude", "scripts"):
+        (top / name).symlink_to(real_top / name)
+    for parent in (real_top / "nn-systems", real_top / "nn-systems" / "skills", PROGRAM.parent):
+        for entry in parent.iterdir():
+            copy = top / parent.relative_to(real_top) / entry.name
+            if entry != PROGRAM and not copy.exists():
+                copy.symlink_to(entry)
+    shutil.copy2(PROGRAM, directory / PROGRAM.name)
+    return directory / PROGRAM.name
+
+
+def printed_program_commands(result):
+    """Each backquoted `python3 ...` command in what the program printed."""
+    return re.findall(r"`(python3 [^`]+)`", result.stdout + result.stderr)
+
+
+def each_printed_command_names_a_file(result):
+    commands = printed_program_commands(result)
+    return bool(commands) and all(Path(shlex.split(command)[1]).is_file() for command in commands)
+
+
+def run_printed_command(case, command):
+    """Run a command the program printed through a shell, as an agent does, with the case's test doubles added."""
+    return subprocess.run(
+        ["bash", "-c", command + " " + shlex.join(case_paths(case)[2:] + ["--gh-program", str(case.gh)])],
+        capture_output=True, text=True, cwd=case.root,
+        env=dict(os.environ, STAND_IN_MODE="", STAND_IN_CALLS=str(case.calls),
+                 STAND_IN_ARGUMENTS=str(case.fast_read_arguments), STAND_IN_RECORDS=str(case.records),
+                 TMPDIR=str(case.temporary_directory), GH_STAND_IN_CALLS=str(case.gh_calls)))
+
+
+def printed_command_with(result, words):
+    return next((command for command in printed_program_commands(result) if words in command), "false")
+
+
+def check_every_printed_command_from_a_path_holding_a_space():
+    case = item_read_case()
+    checked = case.run("check")
+    check("from a path holding a space, check prints a close command naming the program",
+          each_printed_command_names_a_file(checked), described(checked))
+    closed = run_printed_command(case, printed_command_with(checked, " close "))
+    case.wait_for_reads_ahead()
+    check("from a path holding a space, the printed close command runs and prints a read-step command",
+          closed.returncode == 0 and each_printed_command_names_a_file(closed), described(closed))
+    read = run_printed_command(case, printed_command_with(closed, WAITING_ITEM_READ))
+    case.wait_for_reads_ahead()
+    check("from a path holding a space, the printed read-step command runs, and each command it prints names a file",
+          read.returncode == 0 and each_printed_command_names_a_file(read), described(read))
+    reread = run_printed_command(case, printed_command_with(read, AFTER_FIXES))
+    case.wait_for_reads_ahead()
+    check("from a path holding a space, the read-step command with its after-fixes flag runs",
+          reread.returncode == 0, described(reread))
+
+    held = Case()
+    held.run("check")
+    with open(held.minutes, "a") as minutes:
+        minutes.write("#next_to_present item 5 of 9\n")
+    held_close = held.run("close")
+    check("from a path holding a space, close holding an answer prints a read-step command that parses to the program",
+          held_close.returncode == 0 and each_printed_command_names_a_file(held_close), described(held_close))
+
+    bumped_case = Case(next_to_present="item 1 of 9", document=bump_walk())
+    bumped = bumped_case.run("check", "--bump", "three", reply="bump three")
+    check("from a path holding a space, check --bump prints a read-step command that parses to the program",
+          bumped.returncode == 0 and each_printed_command_names_a_file(bumped), described(bumped))
+
+    refused_case = Case(next_to_present="item 1 of 9", document=bump_walk())
+    refused_case.run("check")
+    refused = refused_case.run("check", "--bump", "three", reply="bump three")
+    refused_close = run_printed_command(refused_case, printed_command_with(refused, " close "))
+    refused_case.wait_for_reads_ahead()
+    check("from a path holding a space, a refused check --bump prints a close command that runs",
+          refused.returncode == 1 and each_printed_command_names_a_file(refused) and refused_close.returncode == 0,
+          described(refused) + described(refused_close))
+
+    unordered = Case(next_to_present="item 1 of 9",
+                     document=bump_walk().replace(f"{CATEGORY_TAG}must_fix_now", ""))
+    order_refused = unordered.run(WAITING_ITEM_READ)
+    check("from a path holding a space, the refusal of an unusable walk order prints a command naming the program",
+          order_refused.returncode == 1 and each_printed_command_names_a_file(order_refused), described(order_refused))
+
+    not_shipped_case = Case()
+    not_shipped = not_shipped_case.run("check", mode="record-not-shipped")
+    # Parsed and not run: the real shipper would copy the case's record to the log-store.
+    ship = shlex.split(printed_command_with(not_shipped, "cold-read-record-ship.py"))
+    check("from a path holding a space, the command that ships an unshipped record parses to the shipper and the "
+          "record", len(ship) == 3 and Path(ship[1]).is_file() and Path(ship[2]).is_dir(), described(not_shipped))
+
+
+def check_read_step_retry_after_failed_scratch_removal_drops_only_the_after_fixes_flag():
+    global SUITE_ROOT
+    # The checkout path and the recheck value both hold the flag's text, which only the flag itself may lose.
+    SUITE_ROOT = SUITE_ROOT / f"path {AFTER_FIXES} holding the flag"
+    SUITE_ROOT.mkdir()
+    case = item_read_case()
+    answered_and_closed(case)
+    rechecked_flag = "--possibly-stale-system-status-claims-rechecked"
+    rechecked = f"ran git status at 10:00 with {AFTER_FIXES} in mind"
+    stopped = case.run(WAITING_ITEM_READ, AFTER_FIXES, rechecked_flag, rechecked, mode="stopped-unremovable SIGTERM")
+    for directory in case.temporary_directory.iterdir():
+        if (directory / "locked").exists():
+            (directory / "locked").chmod(0o700)  # Else the suite's own removal leaves it behind.
+    retry = printed_command_with(stopped, WAITING_ITEM_READ)
+    words = shlex.split(retry)
+    check("the retry a failed scratch removal prints drops the after-fixes flag and keeps --cwd and the recheck value "
+          "whole, each holding the flag's text",
+          stopped.returncode == -signal.SIGTERM and AFTER_FIXES not in words
+          and words[2:] == [WAITING_ITEM_READ, rechecked_flag, rechecked, "--cwd", str(case.checkout.resolve())],
+          described(stopped))
+    ran = run_printed_command(case, retry)
+    case.wait_for_reads_ahead()
+    check("the retry a failed scratch removal prints runs from a path holding a space", ran.returncode == 0,
+          described(ran))
+
+
+def test_every_printed_command_runs_from_a_checkout_path_holding_a_space():
+    global PROGRAM, SUITE_ROOT
+    program, suite_root = PROGRAM, SUITE_ROOT
+    root = suite_root / "suite root with a space"
+    root.mkdir()
+    try:
+        PROGRAM, SUITE_ROOT = program_copy_in_checkout_path_holding_a_space(root), root
+        check_every_printed_command_from_a_path_holding_a_space()
+        check_read_step_retry_after_failed_scratch_removal_drops_only_the_after_fixes_flag()
+    finally:
+        PROGRAM, SUITE_ROOT = program, suite_root
 
 
 def stopped_by_sigterm(*_):
