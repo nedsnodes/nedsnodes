@@ -58,6 +58,8 @@ SUITE_ROOT = _scratch_directory_common.make_test_scratch_directory_after_removin
     "answer-added-texts-fast-read-check-test-")
 WALK_NAME = "poem-page-2026-10-12"
 FAILURE_PREFIX = "walk-me-through-answer-added-texts-cold-read-fast-read-check-and-close "
+LOG_STORE_ROOT_OVERRIDE_ENVIRONMENT_VARIABLE = "LOG_STORE_PAST_DISCUSSIONS_SEARCH_LOG_STORE_ROOT_OVERRIDE"
+AGENT_HOMES_DIRECTORY_OVERRIDE_ENVIRONMENT_VARIABLE = "WALK_ME_THROUGH_AGENT_HOMES_DIRECTORY_OVERRIDE"
 failures = []
 
 # Behaves as cold-read-fast-read.py does on the records route: writes a
@@ -248,6 +250,13 @@ class Case:
         self.gh.chmod(0o755)
         self.gh_calls = self.root / "gh-stand-in-calls.jsonl"
         self.gh_calls.write_text("")
+        # The read step searches the log-store and the agent-homes for the user's words; an empty one each, unless a
+        # case fills them, keeps the real ones out of every case.
+        self.log_store = self.root / "log-store"
+        (self.log_store / "session-dialogs").mkdir(parents=True)
+        (self.log_store / "walk").mkdir()
+        self.agent_homes = self.root / "agent-homes"
+        self.agent_homes.mkdir()
 
     def gh_comments(self):
         """[(pull request number, body)] of each comment the gh stand-in was asked to post, in order."""
@@ -297,6 +306,8 @@ class Case:
                            STAND_IN_ARGUMENTS=str(self.fast_read_arguments),
                            STAND_IN_RECORDS=str(self.records), TMPDIR=str(self.temporary_directory),
                            GH_STAND_IN_CALLS=str(self.gh_calls))
+        environment.setdefault(LOG_STORE_ROOT_OVERRIDE_ENVIRONMENT_VARIABLE, str(self.log_store))
+        environment.setdefault(AGENT_HOMES_DIRECTORY_OVERRIDE_ENVIRONMENT_VARIABLE, str(self.agent_homes))
 
         def stop_signal_dispositions():
             # Set explicitly: a child left to inherit would get SIG_IGN when this suite runs under nohup.
@@ -706,6 +717,46 @@ def test_the_waiting_item_read_step_reads_an_item_of_progress_talk_without_askin
     result = case.run(WAITING_ITEM_READ_STEP_NAME)
     check("an item with no status claim is read as before",
           result.returncode == 0 and "had to be run now" in result.stdout and "status claims" not in result.stdout,
+          described(result))
+
+
+def test_the_waiting_item_read_step_prints_the_user_messages_of_an_agent_session_that_named_the_item_title():
+    case = Case(document=marks_document("The tests are still running.\n"))
+    key = "-home-nedlern-agents-MD-skills-2"
+    dialog = case.log_store / "session-dialogs" / "ned-box" / key / "s1-dialog-complete.md"
+    dialog.parent.mkdir(parents=True)
+    dialog.write_text("# Complete session dialog\n\n---\n\n## Agent\n\nShall I split the page?\n\n## User\n\n"
+                      "Keep one poem per job, as we agreed.\n\n## Agent\n\n## Item 3 of 9: the opening sentence\n\n")
+    transcript = case.log_store / "agent-session-files-by-machine" / "ned-box" / "projects" / key / "s1.jsonl"
+    transcript.parent.mkdir(parents=True)
+    transcript.write_text("\n".join(json.dumps(record) for record in [
+        {"type": "assistant", "message": {"content": [{"type": "text", "text": "Shall I split the page?"}]}},
+        {"type": "user", "entrypoint": "cli", "message": {"content": "Keep one poem per job, as we agreed."}},
+        {"type": "assistant", "message": {"content": [{"type": "text",
+                                                       "text": "## Item 3 of 9: the opening sentence"}]}}]) + "\n")
+    result = case.run(WAITING_ITEM_READ_STEP_NAME)
+    check("the read step prints, last, each message the user typed in an agent-session whose dialog named the item's "
+          "title, after the agent message it answers, with file and line",
+          result.returncode == 0 and "had to be run now" in result.stdout
+          and result.stdout.rstrip("\n").endswith(
+              f"  agent  {dialog}:7  Shall I split the page?\n"
+              f"  user   {dialog}:11  Keep one poem per job, as we agreed.\n"
+              f"Walk-minutes lines naming the title: 0."),
+          described(result))
+
+
+def test_the_waiting_item_read_step_refuses_when_the_search_for_the_user_earlier_words_fails():
+    case = Case(document=marks_document("The tests are still running.\n"))
+    minutes_before = case.minutes.read_text()
+    result = case.run(WAITING_ITEM_READ_STEP_NAME, environment=dict(
+        os.environ, LOG_STORE_PAST_DISCUSSIONS_SEARCH_RIPGREP_PROGRAM_OVERRIDE=str(case.root / "no-such-rg")))
+    check("a failed search refuses before any read, saying what the search said and how to run the step again",
+          result.returncode == 1
+          and "nothing read: item 3 of 9 was not given its cold-read-fast-read, because the search for what the user "
+              "said in earlier agent-sessions that named its title failed (exit 2)" in result.stderr
+          and "FAILED: ripgrep (" in result.stderr
+          and f"run `python3 {shlex.quote(str(PROGRAM))} {WAITING_ITEM_READ_STEP_NAME} --cwd" in result.stderr
+          and case.calls.read_text() == "" and case.minutes.read_text() == minutes_before,
           described(result))
 
 

@@ -446,6 +446,16 @@ step exits 0 only when it hands the
 item over. CHECK's reads of the texts an answer adds need no outcomes, and it
 prints no such command.
 
+USER'S EARLIER WORDS. For an item that is to be shown, the step then runs
+walk-me-through-approval-walk-item-title-search-user-messages-in-session-dialogs-and-lines-in-walk-minutes-print.py
+with the item's title, the title of each earlier text of it read, which the
+next paragraph finds, and the item's numbers; a Withdrawn heading carries no
+title. It prints what that program prints, last: each message the user typed
+in an agent-session whose saved dialog names a title, after the agent message
+it answers, and each walk-minutes line naming one, each with its file and line.
+When the search fails, the step refuses, before any read, printing what the
+search said, and exits 1.
+
 Before it reads, the step keeps each earlier version of the item: each text of
 the item that a read wrote its report for, oldest first, goes below the item's
 live version, after the versions kept there already and before the next item,
@@ -518,6 +528,8 @@ RECORD_SHIPPER_FILE = REPOSITORY_TOP / "nn-systems" / "cold-read" / "cold-read-r
 RECORD_NAMES_FILE = REPOSITORY_TOP / "nn-systems" / "cold-read" / "cold-read-record-names-common.py"
 FINDING_OUTCOMES_COMMON_FILE = (REPOSITORY_TOP / "nn-systems" / "cold-read"
                                 / "cold-read-fast-read-report-findings-parse-and-finding-outcomes-check-common.py")
+TITLE_SEARCH_PROGRAM = HERE / ("walk-me-through-approval-walk-item-title-search-user-messages-in-session-dialogs-"
+                               "and-lines-in-walk-minutes-print.py")
 PATH_CONSTANTS_FILE = (REPOSITORY_TOP / "nn-systems" / "general-tools"
                        / "ned-box-home-directory-and-its-mac-mount-point-path-constants-common.py")
 COUNTS_LOG_FILE_NAME = "walk-me-through-answer-added-texts-cold-read-fast-read-already-done-or-had-to-run-counts-per-check.tsv"
@@ -1423,6 +1435,13 @@ RATED_NONE_NOT_SHOWN_LINES = (
     "If the case against is in fact more than none, change the rating on its `#case_against` line, then run "
     "`{read_command}` again.",
 )
+APPROVAL_WALK_ITEM_TITLE_SEARCH_FAILED = (
+    "nothing read: {item} was not given its cold-read-fast-read, because the search for what the user said in earlier "
+    "agent-sessions that named its title failed (exit {exit}), and the user's earlier words may already decide "
+    "the item. The search said:\n{said}\n"
+    "If a FAILED line above names a remedy, run it, then run `{command}` again.\n"
+    "If ned-box cannot be reached, or the log-store or ripgrep is missing, tell the user what the FAILED line says "
+    "and do not show {item} until the search runs; a subagent tells the agent that dispatched it instead.")
 ITEM_READ_FAILED_LINES = (
     "{item} has had no cold-read-fast-read of its text as it stands, so do not present it yet: the user is shown an "
     "item only after its cold-read-fast-read.",
@@ -2955,6 +2974,26 @@ def approval_walk_item_system_status_claims_not_rechecked_refused(text, item, do
     return SYSTEM_STATUS_CLAIMS_RECHECKED_LINE.format(item=item, matched=matched, rechecked=rechecked)
 
 
+def approval_walk_item_title_user_messages_in_earlier_agent_sessions_lines(walk_finder, text, earlier, numbers, item,
+                                                                         command):
+    """Return the lines TITLE_SEARCH_PROGRAM prints for the item's title and the title of each earlier read text of
+    it, as earlier_read_texts_of_item returns them; raise Failure when the search failed. A Withdrawn version
+    heading carries no title, so those read texts are the item's only earlier titles the program can know."""
+    titles = []
+    for heading in [text] + [copied for _, _, copied in earlier]:
+        title = item_title(walk_finder, heading.split("\n", 1)[0])
+        if title and title not in titles:
+            titles.append(title)
+    words = [word for title in titles for word in ("--title", title)]
+    words += [word for number in numbers for word in ("--item-number", number)]
+    result = subprocess.run([sys.executable, str(TITLE_SEARCH_PROGRAM), *words], capture_output=True, text=True,
+                            stdin=subprocess.DEVNULL)
+    if result.returncode not in (0, 1):
+        raise Failure(APPROVAL_WALK_ITEM_TITLE_SEARCH_FAILED.format(
+            item=item, exit=result.returncode, said=result.stderr.strip() or "nothing", command=command))
+    return result.stdout.rstrip("\n").split("\n") if result.stdout.strip() else []
+
+
 def waiting_item_read(arguments, sub_step_of=None):
     """Give the item the `#next_to_present` line names its cold-read-fast-read, as its text stands.
 
@@ -2996,10 +3035,12 @@ def waiting_item_read(arguments, sub_step_of=None):
                                              (sub_step_of[2] if sub_step_of else []) + [keep]))
     # Before anything is written, so a refused item leaves the walk-minutes and the walk-document as they were; an
     # item settled without being shown is not refused, since no status in it reaches the user.
-    recheck_line = None
+    recheck_line, past_words = None, []
     if rated_none_item_not_to_be_shown(walk_finder, top, minutes, value, numbers, total, parser, named) is None:
         recheck_line = approval_walk_item_system_status_claims_not_rechecked_refused(
             text, item, document, rerun, rechecked)
+        past_words = approval_walk_item_title_user_messages_in_earlier_agent_sessions_lines(
+            walk_finder, text, earlier, numbers, item, rerun)
     if sub_step_of:
         # An item read before it was split keeps that text, as an item revised after its read does.
         for above in sub_step_of[2]:
@@ -3051,7 +3092,7 @@ def waiting_item_read(arguments, sub_step_of=None):
                                  + (withheld or [ITEM_READ_NOT_RUN_NEXT.format(
                                      item=item, now_over_later_command=check_command_with_cwd(top, NOW_OVER_LATER_FLAG))]
                                     + waiting_on_item_prerequisite_lines(walk_finder, minutes, numbers, total,
-                                                                         parser))))
+                                                                         parser)) + past_words))
                 return 1 if withheld else 0
             why = ITEM_READ_RUN_FACTS.format(report=latest[1]["report"], facts=", ".join(facts[:FACTS_LISTED]))
         walk_name = minutes.name[:-len(walk_finder.MINUTES_SUFFIX)]
@@ -3077,7 +3118,8 @@ def waiting_item_read(arguments, sub_step_of=None):
                     + [line.format(item=item, document=document, command=command,
                                    now_over_later_command=check_command_with_cwd(top, NOW_OVER_LATER_FLAG))
                        for line in (ITEM_READ_LINES[:1] if withheld else ITEM_READ_LINES)]
-                    + (withheld or waiting_on_item_prerequisite_lines(walk_finder, minutes, numbers, total, parser))))
+                    + (withheld or waiting_on_item_prerequisite_lines(walk_finder, minutes, numbers, total, parser))
+                    + past_words))
     return 1 if withheld else 0
 
 
