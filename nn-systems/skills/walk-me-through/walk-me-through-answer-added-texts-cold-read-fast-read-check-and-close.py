@@ -480,11 +480,11 @@ saw last, and each change counts one; the count and the last texts are kept in
 step that sees no `#new` text counts nothing and keeps the last texts. When the
 count reaches 3 and the waiting item, or sub-step, holds a `#new` text, the step
 reads nothing and hands nothing over: it prints that the item's proposed text
-has been revised three times and a prompt for a fresh-agent, built from the
+has been revised three times and a brief for a fresh-agent, built from the
 walk-minutes lines that hold the user's words and name the item, one of its
 sub-steps or its title, and from the link targets of the item's live versions,
 a link into the Mac's mount of ned-box's home given with its path on ned-box
-too, and holding no version of the item's text. The prompt tells the
+too, and holding no version of the item's text. The brief tells the
 fresh-agent to write the item's text, with no heading line, to
 `item-<number>-fresh-agent-rewrite.md` in that directory, and the step says to
 run it again with --approval-walk-item-fresh-agent-rewrite-file naming that
@@ -1449,25 +1449,25 @@ FRESH_AGENT_REWRITE_REFUSED = (
     "so it cannot take the place of {item}'s text in {document}.\n"
     "If the fresh-agent wrote its text somewhere else, or in its reply, put that text in {rewrite_file}, with no "
     "Markdown heading line in it, then run `{command}` again.\n"
-    "Otherwise run `{read_command}`, which prints the fresh-agent's prompt again, and do what its lines say.")
+    "Otherwise run `{read_command}`, which prints the fresh-agent's brief again, and do what its lines say.")
 FRESH_AGENT_REWRITE_MISSING = "does not exist or cannot be read ({error})"
 FRESH_AGENT_REWRITE_EMPTY = "is empty"
 FRESH_AGENT_REWRITE_TAG_LINE = ("holds the line `{line}`; the item keeps its own `#approval_walk_item_` lines, so the "
                                 "rewrite holds none")
 FRESH_AGENT_REWRITE_HEADING = ("holds the Markdown heading `{heading}`, which the walk-document would read as the start "
                                "of another item or sub-step")
-FRESH_AGENT_REWRITE_PROMPT_START = "----- prompt for the fresh-agent: start -----"
-FRESH_AGENT_REWRITE_PROMPT_END = "----- prompt for the fresh-agent: end -----"
+FRESH_AGENT_REWRITE_BRIEF_START = "----- brief for the fresh-agent: start -----"
+FRESH_AGENT_REWRITE_BRIEF_END = "----- brief for the fresh-agent: end -----"
 FRESH_AGENT_REWRITE_DUE_LINES = (
     "{item} is not read or handed over to be presented: its proposed text has been revised three times, {count} "
     "changes in all to the `#new` lines of item {whole_number} and its sub-steps since the count last started, and an item "
     "revised that often is rewritten by a fresh-agent from the user's words, not revised again.",
-    "Dispatch a fresh subagent with the prompt between the two delimiter lines below, unchanged; it sees none of "
-    "this conversation, and the prompt leaves out every earlier text of the item.",
+    "Dispatch a fresh subagent with the brief between the two delimiter lines below, unchanged; it sees none of "
+    "this conversation, and the brief leaves out every earlier text of the item.",
 )
-FRESH_AGENT_REWRITE_PROMPT_LINES = (
+FRESH_AGENT_REWRITE_BRIEF_LINES = (
     "Write afresh the text of one item of an approval-walk, the item {title}. Its earlier texts are left out of "
-    "this prompt on purpose: write it from the user's words and the files below, not from any earlier text.",
+    "this brief on purpose: write it from the user's words and the files below, not from any earlier text.",
     "Read {skill} for how an item is written, and keep the item within the word limit it gives.",
     "The user's words on this item, in the lines of the walk-minutes {minutes} that hold them:",
 )
@@ -1476,7 +1476,7 @@ FRESH_AGENT_REWRITE_NO_USER_WORDS = ("- none: no line of the walk-minutes holds 
 FRESH_AGENT_REWRITE_FILES_HEADER = "The files and pages the item links:"
 FRESH_AGENT_REWRITE_NO_FILES = "- none."
 FRESH_AGENT_REWRITE_ON_NED_BOX = "{link} (on ned-box: {path})"
-FRESH_AGENT_REWRITE_PROMPT_CLOSING_LINES = (
+FRESH_AGENT_REWRITE_BRIEF_CLOSING_LINES = (
     "Do not open {document} or {reads}: they hold the item's earlier texts.",
     "Write the item's text, from its first paragraph to its last line, to {rewrite_file}, replacing "
     "anything there: no heading line and no line opening `#approval_walk_item_`, since the item keeps its own. "
@@ -1488,7 +1488,7 @@ FRESH_AGENT_REWRITE_AFTER_LINES = (
     "When the fresh-agent has written {rewrite_file}, run `{command}`: it puts that file's text in place of "
     "{item}'s text in {document}, below the heading and its `#approval_walk_item_` lines, keeps the replaced text "
     "below as a withdrawn version, starts the count again, and reads the new text.",
-    "If the fresh-agent ends without writing {rewrite_file}, dispatch it once more with the same prompt; if it fails "
+    "If the fresh-agent ends without writing {rewrite_file}, dispatch it once more with the same brief; if it fails "
     "again, ask the user whether to present {item} as it stands, quoting what the fresh-agent said; a subagent puts "
     "that question to the agent that dispatched it.",
     "If the user says to present {item} as it stands, delete {count_file}, which starts the count again from the "
@@ -2925,7 +2925,8 @@ def approval_walk_item_and_sub_steps_live_units(walk_finder, parser, document, w
         units, whole, [whole_number])]
 
 
-def approval_walk_item_and_sub_steps_new_texts(walk_finder, parser, document, whole_number, total, waiting_unit):
+def approval_walk_item_and_sub_steps_live_versions_proposed_new_texts_read_sorted(
+        walk_finder, parser, document, whole_number, total, waiting_unit):
     """Return the `#new` texts of the live versions of item whole_number and its sub-steps, sorted, so that a text
     moved to another sub-step unchanged, as a split into sub-steps moves one, is the same list."""
     lines, units = approval_walk_item_and_sub_steps_live_units(walk_finder, parser, document, whole_number, total,
@@ -2990,9 +2991,9 @@ def approval_walk_item_user_words_in_minutes(walk_finder, minutes_text, whole_nu
     return found
 
 
-def approval_walk_item_fresh_agent_rewrite_prompt_lines(walk_finder, parser, minutes, document, reads, whole_number,
+def approval_walk_item_fresh_agent_rewrite_brief_lines(walk_finder, parser, minutes, document, reads, whole_number,
                                                         total, unit, rewrite_file):
-    """Return the lines of the fresh-agent's prompt for rewriting the item in unit, built from the user's words in
+    """Return the lines of the fresh-agent's brief for rewriting the item in unit, built from the user's words in
     the walk-minutes and the links of the live versions of item whole_number and its sub-steps, with no text of the
     item."""
     lines, family = approval_walk_item_and_sub_steps_live_units(walk_finder, parser, document, whole_number, total,
@@ -3007,14 +3008,14 @@ def approval_walk_item_fresh_agent_rewrite_prompt_lines(walk_finder, parser, min
                                                      {title, whole_title})
     values = dict(title=named, skill=WALK_ME_THROUGH_SKILL_FILE, minutes=minutes, whole_number=whole_number,
                   document=document, reads=reads, rewrite_file=rewrite_file)
-    return ([line.format(**values) for line in FRESH_AGENT_REWRITE_PROMPT_LINES]
+    return ([line.format(**values) for line in FRESH_AGENT_REWRITE_BRIEF_LINES]
             + ([f"- {line}" for line in words] or [FRESH_AGENT_REWRITE_NO_USER_WORDS.format(**values)])
             + [FRESH_AGENT_REWRITE_FILES_HEADER] + (links or [FRESH_AGENT_REWRITE_NO_FILES])
-            + [line.format(**values) for line in FRESH_AGENT_REWRITE_PROMPT_CLOSING_LINES])
+            + [line.format(**values) for line in FRESH_AGENT_REWRITE_BRIEF_CLOSING_LINES])
 
 
-def approval_walk_item_text_replaced_by_fresh_agent_rewrite(walk_finder, parser, document, unit, rewrite_file, item,
-                                                            command, read_command):
+def approval_walk_item_text_replace_with_fresh_agent_rewrite_file(
+        walk_finder, parser, document, unit, rewrite_file, item, command, read_command):
     """Put the text of rewrite_file in place of the unit's text below its heading line and the
     `#approval_walk_item_` lines right under it; return the unit's text as it was, heading included. Raise Failure,
     writing nothing, when rewrite_file cannot be read, is empty, or holds a Markdown heading or an
@@ -3236,12 +3237,12 @@ def waiting_item_read(arguments, sub_step_of=None):
     whole_number = numbers[0].split(".")[0]
     if rewrite_file is not None:
         unit = walk_finder.waiting_item_units(document, value, numbers, total, parser)[1][0]
-        replaced = approval_walk_item_text_replaced_by_fresh_agent_rewrite(
+        replaced = approval_walk_item_text_replace_with_fresh_agent_rewrite_file(
             walk_finder, parser, document, unit, rewrite_file, item,
             read_step_command_with_cwd(top, FRESH_AGENT_REWRITE_FLAG, str(rewrite_file), *rechecked_words),
             command_reading_again)
         approval_walk_item_proposed_text_revisions_counted(
-            reads, whole_number, approval_walk_item_and_sub_steps_new_texts(
+            reads, whole_number, approval_walk_item_and_sub_steps_live_versions_proposed_new_texts_read_sorted(
                 walk_finder, parser, document, whole_number, total,
                 walk_finder.waiting_item_units(document, value, numbers, total, parser)[1][0]), True, item,
             command_reading_again)
@@ -3274,7 +3275,7 @@ def waiting_item_read(arguments, sub_step_of=None):
     if not numbers[1:]:
         unit = walk_finder.waiting_item_units(document, value, numbers, total, parser)[1][0]
         revisions = approval_walk_item_proposed_text_revisions_counted(
-            reads, whole_number, approval_walk_item_and_sub_steps_new_texts(
+            reads, whole_number, approval_walk_item_and_sub_steps_live_versions_proposed_new_texts_read_sorted(
                 walk_finder, parser, document, whole_number, total, unit), False, item, command_reading_again)
         if (revisions >= PROPOSED_TEXT_REVISIONS_BEFORE_FRESH_AGENT_REWRITE
                 and approval_walk_item_new_texts(walk_finder, parser, text)):
@@ -3284,10 +3285,10 @@ def waiting_item_read(arguments, sub_step_of=None):
                               top, FRESH_AGENT_REWRITE_FLAG, str(rewrite), *rechecked_words),
                           count_file=reads / PROPOSED_TEXT_REVISIONS_FILE.format(number=whole_number),
                           read_command=command_reading_again)
-            prompt = approval_walk_item_fresh_agent_rewrite_prompt_lines(
+            brief = approval_walk_item_fresh_agent_rewrite_brief_lines(
                 walk_finder, parser, minutes, document, reads, whole_number, total, unit, rewrite)
             print("\n".join([line.format(**values) for line in FRESH_AGENT_REWRITE_DUE_LINES]
-                            + [FRESH_AGENT_REWRITE_PROMPT_START, *prompt, FRESH_AGENT_REWRITE_PROMPT_END]
+                            + [FRESH_AGENT_REWRITE_BRIEF_START, *brief, FRESH_AGENT_REWRITE_BRIEF_END]
                             + [line.format(**values) for line in FRESH_AGENT_REWRITE_AFTER_LINES]))
             return 1
     not_started = start_read_ahead_of_item_after(walk_finder, top, minutes, parser, numbers, total,
@@ -4318,7 +4319,7 @@ def main(argv=None):
                              "status the waiting item states, such as an agent-seat offline")
     parser.add_argument(FRESH_AGENT_REWRITE_FLAG, type=Path, metavar="FILE",
                         help=f"{WAITING_ITEM_READ_STEP}: the file a fresh-agent wrote the waiting item's new text to, "
-                             "from the prompt this step printed when the item's proposed text had been revised three "
+                             "from the brief this step printed when the item's proposed text had been revised three "
                              "times; it takes the place of the item's text and starts the count again")
     parser.add_argument("--text-file", type=Path, help=argparse.SUPPRESS)
     parser.add_argument("--item", help=argparse.SUPPRESS)

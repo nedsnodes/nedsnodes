@@ -7339,7 +7339,7 @@ def revised_item_case_revised_three_times_across_a_split():
     return case, results, calls_before
 
 
-def test_the_waiting_item_read_step_prints_a_fresh_agent_prompt_at_the_third_revision_of_the_proposed_text():
+def test_the_waiting_item_read_step_prints_a_fresh_agent_brief_at_the_third_revision_of_the_proposed_text():
     case, results, calls_before = revised_item_case_revised_three_times_across_a_split()
     check("the first two revisions of item 3's `#new` text, and the split that moves it unchanged into sub-step 3.1, "
           "each let the read step hand the item over", all(result.returncode == 0 for result in results[:4]),
@@ -7349,23 +7349,23 @@ def test_the_waiting_item_read_step_prints_a_fresh_agent_prompt_at_the_third_rev
           "revised three times, and runs no cold-read-fast-read of it",
           last.returncode == 1 and "has been revised three times" in last.stdout and revised_item_revisions(case) == 3
           and case.calls.read_text() == calls_before and "Then present" not in last.stdout, described(last))
-    prompt = last.stdout.split("----- prompt for the fresh-agent: start -----\n")[-1].split(
-        "----- prompt for the fresh-agent: end -----")[0]
-    check("the fresh-agent's prompt holds the user's words naming item 3 or its title, not those on item 4, nor "
+    brief = last.stdout.split("----- brief for the fresh-agent: start -----\n")[-1].split(
+        "----- brief for the fresh-agent: end -----")[0]
+    check("the fresh-agent's brief holds the user's words naming item 3 or its title, not those on item 4, nor "
           "those on a range of items that runs backwards, which names no item",
-          REVISED_ITEM_USER_WORDS[0] in prompt and REVISED_ITEM_USER_WORDS[1] in prompt
-          and REVISED_ITEM_USER_WORDS[2] not in prompt and REVISED_ITEM_USER_WORDS[3] not in prompt, prompt)
-    check("the fresh-agent's prompt names the file the item links, with its path on ned-box",
-          "file:///Volumes/nedhome/agents/x/poem-list.md (on ned-box: /home/nedlern/agents/x/poem-list.md)" in prompt,
-          prompt)
+          REVISED_ITEM_USER_WORDS[0] in brief and REVISED_ITEM_USER_WORDS[1] in brief
+          and REVISED_ITEM_USER_WORDS[2] not in brief and REVISED_ITEM_USER_WORDS[3] not in brief, brief)
+    check("the fresh-agent's brief names the file the item links, with its path on ned-box",
+          "file:///Volumes/nedhome/agents/x/poem-list.md (on ned-box: /home/nedlern/agents/x/poem-list.md)" in brief,
+          brief)
     check("the step's output holds no version of the item's proposed text, the current one included",
           not any(text in last.stdout for text in REVISED_ITEM_TEXTS), last.stdout)
     rewrite = case.reads() / "item-3.1-fresh-agent-rewrite.md"
-    check("the prompt names the file the fresh-agent writes to, and the step names the command that puts that file "
-          "in place of the item's text", f"to {rewrite}," in prompt
+    check("the brief names the file the fresh-agent writes to, and the step names the command that puts that file "
+          "in place of the item's text", f"to {rewrite}," in brief
           and shlex.join([FRESH_AGENT_REWRITE_FLAG, str(rewrite)]) in last.stdout, last.stdout)
     again = case.run(WAITING_ITEM_READ_STEP_NAME, "--after-fixes-reread-only-when-facts-change")
-    check("a rerun with no rewrite prints the prompt again, the count unchanged",
+    check("a rerun with no rewrite prints the brief again, the count unchanged",
           again.returncode == 1 and "has been revised three times" in again.stdout
           and revised_item_revisions(case) == 3, described(again))
     count_file = case.reads() / "item-3-proposed-text-revisions.json"
@@ -7453,7 +7453,7 @@ def test_a_fresh_agent_rewrite_keeps_the_item_s_heading_and_approval_walk_item_l
     rewrite = directory / "rewrite.md"
     rewrite.write_text('\nNew text.\n\n#new "New rule."\n\n')
     unit = next(unit for unit in walk_finder.item_unit_spans(document.read_text(), parser) if unit[0] == ["3"])
-    replaced = program.approval_walk_item_text_replaced_by_fresh_agent_rewrite(
+    replaced = program.approval_walk_item_text_replace_with_fresh_agent_rewrite_file(
         walk_finder, parser, document, unit, rewrite, "item 3 of 9", "rerun", "read again")
     check("the rewrite goes below the heading and its `#approval_walk_item_` lines, which stay, and the text it "
           "replaced is returned whole",
@@ -7474,7 +7474,8 @@ def approval_walk_item_and_sub_steps_new_texts_of(name, document_text, waiting_n
     document = directory / "a-walk.md"
     document.write_text(document_text)
     waiting = next(unit for unit in walk_finder.item_unit_spans(document_text, parser) if unit[0] == [waiting_number])
-    return program.approval_walk_item_and_sub_steps_new_texts(walk_finder, parser, document, "3", "10", waiting)
+    return program.approval_walk_item_and_sub_steps_live_versions_proposed_new_texts_read_sorted(
+        walk_finder, parser, document, "3", "10", waiting)
 
 
 def test_the_count_of_proposed_text_revisions_leaves_out_withdrawn_items_and_their_sub_steps():
