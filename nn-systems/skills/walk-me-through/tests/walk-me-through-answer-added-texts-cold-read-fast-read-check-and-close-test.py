@@ -735,13 +735,15 @@ def test_the_waiting_item_read_step_prints_the_user_messages_of_an_agent_session
         {"type": "assistant", "message": {"content": [{"type": "text",
                                                        "text": "## Item 3 of 9: the opening sentence"}]}}]) + "\n")
     result = case.run(WAITING_ITEM_READ_STEP_NAME)
-    check("the read step prints, last, each message the user typed in an agent-session whose dialog named the item's "
-          "title, after the agent message it answers, with file and line",
-          result.returncode == 0 and "had to be run now" in result.stdout
-          and result.stdout.rstrip("\n").endswith(
-              f"  agent  {dialog}:7  Shall I split the page?\n"
-              f"  user   {dialog}:11  Keep one poem per job, as we agreed.\n"
-              f"Walk-minutes lines naming the title: 0."),
+    lines = result.stdout.split("\n")
+    check("the read step prints, right after its first line, each message the user typed in an agent-session whose "
+          "dialog named the item's title, after the agent message it answers, with file and line",
+          result.returncode == 0 and "had to be run now" in lines[0]
+          and lines[1].startswith("The user's words where the item's title, \"the opening sentence\", was named "
+                                  "before: 1 agent-session(s)")
+          and lines[3:6] == [f"  agent  {dialog}:7  Shall I split the page?",
+                             f"  user   {dialog}:11  Keep one poem per job, as we agreed.",
+                             "Walk-minutes lines naming the title: 0."],
           described(result))
 
 

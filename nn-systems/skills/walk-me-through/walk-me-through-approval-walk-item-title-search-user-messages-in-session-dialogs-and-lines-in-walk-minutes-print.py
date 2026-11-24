@@ -6,28 +6,31 @@ Usage:
   walk-me-through-approval-walk-item-title-search-user-messages-in-session-dialogs-and-lines-in-walk-minutes-print.py
       --title TITLE [--title TITLE]... --item-number N [--item-number N]...
 
-The walk check program's pre-show step, approval-walk-waiting-item-cold-read-fast-read, runs this before each item
-is shown, giving the item's title, each title an earlier read text of the item had, and the item's numbers.
+The walk check program's pre-show step, approval-walk-waiting-item-cold-read-fast-read of
+walk-me-through-answer-added-texts-cold-read-fast-read-check-and-close.py beside this program, runs this before each
+item is shown, giving the item's title, each title an earlier read text of the item had, and the item's numbers.
 
 WHAT IT SEARCHES. The log-store's session dialogs,
 session-dialogs/<machine>/<project-key>/*-dialog-complete.md, and the walk-minutes files, *-minutes.md, in the
-log-store's walk/ and in /home/nedlern/agents/*/docs/walk/. A line names a title when it holds the title where it
-reads as one: after "Item <number>", in quotes, or as a whole heading or list line. A title of fewer than
-SHORT_TITLE_WORDS words, such as "The fix", is too common for that, so it names one only right after
-"Item <number>" with one of the item's own numbers.
+log-store's walk/ and in /home/nedlern/agents/*/docs/walk/, those of the walk/ directories that exist. A line names
+a title when it holds the title, in any case, where it reads as one: after "Item" and any number, as in
+"Item 6 of 27: <title>", in quotes, or as a whole heading or list line, its `#`, `-` or `1.` and emphasis marks
+allowed. A title of fewer than four words, such as "The fix", is too common for that, so it names one only right
+after "Item" and one of the item's own numbers.
 
 WHAT IT PRINTS. For each agent-session whose dialog names a title, newest first, each message the user typed in it,
 the whole agent-session and not only near the title, since the user's ruling can come before the title is named;
 each after an excerpt of the agent message it answers, with the dialog's file and line, or the transcript's when
 the dialog does not hold the message. Messages are told from the agent's and from a program's prompts by
 search-user-messages-in-transcripts.py's speaker test, so an agent-session in which the user typed nothing, one a
-program started, is skipped and counted. Then each walk-minutes line that names a title, with its file and line.
+program started, is skipped and counted in the first line printed. Several messages the user typed in a row follow
+one excerpt of the agent message before them. Then each walk-minutes line that names a title, with its file and line.
 
 FROM THE MAC. When the log-store is not on this machine and this machine is not ned-box, ned-box's copy of this
 program runs over ssh, as scripts/log-store-past-discussions-regex-search-newest-first.py does.
 
-Exit 0 when something was found, 1 when nothing was, and 2 when anything could not be searched, each failure named
-on stderr by a line opening FAILED.
+Exit 2 when anything could not be searched, even when something was found, each failure named on stderr by a line
+opening FAILED; otherwise 0 when something was found and 1 when nothing was.
 
 Environment, for the tests:
   LOG_STORE_PAST_DISCUSSIONS_SEARCH_LOG_STORE_ROOT_OVERRIDE  the log-store's root
@@ -55,6 +58,9 @@ AGENT_EXCERPT_CHARACTERS = 300
 EXIT_FOUND = 0
 EXIT_NOTHING_FOUND = 1
 EXIT_FAILED = 2
+FAILURES_CLOSING_LINE = (
+    "The user's messages printed above are real, but those in the records the FAILED lines name are missing, and "
+    "may decide the item. Tell the user what each FAILED line says.")
 
 
 def load_search():
@@ -239,7 +245,9 @@ def main(argv=None):
     if not root.is_dir():
         if search.this_machine() != search.NED_BOX_HOSTNAME:
             return search.run_on_ned_box_over_ssh(list(arguments), NED_BOX_PROGRAM_PATH)
-        print(f"FAILED: there is no log-store at {root} on {search.this_machine()}, so nothing was searched.",
+        print(f"FAILED: there is no log-store at {root} on {search.this_machine()}, so no session dialog or "
+              f"walk-minutes file was searched for the item's title.\n"
+              f"The log-store is on ned-box at {search.DEFAULT_LOG_STORE_ROOT}: tell the user it is missing there.",
               file=sys.stderr)
         return EXIT_FAILED
     agent_homes = Path(os.environ.get(AGENT_HOMES_DIRECTORY_OVERRIDE_ENVIRONMENT_VARIABLE) or DEFAULT_AGENT_HOMES_DIRECTORY)
@@ -248,13 +256,16 @@ def main(argv=None):
         lines, found = found_lines(root, agent_homes, [title.strip() for title in parsed.title if title.strip()],
                                    parsed.item_number, failures)
     except search.RipgrepMissing as missing:
-        print(f"FAILED: ripgrep ({missing}) is not installed on {search.this_machine()}, so nothing was searched.\n"
-              f"Install it: sudo apt install ripgrep.", file=sys.stderr)
+        print(f"FAILED: ripgrep ({missing}) is not installed on {search.this_machine()}, so no session dialog or "
+              f"walk-minutes file was searched for the item's title.\n"
+              f"Ask the user to install it there, with `sudo apt install ripgrep`; an agent cannot run sudo.",
+              file=sys.stderr)
         return EXIT_FAILED
     print("\n".join(lines))
     for failure in failures:
         print(f"FAILED: {failure}", file=sys.stderr)
     if failures:
+        print(FAILURES_CLOSING_LINE, file=sys.stderr)
         return EXIT_FAILED
     return EXIT_FOUND if found else EXIT_NOTHING_FOUND
 

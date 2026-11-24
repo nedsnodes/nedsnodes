@@ -450,7 +450,8 @@ USER'S EARLIER WORDS. For an item that is to be shown, the step then runs
 walk-me-through-approval-walk-item-title-search-user-messages-in-session-dialogs-and-lines-in-walk-minutes-print.py
 with the item's title, the title of each earlier text of it read, which the
 next paragraph finds, and the item's numbers; a Withdrawn heading carries no
-title. It prints what that program prints, last: each message the user typed
+title. It prints what that program prints right after its first line, which
+names the read's report: each message the user typed
 in an agent-session whose saved dialog names a title, after the agent message
 it answers, and each walk-minutes line naming one, each with its file and line.
 When the search fails, the step refuses, before any read, printing what the
@@ -1439,9 +1440,10 @@ APPROVAL_WALK_ITEM_TITLE_SEARCH_FAILED = (
     "nothing read: {item} was not given its cold-read-fast-read, because the search for what the user said in earlier "
     "agent-sessions that named its title failed (exit {exit}), and the user's earlier words may already decide "
     "the item. The search said:\n{said}\n"
-    "If a FAILED line above names a remedy, run it, then run `{command}` again.\n"
-    "If ned-box cannot be reached, or the log-store or ripgrep is missing, tell the user what the FAILED line says "
-    "and do not show {item} until the search runs; a subagent tells the agent that dispatched it instead.")
+    "Tell the user what each FAILED line above says, with any remedy the lines after it give, and do not show "
+    "{item} until the command below runs without this refusal, since until then nobody has read his earlier words "
+    "on it; a subagent tells the agent that dispatched it instead.\n"
+    "Once the user says the cause is fixed, run `{command}` again.")
 ITEM_READ_FAILED_LINES = (
     "{item} has had no cold-read-fast-read of its text as it stands, so do not present it yet: the user is shown an "
     "item only after its cold-read-fast-read.",
@@ -3088,11 +3090,12 @@ def waiting_item_read(arguments, sub_step_of=None):
                 withheld = item_read_findings_without_outcomes_lines(
                     item, latest[1]["report"], reads / f"{latest[0]}-outcome.json", arguments.fast_read_program,
                     command, command_reading_again)
-                print("\n".join([ITEM_READ_NOT_RUN.format(item=item, report=latest[1]["report"])] + no_answer_rows
+                print("\n".join([ITEM_READ_NOT_RUN.format(item=item, report=latest[1]["report"])] + past_words
+                                 + no_answer_rows
                                  + (withheld or [ITEM_READ_NOT_RUN_NEXT.format(
                                      item=item, now_over_later_command=check_command_with_cwd(top, NOW_OVER_LATER_FLAG))]
                                     + waiting_on_item_prerequisite_lines(walk_finder, minutes, numbers, total,
-                                                                         parser)) + past_words))
+                                                                         parser))))
                 return 1 if withheld else 0
             why = ITEM_READ_RUN_FACTS.format(report=latest[1]["report"], facts=", ".join(facts[:FACTS_LISTED]))
         walk_name = minutes.name[:-len(walk_finder.MINUTES_SUFFIX)]
@@ -3114,12 +3117,12 @@ def waiting_item_read(arguments, sub_step_of=None):
     withheld = item_read_findings_without_outcomes_lines(item, outcome["report"], reads / f"{key}-outcome.json",
                                                          arguments.fast_read_program, command,
                                                          command_reading_again)
-    print("\n".join([ITEM_READ_USED.format(item=item, how=how, report=outcome["report"], notes=notes)] + no_answer_rows
+    print("\n".join([ITEM_READ_USED.format(item=item, how=how, report=outcome["report"], notes=notes)] + past_words
+                     + no_answer_rows
                     + [line.format(item=item, document=document, command=command,
                                    now_over_later_command=check_command_with_cwd(top, NOW_OVER_LATER_FLAG))
                        for line in (ITEM_READ_LINES[:1] if withheld else ITEM_READ_LINES)]
-                    + (withheld or waiting_on_item_prerequisite_lines(walk_finder, minutes, numbers, total, parser))
-                    + past_words))
+                    + (withheld or waiting_on_item_prerequisite_lines(walk_finder, minutes, numbers, total, parser))))
     return 1 if withheld else 0
 
 
