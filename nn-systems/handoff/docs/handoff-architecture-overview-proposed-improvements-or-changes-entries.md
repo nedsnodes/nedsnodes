@@ -1107,3 +1107,14 @@ Goes wrong when: a reader takes the assertion as exact.
 The claim check's evidence:
 > `nn-systems/handoff/handoff-asked-stop-typing-user-notice-user-prompt-submit-hook.py:94` `return os.environ.get(supervisor.HANDOFF_SUPERVISOR_AGENT_NAME_ENVIRONMENT_VARIABLE, "").strip()`. This hook also reads the first variable. It takes the name from the supervisor's constant, so a rename would not break it.
 State: open
+
+## E95 — possible problem: an assertion of the overview is contradicted
+
+Claim: `<seat>-supervisor-state.json` is written only by `handoff-supervisor.py` and read by the writer, resupervise, recovery, the login restart, the agent-crash-watcher, the restart program and `agent-seat-idle-sweep-verdicts-print.py`.
+Found by: the overview claim check of 2026-11-24 against commit f4967e2d01c678b55906907db4750cc19331f07a; its report is /home/nedlern/nedsnodes-logs/overview-write-architecture-overview-claim-check-reports/nedsnodes-handoff-architecture-overview/487ffbaab48cdcfe936c41cf0d9c61bcc72ff719-2026-11-24T18-25-39-022146Z.md.
+Fixed by: regular maintenance, in the overview.
+Goes wrong when: a reader takes the assertion as exact.
+The claim check's evidence:
+> - The writer and the listed readers are borne out (handoff-supervisor.py:699; restart-live-seats-at-login.py:48-49 `Nothing else writes that file`).
+> - The reader list leaves out scripts/agent-seat-idle-sweep-headless-judge-wake-messages-send-and-user-alerts-write.py:710-712 `path = verdicts_print.supervisor.supervisor_state_path(...)` and `state = json.loads(path.read_text(encoding="utf-8"))`. Through that function, scripts/merge-lane-open-prs-not-changes-requested-count-then-next-agent-seat-go-ahead-to-open-surviving-mutant-test-prs.py:271-273 also depends on the file.
+State: open
