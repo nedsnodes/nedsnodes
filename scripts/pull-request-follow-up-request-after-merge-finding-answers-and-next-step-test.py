@@ -1073,24 +1073,13 @@ def test_clean_up():
         case.run(worktree, "start-topic-branch", "topic-unpushed", "--finding-numbers", "2")
         case.commit_change("unpushed.txt")
         git(worktree, "switch", "-q", "topic-one")
-        git(case.repository, "worktree", "lock", "--reason", "claude agent agent-a1b2 (pid 4242)", str(worktree))
-        code, out, err = case.run(case.repository, "remove-topic-branches-and-worktrees")
-        check("remove-topic-branches-and-worktrees leaves a worktree the agent harness locks, and its branches, with exit 1",
-              code == 1 and f"Worktree {worktree} is locked by the agent harness (lock reason: claude agent "
-                            "agent-a1b2 (pid 4242)), so remove-topic-branches-and-worktrees left it" in out
-              and "Wait until the subagent has ended.\nIf the worktree is still locked when you end your turn, pass "
-                  "this sentence to the user word for word: \"The agent harness still locks worktree "
-                  f"{worktree} of the follow-up of {FOLLOWED_UP}, so remove-topic-branches-and-worktrees "
-                  "could not remove it.\"\nIf you are a subagent, pass that sentence to the agent that dispatched "
-                  "you instead.\n" in out
-              and "left 1 worktree or branch in place;" in out
-              and out.endswith(f"\nWhen you have done what each says, run: python3 {program.PROGRAM} {NUMBER} remove-topic-branches-and-worktrees\n")
-              and worktree.exists() and "topic-one" in git(case.repository, "branch"), out + err)
-        git(case.repository, "worktree", "unlock", str(worktree))
         git(case.repository, "worktree", "lock", "--reason", "kept by the user", str(worktree))
         code, out, err = case.run(case.repository, "remove-topic-branches-and-worktrees")
-        check("remove-topic-branches-and-worktrees leaves a worktree locked for another reason, saying what to do",
+        check("remove-topic-branches-and-worktrees leaves a locked worktree and its branches with exit 1, saying what to do",
               code == 1 and "is locked (lock reason: kept by the user), so remove-topic-branches-and-worktrees left it" in out
+              and "left 1 worktree or branch in place;" in out
+              and out.endswith(f"\nWhen you have done what each says, run: python3 {program.PROGRAM} {NUMBER} remove-topic-branches-and-worktrees\n")
+              and "topic-one" in git(case.repository, "branch")
               and "\nIf anyone may still be using the worktree, leave it, and pass this sentence to the user word "
                   f"for word: \"Worktree {worktree} of the follow-up of {FOLLOWED_UP} is locked (lock reason: kept by "
                   "the user), so remove-topic-branches-and-worktrees left it.\"\nOtherwise list" in out
@@ -1154,63 +1143,6 @@ def test_clean_up_goes_on_past_each_worktree_and_branch():
         check("a lock without a reason is named as such",
               code == 1 and "is locked (lock reason: none given)" in out
               and f"of the follow-up of {FOLLOWED_UP} is locked (lock reason: none given), so" in out, out + err)
-    finally:
-        case.close()
-
-
-def test_clean_up_claude_code_lock_whose_claude_process_has_ended():
-    # Linux only: the lock's start is a Linux clock-tick count read from /proc, which macOS lacks.
-    if not sys.platform.startswith("linux"):
-        print("SKIP  [this machine cannot run it] a Claude Code lock whose claude process has ended "
-              "is unlocked: the case reads its process's start from /proc")
-        return
-    case = Case()
-    try:
-        worktree = started(case)
-        git(worktree, "push", "-q", "origin", "topic-one")
-        command = "remove-topic-branches-and-worktrees"
-        snapshots = program.owner_file.load_uncommitted_work_snapshots_module_once()
-        start = snapshots.linux_start_ticks(os.getpid())
-        # This test's own process runs; the same pid with another start names a process that has ended.
-        running = f"claude agent agent-a77d25c01f5a06582 (pid {os.getpid()} start {start})"
-        ended = f"claude agent agent-a77d25c01f5a06582 (pid {os.getpid()} start {int(start) + 1})"
-        git(case.repository, "worktree", "lock", "--reason", running, str(worktree))
-        code, out, err = case.run(case.repository, command)
-        check("a Claude Code lock whose claude process runs keeps the worktree, locked, as the harness's",
-              code == 1 and f"Worktree {worktree} is locked by the agent harness (lock reason: {running})" in out
-              and "Unlocked" not in out and worktree.exists()
-              and f"locked {running}" in git(case.repository, "worktree", "list", "--porcelain"), out + err)
-        git(case.repository, "worktree", "unlock", str(worktree))
-        git(case.repository, "worktree", "lock", "--reason", ended, str(worktree))
-        with case.in_process(case.repository), contextlib.redirect_stdout(io.StringIO()) as printed:
-            saved = program.owner_file.claude_code_subagent_worktree_lock_dispatching_process_running_state
-            program.owner_file.claude_code_subagent_worktree_lock_dispatching_process_running_state = (
-                lambda lock: (program.owner_file.UNKNOWN, "whether claude process runs could not be read"))
-            try:
-                code = program.remove_topic_branches_and_worktrees(NUMBER)
-            finally:
-                program.owner_file.claude_code_subagent_worktree_lock_dispatching_process_running_state = saved
-        out = printed.getvalue()
-        check("a Claude Code lock whose claude process cannot be read keeps the worktree, locked, as the harness's",
-              code == 1 and f"Worktree {worktree} is locked by the agent harness (lock reason: {ended})" in out
-              and "Unlocked" not in out and worktree.exists()
-              and f"locked {ended}" in git(case.repository, "worktree", "list", "--porcelain"), out)
-        (worktree / "stray.txt").write_text("stray\n")
-        code, out, err = case.run(case.repository, command)
-        check("a Claude Code lock whose claude process has ended is unlocked, and the worktree is then judged "
-              "as an unlocked one: kept for its untracked file",
-              code == 1 and f"Unlocked worktree {worktree}, since Claude Code's lock names claude process "
-                            f"{os.getpid()}, started at {int(start) + 1}, which has ended.\n" in out
-              and f"Worktree {worktree} holds changed or untracked files" in out and "?? stray.txt" in out
-              and "locked by the agent harness" not in out and worktree.exists()
-              and "locked" not in git(case.repository, "worktree", "list", "--porcelain"), out + err)
-        (worktree / "stray.txt").unlink()
-        git(case.repository, "worktree", "lock", "--reason", ended, str(worktree))
-        code, out, err = case.run(case.repository, command)
-        check("a clean worktree whose Claude Code lock names an ended claude process is unlocked and removed, "
-              "and its pushed branch deleted",
-              code == 0 and f"Unlocked worktree {worktree}," in out and f"Removed worktree {worktree}." in out
-              and "Deleted branch topic-one." in out and not worktree.exists(), out + err)
     finally:
         case.close()
 
@@ -1491,13 +1423,17 @@ def test_waiting_for_user_ruling():
 PRINT_BLOCK = "print-follow-up-request-block-from-merge-lane-2-reviews"
 
 
-def print_block(reviews, comments, gh_failure=None, read_back=None, description="", replaced=None):
+def print_block(reviews, comments, gh_failure=None, read_back=None, description="", replaced=None,
+                author="another-seat-account"):
     """Run PRINT_BLOCK in process, gh answering with reviews and comments as one page each, or raising
     gh_failure; read_back replaces the block parser. `replaced` maps a replaced pull request's number to its
-    (description, reviews, comments). Return (exit code, stdout, stderr)."""
+    (description, reviews, comments); author is the login gh pr view prints for the pull request's author.
+    Return (exit code, stdout, stderr)."""
     pull_requests = {NUMBER: (description, reviews, comments), **(replaced or {})}
 
     def fake_gh(arguments, timeout_seconds=None):
+        if arguments[:2] == ["pr", "view"] and "body,author" in arguments:
+            return author + "\n" + pull_requests[int(arguments[2])][0] + "\n"
         if arguments[:2] == ["pr", "view"]:
             return (pull_requests[int(arguments[2])][0] if "body" in arguments else TITLE) + "\n"
         if gh_failure:
@@ -1553,6 +1489,28 @@ def test_print_block():
               "changes and has not yet approved the author's fixes. No #follow_up_request block was printed.\n"
               f"After ned-review-merge posts an approving review of pull request {NUMBER}, run: "
               f"python3 {program.PROGRAM} {NUMBER} {PRINT_BLOCK}\n"), err)
+    posted_approval = {"state": program.load_script_beside_this_one(program.POSTING_PROGRAM_FILE_NAME)
+                       .EVENT_STATES["COMMENT"], "body": "APPROVE\n\nThe review body."}
+    code, out, err = print_block([merge_lane_review(1, **posted_approval)],
+                                 [merge_lane_comment(10, 1, "**fix-next** Rename it.")], author="ned-review-merge")
+    check(f"{PRINT_BLOCK} reads merge-lane-2's approval posted as a COMMENT review on a pull request it opened",
+          code == 0 and err == "" and out == (f"#follow_up_request pull request {NUMBER}\n"
+                                               "1. fix-next: `scripts/thing.py:3`: Rename it.\n"), out + err)
+    code, out, err = print_block([merge_lane_review(1, **posted_approval)],
+                                 [merge_lane_comment(10, 1, "**fix-next** Rename it.")])
+    check(f"{PRINT_BLOCK} does not read merge-lane-2's only review, a COMMENT review opening with APPROVE, as an "
+          "approval on a pull request another account opened",
+          code == 1 and out == "" and "has no approving review" in err, out + err)
+    code, out, err = print_block([merge_lane_review(1, state="COMMENTED", body="REQUEST_CHANGES\n\n**Blocking: 1**")],
+                                 [merge_lane_comment(10, 1, "**fix-next** Rename it.")], author="ned-review-merge")
+    check(f"{PRINT_BLOCK} refuses when merge-lane-2's only COMMENT verdict requests changes",
+          code == 1 and out == "" and "has no approving review" in err, out + err)
+    code, out, err = print_block([merge_lane_review(1, state="CHANGES_REQUESTED"),
+                                  merge_lane_review(2, state="COMMENTED", body="APPROVE\n\nA comment.")],
+                                 [merge_lane_comment(10, 1, "**fix-next** Rename it.")])
+    check(f"{PRINT_BLOCK} does not read a COMMENT review that opens with APPROVE, after a CHANGES_REQUESTED review, "
+          "as an approval on a pull request another account opened",
+          code == 1 and out == "" and "has no approving review" in err, out + err)
     code, out, err = print_block([merge_lane_review(1)], [merge_lane_comment(10, 1, "Rename it.")])
     check(f"{PRINT_BLOCK} refuses a merge-lane-2 comment with no mark, naming it, and says how to write the block "
           "by hand",
@@ -1575,6 +1533,19 @@ def test_print_block():
     check(f"{PRINT_BLOCK} reports a review without its expected fields as FAILED with exit 2",
           code == 2 and err.startswith(f"FAILED: GitHub's reviews of pull request {NUMBER} were not in the "
                                        "expected shape: KeyError"), err)
+    without_state = merge_lane_review(2)
+    del without_state["state"]
+    code, out, err = print_block([without_state, merge_lane_review(1)],
+                                 [merge_lane_comment(10, 1, "**fix-next** Rename it.")])
+    check(f"{PRINT_BLOCK} prints the block when a merge-lane-2 review has no state but another review approves",
+          code == 0 and err == "" and out == (f"#follow_up_request pull request {NUMBER}\n"
+                                               "1. fix-next: `scripts/thing.py:3`: Rename it.\n"), out + err)
+    code, out, err = print_block([merge_lane_review(1, state="CHANGES_REQUESTED"), without_state],
+                                 [merge_lane_comment(10, 1, "**fix-next** Rename it.")])
+    check(f"{PRINT_BLOCK} prints nothing and fails with exit 2 when a merge-lane-2 review has no state and no "
+          "readable review approves",
+          code == 2 and out == "" and err.startswith("FAILED: GitHub returned a review by ned-review-merge without a "
+                                                     "state, so its verdict cannot be read: "), out + err)
     code, out, err = print_block([merge_lane_review(1)], [merge_lane_comment(10, 1, "**fix-next** Rename it.")],
                                  read_back=lambda text: [])
     check(f"{PRINT_BLOCK} prints nothing and fails with exit 2 when its block does not read back as itself",
@@ -1621,7 +1592,6 @@ for test in (test_help, test_block_parsing, test_print_block, test_print_block_w
              test_open_gh_pr_create_second_try_and_gh_pr_list,
              test_push_time_limit_is_the_pre_push_conflict_check_budget_plus_120_seconds,
              test_open_title_and_description_file_removal_failure,
-             test_clean_up_claude_code_lock_whose_claude_process_has_ended,
              test_leave_out_and_finish, test_three_findings, test_waiting_for_user_ruling,
              test_state_failures, test_clean_up, test_clean_up_goes_on_past_each_worktree_and_branch,
              test_clean_up_failure, test_clean_up_run_from_inside_a_worktree_it_removes, test_next_step, test_next_step_branch_choice):

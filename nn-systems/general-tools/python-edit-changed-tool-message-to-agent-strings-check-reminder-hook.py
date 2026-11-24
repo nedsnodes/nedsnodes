@@ -6,7 +6,7 @@ its cold-read-fast-read command: the hook writes each message's text to a file
 of its own under the temporary directory, because cold-read-fast-read.py reads
 only files, and the file's name becomes the cold-read-record's name. The text
 written is the message as the agent reads it, without Python's quotes, with
-each placeholder shown as <its source>, or as its value when it names a
+each placeholder shown as <filled in: its source>, or as its value when it names a
 module-level string constant, as the collector's
 text_as_agent_reads_it_with_placeholder_stand_ins says, so the reader is not handed
 Python source.

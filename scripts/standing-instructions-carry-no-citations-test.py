@@ -5,9 +5,9 @@ the two patterns in MARKER_PATTERNS.
 Standing instructions hold what an agent must do. A line that records when the
 user decided tells the agent nothing to do; that history belongs in the commit
 message and the pull request. The files checked are every git-tracked
-CLAUDE.md, AGENTS.md, SKILL.md, *-instructions.md and *-prompt.md, the agent
-definitions in .claude/agents/ and the cold-read prompts in
-.claude/skills/cold-read/prompts/.
+CLAUDE.md, AGENTS.md, SKILL.md and reusable-prompt (a *-instructions.md or
+*-prompt.md that is not a GHI-MD), the agent definitions in .claude/agents/ and
+the cold-read prompts in .claude/skills/cold-read/prompts/.
 
 Links and paths are not checked: a date inside a markdown link target, a URL,
 or a path or file name such as `docs/walk/x-YYYY-MM-DD.md` is a pointer an
@@ -43,12 +43,20 @@ _date_pattern_spec = importlib.util.spec_from_file_location(
 _date_pattern = importlib.util.module_from_spec(_date_pattern_spec)
 _date_pattern_spec.loader.exec_module(_date_pattern)
 
+_reusable_prompt_rule_spec = importlib.util.spec_from_file_location(
+    "reusable_prompt_file_recognized_by_name_ending_and_not_ghi_md_common",
+    Path(__file__).resolve().parents[1] / "nn-systems" / "general-tools"
+    / "reusable-prompt-file-recognized-by-name-ending-and-not-ghi-md-common.py")
+_reusable_prompt_rule = importlib.util.module_from_spec(_reusable_prompt_rule_spec)
+_reusable_prompt_rule_spec.loader.exec_module(_reusable_prompt_rule)
+
 REPOSITORY = Path(__file__).resolve().parent.parent
 SUITE = "scripts/standing-instructions-carry-no-citations-test.py"
 
 # git's pathspec `*` crosses directories, so `*-prompt.md` finds the file at any depth.
 STANDING_INSTRUCTION_PATHSPECS = ("CLAUDE.md", "*/CLAUDE.md", "AGENTS.md", "*/AGENTS.md",
-                                  "SKILL.md", "*/SKILL.md", "*-instructions.md", "*-prompt.md",
+                                  "SKILL.md", "*/SKILL.md",
+                                  *(f"*{suffix}" for suffix in _reusable_prompt_rule.REUSABLE_PROMPT_SUFFIXES),
                                   ".claude/agents/*.md", ".claude/skills/cold-read/prompts/*.md")
 
 MARKER_PATTERNS = {
@@ -71,6 +79,8 @@ EXCEPTIONS = {
         "an example of a citation's form, which the agent copies when it cites a ruling",
     (".claude/skills/cold-read/SKILL.md", "`--user-ruled-cold-read-full-run-count-restart`"):
         "the name of a cold-read-grid.py flag the agent must type, not a record of a ruling",
+    (".claude/skills/walk-me-through/SKILL.md", "the user's answer of 2026-11-17 to item 58.5 of approval-walk"):
+        "the citation the agent writes into the walk-minutes' check --already-decided for a clarity-only change",
 }
 
 
@@ -97,7 +107,10 @@ def standing_instruction_paths(repository):
     listing = subprocess.run(
         ["git", "-C", str(repository), "ls-files", "-z", "--", *STANDING_INSTRUCTION_PATHSPECS],
         capture_output=True, text=True, check=True).stdout
-    return sorted(path for path in listing.split("\0") if path)
+    # A GHI-MD reaches the listing only through a suffix pathspec, so only those paths are filtered.
+    return sorted(path for path in listing.split("\0")
+                  if path and (not path.endswith(_reusable_prompt_rule.REUSABLE_PROMPT_SUFFIXES)
+                               or _reusable_prompt_rule.has_reusable_prompt_file_name_and_is_not_ghi_md(path)))
 
 
 def stale_exceptions(sources, exceptions=EXCEPTIONS):
@@ -123,6 +136,8 @@ def the_file_listing_takes_exactly_the_standing_instruction_files():
         names = ["CLAUDE.md", "x/CLAUDE.md", "x/y/SKILL.md", "a-instructions.md",
                  "x/b-prompt.md", "AGENTS.md", "x/AGENTS.md", ".claude/agents/d.md",
                  ".claude/skills/cold-read/prompts/e.md", "c-design.md", "NOTCLAUDE.md",
+                 "docs/issues/4080-fix-the-arbitrator-agent-instructions.md",
+                 "docs/issues/AGENTS.md", "docs/issues/queue/x-prompt.md",
                  "x/SKILL.md.bak", ".claude/skills/other/prompts/f.md", ".claude/g.md"]
         for name in names:
             (scratch / name).parent.mkdir(parents=True, exist_ok=True)
@@ -131,6 +146,7 @@ def the_file_listing_takes_exactly_the_standing_instruction_files():
         listed = standing_instruction_paths(scratch)
     return listed == sorted(["CLAUDE.md", "x/CLAUDE.md", "x/y/SKILL.md",
                              "a-instructions.md", "x/b-prompt.md", "AGENTS.md", "x/AGENTS.md",
+                             "docs/issues/AGENTS.md", "docs/issues/queue/x-prompt.md",
                              ".claude/agents/d.md", ".claude/skills/cold-read/prompts/e.md"])
 
 
@@ -260,9 +276,9 @@ def main():
     if not os.environ.get("STANDING_INSTRUCTIONS_SUITE_CHILD"):
         results.append(check("run with GIT_DIR set, the suite still scans this repository",
                              the_suite_run_with_git_dir_set_still_scans_this_repository()))
-        results.append(check("the listing takes every CLAUDE.md, AGENTS.md, SKILL.md, "
-                             "-instructions.md and -prompt.md file, at any depth, every agent "
-                             "definition and every cold-read prompt, and no other file",
+        results.append(check("the listing takes every CLAUDE.md, AGENTS.md, SKILL.md and "
+                             "reusable-prompt, at any depth, every agent definition and every "
+                             "cold-read prompt, and no other file, nor a GHI-MD",
                              the_file_listing_takes_exactly_the_standing_instruction_files()))
     results.append(check("a scanned marker or a stale exception fails the suite, and the "
                          "failure names the remedy",

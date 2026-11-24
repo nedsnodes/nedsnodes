@@ -102,9 +102,11 @@ answer.
 
 AN ITEM'S TEXT. approval_walk_item_heading_and_item_page_body_lines gives the
 lines of an item that the item page builder puts on its page.
-approval_walk_item_text_as_shown_to_user gives the text the user must have been
-shown before his answer to the item counts: the same lines without the
-`#approval_walk_item_` lines, which the check program writes for agents. The
+approval_walk_item_text_as_shown_to_user gives the item's text as the user is
+shown it, from which the short-answer hook reads the decision-bearing lines
+the user must have been shown before his answer to the item counts: the same
+lines without the `#approval_walk_item_` lines, which the check program writes
+for agents. The
 short-answer hook drops each running count's `of M` only when it compares,
 because M changes when items are added to the walk.
 
@@ -112,11 +114,15 @@ ITEM PAGES. The walk-me-through skill publishes each item as a page before
 any message shows it, and records the page's link in the walk-minutes as a
 line `#item_page item N of M <link>`, or, when the publish failed, as
 `#item_page item N of M publish failed: <reason>`.
-newest_item_page_link_per_item_from_walk_minutes reads both forms, each on one
+A republish may be recorded with its version before the link, as in
+`#item_page item N of M version 2 <link>`, and any line with a link may end
+with a note in parentheses, as in `<link> (version 3: revised)`.
+approval_walk_item_page_link_lines_oldest_first_from_walk_minutes reads every such line, each on one
 line and at the line's start, outside code and HTML comments; a publish-failed
-line with no reason is not read. The newest line for an item number counts,
-whatever its `of M`, because a re-planned walk keeps an item's page while its
-total changes.
+line with no reason is not read.
+newest_item_page_link_per_item_from_walk_minutes gives each item number's
+newest line, whatever its `of M`, because a re-planned walk keeps an item's
+page while its total changes.
 
 CLOSING LINES. approval_walk_closing_line_read is the one reader of the line
 the walk-me-through skill ends every message of an open walk with, so the
@@ -132,6 +138,11 @@ approval_walk_sub_step_no_decision_closing_line_page_link_or_none reads the
 line a sub-step that asks for no decision ends with, `[No decision here; type
 N or next to continue.](<page link>)`, alone on its line, or, for a sub-step
 whose publish failed, the same line without its link.
+approval_walk_waiting_sub_step_numbers_whose_text_ends_with_no_decision_closing_line
+says which waiting sub-steps ask for no decision: those whose text as shown
+ends with that line and holds no recommendation, so that the answer
+program's --moved-on-no-decision, which refuses an item with a recommendation,
+accepts each of them.
 
 Tool-messages-to-agent follow
 docs/nedsnodes-wiki/nedsnodes-how-to-write-a-tool-message-to-agent-such-as-a-hook-refusal-or-script-error.md.
@@ -180,8 +191,9 @@ ITEM_LABEL = re.compile(
     rf"^(?:(?P<bold>\*\*|__)item\s+(?P<bold_number>{WHOLE_NUMBER})(?:\s+of\s+(?P<total>\d+))?"
     rf"(?=\s*[:.,]|(?P=bold)\s*(?:[:.,\-–—]|$))"
     rf"|item\s+(?P<plain_number>{WHOLE_NUMBER})[:.](?=\s|$))", re.I)
+APPROVAL_WALK_SUB_STEP_ASKING_FOR_NO_DECISION_CLOSING_LINE_WORDS_WITHOUT_LINK = "No decision here; type N or next to continue."
 SUB_STEP_NO_DECISION_CLOSING_LINE = re.compile(
-    r"^\s*(?:\[No decision here; type N or next to continue\.\]\((\S+)\)|No decision here; type N or next to continue\.)\s*$")
+    rf"^\s*(?:\[{re.escape(APPROVAL_WALK_SUB_STEP_ASKING_FOR_NO_DECISION_CLOSING_LINE_WORDS_WITHOUT_LINK)}\]\((\S+)\)|{re.escape(APPROVAL_WALK_SUB_STEP_ASKING_FOR_NO_DECISION_CLOSING_LINE_WORDS_WITHOUT_LINK)})\s*$")
 CLOSING_LINE_LABEL = re.compile(rf"Items?\s+({NUMBER_LIST})\s+of\s+(\d+)(?:,\s.*)?", re.S)
 # Only right after the count, as in `(revised)` or `, revised:`, so a title that uses the word drops nothing.
 REVISED = re.compile(r"^[*_\s(,:;.\-\u2013\u2014]*revised\b", re.I)
@@ -201,10 +213,13 @@ UNNUMBERED_ITEM_HEADING_MARKUP = "##"
 APPROVAL_WALK_DEFERRED_ITEM_HEADING_NOTE_AFTER_RUNNING_COUNT = "(deferred: moved to just before the summary item)"
 NUMBER_OR_JOINER = re.compile(rf"{NUMBER}|\bto\b|-|\u2013", re.I)
 # A link is one run of non-space characters, so `publish failed: <reason>` can never be read as a link. Spaces
-# only, never a newline, so a line that ends short is not completed by the line below it.
+# only, never a newline, so a line that ends short is not completed by the line below it. Groups: the item number,
+# the failed publish's text, the version written before the link, the link, the note in parentheses after it.
 ITEM_PAGE_LINE_PATTERN = re.compile(
-    rf"^#item_page[ \t]+item[ \t]+({NUMBER})[ \t]+of[ \t]+\d+[ \t]+(?:(publish failed:[ \t]*\S.*?)|(\S+))[ \t]*$",
+    rf"^#item_page[ \t]+item[ \t]+({NUMBER})[ \t]+of[ \t]+\d+[ \t]+"
+    rf"(?:(publish failed:[ \t]*\S.*?)|(?:version[ \t]+(\d+)[ \t]+)?(\S+)(?:[ \t]+\(([^\n]*)\))?)[ \t]*$",
     re.I | re.M)
+ITEM_PAGE_NOTE_VERSION = re.compile(r"\bversion[ \t]+(\d+)", re.I)
 # A link has no space in it, so no link can equal this value.
 ITEM_PAGE_PUBLISH_FAILED = "publish failed"
 NOT_A_FORM_PROBLEM = (
@@ -400,11 +415,23 @@ def text_wrapped_as_markdown_code_span(text):
     return f"{delimiter}{padding}{text}{padding}{delimiter}"
 
 
+def approval_walk_item_page_link_lines_oldest_first_from_walk_minutes(minutes_text, parser):
+    """Return [(item number, the line's link or ITEM_PAGE_PUBLISH_FAILED, the version the line states or None)] for
+    every `#item_page` line of the minutes, oldest first; the version is the one written before the link, else the
+    first `version K` in the note after it."""
+    lines = []
+    for number, failed, version, link, note in ITEM_PAGE_LINE_PATTERN.findall(
+            "\n".join(prose_lines(minutes_text, parser))):
+        noted = ITEM_PAGE_NOTE_VERSION.search(note)
+        stated = version or (noted[1] if noted else None)
+        lines.append((number, ITEM_PAGE_PUBLISH_FAILED if failed else link, int(stated) if stated else None))
+    return lines
+
+
 def newest_item_page_link_per_item_from_walk_minutes(minutes_text, parser):
     """Return {item number: the link of its newest `#item_page` line, or ITEM_PAGE_PUBLISH_FAILED when that line
     records a failed publish}."""
-    return {number: ITEM_PAGE_PUBLISH_FAILED if failed else link
-            for number, failed, link in ITEM_PAGE_LINE_PATTERN.findall("\n".join(prose_lines(minutes_text, parser)))}
+    return {number: link for number, link, _ in approval_walk_item_page_link_lines_oldest_first_from_walk_minutes(minutes_text, parser)}
 
 
 def approval_walk_closing_line_read(line, parser, answer_letters):
@@ -447,6 +474,26 @@ def approval_walk_sub_step_no_decision_closing_line_page_link_or_none(line):
     if match is None:
         return None
     return match[1] or ITEM_PAGE_PUBLISH_FAILED
+
+
+def approval_walk_waiting_sub_step_numbers_whose_text_ends_with_no_decision_closing_line(
+        text, parser, waiting_units, numbers, all_units=None):
+    """The set of numbers that are sub-steps asking for no decision, as the module docstring's CLOSING LINES says, of
+    the walk-document text; waiting_units are waiting_item_units' units for numbers, and all_units item_unit_spans'
+    units of text when the caller has them already."""
+    sub_steps = [number for number in numbers if "." in number]
+    if not sub_steps:
+        return set()
+    all_units = item_unit_spans(text, parser) if all_units is None else all_units
+    found = set()
+    for number in sub_steps:
+        unit = next(unit for unit in waiting_units if number in unit[0])
+        shown = approval_walk_item_text_as_shown_to_user(text, parser, all_units, unit, number)
+        lines = [line for line in prose_lines(shown, parser) if line.strip()]
+        if (approval_walk_sub_step_no_decision_closing_line_page_link_or_none(lines[-1]) is not None
+                and approval_walk_item_last_recommendation_text_from_item_lines(lines) is None):
+            found.add(number)
+    return found
 
 
 def is_closed(value):
@@ -742,33 +789,67 @@ def approval_walk_item_heading_and_item_page_body_lines(text, parser, all_units,
         own = [each for each in sub_unit[0] if each.startswith(sub_step)]
         body += ["", approval_walk_item_heading_with_deferred_note_removed(lines[sub_unit[3]])]
         body += own_lines_of_unit(text, parser, lines, sub_unit, openings,
-                                  own if len(own) < len(sub_unit[0]) else None)[1:]
+                                  own if len(own) < len(sub_unit[0]) else None, keep_setext_underline=True)[1:]
     return heading, body
 
 
-def own_lines_of_unit(text, parser, lines, unit, openings, own=None):
+def own_lines_of_unit(text, parser, lines, unit, openings, own=None, keep_setext_underline=False):
     """Return the lines below unit's heading line, each run of them after a blank line, that belong to the item
     numbers own of the item numbers unit names: all of them when own is None, and otherwise, as
     approval_walk_item_line_range_within_heading_shared_by_several_items gives each, the lines of own's first
     number and those of each later one that has an opening of its own. openings is a list that holds
-    item_opening_lines' result once one call has needed it, so that the walk-document is read once."""
+    item_opening_lines' result once one call has needed it, so that the walk-document is read once. Below a setext
+    heading, the heading's further lines come first, whatever own is, since the heading names every number in unit,
+    as a paragraph, and a blank line stands where its underline was; with keep_setext_underline, for a caller that
+    puts the heading line back above them, the underline stays, so that the heading is still a heading.
+
+    Not handled: a further line of a setext heading indented four spaces or more, such as `    #new Hide rows.`, is
+    heading text in the walk-document but becomes an indented code block once the underline is replaced, so a
+    message that leaves that line out is not caught. Nor, with keep_setext_underline, is a further line such as
+    `#new Hide rows.`: it stays heading text, and the short-answer hook, which skips headings, does not check that
+    the message showed it."""
+    heading_end, ranges = approval_walk_unit_heading_end_and_item_line_ranges_below_heading_line(
+        text, parser, lines, unit, openings, own)
+    if heading_end > unit[3] + 1 and not keep_setext_underline:
+        # Read as the heading's own body, a further line such as `#new_if_d Show every row.` would sit above the
+        # underline and make a second heading; and the blank line keeps an indented code block below the
+        # underline a code block rather than that paragraph's last line.
+        lines = [*lines[:heading_end - 1], "", *lines[heading_end:]]
+    body = []
+    for start, stop in ranges:
+        body += ["", *lines[start:stop]]
+    return body
+
+
+def approval_walk_unit_heading_end_and_item_line_ranges_below_heading_line(text, parser, lines, unit, openings,
+                                                                          own=None):
+    """Return (the line after unit's heading, the (start, stop) line ranges below unit's heading line that belong to
+    the item numbers own of the item numbers unit names, in order and not overlapping), as own_lines_of_unit's
+    docstring says, for the walk-document text split into lines: the item copy the user is shown and the walk check
+    program's marks both read these ranges, so that a `#new` line the user is shown is a line the check reads.
+    Below a setext heading, the heading's further lines, up to its underline, come first, whatever own is."""
     numbers, total, _, first, end = unit
+    opening = parser.parse("\n".join(lines[first:end]))
+    heading_end = first + 1
+    if (opening and opening[0].type == "heading_open"
+            and opening[0].markup in ("=", "-") and opening[0].map[0] == 0):
+        heading_end = first + opening[0].map[1]
     if own is None:
-        ranges = [(first, end)]
+        own_ranges = [(first, end)]
     else:
         if not openings:
             openings.append(item_opening_lines(text, parser))
-        ranges = [approval_walk_item_line_range_within_heading_shared_by_several_items(
+        own_ranges = [approval_walk_item_line_range_within_heading_shared_by_several_items(
             openings[0], first, end, each, numbers, total) for each in own]
         # A number with no opening of its own would bring in the unit's lines above the first number's own opening.
-        ranges = ranges[:1] + [(start, stop) for start, stop in ranges[1:] if start != first]
+        own_ranges = own_ranges[:1] + [(start, stop) for start, stop in own_ranges[1:] if start != first]
     # A number with no opening of its own has a range that already holds the later numbers' ranges.
-    body, covered = [], first + 1
-    for start, stop in sorted(ranges):
+    ranges, covered = ([(first + 1, heading_end)] if heading_end > first + 1 else []), heading_end
+    for start, stop in sorted(own_ranges):
         if max(start, covered) < stop:
-            body += ["", *lines[max(start, covered):stop]]
+            ranges.append((max(start, covered), stop))
         covered = max(covered, stop)
-    return body
+    return heading_end, ranges
 
 
 def approval_walk_text_with_approval_walk_item_hashtag_lines_removed(text):
@@ -784,9 +865,9 @@ def approval_walk_text_with_running_count_totals_removed(text):
 
 
 def approval_walk_item_text_as_shown_to_user(text, parser, all_units, unit, number):
-    """Return the Markdown the user must be shown for item number of the walk-document text, as the short-answer
-    hook compares it with the agent's message: approval_walk_item_heading_and_item_page_body_lines' heading and lines, without
-    the `#approval_walk_item_` lines."""
+    """Return the Markdown the user is shown for item number of the walk-document text, from which the short-answer
+    hook reads the heading and the decision-bearing lines it looks for in the agent's message:
+    approval_walk_item_heading_and_item_page_body_lines' heading and lines, without the `#approval_walk_item_` lines."""
     heading, body = approval_walk_item_heading_and_item_page_body_lines(text, parser, all_units, unit, number)
     shown = heading + "\n" + "\n".join(body)
     # A tag line removed leaves the blank lines around it, so blank lines are squeezed to one.

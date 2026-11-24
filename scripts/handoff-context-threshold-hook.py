@@ -11,7 +11,8 @@ transcript it reads launch records from cannot be read, since it then cannot tel
 With no background_tasks list it counts nothing as running.
 
 Once before that, at the first turn end at which the count is at or above
---get-ready-used-percentage and below the threshold, it tells the agent to start no long work,
+--get-ready-used-percentage and below the threshold, it tells the agent to start no new subagent
+and no 10-plus-minute background work, and that it may hand off whenever it is ready,
 and records that in <session>-handoff-get-ready-notice-sent; a count that passes both shares in
 one turn gets no such notice. The record is kept apart from <session>-handoff-deferred, because
 this hook, the cold-read-full-run guard hook and the writer script read that file's existence as
@@ -127,14 +128,17 @@ HANDOFF_INSTRUCTION = (
 )
 
 HANDOFF_GET_READY_NOTICE = (
-    "[rule handoff-context-threshold-get-ready-hold-back-long-work] Context at {share}: at "
+    "[rule handoff-context-threshold-get-ready-no-new-subagents-or-10-plus-minute-work] Context at {share}: at "
     "{threshold:g}% this agent-session is asked to hand off, and a subagent or background Bash "
     "task still running then can delay the handoff by an hour or more; a detached program that "
-    "writes its result to a file does not. From now on, start no subagent or background Bash "
-    "task that usually runs 10 minutes or longer, such as a cold-read-full-run: add that work to "
-    "your task list for your successor. If such work is the next thing to do and nothing shorter "
-    "is left, run the /handoff skill now instead, so that your successor starts it. Work that "
-    "usually takes under 10 minutes may still start."
+    "writes its result to a file does not. Start no new subagents, and no runs of the Workflow "
+    "tool, from now until the session-handoff: do the work yourself, or add it to your task list "
+    "for your successor. This overrides any instruction to dispatch a subagent. Start no "
+    "background Bash task that usually runs 10 minutes or longer, such as a cold-read-full-run: "
+    "add that work to your task list for your successor. From now on, at {get_ready:g}% context "
+    "or more, you may run the /handoff skill whenever nothing of yours is still running and you "
+    "reach a good stopping point, such as a finished pull request or an answered walk item; when "
+    "the only work left is on your task list for your successor, run it."
 )
 
 # Without the record, every later turn's end below the threshold repeats the notice.
@@ -162,21 +166,26 @@ CLAUDE_VERSION_TIMEOUT_SECONDS = 10
 
 # The approved ban on new work; the wait no longer counts work started after the deferral began.
 NEW_WORK_DURING_HANDOFF_DEFERRAL_INSTRUCTION = (
-    "Carry on, open approval-walks included. Short work, which usually ends "
-    "within 10 minutes, such as a cold-read-fast-read, may start; run such work "
-    "as a subagent or a background Bash task. When you run the handoff writer "
-    "script, nn-systems/handoff/handoff-write-and-check-supervisor.py, before "
-    "this agent-session ends, it names in your session-handoff each subagent "
-    "still working, whenever it started, and each background Bash task that "
-    "started since this handoff-deferral began and is still running, so you need "
-    "not add that work to "
-    "your task list; the end of this agent-session stops that work. Your "
-    "successor is shown that work, and "
-    "decides whether to start it again. If the writer script says it could not list "
-    "that work, it says what to name by hand; name it in the session-handoff's next "
-    "step. Do not start long "
-    "work, such as a cold-read-full-run or a pull-request review: add it to "
-    "your task list for your successor."
+    "Carry on, open approval-walks included. Start no new subagents, and no "
+    "runs of the Workflow tool, from now until the session-handoff: do the work "
+    "yourself, or add it to your task list for your successor. This overrides "
+    "any instruction to dispatch a subagent. Short work, which usually ends "
+    "within 10 minutes, such as a cold-read-fast-read, may start. Work you leave "
+    "running when your turn ends must run as a background Bash task "
+    "or a detached process, such as one started with setsid or systemd-run --user, "
+    "that writes its result to a file; name that file in your next-step file, "
+    "since the handoff writer script cannot name that process. A command or an "
+    "edit that finishes within your turn needs none of these. When you run the "
+    "handoff writer script, nn-systems/handoff/handoff-write-and-check-supervisor.py, "
+    "before this agent-session ends, it names in your session-handoff each subagent "
+    "still working and each background Bash task still running, whenever it "
+    "started, so you need not add that work to your task list; the end of this "
+    "agent-session stops that work. Your successor is shown that work, and decides "
+    "whether to start it again. Write work the "
+    "writer could not list into a new next-step file that holds your next step "
+    "and names that work, and run the writer again with --next-step-file. Do not "
+    "start long work, such as a cold-read-full-run or a pull-request review: add "
+    "it to your task list for your successor."
 )
 
 HANDOFF_DEFERRED_MARKER_NOT_DELETED = (
@@ -246,7 +255,7 @@ MARKER_NOT_WRITTEN_LINE = (
 )
 
 
-def awaited_phrase(flight: WorkInFlight) -> str:
+def awaited_phrase(flight: "WorkInFlight") -> str:
     """Return the ids of the work the deferral waits for, by kind."""
     parts = [f"subagent {agent_id}" for agent_id in flight.subagent_ids]
     parts += [f"workflow {workflow_id}" for workflow_id in flight.workflow_ids]
@@ -277,7 +286,7 @@ _LOOP_CONDITION_CHECK = r"(?:![ \t]+)?(?:grep|pgrep|kill[ \t]+-0|test|\[|true|:)
 _DEADLINE = r"\$\(date[ \t]+\+%s\)"
 WAIT_LIMIT_TABLE_WAITING_TASK_KIND_NAME = "waiting-task"
 BACKGROUND_TASK_WAIT_LIMIT_MINUTES_BY_KIND = (
-    ("nc-mutation-testing", (r".*(?:mutation|mutmut|mutant).*",), 105.0),
+    ("nn-mutation-testing", (r".*(?:mutation|mutmut|mutant).*",), 105.0),
     ("test-suite", (r".*(?:run-all-test-suites\.py|pytest|-test\.py\b|_test\.py\b|unittest"
                     r"|head-tests-with-retry|head-test-run|test-suite|run-suites).*",), 90.0),
     (WAIT_LIMIT_TABLE_WAITING_TASK_KIND_NAME, tuple(_COMMAND_PREFIX + shape + _TO_THE_END for shape in (
@@ -1061,7 +1070,8 @@ def defer(session_id, used, share, flight, arguments, unreadable_marker_problem=
 
 
 def send_handoff_get_ready_notice(session_id, used, share, arguments) -> int:
-    lines = [HANDOFF_GET_READY_NOTICE.format(share=share, threshold=arguments.threshold_used_percentage)]
+    lines = [HANDOFF_GET_READY_NOTICE.format(share=share, threshold=arguments.threshold_used_percentage,
+                                             get_ready=arguments.get_ready_used_percentage)]
     record = handoff_get_ready_notice_sent_marker_path(session_id)
     try:
         HANDOFF_DIRECTORY.mkdir(parents=True, exist_ok=True)
@@ -1091,7 +1101,8 @@ def main(argv=None) -> int:
         "--get-ready-used-percentage", type=float, default=DEFAULT_GET_READY_USED_PERCENTAGE,
         help="the share of the context window, in percent, at or above which, and below the "
              "reincarnation threshold, the context used plus the tokens compactions dropped "
-             "makes the hook tell the agent once to start no long work",
+             "makes the hook tell the agent once to start no new subagent and no 10-plus-minute "
+             "background work, and that it may hand off whenever it is ready",
     )
     arguments = parser.parse_args(argv)
 

@@ -2,7 +2,7 @@
 """Run one agent session and reincarnate it when it writes a handoff.
 
 The handoff system's supervisor (specification:
-nn-systems/handoff/handoff-design.md). One supervisor per agent, run in
+nn-systems/handoff/handoff.system.design.md). One supervisor per agent, run in
 that agent's console. It owns the whole reincarnation cycle because an agent
 cannot exit itself: /clear and /exit are unavailable to it, and self-SIGTERM
 trips the safety classifier.
@@ -48,9 +48,8 @@ The cycle, per reincarnation:
   5. Launch the successor with the initial agent instructions. Beside the
      launch-time-git-sync's line they carry, for agent-instructions-editor alone, one
      line per system whose code moved on
-     main past the commit its overview was checked against, until the user has been shown
-     that overview's refresh that day (overview_refresh_due_lines), plus
-     one line saying so when the day's reminder marks cannot be read,
+     main past the commit its overview was checked against, unless an open
+     pull request changes that overview (overview_refresh_due_lines),
      and, on the Mac from noon Pacific, one line when the day's memory review
      is due (memory_review_due_lines).
      Every launch, a resume included, also carries the agent-seat's leftover
@@ -63,7 +62,9 @@ The cycle, per reincarnation:
      a count of the first prompts that have listed it, such as "(listed in 2
      first prompt(s))"; the branches the first-prompt list deleted go above
      the leftovers' opening sentence, under a line that opens with their
-     heading (launch_prompt_with_leftovers_before_the_next_step).
+     heading, and so does a part that lists no entry, so the sentence is
+     shown only when an entry follows it
+     (launch_prompt_with_leftovers_before_the_next_step).
   6. Keep the current and previous handoff and conversation-tail; delete older ones.
 
 The handoff file the agent writes (simple `key: value` lines):
@@ -123,6 +124,13 @@ every agent-session it starts, to the token of the GitHub account the agent-seat
 (agent_seat_github_account_lookup_and_token_file_read), replacing any GH_TOKEN it inherited. Every way
 an agent-seat is started runs this program, so this is the one place that decides the
 account.
+
+Terminal capture: at every start, a restart onto main's code at a session-handoff included,
+once it holds its lock, the supervisor runs `tmux pipe-pane` on its own tmux pane, so the pane's
+output from then on is appended to a new file in the agent-seat terminal captures directory
+(agent-seat-terminal-captures-common.py beside this file says where, and how the file is named),
+and prints one line saying where, or why the terminal is not captured. A failed start of the
+terminal capture never stops the agent-seat.
 """
 
 import argparse
@@ -222,16 +230,6 @@ handoff_user_review_of_agent_memory_stores_mark = importlib.util.module_from_spe
 _handoff_user_review_of_agent_memory_stores_mark_spec.loader.exec_module(
     handoff_user_review_of_agent_memory_stores_mark)
 
-HANDOFF_ARCHITECTURE_OVERVIEW_REFRESH_USER_SHOWN_MARK_PATH = Path(__file__).resolve().with_name(
-    "handoff-architecture-overview-refresh-user-shown-mark.py")
-_handoff_architecture_overview_refresh_user_shown_mark_spec = importlib.util.spec_from_file_location(
-    "handoff_architecture_overview_refresh_user_shown_mark",
-    HANDOFF_ARCHITECTURE_OVERVIEW_REFRESH_USER_SHOWN_MARK_PATH)
-handoff_architecture_overview_refresh_user_shown_mark = importlib.util.module_from_spec(
-    _handoff_architecture_overview_refresh_user_shown_mark_spec)
-_handoff_architecture_overview_refresh_user_shown_mark_spec.loader.exec_module(
-    handoff_architecture_overview_refresh_user_shown_mark)
-
 _checkout_freshness_catch_up_spec = importlib.util.spec_from_file_location(
     "checkout_freshness_catch_up", SCRIPTS_DIRECTORY / "checkout-freshness-catch-up.py")
 checkout_freshness_catch_up = importlib.util.module_from_spec(_checkout_freshness_catch_up_spec)
@@ -270,6 +268,12 @@ agent_seat_worktrees_and_branches_list = importlib.util.module_from_spec(
     _agent_seat_worktrees_and_branches_list_spec)
 _agent_seat_worktrees_and_branches_list_spec.loader.exec_module(
     agent_seat_worktrees_and_branches_list)
+
+_agent_seat_terminal_captures_spec = importlib.util.spec_from_file_location(
+    "agent_seat_terminal_captures_common",
+    Path(__file__).resolve().with_name("agent-seat-terminal-captures-common.py"))
+agent_seat_terminal_captures = importlib.util.module_from_spec(_agent_seat_terminal_captures_spec)
+_agent_seat_terminal_captures_spec.loader.exec_module(agent_seat_terminal_captures)
 
 # One loaded copy, so the GitCommandFailed checkout_freshness_catch_up raises is the class caught here.
 git_machine_readable_output = checkout_freshness_catch_up.git_output
@@ -443,7 +447,12 @@ def launch_time_git_sync_report_in_prompt(launch_time_git_sync_report: str,
                                           branch_state_instruction: str = "") -> str:
     """The report as the prompt carries it: a report of several lines, such as a git
     failure's next steps, stands as its own paragraph instead of running on from the
-    sentence before it."""
+    sentence before it. A report that the checkout holds all of main after a fetch asks
+    the successor for nothing, so only the branch-state instruction, if any, stands in its
+    place; the console still prints the report."""
+    # Decided from the sync's outcome, never its text: a git error can quote any phrase.
+    if getattr(launch_time_git_sync_report, "checkout_has_main_after_a_fetch", False):
+        return branch_state_instruction
     text = launch_time_git_sync_report + branch_state_instruction_after(
         launch_time_git_sync_report, branch_state_instruction)
     return f"\n\n{text}\n\n" if "\n" in launch_time_git_sync_report else text
@@ -505,44 +514,19 @@ AGENT_SEAT_GIVEN_OVERVIEW_REFRESH_LINES = "agent-instructions-editor"
 
 SYSTEM_OVERVIEW_PATH_TEMPLATE = architecture_overview_path_template_and_checked_against_commit_reader.PATH_TEMPLATE
 
-# The draft suffix avoids a tracked-name collision; the queue permits drafting before overview approval.
-SYSTEM_OVERVIEW_DRAFT_PATH_TEMPLATE = (
-    "docs/nedsnodes-wiki/queue/nedsnodes-{system}-architecture-overview-draft.md")
+# The overview-refresh line puts a system's name into a shell command unquoted.
+SYSTEM_NAME_PATTERN = r"[A-Za-z0-9][A-Za-z0-9_-]*"
 
 OVERVIEW_REFRESH_CHECK_GIT_TIMEOUT_SECONDS = 15
 
 OVERVIEW_REFRESH_CHECK_GH_TIMEOUT_SECONDS = 30
 
-OVERVIEW_REFRESH_REMINDER_MARKS_READ_TIMEOUT_SECONDS = 30
-
 OVERVIEW_REFRESH_DUE_INSTRUCTION_TEMPLATE = (
-    " — Dispatch a subagent to write {overview_draft_path}: a copy of "
-    "{overview_path} refreshed against the commits "
+    " — Dispatch a subagent to refresh {overview_path} against the commits "
     "`{commit_listing_command}` lists, as "
     "docs/nedsnodes-wiki/nedsnodes-how-to-write-an-architecture-overview.md "
-    "defines a refresh, ending in the line `{checked_against_line}`. When the subagent reports, show the user the "
-    "diff between {overview_path} and {overview_draft_path}. Once the user "
-    "has been shown the diff, run `python3 {reminder_mark_script} {system}`. "
-    "When the user approves the diff, write {overview_path} from "
-    "{overview_draft_path} and delete {overview_draft_path}."
-)
-
-OVERVIEW_REFRESH_REMINDER_MARKS_UNREAD_TEMPLATE = (
-    "overview check could not read the day's reminder marks in {marks_location}, "
-    "so no line is withheld for a reminder already given: {error}"
-    " — Before you act on any overview-refresh line in this prompt, tell the "
-    "user that the handoff-supervisor could not read the day's overview-refresh "
-    "reminder marks, giving the location {marks_location} and the error above, "
-    "and that an overview-refresh line in this prompt may therefore repeat a "
-    "refresh the user was already shown today."
-)
-
-# Appended only when ned-box gave no answer; an answer that does not parse
-# came from ned-box, so the ssh check would mislead.
-OVERVIEW_REFRESH_REMINDER_MARKS_NED_BOX_DID_NOT_ANSWER_SENTENCE = (
-    " Because ned-box did not answer this machine, also tell the user that "
-    "`ssh nedlern@ned-box true`, run on the Mac, shows whether ned-box answers "
-    "again, and that the next agent-session's start reads the marks again."
+    "defines a refresh, ending in the line `{checked_against_line}`, to check "
+    "the refresh as /overview-write says, and to open a pull request with it."
 )
 
 MEMORY_REVIEW_DUE_FROM_PACIFIC_HOUR = 12
@@ -1241,12 +1225,15 @@ def load_module_from_path(name: str, path: Path):
     return module
 
 
-def successor_initial_agent_instructions_line_naming_waiting_approval_walk_item(working_directory: Path) -> tuple:
+def successor_initial_agent_instructions_line_naming_waiting_approval_walk_item(working_directory: Path,
+                                                                                next_step: str = "") -> tuple:
     """Return the first prompt's line naming the open approval-walk's waiting item and its last page link, or no
     lines when no approval-walk is open or every one is paused; never block launch.
 
-    The walk is the one with the latest walk-minutes, by modification time, among the open ones in
-    working_directory's docs/walk/, as /walk-me-through chooses when several are open. When the walk-minutes'
+    The walk is the open one in working_directory's docs/walk/ that next_step names first, by its name or its
+    walk-minutes' file name, since the next step's first action comes first; when next_step names none, the one
+    with the latest walk-minutes, by modification time, as /walk-me-through chooses when several are open. When
+    the walk-minutes'
     `#next_to_present` line names several items, the line names the first, where the walk resumes. When the
     walk-document cannot be read, the line names the item from the walk-minutes alone, without its point, and
     says why; its count then lacks `of M` when the `#next_to_present` line gives none, so the `#item_page` line
@@ -1264,7 +1251,22 @@ def successor_initial_agent_instructions_line_naming_waiting_approval_walk_item(
                  if not walk[3]]
         if not walks:
             return ()
-        minutes, value, _, _ = max(walks, key=lambda walk: walk[0].stat().st_mtime)
+        named_in_next_step = []
+        for walk in walks:
+            # The walk's name, alone or as its walk-minutes or walk-document file name, counts only where no
+            # file-name character follows, so -minutes.md.bak and -minutes.md~ name other files while
+            # -minutes.md:143, **name** and a sentence's closing period do not; a period followed by another
+            # file-name character continues the name.
+            mention = re.search(rf"(?<![\w-]){re.escape(walk[0].name[:-len(walk_finder.MINUTES_SUFFIX)])}"
+                                rf"(?:{re.escape(walk_finder.MINUTES_SUFFIX)}|\.md)?"
+                                r"(?![\w~-]|\.[\w~-])",
+                                next_step)
+            if mention:
+                named_in_next_step.append((mention.start(), walk))
+        if named_in_next_step:
+            minutes, value, _, _ = min(named_in_next_step, key=lambda named: named[0])[1]
+        else:
+            minutes, value, _, _ = max(walks, key=lambda walk: walk[0].stat().st_mtime)
         name = minutes.name[:-len(walk_finder.MINUTES_SUFFIX)]
         numbers, total = walk_finder.parse_items(value)
         number = numbers[0]
@@ -1282,8 +1284,12 @@ def successor_initial_agent_instructions_line_naming_waiting_approval_walk_item(
         document = minutes.with_name(name + ".md")
         text = document.read_text(encoding="utf-8")
         spans = walk_finder.item_unit_spans(text, parser)
-        total, _ = walk_finder.waiting_item_units(document, value, numbers, total, parser, spans)
-        point = walk_short_answer_hook.heading_points(text.split("\n"), spans, parser).get(number)
+        # Every named item is checked, so that a missing or repeated heading is reported; the point is read from
+        # the first-named item's unit alone, because units come back in walk-document order, and a later waiting
+        # item's heading may name the first item too.
+        walk_finder.waiting_item_units(document, value, numbers, total, parser, spans)
+        total, units = walk_finder.waiting_item_units(document, value, [number], total, parser, spans)
+        point = walk_short_answer_hook.heading_points(text.split("\n"), units, parser).get(number)
     except Exception as error:
         print(f"handoff-supervisor: waiting approval-walk item's walk-document unreadable: "
               f"{type(error).__name__}: {error}")
@@ -1311,9 +1317,11 @@ def build_ignition_prompt(extract_path: Path, handoff_fields: dict,
         ITEMS_NEEDING_THE_USER_IN_ONE_APPROVAL_WALK_INSTRUCTION,
         *waiting_approval_walk_item,
     ]
-    if launch_time_git_sync_report:
-        lines.append(launch_time_git_sync_report_in_prompt(launch_time_git_sync_report,
-                                                           branch_state_instruction))
+    git_sync_text = (launch_time_git_sync_report_in_prompt(launch_time_git_sync_report,
+                                                           branch_state_instruction)
+                     if launch_time_git_sync_report else "")
+    if git_sync_text:
+        lines.append(git_sync_text)
     lines.extend(overview_refresh_due)
     lines.extend(memory_review_due)
     roster = spawned_subagent_roster_from(handoff_fields)
@@ -1356,6 +1364,10 @@ class DialogIgnitionPlan:
     extract_path: Path
     handoff_fields: dict
     predecessor_session_directory: Optional[Path] = None
+
+    @property
+    def next_step(self) -> str:
+        return next_step_from(self.handoff_fields)
 
     def compose(self, launch_time_git_sync_report: str,
                 overview_refresh_due: tuple = (),
@@ -1419,9 +1431,11 @@ class IgnitionPlanWithoutConversationTail:
                   + ITEMS_NEEDING_THE_USER_IN_ONE_APPROVAL_WALK_INSTRUCTION)
         for line in waiting_approval_walk_item:
             prompt += " " + line
-        if launch_time_git_sync_report:
-            prompt += " " + launch_time_git_sync_report_in_prompt(launch_time_git_sync_report,
-                                                                  branch_state_instruction)
+        git_sync_text = (launch_time_git_sync_report_in_prompt(launch_time_git_sync_report,
+                                                               branch_state_instruction)
+                         if launch_time_git_sync_report else "")
+        if git_sync_text:
+            prompt += " " + git_sync_text
         for line in overview_refresh_due:
             prompt += " " + line
         for line in memory_review_due:
@@ -1472,6 +1486,17 @@ def run_git_here(arguments: list, working_directory: Path, timeout: int = 60):
 # The handoff-supervisor restarts itself on main's code only after a report holding one of these.
 LAUNCH_TIME_GIT_SYNC_REPORT_PHRASE_CURRENT_WITH_MAIN = " is current with main"
 LAUNCH_TIME_GIT_SYNC_REPORT_PHRASE_FAST_FORWARDED_TO_MAIN = " fast-forwarded to main"
+
+
+class LaunchTimeGitSyncReport(str):
+    """A launch-time-git-sync report's text, with the sync's outcome beside it: whether the fetch
+    of origin succeeded and the checkout then held all of main. A plain str report has no such
+    outcome, so it counts as not holding main."""
+
+    def __new__(cls, text: str, checkout_has_main_after_a_fetch: bool):
+        report = super().__new__(cls, text)
+        report.checkout_has_main_after_a_fetch = checkout_has_main_after_a_fetch
+        return report
 
 
 def launch_time_git_sync(working_directory: Path) -> str:
@@ -1552,9 +1577,13 @@ def launch_time_git_sync(working_directory: Path) -> str:
         if is_ancestor("origin/main", "HEAD"):
             ahead = answer(["rev-list", "--count", "origin/main..HEAD"], 30)
             if ahead == "0":
-                return f"launch-time-git-sync: {branch}{LAUNCH_TIME_GIT_SYNC_REPORT_PHRASE_CURRENT_WITH_MAIN}{fetch_note}"
-            return (f"launch-time-git-sync: {branch} is {ahead} commit(s) ahead of main and has all of "
-                    f"it — nothing to pull{fetch_note}")
+                return LaunchTimeGitSyncReport(
+                    f"launch-time-git-sync: {branch}{LAUNCH_TIME_GIT_SYNC_REPORT_PHRASE_CURRENT_WITH_MAIN}{fetch_note}",
+                    checkout_has_main_after_a_fetch=fetched.returncode == 0)
+            return LaunchTimeGitSyncReport(
+                f"launch-time-git-sync: {branch} is {ahead} commit(s) ahead of main and has all of "
+                f"it — nothing to pull{fetch_note}",
+                checkout_has_main_after_a_fetch=fetched.returncode == 0)
 
         if not is_ancestor("HEAD", "origin/main"):
             ahead = answer(["rev-list", "--count", "origin/main..HEAD"], 30)
@@ -1576,7 +1605,9 @@ def launch_time_git_sync(working_directory: Path) -> str:
     except git.GitCommandFailed as error:
         return (f"launch-time-git-sync: {branch}{LAUNCH_TIME_GIT_SYNC_REPORT_PHRASE_FAST_FORWARDED_TO_MAIN} (its new commit could not be "
                 f"read: {error}){fetch_note}\n{launch_time_git_sync_git_failure_next_steps(error)}")
-    return f"launch-time-git-sync: {branch}{LAUNCH_TIME_GIT_SYNC_REPORT_PHRASE_FAST_FORWARDED_TO_MAIN} ({tip}){fetch_note}"
+    return LaunchTimeGitSyncReport(
+        f"launch-time-git-sync: {branch}{LAUNCH_TIME_GIT_SYNC_REPORT_PHRASE_FAST_FORWARDED_TO_MAIN} ({tip}){fetch_note}",
+        checkout_has_main_after_a_fetch=fetched.returncode == 0)
 
 
 class OverviewCheckGitFailure(Exception):
@@ -1594,9 +1625,8 @@ def overview_check_git_output(arguments: list, working_directory: Path,
     return output
 
 
-def overview_refresh_due_lines(working_directory: Path,
-                               now: Optional[datetime] = None) -> tuple:
-    """Return unsuppressed overview-refresh reminders, and a line for a reminder-marks read failure; never block launch."""
+def overview_refresh_due_lines(working_directory: Path) -> tuple:
+    """Return the overview-refresh reminders no open pull request answers; never block launch."""
     # Read origin/main so unmerged seat work cannot trigger a refresh; Markdown-only refreshes must not trigger another.
     # The checked-against commit may name a merge, so compare the commit range rather than last-commit identity.
     timeout = OVERVIEW_REFRESH_CHECK_GIT_TIMEOUT_SECONDS
@@ -1620,15 +1650,12 @@ def overview_refresh_due_lines(working_directory: Path,
     due = []
     for system_directory in git_machine_readable_output.nul_separated_fields(listed):
         system = system_directory.rsplit("/", 1)[-1]
-        # The reminder's commands take the name unquoted, and the mark script refuses any other name.
-        if not re.fullmatch(handoff_architecture_overview_refresh_user_shown_mark.SYSTEM_NAME_PATTERN, system):
+        if not re.fullmatch(SYSTEM_NAME_PATTERN, system):
             printable = system.encode("utf-8", "surrogateescape").decode("utf-8", "backslashreplace")
             print(f"handoff-supervisor: overview check for {printable} passed over: "
                   f"the directory name nn-systems/{printable} on origin/main does not match "
-                  f"{handoff_architecture_overview_refresh_user_shown_mark.SYSTEM_NAME_PATTERN}, "
-                  f"the system-name pattern "
-                  f"nn-systems/handoff/handoff-architecture-overview-refresh-user-shown-mark.py "
-                  f"accepts, so its nc-architecture-overview is not checked; the other systems "
+                  f"{SYSTEM_NAME_PATTERN}, the system-name pattern the overview-refresh line "
+                  f"needs, so its nn-architecture-overview is not checked; the other systems "
                   f"still are.\n"
                   f"If nn-systems/{printable} holds a system's programs, propose to the user a "
                   f"name for it that matches, to be renamed in a pull request; otherwise "
@@ -1665,7 +1692,6 @@ def overview_refresh_due_lines(working_directory: Path,
                 f"git log --no-merges {commit_range} -- "
                 + " ".join(f"'{pathspec}'" if ":(" in pathspec else pathspec
                            for pathspec in pathspecs))
-            overview_draft_path = SYSTEM_OVERVIEW_DRAFT_PATH_TEMPLATE.format(system=system)
             due.append((system, overview_path,
                 f"overview refresh due: {system} — {count} commit(s) under "
                 f"nn-systems/{system}/ since the commit its overview was checked "
@@ -1673,13 +1699,10 @@ def overview_refresh_due_lines(working_directory: Path,
                 f"{commit_range}"
                 + OVERVIEW_REFRESH_DUE_INSTRUCTION_TEMPLATE.format(
                     overview_path=overview_path,
-                    overview_draft_path=overview_draft_path,
                     commit_listing_command=commit_listing_command,
                     checked_against_line=(
                         architecture_overview_path_template_and_checked_against_commit_reader.CHECKED_AGAINST_LINE_TEMPLATE.format(
-                            commit=main_commit_full)),
-                    reminder_mark_script=HANDOFF_ARCHITECTURE_OVERVIEW_REFRESH_USER_SHOWN_MARK_PATH,
-                    system=system)))
+                            commit=main_commit_full)))))
         except Exception as error:
             print(f"handoff-supervisor: overview check for {system} passed over: "
                   f"{type(error).__name__}: {error}")
@@ -1709,53 +1732,18 @@ def overview_refresh_due_lines(working_directory: Path,
         print(f"handoff-supervisor: overview check could not ask GitHub which open "
               f"pull requests change an overview, so no line is withheld for a "
               f"pull request: {unanswered}")
-        still_to_give = [(system, line) for system, _, line in due]
-    else:
-        still_to_give = []
-        # Any open change to the overview could conflict with another refresh.
-        for system, overview_path, line in due:
-            if overview_path not in changing_pull_request_by_path:
-                still_to_give.append((system, line))
-                continue
-            title, url = changing_pull_request_by_path[overview_path]
-            print(f"handoff-supervisor: overview check for {system} withheld its line: "
-                  f"the open pull request \"{title}\" ({url}) already changes "
-                  f"{overview_path}")
-    if not still_to_give:
-        return ()
-    # The seat marks only after showing the diff, so a seat that dies first cannot consume the daily reminder.
-    reminder_mark = handoff_architecture_overview_refresh_user_shown_mark
-    try:
-        today = reminder_mark.pacific_date_of(now or datetime.now(timezone.utc))
-        reminder_marks = reminder_mark.read_daily_overview_refresh_reminder_marks(
-            today, OVERVIEW_REFRESH_REMINDER_MARKS_READ_TIMEOUT_SECONDS)
-    except Exception as error:
-        # Unknown reminder state must not violate the daily reminder floor.
-        # The failure travels as a line so both the console and the successor see it.
-        return tuple(line for _, line in still_to_give) + (
-            OVERVIEW_REFRESH_REMINDER_MARKS_UNREAD_TEMPLATE.format(
-                marks_location=reminder_mark.daily_overview_refresh_reminder_mark_citation(''),
-                error=f"{type(error).__name__}: {error}")
-            + (OVERVIEW_REFRESH_REMINDER_MARKS_NED_BOX_DID_NOT_ANSWER_SENTENCE
-               if getattr(error, "ned_box_did_not_answer", False) else ""),)
-    lines = []
-    for system, line in still_to_give:
-        file_name = reminder_mark.daily_overview_refresh_reminder_mark_file_name(today, system)
-        if file_name not in reminder_marks:
-            lines.append(line)
+        return tuple(line for _, _, line in due)
+    still_to_give = []
+    # Any open change to the overview could conflict with another refresh.
+    for system, overview_path, line in due:
+        if overview_path not in changing_pull_request_by_path:
+            still_to_give.append(line)
             continue
-        citation = reminder_mark.daily_overview_refresh_reminder_mark_citation(file_name)
-        written_at = reminder_marks[file_name].strip()
-        if not reminder_mark.reminder_mark_text_is_a_time(written_at):
-            print(f"handoff-supervisor: overview check for {system} gives its line: the "
-                  f"day's reminder mark {citation} does not hold the time it was "
-                  f"written, but {written_at!r}")
-            lines.append(line)
-            continue
-        print(f"handoff-supervisor: overview check for {system} withheld its line: the "
-              f"user was shown this overview's refresh today, at {written_at}, as "
-              f"{citation} records")
-    return tuple(lines)
+        title, url = changing_pull_request_by_path[overview_path]
+        print(f"handoff-supervisor: overview check for {system} withheld its line: "
+              f"the open pull request \"{title}\" ({url}) already changes "
+              f"{overview_path}")
+    return tuple(still_to_give)
 
 
 def memory_review_due_lines(now: Optional[datetime] = None) -> tuple:
@@ -1877,20 +1865,24 @@ def forget_leftover_prompt_listing_counts(counts_path: Path) -> None:
 def launch_prompt_with_leftovers_before_the_next_step(prompt: str, leftover_parts: tuple,
                                                       counts_path: Path) -> str:
     """The prompt with the leftovers between its opening and its next step, or after it when it
-    has no next step. Branches the list deleted go above the leftovers' opening sentence, which
-    asks the agent to act on each leftover below it, because they need nothing."""
+    has no next step. The leftovers' opening sentence asks the agent to act on each leftover
+    below it, so only parts that list an entry go below it; branches the list deleted, and parts
+    that list no entry, such as a failure that carries its own instruction or the line on what
+    open tasks hold, go above it."""
     heading_start = agent_seat_worktrees_and_branches_list.ALREADY_DELETED_HEADING_START
-    listed_parts, deleted_parts = [], []
+    listed_parts, deleted_parts, parts_with_no_entry = [], [], []
     for part in leftover_parts:
         # Only a line that opens with the heading starts the deleted block: an entry's commit
         # subject may quote the heading's words.
         found = re.search("^" + re.escape(heading_start), part, re.MULTILINE)
         listed = part[:found.start()] if found else part
-        if listed.strip():
+        if any(line.startswith(LEFTOVER_ENTRY_PREFIXES) for line in listed.split("\n")):
             listed_parts.append(listed.rstrip("\n"))
+        elif listed.strip():
+            parts_with_no_entry.append(listed.rstrip("\n"))
         if found:
             deleted_parts.append(part[found.start():])
-    blocks = deleted_parts
+    blocks = deleted_parts + parts_with_no_entry
     leftovers = "\n\n".join(listed_parts)
     if leftovers:
         blocks.append(LEFTOVERS_BEFORE_THE_NEXT_STEP_SENTENCE + "\n\n"
@@ -2738,7 +2730,8 @@ def supervise_sessions(settings: SupervisorSettings) -> int:
                 choose_branch_state_instruction_from_working_directory_push_state(
                     settings.working_directory))
             waiting_approval_walk_item = (
-                successor_initial_agent_instructions_line_naming_waiting_approval_walk_item(settings.working_directory))
+                successor_initial_agent_instructions_line_naming_waiting_approval_walk_item(
+                    settings.working_directory, ignition_plan.next_step))
             prompt = ignition_plan.compose(
                 launch_time_git_sync_report, overview_refresh_due, memory_review_due,
                 branch_state_instruction=branch_state_instruction,
@@ -3029,6 +3022,9 @@ def main(argv=None) -> int:
         print(f"handoff-supervisor: startup stopped: {error}", file=sys.stderr)
         return 4
 
+    print(f"handoff-supervisor: "
+          f"{agent_seat_terminal_captures.agent_seat_terminal_capture_start_in_this_tmux_pane(settings.agent)}",
+          flush=True)
     try:
         return supervise_sessions(settings)
     finally:

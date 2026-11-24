@@ -365,7 +365,7 @@ with tempfile.TemporaryDirectory() as temporary_directory:
           merge_note.endswith("\n" + NOT_FOR_THE_USER_LINE), merge_note)
     check("and only once",
           "merge commit(s) from main" not in agent_text(run_catch_up(["--cwd", str(merge_seat)])))
-    # A merge of another nc-topic-branch is not the banned thing.
+    # A merge of another nn-topic-branch is not the banned thing.
     topic_seat = tmp / "topic-merge-worktree"
     git(["worktree", "add", "-q", "-b", "topic-a", str(topic_seat), "main"], reference)
     configure_identity(topic_seat)
@@ -377,7 +377,7 @@ with tempfile.TemporaryDirectory() as temporary_directory:
     commit_file(other, "topic-b.txt", "b\n", "topic b work")
     git(["-c", "core.editor=true", "merge", "--no-ff", "--no-edit", "topic-b"], topic_seat)
     result = run_catch_up(["--cwd", str(topic_seat)])
-    check("a merge of another nc-topic-branch is NOT reported as a merge from main",
+    check("a merge of another nn-topic-branch is NOT reported as a merge from main",
           "merge commit(s) from main" not in agent_text(result), agent_text(result))
 
     # -----------------------------------------------------------------------
@@ -567,7 +567,7 @@ with tempfile.TemporaryDirectory() as temporary_directory:
     detached_work_line = (
         "It holds work of its own.\n"
         "This checkout is an agent-home, so git refuses commits in it: carry that work to a "
-        "worktree of your own on an nc-topic-branch, as the refusal of `git commit` here says "
+        "worktree of your own on an nn-topic-branch, as the refusal of `git commit` here says "
         "how.")
     detached_bisect_line = (
         "A bisect is in progress: finish it or abort it; the next turn's end moves the "
@@ -929,7 +929,7 @@ import importlib.util
 specification = importlib.util.spec_from_file_location("catch_up_module", SCRIPT_PATH)
 catch_up_module = importlib.util.module_from_spec(specification)
 specification.loader.exec_module(catch_up_module)
-import contextlib, io
+import contextlib
 
 # ---------------------------------------------------------------------------
 # PR #87's review: git's prose must be read in a stable locale
@@ -940,7 +940,6 @@ import contextlib, io
 # should abort the merge is skipped, and the seat's tree is left parked
 # mid-merge. A stub git reports the locale it was handed.
 import os as _os
-import shutil as _shutil
 import tempfile as _tempfile
 
 with _tempfile.TemporaryDirectory() as locale_scratch:
@@ -1330,17 +1329,17 @@ with tempfile.TemporaryDirectory() as naming_scratch:
     # design of record in one directory — so a change there is named as what
     # it is. Until 2026-09-22 the directory matched no category and fell to
     # the catch-all: observed live that day, when
-    # nn-systems/handoff/handoff-design.md moved on main and this hook
+    # nn-systems/handoff/handoff.system.design.md moved on main and this hook
     # reported it as "other files". The pair is a design AND a program, so the
     # case proves the category is decided by the path's prefix, not by the
     # extension; the catch-all still holds this scratch repository's Makefile
     # from the case above, so what is asserted is that nn-systems/ is not on
     # that line.
-    systems_listing = named(("nn-systems/handoff/handoff-design.md", "a design of record"),
+    systems_listing = named(("nn-systems/handoff/handoff.system.design.md", "a design of record"),
                             ("nn-systems/handoff/handoff-supervisor.py", "the system's code"))
     check("a system kept whole is named as one, its design of record and its code together",
           "systems you build on, code and design of record (2): "
-          "nn-systems/handoff/handoff-design.md, nn-systems/handoff/handoff-supervisor.py"
+          "nn-systems/handoff/handoff-supervisor.py, nn-systems/handoff/handoff.system.design.md"
           in systems_listing, systems_listing)
     catch_all_line = next((line for line in systems_listing.splitlines()
                            if line.lstrip().startswith("other files")), "")
@@ -2032,6 +2031,8 @@ with tempfile.TemporaryDirectory() as notes_scratch:
     commit_file(origin_repo, "nn-systems/cold-read/cold-read-fast-clarify-prompt.md", "p\n", "a prompt")
     commit_file(origin_repo, ".claude/skills/walk-me-through/reference.md", "r\n", "not a SKILL.md")
     commit_file(origin_repo, "scripts/tool.py", "t\n", "a script")
+    commit_file(origin_repo, "docs/issues/4080-fix-the-arbitrator-agent-instructions.md", "i\n",
+                "a GHI-MD whose title ends in instructions")
     stop_only(notes_seat)
     told = delivered_text(deliver(notes_seat))
     check("a changed SKILL.md tells the agent to invoke the skill again",
@@ -2044,6 +2045,8 @@ with tempfile.TemporaryDirectory() as notes_scratch:
           in told, told)
     check("a skill's other files and scripts are not told",
           "reference.md" not in told and "scripts/tool.py" not in told, told)
+    check("a GHI-MD whose name ends in -instructions.md is not told",
+          "docs/issues/4080-" not in told, told)
 
     origin_repo, notes_seat = notes_fixture({"CLAUDE.md": "- one rule\n"})
     commit_file(origin_repo, "CLAUDE.md", "".join(f"- new rule {n:04d} {'x' * 60}\n"

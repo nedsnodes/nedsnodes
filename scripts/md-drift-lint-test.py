@@ -29,7 +29,7 @@ LINT_SCRIPT = Path(__file__).with_name("md-drift-lint.py")
 # sys.dont_write_bytecode keeps one from being written either. The two cover
 # different halves of the same hazard and both are needed.
 #
-# nc-mutation-testing of this lint -- change PLACEHOLDER_SPAN, rerun, read which
+# nn-mutation-testing of this lint -- change PLACEHOLDER_SPAN, rerun, read which
 # case fails -- is how its exclusions are checked, and a stale .pyc makes it
 # report a clean, plausible, entirely wrong table. Python decides a cached
 # .pyc is current by (mtime, size) at one-second resolution, so two mutations
@@ -354,7 +354,7 @@ with tempfile.TemporaryDirectory() as workspace:
     # split on whitespace first, so a placeholder containing a space lost its
     # "<" to the split and its tail was checked as a real path. Five standing
     # findings on main were this. The first case is the repository's own text,
-    # from docs/design-to-main/design-to-main-state-machine-design.md:521.
+    # from docs/design-to-main/design-to-main-state-machine.system.design.md:521.
     findings = problems_for(
         "| `<component's directory>/design-to-main-record/design-to-main-component-user-rulings-log.md` | every ruling |",
         root)
@@ -438,7 +438,7 @@ with tempfile.TemporaryDirectory() as workspace:
           problems_for("the value `9999` per [d](docs/real-doc.md)", root) == [])
     # A paragraph is one line, so a number and a code file in different
     # sentences of it are different claims. The shape is
-    # nn-systems/handoff/handoff-design.md:114, whose exit codes `143` and
+    # nn-systems/handoff/handoff.system.design.md:114, whose exit codes `143` and
     # `137` belong to the handoff-supervisor it names in prose, not to the
     # one script the paragraph cites as a path, several sentences later.
     findings = problems_for(
@@ -615,12 +615,14 @@ with tempfile.TemporaryDirectory() as frozen_workspace:
           findings == ["path does not exist: scripts/long-gone.py"], str(findings))
 
 
-# An nc-architecture-overview gets the overview checks of
+# An nn-architecture-overview gets the overview checks of
 # docs/nedsnodes-wiki/nedsnodes-how-to-write-an-architecture-overview.md on
 # top of the ordinary ones; any other Markdown file does not.
 OVERVIEW_NAME = "docs/nedsnodes-wiki/nedsnodes-demo-architecture-overview.md"
 OVERVIEW_PATH_MODULE = LINT_SCRIPT.with_name(
     "architecture-overview-path-template-and-checked-against-commit-reader-common.py")
+REPOSITORY_NAMES_MODULE_PATH_IN_CHECKOUT = (
+    "nn-systems/general-tools/github-repository-name-and-name-before-project-rename-common.py")
 
 
 def overview_repository(root: Path):
@@ -668,7 +670,7 @@ with tempfile.TemporaryDirectory() as overview_workspace:
                            encoding="utf-8")
         findings = [problem for _, problem in lint.lint_markdown(
             outside, root, architecture_overview_checks=True)]
-        check("a file outside the repository is not taken for an nc-architecture-overview",
+        check("a file outside the repository is not taken for an nn-architecture-overview",
               findings == [], str(findings))
     findings = problems_for(
         "- `scripts/unregistered-hook.py`, a `Stop` hook: does a thing.\n", root,
@@ -686,7 +688,7 @@ with tempfile.TemporaryDirectory() as overview_workspace:
     findings = problems_for(
         "- `scripts/unregistered-hook.py`, a `Stop` hook: does a thing.\n", root,
         "docs/nedsnodes-wiki/ordinary-page.md")
-    check("a file that is not an nc-architecture-overview gets no hook check",
+    check("a file that is not an nn-architecture-overview gets no hook check",
           findings == [], str(findings))
 
     findings = problems_for(
@@ -806,6 +808,9 @@ def run_lint_with_fake_gh(gh_source):
             (root / "scripts" / script.name).write_text(
                 script.read_text(encoding="utf-8"), encoding="utf-8")
         (root / "nn-systems" / "demo" / "unnamed-program.py").write_text("", encoding="utf-8")
+        (root / REPOSITORY_NAMES_MODULE_PATH_IN_CHECKOUT).parent.mkdir(parents=True)
+        (root / REPOSITORY_NAMES_MODULE_PATH_IN_CHECKOUT).write_text(
+            (LINT_SCRIPT.resolve().parents[1] / REPOSITORY_NAMES_MODULE_PATH_IN_CHECKOUT).read_text(encoding="utf-8"), encoding="utf-8")
         (root / OVERVIEW_NAME).write_text(
             "## Planned work\n\n"
             "- GHI [Open one](https://github.com/nedsnodes/nedsnodes/issues/1)\n",
@@ -862,7 +867,7 @@ check("a GHI GitHub reports NOT_FOUND is a finding, not a stopped check",
 
 
 old_name_line = lint.PLANNED_WORK_GHI_LINE.fullmatch(
-    f"- GHI [A title](https://github.com/{lint.OLD_REPOSITORY}/issues/12)")
+    f"- GHI [A title](https://github.com/{lint.repository_names.OLD_REPOSITORY}/issues/12)")
 check("a Planned work line linking with the repository's old name, which GitHub redirects, is read",
       old_name_line is not None and old_name_line.group("number") == "12", repr(old_name_line))
 

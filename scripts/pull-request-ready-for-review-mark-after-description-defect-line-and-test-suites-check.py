@@ -3,9 +3,9 @@
 
 Usage: python3 scripts/pull-request-ready-for-review-mark-after-description-defect-line-and-test-suites-check.py <pull request number>
 
-Run it from the pull request's own checkout, with its nc-head-commit checked out. In order, it:
+Run it from the pull request's own checkout, with its nn-head-commit checked out. In order, it:
 1. reads the pull request with gh, and stops when it is not open, or is already ready for review;
-2. refuses when the checkout's HEAD is not the pull request's pushed nc-head-commit, naming the
+2. refuses when the checkout's HEAD is not the pull request's pushed nn-head-commit, naming the
    one case that applies (another branch is checked out, the pushed commit has not been fetched,
    or the checkout is ahead, behind, or both), or when git status shows an uncommitted change or
    an untracked file that is not ignored, whatever status.showUntrackedFiles says, because the
@@ -13,8 +13,11 @@ Run it from the pull request's own checkout, with its nc-head-commit checked out
 3. refuses a description with no defect line (#root_cause, #root_cause_not_fixed or
    #no_defect_fixed), read by the same reader scripts/merge-gate.sh uses; a placeholder
    description has none;
-4. runs this checkout's test suites whose recorded inputs changed since origin/main, with this
-   checkout's own scripts/run-all-test-suites.py, and refuses when any fails;
+4. runs this checkout's test suites whose recorded inputs changed since the checkout's merge
+   base with origin/main, so a change main made after the branch started selects no suite unless
+   a suite's recording no longer matches the checkout, as when a recording made on main read
+   main's copy of a file or listed a new file this checkout lacks, with this checkout's own
+   scripts/run-all-test-suites.py, and refuses when any fails;
 5. marks the pull request ready for review with gh pr ready.
 
 It does not check what scripts/merge-gate.sh checks again before merging, such as a not-fixed
@@ -50,6 +53,7 @@ GIT_MERGE_BASE_IS_ANCESTOR_NO = 1
 # --untracked-files=normal overrides a status.showUntrackedFiles=no setting, which would hide
 # untracked files from the check.
 UNCOMMITTED_CHANGES_COMMAND = ["git", "status", "--porcelain", "--untracked-files=normal"]
+MERGE_BASE_WITH_ORIGIN_MAIN_COMMAND = ["git", "merge-base", "origin/main", "HEAD"]
 MESSAGE_PREFIX = "pull request ready for review: "
 # Messages follow docs/nedsnodes-wiki/nedsnodes-how-to-write-a-tool-message-to-agent-such-as-a-hook-refusal-or-script-error.md.
 NOTHING_CHANGED_LINE = "Nothing was changed on GitHub."
@@ -63,12 +67,12 @@ class StepFailed(Exception):
     """A step refused the pull request, or could not run; the message says which and why."""
 
 
-def selective_test_run_command(checkout):
-    """The run of the suites whose recorded inputs changed since origin/main, with checkout's own
-    runner, which tests the checkout it sits in; the runner beside this program may sit in another
-    checkout."""
+def selective_test_run_command(checkout, merge_base):
+    """The run of the suites whose recorded inputs changed since merge_base, the checkout's merge
+    base with origin/main, with checkout's own runner, which tests the checkout it sits in; the
+    runner beside this program may sit in another checkout."""
     return ["python3", str(Path(checkout) / "scripts" / "run-all-test-suites.py"),
-            "--only-suites-whose-recorded-inputs-changed-since", "origin/main"]
+            "--only-suites-whose-recorded-inputs-changed-since", merge_base]
 
 
 def first_stderr_line(completed):
@@ -151,11 +155,11 @@ def head_mismatch_next_steps(pull_request, head, runner, git_failed):
     # that is there but unreadable prints an error, with exit 128 or, for a hash mismatch, 1.
     pushed_is_here = git_answers_yes(
         ["git", "rev-parse", "--verify", "--quiet", pushed + "^{commit}"], runner,
-        "looking for the pushed nc-head-commit in this checkout", git_failed)
+        "looking for the pushed nn-head-commit in this checkout", git_failed)
     if not pushed_is_here:
         return (f"This checkout does not have the pushed commit yet: run git fetch origin "
                 f"{quoted}, then run this again, and it names what to do next.")
-    comparing = "comparing this checkout's HEAD with the pushed nc-head-commit"
+    comparing = "comparing this checkout's HEAD with the pushed nn-head-commit"
     if git_answers_yes(["git", "merge-base", "--is-ancestor", pushed, head], runner, comparing,
                        git_failed):
         return (f"This checkout has commits the pull request lacks: push them with git push "
@@ -212,7 +216,7 @@ def check_and_mark_ready(number, runner, output):
     checkout, head = printed
     if head != pull_request["headRefOid"]:
         raise StepFailed(
-            f"this checkout's HEAD, {head[:12]}, is not {name}'s pushed nc-head-commit, "
+            f"this checkout's HEAD, {head[:12]}, is not {name}'s pushed nn-head-commit, "
             f"{str(pull_request['headRefOid'])[:12]}, so the test suites would not test the "
             f"commits under review. {NOTHING_CHANGED_LINE}\n"
             + head_mismatch_next_steps(pull_request, head, runner, rev_parse_failed))
@@ -260,7 +264,15 @@ def check_and_mark_ready(number, runner, output):
             "lines. Then upload the "
             f"file with gh pr edit {number} --body-file <file>, which replaces the whole "
             "description, and run this again.")
-    command = selective_test_run_command(checkout)
+    merge_base = run_command(
+        MERGE_BASE_WITH_ORIGIN_MAIN_COMMAND, runner, GIT_TIMEOUT_SECONDS,
+        "finding this checkout's merge base with origin/main",
+        NOTHING_CHANGED_LINE + "\n"
+        "If git's error says origin/main is not a valid object name: run git fetch origin main, "
+        "then run this again.\n"
+        "If git gave any other error, or none: "
+        + RETRY_THEN_USER_INSTRUCTION.format(number=number)).strip()
+    command = selective_test_run_command(checkout, merge_base)
     output.write(MESSAGE_PREFIX + "running " + " ".join(command[1:]) + "\n")
     output.flush()
     try:
@@ -300,7 +312,7 @@ def check_and_mark_ready(number, runner, output):
 def main(argv=None, runner=subprocess.run, output=sys.stdout, errors=sys.stderr):
     parser = argparse.ArgumentParser(
         description="Mark one draft pull request ready for review, after checking that this "
-                    "checkout's HEAD is its pushed nc-head-commit, that its description has a "
+                    "checkout's HEAD is its pushed nn-head-commit, that its description has a "
                     "defect line, and that the test suites pass.")
     parser.add_argument("pull_request_number", type=int)
     arguments = parser.parse_args(argv)

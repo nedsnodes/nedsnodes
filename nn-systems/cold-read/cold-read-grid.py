@@ -5,17 +5,17 @@ One invocation = one review: eight cold-read-cells launched in parallel, seven
 for the two passes and the eighth for Question 4 (see below) -- the
 defect-hunt pass in five ({deep, second-strongest-model} x {claude, codex}, where
 second-strongest-model is the agent-binary's second-strongest model, and Gemini
-Argon at high on agy) and the terminology pass in two (deep x {claude, codex})
+Neon at high on agy) and the terminology pass in two (deep x {claude, codex})
 -- every report saved into a cold-read-record named
 `cold-read-records/<file stem>-<YYYY-MM-DD>/`, or `SKILL-<skill name>-<YYYY-MM-DD>/` for a skill
 (a -2, -3 suffix for a second read of the document that day, the first
 free both in this checkout and in the log-store), progress and next-step
 instructions printed for the reviewing agent as reviews land. A report of the
 two passes is named `<runtime>-<hunt|terminology>-<cold-read-tier>.md`, or for a cell the grid
-gives a model, `<runtime>-<hunt|terminology>-<model>.md`. The Argon cell runs on
+gives a model, `<runtime>-<hunt|terminology>-<model>.md`. The Neon cell runs on
 agy's one cold-read-tier, `fast`, with the model the grid gives it,
-`gemini-4-argon-high`, and the effort `high`, so its report is
-`agy-hunt-gemini-4-argon-high.md`; its stamp says tier=fast beside
+`gemini-4-neon-high`, and the effort `high`, so its report is
+`agy-hunt-gemini-4-neon-high.md`; its stamp says tier=fast beside
 the model and effort it ran with.
 
 Usage:
@@ -30,7 +30,7 @@ it creates anything, the grid lists the cold-read-records in the log-store and
 in this checkout, counts those that froze this document, under its present
 path or an earlier one `git log --follow` shows, and hold a grid report written
 after the commit on origin/main's first-parent line that last changed the
-document -- for a merged nc-topic-branch, the merge, not the topic's own commit --
+document -- for a merged nn-topic-branch, the merge, not the topic's own commit --
 prints
 "cold-read-full-run N of 3", and refuses a fourth. A flag saying the user
 decided to run again or to change the design makes the run number 1, and the
@@ -74,7 +74,7 @@ record holds the reference check alone and no report to keep.
 
 WHEN A COLD-READ-CELL FAILS (nedschorus#413; the design, user-reviewed
 2026-09-16 and 2026-09-17, is
-nn-systems/cold-read/cold-read-grid-cell-failure-handling-design.md). Every
+nn-systems/cold-read/cold-read-grid-cell-failure-handling.tool.design.md). Every
 cold-read-cell whose attempt ends without a landed report is retried once,
 at once, with the same model -- no cold-read-cell is special (user-ruled
 2026-09-11) -- and the first attempt's log is kept as
@@ -258,14 +258,14 @@ class GridCell(typing.NamedTuple):
     effort: typing.Optional[str]
 
 
-# agy serves only the fast tier, so Argon runs on it with the model and effort given here.
-GEMINI_ARGON_DEFECT_HUNT_CELL = GridCell(
-    "agy", "defect-hunt", "fast", "gemini-4-argon-high", "high")
+# agy serves only the fast tier, so Neon runs on it with the model and effort given here.
+GEMINI_NEON_DEFECT_HUNT_CELL = GridCell(
+    "agy", "defect-hunt", "fast", "gemini-4-neon-high", "high")
 GRID_CELLS = tuple(
     GridCell(runtime, cell_pass, tier, None, effort)
     for runtime in ("claude", "codex")
     for cell_pass, tier, effort in GRID_CELL_ROSTER
-) + (GEMINI_ARGON_DEFECT_HUNT_CELL,)
+) + (GEMINI_NEON_DEFECT_HUNT_CELL,)
 
 # Logs, reports and captures record observations; cold reads must not revise that evidence.
 UNREVIEWABLE_TARGET_GENRE_SUFFIXES = ("-log", "-report", "-capture")
@@ -279,16 +279,73 @@ GRID_MARKER_PREFIXES = (FROZEN_COPY_CHANGED_MARKER_PREFIX, INCOMPLETE_SET_MARKER
 # These prefixes are consumed by the cold-read skill's Monitor; FAILED keeps its no-colon form.
 RETRYING_PREFIX = "RETRYING:"
 AGENT_BINARY_DOWN_PREFIX = "AGENT-BINARY DOWN:"
+# Both undo messages share this, so that neither can drop the `--` before a path.
+STRAY_WRITE_RESTORE_ARGUMENTS = "restore --staged --worktree --"
 STOPPED_CELL_WRITE_CHECK_LINE = (
     "The {cell} cell was stopped before it could check for files it wrote outside its "
-    "report, so no such check ran; that is "
+    "report, and the grid could not check for it, because {reason}; that is "
     + cell_common.COLD_READ_CELL_STRAY_WRITE_CHECK_SKIPPED_IS_NOT_A_CLEAN_RESULT_PHRASE
     + ". Before "
     "you do anything else, read `git status` against the edits you know are your own. "
-    "Undo a change git status lists, by deleting the file or directory if it is untracked or running "
-    "`git restore --staged --worktree <path>` if it is tracked, only when its content shows a reviewer wrote "
+    "Undo a change git status lists, by running `rm -r -- <path>` if it is untracked or "
+    f"`git --literal-pathspecs {STRAY_WRITE_RESTORE_ARGUMENTS} <path>` if it is tracked, with <path> "
+    "replaced by the path as one shell-quoted argument, only when its content shows a reviewer wrote "
     "it, such as notes about the document under review. Ask the user about any other "
     "change you did not make, and whenever you are unsure.")
+
+# A stopped cell never reaches its own stray-write check, so the grid runs one for it
+# against the snapshot it took before launching the cells.
+STOPPED_CELLS_STRAY_WRITE_LINE = (
+    "STRAY WRITE: {path} changed after the cells launched. The grid checked for the stopped "
+    "cells {cells}, whose own check never runs, and cannot tell who changed it. {undo}")
+STRAY_WRITE_UNDO_UNTRACKED = (
+    "If its content shows a reviewer wrote it, delete it: `rm -r -- {absolute_path}`. "
+    "Ask the user about it if you did not make it and are unsure.")
+STRAY_WRITE_UNDO_TRACKED = (
+    "If its content shows a reviewer wrote it, undo it: "
+    f"`git -C {{repository}} {STRAY_WRITE_RESTORE_ARGUMENTS} {{path}}`. "
+    "Ask the user about it if you did not make it and are unsure.")
+STRAY_WRITE_NO_UNDO_ALREADY_CHANGED = (
+    "It already had uncommitted changes before the cells launched, so no undo command is given: "
+    "one would also undo those. Read {what_to_read} against the edits you know are your own, and ask "
+    "the user about any change you did not make.")
+# Two diffs, not `diff HEAD`: a cell that writes the HEAD text back over a staged-and-edited
+# file leaves the working tree equal to HEAD, so only the working tree against the index shows it.
+STRAY_WRITE_ALREADY_CHANGED_TRACKED_READ = (
+    "both `git -C {repository} diff --cached -- {path}`, its staged changes, and "
+    "`git -C {repository} diff -- {path}`, its unstaged ones,")
+STRAY_WRITE_ALREADY_CHANGED_UNTRACKED_READ = "{absolute_path} itself, which git does not track,"
+# `git rm --cached` of a file later rewritten is two status entries; neither diff above shows both.
+STRAY_WRITE_ALREADY_CHANGED_STAGED_DELETION_READ = (
+    "both `git -C {repository} diff --cached -- {path}`, its staged deletion, and "
+    "{absolute_path}, the copy on disk, which git does not track,")
+# For an unmerged path `diff --cached` prints only that it is unmerged, the combined diff can
+# omit every hunk of a file overwritten with one side, and `diff HEAD` is empty for the HEAD side.
+# A path with a missing side, such as DD or DU, can print only `* Unmerged path` from both diffs.
+STRAY_WRITE_ALREADY_CHANGED_UNMERGED_READ = (
+    "both `git -C {repository} diff --ours -- {path}` and `git -C {repository} diff --theirs -- {path}`, "
+    "the file against each side of its unresolved merge conflict, and {absolute_path}, the copy on "
+    "disk, because those diffs show nothing against a side the conflict does not have,")
+GIT_STATUS_UNMERGED_CODES = frozenset({"DD", "AU", "UD", "UA", "DU", "AA", "UU"})
+# A cell can move an already-edited file without git pairing the move as a rename (a plain
+# `mv`, or a `git mv` of a much-edited file), can re-create the old name afterwards, and can
+# move a file git tracks only as new or untracked out of git status altogether, so no path can
+# be shown to be free of those edits once any already-edited file has changed or gone.
+STRAY_WRITE_NO_UNDO_MAY_HOLD_MOVED_CHANGES = (
+    "No undo command is given. A file with uncommitted changes from before the cells launched "
+    "has changed or gone since: {touched}. A stopped cell may have moved those changes into {path}, "
+    "so an undo of {path} could delete them. Read {path} against the edits you know are your own, "
+    "and ask the user about any change you did not make.")
+STRAY_WRITE_NO_UNDO_GONE_WHILE_CHANGES_MAY_HAVE_MOVED = (
+    "No undo command is given for any path, because a file with uncommitted changes from before "
+    "the cells launched has changed or gone since: {touched}, and a stopped cell may have moved "
+    "those changes. {path} is gone; `git -C {repository} diff HEAD -- {path}` shows what it held. "
+    "The index may still hold the moved changes under {path}, and an undo would discard them; "
+    "`git -C {repository} diff --cached -- {path}` shows any copy the index holds. Ask the user before you "
+    "restore {path}, and about any change you did not make.")
+STOPPED_CELL_LINE = "{report}: stopped before it finished{deleted}."
+WORKING_TREE_SNAPSHOT_NOT_TAKEN_REASON = "its snapshot of the working tree before the cells launched failed ({error})"
+WORKING_TREE_CHECK_FAILED_REASON = "git status failed when it checked ({error})"
 
 ALL_LANDED_OPENING = "All seven reports landed in {record_dir}, one file per reviewer."
 SOME_LANDED_OPENING = (
@@ -480,8 +537,7 @@ def full_run_history_since_count_start(frozen_paths: set, landed_at, listing: li
     for line in listing:
         path, _, mtime = line.rpartition("\t")
         directory, _, inside = path.partition("/")
-        # An interrupted shipment's staging copy holds the same files as its record.
-        if directory.startswith(record_shipper.STAGING_DIRECTORY_PREFIX):
+        if record_shipper.cold_read_records_entry_name_is_shipment_staging_directory(directory):
             continue
         record = records.setdefault(directory, {"frozen": False, "reported": None, "marked": None,
                                                 "inside_design_to_main": False, "stopped": None})
@@ -926,6 +982,77 @@ def cell_status_line(line: str, phrase: str) -> bool:
                for program in CELL_PROGRAM_NAMES)
 
 
+def working_tree_snapshot_or_failure_reason() -> tuple:
+    """Return (snapshot, None), or (None, why no snapshot was taken)."""
+    try:
+        return cell_common.working_tree_state(), None
+    except cell_common.WriteDetectorUnavailable as error:
+        return None, WORKING_TREE_SNAPSHOT_NOT_TAKEN_REASON.format(error=error)
+
+
+def stopped_cells_write_check_lines(stopped_report_paths: list, baseline,
+                                    baseline_failure_reason, already_reported: set) -> list:
+    """Return a line per path changed since the baseline and not yet reported, each with
+    its undo command, or, when no check can run, a line per stopped cell saying so.
+    A path that leaves the snapshot after the baseline gets no line of its own, such as an
+    already-untracked file a stopped cell deletes, or a changed tracked file it resets to HEAD;
+    it withholds every undo command instead. A gitignored file is in no snapshot, so a cell
+    that moves one to a path git does not ignore gets an undo command for that path."""
+    reason = None if baseline is not None else (
+        baseline_failure_reason or "no snapshot of the working tree was taken before the cells launched")
+    if baseline is not None:
+        try:
+            current = cell_common.working_tree_state()
+            changed = sorted({name for name, _ in current - baseline})
+            entries = git_machine_readable_output.status_entries(
+                git_machine_readable_output.run_git(
+                    cell_common.REPO_ROOT, ["status", "--porcelain", "-z", "--untracked-files=all"]))
+        except (cell_common.WriteDetectorUnavailable,
+                git_machine_readable_output.GitCommandFailed) as error:
+            reason = WORKING_TREE_CHECK_FAILED_REASON.format(
+                error=getattr(error, "stderr", "").strip() or error)
+    if reason is not None:
+        return [f"WRITE CHECK DID NOT RUN: {path.name} — "
+                + STOPPED_CELL_WRITE_CHECK_LINE.format(cell=cell_name_of(path), reason=reason)
+                for path in stopped_report_paths]
+    status_codes_by_path = {}
+    for entry in entries:
+        for path in filter(None, (entry.path, entry.origin_path)):
+            status_codes_by_path.setdefault(path, set()).add(entry.code)
+    untracked = {path for path, codes in status_codes_by_path.items() if codes == {"??"}}
+    changed_before = {name for name, _ in baseline}
+    # Read from the launch side: a pre-launch path that is now different, gone or out
+    # of git status is in no current entry, and an undo could delete what it held.
+    touched = sorted({name for name, _ in baseline - current})
+    cells = ", ".join(cell_name_of(path) for path in stopped_report_paths)
+    # Without --literal-pathspecs, a restore of `chapter[1].md` also discards edits to `chapter1.md`.
+    repository = f"{shlex.quote(str(cell_common.REPO_ROOT))} --literal-pathspecs"
+    lines = []
+    for name in changed:
+        if name in already_reported:
+            continue
+        already_reported.add(name)
+        undo = (STRAY_WRITE_NO_UNDO_ALREADY_CHANGED if name in changed_before
+                else STRAY_WRITE_NO_UNDO_MAY_HOLD_MOVED_CHANGES
+                if touched and os.path.lexists(cell_common.REPO_ROOT / name)
+                else STRAY_WRITE_NO_UNDO_GONE_WHILE_CHANGES_MAY_HAVE_MOVED if touched
+                else STRAY_WRITE_UNDO_UNTRACKED if name in untracked
+                else STRAY_WRITE_UNDO_TRACKED)
+        codes = status_codes_by_path.get(name, set())
+        absolute_path = shlex.quote(str(cell_common.REPO_ROOT / name))
+        what_to_read = (STRAY_WRITE_ALREADY_CHANGED_UNMERGED_READ if codes & GIT_STATUS_UNMERGED_CODES
+                        else STRAY_WRITE_ALREADY_CHANGED_UNTRACKED_READ if name in untracked
+                        else STRAY_WRITE_ALREADY_CHANGED_STAGED_DELETION_READ if "??" in codes
+                        else STRAY_WRITE_ALREADY_CHANGED_TRACKED_READ).format(
+            path=shlex.quote(name), repository=repository, absolute_path=absolute_path)
+        lines.append(STOPPED_CELLS_STRAY_WRITE_LINE.format(
+            path=name, cells=cells, undo=undo.format(
+                path=shlex.quote(name), repository=repository, what_to_read=what_to_read,
+                absolute_path=absolute_path,
+                touched=", ".join(shlex.quote(name) for name in touched))))
+    return lines
+
+
 def lift_cell_status_lines(report_path: pathlib.Path, log_lines: list) -> None:
     """Print cell status lines before successful-attempt logs are deleted."""
     for line in log_lines:
@@ -995,6 +1122,8 @@ def wait_for_cells(running: dict,
                    target_check_interval_seconds: float = 0.0,
                    cell_poll_interval_seconds: float = CELL_POLL_INTERVAL_DEFAULT_SECONDS,
                    cell_attempt_timeout_seconds: float = CELL_ATTEMPT_TIMEOUT_DEFAULT_SECONDS,
+                   working_tree_baseline=None,
+                   working_tree_baseline_failure_reason: typing.Optional[str] = None,
                    ) -> RunOutcome:
     """Retry failed cells once, unless the cause is user-clearable or the attempt
     timed out, and wait for reports, absences or a changed target."""
@@ -1006,8 +1135,17 @@ def wait_for_cells(running: dict,
     for report_path in running:
         cells_by_runtime.setdefault(
             runtime_of(cell_name_of(report_path)), []).append(cell_name_of(report_path))
+    stray_paths_reported = set()
+
+    def print_stopped_cells_write_check(stopped_report_paths):
+        for line in stopped_cells_write_check_lines(
+                stopped_report_paths, working_tree_baseline,
+                working_tree_baseline_failure_reason, stray_paths_reported):
+            print(line, flush=True)
+
     while running:
         time.sleep(cell_poll_interval_seconds)
+        timed_out_this_poll = []
         for report_path in list(running):
             attempt = running[report_path]
             code = None if attempt.process is None else attempt.process.poll()
@@ -1017,9 +1155,7 @@ def wait_for_cells(running: dict,
             if timed_out:
                 report_deleted = stop_attempt_and_delete_unfinished_report(attempt, report_path)
                 code = attempt.process.returncode
-                print(f"WRITE CHECK DID NOT RUN: {report_path.name} — "
-                      f"{STOPPED_CELL_WRITE_CHECK_LINE.format(cell=cell_name_of(report_path))}",
-                      flush=True)
+                timed_out_this_poll.append(report_path)
             if attempt.process is not None and code is None:
                 continue
             del running[report_path]
@@ -1070,6 +1206,8 @@ def wait_for_cells(running: dict,
                     else:
                         outcome.absent[name] = report
             announce_agent_binary_down(cells_by_runtime, outcome)
+        if timed_out_this_poll:
+            print_stopped_cells_write_check(timed_out_this_poll)
         if running and time.monotonic() - last_target_check >= target_check_interval_seconds:
             last_target_check = time.monotonic()
             move = target_move()
@@ -1077,14 +1215,14 @@ def wait_for_cells(running: dict,
                 for report_path, attempt in running.items():
                     report_deleted = stop_attempt_and_delete_unfinished_report(attempt, report_path)
                     outcome.stopped.append(cell_name_of(report_path))
-                    # Stopped cells never reach the post-model stray-write check; absence of results is not a clean check.
                     log_lines = (attempt.stderr_path.read_text(encoding="utf-8").splitlines()
                                  if attempt.stderr_path.is_file() else [])
                     lift_cell_status_lines(report_path, log_lines)
-                    print(f"WRITE CHECK DID NOT RUN: {report_path.name} — "
-                          f"{STOPPED_CELL_WRITE_CHECK_LINE.format(cell=cell_name_of(report_path))}"
-                          f"{STOPPED_CELL_UNFINISHED_REPORT_DELETED_PHRASE if report_deleted else ''}",
+                    print(STOPPED_CELL_LINE.format(
+                        report=report_path.name,
+                        deleted=STOPPED_CELL_UNFINISHED_REPORT_DELETED_PHRASE if report_deleted else ""),
                           flush=True)
+                print_stopped_cells_write_check(list(running))
                 return outcome._replace(moved_mid_run=move)
     return outcome
 
@@ -1257,6 +1395,7 @@ def main() -> int:
 
     # Outside the checkout, like the cold-read-fast-read's: the cell's prompt is
     # not part of the record, and the claude launcher needs it as a file.
+    working_tree_baseline, working_tree_baseline_failure_reason = working_tree_snapshot_or_failure_reason()
     with tempfile.TemporaryDirectory(prefix="cold-read-grid-") as scratch:
         running = launch_cells(frozen_target, record_dir, target)
         running.update(launch_what_should_be_code_question_cell(
@@ -1269,7 +1408,8 @@ def main() -> int:
             float(os.environ.get(CELL_POLL_INTERVAL_OVERRIDE_VARIABLE)
                   or CELL_POLL_INTERVAL_DEFAULT_SECONDS),
             float(os.environ.get(CELL_ATTEMPT_TIMEOUT_OVERRIDE_VARIABLE)
-                  or CELL_ATTEMPT_TIMEOUT_DEFAULT_SECONDS))
+                  or CELL_ATTEMPT_TIMEOUT_DEFAULT_SECONDS),
+            working_tree_baseline, working_tree_baseline_failure_reason)
     # Before any marker goes in and before shipping: the store refuses changed bytes.
     question_4_line = what_should_be_code_question_closing_line(record_dir, outcome)
     # Retain the poll result if the changed bytes were restored before the final comparison.

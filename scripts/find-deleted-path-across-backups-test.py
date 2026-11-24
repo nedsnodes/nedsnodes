@@ -1490,10 +1490,6 @@ check("the reflog surface on a non-repo is UNAVAILABLE, not NOT FOUND",
 # a caller's git redirect variables — every command runs without them
 # --------------------------------------------------------------------------
 
-# Imported here, not with the others, for the reason given at `import select`
-# below: an import added at the top moves the line run-all-test-suites cites.
-import json  # noqa: E402
-
 # Written out here rather than read from the program, so a name dropped from
 # the program's list fails a case instead of shrinking what the cases check.
 GIT_REDIRECT_VARIABLES_EXPECTED_DROPPED = (
@@ -1851,7 +1847,6 @@ class RunsLocallyRefusesSsh(FakeRunner):
 import select  # noqa: E402
 import signal  # noqa: E402
 import socket  # noqa: E402
-import time  # noqa: E402
 
 
 def log_store_fixture(tmp):
@@ -2970,6 +2965,36 @@ check("... and the git-failure lines tell the agent to rerun the very command it
       finder.rerun_command(git_failure_argv) in main_errors.getvalue()
       and "--repo /repo" in finder.rerun_command(git_failure_argv),
       main_errors.getvalue())
+
+
+class StreamRecordingWritesAndFlushes(io.StringIO):
+    """io.StringIO's flush does nothing, so a capture made with it cannot tell whether main flushed."""
+
+    def __init__(self, name, events):
+        super().__init__()
+        self.name, self.events = name, events
+
+    def write(self, text):
+        self.events.append((self.name, "write", text))
+        return super().write(text)
+
+    def flush(self):
+        self.events.append((self.name, "flush", ""))
+
+
+stream_events = []
+with contextlib.redirect_stderr(StreamRecordingWritesAndFlushes("stderr", stream_events)), \
+        contextlib.redirect_stdout(StreamRecordingWritesAndFlushes("stdout", stream_events)):
+    finder.main(git_failure_argv, runner=FakeRunner([("rev-parse --git-dir", (0, ".git\n", "")), TOP_LEVEL_FAILS]))
+git_failure_written = next((i for i, (name, kind, text) in enumerate(stream_events)
+                            if name == "stderr" and kind == "write" and "unable to read index" in text), None)
+header_written = next((i for i, (name, kind, text) in enumerate(stream_events)
+                       if name == "stdout" and kind == "write" and "Searching every history" in text), None)
+check("... and the git-failure lines are flushed to stderr before the header is written to stdout, "
+      "so a block-buffered stderr cannot print them after the search results",
+      git_failure_written is not None and header_written is not None
+      and ("stderr", "flush", "") in stream_events[git_failure_written:header_written],
+      stream_events)
 
 code, text = run_main(["a/b.md", "--repo", "/repo", "--skip", "transcripts", "--skip", "box",
                        "--skip", "timemachine", "--skip", "localsnapshots"],

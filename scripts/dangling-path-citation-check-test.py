@@ -51,6 +51,7 @@ GIT_OUTPUT_MODULE = (Path(__file__).resolve().parents[1] / "nn-systems" / "gener
                      / "git-machine-readable-output-runner-and-parser-common.py")
 NEXT_STEP_LINES_MODULE = GIT_OUTPUT_MODULE.with_name(
     "failed-command-tool-message-to-agent-rerun-once-then-stop-and-report-lines-common.py")
+REPOSITORY_NAMES_MODULE = GIT_OUTPUT_MODULE.with_name("github-repository-name-and-name-before-project-rename-common.py")
 
 failures = []
 
@@ -83,7 +84,7 @@ def build_repository(root: Path):
         (root / "scripts" / source.name).write_text(source.read_text(encoding="utf-8"),
                                                    encoding="utf-8")
     (root / "nn-systems" / "general-tools").mkdir(parents=True)
-    for module in (GIT_OUTPUT_MODULE, NEXT_STEP_LINES_MODULE):
+    for module in (GIT_OUTPUT_MODULE, NEXT_STEP_LINES_MODULE, REPOSITORY_NAMES_MODULE):
         (root / "nn-systems" / "general-tools" / module.name).write_text(
             module.read_text(encoding="utf-8"), encoding="utf-8")
     (root / "scripts" / "already-here.py").write_text("# a file that exists\n", encoding="utf-8")
@@ -1089,7 +1090,7 @@ with tempfile.TemporaryDirectory() as workspace:
           "notes/naïve-dir" not in out, out)
 
 
-# --- an nc-architecture-overview is checked for paths only ---------------------
+# --- an nn-architecture-overview is checked for paths only ---------------------
 # md-drift-lint's overview checks query GitHub; this program reads only path
 # findings, so a changed overview must make no GitHub call.
 with tempfile.TemporaryDirectory() as workspace:
@@ -1115,7 +1116,7 @@ with tempfile.TemporaryDirectory() as workspace:
     completed = subprocess.run(
         [sys.executable, str(root / "scripts" / CHECK_SCRIPT.name), "--base", base],
         cwd=root, env=environment, capture_output=True, text=True, check=False)
-    check("a changed nc-architecture-overview makes no GitHub call",
+    check("a changed nn-architecture-overview makes no GitHub call",
           not gh_called.exists() and completed.returncode == 0
           and "GHI" not in completed.stdout,
           f"{completed.returncode} {completed.stdout!r} {completed.stderr!r}")
