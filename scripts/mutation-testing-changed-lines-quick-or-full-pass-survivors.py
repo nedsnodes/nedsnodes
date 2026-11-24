@@ -1593,7 +1593,7 @@ def hunk_replaced_lines(old, new):
 
 def commit_on_main_holding_recorded_hunk(checkout, main, path, old_start, old, environment):
     """The newest first-parent commit of main that changed path and has the hunk's old lines at
-    the hunk's own line, or None when git cannot list the commits or none has them."""
+    the hunk's own line, or None when git cannot read a commit's file or none has them."""
     listed = run(["git", "log", "--first-parent", "--format=%H", main, "--", path], checkout,
                  environment)
     if listed.returncode:
@@ -1601,8 +1601,14 @@ def commit_on_main_holding_recorded_hunk(checkout, main, path, old_start, old, e
     at = old_start - 1
     for commit in listed.stdout.split():
         shown = run(["git", "show", f"{commit}:{path}"], checkout, environment)
-        # The commit that deleted the file is listed too, and has no such file.
-        if not shown.returncode and shown.stdout.split("\n")[at:at + len(old)] == old:
+        if shown.returncode:
+            # The commit that deleted the file is listed too, and has no such file. Any other
+            # failure must stop the search: an older copy would end the line that this one holds.
+            in_tree = run(["git", "ls-tree", commit, "--", path], checkout, environment)
+            if in_tree.returncode or in_tree.stdout.strip():
+                return None
+            continue
+        if shown.stdout.split("\n")[at:at + len(old)] == old:
             return commit
     return None
 
@@ -1646,7 +1652,7 @@ def recorded_hunk_replaced_lines_traced_to_main(checkout, main, path, hunk, envi
             if commit == main:
                 return "present", f"{name}:{line}"
             names.add(name)
-    replaced = old[start:len(old) - end]
+    replaced = hunk_replaced_lines(old, new)
     for name in names:
         listed = run(["git", "ls-tree", main, "--", name], checkout, environment)
         if listed.returncode:

@@ -2748,6 +2748,32 @@ def run_recorded_mutant_lines_on_main_traced_through_history_cases():
             check(f"a recorded mutant is not called gone when a file its line was followed "
                   f"through cannot be read on origin/main: {name}", got == (None, None), got)
 
+    # Present, deleted, restored, then re-indented: a failed git show on the restoring commit
+    # must not let the search fall back to the copy before the deletion, where blame ends the line.
+    for name, failing_words in [("git show fails on a commit that has the file", {"show"}),
+                                ("git show and git ls-tree both fail on that commit",
+                                 {"show", "ls-tree"})]:
+        with tempfile.TemporaryDirectory() as scratch_name:
+            repository, _, _ = scratch_repository(scratch_name, {"README2": "x\n"})
+            commits_on_origin_main(repository, [{path: "a\nb\nc\n" + unrelated},
+                                                {path: None, "OTHER": "x\n"},
+                                                {path: "a\nb\nc\n" + unrelated},
+                                                {path: "a\n    b\nchanged\n" + unrelated}])
+            restoring_commit = git(repository, "rev-parse", "HEAD~1")
+
+            def failing_on_restoring_commit(command, cwd, environment=None):
+                if command[1] in failing_words and restoring_commit in " ".join(command[2:]):
+                    return subprocess.CompletedProcess(command, 128, "", "injected failure")
+                return real_run(command, cwd, environment)
+            survivors.run = failing_on_restoring_commit
+            try:
+                got = survivors.recorded_mutant_lines_on_main(repository, path, [one_line_hunk],
+                                                              None)
+            finally:
+                survivors.run = real_run
+            check(f"a recorded mutant is not called gone when a commit's copy of the file cannot "
+                  f"be read, and could not be judged: {name}", got == (None, None), got)
+
 
 def run_cases():
     run_hunk_shared_context_line_counts_and_replaced_lines_cases()
