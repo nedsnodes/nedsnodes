@@ -241,15 +241,17 @@ its verdict and naming its diff file: MUTANT KILLED when a suite fails with
 the mutant applied; MUTANT SURVIVED when every suite passes with it; MUTANT
 NO LONGER EXISTS when there is nothing to kill, because the line it changes ends with a
 `# pragma: no mutate` comment at the head, or the diff does not apply at the
-head and origin/main, read without fetching, lacks the lines it replaces, or has
-them only where none of the diff's non-blank context lines stands beside them, as a bare
-`continue` the diff replaces has unrelated copies elsewhere; and
+head and git blame, followed through renames from the newest commit on origin/main
+(read without fetching) that holds the diff's lines at the diff's line number, shows every
+line it replaces removed or changed before origin/main, with no copy of their text left in
+the file; and
 MUTANT COULD NOT BE JUDGED, with what to do, when the diff file cannot be read or
 names no file, the file has no suite while the mutant still applies at the
 head, the diff does not apply at the head while origin/main has those lines,
 the diff does not apply at the head and whether origin/main has those lines
-cannot be told (there is no local origin/main, git cannot read the file there,
-or the lines appear there more than once and some copy has one of
+cannot be told (there is no local origin/main, the diff replaces no line, git
+cannot read the file or its history there, git blame ended the lines but a copy of their
+text is still in the file, or no commit there has the lines it replaces with
 the diff's non-blank context lines beside it), two of the diff's hunks are found at
 places whose lines overlap, some copies of the lines it replaces end with a
 `# pragma: no mutate` comment and others do not, so that the lines appear more
@@ -630,6 +632,7 @@ def failure_handling_line_ranges(source):
 
 
 HUNK_HEADER = re.compile(r"^@@ -\d+(?:,\d+)? \+(\d+)(?:,(\d+))? @@")
+REVERSE_BLAME_LINE_HEADER = re.compile(r"(?P<commit>[0-9a-f]{40}) (?P<line>\d+) \d+")
 HUNK_COUNTS = re.compile(
     r"^@@ -(?P<old_start>\d+)(?:,(?P<old_count>\d+))? \+\d+(?:,(?P<new_count>\d+))? @@")
 
@@ -1588,47 +1591,102 @@ def hunk_replaced_lines(old, new):
     return old[start:len(old) - end]
 
 
-def recorded_mutant_lines_on_main(checkout, path, hunks, environment):
-    """"applies" when origin/main's file takes the mutant, "gone" when the file is not in
-    origin/main's tree or some hunk's replaced lines are nowhere in it, or are in it only at
-    places where none of the hunk's non-blank context lines stands at its own offset from
-    them; None when it cannot tell: no origin/main, git fails to read the tree or the file, or
-    a hunk's replaced lines appear in it more than once, either with a non-blank context line
-    of the hunk beside some copy or in a hunk with no non-blank context line. A short replaced
-    line, such as a bare `continue`, has unrelated copies all over a file, so only a copy that
-    some context line still stands beside can be the mutant's own; one context line suffices,
-    since a change beside the mutated lines leaves the survivor live."""
-    if run(["git", "rev-parse", "--verify", "--quiet", "refs/remotes/origin/main^{commit}"],
-           checkout, environment).returncode:
-        return None
-    listed = run(["git", "ls-tree", "refs/remotes/origin/main", "--", path], checkout,
+def commit_on_main_holding_recorded_hunk(checkout, main, path, old_start, old, environment):
+    """The newest first-parent commit of main that changed path and has the hunk's old lines at
+    the hunk's own line, or None when git cannot list the commits or none has them."""
+    listed = run(["git", "log", "--first-parent", "--format=%H", main, "--", path], checkout,
                  environment)
     if listed.returncode:
         return None
-    if not listed.stdout.strip():
-        return "gone"
-    shown = run(["git", "show", f"refs/remotes/origin/main:{path}"], checkout, environment)
-    if shown.returncode:
-        return None
-    if source_with_recorded_mutant_applied(shown.stdout, hunks) is not None:
-        return "applies"
-    lines = shown.stdout.split("\n")
-    for _, old, new in hunks:
-        replaced = hunk_replaced_lines(old, new)
-        if not replaced:
-            continue
-        start, end = hunk_shared_context_line_counts(old, new)
-        # Padded so a context offset before the file's start or past its end reads no line.
-        padded = [None] * len(old) + lines + [None] * len(old)
-        # A blank line stands beside unrelated copies as often as a bare `continue` does.
-        context = [(offset, line) for offset, line in enumerate(old)
-                   if (offset < start or offset >= len(old) - end) and line.strip()]
-        places = places_of_lines(lines, replaced)
-        if not places or (context and not any(
-                padded[len(old) + place - start + offset] == line
-                for place in places for offset, line in context)):
-            return "gone"
+    at = old_start - 1
+    for commit in listed.stdout.split():
+        shown = run(["git", "show", f"{commit}:{path}"], checkout, environment)
+        # The commit that deleted the file is listed too, and has no such file.
+        if not shown.returncode and shown.stdout.split("\n")[at:at + len(old)] == old:
+            return commit
     return None
+
+
+def recorded_hunk_replaced_lines_traced_to_main(checkout, main, path, hunk, environment):
+    """("present", "file:line") when reverse blame follows a replaced line to main; ("gone",
+    None) when it ends every replaced line before main and no file it followed them through
+    holds their text on main; (None, None) when it cannot tell.
+
+    Text alone cannot decide: a renamed file holds the line at another path, and a short line
+    such as `return True` has unrelated copies. Blame alone cannot either: each flag set aligns
+    a rewritten block differently, and -w has ended a line that plain blame follows to main. So
+    a line is present if either flag set follows it, and a copy left on main blocks "gone"."""
+    old_start, old, new = hunk
+    start, end = hunk_shared_context_line_counts(old, new)
+    count = len(old) - end - start
+    if count <= 0:
+        return None, None
+    recording = commit_on_main_holding_recorded_hunk(checkout, main, path, old_start, old,
+                                                     environment)
+    if recording is None:
+        return None, None
+    first = old_start + start
+    names = {path}
+    for flags in ([], ["-w", "-M", "-C"]):
+        blamed = run(["git", "blame", "--reverse", "--first-parent", "--line-porcelain", *flags,
+                      "-L", f"{first},{first + count - 1}", f"{recording}..{main}", "--", path],
+                     checkout, environment)
+        if blamed.returncode:
+            return None, None
+        traced = []
+        for text in blamed.stdout.split("\n"):
+            header = REVERSE_BLAME_LINE_HEADER.match(text)
+            if header:
+                traced.append([header["commit"], header["line"], None])
+            elif text.startswith("filename ") and traced:
+                traced[-1][2] = text[len("filename "):]
+        if len(traced) != count:
+            return None, None
+        for commit, line, name in traced:
+            if commit == main:
+                return "present", f"{name}:{line}"
+            names.add(name)
+    replaced = old[start:len(old) - end]
+    for name in names:
+        listed = run(["git", "ls-tree", main, "--", name], checkout, environment)
+        if listed.returncode:
+            return None, None
+        if not listed.stdout.strip():
+            continue
+        shown = run(["git", "show", f"{main}:{name}"], checkout, environment)
+        if shown.returncode or places_of_lines(shown.stdout.split("\n"), replaced):
+            return None, None
+    return "gone", None
+
+
+def recorded_mutant_lines_on_main(checkout, path, hunks, environment):
+    """(state, place): ("applies", None) when origin/main's file takes the mutant; ("present",
+    "file:line") when a replaced line is still on origin/main though the diff does not apply;
+    ("gone", None) when reverse blame ends every replaced line of every hunk before
+    origin/main; (None, None) when it cannot tell: no origin/main, git fails, no commit on
+    origin/main holds a hunk at its own line, or a hunk replaces no line."""
+    named = run(["git", "rev-parse", "--verify", "--quiet", "refs/remotes/origin/main^{commit}"],
+                checkout, environment)
+    if named.returncode:
+        return None, None
+    main = named.stdout.strip()
+    listed = run(["git", "ls-tree", main, "--", path], checkout, environment)
+    if listed.returncode:
+        return None, None
+    if listed.stdout.strip():
+        shown = run(["git", "show", f"{main}:{path}"], checkout, environment)
+        if shown.returncode:
+            return None, None
+        if source_with_recorded_mutant_applied(shown.stdout, hunks) is not None:
+            return "applies", None
+    traced = [recorded_hunk_replaced_lines_traced_to_main(checkout, main, path, hunk, environment)
+              for hunk in hunks]
+    for state, place in traced:
+        if state == "present":
+            return state, place
+    if all(state == "gone" for state, _ in traced):
+        return "gone", None
+    return None, None
 
 
 def recorded_mutant_run_verdict(exit_code, output, runner):
@@ -1737,13 +1795,31 @@ def recorded_mutant_verdict_without_a_suite_run(checkout, path, hunks, head, sou
 def recorded_mutant_not_applied_verdict(checkout, path, hunks, head, why_not_applied,
                                         environment):
     """(verdict, why) for a recorded mutant that does not apply to its file at the head."""
-    on_main = recorded_mutant_lines_on_main(checkout, path, hunks, environment)
+    on_main, place = recorded_mutant_lines_on_main(checkout, path, hunks, environment)
     if on_main == "gone":
         return "no longer exists", (
-            f"origin/main has no copy of the lines it replaces in {path} with one of the "
-            f"diff's non-blank context lines beside it, so the mutant's own lines are gone from "
-            f"origin/main too, so there is nothing to kill; the nightly mutation pass drops it "
-            f"from its task.")
+            f"git blame, followed from the commit that recorded the lines it replaces in {path}, "
+            f"shows every one of them removed or changed before origin/main, so the mutant's own "
+            f"lines are gone from origin/main too, so there is nothing to kill; the nightly "
+            f"mutation pass drops it from its task, and you need do nothing for this mutant.")
+    if on_main == "present":
+        return "could not be judged", (
+            f"it does not apply to {path} at head {head[:12]}: {why_not_applied}, but git blame "
+            f"follows a line it replaces to {place} on origin/main, so the mutant is not gone, "
+            f"and no suite was run.\n"
+            f"If your branch removed or changed that line on purpose: the mutant is gone from "
+            f"your branch; leave the survivor task that names this diff file open, and the "
+            f"nightly mutation pass rechecks it once your branch is merged.\n"
+            f"If your branch changed that line by accident: run git checkout origin/main -- "
+            f"{shlex.quote(place.rsplit(':', 1)[0])}, commit, and run this command again.\n"
+            f"Otherwise, make the diff's change by hand at {place}, run that file's suites, and "
+            f"put the line back before you commit.\n"
+            f"If a suite fails: the mutant is killed, so no new test is needed; mark the survivor "
+            f"task that names this diff file completed, naming the suite that failed.\n"
+            f"If every suite passes: write a test that fails with the change made, put the line "
+            f"back, commit the test, and mark that task completed once the pull request carrying "
+            f"the test merges. This command gives this same verdict after that merge, because "
+            f"the diff still does not apply.")
     if on_main == "applies":
         return "could not be judged", (
             f"it does not apply to {path} at head {head[:12]}: {why_not_applied}. origin/main "
@@ -1756,12 +1832,30 @@ def recorded_mutant_not_applied_verdict(checkout, path, hunks, head, why_not_app
     return "could not be judged", (
         f"it does not apply to {path} at head {head[:12]}: {why_not_applied}, and whether "
         f"origin/main still has the lines it replaces cannot be told: there is no local "
-        f"origin/main, git could not read {path} there, or the lines appear there more than "
-        f"once and one of the diff's non-blank context lines stands beside some copy.\n"
+        f"origin/main, git could not read {path} or its history there, no commit there holds "
+        f"the diff's lines at the diff's line number, the diff replaces no line, or git blame "
+        f"ended those lines but a copy of their text is still in the file, which may be "
+        f"unrelated.\n"
+        f"If `git rev-parse --verify origin/main` fails: run `git fetch origin main`, then run "
+        f"this command again once. If the fetch fails, report its error to whoever gave you "
+        f"this work.\n"
         f"If your branch changed those lines on purpose, the mutant is gone from your branch: "
-        f"once your branch is merged, the nightly mutation pass drops it from its task.\n"
-        f"Otherwise, make sure your branch's head has {path} as origin/main has it, commit your "
-        f"test in another file, and run this command again.")
+        f"leave the survivor task that names this diff file open, and once your branch is "
+        f"merged, the nightly mutation pass rechecks it.\n"
+        f"If {path} at your head is as origin/main has it, as in the nightly mutation pass: "
+        f"read the copies of the lines it replaces, starting around the line number in the "
+        f"diff's `@@` line. A copy is the mutant's own line when it stands in the function the "
+        f"diff's context lines come from and does the same job there.\n"
+        f"When the file has no copy, or no copy is the mutant's own line: mark the survivor task "
+        f"that names this diff file completed, saying why in the task's description.\n"
+        f"When one or more may be: for each in turn, make the diff's change by hand, run the "
+        f"file's suites, and put the line back before the next. If a suite fails for each, the "
+        f"mutant is killed: mark that task completed, naming the suites. Otherwise write a test "
+        f"that fails with the change made at each copy where every suite passed, commit the "
+        f"tests, and mark that task completed once the pull request carrying them merges.\n"
+        f"If your branch changed {path} by accident: make sure your branch's head has {path} as "
+        f"origin/main has it, commit any test you wrote in another file, and run this command "
+        f"again.")
 
 
 def recorded_mutant_killed_check(arguments, checkout, environment, runner,
