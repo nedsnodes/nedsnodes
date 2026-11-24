@@ -222,7 +222,20 @@ def main():
               f"exit {completed.returncode}\n{completed.stdout}{completed.stderr}")
 
         completed = run_program(helpers, checkout, "8", head_commit, main_commit)
-        check("a pull request origin does not have exits 1 at the fetch",
+        check("a head commit already local is used with no fetch, even when origin no longer "
+              "has the pull request's ref",
+              completed.returncode == 0
+              and git(review_worktrees_directory(helpers) / "pr8-merged", "rev-parse", "HEAD^2")
+              == head_commit,
+              f"exit {completed.returncode}\n{completed.stdout}{completed.stderr}")
+
+        (author / "never-pushed.txt").write_text("only in the author's clone\n")
+        git(author, "add", "never-pushed.txt")
+        git(author, "commit", "-q", "-m", "a commit origin does not have")
+        unpushed_commit = git(author, "rev-parse", "HEAD")
+        completed = run_program(helpers, checkout, "12", unpushed_commit, main_commit)
+        check("a head commit not local, of a pull request origin does not have, exits 1 at the "
+              "fetch",
               completed.returncode == 1 and "git fetch" in completed.stdout,
               f"exit {completed.returncode}\n{completed.stdout}{completed.stderr}")
     finally:
