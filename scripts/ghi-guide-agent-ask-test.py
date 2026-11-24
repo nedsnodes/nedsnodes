@@ -561,15 +561,21 @@ with tempfile.TemporaryDirectory() as temporary:
     answer, closed_on, error = ghi_ask.ask("q", False, seat11, "x/y", timeout_seconds=300)
     check("all three turns of one ask draw on a single budget",
           len(budgets) == 3, budgets)
-    check("each turn is handed only what the ask has left, never the full budget again",
-          budgets == sorted(budgets, reverse=True) and budgets[0] <= 300
-          and budgets[-1] < budgets[0],
+    check("the cold-start turn gets the ask's budget plus COLD_START_EXTRA_SECONDS, and "
+          "each later turn only what the ask has left, never the full budget again",
+          budgets == sorted(budgets, reverse=True)
+          and 300 < budgets[0] <= 300 + ghi_ask.COLD_START_EXTRA_SECONDS
+          and budgets[1] <= budgets[0] and budgets[-1] < budgets[0],
           budgets)
 
     # An ask whose budget is already gone fails saying so, rather than
-    # starting a turn it cannot afford.
+    # starting a turn it cannot afford. A resumed session, since a cold
+    # start adds time of its own.
     seat12 = root / "seat12"
     seat12.mkdir()
+    ghi_ask.save_state(seat12 / ghi_ask.STATE_FILE_NAME,
+                       {ghi_ask.GHI_GUIDE_AGENT_SESSION_ID_STATE_KEY: "sess-S",
+                        "closes_since_birth": 0, "recent_matches": []})
     fake_refresh_queue([([1], {"1": issue(1)}, None)])
     spent_calls = fake_claude_queue([])
     answer, closed_on, error = ghi_ask.ask("q", False, seat12, "x/y", timeout_seconds=0)

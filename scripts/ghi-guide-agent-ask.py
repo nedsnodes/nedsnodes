@@ -209,6 +209,9 @@ GHI_GUIDE_AGENT_ALLOWED_TOOLS = "Read,Grep,Glob"
 # NM's three-watchdog machinery is deliberately not carried over (design:
 # "version 1 here starts with one timeout").
 ASK_TIMEOUT_SECONDS = int(os.environ.get("GHI_GUIDE_AGENT_ASK_TIMEOUT_SECONDS", "300"))
+# A cold start reads every file an open issue links to, so an ask that
+# cold-starts gets this much more time, once.
+COLD_START_EXTRA_SECONDS = ghi_issue_write.GHI_GUIDE_AGENT_COLD_START_EXTRA_SECONDS
 
 # A claude that cannot authenticate says so in its JSON result's `result` field
 # ("Failed to authenticate: OAuth session expired and could not be refreshed",
@@ -227,7 +230,8 @@ LOGGED_OUT_REMEDY = (f" — the claude on {AGENT_BOX} is logged out; run `claude
 # misattribution, not a wrong answer: the Mac reports that the ssh call did
 # not finish instead of the box's real refresh error, and both land the caller on the
 # ghi-write skill's fallback ladder.
-SSH_TIMEOUT_SECONDS = ASK_TIMEOUT_SECONDS + 120
+# The Mac cannot know whether the box will cold-start, so it allows for one.
+SSH_TIMEOUT_SECONDS = ASK_TIMEOUT_SECONDS + COLD_START_EXTRA_SECONDS + 120
 
 # Reincarnation-trigger constants (design § Verify at build's Constants list).
 CLOSES_SINCE_BIRTH_THRESHOLD = 20
@@ -780,8 +784,12 @@ def ask(question: str, include_closed: bool, seat_dir: Path, repo: str,
     # One deadline for the whole ask, however many turns it takes.
     deadline = time.monotonic() + timeout_seconds
 
-    def turn(prompt, resume_session_id):
-        """A claude turn that can only spend what the ask has left."""
+    def turn(prompt, resume_session_id, cold_start=False):
+        """A claude turn that can only spend what the ask has left; the
+        cold-start turn first adds COLD_START_EXTRA_SECONDS to it."""
+        nonlocal deadline
+        if cold_start:
+            deadline += COLD_START_EXTRA_SECONDS
         remaining = deadline - time.monotonic()
         if remaining <= 0:
             return None, (f"the ask's {timeout_seconds}s budget was already spent "
@@ -985,7 +993,7 @@ def _ask_within_lock(question, include_closed, seat_dir, repo, projects_root,
             mirror_path=full_result["mirror_dir"],
             question_files_path=ghi_issue_write.ghi_guide_agent_log_store()[1])
         # The cold-start turn asks nothing, so its structured_output is not read.
-        cold_reply, error = turn(cold_start_text, None)
+        cold_reply, error = turn(cold_start_text, None, cold_start=True)
         if cold_reply is None:
             return None, None, f"ghi-guide-agent cold-start failed: {error}"
         session_id = cold_reply["session_id"]
