@@ -5,7 +5,8 @@ the answer adds to the waiting item, `#new` or `#new_if_d`, that has not had a
 fast read, and its close step.
 
 Most cases run the program as a subprocess in a scratch checkout this suite
-made; the rest load it into this process, in a forked child where a signal
+made, started through nn-systems/general-tools/python-program-run-as-main-from-cached-bytecode-test-launcher.py
+so it is compiled once; the rest load it into this process, in a forked child where a signal
 must end the process. cold-read-fast-read.py is replaced by a stand-in this suite writes, so no
 case calls a model, except one case that runs a copy of the real
 cold-read-fast-read.py with stub models, to show the check reads that
@@ -42,6 +43,11 @@ _git_environment_fixture.remove_git_redirecting_environment_variables_from_this_
 
 PROGRAM = (Path(__file__).resolve().parents[1]
            / "walk-me-through-answer-added-texts-cold-read-fast-read-check-and-close.py")
+# Most cases start the program several times; through this launcher its 4,000 lines are compiled once, not at
+# every start.
+PROGRAM_START = [sys.executable, str(Path(__file__).resolve().parents[3] / "general-tools"
+                                     / "python-program-run-as-main-from-cached-bytecode-test-launcher.py"),
+                 str(PROGRAM)]
 _cold_read_scratch_fixture_spec = importlib.util.spec_from_file_location(
     "cold_read_scratch_repository_test_fixture",
     Path(__file__).resolve().parents[3] / "cold-read" / "tests"
@@ -304,7 +310,7 @@ class Case:
                 signal.signal(number, signal.SIG_IGN if number == ignored_signal else signal.SIG_DFL)
 
         return subprocess.run(
-            [sys.executable, str(PROGRAM), step, *flags, "--cwd", str(self.checkout),
+            [*PROGRAM_START, step, *flags, "--cwd", str(self.checkout),
              "--cold-read-records", str(self.records),
              "--fast-read-program", str(fast_read_program or self.stand_in),
              "--counts-log", str(counts_log or self.counts_log), "--gh-program", str(self.gh)],
@@ -4393,7 +4399,7 @@ def check_and_its_printed_retry_run_outside_the_checkout(case, flags, environmen
                        STAND_IN_ARGUMENTS=str(case.fast_read_arguments), STAND_IN_RECORDS=str(case.records),
                        TMPDIR=str(case.temporary_directory))
     paths_but_cwd = case_paths(case)[2:]
-    result = subprocess.run([sys.executable, str(PROGRAM), "check", *flags, "--cwd", str(case.checkout),
+    result = subprocess.run([*PROGRAM_START, "check", *flags, "--cwd", str(case.checkout),
                              *paths_but_cwd], capture_output=True, text=True, env=environment, cwd=elsewhere)
     printed = re.search("`(" + re.escape(shlex.join(["python3", str(PROGRAM)])) + " check [^`]*)`", result.stderr)
     if printed is None:
