@@ -618,6 +618,119 @@ def failed_suites_record_of(directory):
     return json.loads(failed_suites_record_file(directory).read_text())
 
 
+def newest_main_commit_left_no_test_failing_file(directory):
+    return (directory / "home" / ".local" / "state" / "nedsnodes"
+            / "newest-main-commit-whose-after-merge-test-run-left-no-test-failing.txt")
+
+
+def newest_main_commit_left_no_test_failing_of(directory):
+    path = newest_main_commit_left_no_test_failing_file(directory)
+    return path.read_text().strip() if path.is_file() else None
+
+
+def newest_main_commit_left_no_test_failing_written(text):
+    """A before_the_program_runs that writes text to the file, makes a directory there when
+    text is None, and writes nothing when text is "". In text, "PARENT" becomes the merge
+    commit's parent, origin's first commit, and "UNRELATED" a commit with no parent in the
+    review tools clone."""
+    def prepare(directory):
+        if text == "":
+            return
+        path = newest_main_commit_left_no_test_failing_file(directory)
+        path.parent.mkdir(parents=True, exist_ok=True)
+        if text is None:
+            path.mkdir()
+            return
+        review_tools = directory / "review-tools"
+        unrelated = subprocess.run(
+            ["git", *GIT_IDENTITY, "-C", str(review_tools), "commit-tree", "HEAD^{tree}",
+             "-m", "unrelated"], capture_output=True, text=True, env=GIT_ENVIRONMENT,
+            check=True).stdout.strip()
+        parent = git_output(directory / "origin-seed", "rev-parse", "HEAD~1")
+        path.write_text(text.replace("PARENT", parent).replace("UNRELATED", unrelated))
+    return prepare
+
+
+def newest_main_commit_left_no_test_failing_cases(scratch):
+    routes = default_routes([])
+    routes["pr merge"] = {"origin_main_to": "MERGE_COMMIT", "origin": "ORIGIN"}
+
+    def case(name, written, **options):
+        exit_code, output, _, _, _ = run_case(
+            scratch, name, [(GATE_PASSED, 0)], routes, merge_commit_new_to_the_clone=True,
+            before_the_program_runs=newest_main_commit_left_no_test_failing_written(written),
+            **options)
+        directory = scratch / name
+        return (exit_code, output, runner_calls(scratch, name),
+                git_output(directory / "origin-seed", "rev-parse", "HEAD~1"),
+                origin_commit(scratch, name), newest_main_commit_left_no_test_failing_of(directory))
+
+    exit_code, output, calls, parent, merge_commit, recorded = case(
+        "no-test-failing-at-parent", "PARENT\n")
+    path = newest_main_commit_left_no_test_failing_file(scratch / "no-test-failing-at-parent")
+    check("after-merge test run selects since the recorded newest main commit whose after-merge "
+          "test run left no test failing, and then records the merge commit in its place",
+          exit_code == 0 and len(calls) == 1
+          and calls[0]["argv"][:2] == ["--only-suites-whose-recorded-inputs-changed-since", parent]
+          and f"selecting the nn-test-suites whose recorded inputs changed since {parent[:12]}, "
+              f"the newest main commit whose after-merge test run left no test failing" in output
+          and "since the head commit" not in output
+          and recorded == merge_commit
+          and f"recorded {merge_commit[:12]} in {path}, so the next after-merge test run selects "
+              f"the suites whose recorded inputs changed since it" in output,
+          f"exit {exit_code}\n{output}\n{calls}\n{recorded}")
+
+    for name, runner_answer, why in (
+            ("no-test-failing-kept-after-a-failed-run", (RUNNER_FAILED, 1), "failed"),
+            ("no-test-failing-kept-after-a-run-with-no-summary",
+             ("PASS scripts/some-test.py (1s)\n", 0), "printed no SUMMARY line"),
+            ("no-test-failing-kept-after-a-killed-run", ("PASS scripts/some-test.py (1s)\n", -9),
+             "was killed")):
+        exit_code, output, calls, parent, merge_commit, recorded = case(
+            name, "PARENT\n", runner_answer=runner_answer)
+        check(f"an after-merge test run that {why} exits 3 and leaves the recorded commit as it "
+              f"was, so the next run still compares with the commit before the break",
+              exit_code == 3 and recorded == parent
+              and calls[0]["argv"][:2] == ["--only-suites-whose-recorded-inputs-changed-since",
+                                           parent],
+              f"exit {exit_code}\n{output}\n{recorded}")
+
+    for name, written, why in (
+            ("no-test-failing-file-missing", "", "does not exist"),
+            ("no-test-failing-file-malformed", "not a commit\n",
+             "does not hold one commit hash of 40 characters. The next after-merge test run that "
+             "leaves no test failing replaces it"),
+            ("no-test-failing-file-names-an-unknown-commit", "b" * 40 + "\n",
+             f"git could not say whether {'b' * 12}, which "),
+            ("no-test-failing-file-names-a-commit-not-an-ancestor", "UNRELATED\n",
+             "is not an ancestor of ")):
+        exit_code, output, calls, parent, merge_commit, recorded = case(name, written)
+        check(f"{name.replace('-', ' ')}: the after-merge test run selects since the head commit, "
+              f"as before, prints why, and records the merge commit once it leaves no test "
+              f"failing",
+              exit_code == 0 and len(calls) == 1
+              and calls[0]["argv"][:2] == ["--only-suites-whose-recorded-inputs-changed-since",
+                                           HEAD]
+              and "no main commit whose after-merge test run left no test failing is used: " in output
+              and why in output
+              and f"changed since the head commit {HEAD[:12]}, which selects more suites" in output
+              and recorded == merge_commit,
+              f"exit {exit_code}\n{output}\n{calls}\n{recorded}")
+
+    exit_code, output, calls, parent, merge_commit, recorded = case(
+        "no-test-failing-file-a-directory", None)
+    path = newest_main_commit_left_no_test_failing_file(scratch / "no-test-failing-file-a-directory")
+    check("a record that cannot be read or written: the after-merge test run selects since the "
+          "head commit, says why, and exits 3 with a STOP saying the merge commit was not recorded",
+          exit_code == 3 and calls[0]["argv"][:2] == [
+              "--only-suites-whose-recorded-inputs-changed-since", HEAD]
+          and f"{path} could not be read: " in output
+          and f"STOP: merged, and main's test run left no test failing, but {merge_commit[:12]} "
+              f"was not recorded in {path}: " in output
+          and f"Otherwise, {TELL_THE_USER_WITH_THE_ERROR}" in output,
+          f"exit {exit_code}\n{output}\n{calls}")
+
+
 def author_seat_made(directory):
     task_list = directory / "home" / ".claude" / "tasks" / "nedsnodes-author-seat-tasks"
     task_list.mkdir(parents=True)
@@ -657,8 +770,10 @@ def failed_suites_kept_in_view_cases(scratch):
             scratch, "failed-suite-known", [(GATE_PASSED, 0)], default_routes([]),
             runner_answer=(RUNNER_FAILED, 1), before_the_program_runs=recorded_with_author)
         directory = scratch / "failed-suite-known"
-        check("a merge that fails only a recorded suite exits 0, with a notice and no second task",
+        check("a merge that fails only a recorded suite exits 0, with a notice and no second task, "
+              "and is not recorded as a commit whose after-merge test run left no test failing",
               exit_code == 0 and "STOP" not in output
+              and not newest_main_commit_left_no_test_failing_file(directory).exists()
               and "failed only suites already on the failed suites record" in output
               and failed_suites_record_of(directory)["scripts/broken-test.py"]["failed_tests"][
                   "scripts/broken-test.py"]["repair_task_id"] == 3
@@ -685,16 +800,23 @@ def failed_suites_kept_in_view_cases(scratch):
               and len(calls) == 2 and "--only-suites-named" in calls[1]["argv"]
               and "scripts/broken-test.py" in calls[1]["argv"]
               and "--leave-recorded-inputs-and-failure-history-unchanged" in calls[1]["argv"]
-              and "scripts/broken-test.py left the failed suites record: it passed" in output,
+              and "scripts/broken-test.py left the failed suites record: it passed" in output
+              and newest_main_commit_left_no_test_failing_of(
+                  scratch / "failed-suite-rerun-passes")
+              == origin_commit(scratch, "failed-suite-rerun-passes"),
               f"exit {exit_code}\n{output}\n{calls}")
 
         exit_code, output, _, _, _ = run_case(
             scratch, "failed-suite-rerun-fails", [(GATE_PASSED, 0)], default_routes([]),
             origin_files=broken_on_origin, before_the_program_runs=recorded_and_rerun(
                 "FAIL scripts/broken-test.py exit 1 (1s)\nSUMMARY: 0 passed, 1 failed, 1 total\n", 1))
-        check("a recorded suite that fails its rerun stays on the record, and the merge exits 0",
+        check("a recorded suite that fails its rerun stays on the record, and the merge exits 0, "
+              "though the selective test run passed, without recording the merge commit as one "
+              "whose after-merge test run left no test failing",
               exit_code == 0 and "scripts/broken-test.py" in failed_suites_record_of(
                   scratch / "failed-suite-rerun-fails")
+              and not newest_main_commit_left_no_test_failing_file(
+                  scratch / "failed-suite-rerun-fails").exists()
               and "FAILED TEST SUITES ON MAIN" in output, f"exit {exit_code}\n{output}")
 
         exit_code, output, _, _, _ = run_case(
@@ -1964,6 +2086,7 @@ def main():
               and not merge_commit_worktree.exists(), f"exit {exit_code}\n{output}")
 
         failed_suites_kept_in_view_cases(scratch)
+        newest_main_commit_left_no_test_failing_cases(scratch)
 
         exit_code, output, _, _, _ = run_case(
             scratch, "after-merge-could-not-run", [(GATE_PASSED, 0)],
