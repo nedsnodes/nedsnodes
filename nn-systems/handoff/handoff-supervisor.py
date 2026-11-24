@@ -1368,8 +1368,9 @@ CONVERSATION_TAIL_LAST_LINES_HEADING_TEMPLATE = (
 # Names the path, which changes each generation, so a copy of an earlier session's closing
 # sentence inside the copied lines is not taken for this one.
 CONVERSATION_TAIL_LAST_LINES_END_SENTENCE_TEMPLATE = (
-    "\n\nThe copied lines of {conversation_tail_path} end here. The instructions above them, "
-    "which open with \"Read {conversation_tail_path}\", say what to do.")
+    "\n\nThe copied lines of {conversation_tail_path} end here. The instructions above the "
+    "heading \"The end of the last session\", which open with \"Read {conversation_tail_path}\", "
+    "say what to do.")
 
 
 def successor_initial_agent_instructions_ending_with_conversation_tail_last_lines(
