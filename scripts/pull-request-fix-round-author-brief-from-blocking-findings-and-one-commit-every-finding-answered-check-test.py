@@ -940,7 +940,7 @@ def stopped_round_cases(root, repository, made, frozen_head, dated_routes, submi
           line == f"cd {made} && python3 scripts/{PROGRAM.name} {NUMBER}" and code == 0
           and answers.read_text() == "1. \n2. \n", line + err + out)
     kept_directory = (Path(git(made, "rev-parse", "--path-format=absolute", "--git-common-dir"))
-                      / "fix-round-answers-kept-copies" / f"pr-{NUMBER}-frozen-head-{frozen_head}")
+                      / "fix-round-answers-kept-copies" / f"pr-{NUMBER}-review-11")
     shutil.rmtree(kept_directory, ignore_errors=True)
     write_answers(GOOD_ANSWERS, -60)
     code, out, err = run(root, repository, dated_routes)
@@ -959,8 +959,9 @@ def stopped_round_cases(root, repository, made, frozen_head, dated_routes, submi
           code == 0 and answers.read_text() == "1. \n2. \n" and [path.read_text() for path in new_copies] == [partial]
           and all(path.read_text() == text for path, text in kept_copies.items()), err + out)
     check("answers kept: the brief names the earlier copy, then the copy it just made",
-          len(new_copies) == 1 and out.find(f"copied it unchanged to {next(iter(kept_copies))}")
-          < out.find(f"copied it unchanged to {new_copies[0]}") != -1, out)
+          len(new_copies) == 1
+          and 0 <= out.find(f"copied it unchanged to {next(iter(kept_copies))}")
+          < out.find(f"copied it unchanged to {new_copies[0]}"), out)
     copies_before = sorted(kept_directory.iterdir())
     write_answers(partial, 60)
     before = answers.read_bytes()
@@ -1096,7 +1097,17 @@ def topic_worktree_cases(root, repository, base, frozen_head):
     code, out, err = run(root, repository, routes)
     check("topic-worktree: an untracked file refuses the brief with exit 1, naming it and how to remove it",
           code == 1 and out == "" and "stray.txt" in err and "uncommitted changes or untracked files" in err
-          and f"git -C {made} clean -d --force" in err, err + out)
+          and f"git -C {made} clean -d --force --exclude=/{ANSWERS_NAME}" in err, err + out)
+    clean_line = next((line for line in err.splitlines() if " clean -d --force" in line), "")
+    unignored = root / "branch-whose-gitignore-lacks-the-answers-file"
+    git(root, "init", "-q", str(unignored))
+    (unignored / ANSWERS_NAME).write_text(GOOD_ANSWERS)
+    leftover = unignored / f"{Path(ANSWERS_NAME).stem}-killed.md"
+    leftover.write_text("1. \n")
+    subprocess.run(clean_line.replace(str(made), str(unignored)), shell=True, check=True, capture_output=True)
+    check("topic-worktree: the printed clean command, on a branch whose .gitignore does not name the answers file, "
+          "keeps the answers file and removes a temporary file a killed brief run left",
+          (unignored / ANSWERS_NAME).read_text() == GOOD_ANSWERS and not leftover.exists(), clean_line)
     (made / "stray.txt").unlink()
     (made / "hook.py").write_text("changed\n")
     code, out, err = run(root, repository, routes)
@@ -2196,8 +2207,8 @@ def answers_write_failure_cases(root, repository, _base, frozen_head):
 
     removed_worktree = root / "worktree-removed-after-a-copy"
     git(repository, "worktree", "add", "-q", "--detach", str(removed_worktree), frozen_head)
-    surviving_directory = program.pull_request_fix_round_answers_kept_copies_directory_path_for_frozen_head(
-        removed_worktree, NUMBER, frozen_head
+    surviving_directory = program.pull_request_fix_round_answers_kept_copies_directory_path_for_round_review(
+        removed_worktree, NUMBER, 11
     )
     answers.write_text("1. An answer the worktree's removal must not delete.\n")
     surviving = program.answers_file_text_kept_in_new_copy(answers, surviving_directory)
@@ -2215,6 +2226,33 @@ def answers_write_failure_cases(root, repository, _base, frozen_head):
         surviving_directory.chmod(0o755)
     check("answers kept: a copies directory that cannot be listed fails instead of reading as empty",
           error is not None and "could not list the kept copies" in error, str(error))
+    round_one = program.pull_request_fix_round_answers_kept_copies_directory_path_for_round_review(
+        repository, NUMBER, 11)
+    check("answers kept: two rounds on one frozen-head get two copies directories, and a rerun of a round its own",
+          round_one != program.pull_request_fix_round_answers_kept_copies_directory_path_for_round_review(
+              repository, NUMBER, 12)
+          and round_one == program.pull_request_fix_round_answers_kept_copies_directory_path_for_round_review(
+              repository, NUMBER, 11), str(round_one))
+    overlap_directory = root / "overlapping-runs-copies"
+    other_run_answers = root / "other-run-answers.md"
+    other_run_answers.write_text("1. An answer the other run copied.\n")
+    answers.write_text("1. \n")
+    real_write = program.answers_file_with_one_line_per_finding_write
+
+    def write_after_other_run_copied(path, finding_count, kept_copies_directory):
+        # The other run lists, copies and writes between this run's listing and its write.
+        program.answers_file_text_kept_in_new_copy(other_run_answers, kept_copies_directory)
+        return real_write(path, finding_count, kept_copies_directory)
+
+    program.answers_file_with_one_line_per_finding_write = write_after_other_run_copied
+    try:
+        named = program.answers_file_written_and_round_copies_oldest_first(answers, 1, overlap_directory)
+    finally:
+        program.answers_file_with_one_line_per_finding_write = real_write
+    check("answers kept: a run that finds only placeholders still names the copy an overlapping run made after "
+          "this run listed the directory",
+          [path.read_text() for path in named] == ["1. An answer the other run copied.\n"], str(named))
+    shutil.rmtree(overlap_directory)
     check("answers kept: a missing copies directory holds no copies",
           program.answers_kept_copies_oldest_first(root / "no-copies-directory") == [], "")
     shutil.rmtree(surviving_directory)
