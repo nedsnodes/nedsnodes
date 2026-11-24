@@ -126,7 +126,7 @@ from zoneinfo import ZoneInfo
 HERE = Path(__file__).resolve().parent
 TRANSCRIPT_READER_FILE = HERE / "search-user-messages-in-transcripts.py"
 GIT_ENVIRONMENT_FILE = (HERE.parent / "nn-systems" / "general-tools"
-                        / "git-redirecting-environment-variables-removal-common.py")
+                        / "git_redirecting_environment_variables_removal_common.py")
 RUN_AGAIN_COMMAND = f"python3 {Path(__file__).resolve()}"
 
 DEFAULT_LOG_STORE = Path("/home/nedlern/nedsnodes-logs")
@@ -249,7 +249,7 @@ END;
 _repository_names_spec = importlib.util.spec_from_file_location(
     "github_repository_name_and_name_before_project_rename_common",
     Path(__file__).resolve().parents[1] / "nn-systems" / "general-tools"
-    / "github-repository-name-and-name-before-project-rename-common.py")
+    / "github_repository_name_and_name_before_project_rename_common.py")
 repository_names = importlib.util.module_from_spec(_repository_names_spec)
 _repository_names_spec.loader.exec_module(repository_names)
 GHI_REFERENCE = re.compile(
@@ -424,7 +424,7 @@ class Repository:
 # names, and the project rename left those records as they were.
 _path_names_spec = importlib.util.spec_from_file_location(
     "project_rename_path_names_before_and_after_common",
-    Path(__file__).resolve().with_name("project-rename-path-names-before-and-after-common.py"))
+    Path(__file__).resolve().with_name("project_rename_path_names_before_and_after_common.py"))
 _path_names = importlib.util.module_from_spec(_path_names_spec)
 _path_names_spec.loader.exec_module(_path_names)
 convert_file_path_before_project_rename_to_path_after = _path_names.convert_file_path_before_project_rename_to_path_after

@@ -12,7 +12,7 @@ and a `<main>` with the walk's name and the item's text rendered from Markdown, 
 N and M are the running count of the item's heading; the walk name is the walk-document's file name without `.md`.
 
 The item is found as the walk-me-through hooks and the walk check program find it, through
-walk-me-through-approval-walk-minutes-and-walk-document-item-finder-common.py: its unit runs from the heading that
+walk_me_through_approval_walk_minutes_and_walk_document_item_finder_common.py: its unit runs from the heading that
 names it to the next item, a sub-step such as `### Item 4.1 of 9` being an item of its own. An item that shares a
 heading with others keeps only its own lines, from its opening, such as `**Item 12:**`, to the next opening; with
 no opening of its own, it keeps the heading's lines. A `Withdrawn` heading ends the item it falls in, and a
@@ -73,7 +73,7 @@ from pathlib import Path
 
 HERE = Path(__file__).resolve().parent
 HEAD_STYLES_AND_FONTS_FILE = HERE / "walk-me-through-approval-walk-item-page-html-head-styles-and-fonts.html"
-FINDER_FILE = HERE / "walk-me-through-approval-walk-minutes-and-walk-document-item-finder-common.py"
+FINDER_FILE = HERE / "walk_me_through_approval_walk_minutes_and_walk_document_item_finder_common.py"
 RECOMMENDATION_CLASS = "rec"
 TAG_CLASS = "tag"
 UNSAFE_LINK_SCHEMES = ("javascript:", "vbscript:", "data:")

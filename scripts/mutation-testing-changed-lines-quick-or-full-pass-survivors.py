@@ -414,14 +414,14 @@ TEST_SUITE_RUNNER_LOG_DIRECTORIES_PARENT_RETENTION_SECONDS = 2 * 24 * 3600
 _git_output_spec = importlib.util.spec_from_file_location(
     "git_machine_readable_output_runner_and_parser_common",
     Path(__file__).resolve().parents[1] / "nn-systems" / "general-tools"
-    / "git-machine-readable-output-runner-and-parser-common.py")
+    / "git_machine_readable_output_runner_and_parser_common.py")
 git_output = importlib.util.module_from_spec(_git_output_spec)
 _git_output_spec.loader.exec_module(git_output)
 
 _stop_signals_spec = importlib.util.spec_from_file_location(
     "stop_signal_sigterm_or_sighup_raises_system_exit_so_cleanup_runs_common",
     Path(__file__).resolve().parents[1] / "nn-systems" / "general-tools"
-    / "stop-signal-sigterm-or-sighup-raises-system-exit-so-cleanup-runs-common.py")
+    / "stop_signal_sigterm_or_sighup_raises_system_exit_so_cleanup_runs_common.py")
 stop_signals = importlib.util.module_from_spec(_stop_signals_spec)
 _stop_signals_spec.loader.exec_module(stop_signals)
 

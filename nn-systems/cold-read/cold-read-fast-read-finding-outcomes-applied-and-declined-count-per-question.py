@@ -34,11 +34,11 @@ def _load(name, path):
 
 
 finding_outcomes = _load("cold_read_fast_read_report_findings_parse_and_finding_outcomes_check_common",
-                         HERE / "cold-read-fast-read-report-findings-parse-and-finding-outcomes-check-common.py")
+                         HERE / "cold_read_fast_read_report_findings_parse_and_finding_outcomes_check_common.py")
 record_shipper = _load("cold_read_record_ship", HERE / "cold-read-record-ship.py")
 ned_box_home = _load("ned_box_home_directory_and_its_mac_mount_point_path_constants_common",
                      HERE.parent / "general-tools"
-                     / "ned-box-home-directory-and-its-mac-mount-point-path-constants-common.py")
+                     / "ned_box_home_directory_and_its_mac_mount_point_path_constants_common.py")
 
 
 class RecordsDirectoryUnreadable(Exception):

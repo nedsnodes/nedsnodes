@@ -50,14 +50,14 @@ DESIGN_PATH = REPOSITORY_ROOT / DESIGN_RELATIVE_PATH
 _rule_failure_lines_spec = importlib.util.spec_from_file_location(
     "rule_enforcing_nn_test_suite_failure_message_closing_lines_text_common",
     REPOSITORY_ROOT / "nn-systems" / "general-tools"
-    / "rule-enforcing-nn-test-suite-failure-message-closing-lines-text-common.py")
+    / "rule_enforcing_nn_test_suite_failure_message_closing_lines_text_common.py")
 RULE_FAILURE_LINES = importlib.util.module_from_spec(_rule_failure_lines_spec)
 _rule_failure_lines_spec.loader.exec_module(RULE_FAILURE_LINES)
 
 
 def load_state_tables_module():
     spec = importlib.util.spec_from_file_location(
-        "design_to_main_state_tables", MACHINE_DIRECTORY / "design-to-main-state-tables-common.py")
+        "design_to_main_state_tables", MACHINE_DIRECTORY / "design_to_main_state_tables_common.py")
     module = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(module)
     return module
@@ -409,10 +409,10 @@ class EachFailureMessageNamesTheRuleAndOneFixPerCause(unittest.TestCase):
     def test_a_string_gone_from_its_cited_module_prints_the_rule_and_one_fix_per_cause(self):
         message = self.failure_message(
             assert_each_outside_name_is_a_literal_in_its_module,
-            {"no-such-planted-name": ("design-to-main-state-tables-common.py", "planted")})
+            {"no-such-planted-name": ("design_to_main_state_tables_common.py", "planted")})
         self.assertTrue(message.rstrip().endswith("\n".join([
             "no-such-planted-name is listed in MACHINE_NAMES_DEFINED_OUTSIDE_THE_STATE_TABLES_MODULE "
-            "as a string in scripts/design-to-main/design-to-main-state-tables-common.py, and that "
+            "as a string in scripts/design-to-main/design_to_main_state_tables_common.py, and that "
             "file no longer spells it; the entry is how this suite accepts a design name the state "
             "tables module does not define.",
             "If your change removed the string by mistake, put it back.",

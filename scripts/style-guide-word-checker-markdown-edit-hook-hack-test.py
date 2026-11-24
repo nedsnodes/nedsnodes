@@ -43,10 +43,10 @@ _git_environment_fixture.remove_git_redirecting_environment_variables_from_this_
 HOOK_PATH = Path(__file__).with_name("style-guide-word-checker-markdown-edit-hook-hack.py")
 CHECKER_PATH = Path(__file__).with_name("style-guide-word-checker-hack.py")
 SHARED_GIT_TRACKING_CHECK_RELATIVE_PATH = Path(
-    "nn-systems", "general-tools", "edited-file-path-within-checkout-root-and-git-check-ignore-common.py")
+    "nn-systems", "general-tools", "edited_file_path_within_checkout_root_and_git_check_ignore_common.py")
 SHARED_GIT_TRACKING_CHECK_PATH = (Path(__file__).resolve().parents[1]
                                   / SHARED_GIT_TRACKING_CHECK_RELATIVE_PATH)
-GIT_RUNNER_MODULE_NAME = "git-machine-readable-output-runner-and-parser-common.py"
+GIT_RUNNER_MODULE_NAME = "git_machine_readable_output_runner_and_parser_common.py"
 
 CLEAN_ENVIRONMENT = {name: value for name, value in os.environ.items()
                      if name not in _git_environment_fixture.GIT_REDIRECTING_ENVIRONMENT_VARIABLES}

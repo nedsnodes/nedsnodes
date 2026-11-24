@@ -98,7 +98,7 @@ supervisor = importlib.util.module_from_spec(_supervisor_spec)
 _supervisor_spec.loader.exec_module(supervisor)
 
 _session_handoff_field_names_spec = importlib.util.spec_from_file_location(
-    "session_handoff_field_names", Path(__file__).with_name("session-handoff-field-names-common.py")
+    "session_handoff_field_names", Path(__file__).with_name("session_handoff_field_names_common.py")
 )
 field_names = importlib.util.module_from_spec(_session_handoff_field_names_spec)
 _session_handoff_field_names_spec.loader.exec_module(field_names)

@@ -94,7 +94,7 @@ Note: "the follow-up pull request" in this item meant the follow-up to PR 3605 f
 >
 > Recommendation: change nothing until an emergency stop shows the race.
 
-Note: "the newest file not lifted is in force" in this item is looser than the merged reader, `nn-systems/skills/emergency-stop/emergency-stop-file-in-force-read-common.py`, which looks only at the newest emergency-stop file and counts a stop in force while that file's last line is not a lift line.
+Note: "the newest file not lifted is in force" in this item is looser than the merged reader, `nn-systems/skills/emergency-stop/emergency_stop_file_in_force_read_common.py`, which looks only at the newest emergency-stop file and counts a stop in force while that file's last line is not a lift line.
 
 ### Open decision: how work restarts after an emergency stop
 

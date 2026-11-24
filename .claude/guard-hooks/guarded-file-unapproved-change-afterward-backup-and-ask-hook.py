@@ -273,7 +273,7 @@ def loaded(name, path):
 
 
 GUARD_DECISION_FILE_NAMES = ("instruction-file-guard.py",
-                             "draft-document-place-directories-definition-and-membership-common.py")
+                             "draft_document_place_directories_definition_and_membership_common.py")
 _guard_version = None
 
 
@@ -1568,7 +1568,7 @@ def approve(pairs, cwd: Path):
                       "run this command from your session's checkout")
     marker = checkout / APPROVAL_MARKER_NAME
     words = loaded("guard_approval_marker_common",
-                   HOOK_PATH.parent / "guard-approval-marker-common.py").read_marker_approval(marker)
+                   HOOK_PATH.parent / "guard_approval_marker_common.py").read_marker_approval(marker)
     if words is None:
         raise Refused(f"there is no approval in {marker}. Show the user each change and ask him; "
                       f"if he approves, write his words into {marker} and run this command again")

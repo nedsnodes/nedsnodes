@@ -185,13 +185,13 @@ from pathlib import Path
 
 _shell_reader_spec = importlib.util.spec_from_file_location(
     "shell_command_tree_sitter_bash_reader_common",
-    Path(__file__).resolve().with_name("shell-command-tree-sitter-bash-reader-common.py"))
+    Path(__file__).resolve().with_name("shell_command_tree_sitter_bash_reader_common.py"))
 shell_reader = importlib.util.module_from_spec(_shell_reader_spec)
 _shell_reader_spec.loader.exec_module(shell_reader)
 
 _next_step_lines_spec = importlib.util.spec_from_file_location(
     "failed_command_tool_message_to_agent_rerun_once_then_stop_and_report_lines_common",
-    Path(__file__).resolve().with_name("failed-command-tool-message-to-agent-rerun-once-then-stop-and-report-lines-common.py"))
+    Path(__file__).resolve().with_name("failed_command_tool_message_to_agent_rerun_once_then_stop_and_report_lines_common.py"))
 next_step_lines = importlib.util.module_from_spec(_next_step_lines_spec)
 _next_step_lines_spec.loader.exec_module(next_step_lines)
 

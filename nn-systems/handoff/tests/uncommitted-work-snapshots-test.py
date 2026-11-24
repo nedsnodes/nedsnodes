@@ -50,31 +50,31 @@ POST_CHECKOUT_HOOK_RELATIVE = Path("scripts/git-client-side-hooks/post-checkout"
 OWNER_FILE_MODULE_RELATIVE = Path("scripts/worktree-owner-file-read-and-write.py")
 CLEANER_RELATIVE = Path("scripts/clean-worktrees.py")
 GIT_OUTPUT_MODULE_RELATIVE = Path(
-    "nn-systems/general-tools/git-machine-readable-output-runner-and-parser-common.py")
+    "nn-systems/general-tools/git_machine_readable_output_runner_and_parser_common.py")
 TASK_WRITE_MODULE_RELATIVE = Path(
-    "nn-systems/general-tools/agent-seat-task-list-new-pending-task-write-common.py")
+    "nn-systems/general-tools/agent_seat_task_list_new_pending_task_write_common.py")
 TASK_FILE_REWRITE_MODULE_RELATIVE = Path(
-    "nn-systems/general-tools/agent-seat-task-list-task-file-rewrite-common.py")
+    "nn-systems/general-tools/agent_seat_task_list_task_file_rewrite_common.py")
 NEXT_STEP_LINES_MODULE_RELATIVE = Path(
-    "nn-systems/general-tools/failed-command-tool-message-to-agent-rerun-once-then-stop-and-report-lines-common.py")
+    "nn-systems/general-tools/failed_command_tool_message_to_agent_rerun_once_then_stop_and_report_lines_common.py")
 LOG_STORE_WRITER_MODULE_RELATIVE = Path(
     "nn-systems/handoff/handoff-user-review-of-agent-memory-stores-mark.py")
 NED_BOX_HOME_CONSTANTS_MODULE_RELATIVE = Path(
-    "nn-systems/general-tools/ned-box-home-directory-and-its-mac-mount-point-path-constants-common.py")
+    "nn-systems/general-tools/ned_box_home_directory_and_its_mac_mount_point_path_constants_common.py")
 # The cleaner reads the review checkouts directory from the merge-lane helpers' common module,
 # which loads the repository-name module and the test runner, which loads the git-redirecting
 # variables module, the attendance check and the project-rename path names.
 MERGE_LANE_COMMON_MODULE_RELATIVE = Path(
     "scripts/merge-lane-pull-request-helpers-common-options-paths-and-token.py")
 REPOSITORY_NAME_MODULE_RELATIVE = Path(
-    "nn-systems/general-tools/github-repository-name-and-name-before-project-rename-common.py")
+    "nn-systems/general-tools/github_repository_name_and_name_before_project_rename_common.py")
 TEST_RUNNER_RELATIVE = Path("scripts/run-all-test-suites.py")
 GIT_REDIRECTING_REMOVAL_MODULE_RELATIVE = Path(
-    "nn-systems/general-tools/git-redirecting-environment-variables-removal-common.py")
+    "nn-systems/general-tools/git_redirecting_environment_variables_removal_common.py")
 ATTENDANCE_CHECK_MODULE_RELATIVE = Path(
-    "nn-systems/general-tools/agent-session-unattended-by-user-check-common.py")
+    "nn-systems/general-tools/agent_session_unattended_by_user_check_common.py")
 PROJECT_RENAME_PATH_NAMES_MODULE_RELATIVE = Path(
-    "scripts/project-rename-path-names-before-and-after-common.py")
+    "scripts/project_rename_path_names_before_and_after_common.py")
 
 # The cleaner's --remove run below would otherwise append to the real log-store's log of removals.
 _removals_log_directory = tempfile.mkdtemp(prefix="uncommitted-work-snapshots-test-removals-log-")

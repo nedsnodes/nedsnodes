@@ -23,7 +23,7 @@ Until it lands, the paused jobs are listed only in a free-text brief, and whoeve
 
 ## Design points to carry
 
-- The hook `nn-systems/skills/emergency-stop/emergency-stop-file-shown-and-push-and-merge-refusal-hook.py` and the `status` subcommand read the stop file through `nn-systems/skills/emergency-stop/emergency-stop-file-in-force-read-common.py`. A new record line must not change what they read, such as by making the file read as Unreadable.
+- The hook `nn-systems/skills/emergency-stop/emergency-stop-file-shown-and-push-and-merge-refusal-hook.py` and the `status` subcommand read the stop file through `nn-systems/skills/emergency-stop/emergency_stop_file_in_force_read_common.py`. A new record line must not change what they read, such as by making the file read as Unreadable.
 - That reader counts a stop as lifted only when the lift line is the stop file's last line. So `lift` writes its resume records before it appends the lift line; a record written after the lift line would put the stop back in force.
 - A `resume-job` run on the other machine after the lift must not put the stop back in force. Its record therefore cannot be a line appended to the lifted stop file; the build chooses where it goes, such as a file beside the stop file, and the reader must still find it.
 - After a lift, a job recorded as paused and not yet resumed would otherwise be forgotten, since the hook no longer shows a lifted stop. So `status`, and the hook on each machine, keep naming the jobs recorded as paused on that machine and not yet resumed, until `resume-job` records each one.

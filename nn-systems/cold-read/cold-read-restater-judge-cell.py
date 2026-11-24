@@ -39,7 +39,7 @@ Exit codes: 0 a model produced a report; 1 every model in the chain failed to
 produce one; 64 this program refused the invocation and never launched a
 model, naming its own fix -- a --prompt-file naming no file, or naming an
 empty one, is refused that way like any other bad invocation. 64 rather than the conventional 2 for the reason
-written beside EXIT_BAD_INVOCATION in nn-systems/cold-read/cold-read-cell-common.py, which
+written beside EXIT_BAD_INVOCATION in nn-systems/cold-read/cold_read_cell_common.py, which
 every cold-read-cell shares.
 
 WHAT THIS LEG SHARES WITH THE OTHER COLD-READ-CELLS, AND WHERE IT PARTS FROM THEM.
@@ -97,7 +97,7 @@ run at a level nobody chose.
 WHY THIS COLD-READ-CELL'S STAMP CARRIES NO `tokens=` FIELD: the same reason
 the Claude leg's does not -- the Claude CLI prints no "tokens used" line,
 so the field is omitted rather than filled with a zero. If the CLI starts
-printing one, the shared parser in nn-systems/cold-read/cold-read-cell-common.py picks
+printing one, the shared parser in nn-systems/cold-read/cold_read_cell_common.py picks
 it up with no change here.
 """
 
@@ -111,7 +111,7 @@ import sys
 import time
 
 _common_spec = importlib.util.spec_from_file_location(
-    "cold_read_cell_common", pathlib.Path(__file__).with_name("cold-read-cell-common.py")
+    "cold_read_cell_common", pathlib.Path(__file__).with_name("cold_read_cell_common.py")
 )
 common = importlib.util.module_from_spec(_common_spec)
 _common_spec.loader.exec_module(common)

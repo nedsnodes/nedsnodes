@@ -105,7 +105,7 @@ def markdown_commonmark_parser_with_tables_common():
     specification = importlib.util.spec_from_file_location(
         "markdown_commonmark_parser_with_tables_common",
         Path(__file__).resolve().parents[1] / "nn-systems" / "general-tools"
-        / "markdown-commonmark-parser-with-tables-common.py")
+        / "markdown_commonmark_parser_with_tables_common.py")
     module = importlib.util.module_from_spec(specification)
     specification.loader.exec_module(module)
     return module
@@ -130,7 +130,7 @@ def _load_edited_file_path_within_checkout_root_and_git_check_ignore():
     specification = importlib.util.spec_from_file_location(
         "edited_file_path_within_checkout_root_and_git_check_ignore_common",
         Path(__file__).resolve().parents[1] / "nn-systems" / "general-tools"
-        / "edited-file-path-within-checkout-root-and-git-check-ignore-common.py")
+        / "edited_file_path_within_checkout_root_and_git_check_ignore_common.py")
     module = importlib.util.module_from_spec(specification)
     specification.loader.exec_module(module)
     return module

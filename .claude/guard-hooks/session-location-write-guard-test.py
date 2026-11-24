@@ -411,8 +411,8 @@ with tempfile.TemporaryDirectory() as temporary_directory:
     (broken_tree / "scripts").mkdir()
     import shutil as _copier
     _copier.copy(SCRIPT_PATH, broken_tree / ".claude" / "guard-hooks" / SCRIPT_PATH.name)
-    for shared_module in ("guard-approval-marker-common.py",
-                          "guard-hook-crash-fail-open-with-notice-common.py"):
+    for shared_module in ("guard_approval_marker_common.py",
+                          "guard_hook_crash_fail_open_with_notice_common.py"):
         _copier.copy(SCRIPT_PATH.resolve().parent / shared_module,
                      broken_tree / ".claude" / "guard-hooks" / shared_module)
     (broken_tree / "scripts" / "checkout-freshness-catch-up.py").write_text(

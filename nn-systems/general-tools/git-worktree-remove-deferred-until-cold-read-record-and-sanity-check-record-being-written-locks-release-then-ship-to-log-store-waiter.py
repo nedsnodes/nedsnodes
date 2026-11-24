@@ -278,7 +278,7 @@ def agent_seat_task_write(list_directory, worktree, command, failure, output, re
     if already is not None:
         return f"agent-seat task already pending for this worktree: {already} in {list_directory}"
     task_list = module_at(REPOSITORY_ROOT / "nn-systems" / "general-tools"
-                          / "agent-seat-task-list-new-pending-task-write-common.py",
+                          / "agent_seat_task_list_new_pending_task_write_common.py",
                           "agent_seat_task_list_new_pending_task_write_common")
     task_id = task_list.agent_seat_task_list_new_pending_task_write(
         list_directory,
@@ -296,7 +296,7 @@ def user_alert_write(ned_box_home, worktree, failure, records_text, log_path):
     """Write the user-alert under ned_box_home, which the user-alerts module reads from HOME; for a removal whose
     agent-session has no task list to write a task on."""
     alerts = module_at(REPOSITORY_ROOT / "nn-systems" / "general-tools"
-                       / "user-alerts-pending-and-claimed-files-write-claim-release-and-delete-common.py",
+                       / "user_alerts_pending_and_claimed_files_write_claim_release_and_delete_common.py",
                        "user_alerts_pending_and_claimed_files_write_claim_release_and_delete_common")
     home_as_given = os.environ.get("HOME")
     os.environ["HOME"] = str(ned_box_home)

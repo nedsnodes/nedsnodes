@@ -39,19 +39,19 @@ _git_environment_fixture.remove_git_redirecting_environment_variables_from_this_
 _next_step_lines_spec = importlib.util.spec_from_file_location(
     "failed_command_tool_message_to_agent_rerun_once_then_stop_and_report_lines_common",
     Path(__file__).resolve().parents[1] / "nn-systems" / "general-tools"
-    / "failed-command-tool-message-to-agent-rerun-once-then-stop-and-report-lines-common.py")
+    / "failed_command_tool_message_to_agent_rerun_once_then_stop_and_report_lines_common.py")
 next_step_lines = importlib.util.module_from_spec(_next_step_lines_spec)
 _next_step_lines_spec.loader.exec_module(next_step_lines)
 
 CHECK_SCRIPT = Path(__file__).with_name("dangling-path-citation-check.py")
 LINT_SCRIPT = Path(__file__).with_name("md-drift-lint.py")
 LINT_OVERVIEW_PATH_MODULE = Path(__file__).with_name(
-    "architecture-overview-path-template-and-checked-against-commit-reader-common.py")
+    "architecture_overview_path_template_and_checked_against_commit_reader_common.py")
 GIT_OUTPUT_MODULE = (Path(__file__).resolve().parents[1] / "nn-systems" / "general-tools"
-                     / "git-machine-readable-output-runner-and-parser-common.py")
+                     / "git_machine_readable_output_runner_and_parser_common.py")
 NEXT_STEP_LINES_MODULE = GIT_OUTPUT_MODULE.with_name(
-    "failed-command-tool-message-to-agent-rerun-once-then-stop-and-report-lines-common.py")
-REPOSITORY_NAMES_MODULE = GIT_OUTPUT_MODULE.with_name("github-repository-name-and-name-before-project-rename-common.py")
+    "failed_command_tool_message_to_agent_rerun_once_then_stop_and_report_lines_common.py")
+REPOSITORY_NAMES_MODULE = GIT_OUTPUT_MODULE.with_name("github_repository_name_and_name_before_project_rename_common.py")
 
 failures = []
 
@@ -927,7 +927,7 @@ echo hello
     # FORWARD: the placeholder is in the MIDDLE, so the token's first
     # component is a real directory of this repository and its ending is a
     # real extension, and nothing else would refuse it. Two live lines of
-    # nn-systems/cold-read/cold-read-cell-common.py are written exactly so.
+    # nn-systems/cold-read/cold_read_cell_common.py are written exactly so.
     git(root, "checkout", "-q", "-b", "placeholder-forward", base)
     commit_change(root, "scripts/illustrates-shapes.py",
                   "# a program of the shape <system>/scripts/absent-illustration.py\n"

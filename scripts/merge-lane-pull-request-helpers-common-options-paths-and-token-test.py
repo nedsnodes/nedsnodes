@@ -97,7 +97,7 @@ def main():
     saved_directory, saved_home = os.getcwd(), os.environ.get("HOME")
     try:
         names_module = (MODULE.resolve().parents[1] / "nn-systems" / "general-tools"
-                        / "github-repository-name-and-name-before-project-rename-common.py")
+                        / "github_repository_name_and_name_before_project_rename_common.py")
         check("the helper imports the shared module merge-gate.sh reads, and REPOSITORY holds its "
               "value",
               Path(common._repository_names.__file__).resolve() == names_module.resolve()

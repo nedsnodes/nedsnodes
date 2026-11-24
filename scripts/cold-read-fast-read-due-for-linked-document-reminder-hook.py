@@ -69,7 +69,7 @@ cold-read-record like any document.
 Records are the directories in the log-store's cold-read-records/ and in a
 cold-read-records/ at the top of the document's checkout or the session's
 checkout whose names match the document by
-nn-systems/cold-read/cold-read-record-names-common.py, and that hold a finished
+nn-systems/cold-read/cold_read_record_names_common.py, and that hold a finished
 report there; a read that failed after freezing its target leaves no report
 and does not count. The record-name, frozen-path and finished-report rules
 are all taken from that module. A record holding a frozen copy under target/
@@ -93,7 +93,7 @@ fast-read is not due again in this agent-session, whatever the document's own
 time: applying a fast read's findings changes the document, which would
 otherwise make it due again every time the agent linked it. A read is this
 agent-session's own when the file a finished fast read writes beside its
-report (nn-systems/cold-read/cold-read-record-names-common.py,
+report (nn-systems/cold-read/cold_read_record_names_common.py,
 cold_read_fast_read_report_agent_session_id_file_path) names the payload's session_id and the
 document's resolved path. The fast read takes the ID from
 CLAUDE_CODE_SESSION_ID, which a subagent's Bash shares with its parent, so a
@@ -108,7 +108,7 @@ the agent so, in additionalContext and on stderr.
 
 SILENT when nothing is due, when this Stop ends the agent's answer to a Stop
 hook's output (the shared rule of
-nn-systems/general-tools/claude-code-stop-hooks-stay-silent-while-agent-answers-a-stop-hook-rule-common.py), when the agent-session is a
+nn-systems/general-tools/claude_code_stop_hooks_stay_silent_while_agent_answers_a_stop_hook_rule_common.py), when the agent-session is a
 headless `claude -p` child (its last words are its caller's answer), when the
 transcript file does not exist, and when the log-store's cold-read-records
 directory does not exist, as on the Mac, because without it every document
@@ -175,13 +175,13 @@ def _load_general_tools_module(file_name):
 try:
     # Every Stop hook obeys this rule first: see the module's docstring.
     stop_hooks_stay_silent_rule = _load_general_tools_module(
-        "claude-code-stop-hooks-stay-silent-while-agent-answers-a-stop-hook-rule-common.py")
+        "claude_code_stop_hooks_stay_silent_while_agent_answers_a_stop_hook_rule_common.py")
     ned_box_home_path_constants = _load_general_tools_module(
-        "ned-box-home-directory-and-its-mac-mount-point-path-constants-common.py")
+        "ned_box_home_directory_and_its_mac_mount_point_path_constants_common.py")
     agent_session_unattended_by_user_check_common = _load_general_tools_module(
-        "agent-session-unattended-by-user-check-common.py")
+        "agent_session_unattended_by_user_check_common.py")
     git_runner = _load_general_tools_module(
-        "git-machine-readable-output-runner-and-parser-common.py")
+        "git_machine_readable_output_runner_and_parser_common.py")
 except Exception as error:
     sys.exit(fault_exit(error))
 
@@ -265,7 +265,7 @@ REMINDER_INSTRUCTIONS = (
 def load_cold_read_record_names():
     """Loaded by run() rather than at import, so a fault loading it is reported by main."""
     return load_module("cold_read_record_names",
-                       REPOSITORY_TOP / "nn-systems" / "cold-read" / "cold-read-record-names-common.py")
+                       REPOSITORY_TOP / "nn-systems" / "cold-read" / "cold_read_record_names_common.py")
 
 
 def environment_without_git_redirection():

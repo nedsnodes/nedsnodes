@@ -152,7 +152,7 @@ _failed_suites_record_spec.loader.exec_module(failed_suites_record)
 _task_write_spec = importlib.util.spec_from_file_location(
     "agent_seat_task_list_new_pending_task_write_common",
     Path(__file__).resolve().parents[1] / "nn-systems" / "general-tools"
-    / "agent-seat-task-list-new-pending-task-write-common.py")
+    / "agent_seat_task_list_new_pending_task_write_common.py")
 task_write = importlib.util.module_from_spec(_task_write_spec)
 _task_write_spec.loader.exec_module(task_write)
 

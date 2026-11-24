@@ -2,7 +2,7 @@
 """Every program that removes the variables that redirect git removes all six.
 
 Each case sets all six variables listed in
-nn-systems/general-tools/git-redirecting-environment-variables-removal-common.py,
+nn-systems/general-tools/git_redirecting_environment_variables_removal_common.py,
 then makes one caller run git, or the program it starts, and records which of
 the six reached it. A stand-in `git`, first on PATH, records the environment
 it was started with and runs no real git, so no case can reach the repository

@@ -18,7 +18,7 @@ every one of these suites runs its cell out of a copy.
 
 WHY THIS MODULE EXISTS (user-ruled 2026-09-21, walk
 md-skills-seat-open-decisions-2026-09-20 item 14). Six suites --
-cold-read-agy-cell, cold-read-cell-common, cold-read-fast-read,
+cold-read-agy-cell, cold_read_cell_common, cold-read-fast-read,
 cold-read-grid, cold-read-restater-judge-cell and
 cold-read-restater-judge-runner -- each carried their own
 build_scratch_repository, 25 to 34 lines apiece, and nine statements were
@@ -44,7 +44,7 @@ from pathlib import Path
 # one directory up.
 SYSTEM_DIRECTORY = Path(__file__).resolve().parent.parent
 GIT_OUTPUT_MODULE = (SYSTEM_DIRECTORY.parent / "general-tools"
-                     / "git-machine-readable-output-runner-and-parser-common.py")
+                     / "git_machine_readable_output_runner_and_parser_common.py")
 
 # The seed commit's author. One fixed name rather than a parameter: nothing
 # reads it, and it points a scratch checkout left behind by a crashed run
@@ -59,7 +59,7 @@ SEED_COMMIT_AUTHOR_EMAIL = "test@test.invalid"
 # copied into every scratch repository too.
 GIT_REDIRECTING_REMOVAL_MODULE = (
     SYSTEM_DIRECTORY.parent / "general-tools"
-    / "git-redirecting-environment-variables-removal-common.py")
+    / "git_redirecting_environment_variables_removal_common.py")
 _git_redirecting_removal_spec = importlib.util.spec_from_file_location(
     "git_redirecting_environment_variables_removal_common", GIT_REDIRECTING_REMOVAL_MODULE)
 git_redirecting_removal = importlib.util.module_from_spec(_git_redirecting_removal_spec)
@@ -67,11 +67,11 @@ _git_redirecting_removal_spec.loader.exec_module(git_redirecting_removal)
 GIT_REDIRECTING_ENVIRONMENT_VARIABLES = git_redirecting_removal.GIT_REDIRECTING_ENVIRONMENT_VARIABLES
 # cold-read-grid.py reads ned-box's home and the Mac's mount of it from this module.
 NED_BOX_HOME_MODULE = (
-    SYSTEM_DIRECTORY.parent / "general-tools" / "ned-box-home-directory-and-its-mac-mount-point-path-constants-common.py")
+    SYSTEM_DIRECTORY.parent / "general-tools" / "ned_box_home_directory_and_its_mac_mount_point_path_constants_common.py")
 # cold-read-claude-cell.py starts its claude command line from this module.
 CLAUDE_CODE_COMMAND_LINE_PREFIX_MODULE = (
     SYSTEM_DIRECTORY.parent / "general-tools"
-    / "claude-code-headless-run-command-line-prefix-with-no-connectors-and-explicit-permission-mode-common.py")
+    / "claude_code_headless_run_command_line_prefix_with_no_connectors_and_explicit_permission_mode_common.py")
 
 
 def git(repository, *arguments):

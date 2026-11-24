@@ -27,7 +27,7 @@ The past-discussion search
 (scripts/log-store-past-discussions-regex-search-newest-first.py) also
 writes, before it searches, each dialog whose transcript changed; both find
 the transcripts and write a dialog with
-scripts/log-store-session-dialogs-refresh-common.py, so the two
+scripts/log_store_session_dialogs_refresh_common.py, so the two
 writers agree on what is current and never write into one temporary file.
 The search writes only when its own extractor's digest is the one this
 program last recorded, so a dialog it writes is one this program would.
@@ -46,8 +46,8 @@ file system whenever rsync puts a new copy in place. The extractor is known
 by the sha256 of its bytes, its subagent tracker's
 (scripts/handoff-extract-conversation-subagent-tracker-hack.py) and those of
 the module the tracker loads
-(scripts/claude-code-subagent-task-notification-interim-recognizer-common.py)
-and of scripts/log-store-session-dialogs-refresh-common.py, which writes it as
+(scripts/claude_code_subagent_task_notification_interim_recognizer_common.py)
+and of scripts/log_store_session_dialogs_refresh_common.py, which writes it as
 the last line of each dialog, kept in session-dialogs/ after each pass that
 had no failure; a pass that finds any of the four files changed rewrites
 every dialog, so one change rewrites every dialog once. A transcript with no dialog in it still gets a
@@ -104,7 +104,7 @@ STALE_DIALOG_WARNING_OPENING = "This dialog could not be refreshed since "
 STALE_DIALOG_WARNING_TIME_FORMAT = "%Y-%m-%d %H:%M UTC"
 _refresh_common_specification = importlib.util.spec_from_file_location(
     "log_store_session_dialogs_refresh_common",
-    pathlib.Path(__file__).resolve().with_name("log-store-session-dialogs-refresh-common.py"))
+    pathlib.Path(__file__).resolve().with_name("log_store_session_dialogs_refresh_common.py"))
 refresh_common = importlib.util.module_from_spec(_refresh_common_specification)
 _refresh_common_specification.loader.exec_module(refresh_common)
 

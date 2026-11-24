@@ -39,7 +39,7 @@ Why it matters: the design is the specification the design-to-main build, GHI [B
 
 ### The state-exit
 
-15. §2 says "`state`, `verdict` and `package-commit` required", while the same section says `named-files` is "always written" and the code requires it: `STATE_EXIT_JSON_FIELDS_REQUIRED = ("state", "verdict", "package-commit", "named-files")` in `scripts/design-to-main/design-to-main-state-tables-common.py`. Reports: CHD 16, CHD 19, CHS 20, XHD 11.
+15. §2 says "`state`, `verdict` and `package-commit` required", while the same section says `named-files` is "always written" and the code requires it: `STATE_EXIT_JSON_FIELDS_REQUIRED = ("state", "verdict", "package-commit", "named-files")` in `scripts/design-to-main/design_to_main_state_tables_common.py`. Reports: CHD 16, CHD 19, CHS 20, XHD 11.
 16. §2's "the one the verdict needs" reads as if every verdict needs one of those fields; the README already says "where it needs one". Report: CHD 18.
 17. §2's "The three sentences before this one were written down on 2026-09-11, the ninth walk" dates sentences that cite user-rulings of 2026-09-14. Reports: CHD 20, CHS 19, XHD 9.
 18. "a writing state's `emitted` that names none is a machine error, since a write that named no file did not happen" leaves no valid state-exit for a test-writer whose set is all `no-tests`, which writes no test file; and a write the agent made but did not name did happen, so the reason given is wrong. Reports: XHD 7, XHD 8, XTD 9.
@@ -65,7 +65,7 @@ Why it matters: the design is the specification the design-to-main build, GHI [B
 
 ## The work
 
-Several of these rules are already held in code, so a change to the prose may also change the code and its tests: the required state-exit fields are `STATE_EXIT_JSON_FIELDS_REQUIRED` and the resume routing is `RESUME_DESTINATION_BY_EDITED_DOCUMENT`, both in `scripts/design-to-main/design-to-main-state-tables-common.py`; `refuse_a_write_that_named_no_file` (defect 18) and `refuse_malformed_resume` (defect 10) are in `scripts/design-to-main/design-to-main-state-machine.py`; and tests pair the design's tables with the code in the same file. The design is a file the instruction-file guard protects, by its `.design.md` name; the agent-instructions in `docs/agents/queue/`, which are pending approval, are not.
+Several of these rules are already held in code, so a change to the prose may also change the code and its tests: the required state-exit fields are `STATE_EXIT_JSON_FIELDS_REQUIRED` and the resume routing is `RESUME_DESTINATION_BY_EDITED_DOCUMENT`, both in `scripts/design-to-main/design_to_main_state_tables_common.py`; `refuse_a_write_that_named_no_file` (defect 18) and `refuse_malformed_resume` (defect 10) are in `scripts/design-to-main/design-to-main-state-machine.py`; and tests pair the design's tables with the code in the same file. The design is a file the instruction-file guard protects, by its `.design.md` name; the agent-instructions in `docs/agents/queue/`, which are pending approval, are not.
 
 1. Check each defect against `main` as it then stands, and drop each one `main` has fixed.
 2. Bring the user the remaining defects, each with a proposed change, the term proposals of defect 27 and the programs of defect 28, in one approval-walk. Its first item asks whether this work waits until the design-to-main build resumes.

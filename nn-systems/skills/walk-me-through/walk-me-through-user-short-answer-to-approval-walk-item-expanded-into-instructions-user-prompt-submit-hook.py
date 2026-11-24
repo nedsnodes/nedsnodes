@@ -44,7 +44,7 @@ the hook does not expand, counts as a reply in his own words. A reply in his own
 words gets WALK_ME_THROUGH_HOOK_AGENT_CONTEXT_OPENING_WHEN_APPROVAL_WALK_ITEM_WAITING_AND_USER_REPLY_NOT_SHORT_ANSWER_LINE and that line, and nothing else.
 Both get the line only when he typed the prompt in an agent-session he attends,
 as the pending-user-alerts hook's typed_by_user and
-agent-session-unattended-by-user-check-common.py decide. With no item waiting,
+agent_session_unattended_by_user_check_common.py decide. With no item waiting,
 an empty prompt, or a prompt he did not type, a reply in his own words prints
 nothing. When reading the approval-walk state fails, the reply gets
 WALK_ME_THROUGH_HOOK_AGENT_CONTEXT_OPENING_WHEN_APPROVAL_WALK_STATE_READ_FAILED_AND_USER_REPLY_NOT_SHORT_ANSWER_LINE and that line, and exit 0.
@@ -271,9 +271,9 @@ from pathlib import Path
 
 HERE = Path(__file__).resolve().parent
 CHECKOUT = HERE.parents[2]
-WALK_FINDER_FILE = HERE / "walk-me-through-approval-walk-minutes-and-walk-document-item-finder-common.py"
+WALK_FINDER_FILE = HERE / "walk_me_through_approval_walk_minutes_and_walk_document_item_finder_common.py"
 CHECK_PROGRAM = HERE / "walk-me-through-answer-added-texts-cold-read-fast-read-check-and-close.py"
-TRANSCRIPT_READER_FILE = CHECKOUT / "scripts" / "claude-code-session-transcript-records-read-backward-common.py"
+TRANSCRIPT_READER_FILE = CHECKOUT / "scripts" / "claude_code_session_transcript_records_read_backward_common.py"
 EXPLAIN_SKILL = CHECKOUT / ".claude" / "skills" / "explain" / "SKILL.md"
 
 # Longer forms first, so `ao` is not read as `a` and `approve as obvious` not as `approve`.
@@ -389,7 +389,7 @@ WALK_ME_THROUGH_HOOK_AGENT_CONTEXT_WHEN_TRANSCRIPT_READ_FAILED_AND_PROMPT_AUTHOR
     "If the user did not type this prompt, the last line does not apply.")
 ANSWERS_THAT_APPROVE = ("A", "AO", "AA")
 PENDING_USER_ALERTS_HOOK_FILE = HERE / "walk-me-through-pending-user-alerts-claim-and-insert-as-approval-walk-items-user-prompt-submit-hook.py"
-ATTENDANCE_CHECK_FILE = CHECKOUT / "nn-systems" / "general-tools" / "agent-session-unattended-by-user-check-common.py"
+ATTENDANCE_CHECK_FILE = CHECKOUT / "nn-systems" / "general-tools" / "agent_session_unattended_by_user_check_common.py"
 # Each answer's lines: (lines while an approval-walk is open, lines while none is).
 MEANINGS = {
     "A": (("{word} means approve: the user agrees with the recommendation of {item}{recommended}. "
@@ -679,7 +679,7 @@ MODEL = "claude-haiku-5-5"
 # .claude/settings.json gives this hook 10 seconds, and a real call takes about 3; the transcript read needs the rest.
 MODEL_TIMEOUT_SECONDS = 7
 COMMAND_LINE_PREFIX_FILE = (CHECKOUT / "nn-systems" / "general-tools"
-                            / "claude-code-headless-run-command-line-prefix-with-no-connectors-and-explicit-permission-mode-common.py")
+                            / "claude_code_headless_run_command_line_prefix_with_no_connectors_and_explicit_permission_mode_common.py")
 MODEL_SCHEMA = {"type": "object",
                 "properties": {"pairs": {"type": "array", "items": {
                     "type": "object",

@@ -804,7 +804,7 @@ with tempfile.TemporaryDirectory() as temporary_directory:
         capture_output=True, text=True, check=False, env=CLEAN_ENVIRONMENT)
     check("a shared git-helper module that fails to load is reported on stderr, exit 1",
           reported(result, "FileNotFoundError")
-          and "edited-file-path-within-checkout-root-and-git-check-ignore-common.py" in result.stderr,
+          and "edited_file_path_within_checkout_root_and_git_check_ignore_common.py" in result.stderr,
           f"exit {result.returncode}: {result.stdout + result.stderr}")
 
     outside_file = tmp / "outside" / "elsewhere.md"

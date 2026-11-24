@@ -28,7 +28,7 @@ _git_environment_fixture.remove_git_redirecting_environment_variables_from_this_
 
 _date_pattern_spec = importlib.util.spec_from_file_location(
     "citation_and_history_marker_tests_date_pattern_common",
-    Path(__file__).resolve().with_name("citation-and-history-marker-tests-date-pattern-common.py"))
+    Path(__file__).resolve().with_name("citation_and_history_marker_tests_date_pattern_common.py"))
 _date_pattern = importlib.util.module_from_spec(_date_pattern_spec)
 _date_pattern_spec.loader.exec_module(_date_pattern)
 
@@ -60,11 +60,11 @@ FILES_AWAITING_THE_COMMENT_TRIM = {
     "nn-systems/cold-read/cold-read-restater-judge-cell.py": 11,
     "nn-systems/cold-read/cold-read-restater-judge-runner.py": 6,
     "nn-systems/cold-read/tests/cold-read-agy-cell-test.py": 10,
-    "nn-systems/cold-read/tests/cold-read-cell-common-test.py": 72,
+    "nn-systems/cold-read/tests/cold_read_cell_common-test.py": 72,
     "nn-systems/cold-read/tests/cold-read-codex-cell-test.py": 4,
     "nn-systems/cold-read/tests/cold-read-fast-read-test.py": 30,
     "nn-systems/cold-read/tests/cold-read-grid-test.py": 53,
-    "nn-systems/cold-read/tests/cold-read-record-names-common-test.py": 5,
+    "nn-systems/cold-read/tests/cold_read_record_names_common-test.py": 5,
     "nn-systems/cold-read/tests/cold-read-record-ship-test.py": 20,
     "nn-systems/cold-read/tests/cold-read-restater-judge-cell-test.py": 6,
     "nn-systems/cold-read/tests/cold-read-restater-judge-runner-test.py": 4,
@@ -180,7 +180,7 @@ SHELL_SHEBANG = re.compile(rb"^#!\S*(?:/|\s)(?:ba|da|z)?sh\b")
 _shell_reader_spec = importlib.util.spec_from_file_location(
     "shell_command_tree_sitter_bash_reader_common",
     Path(__file__).resolve().parent.parent / "nn-systems" / "general-tools"
-    / "shell-command-tree-sitter-bash-reader-common.py")
+    / "shell_command_tree_sitter_bash_reader_common.py")
 shell_reader = importlib.util.module_from_spec(_shell_reader_spec)
 _shell_reader_spec.loader.exec_module(shell_reader)
 

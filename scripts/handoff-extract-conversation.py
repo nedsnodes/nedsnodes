@@ -61,7 +61,7 @@ the companion is the conversation's history without the raw transcript's tool
 dumps.
 
 The session dialogs the log-store keeps for the past-discussion search hold
-all of a session's turns, and scripts/log-store-session-dialogs-refresh-common.py
+all of a session's turns, and scripts/log_store_session_dialogs_refresh_common.py
 writes them from the session's transcript with this file's renderer for the
 handoff's companion. They differ from the companion in two ways. First, in
 them, an agent paragraph identical to one the agent showed earlier in the
@@ -130,7 +130,7 @@ class TranscriptProblem(Exception):
 
 def project_directory_for_working_directory(working_directory: Path) -> Path:
     """Return the harness project directory holding the worktree's sessions."""
-    # Same rule as claude-code-session-transcript-lookup-and-text-search-common.py,
+    # Same rule as claude_code_session_transcript_lookup_and_text_search_common.py,
     # copied because this script runs copied beside hooks that lack that module; that
     # module's test fails if the two disagree.
     return PROJECTS_ROOT / re.sub(r"[^a-zA-Z0-9]", "-", str(Path(working_directory).resolve()))

@@ -39,7 +39,7 @@ SCRIPT_PATH = Path(__file__).resolve().parents[1] / "bash-guards-verdict-changes
 TMUX_KILL_GUARD = ".claude/guard-hooks/claude-code-tmux-kill-server-and-kill-session-missing-server-selection-refusal-hook.py"
 ISSUE_WRITE_GUARD = ".claude/guard-hooks/ghi-issue-write-hand-typed-gh-command-refusal.py"
 SEARCH_FILE_GUARD = ".claude/guard-hooks/search-file-argument-read-as-option-guard-hook.py"
-SHELL_READER = "nn-systems/general-tools/shell-command-tree-sitter-bash-reader-common.py"
+SHELL_READER = "nn-systems/general-tools/shell_command_tree_sitter_bash_reader_common.py"
 
 spec = importlib.util.spec_from_file_location("bash_guards_replay", SCRIPT_PATH)
 replay = importlib.util.module_from_spec(spec)

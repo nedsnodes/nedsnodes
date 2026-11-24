@@ -20,7 +20,7 @@ must not drift are pinned:
     walk what-a-cold-read-reviewer-may-read-2026-09-28, "y"); Codex refuses
     the two together. The profile comes from the builder the cold-read Codex
     cell uses, codex_credential_denying_permission_profile_arguments in
-    nn-systems/cold-read/cold-read-cell-common.py;
+    nn-systems/cold-read/cold_read_cell_common.py;
   - the base, as a SHA the caller resolved -- `--base origin/main` drifts
     under a moving remote, so the review's subject is recorded exactly;
   - the output, captured to a file the caller names;
@@ -460,7 +460,7 @@ import sys
 _common_spec = importlib.util.spec_from_file_location(
     "cold_read_cell_common",
     pathlib.Path(__file__).resolve().parent.parent
-    / "nn-systems" / "cold-read" / "cold-read-cell-common.py")
+    / "nn-systems" / "cold-read" / "cold_read_cell_common.py")
 common = importlib.util.module_from_spec(_common_spec)
 _common_spec.loader.exec_module(common)
 

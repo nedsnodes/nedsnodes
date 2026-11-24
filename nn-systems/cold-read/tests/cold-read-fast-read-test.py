@@ -88,7 +88,7 @@ WHAT IS PINNED HERE.
     entities, URLs and their fragments are not bare numbers.
 
 Each case that launches the read builds a throwaway git repository holding a
-copy of the scripts, as nn-systems/cold-read/tests/cold-read-cell-common-test.py does, so the
+copy of the scripts, as nn-systems/cold-read/tests/cold_read_cell_common-test.py does, so the
 read's repository root -- and with it the docs/walk and cold-read-records
 paths the rule names -- is the scratch tree. The one exception is the case
 that compares the embedded template against the skill's prompt file: both of
@@ -149,7 +149,7 @@ _scratch_repository_fixture_spec.loader.exec_module(scratch_repository_fixture)
 
 # The shared cell module, whose own suite pins its wording; the cases here take that wording from it.
 _cell_common_spec = importlib.util.spec_from_file_location(
-    "cold_read_cell_common", SYSTEM_DIRECTORY / "cold-read-cell-common.py")
+    "cold_read_cell_common", SYSTEM_DIRECTORY / "cold_read_cell_common.py")
 cell_common = importlib.util.module_from_spec(_cell_common_spec)
 _cell_common_spec.loader.exec_module(cell_common)
 # Every read on the records route ships its record; here, to a scratch

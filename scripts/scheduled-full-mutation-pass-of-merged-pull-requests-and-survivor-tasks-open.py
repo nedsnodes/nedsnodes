@@ -460,17 +460,17 @@ mutation_testing = module_loaded_by_path(
 git_redirecting_removal = module_loaded_by_path(
     "git_redirecting_environment_variables_removal_common",
     REPOSITORY_ROOT / "nn-systems" / "general-tools"
-    / "git-redirecting-environment-variables-removal-common.py")
+    / "git_redirecting_environment_variables_removal_common.py")
 agent_seat_task_list = module_loaded_by_path(
     "agent_seat_task_list_new_pending_task_write_common",
     REPOSITORY_ROOT / "nn-systems" / "general-tools"
-    / "agent-seat-task-list-new-pending-task-write-common.py")
+    / "agent_seat_task_list_new_pending_task_write_common.py")
 agent_seat_task_list_new_pending_task_write = (
     agent_seat_task_list.agent_seat_task_list_new_pending_task_write)
 agent_seat_task_list_task_file_rewrite = module_loaded_by_path(
     "agent_seat_task_list_task_file_rewrite_common",
     REPOSITORY_ROOT / "nn-systems" / "general-tools"
-    / "agent-seat-task-list-task-file-rewrite-common.py").agent_seat_task_list_task_file_rewrite
+    / "agent_seat_task_list_task_file_rewrite_common.py").agent_seat_task_list_task_file_rewrite
 
 
 class StepFailed(Exception):

@@ -27,7 +27,7 @@ HERE = Path(__file__).resolve().parents[1]
 PROGRAM = HERE / "walk-me-through-user-alert-insert-as-unnumbered-item-after-waiting-item-and-record-in-walk-minutes.py"
 _finder_spec = importlib.util.spec_from_file_location(
     "walk_me_through_approval_walk_minutes_and_walk_document_item_finder_common",
-    HERE / "walk-me-through-approval-walk-minutes-and-walk-document-item-finder-common.py")
+    HERE / "walk_me_through_approval_walk_minutes_and_walk_document_item_finder_common.py")
 walk_finder = importlib.util.module_from_spec(_finder_spec)
 _finder_spec.loader.exec_module(walk_finder)
 WALK = "alerts-test-walk-2026-10-27"

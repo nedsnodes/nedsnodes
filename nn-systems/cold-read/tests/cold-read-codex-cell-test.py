@@ -15,7 +15,7 @@ WHAT CHANGED SINCE THAT FIX, and why half of this file was rewritten. The
 cell no longer passes codex's exit code through, so the passthrough cases
 that pinned it have nothing left to pin. The reviewer now writes its findings
 to --report rather than answering in chat, and the cell hands its models to
-the chain runner in nn-systems/cold-read/cold-read-cell-common.py: a model that fails is a
+the chain runner in nn-systems/cold-read/cold_read_cell_common.py: a model that fails is a
 model the chain falls back from, and the caller is told whether ANY model
 produced a review — 1 when none did, however each of them failed. The old
 cases are replaced by what the chain actually does when codex exits 2 or 7,
@@ -53,7 +53,7 @@ Everything else about this cell — the model and effort pins, the memory store
 being off for the launch, the stray-write detector, the provenance stamp's
 fields — is NOT covered here; this file was written for the exit-code seam
 and does not stand in for a full suite. The shared module's own behaviour is
-covered in nn-systems/cold-read/tests/cold-read-cell-common-test.py.
+covered in nn-systems/cold-read/tests/cold_read_cell_common-test.py.
 
 Every case runs the cell with a stub `codex` first on PATH, so no model is
 ever called: the stub is the seam that lets the cell's own logic be tested
@@ -88,7 +88,7 @@ PROMPTS_DIR = REPO_ROOT / ".claude" / "skills" / "cold-read" / "prompts"
 CELL_RELATIVE_PATH = "nn-systems/cold-read/cold-read-codex-cell.py"
 # The shared cell module, whose own suite pins its wording; the cases here take that wording from it.
 _cell_common_spec = importlib.util.spec_from_file_location(
-    "cold_read_cell_common", SYSTEM_DIRECTORY / "cold-read-cell-common.py")
+    "cold_read_cell_common", SYSTEM_DIRECTORY / "cold_read_cell_common.py")
 cell_common = importlib.util.module_from_spec(_cell_common_spec)
 _cell_common_spec.loader.exec_module(cell_common)
 
@@ -509,10 +509,10 @@ with tempfile.TemporaryDirectory() as scratch:
     copied_checkout = scratch / "a-checkout-with-no-prompt-templates"
     for relative_path in (
             "nn-systems/cold-read/cold-read-codex-cell.py",
-            "nn-systems/cold-read/cold-read-cell-common.py",
-            "nn-systems/cold-read/cold-read-record-names-common.py",
-            "nn-systems/general-tools/ned-box-home-directory-and-its-mac-mount-point-path-constants-common.py",
-            "nn-systems/general-tools/git-machine-readable-output-runner-and-parser-common.py"):
+            "nn-systems/cold-read/cold_read_cell_common.py",
+            "nn-systems/cold-read/cold_read_record_names_common.py",
+            "nn-systems/general-tools/ned_box_home_directory_and_its_mac_mount_point_path_constants_common.py",
+            "nn-systems/general-tools/git_machine_readable_output_runner_and_parser_common.py"):
         (copied_checkout / relative_path).parent.mkdir(parents=True, exist_ok=True)
         shutil.copy2(REPO_ROOT / relative_path, copied_checkout / relative_path)
     copied_temporary_directory = scratch / "a-temporary-directory"

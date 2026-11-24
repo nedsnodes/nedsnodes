@@ -23,8 +23,8 @@ WHAT ONE RUN DOES, in order.
   1. Makes a scratch clone holding the hook and the four modules it needs:
      nn-systems/handoff/uncommitted-work-snapshots.py and
      scripts/worktree-owner-file-read-and-write.py, which the hook loads, and
-     nn-systems/general-tools/git-machine-readable-output-runner-and-parser-common.py
-     and nn-systems/general-tools/agent-seat-task-list-new-pending-task-write-common.py,
+     nn-systems/general-tools/git_machine_readable_output_runner_and_parser_common.py
+     and nn-systems/general-tools/agent_seat_task_list_new_pending_task_write_common.py,
      which the first of those loads. The clone has one commit and sits in a
      temporary directory.
   2. Runs `claude -p` on Haiku from that clone, with the hook registered for
@@ -86,9 +86,9 @@ MODULE_RELATIVE = Path("nn-systems/handoff/uncommitted-work-snapshots.py")
 HOOK_RELATIVE = Path("scripts/uncommitted-work-snapshot-hook.py")
 OWNER_FILE_MODULE_RELATIVE = Path("scripts/worktree-owner-file-read-and-write.py")
 GIT_OUTPUT_MODULE_RELATIVE = Path(
-    "nn-systems/general-tools/git-machine-readable-output-runner-and-parser-common.py")
+    "nn-systems/general-tools/git_machine_readable_output_runner_and_parser_common.py")
 TASK_WRITE_MODULE_RELATIVE = Path(
-    "nn-systems/general-tools/agent-seat-task-list-new-pending-task-write-common.py")
+    "nn-systems/general-tools/agent_seat_task_list_new_pending_task_write_common.py")
 LIVE_CHECK_FILE_NAME = "uncommitted-work-snapshot-hook-scheduled-check-that-real-claude-session-is-recorded-as-owner-marker-file-created-by-real-claude-session.txt"
 LIVE_CHECK_PROMPT = (f"Run this one shell command and nothing else: "
                      f"echo live > {LIVE_CHECK_FILE_NAME}")
@@ -117,7 +117,7 @@ snapshots = module_loaded_by_path("uncommitted_work_snapshots",
 command_line_prefix = module_loaded_by_path(
     "claude_code_headless_run_command_line_prefix_with_no_connectors_and_explicit_permission_mode_common",
     REPOSITORY_ROOT / "nn-systems" / "general-tools"
-    / "claude-code-headless-run-command-line-prefix-with-no-connectors-and-explicit-permission-mode-common.py")
+    / "claude_code_headless_run_command_line_prefix_with_no_connectors_and_explicit_permission_mode_common.py")
 
 
 def git(directory, *arguments):

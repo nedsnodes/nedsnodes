@@ -56,7 +56,7 @@ HELP_TIMEOUT_SECONDS = 60
 EXIT_CHECKOUT_CHANGED = 3
 
 _common_spec = importlib.util.spec_from_file_location(
-    "cold_read_cell_common", REPO_ROOT / "nn-systems/cold-read/cold-read-cell-common.py")
+    "cold_read_cell_common", REPO_ROOT / "nn-systems/cold-read/cold_read_cell_common.py")
 cell_common = importlib.util.module_from_spec(_common_spec)
 _common_spec.loader.exec_module(cell_common)
 

@@ -3,12 +3,12 @@
 
 docs/nedsnodes-wiki/nedsnodes-file-naming-and-location-standards.md, section
 "Filename suffixes": a log, as
-nn-systems/general-tools/log-suffix-and-extension-file-classify-common.py
+nn-systems/general-tools/log_suffix_and_extension_file_classify_common.py
 classifies one, is kept in the log-store and never in git, with two
 exceptions, which this test allows:
 
   * a `-draft` or `-candidate` file in a draft place, as
-    .claude/guard-hooks/draft-document-place-directories-definition-and-membership-common.py defines one
+    .claude/guard-hooks/draft_document_place_directories_definition_and_membership_common.py defines one
     for the instruction-file guard too. Whether the file is still pending
     approval, as the page also asks, is not something a file name shows, so
     it is not checked;
@@ -43,11 +43,11 @@ def load(module_name, file_name, directory=GENERAL_TOOLS):
 
 
 classify = load("log_suffix_and_extension_file_classify_common",
-                "log-suffix-and-extension-file-classify-common.py")
-draft_place = load("draft_document_place_directories_definition_and_membership_common", "draft-document-place-directories-definition-and-membership-common.py",
+                "log_suffix_and_extension_file_classify_common.py")
+draft_place = load("draft_document_place_directories_definition_and_membership_common", "draft_document_place_directories_definition_and_membership_common.py",
                    REPOSITORY_ROOT / ".claude" / "guard-hooks")
 git_environment = load("git_redirecting_environment_variables_removal_common",
-                       "git-redirecting-environment-variables-removal-common.py")
+                       "git_redirecting_environment_variables_removal_common.py")
 
 GHI_MD_NAME = re.compile(r"[0-9]+-[^/]*\.md")
 

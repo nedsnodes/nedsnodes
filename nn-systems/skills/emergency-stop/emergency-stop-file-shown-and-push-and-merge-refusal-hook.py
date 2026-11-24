@@ -6,7 +6,7 @@ makes, except the coordinating agent-seat's.
 
 Wired in .claude/settings.json for UserPromptSubmit and for PreToolUse on every
 tool, so running work sees a stop at its next tool call. The stop file is read
-by emergency-stop-file-in-force-read-common.py.
+by emergency_stop_file_in_force_read_common.py.
 
 What it shows:
 - In force: the rules and the file, cut to MAX_FILE_CHARACTERS, at every run.
@@ -23,7 +23,7 @@ What it shows:
 The refusal matches `git push`, `gh pr merge` with -R or --repo anywhere
 before `merge`, and `gh api` with method PUT on a `pulls/<number>/merge` path,
 in a Bash call, read by
-nn-systems/general-tools/shell-command-tree-sitter-bash-reader-common.py, also
+nn-systems/general-tools/shell_command_tree_sitter_bash_reader_common.py, also
 inside a `bash -c` string and inside the remote command of `ssh`; a command the reader cannot read is refused too; a
 push made inside another program, or by a scheduled job, is not refused.
 
@@ -49,12 +49,12 @@ from pathlib import Path
 
 HERE = Path(__file__).resolve().parent
 _spec = importlib.util.spec_from_file_location(
-    "emergency_stop_file_in_force_read_common", HERE / "emergency-stop-file-in-force-read-common.py")
+    "emergency_stop_file_in_force_read_common", HERE / "emergency_stop_file_in_force_read_common.py")
 common = importlib.util.module_from_spec(_spec)
 _spec.loader.exec_module(common)
 _shell_reader_spec = importlib.util.spec_from_file_location(
     "shell_command_tree_sitter_bash_reader_common",
-    HERE.parent.parent / "general-tools" / "shell-command-tree-sitter-bash-reader-common.py")
+    HERE.parent.parent / "general-tools" / "shell_command_tree_sitter_bash_reader_common.py")
 shell_reader = importlib.util.module_from_spec(_shell_reader_spec)
 _shell_reader_spec.loader.exec_module(shell_reader)
 

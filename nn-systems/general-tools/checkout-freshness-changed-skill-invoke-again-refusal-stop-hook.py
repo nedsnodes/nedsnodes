@@ -55,7 +55,7 @@ from pathlib import Path
 
 HERE = Path(__file__).resolve().parent
 FRESHNESS_HOOK_FILE = HERE.parents[1] / "scripts" / "checkout-freshness-catch-up.py"
-STOP_HOOKS_STAY_SILENT_RULE_FILE = HERE / "claude-code-stop-hooks-stay-silent-while-agent-answers-a-stop-hook-rule-common.py"
+STOP_HOOKS_STAY_SILENT_RULE_FILE = HERE / "claude_code_stop_hooks_stay_silent_while_agent_answers_a_stop_hook_rule_common.py"
 
 REFUSAL_RULE_ID_OPENING = "[rule checkout-freshness-changed-skill-not-invoked-again-stop-refused] "
 REFUSAL_OPENING_TEMPLATE = REFUSAL_RULE_ID_OPENING + (

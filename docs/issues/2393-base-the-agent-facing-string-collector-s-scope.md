@@ -8,7 +8,7 @@ Filed by cold-read-improvement on 2026-11-02, as the follow-up that the `#root_c
 
 ## What is wrong
 
-`nn-systems/general-tools/python-source-tool-message-to-agent-string-collector-common.py` lists the strings a Python file hands an agent; `scripts/pull-request-review-plan.py` uses that list to decide which strings merge-lane-2 fast-reads in a pull request. To follow a local name to the strings bound to it, the collector must know which names a function, lambda, class body or comprehension binds, and which outer binding a name refers to. It works this out with its own rules, chiefly `scope_assigned_names` (`:537-558`), `nodes_in_own_scope` (`:581`) and `definition_time_expressions` (`:515`). Each binding form those rules do not model is a miss of its own, and reviews keep finding new ones: Codex found seven forms after [PR 2280](https://github.com/nedschorus/nedschorus/pull/2280) and two after [PR 2318](https://github.com/nedschorus/nedschorus/pull/2318), and PR 2346 added the forms it could.
+`nn-systems/general-tools/python_source_tool_message_to_agent_string_collector_common.py` lists the strings a Python file hands an agent; `scripts/pull-request-review-plan.py` uses that list to decide which strings merge-lane-2 fast-reads in a pull request. To follow a local name to the strings bound to it, the collector must know which names a function, lambda, class body or comprehension binds, and which outer binding a name refers to. It works this out with its own rules, chiefly `scope_assigned_names` (`:537-558`), `nodes_in_own_scope` (`:581`) and `definition_time_expressions` (`:515`). Each binding form those rules do not model is a miss of its own, and reviews keep finding new ones: Codex found seven forms after [PR 2280](https://github.com/nedschorus/nedschorus/pull/2280) and two after [PR 2318](https://github.com/nedschorus/nedschorus/pull/2318), and PR 2346 added the forms it could.
 
 ## Misses still at PR 2346's head
 
@@ -60,7 +60,7 @@ Until then, a new miss is fixed in the rule that missed it, with a test that fai
 3. A name read inside a target, as `text` in `for messages[text] in items`, is no longer taken as bound: `comprehension_target_names` keeps only the names the target stores to.
 4. A type parameter's name hides the outer name in its own bound and default, and in a generic definition's annotations, bases and keywords (PEP 695): the new `type_parameter_scope_expressions` splits these out of `definition_time_expressions`.
 
-The module docstring's "Where a followed name may be bound" states all four. PR 2426 added seven cases to `nn-systems/general-tools/tests/python-source-tool-message-to-agent-string-collector-common-test.py`: six fail on the collector before the fix, and the seventh, a parameter printed in a comprehension's first iterable, checks that the fix does not hide too much. Over the 370 Python files at main, test files skipped, the collector's entries were the same before and after the fix.
+The module docstring's "Where a followed name may be bound" states all four. PR 2426 added seven cases to `nn-systems/general-tools/tests/python_source_tool_message_to_agent_string_collector_common-test.py`: six fail on the collector before the fix, and the seventh, a parameter printed in a comprehension's first iterable, checks that the fix does not hide too much. Over the 370 Python files at main, test files skipped, the collector's entries were the same before and after the fix.
 
 ## Next action
 

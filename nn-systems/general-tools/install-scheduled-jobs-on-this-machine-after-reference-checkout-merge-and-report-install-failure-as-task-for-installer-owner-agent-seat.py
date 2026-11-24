@@ -32,7 +32,7 @@ marked completed: the subject names paths and options that a rename changes.
 
 When a step fails, each open task gets as its description the failed step's
 option, exit code and output, or, when none is open, a new task is written
-with agent-seat-task-list-new-pending-task-write-common.py; nothing is
+with agent_seat_task_list_new_pending_task_write_common.py; nothing is
 printed. Every open task is rewritten, not one of them, so none is left
 telling its reader an older failure. When a write fails, the tasks rewritten
 before it hold the new description and the rest keep the old one, and the
@@ -109,14 +109,14 @@ def _load(module_name, file_name):
 
 
 ned_box_paths = _load("ned_box_home_directory_and_its_mac_mount_point_path_constants_common",
-                      "ned-box-home-directory-and-its-mac-mount-point-path-constants-common.py")
+                      "ned_box_home_directory_and_its_mac_mount_point_path_constants_common.py")
 mac_reference_checkout = _load(
     "mac_reference_checkout_launcher_scripts_directory_path_constant_common",
-    "mac-reference-checkout-launcher-scripts-directory-path-constant-common.py")
+    "mac_reference_checkout_launcher_scripts_directory_path_constant_common.py")
 agent_seat_task_list = _load("agent_seat_task_list_new_pending_task_write_common",
-                             "agent-seat-task-list-new-pending-task-write-common.py")
+                             "agent_seat_task_list_new_pending_task_write_common.py")
 agent_seat_task_file = _load("agent_seat_task_list_task_file_rewrite_common",
-                             "agent-seat-task-list-task-file-rewrite-common.py")
+                             "agent_seat_task_list_task_file_rewrite_common.py")
 
 REFERENCE_CHECKOUT_PATH_BY_MACHINE_NAME = {
     NED_BOX: f"{ned_box_paths.NED_BOX_HOME}/Projects/nedsnodes",

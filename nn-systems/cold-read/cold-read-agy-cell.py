@@ -4,7 +4,7 @@
 One invocation = one cold-read-cell — the third leg beside the Claude
 cold-read-cell launcher (nn-systems/cold-read/cold-read-claude-cell.py) and the Codex
 cold-read-cell launcher (nn-systems/cold-read/cold-read-codex-cell.py). Everything the three
-do apart from invoking their model lives in nn-systems/cold-read/cold-read-cell-common.py
+do apart from invoking their model lives in nn-systems/cold-read/cold_read_cell_common.py
 and is imported by all of them, so the legs cannot drift. Read that file for
 the report contract, the write-detection rule, and why the reviewer writes a
 file rather than answering in chat.
@@ -23,7 +23,7 @@ because the binary is not on PATH (the common module names that on stderr
 and lets the chain advance, so a 1 always means "no review was produced");
 64 this program refused the invocation and never launched agy, naming its
 own fix -- including when this machine has no sandbox to run agy in. 64 rather than the conventional 2 for the reason written beside
-EXIT_BAD_INVOCATION in nn-systems/cold-read/cold-read-cell-common.py, which every
+EXIT_BAD_INVOCATION in nn-systems/cold-read/cold_read_cell_common.py, which every
 cold-read-cell shares.
 
 WHAT THIS LEG IS FOR (user-ruled 2026-09-07 at the cold-read-research seat,
@@ -91,7 +91,7 @@ the threshold with no file written fails, as on the other legs.
 AGY RUNS INSIDE THE OPERATING SYSTEM'S SANDBOX, because nothing inside agy
 keeps a reviewer from reading a credential file (user-ruled 2026-09-28; the
 lists of credential files are CREDENTIAL_FILES_ON_NED_BOX and its neighbours in
-nn-systems/cold-read/cold-read-cell-common.py). Measured 2026-09-28 with
+nn-systems/cold-read/cold_read_cell_common.py). Measured 2026-09-28 with
 canary files: unguarded, agy read all three canaries, on the Mac and on
 ned-box; its own `--sandbox` switch still let it read all three; inside the
 sandbox below it read none, still read README.md, and wrote its report, on
@@ -121,7 +121,7 @@ move agy's calls onto per-call billing. It also removes GH_TOKEN and
 GITHUB_TOKEN, so agy gets no GitHub token from its caller; an agent-seat's
 supervisor sets GH_TOKEN to the agent-seat's own GitHub token. How gh behaves
 inside the Mac sandbox is said once, beside CREDENTIAL_DIRECTORIES in
-nn-systems/cold-read/cold-read-cell-common.py. When agy finds no login, it prints
+nn-systems/cold-read/cold_read_cell_common.py. When agy finds no login, it prints
 a line starting with AGY_MISSING_GOOGLE_LOGIN_STDERR_LINE_PREFIX, waits a
 minute for a login that cannot come headless, and exits 1; the cell's cause
 line is then logged-out, saying how to log agy in.
@@ -129,7 +129,7 @@ line is then logged-out, saying how to log agy in.
 WHY THIS LEG'S STAMP CARRIES NO `tokens=` FIELD. The Antigravity CLI prints
 no "tokens used" line the way the Codex CLI does, so the field is omitted
 rather than filled with a zero; if it starts printing one, the shared parser in
-nn-systems/cold-read/cold-read-cell-common.py picks it up with no change here.
+nn-systems/cold-read/cold_read_cell_common.py picks it up with no change here.
 """
 
 import importlib.util
@@ -141,7 +141,7 @@ import shutil
 import sys
 
 _common_spec = importlib.util.spec_from_file_location(
-    "cold_read_cell_common", pathlib.Path(__file__).with_name("cold-read-cell-common.py")
+    "cold_read_cell_common", pathlib.Path(__file__).with_name("cold_read_cell_common.py")
 )
 common = importlib.util.module_from_spec(_common_spec)
 _common_spec.loader.exec_module(common)

@@ -4285,7 +4285,7 @@ for raised in ("RuntimeError('a case raised')", "KeyboardInterrupt()"):
         shutil.copy(__file__, copy / Path(__file__).name)
         shutil.copy(Path(__file__).with_name("git-redirecting-environment-removal-test-fixture.py"), copy)
         shutil.copy(Path(__file__).resolve().parents[1] / "nn-systems" / "general-tools"
-                    / "git-redirecting-environment-variables-removal-common.py", tmp / "nn-systems" / "general-tools")
+                    / "git_redirecting_environment_variables_removal_common.py", tmp / "nn-systems" / "general-tools")
         (copy / "find-deleted-path-across-backups.py").write_text("raise %s\n" % raised)
         completed = subprocess.run([sys.executable, str(copy / Path(__file__).name)], capture_output=True, text=True,
                                    env=dict(os.environ, TMPDIR=str(copy_temp)))

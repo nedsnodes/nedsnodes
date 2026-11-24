@@ -9,7 +9,7 @@ url, so the agent can give the user the link to delete it himself on claude.ai.
 
 Only the Artifact tool is read. A payload that is not an object, or not an Artifact call,
 is let through without output. A payload that is not JSON lets the call go ahead with the
-crash notice of guard-hook-crash-fail-open-with-notice-common.py, as the other guard hooks do.
+crash notice of guard_hook_crash_fail_open_with_notice_common.py, as the other guard hooks do.
 """
 
 # Deferred annotations let the hook load on the Mac's system Python 3.9.
@@ -22,7 +22,7 @@ from pathlib import Path
 
 _crash_notice_spec = importlib.util.spec_from_file_location(
     "guard_hook_crash_fail_open_with_notice_common",
-    Path(__file__).resolve().parent / "guard-hook-crash-fail-open-with-notice-common.py")
+    Path(__file__).resolve().parent / "guard_hook_crash_fail_open_with_notice_common.py")
 _crash_notice = importlib.util.module_from_spec(_crash_notice_spec)
 _crash_notice_spec.loader.exec_module(_crash_notice)
 

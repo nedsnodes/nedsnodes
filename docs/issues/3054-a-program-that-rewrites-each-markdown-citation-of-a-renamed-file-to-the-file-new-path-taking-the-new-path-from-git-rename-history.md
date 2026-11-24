@@ -14,7 +14,7 @@ The user approved filing this as its own GHI on 2026-10-05, with "y" to item 7 o
 
 A program, run by the author of a change on its committed commits before pushing, that:
 
-1. reads the change's renames from git as `scripts/dangling-path-citation-check.py` does, with `git diff --name-status` between the merge base and `HEAD`, keeping only the rows git marks as renames. The code that reads those rows moves into a shared `-common.py` module that both programs import, rather than being copied, because a file name with hyphens cannot be imported with a plain `import` statement;
+1. reads the change's renames from git as `scripts/dangling-path-citation-check.py` does, with `git diff --name-status` between the merge base and `HEAD`, keeping only the rows git marks as renames. The code that reads those rows moves into a shared `_common.py` module that both programs import, rather than being copied, because a file name with hyphens cannot be imported with a plain `import` statement;
 2. finds each citation of an old path in the repository's Markdown files: a path in backticks, or a link target, with or without a line-number suffix such as `:120`;
 3. rewrites each such citation to the new path, in the form the citation had: a path from the repository root stays one, and a relative link target is recomputed from the citing file's directory, so a link still resolves after the rename moves the file to another directory; and prints each file and line it changed;
 4. leaves alone every other citation that `scripts/dangling-path-citation-check.py` reports: a citation of a deleted file, of a file git did not detect as renamed (git reports a rename below its similarity threshold as a delete and an add), of a directory, a path that is not in backticks, and a citation in a file that is not Markdown. git gives no single replacement for these, so the author fixes them by hand, as today.
@@ -29,7 +29,7 @@ Today the reminder hook `nn-systems/general-tools/claude-code-bash-git-push-of-m
 
 ## Next action
 
-Read `scripts/dangling-path-citation-check.py` and `scripts/md-drift-lint.py`, decide whether the rewrite is a new mode of `scripts/dangling-path-citation-check.py` or a program of its own, and build it, with the shared `-common.py` module, its test and the two changes to the reminder hook and the test suite, in one pull request.
+Read `scripts/dangling-path-citation-check.py` and `scripts/md-drift-lint.py`, decide whether the rewrite is a new mode of `scripts/dangling-path-citation-check.py` or a program of its own, and build it, with the shared `_common.py` module, its test and the two changes to the reminder hook and the test suite, in one pull request.
 
 ## Trigger to close
 

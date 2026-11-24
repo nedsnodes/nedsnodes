@@ -41,12 +41,12 @@ THIS_SCRIPT = "scripts/glossary-term-agent-facing-message-replaced-by-tool-messa
 # fails on such a citation.
 MOVED_FILES_NEW_PATHS = (
     "docs/nedsnodes-wiki/nedsnodes-how-to-write-a-tool-message-to-agent-such-as-a-hook-refusal-or-script-error.md",
-    "nn-systems/general-tools/failed-command-tool-message-to-agent-rerun-once-then-stop-and-report-lines-common.py",
-    "nn-systems/general-tools/tests/failed-command-tool-message-to-agent-rerun-once-then-stop-and-report-lines-common-test.py",
+    "nn-systems/general-tools/failed_command_tool_message_to_agent_rerun_once_then_stop_and_report_lines_common.py",
+    "nn-systems/general-tools/tests/failed_command_tool_message_to_agent_rerun_once_then_stop_and_report_lines_common-test.py",
     "nn-systems/general-tools/python-edit-changed-tool-message-to-agent-strings-check-reminder-hook.py",
     "nn-systems/general-tools/tests/python-edit-changed-tool-message-to-agent-strings-check-reminder-hook-test.py",
-    "nn-systems/general-tools/python-source-tool-message-to-agent-string-collector-common.py",
-    "nn-systems/general-tools/tests/python-source-tool-message-to-agent-string-collector-common-test.py",
+    "nn-systems/general-tools/python_source_tool_message_to_agent_string_collector_common.py",
+    "nn-systems/general-tools/tests/python_source_tool_message_to_agent_string_collector_common-test.py",
     "scripts/tool-message-to-agent-ask-two-fresh-agents-next-step-and-check-named-script-flags.py",
     "scripts/tool-message-to-agent-ask-two-fresh-agents-next-step-and-check-named-script-flags-test.py",
 )

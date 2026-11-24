@@ -118,7 +118,7 @@ WHAT IS PINNED HERE.
     as a prefix, added because two cold-read runs going at once in one
     checkout each held a file of every one of those names and a cell's
     near-miss recovery could take the other run's; that case is now met in
-    the recovery itself (nn-systems/cold-read/tests/cold-read-cell-common-test.py pins it). The
+    the recovery itself (nn-systems/cold-read/tests/cold_read_cell_common-test.py pins it). The
     cases below assert the bare names on every file in the set.
 
   - A record directory is named `<file stem>-<YYYY-MM-DD>`, or
@@ -185,7 +185,7 @@ _scratch_repository_fixture_spec.loader.exec_module(scratch_repository_fixture)
 
 # The shared cell module, whose own suite pins its wording; the cases here take that wording from it.
 _cell_common_spec = importlib.util.spec_from_file_location(
-    "cold_read_cell_common", SYSTEM_DIRECTORY / "cold-read-cell-common.py")
+    "cold_read_cell_common", SYSTEM_DIRECTORY / "cold_read_cell_common.py")
 cell_common = importlib.util.module_from_spec(_cell_common_spec)
 _cell_common_spec.loader.exec_module(cell_common)
 
@@ -613,14 +613,14 @@ def frozen_target_path_in_scratch_repository(repository, record_directory):
     `record_directory`, as frozen_target_path() itself answers it.
 
     Loaded from the scratch repository's own copy of
-    nn-systems/cold-read/cold-read-record-names-common.py, not from this checkout's:
+    nn-systems/cold-read/cold_read_record_names_common.py, not from this checkout's:
     the function makes the target relative to its module's REPO_ROOT, so this
     checkout's copy would find the scratch target outside its repository and
     return the absolute-path fallback. The scratch copy is also the very file
     the grid under test loaded."""
     record_names_spec = importlib.util.spec_from_file_location(
         "cold_read_record_names_in_scratch_repository",
-        repository / "nn-systems" / "cold-read" / "cold-read-record-names-common.py")
+        repository / "nn-systems" / "cold-read" / "cold_read_record_names_common.py")
     record_names = importlib.util.module_from_spec(record_names_spec)
     record_names_spec.loader.exec_module(record_names)
     return record_names.frozen_target_path(
@@ -630,7 +630,7 @@ def frozen_target_path_in_scratch_repository(repository, record_directory):
 _scratch_directory_common_spec = importlib.util.spec_from_file_location(
     "test_scratch_directory_whose_earlier_killed_runs_leftovers_are_removed_first_common",
     REPO_ROOT / "nn-systems" / "general-tools"
-    / "test-scratch-directory-whose-earlier-killed-runs-leftovers-are-removed-first-common.py")
+    / "test_scratch_directory_whose_earlier_killed_runs_leftovers_are_removed_first_common.py")
 _scratch_directory_common = importlib.util.module_from_spec(_scratch_directory_common_spec)
 _scratch_directory_common_spec.loader.exec_module(_scratch_directory_common)
 SCRATCH_ROOT = _scratch_directory_common.make_test_scratch_directory_after_removing_killed_runs_leftovers(

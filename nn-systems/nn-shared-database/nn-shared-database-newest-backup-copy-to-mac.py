@@ -39,7 +39,7 @@ EXIT_NOT_COPIED = 1
 _ned_box_paths_spec = importlib.util.spec_from_file_location(
     "ned_box_home_directory_and_its_mac_mount_point_path_constants_common",
     Path(__file__).resolve().parents[1] / "general-tools"
-    / "ned-box-home-directory-and-its-mac-mount-point-path-constants-common.py")
+    / "ned_box_home_directory_and_its_mac_mount_point_path_constants_common.py")
 ned_box_paths = importlib.util.module_from_spec(_ned_box_paths_spec)
 _ned_box_paths_spec.loader.exec_module(ned_box_paths)
 

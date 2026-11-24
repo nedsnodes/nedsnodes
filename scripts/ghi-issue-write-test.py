@@ -2977,8 +2977,8 @@ def run_edit_cases(scratch: Path):
                            directory="nn-systems/statusline"),
               scratch)[2] == 570)
 
-    # nn-systems/general-tools/reusable-prompt-file-recognized-by-name-ending-
-    # and-not-ghi-md-common.py takes a GHI-MD by issue_number_in_file_name, so
+    # nn-systems/general-tools/reusable_prompt_file_recognized_by_name_ending_
+    # and_not_ghi_md_common.py takes a GHI-MD by issue_number_in_file_name, so
     # validate_edit must ask the same function or the two can disagree.
     original_rule = tool.issue_number_in_file_name
     tool.issue_number_in_file_name = lambda path: 572

@@ -118,7 +118,7 @@ EXIT_FAILED = 1
 
 _worth_resuming_specification = importlib.util.spec_from_file_location(
     "seat_transcript_worth_resuming",
-    Path(__file__).resolve().parents[2] / "scripts" / "agent-seat-transcript-worth-resuming-common.py")
+    Path(__file__).resolve().parents[2] / "scripts" / "agent_seat_transcript_worth_resuming_common.py")
 worth_resuming = importlib.util.module_from_spec(_worth_resuming_specification)
 _worth_resuming_specification.loader.exec_module(worth_resuming)
 

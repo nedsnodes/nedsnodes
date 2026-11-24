@@ -109,13 +109,13 @@ class WorkSnapshotError(Exception):
 _git_machine_readable_output_spec = importlib.util.spec_from_file_location(
     "git_machine_readable_output_runner_and_parser_common",
     Path(__file__).resolve().parents[2] / "nn-systems" / "general-tools"
-    / "git-machine-readable-output-runner-and-parser-common.py")
+    / "git_machine_readable_output_runner_and_parser_common.py")
 git_machine_readable_output = importlib.util.module_from_spec(_git_machine_readable_output_spec)
 _git_machine_readable_output_spec.loader.exec_module(git_machine_readable_output)
 _agent_seat_task_list_spec = importlib.util.spec_from_file_location(
     "agent_seat_task_list_new_pending_task_write_common",
     Path(__file__).resolve().parents[2] / "nn-systems" / "general-tools"
-    / "agent-seat-task-list-new-pending-task-write-common.py")
+    / "agent_seat_task_list_new_pending_task_write_common.py")
 agent_seat_task_list = importlib.util.module_from_spec(_agent_seat_task_list_spec)
 _agent_seat_task_list_spec.loader.exec_module(agent_seat_task_list)
 

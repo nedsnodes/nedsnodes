@@ -5,7 +5,7 @@ result, hand the lift to an agent-seat, and lift the stop.
 
 The /emergency-stop skill runs this program; no agent writes the file by hand,
 so its lines keep the exact form the hooks read. The folder and the stop
-file's reading rules are in emergency-stop-file-in-force-read-common.py.
+file's reading rules are in emergency_stop_file_in_force_read_common.py.
 
 Subcommands:
   start --words TEXT | --evidence TEXT
@@ -54,7 +54,7 @@ from pathlib import Path
 
 HERE = Path(__file__).resolve().parent
 _spec = importlib.util.spec_from_file_location(
-    "emergency_stop_file_in_force_read_common", HERE / "emergency-stop-file-in-force-read-common.py")
+    "emergency_stop_file_in_force_read_common", HERE / "emergency_stop_file_in_force_read_common.py")
 common = importlib.util.module_from_spec(_spec)
 _spec.loader.exec_module(common)
 

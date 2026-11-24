@@ -31,7 +31,7 @@ _git_environment_fixture.remove_git_redirecting_environment_variables_from_this_
 _attendance_check_spec = importlib.util.spec_from_file_location(
     "agent_session_unattended_by_user_check_common",
     Path(__file__).resolve().parents[4] / "nn-systems" / "general-tools"
-    / "agent-session-unattended-by-user-check-common.py")
+    / "agent_session_unattended_by_user_check_common.py")
 attendance_check = importlib.util.module_from_spec(_attendance_check_spec)
 _attendance_check_spec.loader.exec_module(attendance_check)
 
