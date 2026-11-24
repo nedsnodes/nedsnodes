@@ -7029,6 +7029,35 @@ def test_each_run_saves_a_changed_walk_document_once_and_keeps_the_newest_twenty
     check("no temporary file is left", not list((root / WALK_NAME).glob("*.tmp")))
 
 
+def test_an_expired_copy_another_run_removed_first_counts_as_pruned():
+    program = load_program()
+    case = Case()
+    root = case.root / "copies-pruned-by-two-runs"
+    arguments = argparse.Namespace(cwd=str(case.checkout), walk_document_copies_directory=root, cold_read_records=None,
+                                   counts_log=None)
+    (root / WALK_NAME).mkdir(parents=True)
+    expired = [root / WALK_NAME / f"2000-01-01T00-00-{number:02}.000000Z.md" for number in range(3)]
+    for path in expired:
+        path.write_bytes(b"expired")
+    for number in range(1, 20):
+        (root / WALK_NAME / f"2000-01-02T00-00-{number:02}.000000Z.md").write_bytes(b"old")
+    real_unlink = Path.unlink
+
+    def unlink_after_another_run_removed_the_first_expired_copy(self, *args, **kwargs):
+        if self == expired[0]:
+            os.remove(self)
+        return real_unlink(self, *args, **kwargs)
+
+    Path.unlink = unlink_after_another_run_removed_the_first_expired_copy
+    try:
+        problem = program.walk_me_through_walk_document_timestamped_copy_save_on_ned_box_and_oldest_copies_prune(arguments)
+    finally:
+        Path.unlink = real_unlink
+    check("the save succeeds although another run removed an expired copy first", problem is None, str(problem))
+    check("the other expired copies are pruned", not any(path.exists() for path in expired))
+    check("the newest 20 copies are kept", len(walk_copies(root)) == 20, str(len(walk_copies(root))))
+
+
 def test_an_unchanged_run_finishes_the_prune_and_keeps_files_the_program_did_not_name():
     case = Case()
     root = case.root / "walk-document-copies"
