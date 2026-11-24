@@ -2678,6 +2678,29 @@ check("rule 3: once the user has typed, the put-off handoff is raised again",
 
 machine = Machine()
 machine.seat("alpha", DONE_TURN)
+machine.handoff_put_off()
+(machine.bin / "gh").write_text("#!/bin/sh\necho 'gh stand-in: failing on purpose' >&2\nexit 1\n")
+(machine.bin / "gh").chmod(0o755)
+machine.task("alpha", "1")
+task_path = machine.tasks / "nedsnodes-alpha-tasks" / "1.json"
+task_path.write_text(json.dumps({**json.loads(task_path.read_text()),
+                                 "metadata": {"prerequisites": [{"pr_merged": 50}]}}))
+machine.script(sent_ok())
+machine.run(0)
+check("rule 3: a GitHub read that fails for a task's prerequisite does not stop the handoff message",
+      [event["text"].startswith(HANDOFF_TEXT_START) for event in machine.events("message_sent")]
+      == [True], machine.events())
+answered_with_a_tool_call_and_idle_again(machine, 10)
+machine.script()
+machine.run(20)
+check("rule 3: with the handoff message withheld, the failed read is reported and no judge runs",
+      not machine.events("judge_answer") and any("GitHub could not say whether pr_merged 50"
+                                            in event["error"]
+                                            for event in machine.events("read_failure")),
+      machine.events())
+
+machine = Machine()
+machine.seat("alpha", DONE_TURN)
 machine.task("alpha", "1")
 machine.script(judged(True, 'Your task "task 1" is open.', raised=["1"]), sent_ok())
 machine.run(0)

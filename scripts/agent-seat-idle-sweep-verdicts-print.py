@@ -804,11 +804,19 @@ def rules_three_to_five(verdict, put_off_at, checker, task_directory,
     if not running:
         # A condition the shared GitHub budget skipped may be met, so it leaves the verdict to rule 5.
         skipped_before = len(checker.conditions_skipped_for_budget)
-        verdict["open_tasks_nothing_holds"] = open_tasks_nothing_holds(
-            task_directory, checker, due_task_raise_state_directory)
         if verdict["handoff_deferred_marker"]:
+            # The open tasks matter only when the sender withholds the handoff message, so a
+            # failed read of them must not stop that message or an escalation already due.
+            try:
+                verdict["open_tasks_nothing_holds"] = open_tasks_nothing_holds(
+                    task_directory, checker, due_task_raise_state_directory)
+            except ReadFailure as error:
+                verdict["open_tasks_nothing_holds"] = None
+                verdict["open_tasks_nothing_holds_read_failure"] = str(error)
             return {fields.RULE: 3, fields.DECISION: fields.WAKE_HANDOFF_PUT_OFF,
                     fields.TEXT: HANDOFF_PUT_OFF_TEXT.format(time=iso(put_off_at))}
+        verdict["open_tasks_nothing_holds"] = open_tasks_nothing_holds(
+            task_directory, checker, due_task_raise_state_directory)
         if (not verdict["open_tasks_nothing_holds"]
                 and len(checker.conditions_skipped_for_budget) == skipped_before):
             return {fields.RULE: 4, fields.DECISION: fields.NO_WAKE}
