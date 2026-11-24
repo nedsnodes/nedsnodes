@@ -54,6 +54,10 @@ with tempfile.TemporaryDirectory() as directory:
           result.returncode == 0 and result.stdout == "" and not stored.exists(), result)
 
     transcript = transcript_with_titles(directory, "seat-a", "----new name")
+    result = run_hook(home, json.dumps({"transcript_path": transcript, "stop_hook_active": True}))
+    check("while the agent answers a Stop hook, a changed title waits for the next turn's end",
+          result.returncode == 0 and result.stdout == "" and not stored.exists(), result)
+
     result = run_hook(home, json.dumps({"transcript_path": transcript}))
     context = json.loads(result.stdout)["hookSpecificOutput"]["additionalContext"]
     check("a changed title is stored", stored.read_text(encoding="utf-8") == "----new name\n")

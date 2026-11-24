@@ -24,6 +24,13 @@ _common_specification = importlib.util.spec_from_file_location(
 remote_control_name_common = importlib.util.module_from_spec(_common_specification)
 _common_specification.loader.exec_module(remote_control_name_common)
 
+_stop_hooks_stay_silent_rule_specification = importlib.util.spec_from_file_location(
+    "claude_code_stop_hooks_stay_silent_while_agent_answers_a_stop_hook_rule_common",
+    Path(__file__).resolve().parents[1] / "general-tools"
+    / "claude-code-stop-hooks-stay-silent-while-agent-answers-a-stop-hook-rule-common.py")
+stop_hooks_stay_silent_rule = importlib.util.module_from_spec(_stop_hooks_stay_silent_rule_specification)
+_stop_hooks_stay_silent_rule_specification.loader.exec_module(stop_hooks_stay_silent_rule)
+
 # Messages below follow docs/nedsnodes-wiki/nedsnodes-how-to-write-a-tool-message-to-agent-such-as-a-hook-refusal-or-script-error.md.
 REMOTE_CONTROL_RENAMED_REMINDER_MESSAGE = (
     "[rule handoff-remote-control-name-changed-in-claude-ai-tell-other-agent-seats] {instruction}")
@@ -38,6 +45,8 @@ def main() -> int:
         payload = json.loads(sys.stdin.read())
         if not isinstance(payload, dict):
             raise ValueError("the input on the hook's stdin is JSON, but not an object")
+        if stop_hooks_stay_silent_rule.stop_hook_stays_silent_while_agent_answers_a_stop_hook(payload):
+            return 0
         agent_seat = os.environ.get(HANDOFF_SUPERVISOR_AGENT_NAME_ENVIRONMENT_VARIABLE, "").strip()
         transcript_path = payload.get("transcript_path")
         if not agent_seat or not isinstance(transcript_path, str) or not transcript_path:
