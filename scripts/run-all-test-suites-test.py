@@ -4856,6 +4856,11 @@ with tempfile.TemporaryDirectory() as scratch:
         {name: None for name in module.SUITE_SANDBOX_LIST_NAMES_READ_FROM_CHECKOUT_UNDER_TEST}),
         encoding="utf-8")
     _, all_fallback_source = module.suite_sandbox_lists_read_from_checkout_under_test(checkout)
+    lists_file.write_text(checkout_runner_source(
+        {name: None for name in module.SUITE_SANDBOX_LIST_NAMES_READ_FROM_CHECKOUT_UNDER_TEST}
+        | {REAL_CLAUDE: "SUITES_THAT_RUN_THE_REAL_CLAUDE_CLI = {\"scripts/a-test.py\"}\n"}),
+        encoding="utf-8")
+    _, set_and_lacking_source = module.suite_sandbox_lists_read_from_checkout_under_test(checkout)
 check("when the checkout lacks one list, the lists' source names the checkout's file and this "
       "program for that list",
       lacking_source == (f"{lists_file}, and in {pathlib.Path(module.__file__).resolve()} for "
@@ -4866,8 +4871,11 @@ check("when the checkout has every list, the lists' source is the checkout's fil
 check("when the checkout lacks every list, the lists' source is this program alone, not the "
       "checkout's file, which supplied none",
       all_fallback_source == (f"{pathlib.Path(module.__file__).resolve()}, since {lists_file} "
-                              f"lacks every list or assigns each a set"),
+                              f"supplies none of the lists, lacking each or assigning it a set"),
       all_fallback_source)
+check("when the checkout assigns one list a set and lacks the others, the lists' source is this "
+      "program alone, with the same reason",
+      set_and_lacking_source == all_fallback_source, set_and_lacking_source)
 
 # A current checkout's list that this program cannot read is refused, not taken for an older
 # checkout's missing list.
