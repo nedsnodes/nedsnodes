@@ -28,7 +28,7 @@ _supervisor_spec.loader.exec_module(supervisor)
 
 _worth_resuming_spec = importlib.util.spec_from_file_location(
     "seat_transcript_worth_resuming",
-    _SCRIPTS_DIRECTORY / "agent-seat-transcript-worth-resuming-common.py")
+    _SCRIPTS_DIRECTORY / "agent_seat_transcript_worth_resuming_common.py")
 worth_resuming = importlib.util.module_from_spec(_worth_resuming_spec)
 _worth_resuming_spec.loader.exec_module(worth_resuming)
 

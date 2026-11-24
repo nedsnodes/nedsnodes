@@ -207,7 +207,7 @@ run_all_test_suites = module_loaded_by_path(
 git_output = module_loaded_by_path(
     "git_machine_readable_output_runner_and_parser_common",
     REPOSITORY_ROOT / "nn-systems" / "general-tools"
-    / "git-machine-readable-output-runner-and-parser-common.py")
+    / "git_machine_readable_output_runner_and_parser_common.py")
 
 SCHEDULED_FULL_TEST_RUN_DEFAULT_LOG_STORE_ROOT = "/home/nedlern/nedsnodes-logs"
 # Use the log-store’s established machine and kind names.

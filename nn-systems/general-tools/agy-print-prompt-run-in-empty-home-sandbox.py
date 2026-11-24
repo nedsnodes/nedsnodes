@@ -15,7 +15,7 @@ the sandbox program. GEMINI_API_KEY is removed from agy's environment, because
 a key is billed per call and agy's own Google login, in ~/.gemini, is not.
 GH_TOKEN and GITHUB_TOKEN are removed too, so agy gets no GitHub token from its
 caller; how gh behaves inside the macOS sandbox is said beside
-CREDENTIAL_DIRECTORIES in nn-systems/cold-read/cold-read-cell-common.py.
+CREDENTIAL_DIRECTORIES in nn-systems/cold-read/cold_read_cell_common.py.
 
 The program's name describes the Linux sandbox; on macOS the home is not
 emptied, as the macOS paragraph below says.
@@ -42,7 +42,7 @@ On macOS the sandbox is `sandbox-exec`, started by the command prefix that
 the program that runs agy for cold reads. The sandbox-exec profile, built by
 `sandbox_exec_profile()` in the same file, denies reading and writing only the
 credential paths, which that function assembles from the lists in
-nn-systems/cold-read/cold-read-cell-common.py: ~/.config/nedsnodes,
+nn-systems/cold-read/cold_read_cell_common.py: ~/.config/nedsnodes,
 ~/.config/gh, ~/.ssh, ~/.steam and ~/nedsmessenger, Claude's and Codex's login files, and files named
 *.token or .env. The
 rest of the home stays readable and writable, and agy stays on PATH, so a plain `agy`

@@ -4,7 +4,7 @@ or when two hooks share one rule ID.
 
 Each message a hook in .claude/settings.json prints for a rule, a refusal, a
 warning or a reminder, starts with `[rule <id>]`, as
-nn-systems/general-tools/claude-code-registered-hook-rule-id-pattern-hook-files-list-and-source-scan-common.py says, so
+nn-systems/general-tools/claude_code_registered_hook_rule_id_pattern_hook_files_list_and_source_scan_common.py says, so
 the weekly count of each ID in the transcripts can name the rules that never
 fire.
 
@@ -44,10 +44,10 @@ def load_by_path(name, path):
 
 
 rule_ids = load_by_path("claude_code_registered_hook_rule_id_pattern_hook_files_list_and_source_scan_common",
-                        REPOSITORY / "nn-systems" / "general-tools" / "claude-code-registered-hook-rule-id-pattern-hook-files-list-and-source-scan-common.py")
+                        REPOSITORY / "nn-systems" / "general-tools" / "claude_code_registered_hook_rule_id_pattern_hook_files_list_and_source_scan_common.py")
 collector = load_by_path(
     "python_source_tool_message_to_agent_string_collector_common",
-    REPOSITORY / "nn-systems" / "general-tools" / "python-source-tool-message-to-agent-string-collector-common.py")
+    REPOSITORY / "nn-systems" / "general-tools" / "python_source_tool_message_to_agent_string_collector_common.py")
 
 LATER_PART = "a later part of a message, after the opening that carries its rule's ID"
 HOOK_FAILED = "says the hook failed or could not check, and lets the act through"

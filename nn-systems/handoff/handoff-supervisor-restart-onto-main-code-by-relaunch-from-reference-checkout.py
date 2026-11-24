@@ -121,10 +121,10 @@ recovery = load_module("recover_crashed_seats", REPOSITORY / "scripts" / "recove
 ned_box_home_path_constants = load_module(
     "ned_box_home_directory_and_its_mac_mount_point_path_constants_common",
     REPOSITORY / "nn-systems" / "general-tools"
-    / "ned-box-home-directory-and-its-mac-mount-point-path-constants-common.py")
+    / "ned_box_home_directory_and_its_mac_mount_point_path_constants_common.py")
 reference_checkout_steps = load_module(
     "handoff_reference_checkout_fetch_and_fast_forward_to_origin_main_check_common",
-    SYSTEM_DIRECTORY / "handoff-reference-checkout-fetch-and-fast-forward-to-origin-main-check-common.py")
+    SYSTEM_DIRECTORY / "handoff_reference_checkout_fetch_and_fast_forward_to_origin_main_check_common.py")
 
 REFERENCE_CHECKOUT = reference_checkout_steps.REFERENCE_CHECKOUT
 HANDOFF_DIRECTORY = Path("~/.claude/handoffs").expanduser()

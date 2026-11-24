@@ -200,7 +200,7 @@ child an agent-seat's program starts. A child inherits the agent-seat's
 environment, CLAUDE_CODE_TASK_LIST_ID included, and the raise text would be
 the last thing the child says, which its caller reads as the answer. The
 hook stays silent when
-nn-systems/general-tools/agent-session-unattended-by-user-check-common.py
+nn-systems/general-tools/agent_session_unattended_by_user_check_common.py
 says no user attends the agent-session; the Stop payload carries no field
 that tells an attended agent-session from a headless child.
 
@@ -225,14 +225,14 @@ from pathlib import Path
 _stop_hooks_stay_silent_rule_specification = importlib.util.spec_from_file_location(
     "claude_code_stop_hooks_stay_silent_while_agent_answers_a_stop_hook_rule_common",
     Path(__file__).resolve().parents[1] / "nn-systems" / "general-tools"
-    / "claude-code-stop-hooks-stay-silent-while-agent-answers-a-stop-hook-rule-common.py")
+    / "claude_code_stop_hooks_stay_silent_while_agent_answers_a_stop_hook_rule_common.py")
 stop_hooks_stay_silent_rule = importlib.util.module_from_spec(_stop_hooks_stay_silent_rule_specification)
 _stop_hooks_stay_silent_rule_specification.loader.exec_module(stop_hooks_stay_silent_rule)
 
 _agent_session_unattended_by_user_check_common_specification = importlib.util.spec_from_file_location(
     "agent_session_unattended_by_user_check_common",
     Path(__file__).resolve().parents[1] / "nn-systems" / "general-tools"
-    / "agent-session-unattended-by-user-check-common.py")
+    / "agent_session_unattended_by_user_check_common.py")
 agent_session_unattended_by_user_check_common = importlib.util.module_from_spec(
     _agent_session_unattended_by_user_check_common_specification)
 _agent_session_unattended_by_user_check_common_specification.loader.exec_module(
@@ -889,11 +889,11 @@ def due_task_lines(tasks: dict, directory: Path, state: dict,
 
 
 WALK_FINDER_FILE = (_HOOK_DIRECTORY.parent / "nn-systems" / "skills" / "walk-me-through"
-                    / "walk-me-through-approval-walk-minutes-and-walk-document-item-finder-common.py")
+                    / "walk_me_through_approval_walk_minutes_and_walk_document_item_finder_common.py")
 WALK_ANSWER_PROGRAM_FILE = WALK_FINDER_FILE.with_name(
     "walk-me-through-answer-added-texts-cold-read-fast-read-check-and-close.py")
 HANDOFF_THRESHOLD_HOOK_FILE = _HOOK_DIRECTORY / "handoff-context-threshold-hook.py"
-TRANSCRIPT_RECORDS_FILE = _HOOK_DIRECTORY / "claude-code-session-transcript-records-read-backward-common.py"
+TRANSCRIPT_RECORDS_FILE = _HOOK_DIRECTORY / "claude_code_session_transcript_records_read_backward_common.py"
 NEXT_ACTION_STATE_KEY = "next_action_prompt"
 OPEN_OUTCOME_MARK = "<open>"
 NEXT_ACTION_LISTED_TASKS_LIMIT = 40

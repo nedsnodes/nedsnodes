@@ -75,7 +75,7 @@ This page sets no upper limit: some studies favour names of two to four words, a
 
 ### Generic words are fine inside a longer name
 
-Generic words, such as `manager`, `handler`, `helper`, `common`, `data`, `info`, `record` or `check`, say almost nothing alone. As one word of a longer name whose other words say which one, they are fine: `nn-systems/cold-read/cold-read-cell-common.py` says it holds the code the cold-read-cells share. What fails is the bare word, or a name such as `seat-manager`, which leaves the reader asking what it does to which agent-seat.
+Generic words, such as `manager`, `handler`, `helper`, `common`, `data`, `info`, `record` or `check`, say almost nothing alone. As one word of a longer name whose other words say which one, they are fine: `nn-systems/cold-read/cold_read_cell_common.py` says it holds the code the cold-read-cells share. What fails is the bare word, or a name such as `seat-manager`, which leaves the reader asking what it does to which agent-seat.
 
 ### Name a test file after what it tests
 

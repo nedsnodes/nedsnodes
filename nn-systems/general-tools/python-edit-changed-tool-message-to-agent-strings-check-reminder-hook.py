@@ -24,7 +24,7 @@ which the agent reads next; a PostToolUse hook's plain stdout reaches only the
 debug log.
 
 Which strings are tool-messages-to-agent is decided by
-python-source-tool-message-to-agent-string-collector-common.py, which also says which
+python_source_tool_message_to_agent_string_collector_common.py, which also says which
 files are tests; a test file gets no reminder. A message counts as added or
 changed when the tool call wrote one of the message's lines and the file at
 HEAD holds no message with the same text, so code moved or re-indented around
@@ -62,13 +62,13 @@ from pathlib import Path
 
 _collector_spec = importlib.util.spec_from_file_location(
     "python_source_tool_message_to_agent_string_collector_common",
-    Path(__file__).resolve().with_name("python-source-tool-message-to-agent-string-collector-common.py"))
+    Path(__file__).resolve().with_name("python_source_tool_message_to_agent_string_collector_common.py"))
 collector = importlib.util.module_from_spec(_collector_spec)
 _collector_spec.loader.exec_module(collector)
 _checkout_path_spec = importlib.util.spec_from_file_location(
     "edited_file_path_within_checkout_root_and_git_check_ignore_common",
     Path(__file__).resolve().with_name(
-        "edited-file-path-within-checkout-root-and-git-check-ignore-common.py"))
+        "edited_file_path_within_checkout_root_and_git_check_ignore_common.py"))
 checkout_path = importlib.util.module_from_spec(_checkout_path_spec)
 _checkout_path_spec.loader.exec_module(checkout_path)
 

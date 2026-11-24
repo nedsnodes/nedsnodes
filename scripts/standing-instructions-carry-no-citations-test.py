@@ -39,14 +39,14 @@ _git_environment_fixture.remove_git_redirecting_environment_variables_from_this_
 
 _date_pattern_spec = importlib.util.spec_from_file_location(
     "citation_and_history_marker_tests_date_pattern_common",
-    Path(__file__).resolve().with_name("citation-and-history-marker-tests-date-pattern-common.py"))
+    Path(__file__).resolve().with_name("citation_and_history_marker_tests_date_pattern_common.py"))
 _date_pattern = importlib.util.module_from_spec(_date_pattern_spec)
 _date_pattern_spec.loader.exec_module(_date_pattern)
 
 _reusable_prompt_rule_spec = importlib.util.spec_from_file_location(
     "reusable_prompt_file_recognized_by_name_ending_and_not_ghi_md_common",
     Path(__file__).resolve().parents[1] / "nn-systems" / "general-tools"
-    / "reusable-prompt-file-recognized-by-name-ending-and-not-ghi-md-common.py")
+    / "reusable_prompt_file_recognized_by_name_ending_and_not_ghi_md_common.py")
 _reusable_prompt_rule = importlib.util.module_from_spec(_reusable_prompt_rule_spec)
 _reusable_prompt_rule_spec.loader.exec_module(_reusable_prompt_rule)
 

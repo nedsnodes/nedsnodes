@@ -73,7 +73,7 @@ from pathlib import Path
 SYSTEM_DIRECTORY = Path(__file__).resolve().parent
 _reference_checkout_steps_spec = importlib.util.spec_from_file_location(
     "handoff_reference_checkout_fetch_and_fast_forward_to_origin_main_check_common",
-    SYSTEM_DIRECTORY / "handoff-reference-checkout-fetch-and-fast-forward-to-origin-main-check-common.py")
+    SYSTEM_DIRECTORY / "handoff_reference_checkout_fetch_and_fast_forward_to_origin_main_check_common.py")
 reference_checkout_steps = importlib.util.module_from_spec(_reference_checkout_steps_spec)
 _reference_checkout_steps_spec.loader.exec_module(reference_checkout_steps)
 

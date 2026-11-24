@@ -620,9 +620,9 @@ with tempfile.TemporaryDirectory() as frozen_workspace:
 # top of the ordinary ones; any other Markdown file does not.
 OVERVIEW_NAME = "docs/nedsnodes-wiki/nedsnodes-demo-architecture-overview.md"
 OVERVIEW_PATH_MODULE = LINT_SCRIPT.with_name(
-    "architecture-overview-path-template-and-checked-against-commit-reader-common.py")
+    "architecture_overview_path_template_and_checked_against_commit_reader_common.py")
 REPOSITORY_NAMES_MODULE_PATH_IN_CHECKOUT = (
-    "nn-systems/general-tools/github-repository-name-and-name-before-project-rename-common.py")
+    "nn-systems/general-tools/github_repository_name_and_name_before_project_rename_common.py")
 
 
 def overview_repository(root: Path):

@@ -241,7 +241,7 @@ import typing
 # has hyphens.
 _record_names_spec = importlib.util.spec_from_file_location(
     "cold_read_record_names",
-    pathlib.Path(__file__).with_name("cold-read-record-names-common.py"))
+    pathlib.Path(__file__).with_name("cold_read_record_names_common.py"))
 record_names = importlib.util.module_from_spec(_record_names_spec)
 _record_names_spec.loader.exec_module(record_names)
 RECORDS_DIR = record_names.RECORDS_DIR
@@ -336,7 +336,7 @@ What each kind holds and how its files are named is decided by its owner,
 in the nedschorus repository, which this machine also clones:
 
 - `cold-read-records/` -- cold-read-records, named by
-  `nn-systems/cold-read/cold-read-record-names-common.py`
+  `nn-systems/cold-read/cold_read_record_names_common.py`
 - `sanity-check-records/` -- the /sanity-check skill's records, shipped by
   `scripts/sanity-check-record-ship.py`
 - `walk/` -- approval-walk files, named by the walk-me-through skill, shipped

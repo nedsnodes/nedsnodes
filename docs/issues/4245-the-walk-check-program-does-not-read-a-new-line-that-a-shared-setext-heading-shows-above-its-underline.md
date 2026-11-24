@@ -28,7 +28,7 @@ Recommendation: approve.
 Recommendation: approve.
 ```
 
-On main at fe6194a84, `approval_walk_item_text_as_shown_to_user(text, parser, units, unit, "2")`, called with that walk-document's text, in `nn-systems/skills/walk-me-through/walk-me-through-approval-walk-minutes-and-walk-document-item-finder-common.py`, returns item 2's copy with the line `#new "Hide the old rows."` in it. So the item page and the agent's message show the user that proposed text with item 2.
+On main at fe6194a84, `approval_walk_item_text_as_shown_to_user(text, parser, units, unit, "2")`, called with that walk-document's text, in `nn-systems/skills/walk-me-through/walk_me_through_approval_walk_minutes_and_walk_document_item_finder_common.py`, returns item 2's copy with the line `#new "Hide the old rows."` in it. So the item page and the agent's message show the user that proposed text with item 2.
 
 Then the walk check program's check step, `nn-systems/skills/walk-me-through/walk-me-through-answer-added-texts-cold-read-fast-read-check-and-close.py check`, run in a checkout holding that walk-document and its walk-minutes, exits 0 and prints `no proposed text marked`. It runs no fast read: the test suite's fast-read stand-in records no call. The close step it then names records the user's answer with no fast read of the text he approved.
 

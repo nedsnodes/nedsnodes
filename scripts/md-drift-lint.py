@@ -36,7 +36,7 @@ Checks, per file type:
           edit to the first does nothing)
 
 An nn-architecture-overview, a file at the path
-scripts/architecture-overview-path-template-and-checked-against-commit-reader-common.py
+scripts/architecture_overview_path_template_and_checked_against_commit_reader_common.py
 gives for a system with a directory under nn-systems/, gets the overview
 checks of docs/nedsnodes-wiki/nedsnodes-how-to-write-an-architecture-overview.md
 too, when this script is run (a program that calls lint_markdown() gets them
@@ -83,7 +83,7 @@ REPO_ROOT = Path(__file__).resolve().parent.parent
 
 def _load_architecture_overview_path_reader():
     path = Path(__file__).resolve().with_name(
-        "architecture-overview-path-template-and-checked-against-commit-reader-common.py")
+        "architecture_overview_path_template_and_checked_against_commit_reader_common.py")
     specification = importlib.util.spec_from_file_location(
         "architecture_overview_path_template_and_checked_against_commit_reader", path)
     module = importlib.util.module_from_spec(specification)
@@ -462,7 +462,7 @@ def check_overview_lock_and_environment_variable_sources(line: str, md_path: Pat
 _repository_names_spec = importlib.util.spec_from_file_location(
     "github_repository_name_and_name_before_project_rename_common",
     Path(__file__).resolve().parents[1] / "nn-systems" / "general-tools"
-    / "github-repository-name-and-name-before-project-rename-common.py")
+    / "github_repository_name_and_name_before_project_rename_common.py")
 repository_names = importlib.util.module_from_spec(_repository_names_spec)
 _repository_names_spec.loader.exec_module(repository_names)
 GITHUB_REPOSITORY = repository_names.REPOSITORY

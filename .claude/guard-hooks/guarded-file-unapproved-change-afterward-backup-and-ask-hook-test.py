@@ -2009,7 +2009,7 @@ def cases(scratch):
     decisions = {}
     hook.checkout_files(world.repo, decisions)
     decisions["made-up-cached-path"] = True
-    with open(copied_guard_hooks / "draft-document-place-directories-definition-and-membership-common.py",
+    with open(copied_guard_hooks / "draft_document_place_directories_definition_and_membership_common.py",
               "a") as module:
         module.write("\n")
     hook.checkout_files(world.repo, decisions)
@@ -2027,7 +2027,7 @@ def cases(scratch):
     hook._loaded.clear()
     decisions = {}
     hook.guard()
-    with open(copied_guard_hooks / "draft-document-place-directories-definition-and-membership-common.py",
+    with open(copied_guard_hooks / "draft_document_place_directories_definition_and_membership_common.py",
               "a") as module:
         module.write("\n")
     hook.checkout_files(world.repo, decisions)

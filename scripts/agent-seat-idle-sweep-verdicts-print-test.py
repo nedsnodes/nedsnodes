@@ -25,7 +25,7 @@ from pathlib import Path
 PROGRAM = Path(__file__).with_name("agent-seat-idle-sweep-verdicts-print.py")
 _fields_specification = importlib.util.spec_from_file_location(
     "agent_seat_idle_sweep_verdict_fields_common",
-    Path(__file__).with_name("agent-seat-idle-sweep-verdict-fields-common.py"))
+    Path(__file__).with_name("agent_seat_idle_sweep_verdict_fields_common.py"))
 fields = importlib.util.module_from_spec(_fields_specification)
 _fields_specification.loader.exec_module(fields)
 NOW = "2026-11-02T12:00:00Z"
@@ -165,7 +165,7 @@ class Machine:
 _scratch_directory_common_spec = importlib.util.spec_from_file_location(
     "test_scratch_directory_whose_earlier_killed_runs_leftovers_are_removed_first_common",
     Path(__file__).resolve().parent.parent / "nn-systems" / "general-tools"
-    / "test-scratch-directory-whose-earlier-killed-runs-leftovers-are-removed-first-common.py")
+    / "test_scratch_directory_whose_earlier_killed_runs_leftovers_are_removed_first_common.py")
 _scratch_directory_common = importlib.util.module_from_spec(_scratch_directory_common_spec)
 _scratch_directory_common_spec.loader.exec_module(_scratch_directory_common)
 SUITE_ROOT = _scratch_directory_common.make_test_scratch_directory_after_removing_killed_runs_leftovers(

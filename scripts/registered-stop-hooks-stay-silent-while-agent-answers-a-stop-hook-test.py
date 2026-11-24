@@ -4,7 +4,7 @@ does not obey, before anything else, the shared rule that Stop hooks stay
 silent while the agent answers a Stop hook.
 
 The rule and its reason are in
-nn-systems/general-tools/claude-code-stop-hooks-stay-silent-while-agent-answers-a-stop-hook-rule-common.py:
+nn-systems/general-tools/claude_code_stop_hooks_stay_silent_while_agent_answers_a_stop_hook_rule_common.py:
 a Stop hook says nothing at a Stop that ends the agent's answer to a Stop
 hook's output, or the agent keeps answering hooks instead of stopping.
 
@@ -37,7 +37,7 @@ from pathlib import Path
 REPOSITORY = Path(__file__).resolve().parent.parent
 SETTINGS = REPOSITORY / ".claude" / "settings.json"
 RULE_MODULE = ("nn-systems/general-tools/"
-                "claude-code-stop-hooks-stay-silent-while-agent-answers-a-stop-hook-rule-common.py")
+                "claude_code_stop_hooks_stay_silent_while_agent_answers_a_stop_hook_rule_common.py")
 RULE_FUNCTION = "stop_hook_stays_silent_while_agent_answers_a_stop_hook"
 STOP_EVENTS = ("Stop", "SubagentStop")
 HOOK_RUN_TIMEOUT_SECONDS = 60

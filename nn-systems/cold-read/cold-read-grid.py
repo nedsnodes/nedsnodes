@@ -80,7 +80,7 @@ at once, with the same model -- no cold-read-cell is special (user-ruled
 2026-09-11) -- and the first attempt's log is kept as
 `<report file name>.attempt-1.stderr.log`. Each failed attempt is reported
 with its CAUSE, the `cause:` line the cold-read-cell program prints
-(nn-systems/cold-read/cold-read-cell-common.py, classify_failed_attempt) or, when it left
+(nn-systems/cold-read/cold_read_cell_common.py, classify_failed_attempt) or, when it left
 none, one the cold-read-grid names itself: `RETRYING:` at the first failure,
 `FAILED (exit N):` at the second, after which the report is ABSENT. Two
 first failures are not retried and go straight to `FAILED` and absence: a
@@ -185,7 +185,7 @@ import urllib.parse
 REPO_ROOT = pathlib.Path(__file__).resolve().parent.parent.parent
 _record_names_spec = importlib.util.spec_from_file_location(
     "cold_read_record_names",
-    pathlib.Path(__file__).with_name("cold-read-record-names-common.py"))
+    pathlib.Path(__file__).with_name("cold_read_record_names_common.py"))
 record_names = importlib.util.module_from_spec(_record_names_spec)
 _record_names_spec.loader.exec_module(record_names)
 RECORDS_DIR = record_names.RECORDS_DIR
@@ -204,26 +204,26 @@ record_shipper = importlib.util.module_from_spec(_record_shipper_spec)
 _record_shipper_spec.loader.exec_module(record_shipper)
 # Import shared status phrases so launcher output and grid parsing cannot drift.
 _common_spec = importlib.util.spec_from_file_location(
-    "cold_read_cell_common", pathlib.Path(__file__).with_name("cold-read-cell-common.py")
+    "cold_read_cell_common", pathlib.Path(__file__).with_name("cold_read_cell_common.py")
 )
 cell_common = importlib.util.module_from_spec(_common_spec)
 _common_spec.loader.exec_module(cell_common)
 _git_redirecting_removal_spec = importlib.util.spec_from_file_location(
     "git_redirecting_environment_variables_removal_common",
     REPO_ROOT / "nn-systems" / "general-tools"
-    / "git-redirecting-environment-variables-removal-common.py")
+    / "git_redirecting_environment_variables_removal_common.py")
 git_redirecting_removal = importlib.util.module_from_spec(_git_redirecting_removal_spec)
 _git_redirecting_removal_spec.loader.exec_module(git_redirecting_removal)
 _ned_box_home_spec = importlib.util.spec_from_file_location(
     "ned_box_home_directory_and_its_mac_mount_point_path_constants_common",
     REPO_ROOT / "nn-systems" / "general-tools"
-    / "ned-box-home-directory-and-its-mac-mount-point-path-constants-common.py")
+    / "ned_box_home_directory_and_its_mac_mount_point_path_constants_common.py")
 ned_box_home_path_constants = importlib.util.module_from_spec(_ned_box_home_spec)
 _ned_box_home_spec.loader.exec_module(ned_box_home_path_constants)
 _git_machine_readable_output_spec = importlib.util.spec_from_file_location(
     "git_machine_readable_output_runner_and_parser_common",
     REPO_ROOT / "nn-systems" / "general-tools"
-    / "git-machine-readable-output-runner-and-parser-common.py")
+    / "git_machine_readable_output_runner_and_parser_common.py")
 git_machine_readable_output = importlib.util.module_from_spec(_git_machine_readable_output_spec)
 _git_machine_readable_output_spec.loader.exec_module(git_machine_readable_output)
 # Loaded only for the Question 4 prompt, heading, model and effort, so the

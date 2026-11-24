@@ -360,14 +360,14 @@ _work_snapshots_spec.loader.exec_module(work_snapshots)
 _git_output_spec = importlib.util.spec_from_file_location(
     "git_machine_readable_output_runner_and_parser_common",
     REPO_ROOT / "nn-systems" / "general-tools"
-    / "git-machine-readable-output-runner-and-parser-common.py")
+    / "git_machine_readable_output_runner_and_parser_common.py")
 git_output = importlib.util.module_from_spec(_git_output_spec)
 _git_output_spec.loader.exec_module(git_output)
 
 _next_step_lines_spec = importlib.util.spec_from_file_location(
     "failed_command_tool_message_to_agent_rerun_once_then_stop_and_report_lines_common",
     REPO_ROOT / "nn-systems" / "general-tools"
-    / "failed-command-tool-message-to-agent-rerun-once-then-stop-and-report-lines-common.py")
+    / "failed_command_tool_message_to_agent_rerun_once_then_stop_and_report_lines_common.py")
 next_step_lines = importlib.util.module_from_spec(_next_step_lines_spec)
 _next_step_lines_spec.loader.exec_module(next_step_lines)
 
@@ -385,7 +385,7 @@ _merge_lane_common_spec.loader.exec_module(merge_lane_common)
 
 _task_file_rewrite_spec = importlib.util.spec_from_file_location(
     "agent_seat_task_list_task_file_rewrite_common",
-    REPO_ROOT / "nn-systems" / "general-tools" / "agent-seat-task-list-task-file-rewrite-common.py")
+    REPO_ROOT / "nn-systems" / "general-tools" / "agent_seat_task_list_task_file_rewrite_common.py")
 _task_file_rewrite = importlib.util.module_from_spec(_task_file_rewrite_spec)
 _task_file_rewrite_spec.loader.exec_module(_task_file_rewrite)
 agent_seat_task_list_task_file_rewrite = _task_file_rewrite.agent_seat_task_list_task_file_rewrite

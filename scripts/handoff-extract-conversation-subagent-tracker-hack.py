@@ -30,7 +30,7 @@ from pathlib import Path
 _interim_recognizer_specification = importlib.util.spec_from_file_location(
     "claude_code_subagent_task_notification_interim_recognizer_common",
     Path(__file__).resolve().with_name(
-        "claude-code-subagent-task-notification-interim-recognizer-common.py"))
+        "claude_code_subagent_task_notification_interim_recognizer_common.py"))
 interim_recognizer = importlib.util.module_from_spec(_interim_recognizer_specification)
 _interim_recognizer_specification.loader.exec_module(interim_recognizer)
 

@@ -252,7 +252,7 @@ with tempfile.TemporaryDirectory() as scratch:
         (seat_handoffs / f"{seat}-handoff.md").write_text("handoff\n")
     transcripts = importlib.util.spec_from_file_location(
         "claude_code_session_transcript_lookup_and_text_search_common",
-        PROGRAM.with_name("claude-code-session-transcript-lookup-and-text-search-common.py"))
+        PROGRAM.with_name("claude_code_session_transcript_lookup_and_text_search_common.py"))
     transcripts_module = importlib.util.module_from_spec(transcripts)
     transcripts.loader.exec_module(transcripts_module)
 

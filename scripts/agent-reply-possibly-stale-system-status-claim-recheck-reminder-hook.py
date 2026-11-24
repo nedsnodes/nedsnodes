@@ -12,7 +12,7 @@ THE TRIGGER is the agent's last reply of the turn, read as
 scripts/absence-claim-locator-reminder-hook.py reads it: the text blocks of the
 last assistant message that has text, since the last message the user, or
 another agent-session, sent. The claims are the phrases
-nn-systems/general-tools/agent-text-possibly-stale-system-status-claim-phrases-match-common.py
+nn-systems/general-tools/agent_text_possibly_stale_system_status_claim_phrases_match_common.py
 finds, the list the walk-me-through check program uses too.
 
 A CHECK RAN when any tool call of the turn is a Bash command, a SendMessage or
@@ -24,10 +24,10 @@ keeps it silent.
 
 THE HOOK STAYS SILENT when this Stop ends the agent's answer to a Stop hook's
 output (the shared rule of
-nn-systems/general-tools/claude-code-stop-hooks-stay-silent-while-agent-answers-a-stop-hook-rule-common.py),
+nn-systems/general-tools/claude_code_stop_hooks_stay_silent_while_agent_answers_a_stop_hook_rule_common.py),
 so it never reminds twice in a row; when a check ran; when no user attends
 the agent-session, as
-nn-systems/general-tools/agent-session-unattended-by-user-check-common.py
+nn-systems/general-tools/agent_session_unattended_by_user_check_common.py
 decides, since a headless child's last words are its caller's answer; when the
 payload names no transcript; and when the transcript does not exist. It
 reminds at every turn whose reply holds an unchecked claim, not once per
@@ -66,19 +66,19 @@ def _load(name, path):
 stop_hooks_stay_silent_rule = _load(
     "claude_code_stop_hooks_stay_silent_while_agent_answers_a_stop_hook_rule_common",
     REPOSITORY_TOP / "nn-systems" / "general-tools"
-    / "claude-code-stop-hooks-stay-silent-while-agent-answers-a-stop-hook-rule-common.py")
+    / "claude_code_stop_hooks_stay_silent_while_agent_answers_a_stop_hook_rule_common.py")
 agent_session_unattended_by_user_check_common = _load(
     "agent_session_unattended_by_user_check_common",
-    REPOSITORY_TOP / "nn-systems" / "general-tools" / "agent-session-unattended-by-user-check-common.py")
+    REPOSITORY_TOP / "nn-systems" / "general-tools" / "agent_session_unattended_by_user_check_common.py")
 transcript_records_read_backward = _load(
     "claude_code_session_transcript_records_read_backward_common",
-    REPOSITORY_TOP / "scripts" / "claude-code-session-transcript-records-read-backward-common.py")
+    REPOSITORY_TOP / "scripts" / "claude_code_session_transcript_records_read_backward_common.py")
 absence_claim_hook = _load(
     "absence_claim_locator_reminder_hook", REPOSITORY_TOP / "scripts" / "absence-claim-locator-reminder-hook.py")
 system_status_claims = _load(
     "agent_text_possibly_stale_system_status_claim_phrases_match_common",
     REPOSITORY_TOP / "nn-systems" / "general-tools"
-    / "agent-text-possibly-stale-system-status-claim-phrases-match-common.py")
+    / "agent_text_possibly_stale_system_status_claim_phrases_match_common.py")
 
 HOOK_NAME = "agent-reply-possibly-stale-system-status-claim-recheck-reminder-hook"
 CHECKING_TOOL_NAMES = ("Bash", "SendMessage", "ListAgents")

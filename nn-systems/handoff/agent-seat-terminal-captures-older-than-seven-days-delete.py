@@ -3,7 +3,7 @@
 
     python3 <this file> [--dry-run] [--captures-directory DIR ...]
 
-The terminal captures are the files agent-seat-terminal-captures-common.py, beside this file,
+The terminal captures are the files agent_seat_terminal_captures_common.py, beside this file,
 says handoff-supervisor.py writes: <captures directory>/<agent-seat>/<UTC start>-<agent-seat>-terminal-capture.log.
 Which captures directories a run deletes from, unless --captures-directory replaces the list:
 - on ned-box, every machine's copy in the log-store,
@@ -48,7 +48,7 @@ from pathlib import Path
 
 _captures_spec = importlib.util.spec_from_file_location(
     "agent_seat_terminal_captures_common",
-    Path(__file__).resolve().with_name("agent-seat-terminal-captures-common.py"))
+    Path(__file__).resolve().with_name("agent_seat_terminal_captures_common.py"))
 captures = importlib.util.module_from_spec(_captures_spec)
 _captures_spec.loader.exec_module(captures)
 

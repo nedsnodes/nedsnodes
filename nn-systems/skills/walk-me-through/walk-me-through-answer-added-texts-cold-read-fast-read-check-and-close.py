@@ -147,7 +147,7 @@ a `#new_if_d` mark, since each of those is a choice the user makes, and
 lists each such line by its line number in the walk-document.
 
 The open approval-walk and its waiting items are found with
-walk-me-through-approval-walk-minutes-and-walk-document-item-finder-common.py,
+walk_me_through_approval_walk_minutes_and_walk_document_item_finder_common.py,
 beside this program and loaded by path, the module the walk-me-through Stop
 hook uses too, so the
 `#next_to_present` line and the walk-document's item headings are read exactly
@@ -373,7 +373,7 @@ those opening `#approval_walk_item_`. Then, for an item that is to be shown, it
 refuses, before any read, an item whose text states the
 current status of something outside the walk, such as an agent-seat offline,
 `claude` logged out, a machine down or work on hold, as
-nn-systems/general-tools/agent-text-possibly-stale-system-status-claim-phrases-match-common.py
+nn-systems/general-tools/agent_text_possibly_stale_system_status_claim_phrases_match_common.py
 finds such claims, the list the Stop hook
 scripts/agent-reply-possibly-stale-system-status-claim-recheck-reminder-hook.py
 uses too, unless --possibly-stale-system-status-claims-rechecked says which
@@ -431,7 +431,7 @@ to a changed fact unread.
 FINDING OUTCOMES. The step hands the item over, printing the line that tells
 the agent to present it, only when the report of the read it uses, the item's
 latest read of its current text, has no finding without a recorded outcome,
-as nn-systems/cold-read/cold-read-fast-read-report-findings-parse-and-finding-outcomes-check-common.py finds
+as nn-systems/cold-read/cold_read_fast_read_report_findings_parse_and_finding_outcomes_check_common.py finds
 findings and reads the outcomes file in the report's cold-read-record. A read
 the step finds or runs is that read; with
 --after-fixes-reread-only-when-facts-change and no fact touched, it is the
@@ -511,15 +511,15 @@ from pathlib import Path
 
 HERE = Path(__file__).resolve().parent
 REPOSITORY_TOP = HERE.parents[2]
-WALK_FINDER_FILE = HERE / "walk-me-through-approval-walk-minutes-and-walk-document-item-finder-common.py"
+WALK_FINDER_FILE = HERE / "walk_me_through_approval_walk_minutes_and_walk_document_item_finder_common.py"
 FAST_READ_PROGRAM = REPOSITORY_TOP / "nn-systems" / "cold-read" / "cold-read-fast-read.py"
 FAST_READ_WITHOUT_QUESTION_4_OPTION = "--without-question-4"
 RECORD_SHIPPER_FILE = REPOSITORY_TOP / "nn-systems" / "cold-read" / "cold-read-record-ship.py"
-RECORD_NAMES_FILE = REPOSITORY_TOP / "nn-systems" / "cold-read" / "cold-read-record-names-common.py"
+RECORD_NAMES_FILE = REPOSITORY_TOP / "nn-systems" / "cold-read" / "cold_read_record_names_common.py"
 FINDING_OUTCOMES_COMMON_FILE = (REPOSITORY_TOP / "nn-systems" / "cold-read"
-                                / "cold-read-fast-read-report-findings-parse-and-finding-outcomes-check-common.py")
+                                / "cold_read_fast_read_report_findings_parse_and_finding_outcomes_check_common.py")
 PATH_CONSTANTS_FILE = (REPOSITORY_TOP / "nn-systems" / "general-tools"
-                       / "ned-box-home-directory-and-its-mac-mount-point-path-constants-common.py")
+                       / "ned_box_home_directory_and_its_mac_mount_point_path_constants_common.py")
 COUNTS_LOG_FILE_NAME = "walk-me-through-answer-added-texts-cold-read-fast-read-already-done-or-had-to-run-counts-per-check.tsv"
 RECORDS_DIRECTORY_NAME = "cold-read-records"
 PROGRAM = "walk-me-through-answer-added-texts-cold-read-fast-read-check-and-close"
@@ -1458,7 +1458,7 @@ APPROVAL_WALK_ITEM_OVER_WORD_LIMIT = (
     "From now on, write each item and each sub-step within {limit} words when you write it into the walk-document.")
 
 SYSTEM_STATUS_CLAIM_PHRASES_FILE = (REPOSITORY_TOP / "nn-systems" / "general-tools"
-                                    / "agent-text-possibly-stale-system-status-claim-phrases-match-common.py")
+                                    / "agent_text_possibly_stale_system_status_claim_phrases_match_common.py")
 SYSTEM_STATUS_CLAIMS_RECHECKED_FLAG = "--possibly-stale-system-status-claims-rechecked"
 SYSTEM_STATUS_CLAIM_PHRASES_SHOWN = 3
 APPROVAL_WALK_ITEM_SYSTEM_STATUS_CLAIM_NOT_RECHECKED = (
@@ -1950,7 +1950,7 @@ def scratch_directory_removed_on_every_exit(after_removal):
 
     The handler raises nothing: an exception raised inside subprocess's own code, between Popen._wait()'s lock
     acquire and its try, leaves the lock held, and the wait() that subprocess.run() then makes blocks forever.
-    stop-signal-sigterm-or-sighup-raises-system-exit-so-cleanup-runs-common.py raises, so it does not fit here.
+    stop_signal_sigterm_or_sighup_raises_system_exit_so_cleanup_runs_common.py raises, so it does not fit here.
     """
     made = []
 
@@ -2940,7 +2940,7 @@ def item_read_findings_without_outcomes_lines(item, report, outcome_file, fast_r
 
 def approval_walk_item_system_status_claims_not_rechecked_refused(text, item, document, command, rechecked):
     """Raise Failure when the item's text states the current status of something outside the walk, as
-    agent-text-possibly-stale-system-status-claim-phrases-match-common.py finds such claims, and the agent has not
+    agent_text_possibly_stale_system_status_claim_phrases_match_common.py finds such claims, and the agent has not
     said, with SYSTEM_STATUS_CLAIMS_RECHECKED_FLAG, how it rechecked them; return the line recording that recheck,
     or None when the text states no such status."""
     claims = load_module("agent_text_possibly_stale_system_status_claim_phrases_match_common",

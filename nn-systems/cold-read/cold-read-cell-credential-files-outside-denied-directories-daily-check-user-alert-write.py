@@ -5,12 +5,12 @@
 
 On Linux the sandboxes of the cold-read-cells and of the Codex and Gemini task programs deny a reviewer program
 only the files CREDENTIAL_FILES_ON_NED_BOX and REVIEWER_PROGRAM_LOGIN_FILES list, by exact path, both in
-nn-systems/cold-read/cold-read-cell-common.py. A credential file added later is readable until it is added to that
+nn-systems/cold-read/cold_read_cell_common.py. A credential file added later is readable until it is added to that
 list. This program walks the home directory, read from HOME, skipping the log-store (~/nedsnodes-logs, whose test
 leftovers match the patterns but hold no credential), and when it finds a file named by a pattern of
 CREDENTIAL_FILE_NAME_PATTERNS, `*.token` or `.env`, that neither list names and IGNORED_FILES does not name, writes
 one user-alert naming every one found, through
-nn-systems/general-tools/user-alerts-pending-and-claimed-files-write-claim-release-and-delete-common.py.
+nn-systems/general-tools/user_alerts_pending_and_claimed_files_write_claim_release_and_delete_common.py.
 It keeps no state, so the alert comes again each day until the file is added to CREDENTIAL_FILES_ON_NED_BOX or
 IGNORED_FILES, or deleted.
 
@@ -44,17 +44,17 @@ def _load(name, path):
     return module
 
 
-cell_common = _load("cold_read_cell_common", REPOSITORY / "nn-systems" / "cold-read" / "cold-read-cell-common.py")
+cell_common = _load("cold_read_cell_common", REPOSITORY / "nn-systems" / "cold-read" / "cold_read_cell_common.py")
 user_alerts = _load(
     "user_alerts_pending_and_claimed_files_write_claim_release_and_delete_common",
     REPOSITORY / "nn-systems" / "general-tools"
-    / "user-alerts-pending-and-claimed-files-write-claim-release-and-delete-common.py")
+    / "user_alerts_pending_and_claimed_files_write_claim_release_and_delete_common.py")
 
 THIS_PROGRAM = "nn-systems/cold-read/cold-read-cell-credential-files-outside-denied-directories-daily-check-user-alert-write.py"
 FOUND_TITLE = "A credential file on ned-box is readable to the cold-read-cells' reviewer programs"
 FOUND_ACTION = (
     "Only the user can say whether the file holds a credential. An agent on ned-box asks him, then, if it does, adds "
-    "the file's path to CREDENTIAL_FILES_ON_NED_BOX in nn-systems/cold-read/cold-read-cell-common.py in a pull request, "
+    "the file's path to CREDENTIAL_FILES_ON_NED_BOX in nn-systems/cold-read/cold_read_cell_common.py in a pull request, "
     "or deletes the file if he says to; if it does not, adds the path to IGNORED_FILES in "
     f"{THIS_PROGRAM} in a pull request.")
 NAME_PATTERNS = " or ".join(cell_common.CREDENTIAL_FILE_NAME_PATTERNS)
@@ -107,10 +107,10 @@ def main(argv=None):
         return 1
     if not found:
         print(f"The search found no file named {NAME_PATTERNS} under {home} that CREDENTIAL_FILES_ON_NED_BOX in "
-              f"nn-systems/cold-read/cold-read-cell-common.py leaves out, outside the log-store {home / 'nedsnodes-logs'}.")
+              f"nn-systems/cold-read/cold_read_cell_common.py leaves out, outside the log-store {home / 'nedsnodes-logs'}.")
         return 0
     text = (f"Each file below is named {NAME_PATTERNS} and is missing from CREDENTIAL_FILES_ON_NED_BOX in "
-            "nn-systems/cold-read/cold-read-cell-common.py, so on ned-box the Claude, Codex and agy programs that "
+            "nn-systems/cold-read/cold_read_cell_common.py, so on ned-box the Claude, Codex and agy programs that "
             "the cold-read-cells and task programs start can read it:\n"
             + "\n".join(str(path) for path in found))
     print(text)

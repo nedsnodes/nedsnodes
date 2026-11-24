@@ -7,14 +7,14 @@ import subprocess
 
 _tables_spec = importlib.util.spec_from_file_location(
     "design_to_main_state_tables",
-    pathlib.Path(__file__).with_name("design-to-main-state-tables-common.py"))
+    pathlib.Path(__file__).with_name("design_to_main_state_tables_common.py"))
 tables = importlib.util.module_from_spec(_tables_spec)
 _tables_spec.loader.exec_module(tables)
 
 _git_output_spec = importlib.util.spec_from_file_location(
     "git_machine_readable_output_runner_and_parser_common",
     pathlib.Path(__file__).resolve().parents[2] / "nn-systems" / "general-tools"
-    / "git-machine-readable-output-runner-and-parser-common.py")
+    / "git_machine_readable_output_runner_and_parser_common.py")
 git_output = importlib.util.module_from_spec(_git_output_spec)
 _git_output_spec.loader.exec_module(git_output)
 

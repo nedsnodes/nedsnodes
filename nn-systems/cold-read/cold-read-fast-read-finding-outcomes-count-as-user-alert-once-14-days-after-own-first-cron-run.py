@@ -14,7 +14,7 @@ directory read from HOME: `first-run.json`, written on its first run with that t
 `user-alert-written.json`, written once the alert is, naming it, after which every run only says so. The count is
 nn-systems/cold-read/cold-read-fast-read-finding-outcomes-applied-and-declined-count-per-question.py's, over the
 log-store's cold-read-records, and the alert is written through
-nn-systems/general-tools/user-alerts-pending-and-claimed-files-write-claim-release-and-delete-common.py. The
+nn-systems/general-tools/user_alerts_pending_and_claimed_files_write_claim_release_and_delete_common.py. The
 alert's action asks for this job's removal from the table, since it has done its one count.
 
 Exit status: 0 when the program waits, wrote the alert, or wrote it before. 1 when the count could not be made,
@@ -48,7 +48,7 @@ outcomes_count = _load("cold_read_fast_read_finding_outcomes_applied_and_decline
                        HERE / "cold-read-fast-read-finding-outcomes-applied-and-declined-count-per-question.py")
 user_alerts = _load(
     "user_alerts_pending_and_claimed_files_write_claim_release_and_delete_common",
-    HERE.parent / "general-tools" / "user-alerts-pending-and-claimed-files-write-claim-release-and-delete-common.py")
+    HERE.parent / "general-tools" / "user_alerts_pending_and_claimed_files_write_claim_release_and_delete_common.py")
 
 COUNT_TITLE = "How often agents applied each cold-read-fast-read question's findings, over two weeks"
 COUNT_TEXT_OPENING = (

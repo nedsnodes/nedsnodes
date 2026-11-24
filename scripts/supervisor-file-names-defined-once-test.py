@@ -109,7 +109,7 @@ THIS_SUITE_RELATIVE_PATH = "scripts/" + Path(__file__).name
 _rule_failure_lines_spec = importlib.util.spec_from_file_location(
     "rule_enforcing_nn_test_suite_failure_message_closing_lines_text_common",
     REPO_ROOT / "nn-systems" / "general-tools"
-    / "rule-enforcing-nn-test-suite-failure-message-closing-lines-text-common.py")
+    / "rule_enforcing_nn_test_suite_failure_message_closing_lines_text_common.py")
 RULE_FAILURE_LINES = importlib.util.module_from_spec(_rule_failure_lines_spec)
 _rule_failure_lines_spec.loader.exec_module(RULE_FAILURE_LINES)
 SCRIPTS_DIRECTORY = REPO_ROOT / "scripts"

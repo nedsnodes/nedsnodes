@@ -25,7 +25,7 @@ from pathlib import Path
 
 _python_libraries_pinned_requirements_install_if_missing_then_import_spec = importlib.util.spec_from_file_location(
     "python_libraries_pinned_requirements_install_if_missing_then_import_common",
-    Path(__file__).resolve().with_name("python-libraries-pinned-requirements-install-if-missing-then-import-common.py"))
+    Path(__file__).resolve().with_name("python_libraries_pinned_requirements_install_if_missing_then_import_common.py"))
 python_libraries_pinned_requirements_install_if_missing_then_import_common = importlib.util.module_from_spec(_python_libraries_pinned_requirements_install_if_missing_then_import_spec)
 _python_libraries_pinned_requirements_install_if_missing_then_import_spec.loader.exec_module(python_libraries_pinned_requirements_install_if_missing_then_import_common)
 

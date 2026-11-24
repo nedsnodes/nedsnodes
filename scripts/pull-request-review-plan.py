@@ -4,7 +4,7 @@
 Rule 1: tiers follow content. Tests, fenced Markdown code, and Python changes
 limited to docstrings, comments and tool-message-to-agent strings get codex-review-and-head-tests-tier.
 A tool-message-to-agent string is one that tool_message_to_agent_string_nodes_in_source,
-in nn-systems/general-tools/python-source-tool-message-to-agent-string-collector-common.py, finds;
+in nn-systems/general-tools/python_source_tool_message_to_agent_string_collector_common.py, finds;
 any other string, such as a regular expression, a command's argument or a path,
 carries behaviour, so a change to it is a behaviour change.
 Python behaviour changes and other code get claude-and-codex-review-and-head-tests-tier. Prose gets
@@ -22,7 +22,7 @@ number is one more than the number of distinct heads reviewed before the
 current head, so a review already posted on the current head does not start
 another round. To it is added, for each pull request this one replaces, by its
 description's #replaces lines followed through replacements of replacements as
-scripts/pull-request-description-replaces-line-replaced-pull-request-chain-reader-common.py
+scripts/pull_request_description_replaces_line_replaced_pull_request_chain_reader_common.py
 reads them, the number of distinct heads reviewed on that pull request. A
 #replaces line that reader cannot follow is refused. Only this pull request's own
 earlier reviewed heads make a fix round, so a replacement with no reviews of its
@@ -43,7 +43,7 @@ base branch to the earlier reviewed head, each measured from its merge base;
 main's unrelated files should not decide it.
 
 Rule 3: list changed tool-message-to-agent strings, with their context and old text.
-nn-systems/general-tools/python-source-tool-message-to-agent-string-collector-common.py
+nn-systems/general-tools/python_source_tool_message_to_agent_string_collector_common.py
 decides which strings are tool-messages-to-agent and which files are tests. Tool-message-to-agent
 strings are printed, written or raised strings; strings assigned to names
 ending in _ADVICE, _INSTRUCTION, _LINE, _MESSAGE, _NOTICE, _REASON, _REFUSAL
@@ -96,7 +96,7 @@ prompt and one the plan lists with no old text, such as a prompt moved into
 another string.
 
 Rule 4: a pull request that adds or changes an nn-architecture-overview, a
-file at the path scripts/architecture-overview-path-template-and-checked-against-commit-reader-common.py
+file at the path scripts/architecture_overview_path_template_and_checked_against_commit_reader_common.py
 gives for a directory under nn-systems/ at the head, is refused, with exit 1
 and no plan, until the newest claim-check report for the overview's text at
 the head says every claim is supported, or that no must-fix claim remains.
@@ -165,20 +165,20 @@ from urllib.parse import quote
 _git_output_spec = importlib.util.spec_from_file_location(
     "git_machine_readable_output_runner_and_parser_common",
     Path(__file__).resolve().parents[1] / "nn-systems" / "general-tools"
-    / "git-machine-readable-output-runner-and-parser-common.py")
+    / "git_machine_readable_output_runner_and_parser_common.py")
 git_output = importlib.util.module_from_spec(_git_output_spec)
 _git_output_spec.loader.exec_module(git_output)
 _git_redirecting_removal_spec = importlib.util.spec_from_file_location(
     "git_redirecting_environment_variables_removal_common",
     Path(__file__).resolve().parents[1] / "nn-systems" / "general-tools"
-    / "git-redirecting-environment-variables-removal-common.py")
+    / "git_redirecting_environment_variables_removal_common.py")
 git_redirecting_removal = importlib.util.module_from_spec(_git_redirecting_removal_spec)
 _git_redirecting_removal_spec.loader.exec_module(git_redirecting_removal)
 
 _tool_message_to_agent_string_collector_spec = importlib.util.spec_from_file_location(
     "python_source_tool_message_to_agent_string_collector_common",
     Path(__file__).resolve().parent.parent / "nn-systems" / "general-tools"
-    / "python-source-tool-message-to-agent-string-collector-common.py")
+    / "python_source_tool_message_to_agent_string_collector_common.py")
 _tool_message_to_agent_string_collector = importlib.util.module_from_spec(_tool_message_to_agent_string_collector_spec)
 _tool_message_to_agent_string_collector_spec.loader.exec_module(_tool_message_to_agent_string_collector)
 path_is_test_file = _tool_message_to_agent_string_collector.path_is_test_file
@@ -195,7 +195,7 @@ _message_reminder_hook = importlib.util.module_from_spec(_message_reminder_hook_
 _message_reminder_hook_spec.loader.exec_module(_message_reminder_hook)
 _replaces_reader_spec = importlib.util.spec_from_file_location(
     "pull_request_description_replaces_line_replaced_pull_request_chain_reader_common",
-    Path(__file__).resolve().with_name("pull-request-description-replaces-line-replaced-pull-request-chain-reader-common.py"))
+    Path(__file__).resolve().with_name("pull_request_description_replaces_line_replaced_pull_request_chain_reader_common.py"))
 replaces_reader = importlib.util.module_from_spec(_replaces_reader_spec)
 _replaces_reader_spec.loader.exec_module(replaces_reader)
 fast_read_target_written = _message_reminder_hook.fast_read_target_written
@@ -205,7 +205,7 @@ FAST_READ_COMMAND = _message_reminder_hook.FAST_READ_COMMAND
 PLAN_PRINTED_WITH_MESSAGES_MISSING_FAST_READ_COMMAND_EXIT_STATUS = 3
 _cold_read_record_names_spec = importlib.util.spec_from_file_location(
     "cold_read_record_names_common",
-    Path(__file__).resolve().parent.parent / "nn-systems" / "cold-read" / "cold-read-record-names-common.py")
+    Path(__file__).resolve().parent.parent / "nn-systems" / "cold-read" / "cold_read_record_names_common.py")
 cold_read_record_names = importlib.util.module_from_spec(_cold_read_record_names_spec)
 _cold_read_record_names_spec.loader.exec_module(cold_read_record_names)
 _overview_claim_check_spec = importlib.util.spec_from_file_location(
@@ -216,7 +216,7 @@ overview_claim_check = importlib.util.module_from_spec(_overview_claim_check_spe
 _overview_claim_check_spec.loader.exec_module(overview_claim_check)
 _overview_path_reader_spec = importlib.util.spec_from_file_location(
     "architecture_overview_path_template_and_checked_against_commit_reader_common",
-    Path(__file__).resolve().parent / "architecture-overview-path-template-and-checked-against-commit-reader-common.py")
+    Path(__file__).resolve().parent / "architecture_overview_path_template_and_checked_against_commit_reader_common.py")
 overview_path_reader = importlib.util.module_from_spec(_overview_path_reader_spec)
 _overview_path_reader_spec.loader.exec_module(overview_path_reader)
 

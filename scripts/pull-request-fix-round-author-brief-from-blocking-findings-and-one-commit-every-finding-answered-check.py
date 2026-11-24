@@ -161,7 +161,7 @@ from pathlib import Path
 _git_output_spec = importlib.util.spec_from_file_location(
     "git_machine_readable_output_runner_and_parser_common",
     Path(__file__).resolve().parents[1] / "nn-systems" / "general-tools"
-    / "git-machine-readable-output-runner-and-parser-common.py")
+    / "git_machine_readable_output_runner_and_parser_common.py")
 git_output = importlib.util.module_from_spec(_git_output_spec)
 _git_output_spec.loader.exec_module(git_output)
 _ready_command_spec = importlib.util.spec_from_file_location(
@@ -185,7 +185,7 @@ _review_plan_spec = importlib.util.spec_from_file_location(
 review_plan = importlib.util.module_from_spec(_review_plan_spec)
 _review_plan_spec.loader.exec_module(review_plan)
 
-REPLACES_READER_FILE_NAME = "pull-request-description-replaces-line-replaced-pull-request-chain-reader-common.py"
+REPLACES_READER_FILE_NAME = "pull_request_description_replaces_line_replaced_pull_request_chain_reader_common.py"
 _replaces_reader_spec = importlib.util.spec_from_file_location(
     "pull_request_description_replaces_line_replaced_pull_request_chain_reader_common",
     Path(__file__).resolve().with_name(REPLACES_READER_FILE_NAME))

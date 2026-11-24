@@ -56,14 +56,14 @@ _common_spec.loader.exec_module(common)
 _repository_names_spec = importlib.util.spec_from_file_location(
     "github_repository_name_and_name_before_project_rename_common",
     Path(__file__).resolve().parents[1] / "nn-systems" / "general-tools"
-    / "github-repository-name-and-name-before-project-rename-common.py")
+    / "github_repository_name_and_name_before_project_rename_common.py")
 repository_names = importlib.util.module_from_spec(_repository_names_spec)
 _repository_names_spec.loader.exec_module(repository_names)
 run_all_test_suites = common.run_all_test_suites
 _git_output_spec = importlib.util.spec_from_file_location(
     "git_machine_readable_output_runner_and_parser_common",
     Path(__file__).resolve().parents[1] / "nn-systems" / "general-tools"
-    / "git-machine-readable-output-runner-and-parser-common.py")
+    / "git_machine_readable_output_runner_and_parser_common.py")
 git_output = importlib.util.module_from_spec(_git_output_spec)
 _git_output_spec.loader.exec_module(git_output)
 _defect_line_reader_spec = importlib.util.spec_from_file_location(

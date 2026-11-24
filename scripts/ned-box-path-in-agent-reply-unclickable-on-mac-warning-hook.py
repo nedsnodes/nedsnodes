@@ -15,7 +15,7 @@ reading the previous reply from transcript_path (a turn starts where
 is_human_or_parent_message() from absence-claim-locator-reminder-hook.py
 says), masking fenced code, code spans, links and bare URLs, the record of
 the last reply noted and the hook output. It stays silent where
-nn-systems/general-tools/agent-session-unattended-by-user-check-common.py says
+nn-systems/general-tools/agent_session_unattended_by_user_check_common.py says
 no user attends the agent-session, such as a headless `claude -p` child, and on every
 machine but ned-box, as this_machine_is_ned_box() from
 nn-systems/handoff/handoff-user-review-of-agent-memory-stores-mark.py decides: a session on the Mac
@@ -91,11 +91,11 @@ try:
     ned_box_home_path_constants = _load_module_by_path(
         "ned_box_home_directory_and_its_mac_mount_point_path_constants_common",
         Path(__file__).resolve().parents[1] / "nn-systems" / "general-tools"
-        / "ned-box-home-directory-and-its-mac-mount-point-path-constants-common.py")
+        / "ned_box_home_directory_and_its_mac_mount_point_path_constants_common.py")
     agent_session_unattended_by_user_check_common = _load_module_by_path(
         "agent_session_unattended_by_user_check_common",
         Path(__file__).resolve().parents[1] / "nn-systems" / "general-tools"
-        / "agent-session-unattended-by-user-check-common.py")
+        / "agent_session_unattended_by_user_check_common.py")
 except Exception as error:
     sys.exit(fault_exit(error))
 

@@ -39,7 +39,7 @@ _git_environment_fixture.remove_git_redirecting_environment_variables_from_this_
 _next_step_lines_spec = importlib.util.spec_from_file_location(
     "failed_command_tool_message_to_agent_rerun_once_then_stop_and_report_lines_common",
     Path(__file__).resolve().parents[1] / "nn-systems" / "general-tools"
-    / "failed-command-tool-message-to-agent-rerun-once-then-stop-and-report-lines-common.py")
+    / "failed_command_tool_message_to_agent_rerun_once_then_stop_and_report_lines_common.py")
 next_step_lines = importlib.util.module_from_spec(_next_step_lines_spec)
 _next_step_lines_spec.loader.exec_module(next_step_lines)
 
@@ -47,12 +47,12 @@ SCRIPTS = Path(__file__).resolve().parent
 PROGRAM = SCRIPTS / "stale-code-citation-check.py"
 LINT = SCRIPTS / "md-drift-lint.py"
 LINT_OVERVIEW_PATH_MODULE = (
-    SCRIPTS / "architecture-overview-path-template-and-checked-against-commit-reader-common.py")
+    SCRIPTS / "architecture_overview_path_template_and_checked_against_commit_reader_common.py")
 GIT_OUTPUT_MODULE = (SCRIPTS.parent / "nn-systems" / "general-tools"
-                     / "git-machine-readable-output-runner-and-parser-common.py")
+                     / "git_machine_readable_output_runner_and_parser_common.py")
 NEXT_STEP_LINES_MODULE = GIT_OUTPUT_MODULE.with_name(
-    "failed-command-tool-message-to-agent-rerun-once-then-stop-and-report-lines-common.py")
-REPOSITORY_NAMES_MODULE = GIT_OUTPUT_MODULE.with_name("github-repository-name-and-name-before-project-rename-common.py")
+    "failed_command_tool_message_to_agent_rerun_once_then_stop_and_report_lines_common.py")
+REPOSITORY_NAMES_MODULE = GIT_OUTPUT_MODULE.with_name("github_repository_name_and_name_before_project_rename_common.py")
 
 failures = []
 

@@ -217,7 +217,7 @@ text, and then gives a ready-made command: this program with
 --record-finding-outcomes-in-cold-read-record naming the record directory and one
 --finding-outcome '<id>=<applied, or declined: reason>' for each finding.
 Which lines are findings, and how they are numbered, is
-nn-systems/cold-read/cold-read-fast-read-report-findings-parse-and-finding-outcomes-check-common.py's to say. A
+nn-systems/cold-read/cold_read_fast_read_report_findings_parse_and_finding_outcomes_check_common.py's to say. A
 walk draft's read has no cold-read-record, so it prints no command and its
 findings get no outcomes. After revising, the agent replaces each placeholder
 with `applied` or `declined: <reason>` and runs the command. That invocation
@@ -303,7 +303,7 @@ RECORD_SHIPPED_LINE_PREFIX = "shipped:"
 # has hyphens.
 _record_names_spec = importlib.util.spec_from_file_location(
     "cold_read_record_names",
-    pathlib.Path(__file__).with_name("cold-read-record-names-common.py"))
+    pathlib.Path(__file__).with_name("cold_read_record_names_common.py"))
 record_names = importlib.util.module_from_spec(_record_names_spec)
 _record_names_spec.loader.exec_module(record_names)
 # Loaded for where a read's record lands and for a record name free in the store.
@@ -314,13 +314,13 @@ _record_shipper_spec.loader.exec_module(record_shipper)
 # Finds a report's findings and checks and records the agent's outcome for each.
 _finding_outcomes_spec = importlib.util.spec_from_file_location(
     "cold_read_fast_read_report_findings_parse_and_finding_outcomes_check_common",
-    pathlib.Path(__file__).with_name("cold-read-fast-read-report-findings-parse-and-finding-outcomes-check-common.py"))
+    pathlib.Path(__file__).with_name("cold_read_fast_read_report_findings_parse_and_finding_outcomes_check_common.py"))
 finding_outcomes = importlib.util.module_from_spec(_finding_outcomes_spec)
 _finding_outcomes_spec.loader.exec_module(finding_outcomes)
 _git_redirecting_removal_spec = importlib.util.spec_from_file_location(
     "git_redirecting_environment_variables_removal_common",
     REPO_ROOT / "nn-systems" / "general-tools"
-    / "git-redirecting-environment-variables-removal-common.py")
+    / "git_redirecting_environment_variables_removal_common.py")
 git_redirecting_removal = importlib.util.module_from_spec(_git_redirecting_removal_spec)
 _git_redirecting_removal_spec.loader.exec_module(git_redirecting_removal)
 WALK_DIRECTORY_RELATIVE = pathlib.Path("docs") / "walk"
@@ -348,7 +348,7 @@ ULTRA_QUOTA_RELAY_INSTRUCTION = (
     "to know when the fast read fell back to Sonnet.")
 SONNET_BACKUP_HASHTAG = "#cold_read_fast_read_sonnet_backup_ran"
 # The launcher's own refusal code (EXIT_BAD_INVOCATION in
-# nn-systems/cold-read/cold-read-cell-common.py), which this program also uses for its
+# nn-systems/cold-read/cold_read_cell_common.py), which this program also uses for its
 # own refusal and never retries.
 EXIT_BAD_INVOCATION = 64
 
@@ -491,7 +491,7 @@ FULL_RUN_NAME_SUFFIXES = (
 _git_output_spec = importlib.util.spec_from_file_location(
     "git_machine_readable_output_runner_and_parser_common",
     REPO_ROOT / "nn-systems" / "general-tools"
-    / "git-machine-readable-output-runner-and-parser-common.py")
+    / "git_machine_readable_output_runner_and_parser_common.py")
 git_output = importlib.util.module_from_spec(_git_output_spec)
 _git_output_spec.loader.exec_module(git_output)
 # git's words when the -C directory does not exist; LC_ALL=C keeps them in English.
@@ -499,7 +499,7 @@ GIT_DIRECTORY_MISSING_MESSAGE = "cannot change to"
 _ned_box_home_spec = importlib.util.spec_from_file_location(
     "ned_box_home_directory_and_its_mac_mount_point_path_constants_common",
     REPO_ROOT / "nn-systems" / "general-tools"
-    / "ned-box-home-directory-and-its-mac-mount-point-path-constants-common.py")
+    / "ned_box_home_directory_and_its_mac_mount_point_path_constants_common.py")
 ned_box_home = importlib.util.module_from_spec(_ned_box_home_spec)
 _ned_box_home_spec.loader.exec_module(ned_box_home)
 # Module attributes, so the test can point them at scratch directories: no
@@ -523,7 +523,7 @@ SONNET_BACKUP_MODEL = claude_cell.TIER_TO_CLAUDE_MODEL_CHAIN[FAST_READ_TIER][0]
 # Loaded only for stop_process_tree, which stops the Question 4 cell's
 # process group, the model it started included, at its time limit.
 _cell_common_spec = importlib.util.spec_from_file_location(
-    "cold_read_cell_common", pathlib.Path(__file__).with_name("cold-read-cell-common.py"))
+    "cold_read_cell_common", pathlib.Path(__file__).with_name("cold_read_cell_common.py"))
 cell_common = importlib.util.module_from_spec(_cell_common_spec)
 _cell_common_spec.loader.exec_module(cell_common)
 # The claude launcher sets no time limit of its own; the Sonnet backup is
@@ -888,9 +888,9 @@ def walk_draft_suggestions_file_path_for_target_in_worktree_or_none(
 # same stem in different directories read on one day come out as -2 of each
 # other (target/ shows which was which), and the -N count says nothing about
 # which draft each read was; both are accepted.
-# The code implementing it is not restated: nn-systems/cold-read/cold-read-record-names-common.py
+# The code implementing it is not restated: nn-systems/cold-read/cold_read_record_names_common.py
 # holds it, and this program and nn-systems/cold-read/cold-read-grid.py both import it, so
-# the two cannot drift apart. nn-systems/cold-read/tests/cold-read-record-names-common-test.py fails a
+# the two cannot drift apart. nn-systems/cold-read/tests/cold_read_record_names_common-test.py fails a
 # program that writes its own copy back. The report inside the record is
 # `cold-read-fast-read.md`: the directory says which read, the file says what it is.
 RECORD_CLOCK_OVERRIDE_VARIABLE = "COLD_READ_RECORD_CLOCK_OVERRIDE"

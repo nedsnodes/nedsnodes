@@ -23,7 +23,7 @@ PRAGMA integrity_check:
   - when the check fails, the older copies stay as they are, the copy is
     renamed to end in .failed-integrity-check, and the program prints the
     check's output, writes the same text as a user-alert through
-    nn-systems/general-tools/user-alerts-pending-and-claimed-files-write-claim-release-and-delete-common.py,
+    nn-systems/general-tools/user_alerts_pending_and_claimed_files_write_claim_release_and_delete_common.py,
     because cron appends this program's output to a log no one reads, and
     exits 1.
 
@@ -59,7 +59,7 @@ service = _load("nn_shared_database_service",
 user_alerts = _load(
     "user_alerts_pending_and_claimed_files_write_claim_release_and_delete_common",
     Path(__file__).resolve().parents[1] / "general-tools"
-    / "user-alerts-pending-and-claimed-files-write-claim-release-and-delete-common.py")
+    / "user_alerts_pending_and_claimed_files_write_claim_release_and_delete_common.py")
 
 BACKUP_COPY_FAILED_INTEGRITY_CHECK_USER_ALERT_TITLE = "The nightly backup copy of the nn-shared-database failed its integrity check"
 BACKUP_COPY_FAILED_INTEGRITY_CHECK_USER_ALERT_ACTION_TEXT_SAYING_WHAT_AN_AGENT_CAN_DO = (

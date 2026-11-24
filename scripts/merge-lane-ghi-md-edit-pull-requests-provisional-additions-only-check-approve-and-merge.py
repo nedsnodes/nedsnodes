@@ -147,7 +147,7 @@ MERGE_PROGRAM = Path(__file__).resolve().with_name(
 TITLE_PREFIX = "GHI-MD edit for issue"
 PROVISIONAL_HEADING = "## Provisional additions (not yet vetted by the user)"
 MARKDOWN_PARSER_MODULE = (CHECKOUT / "nn-systems" / "general-tools"
-                          / "markdown-commonmark-parser-with-tables-common.py")
+                          / "markdown_commonmark_parser_with_tables_common.py")
 # Every character Python's str.splitlines() splits on except "\n": CommonMark reads a carriage
 # return as a line break where git does not, and other Markdown tools split on the rest.
 LINE_BREAKS_OTHER_THAN_NEWLINE = "\r\x0b\x0c\x1c\x1d\x1e\x85\u2028\u2029"

@@ -188,7 +188,7 @@ command -v jq >/dev/null 2>&1 || cannot "jq is not on PATH. Put jq on PATH, then
 command -v gh >/dev/null 2>&1 || cannot "gh is not on PATH. Put gh on PATH, then rerun the gate." \
   "If gh is not installed on this machine, tell the user this message."
 # The old name is read too: GitHub redirects it, and descriptions written before the rename still link with it.
-REPOSITORY_NAMES_MODULE="$(dirname "${BASH_SOURCE[0]}")/../nn-systems/general-tools/github-repository-name-and-name-before-project-rename-common.py"
+REPOSITORY_NAMES_MODULE="$(dirname "${BASH_SOURCE[0]}")/../nn-systems/general-tools/github_repository_name_and_name_before_project_rename_common.py"
 REPOSITORY_NAMES_UNREADABLE="could not read the repository's names, REPOSITORY and OLD_REPOSITORY, from $REPOSITORY_NAMES_MODULE"
 repository_names=$(python3 -c '
 import importlib.util, sys

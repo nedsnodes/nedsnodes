@@ -16,7 +16,7 @@ reading that means the program is wrong.
 The case on two seats' records ships to a scratch store with the real
 nn-systems/cold-read/cold-read-record-ship.py, pointed there by
 COLD_READ_RECORD_SHIP_DESTINATION, the shipper's own test destination, and
-names each record with the real nn-systems/cold-read/cold-read-record-names-common.py,
+names each record with the real nn-systems/cold-read/cold_read_record_names_common.py,
 as the fast read does. Only the fast read itself is a stand-in.
 
 One case runs a copy of the real nn-systems/cold-read/cold-read-fast-read.py,
@@ -369,7 +369,7 @@ def main() -> int:
         # and the second seat to ship was refused (2026-10-01, merge-lane-2's
         # review of the pull request that added the program).
         record_names = load_module("cold_read_record_names",
-                                   COLD_READ_DIRECTORY / "cold-read-record-names-common.py")
+                                   COLD_READ_DIRECTORY / "cold_read_record_names_common.py")
         store = scratch / "store" / "cold-read-records"
         store.mkdir(parents=True)
         today = datetime.datetime.now()

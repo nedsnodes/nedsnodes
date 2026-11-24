@@ -38,27 +38,27 @@ from typing import NamedTuple, Optional
 _stop_hooks_stay_silent_rule_specification = importlib.util.spec_from_file_location(
     "claude_code_stop_hooks_stay_silent_while_agent_answers_a_stop_hook_rule_common",
     Path(__file__).resolve().parents[1] / "nn-systems" / "general-tools"
-    / "claude-code-stop-hooks-stay-silent-while-agent-answers-a-stop-hook-rule-common.py")
+    / "claude_code_stop_hooks_stay_silent_while_agent_answers_a_stop_hook_rule_common.py")
 stop_hooks_stay_silent_rule = importlib.util.module_from_spec(_stop_hooks_stay_silent_rule_specification)
 _stop_hooks_stay_silent_rule_specification.loader.exec_module(stop_hooks_stay_silent_rule)
 
 _transcript_records_specification = importlib.util.spec_from_file_location(
     "claude_code_session_transcript_records_read_backward_common",
-    Path(__file__).resolve().with_name("claude-code-session-transcript-records-read-backward-common.py"))
+    Path(__file__).resolve().with_name("claude_code_session_transcript_records_read_backward_common.py"))
 transcript_records = importlib.util.module_from_spec(_transcript_records_specification)
 _transcript_records_specification.loader.exec_module(transcript_records)
 
 _interim_recognizer_specification = importlib.util.spec_from_file_location(
     "claude_code_subagent_task_notification_interim_recognizer_common",
     Path(__file__).resolve().with_name(
-        "claude-code-subagent-task-notification-interim-recognizer-common.py"))
+        "claude_code_subagent_task_notification_interim_recognizer_common.py"))
 interim_recognizer = importlib.util.module_from_spec(_interim_recognizer_specification)
 _interim_recognizer_specification.loader.exec_module(interim_recognizer)
 
 _deferred_marker_file_specification = importlib.util.spec_from_file_location(
     "handoff_deferred_marker_and_refused_commands_files_common",
     Path(__file__).resolve().parents[1] / "nn-systems" / "handoff"
-    / "handoff-deferred-marker-and-refused-commands-files-common.py")
+    / "handoff_deferred_marker_and_refused_commands_files_common.py")
 handoff_deferred_marker_and_refused_commands_files_common = importlib.util.module_from_spec(_deferred_marker_file_specification)
 _deferred_marker_file_specification.loader.exec_module(handoff_deferred_marker_and_refused_commands_files_common)
 

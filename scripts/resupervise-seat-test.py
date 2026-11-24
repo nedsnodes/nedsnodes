@@ -39,7 +39,7 @@ failures = []
 _tmux_error_pattern_spec = importlib.util.spec_from_file_location(
     "tmux_target_or_server_does_not_exist_error_pattern_common",
     RESUPERVISE_SCRIPT.resolve().parent.parent / "nn-systems" / "general-tools"
-    / "tmux-target-or-server-does-not-exist-error-pattern-common.py")
+    / "tmux_target_or_server_does_not_exist_error_pattern_common.py")
 tmux_error_pattern = importlib.util.module_from_spec(_tmux_error_pattern_spec)
 _tmux_error_pattern_spec.loader.exec_module(tmux_error_pattern)
 # What the unknown-kill check's answers mean; the answers come from the shared tmux pattern,
@@ -322,12 +322,12 @@ def run_missing_launcher_case(workspace: Path):
     # file directly or through a path constant.
     supervisor_home = workspace / "nn-systems" / "handoff"
     supervisor_home.mkdir(parents=True)
-    for supervisor_file in ("handoff-supervisor.py", "session-handoff-field-names-common.py",
+    for supervisor_file in ("handoff-supervisor.py", "session_handoff_field_names_common.py",
                             "handoff-user-review-of-agent-memory-stores-mark.py",
                             "uncommitted-work-snapshots.py",
-                            "handoff-reference-checkout-fetch-and-fast-forward-to-origin-main-check-common.py",
+                            "handoff_reference_checkout_fetch_and_fast_forward_to_origin_main_check_common.py",
                             "handoff-reference-checkout-back-on-main-after-pushing-leftovers-to-a-branch.py",
-                            "agent-seat-terminal-captures-common.py",
+                            "agent_seat_terminal_captures_common.py",
                             "agent-seat-worktrees-and-branches-with-no-pull-request-first-prompt-list.py"):
         (supervisor_home / supervisor_file).write_text(
             SUPERVISOR_SCRIPT.with_name(supervisor_file).read_text(encoding="utf-8"),
@@ -343,16 +343,16 @@ def run_missing_launcher_case(workspace: Path):
     # answers a Stop hook; and checkout-freshness-catch-up.py loads from here the
     # rule for which changed files are reusable-prompts.
     for general_tools_module in (
-            "git-machine-readable-output-runner-and-parser-common.py",
-            "agent-seat-task-list-new-pending-task-write-common.py",
-            "git-redirecting-environment-variables-removal-common.py",
-            "tmux-target-or-server-does-not-exist-error-pattern-common.py",
-            "claude-code-stop-hooks-stay-silent-while-agent-answers-a-stop-hook-rule-common.py",
-            "ned-box-home-directory-and-its-mac-mount-point-path-constants-common.py",
-            "mac-reference-checkout-launcher-scripts-directory-path-constant-common.py",
-            "failed-command-tool-message-to-agent-rerun-once-then-stop-and-report-lines-common.py",
-            "pull-request-conflict-with-main-rebase-or-replace-answer-common.py",
-            "reusable-prompt-file-recognized-by-name-ending-and-not-ghi-md-common.py"):
+            "git_machine_readable_output_runner_and_parser_common.py",
+            "agent_seat_task_list_new_pending_task_write_common.py",
+            "git_redirecting_environment_variables_removal_common.py",
+            "tmux_target_or_server_does_not_exist_error_pattern_common.py",
+            "claude_code_stop_hooks_stay_silent_while_agent_answers_a_stop_hook_rule_common.py",
+            "ned_box_home_directory_and_its_mac_mount_point_path_constants_common.py",
+            "mac_reference_checkout_launcher_scripts_directory_path_constant_common.py",
+            "failed_command_tool_message_to_agent_rerun_once_then_stop_and_report_lines_common.py",
+            "pull_request_conflict_with_main_rebase_or_replace_answer_common.py",
+            "reusable_prompt_file_recognized_by_name_ending_and_not_ghi_md_common.py"):
         (general_tools_home / general_tools_module).write_text(
             (SUPERVISOR_SCRIPT.parents[1] / "general-tools" / general_tools_module)
             .read_text(encoding="utf-8"), encoding="utf-8")

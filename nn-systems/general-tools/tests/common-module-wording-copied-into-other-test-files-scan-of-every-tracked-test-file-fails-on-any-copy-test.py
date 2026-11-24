@@ -15,16 +15,16 @@ from pathlib import Path
 
 REPOSITORY_ROOT = Path(__file__).resolve().parents[3]
 WORDING_MODULES = (
-    "nn-systems/cold-read/cold-read-cell-common.py",
-    "nn-systems/general-tools/failed-command-tool-message-to-agent-rerun-once-then-stop-and-report-lines-common.py",
-    "nn-systems/general-tools/shell-command-tree-sitter-bash-reader-common.py",
-    "nn-systems/general-tools/tmux-target-or-server-does-not-exist-error-pattern-common.py",
-    "scripts/design-to-main/design-to-main-state-tables-common.py",
+    "nn-systems/cold-read/cold_read_cell_common.py",
+    "nn-systems/general-tools/failed_command_tool_message_to_agent_rerun_once_then_stop_and_report_lines_common.py",
+    "nn-systems/general-tools/shell_command_tree_sitter_bash_reader_common.py",
+    "nn-systems/general-tools/tmux_target_or_server_does_not_exist_error_pattern_common.py",
+    "scripts/design-to-main/design_to_main_state_tables_common.py",
 )
 
 _finder_spec = importlib.util.spec_from_file_location(
     "common_module_wording_copied_into_other_test_files_finder_common",
-    REPOSITORY_ROOT / "nn-systems" / "general-tools" / "common-module-wording-copied-into-other-test-files-finder-common.py")
+    REPOSITORY_ROOT / "nn-systems" / "general-tools" / "common_module_wording_copied_into_other_test_files_finder_common.py")
 finder = importlib.util.module_from_spec(_finder_spec)
 _finder_spec.loader.exec_module(finder)
 

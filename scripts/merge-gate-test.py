@@ -143,9 +143,9 @@ DESCRIPTION_DEFECT_LINE_READER = Path(__file__).with_name(
     "pull-request-description-defect-line-root-cause-status-and-follow-up-link-reader.py")
 NO_SANDBOX_SUITES_PROGRAM = Path(__file__).with_name("no-sandbox-test-suites-run-on-main-in-a-quiet-gap.py")
 VERDICT_REVIEW_POSTING_PROGRAM_MARKS_CHECK_PROGRAM_PATH = Path(__file__).resolve().with_name("merge-gate-approval-or-changes-request-review-has-review-posting-program-marks-check.py")
-GIT_REDIRECTING_ENVIRONMENT_COMMON = Path("nn-systems/general-tools/git-redirecting-environment-variables-removal-common.py")
-GIT_MACHINE_READABLE_OUTPUT_COMMON = Path("nn-systems/general-tools/git-machine-readable-output-runner-and-parser-common.py")
-REPOSITORY_NAMES_COMMON = Path("nn-systems/general-tools/github-repository-name-and-name-before-project-rename-common.py")
+GIT_REDIRECTING_ENVIRONMENT_COMMON = Path("nn-systems/general-tools/git_redirecting_environment_variables_removal_common.py")
+GIT_MACHINE_READABLE_OUTPUT_COMMON = Path("nn-systems/general-tools/git_machine_readable_output_runner_and_parser_common.py")
+REPOSITORY_NAMES_COMMON = Path("nn-systems/general-tools/github_repository_name_and_name_before_project_rename_common.py")
 FIXTURES = Path(__file__).with_name("merge-gate-test-captured-github-responses")
 BASH = shutil.which("bash")
 TEST_TOKEN = "merge-gate-test-token-not-a-credential"
@@ -1502,7 +1502,7 @@ def case_repository_names_module_failing_stops_the_gate(gate):
     run = run_gate(copy, BASE_PR, BASE_HEAD, BASE_APPROVAL["submitted_at"], base_routes())
     return could_not_run_before_gh(
         run, "GATE COULD NOT RUN: could not read the repository's names, REPOSITORY and OLD_REPOSITORY, from ",
-        "github-repository-name-and-name-before-project-rename-common.py; python3's error is just above this line.\n"
+        "github_repository_name_and_name_before_project_rename_common.py; python3's error is just above this line.\n"
         "Fix the module or restore it from main, then run the gate again.\n"), run.summary()
 
 
@@ -1511,7 +1511,7 @@ def case_repository_names_module_printing_one_name_stops_the_gate(gate):
         gate, 'REPOSITORY = "nedsnodes/nedsnodes"\nOLD_REPOSITORY = ""\n')
     run = run_gate(copy, BASE_PR, BASE_HEAD, BASE_APPROVAL["submitted_at"], base_routes())
     return could_not_run_before_gh(
-        run, "github-repository-name-and-name-before-project-rename-common.py: it printed "
+        run, "github_repository_name_and_name_before_project_rename_common.py: it printed "
         "`nedsnodes/nedsnodes `, not two names separated by a space.\n"
         "Fix the module or restore it from main, then run the gate again.\n"), run.summary()
 

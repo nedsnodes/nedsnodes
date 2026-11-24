@@ -6,7 +6,7 @@ issue: "[The walk-me-through recommendation reader reads an HTML comment inside 
 
 ## Reproduction
 
-On ned-box, on main at `8f38e5740`, this was run: `python3 /home/nedlern/nedsnodes-logs/seats/merge-lane-2/merge-helpers/ghi-reproductions-2026-11-11/walk-me-through-recommendation-reader-html-comment-inside-html-block-reproduction.py <a checkout of main>`. It loads `nn-systems/skills/walk-me-through/walk-me-through-approval-walk-minutes-and-walk-document-item-finder-common.py` from the checkout and runs `approval_walk_item_recommendation_text(prose_lines(text, markdown_parser()))` on three approval-walk item texts:
+On ned-box, on main at `8f38e5740`, this was run: `python3 /home/nedlern/nedsnodes-logs/seats/merge-lane-2/merge-helpers/ghi-reproductions-2026-11-11/walk-me-through-recommendation-reader-html-comment-inside-html-block-reproduction.py <a checkout of main>`. It loads `nn-systems/skills/walk-me-through/walk_me_through_approval_walk_minutes_and_walk_document_item_finder_common.py` from the checkout and runs `approval_walk_item_recommendation_text(prose_lines(text, markdown_parser()))` on three approval-walk item texts:
 
 ```python
 for text in ["<div>\n<!-- Recommendation: hidden -->\n</div>\n\nRecommendation: shown.\n",

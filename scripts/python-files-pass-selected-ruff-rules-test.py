@@ -38,7 +38,7 @@ REPOSITORY = Path(__file__).resolve().parent.parent
 _pinned_libraries_install_spec = importlib.util.spec_from_file_location(
     "python_libraries_pinned_requirements_install_if_missing_then_import_common",
     REPOSITORY / "nn-systems" / "general-tools"
-    / "python-libraries-pinned-requirements-install-if-missing-then-import-common.py")
+    / "python_libraries_pinned_requirements_install_if_missing_then_import_common.py")
 pinned_libraries_install = importlib.util.module_from_spec(_pinned_libraries_install_spec)
 _pinned_libraries_install_spec.loader.exec_module(pinned_libraries_install)
 
