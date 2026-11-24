@@ -5039,6 +5039,19 @@ def test_read_step_reports_a_row_whose_check_fails_and_still_offers_the_others()
           described(result))
     check("the other rows are still offered", any(row.startswith("- case against weak, cost only:") for row in rows),
           described(result))
+    check("the row that is not offered gives the failure alone, not the rerun of the command it withholds",
+          f"{check_command_for(case, '--not-asked', '3')}` again once" not in result.stdout, described(result))
+
+
+def test_read_step_offers_a_removal_that_lacks_only_its_touches_line_while_the_removed_name_is_still_in_files():
+    case = rated_none_case(touches="#not_asked_unused old_reader\n\n", rating=WEAK_COST_ONLY,
+                           files=("tools/old_reader.py",))
+    (case.checkout / "tools" / "old_reader.py").write_text("def old_reader():\n    return 0\n")
+    result = case.run(WAITING_ITEM_READ)
+    kind_3 = [row for row in no_answer_rows_printed(result) if row.startswith("- kind 3:")]
+    check("a removal with an unused line and no touches line is offered kind 3 as lacking only the touches line",
+          len(kind_3) == 1 and "Only evidence is missing" in kind_3[0] and "#not_asked_touches" in kind_3[0]
+          and check_command_for(case, "--not-asked", "3") in kind_3[0], described(result))
 
 
 def test_read_step_offers_the_handoff_row_only_for_an_item_naming_the_handoff():
@@ -5178,6 +5191,9 @@ def test_the_read_step_presents_an_item_rated_none_that_is_shown_all_the_same():
         check(f"the read step reads and presents an item rated none {described_case}",
               result.returncode == 0 and "Then present item 22 of 26" in result.stdout
               and times_read(case, "## Item 22 of 26") == 1, described(result))
+        if "close has not closed" in described_case:
+            check(f"the read step offers no settling command for an item {described_case}, since rerunning it "
+                  "would record a second answer", not no_answer_rows_printed(result), described(result))
     case = rated_none_case(next_to_present="item 3 of 3")
     result = case.run(WAITING_ITEM_READ)
     check("the read step presents an item rated none that asks no decision, such as a summary item",
