@@ -153,6 +153,10 @@ class Fixture:
         self.program.write_text(FAKE_MUTATION_TESTING_PROGRAM)
         self.plan_file = self.root / "plan.json"
         self.plan_file.write_text("{}")
+        # The real table no longer schedules this program; a case's own flag overrides this one.
+        self.schedule_file = self.root / "default-scheduled-jobs.json"
+        self.schedule_file.write_text(json.dumps({"jobs": [
+            {"name": job.PROGRAM, "on": {"ned-box": {"schedule": "30 0 * * *"}}}]}))
 
     def commit(self, path, text, author="tester"):
         (self.work / path).parent.mkdir(parents=True, exist_ok=True)
@@ -175,7 +179,8 @@ class Fixture:
                 "--task-lists-directory", str(self.tasks),
                 "--agent-seats-directory", str(self.agents),
                 "--cosmic-ray-venv", str(self.venv),
-                "--mutation-testing-program", str(self.program)]
+                "--mutation-testing-program", str(self.program),
+                "--scheduled-jobs-on-each-machine-json-file", str(self.schedule_file)]
 
     def run(self, plan=None, *flags, timeout_seconds=None, output=None):
         if plan is not None:
@@ -1259,6 +1264,18 @@ def run_first_pass_and_second_pass_cases():
             scheduled_jobs_file_with_schedule(fixture, "5 13 * * *"), local(11, 11, 12, 0))
         check("cron's next start of the job reads the hour and the minute from the schedule",
               due == local(11, 11, 13, 5), (due, local(11, 11, 13, 5)))
+
+    try:
+        job.unix_time_cron_next_starts_this_program_on_ned_box(
+            job.SCHEDULED_JOBS_ON_EACH_MACHINE_JSON_FILE, time.time())
+        message = None
+    except job.StepFailed as error:
+        message = str(error)
+    check("the default scheduled-jobs table gives the job no schedule, and the step failure says "
+          "how to run the second pass by hand without adding the job back",
+          message is not None and "do not add it back" in message
+          and "--scheduled-jobs-on-each-machine-json-file <that file>" in message
+          and "Give the job" not in message, message)
 
     line = job.run_record_line_counting_mutants_not_run_and_naming_oldest_merge_with_one({NOT_RUN_KEY: {
         "b" * 40: {"merged_at_unix_seconds": 86400, "mutants_not_run_count": 3},

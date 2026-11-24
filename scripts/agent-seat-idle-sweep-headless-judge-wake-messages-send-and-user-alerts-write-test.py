@@ -5,7 +5,8 @@ Every case runs the program as a subprocess against folders this suite made, nev
 a handoff directory, agents, projects and tasks roots, a ~/.claude.json, a log file, a state
 directory and HOME, under which user-alerts are written. `claude` is a fake placed first on PATH:
 it answers each call with the next scripted answer, as stream-json, and records the call's
-arguments and prompt. `gh` is never reached: no case gives a task prerequisites. Each invocation
+arguments and prompt. `gh` is never reached: the one case that gives a task prerequisites runs the
+program through GITHUB_BUDGET_SPENT_RUNNER, which starts the GitHub budget spent. Each invocation
 fixes the time with --now.
 """
 
@@ -125,8 +126,9 @@ def turn_end(when=LONG_AGO):
 
 
 def cross_session(text, when):
-    return user("Another Claude session sent a message:\n<cross-session-message from=\"x\" "
-                f"from-name=\"agent-seat-idle-sweep-1f\">\n{text}\n</cross-session-message>", when)
+    return {**user("Another Claude session sent a message:\n<cross-session-message from=\"x\" "
+                   f"from-name=\"agent-seat-idle-sweep-1f\">\n{text}\n</cross-session-message>", when),
+            "origin": {"kind": "peer", "from": "uds:/tmp/x.sock"}}
 
 
 def usage_limit(resets_at, when=LONG_AGO):
@@ -160,9 +162,42 @@ def sent_ok(seat="alpha"):
     return {"sends": [send_to(seat)], "answer": {"sent": True, "reason": "sent"}}
 
 
-def judged(send, message="", reason="r"):
+# Runs the program in a process whose GitHubConditionChecker reads 0 when it starts its budget and a
+# time past the budget at every later read, so no prerequisite is asked of gh.
+GITHUB_BUDGET_SPENT_RUNNER = r'''
+import importlib.util, sys
+spec = importlib.util.spec_from_file_location("sweep", sys.argv[1])
+sweep = importlib.util.module_from_spec(spec)
+spec.loader.exec_module(sweep)
+due_task_hook = sweep.verdicts_print.due_task_hook
+readings = iter([0])
+due_task_hook.GitHubConditionChecker.clock = staticmethod(
+    lambda: next(readings, due_task_hook.GH_CALLS_TOTAL_BUDGET_SECONDS + 1))
+sys.exit(sweep.main(sys.argv[2:]))
+'''
+# The first read, of the turns since the last check, finds a budget skip; the reread of a new
+# agent-session finds none, as when that agent-session is busy by then.
+FIRST_READ_ONLY_BUDGET_SKIP_RUNNER = r'''
+import importlib.util, sys
+spec = importlib.util.spec_from_file_location("sweep", sys.argv[1])
+sweep = importlib.util.module_from_spec(spec)
+spec.loader.exec_module(sweep)
+verdict_for_seat = sweep.verdicts_print.verdict_for_seat
+def first_read_skips(seat, paths, now, since, *rest):
+    verdict = verdict_for_seat(seat, paths, now, since, *rest)
+    if since is not None:
+        verdict[sweep.fields.GITHUB_CONDITIONS_SKIPPED_FOR_BUDGET] = [
+            {"kind": "pr_merged", "number": 50}]
+    return verdict
+sweep.verdicts_print.verdict_for_seat = first_read_skips
+sys.exit(sweep.main(sys.argv[2:]))
+'''
+
+
+def judged(send, message="", reason="r", raised=()):
     """A rule 5 judge's answer."""
-    return {"answer": {"send": send, "message": message, "reason": reason}}
+    return {"answer": {"send": send, "message": message, "reason": reason,
+                       "open_task_ids_raised": list(raised)}}
 
 
 DO_NOT_REPLY = "Do not reply to this message: the idle sweep sent it, and nothing acts on a reply."
@@ -270,7 +305,7 @@ class Machine:
         return ([json.loads(path.read_text()) for path in sorted(pending.glob("*.json"))]
                 if pending.is_dir() else [])
 
-    def run(self, minutes, *extra, path_has_fake=True):
+    def run(self, minutes, *extra, path_has_fake=True, github_budget_spent=False, runner_source=None):
         environment = dict(os.environ)
         environment["HOME"] = str(self.home)
         # Python finds the user's site-packages from HOME, and on the Mac markdown-it-py is installed there.
@@ -284,8 +319,11 @@ class Machine:
         environment["FAKE_CLAUDE_CALLS"] = str(self.calls)
         environment["FAKE_CLAUDE_ANSWERS"] = str(self.answers)
         environment["FAKE_CLAUDE_PROJECTS"] = str(self.projects)
+        if github_budget_spent:
+            runner_source = GITHUB_BUDGET_SPENT_RUNNER
+        runner = ["-c", runner_source] if runner_source else []
         completed = subprocess.run(
-            [sys.executable, str(PROGRAM), "--now", at(minutes), "--handoff-directory",
+            [sys.executable, *runner, str(PROGRAM), "--now", at(minutes), "--handoff-directory",
              str(self.handoffs), "--agents-root", str(self.agents), "--projects-root",
              str(self.projects), "--tasks-root", str(self.tasks), "--claude-json",
              str(self.claude_json), "--due-task-raise-state-directory",
@@ -391,12 +429,13 @@ machine.script(sent_ok())
 machine.run(0)
 nudge = machine.events("message_sent")[-1]["text"]
 machine.append("alpha", cross_session(nudge, at(0.2)),
+               {**user("Carry on.", at(0.5)), "origin": {"kind": "human"}},
                assistant(tool=("Bash", {"command": "make"}), when=at(1)),
                assistant("Built it.", at(9)), turn_end(at(9.5)))
 machine.script(sent_ok())
 code, _ = machine.run(16)
-check("a tool call after the nudge ends the wait: no escalation, the next idle stretch gets a new "
-      "nudge counted from its own start",
+check("a tool call after the nudge ends the wait: no escalation, and after the user has typed the "
+      "next idle stretch gets a new nudge counted from its own start",
       code == 0 and [event["why"] for event in machine.events("wait_ended")]
       == ["it made a tool call after the nudge"]
       and [(event["step"], event.get("first_idle_at")) for event in machine.events("wait_step")]
@@ -1296,6 +1335,38 @@ for case, answer in (("an index missing", {"sentences": []}),
           code == 1 and not machine.alerts() and machine.owner_task_subjects()
           == ["Idle sweep: a headless agent-session failed: the judge's answer could not be used"]
           and not machine.events("message_sent"), (code, machine.alerts(), machine.owner_tasks()))
+
+# --- a prerequisite the GitHub budget left unasked ----------------------------------------------
+machine = Machine()
+machine.seat("alpha", DONE_TURN)
+machine.task("alpha", "1")
+task_file = machine.tasks / "nedsnodes-alpha-tasks" / "1.json"
+task_file.write_text(json.dumps({**json.loads(task_file.read_text()),
+                                 "metadata": {"prerequisites": [{"pr_merged": 50}]}}))
+machine.script(judged(False, reason="r"))
+code, output = machine.run(0, github_budget_spent=True)
+skipped = [{"kind": "pr_merged", "number": 50}]
+check("a prerequisite the GitHub budget left unasked: logged by name",
+      code == 0 and [(event["agent_seat"], event["conditions"]) for event in
+                     machine.events("github_conditions_skipped_for_budget")] == [("alpha", skipped)],
+      (code, output, machine.events()))
+calls, judge_facts = rule_five_judge_facts(machine)
+check("a prerequisite the GitHub budget left unasked: the rule 5 judge is called, is not told of "
+      "the skip, and is told of no open task nothing holds",
+      len(calls) == 1 and "github_conditions_skipped_for_budget" not in judge_facts
+      and judge_facts.get("open_tasks_nothing_holds") == [], (calls, judge_facts))
+
+machine = Machine()
+machine.seat("alpha", DONE_TURN)
+machine.script()
+machine.run(0)
+machine.seat("alpha", DONE_TURN, session="s-2")
+machine.script()
+code, output = machine.run(20, runner_source=FIRST_READ_ONLY_BUDGET_SKIP_RUNNER)
+check("a budget skip the first read found and a new agent-session's reread did not: still logged",
+      code == 0 and [(event["agent_seat"], event["conditions"]) for event in
+                     machine.events("github_conditions_skipped_for_budget")] == [("alpha", skipped)],
+      (code, output, machine.events()))
 
 # --- rule 1: a usage limit ------------------------------------------------------------------------
 RESET_PASSED = int(START.timestamp()) - 60
@@ -2520,6 +2591,315 @@ check("the account notice is logged for each agent-seat as sent, with the do-not
       len(machine.events("message_sent")) == 2
       and all(event["text"] == wake_texts[-1][1] for event in machine.events("message_sent")),
       machine.events("message_sent"))
+
+# --- no reminder of a wait on the user, and no repeat until the user types ----------------------
+def typed_by_the_user(text, when):
+    return {**user(text, when), "origin": {"kind": "human"}}
+
+
+def queued_by_the_user(text, when):
+    return {"type": "attachment", "timestamp": when, "attachment": {
+        "type": "queued_command", "prompt": text, "origin": {"kind": "human"}}}
+
+
+def one_reminder_of_task_1():
+    machine = Machine()
+    machine.seat("alpha", DONE_TURN)
+    machine.task("alpha", "1")
+    machine.script(judged(True, 'Your task "task 1" is open and nothing holds it.', raised=["1"]), sent_ok())
+    machine.run(0)
+    answered_with_a_tool_call_and_idle_again(machine, 10)
+    return machine
+
+
+def judge_asked_at(machine, minutes):
+    machine.script(judged(False))
+    machine.run(minutes)
+    return rule_five_judge_facts(machine)
+
+
+machine = Machine()
+machine.seat("alpha", DONE_TURN)
+machine.task("alpha", "1")
+machine.script(judged(False))
+machine.run(0)
+check("rule 5: the judge is told never to mention a wait on the user, and to send nothing when that "
+      "is all that is left",
+      "never mention that wait" in " ".join(machine.claude_calls()[0]["prompt"].split())
+      and "send no message" in " ".join(machine.claude_calls()[0]["prompt"].split()),
+      machine.claude_calls())
+
+machine = one_reminder_of_task_1()
+calls, _ = judge_asked_at(machine, 20)
+check("rule 5: an open task already reminded of is not raised again, and no judge runs", not calls, calls)
+machine.append("alpha", cross_session("A message from another agent-seat.", at(21)),
+               assistant("Done.", when=at(21)), turn_end(at(21)))
+calls, _ = judge_asked_at(machine, 40)
+check("rule 5: a message from another agent-seat is not the user typing", not calls, calls)
+machine.append("alpha", typed_by_the_user("Please carry on.", at(41)),
+               assistant("On it.", when=at(41)), turn_end(at(41)))
+calls, facts = judge_asked_at(machine, 60)
+check("rule 5: once the user has typed, the same open task is raised again",
+      [task["id"] for task in facts.get("open_tasks_nothing_holds", [])] == ["1"], calls)
+
+for notice in (user([{"type": "text", "text": "[Request interrupted by user]"}], at(11)),
+               typed_by_the_user("[Request interrupted by user for tool use]", at(11))):
+    machine = one_reminder_of_task_1()
+    machine.append("alpha", notice, assistant("Stopped.", when=at(11)), turn_end(at(11)))
+    calls, _ = judge_asked_at(machine, 30)
+    check("rule 5: an interrupt notice, which the user did not type, does not raise the task again",
+          not calls, calls)
+
+machine = Machine()
+machine.seat("alpha", DONE_TURN)
+machine.task("alpha", "1")
+machine.script(judged(True, "You have open tasks.", raised=["1"]), sent_ok())
+machine.run(0)
+machine.append("alpha", typed_by_the_user("Something else.", at(2)))
+answered_with_a_tool_call_and_idle_again(machine, 5)
+machine.run(6)
+calls, _ = judge_asked_at(machine, 20)
+check("rule 5: the user typing after the send started, before the message arrived, does not raise "
+      "the task again",
+      [event.get("received_at") for event in machine.events("delivery_checked")] == [at(4.5)]
+      and not calls, (machine.events("delivery_checked"), calls))
+
+machine = one_reminder_of_task_1()
+machine.append("alpha", queued_by_the_user("Also this.", at(11)),
+               assistant("On it.", when=at(11)), turn_end(at(11)))
+_, facts = judge_asked_at(machine, 30)
+check("rule 5: a message the user typed while the agent-seat was mid-turn counts as the user typing",
+      [task["id"] for task in facts.get("open_tasks_nothing_holds", [])] == ["1"], facts)
+
+machine = one_reminder_of_task_1()
+machine.task("alpha", "2")
+_, facts = judge_asked_at(machine, 20)
+check("rule 5: a new open task is raised, without the one already reminded of",
+      [task["id"] for task in facts.get("open_tasks_nothing_holds", [])] == ["2"], facts)
+
+machine = Machine()
+machine.seat("alpha", DONE_TURN)
+machine.task("alpha", "1")
+machine.task("alpha", "2")
+machine.script(judged(True, 'Your task "task 1" is open and nothing holds it.', raised=["1"]), sent_ok())
+machine.run(0)
+answered_with_a_tool_call_and_idle_again(machine, 10)
+_, facts = judge_asked_at(machine, 20)
+check("rule 5: an open task the message did not name is still raised",
+      [task["id"] for task in facts.get("open_tasks_nothing_holds", [])] == ["2"], facts)
+
+machine = Machine()
+machine.seat("alpha", DONE_TURN)
+machine.task("alpha", "1")
+machine.task("alpha", "2")
+machine.script(judged(True, "You have open tasks and nothing holds them.", raised=["1", "2"]),
+               sent_ok())
+machine.run(0)
+answered_with_a_tool_call_and_idle_again(machine, 10)
+calls, _ = judge_asked_at(machine, 20)
+check("rule 5: every task the judge lists as raised counts as reminded", not calls, calls)
+
+machine = Machine()
+machine.seat("alpha", DONE_TURN)
+machine.task("alpha", "1")
+machine.task("alpha", "12")
+machine.script(judged(True, 'Your task "task 12" is open: (1) rebase it.', raised=["12"]), sent_ok())
+machine.run(0)
+check("rule 5: only the ids the judge lists are recorded, whatever the message's words match",
+      [event["subjects"] for event in machine.events("reminder_sent")] == [["open task: 12"]],
+      machine.events("reminder_sent"))
+
+machine = Machine()
+machine.seat("alpha", DONE_TURN)
+for task_id in ("1", "2", "3"):
+    machine.task("alpha", task_id)
+machine.script(judged(True, "You have open tasks nothing holds, for example #1.",
+                      raised=["1", "2", "3"]), sent_ok())
+machine.run(0)
+sent_text = machine.events("message_sent")[0]["text"]
+check("rule 5: code lists every raised task in the message, whatever examples the judge gave",
+      'Open tasks nothing holds: #1 "task 1"; #2 "task 2"; #3 "task 3".' in sent_text
+      and [event["subjects"] for event in machine.events("reminder_sent")]
+      == [["open task: 1", "open task: 2", "open task: 3"]], sent_text)
+answered_with_a_tool_call_and_idle_again(machine, 10)
+calls, _ = judge_asked_at(machine, 20)
+check("rule 5: one backlog gives one reminder, though the judge's words named one task", not calls,
+      calls)
+
+machine = Machine()
+machine.seat("alpha", DONE_TURN)
+machine.task("alpha", "1")
+machine.task("alpha", "2")
+machine.script(judged(True, "You have open tasks.", raised=["1", "2"]),
+               {"sends": [send_to("alpha", 'You have open tasks. Open tasks nothing holds: #1 '
+                                  f'"task 1".\n\n{DO_NOT_REPLY}')],
+                "answer": {"sent": True, "reason": "sent"}})
+machine.run(0)
+check("rule 5: a task the sender left out of the text sent is not recorded as reminded",
+      [event["subjects"] for event in machine.events("reminder_sent")] == [["open task: 1"]],
+      machine.events("reminder_sent"))
+
+for name, bad_raised in (("an id it was not given", ["9"]), ("no list", None)):
+    machine = Machine()
+    machine.seat("alpha", DONE_TURN)
+    machine.task("alpha", "1")
+    answer = judged(True, 'Your task "task 1" is open.', raised=["1"])
+    answer["answer"]["open_task_ids_raised"] = bad_raised
+    machine.script(answer)
+    machine.run(0)
+    check(f"rule 5: a judge answer listing {name} is a failure and sends nothing",
+          not machine.events("message_sent") and not machine.events("reminder_sent")
+          and machine.events("judge_answer")[-1]["failed"], machine.events("judge_answer"))
+
+machine = Machine()
+machine.seat("alpha", DONE_TURN)
+machine.task("alpha", "1")
+machine.script(judged(True, 'Your task "task 1" is open.', raised=["1"]),
+               {"sends": [send_to("alpha", is_error=True)], "answer": {"sent": False, "reason": "r"}})
+machine.run(0)
+check("rule 5: a message whose send failed logs no reminder", not machine.events("reminder_sent"),
+      machine.events())
+
+machine = Machine()
+machine.seat("alpha", DONE_TURN)
+machine.task("alpha", "1")
+machine.script(judged(True, 'Your task "task 1" is open.', raised=["1"]), sent_ok())
+machine.run(0)
+answered_with_a_tool_call_and_idle_again(machine, 10, received=False)
+machine.run(11)
+_, facts = judge_asked_at(machine, 20)
+check("rule 5: a reminder the delivery check did not find is raised again",
+      [event["found"] for event in machine.events("delivery_checked")] == [False]
+      and [task["id"] for task in facts.get("open_tasks_nothing_holds", [])] == ["1"],
+      machine.events("delivery_checked"))
+
+machine = one_reminder_of_task_1()
+machine.seat("alpha", DONE_TURN, session="s-2")
+_, facts = judge_asked_at(machine, 20)
+check("rule 5: a new agent-session is reminded of the task again",
+      [task["id"] for task in facts.get("open_tasks_nothing_holds", [])] == ["1"], facts)
+
+machine = Machine()
+machine.seat("alpha", DONE_TURN)
+machine.handoff_put_off()
+machine.script(sent_ok())
+machine.run(0)
+answered_with_a_tool_call_and_idle_again(machine, 10)
+machine.script()
+machine.run(20)
+check("rule 3: the same put-off handoff is not raised again until the user types",
+      not machine.claude_calls() and len(machine.events("message_sent")) == 1, machine.events())
+machine.append("alpha", typed_by_the_user("Go on.", at(21)), assistant("On it.", when=at(21)),
+               turn_end(at(21)))
+machine.script(sent_ok())
+machine.run(40)
+check("rule 3: once the user has typed, the put-off handoff is raised again",
+      len(machine.events("message_sent")) == 2, machine.events("message_sent"))
+
+machine = Machine()
+machine.seat("alpha", DONE_TURN)
+machine.task("alpha", "1")
+machine.script(judged(True, 'Your task "task 1" is open.', raised=["1"]), sent_ok())
+machine.run(0)
+machine.append("alpha", cross_session(machine.events("message_sent")[-1]["text"], at(0.5)),
+               assistant("Done.", when=at(1)), turn_end(at(1)))
+machine.script(sent_ok())
+machine.run(16)
+machine.script()
+machine.run(32)
+check("a reminder already sent still goes on to its escalation and its user-alert",
+      [event["step"] for event in machine.events("wait_step")] == ["nudge", "escalate", "tell_user"]
+      and len(machine.alerts()) == 1, machine.events("wait_step"))
+
+machine = one_reminder_of_task_1()
+machine.append("alpha", assistant("I'll report when PR 927 merges.", when=at(11)), turn_end(at(11)))
+machine.script(sent_ok())
+machine.run(20)
+check("a new promise is still raised while the open task's reminder is held",
+      [event.get("rule") for event in machine.events("wait_step")] == [5, 2]
+      and len(machine.events("message_sent")) == 2,
+      ([event.get("rule") for event in machine.events("wait_step")],
+       [event["event"] for event in machine.events()][-6:], machine.claude_calls()[:1]))
+
+machine = one_reminder_of_task_1()
+machine.append("alpha",
+               assistant(tool=("TaskUpdate", {"taskId": "1", "metadata": {
+                   "prerequisites": [{"pr_merged": 927}]}}), when=at(11), tool_id="t-hold"),
+               task_result("t-hold", "Updated task #1 metadata", at(11.01)),
+               assistant("Held.", when=at(11.1)), turn_end(at(11.1)))
+_, facts = judge_asked_at(machine, 45)
+check("rule 5: a reminded task held after the reminder is raised again once it is free",
+      [task["id"] for task in facts.get("open_tasks_nothing_holds", [])] == ["1"], facts)
+
+machine = one_reminder_of_task_1()
+machine.append("alpha",
+               assistant(tool=("TaskUpdate", {"taskId": "2", "addBlocks": ["1"]}), when=at(11),
+                         tool_id="t-blocks"),
+               task_result("t-blocks", "Updated task #2 blocks", at(11.01)),
+               assistant("Held.", when=at(11.1)), turn_end(at(11.1)))
+_, facts = judge_asked_at(machine, 45)
+check("rule 5: a reminded task held through another task's addBlocks is raised again once it is free",
+      [task["id"] for task in facts.get("open_tasks_nothing_holds", [])] == ["1"], facts)
+
+machine = one_reminder_of_task_1()
+machine.append("alpha",
+               assistant(tool=("TaskUpdate", {"taskId": "2", "addBlocks": ["1"]}), when=at(11),
+                         tool_id="t-blocks"),
+               task_result("t-blocks", "Task not found", at(11.01)),
+               assistant("Held.", when=at(11.1)), turn_end(at(11.1)))
+machine.script()
+machine.run(45)
+check("rule 5: an addBlocks call that failed does not count as a hold, so the reminder stays withheld",
+      not machine.claude_calls(), machine.claude_calls())
+
+machine = Machine()
+machine.seat("alpha", DONE_TURN)
+machine.handoff_put_off()
+machine.script(sent_ok())
+machine.run(0)
+answered_with_a_tool_call_and_idle_again(machine, 10)
+machine.task("alpha", "2")
+machine.script(judged(False))
+machine.run(20)
+_, facts = rule_five_judge_facts(machine)
+check("rule 3: while its reminder is held, a new open task still goes to the judge, without the "
+      "put-off handoff",
+      [task["id"] for task in facts.get("open_tasks_nothing_holds", [])] == ["2"]
+      and facts.get("handoff_deferral_marker_file") is None, facts)
+
+machine = Machine()
+machine.seat("alpha", DONE_TURN)
+machine.handoff_put_off()
+machine.script({"sends": [send_to("alpha", is_error=True)], "answer": {"sent": False, "reason": "r"}})
+machine.run(0)
+check("rule 3: a message whose send failed logs no reminder", not machine.events("reminder_sent"),
+      machine.events())
+
+import importlib.util
+_spec = importlib.util.spec_from_file_location("idle_sweep_program", PROGRAM)
+idle_sweep_program = importlib.util.module_from_spec(_spec)
+_spec.loader.exec_module(idle_sweep_program)
+
+
+def reminded(events, typed=None, held=None):
+    path = SUITE_ROOT / f"reminded-{len(list(SUITE_ROOT.iterdir()))}.jsonl"
+    path.write_text("".join(json.dumps({"agent_seat": "alpha", **event}) + "\n" for event in events))
+    return idle_sweep_program.SweepLog(path).reminded_subjects(
+        "alpha", "s1", typed, {subject: idle_sweep_program.parse_time(time)
+                               for subject, time in (held or {}).items()})
+
+
+REMINDER = {"event": "reminder_sent", "session_id": "s1", "message_id": "m1",
+            "subjects": ["open task: 1"], "send_started_at": at(0), "at": at(0.1)}
+ARRIVED = {"event": "delivery_checked", "message_id": "m1", "found": True, "received_at": at(0.5)}
+check("a hold made while the sender ran, before the reminder arrived, has not answered it",
+      reminded([REMINDER, ARRIVED], held={"open task: 1": at(0.3)}) == {"open task: 1"})
+check("a hold made after the reminder arrived frees the task to be raised again",
+      reminded([REMINDER, ARRIVED], held={"open task: 1": at(0.7)}) == set())
+check("before the delivery check, typing before the send was logged has not answered the reminder",
+      reminded([REMINDER], typed=at(0.05)) == {"open task: 1"})
+check("before the delivery check, typing after the send was logged answers the reminder",
+      reminded([REMINDER], typed=at(0.2)) == set())
 
 if failures:
     print(f"{len(failures)} case(s) failed")

@@ -45,6 +45,20 @@ ONE_ITEM_AT_A_TIME_LINE = (
     "that `close` names only after the last answer is recorded.")
 failures = []
 
+
+def load_module_by_path(name, path):
+    specification = importlib.util.spec_from_file_location(name, path)
+    module = importlib.util.module_from_spec(specification)
+    specification.loader.exec_module(module)
+    return module
+
+
+HOOK_MODULE = load_module_by_path("walk_me_through_short_answer_hook_under_test", HOOK_SCRIPT)
+ATTENDANCE_CHECK = load_module_by_path(
+    "agent_session_unattended_by_user_check_common",
+    CHECKOUT / "nn-systems" / "general-tools" / "agent-session-unattended-by-user-check-common.py")
+SETTLED_LINE = getattr(HOOK_MODULE, "WALK_ME_THROUGH_HOOK_INSTRUCTION_TO_AGENT_REWRITE_APPROVAL_WALK_ITEM_WHEN_DISCUSSION_SETTLED_ON_NON_RECOMMENDED_OPTION_LINE", "<the hook has no such line>")
+
 # The fake's answer for every pair the prompt numbers: `same` judges each meaning unchanged, `changed` judges each
 # changed; the other modes are failures of the call.
 FAKE_CLAUDE = """#!/usr/bin/env python3
@@ -172,7 +186,7 @@ class Case:
         path.write_text("".join(json.dumps(line) + "\n" for line in lines))
         return path
 
-    def run(self, prompt=None, stdin_text=None, transcript_path=None, process_cwd=None):
+    def run(self, prompt=None, stdin_text=None, transcript_path=None, environment=None, process_cwd=None):
         """Run the hook. With no transcript_path, the transcript's one agent message shows the whole walk-document as
         it now stands, so the hook's check that the user saw the waiting item passes. process_cwd, by default the
         checkout, is the directory the hook process starts in, apart from the payload's cwd."""
@@ -185,8 +199,9 @@ class Case:
             [sys.executable, str(HOOK_SCRIPT)],
             input=json.dumps(payload) if stdin_text is None else stdin_text,
             capture_output=True, text=True, cwd=self.checkout if process_cwd is None else process_cwd,
-            env={**os.environ, "PATH": self.path, "FAKE_CLAUDE_MODE": self.model,
-                 "FAKE_CLAUDE_CALLS": str(self.calls)})
+            env={**ATTENDANCE_CHECK.environment_without_agent_session_attendance_variables(os.environ),
+                 "PATH": self.path, "FAKE_CLAUDE_MODE": self.model, "FAKE_CLAUDE_CALLS": str(self.calls),
+                 **(environment or {})})
 
     def model_calls(self):
         """The fake model's calls so far, oldest first, each as {"argv": ..., "stdin": ...}."""
@@ -210,6 +225,8 @@ class Case:
             check(f"{prompt!r} ends with the line giving check its reply", lines[-1] == expected,
                   f"{lines[-1]!r} != {expected!r}")
             lines = lines[:-1]
+        # Most cases compare an answer's own lines; the cases named test_settled_line_* check this line.
+        lines = [line for line in lines if line != SETTLED_LINE]
         return OutputLines(lines)
 
 
@@ -281,7 +298,11 @@ def test_a_hyphen_between_the_letters_of_ao_o2_and_o3_is_read_as_that_letter():
               and lines[1].startswith(f"\"{prompt}\" means AO to every item now waiting"), f"lines {lines!r}")
     for prompt in ("a-ok", "A-OK.", "O-ring", "a-one", "a-o-k", "a o", "o-4", "5 a-ok"):
         result = case.run(prompt)
-        check(f"the hyphenated word {prompt!r} is not read as an answer",
+        check(f"the hyphenated word {prompt!r} is not read as an answer, so an open walk gets only the settled line",
+              is_only_the_own_words_message(result),
+              f"exit {result.returncode}, stdout {result.stdout!r}, stderr {result.stderr!r}")
+        result = Case().run(prompt)
+        check(f"the hyphenated word {prompt!r} with no approval-walk prints nothing",
               result.returncode == 0 and result.stdout == "" and result.stderr == "",
               f"exit {result.returncode}, stdout {result.stdout!r}, stderr {result.stderr!r}")
     lines = case.lines("a - other text")
@@ -290,15 +311,33 @@ def test_a_hyphen_between_the_letters_of_ao_o2_and_o3_is_read_as_that_letter():
           and any(line.startswith("A means approve") for line in lines), f"lines {lines!r}")
 
 
-def test_retired_letters_o_and_other_prompts_print_nothing():
+def is_only_the_own_words_message(result):
+    """Whether the hook exited 0 and its context is the message for a reply in the user's own words, and no more."""
+    if result.returncode != 0 or result.stderr or not result.stdout.strip():
+        return False
+    lines = json.loads(result.stdout)["hookSpecificOutput"]["additionalContext"].split("\n")
+    return len(lines) == 2 and lines[0].startswith(OWN_WORDS_RULE_OPENING) and lines[1] == SETTLED_LINE
+
+
+def test_retired_letters_o_and_other_prompts_print_nothing_with_no_walk_and_only_the_settled_line_on_one():
     case = Case(next_to_present="item 3 of 9")
+    no_walk = Case()
     for prompt in ("y", "n", "N", "next", "c", "l", "L.", "1 l", "l, later", "Y.", "all o", "1 o2", "o4", "oo", "all y", "1 y 2 n", "5 n, 6 y", "y but quickly",
                    "yes", "a a", "aaa", "A..", "X", "", ".", "a lot of things to do", "I think a",
                    "4", "1a2d", "1 c", "1 ab", "explain", "repeater", "deferred", "aol"):
-        result = case.run(prompt)
-        check(f"{prompt!r} prints nothing",
+        result = no_walk.run(prompt)
+        check(f"{prompt!r} with no approval-walk prints nothing",
               result.returncode == 0 and result.stdout == "" and result.stderr == "", (
                   f"exit {result.returncode}, stdout {result.stdout!r}, stderr {result.stderr!r}"))
+        result = case.run(prompt)
+        if prompt.strip():
+            check(f"{prompt!r} while an item waits gets only the own-words message",
+                  is_only_the_own_words_message(result),
+                  f"exit {result.returncode}, stdout {result.stdout!r}, stderr {result.stderr!r}")
+        else:
+            check("an empty prompt while an item waits prints nothing",
+                  result.returncode == 0 and result.stdout == "" and result.stderr == "",
+                  f"exit {result.returncode}, stdout {result.stdout!r}, stderr {result.stderr!r}")
 
 
 CLOSE_END = "then the close command it prints, and do what close prints; write nothing in the minutes by hand."
@@ -987,8 +1026,8 @@ def test_repeat_and_an_item_number_is_read_as_that_number_and_r():
               lines is not None and lines[1:5] == numbered_r_lines(number, f"item {number} of 9", point),
               f"lines {lines!r}")
     result = case.run("repeat 99")
-    check("'repeat 99' with no item 99 prints nothing",
-          result.returncode == 0 and result.stdout == "" and result.stderr == "",
+    check("'repeat 99' with no item 99 is a reply in the user's own words",
+          is_only_the_own_words_message(result),
           f"exit {result.returncode}, stdout {result.stdout!r}, stderr {result.stderr!r}")
 
 
@@ -1017,11 +1056,10 @@ def test_an_answer_word_and_a_list_of_item_numbers_answers_each_when_each_names_
           lines is not None and lines[1:9] == (numbered_r_lines("5", "item 5 of 9", "two small corrections")
                                                + numbered_r_lines("6", "item 6 of 9", "two small corrections")),
           f"lines {lines!r}")
-    for prompt in ("approve 5 and 99", "repeat 5 99", "approve 5 and 6 then more", "a, 5", "approve item 5 too",
-                   "defer, 5 and 6"):
+    for prompt in ("approve 5 and 99", "repeat 5 99", "approve 5 and 6 then more", "a, 5", "approve item 5 too", "defer, 5 and 6"):
         result = case.run(prompt)
-        check(f"{prompt!r} prints nothing, so the prompt reaches the agent as typed",
-              result.returncode == 0 and result.stdout == "" and result.stderr == "",
+        check(f"{prompt!r} is no short answer, so it gets only the own-words message",
+              is_only_the_own_words_message(result),
               f"exit {result.returncode}, stdout {result.stdout!r}, stderr {result.stderr!r}")
     lines = case.lines("approve 7")
     check("'approve 7', one number that names an item not waiting, is refused",
@@ -1041,12 +1079,15 @@ def test_an_answer_word_and_a_list_of_item_numbers_answers_each_when_each_names_
 
 def test_numbered_r_on_a_number_no_item_has_passes_the_prompt_through():
     for case, prompt in ((Case(next_to_present="item 4 of 9"), "37.4 r"),
-                         (Case(next_to_present="items 5 and 6 of 9"), "5 a, 7 r"),
-                         (Case(), "6 r")):
+                         (Case(next_to_present="items 5 and 6 of 9"), "5 a, 7 r")):
         result = case.run(prompt)
-        check(f"{prompt!r} with no such item prints nothing",
-              result.returncode == 0 and result.stdout == "" and result.stderr == "",
+        check(f"{prompt!r} with no such item is a reply in the user's own words",
+              is_only_the_own_words_message(result),
               f"exit {result.returncode}, stdout {result.stdout!r}, stderr {result.stderr!r}")
+    result = Case().run("6 r")
+    check("'6 r' with no approval-walk prints nothing",
+          result.returncode == 0 and result.stdout == "" and result.stderr == "",
+          f"exit {result.returncode}, stdout {result.stdout!r}, stderr {result.stderr!r}")
 
 
 def test_numbered_r_beside_other_numbered_answers():
@@ -1630,7 +1671,8 @@ def test_each_check_command_the_hook_names_runs_on_the_real_program():
     # Z's text names the check step and its flag, not the whole command.
     case = Case(next_to_present="item 3 of 9")
     lines = case.lines("z") or []
-    result = subprocess.run(CHECK.strip("`").split() + ["--deferred"] + reply_arguments(case, "z"),
+    result = subprocess.run(CHECK.strip("`").split() + ["--deferred", "--counts-log", str(case.checkout.parent / "z.tsv")]
+                            + reply_arguments(case, "z"),
                             capture_output=True, text=True, cwd=case.checkout)
     check("Z's text names --deferred, and the check step run with it records the answer as deferred",
           any("--deferred" in line for line in lines) and result.returncode == 0
@@ -1835,8 +1877,10 @@ def test_an_answer_to_an_item_revised_after_it_was_shown_is_not_counted_and_the_
             context = json.loads(result.stdout)["hookSpecificOutput"]["additionalContext"] if not_blocked(result) else ""
             check(f"{prompt!r} after only the item's {changed} line changed is not counted, and the agent is handed "
                   "the item's current text, with no check command and no reply line",
-                  context.split("\n") == not_shown_lines(prompt, changed_reason(
-                      RECOMMENDATION_CHANGED if changed == "Recommendation" else NEW_CHANGED)),
+                  [line for line in context.split("\n") if line != SETTLED_LINE]
+                  == not_shown_lines(prompt, changed_reason(
+                      RECOMMENDATION_CHANGED if changed == "Recommendation" else NEW_CHANGED))
+                  and (SETTLED_LINE in context.split("\n")) == (prompt != "D"),
                   f"exit {result.returncode}, context {context!r}, stderr {result.stderr!r}")
 
 
@@ -2764,7 +2808,7 @@ def test_a_payload_with_no_transcript_path_leaves_the_answer_uncounted_and_says_
     context = json.loads(result.stdout)["hookSpecificOutput"]["additionalContext"] if not_blocked(result) else ""
     lines = context.split("\n")
     check("a payload with no transcript_path leaves the answer uncounted and says the payload names none, not "
-          "`transcript None`", result.returncode == 0 and len(lines) == 5 and lines[1] == (
+          "`transcript None`", result.returncode == 0 and len(lines) == 6 and lines.pop(1) == SETTLED_LINE and lines[1] == (
               f"{ANSWER_DISCARDED}: it could not read this agent-session's transcript, which the hook's payload does "
               "not name, having no transcript_path, which it reads to check that the user was last shown item 4 of 9 "
               "as the walk-document now has it. The error: no transcript_path.")
@@ -3228,26 +3272,225 @@ def test_items_under_a_shared_heading_with_no_openings_and_no_recommendation_lin
 
 def test_bump_on_an_open_walk_runs_check_bump_with_the_title_and_without_a_walk_prints_nothing():
     case = Case(next_to_present="item 4 of 9")
-    result = case.run("Bump the code proposals ")
+    result = case.run("Bump the code proposals ", process_cwd=Case().checkout)
     context = json.loads(result.stdout)["hookSpecificOutput"]["additionalContext"] if result.stdout else ""
-    check("bump and a title tell the agent to run check --bump with that title and the reply as typed",
+    check("bump and a title, with the hook process started in another checkout, find the approval-walk by the "
+          "payload's cwd and tell the agent to run check --bump with that title and the reply as typed",
           result.returncode == 0
           and f"before item 4 of 9 of approval-walk {WALK_NAME}" in context
           and "check --bump 'the code proposals' --user-reply-as-typed 'Bump the code proposals'" in context
           and str(HOOK_SCRIPT.parent / "walk-me-through-answer-added-texts-cold-read-fast-read-check-and-close.py")
           in context,
           f"exit {result.returncode}, stdout {result.stdout!r}, stderr {result.stderr!r}")
-    result = case.run("Bump the code proposals", process_cwd=Case().checkout)
-    check("bump finds the approval-walk by the payload's cwd, not the directory the hook process starts in",
-          result.returncode == 0 and f"before item 4 of 9 of approval-walk {WALK_NAME}" in result.stdout,
-          f"exit {result.returncode}, stdout {result.stdout!r}, stderr {result.stderr!r}")
     result = Case().run("bump the code proposals")
     check("bump with no approval-walk open prints nothing",
           result.returncode == 0 and result.stdout == "" and result.stderr == "",
           f"exit {result.returncode}, stdout {result.stdout!r}, stderr {result.stderr!r}")
     result = case.run("bump")
-    check("bump with no title is not a bump and prints nothing",
+    check("bump with no title is not a bump, so it is a reply in the user's own words",
+          is_only_the_own_words_message(result), f"exit {result.returncode}, stdout {result.stdout!r}")
+    result = Case().run("bump")
+    check("bump with no title and no approval-walk prints nothing",
           result.returncode == 0 and result.stdout == "", f"exit {result.returncode}, stdout {result.stdout!r}")
+
+
+OWN_WORDS_RULE_OPENING = "[rule walk-me-through-hook-instruction-to-agent-rewrite-approval-walk-item-when-discussion-settled-on-non-recommended-option] "
+APPROVED_SENTENCE = (
+    "When the discussion of an item settles on any option but its recommendation, even its alternative, rewrite the "
+    "item's recommendation as that option and its alternative as the old recommendation, show the revised item, and "
+    "record only an answer given to the revised item.")
+
+
+def context_lines(result):
+    return json.loads(result.stdout)["hookSpecificOutput"]["additionalContext"].split("\n") if result.stdout else []
+
+
+def test_settled_line_holds_the_sentence_the_skill_holds_word_for_word():
+    check("the hook's line is the condition, then the approved sentence",
+          SETTLED_LINE == ("Act on this line only if the discussion of the waiting approval-walk item settled on an "
+                           "option other than its recommendation: " + APPROVED_SENTENCE), SETTLED_LINE)
+    check("the skill's section Advancing holds the approved sentence, right after its sentence on answers in the "
+          "user's own words",
+          "ask as the list below says for an unclear reply. " + APPROVED_SENTENCE + " An answer that makes a change"
+          in SKILL_FILE.read_text())
+
+
+def test_settled_line_shown_for_a_reply_in_own_words_and_for_a_ao_aa_and_approved():
+    for prompt in ("I think we should take the other option", "a", "AO", "Aa", "approved", "approve as obvious",
+                   "A, but keep it short", "all a", "4 a"):
+        result = Case(next_to_present="item 4 of 9").run(prompt)
+        check(f"{prompt!r} while an item waits shows the settled line, exit 0",
+              result.returncode == 0 and SETTLED_LINE in context_lines(result),
+              f"exit {result.returncode}, stdout {result.stdout!r}, stderr {result.stderr!r}")
+
+
+def test_settled_line_comes_right_after_the_opening_and_keeps_the_short_answers_lines():
+    result = Case(next_to_present="item 4 of 9").run("a")
+    lines = context_lines(result)
+    check("A's opening, then the settled line, then its meaning lines and the reply line",
+          len(lines) == 5 and lines[0].startswith(EXPANDED_RULE_ID_OPENING) and lines[1] == SETTLED_LINE
+          and lines[2].startswith("A means approve") and lines[4] == USER_REPLY_LINE.format(reply="a"),
+          f"lines {lines!r}")
+
+
+def test_settled_line_not_shown_for_other_answers_or_with_no_item_waiting():
+    for prompt in ("d", "z", "r", "e", "o", "m", "o2", "disapproved", "defer", "4 d"):
+        result = Case(next_to_present="item 4 of 9").run(prompt)
+        check(f"{prompt!r} does not show the settled line", SETTLED_LINE not in context_lines(result),
+              f"stdout {result.stdout!r}")
+    for prompt in ("I think we should take the other option", "next"):
+        result = Case().run(prompt)
+        check(f"{prompt!r} with no approval-walk prints nothing",
+              result.returncode == 0 and result.stdout == "" and result.stderr == "", f"stdout {result.stdout!r}")
+        closed = Case(next_to_present="none, closed")
+        result = closed.run(prompt)
+        check(f"{prompt!r} with only a closed approval-walk prints nothing",
+              result.returncode == 0 and result.stdout == "" and result.stderr == "", f"stdout {result.stdout!r}")
+    for prompt in ("a", "approved"):
+        check(f"{prompt!r} with no approval-walk does not show the settled line",
+              SETTLED_LINE not in context_lines(Case().run(prompt)))
+
+
+def test_settled_line_not_shown_for_a_prompt_the_user_did_not_type():
+    case = Case(next_to_present="item 4 of 9")
+    for prompt in ("<task-notification>a task ended</task-notification>",
+                   "<cross-session-message from=\"x\">hello</cross-session-message>"):
+        result = case.run(prompt)
+        check(f"{prompt[:24]!r} prints nothing", result.returncode == 0 and result.stdout == "",
+              f"stdout {result.stdout!r}")
+    result = case.run("take the other option", environment={"CLAUDE_CODE_SESSION_ATTENDED": "0"})
+    check("a reply in a headless agent-session prints nothing", result.returncode == 0 and result.stdout == "",
+          f"stdout {result.stdout!r}")
+    broken = Case(next_to_present="item 4 of 9")
+    (broken.walk / f"{WALK_NAME}-minutes.md").write_bytes(b"#next_to_present item 4 of 9\n\xff\xfe")
+    result = broken.run("<task-notification>a task ended</task-notification>")
+    check("a task notice with unreadable minutes prints nothing", result.returncode == 0 and result.stdout == "",
+          f"stdout {result.stdout!r}")
+
+
+def test_settled_line_unreadable_transcript_falls_back_to_the_prompts_opening():
+    case = Case(next_to_present="item 4 of 9")
+    transcript = case.checkout.parent / "unreadable-transcript.jsonl"
+    transcript.write_bytes(b"\xff\xfe not a record\n")
+    result = case.run("take the other option", transcript_path=transcript)
+    lines = context_lines(result)
+    check("a reply with an unreadable transcript names the failure, does not say the user wrote it, and exits 0",
+          result.returncode == 0 and len(lines) == 3 and lines[0].startswith(OWN_WORDS_RULE_OPENING)
+          and "his reply is in his own words" not in lines[0] and str(transcript) in lines[1]
+          and "could not tell who wrote this prompt" in lines[1] and "UnicodeDecodeError" in lines[1]
+          and lines[2] == SETTLED_LINE, f"exit {result.returncode}, stdout {result.stdout!r}")
+    (case.walk / f"{WALK_NAME}-minutes.md").write_bytes(b"#next_to_present item 4 of 9\n\xff\xfe")
+    result = case.run("take the other option", transcript_path=transcript)
+    lines = context_lines(result)
+    check("with the walk state and the transcript both unreadable, the reply names both failures, and both make the "
+          "last line, the settled line, depend on them",
+          result.returncode == 0 and len(lines) == 3 and "reading the approval-walk state failed" in lines[0]
+          and "If an item is waiting, the last line applies" in lines[0] and "next line" not in lines[0]
+          and "could not tell who wrote this prompt" in lines[1] and "the last line does not apply" in lines[1]
+          and lines[2] == SETTLED_LINE, f"exit {result.returncode}, stdout {result.stdout!r}")
+    check("the failed-read opening says a paused approval-walk has no item waiting",
+          bool(lines) and "unless an `#approval_walk_paused` line follows that line, which means no item is waiting"
+          in lines[0],
+          lines[0] if lines else "no lines")
+    result = case.run("<task-notification>a task ended</task-notification>", transcript_path=transcript)
+    check("a task notice with an unreadable transcript prints nothing",
+          result.returncode == 0 and result.stdout == "", f"stdout {result.stdout!r}")
+
+
+def test_settled_line_not_shown_for_an_a_from_a_headless_session_or_another_agent_seat():
+    case = Case(next_to_present="item 4 of 9")
+    result = case.run("a", environment={"CLAUDE_CODE_SESSION_ATTENDED": "0"})
+    check("a headless A keeps its answer lines without the settled line",
+          SETTLED_LINE not in context_lines(result) and any(line.startswith("A means approve")
+                                                            for line in context_lines(result)), result.stdout)
+    document = (case.walk / f"{WALK_NAME}.md").read_text()
+    transcript = case.transcript(document)
+    with open(transcript, "a", encoding="utf-8") as records:
+        records.write(json.dumps({"type": "user", "turnOrigin": "peer",
+                                  "message": {"role": "user", "content": "a"}}) + "\n")
+    result = case.run("a", transcript_path=transcript)
+    check("an A the transcript shows another agent-seat sent has no settled line, exits 0 and keeps A's lines",
+          result.returncode == 0 and SETTLED_LINE not in context_lines(result)
+          and any(line.startswith("A means approve") for line in context_lines(result)),
+          f"exit {result.returncode}, stdout {result.stdout!r}, stderr {result.stderr!r}")
+
+
+def test_settled_line_shown_for_a_numbered_answer_that_approves_only_some_parts():
+    case = Case(next_to_present="item 4 of 9", document=PARTS_DOCUMENT)
+    for prompt in ("1 a 2 d", "1 d 2 a 3 d"):
+        result = case.run(prompt)
+        check(f"{prompt!r}, which approves one part and disapproves another, shows the settled line",
+              result.returncode == 0 and SETTLED_LINE in context_lines(result),
+              f"exit {result.returncode}, stdout {result.stdout!r}")
+    result = case.run("1 d 2 d 3 d")
+    check("'1 d 2 d 3 d', which approves no part, has no settled line", SETTLED_LINE not in context_lines(result),
+          result.stdout)
+
+
+def test_settled_line_a_transcript_record_whose_message_is_a_string_counts_as_a_failed_read():
+    case = Case(next_to_present="item 4 of 9")
+    document = (case.walk / f"{WALK_NAME}.md").read_text()
+    transcript = case.transcript(document)
+    with open(transcript, "a", encoding="utf-8") as records:
+        records.write(json.dumps({"type": "user", "turnOrigin": "user", "message": "a"}) + "\n")
+    result = case.run("a", transcript_path=transcript)
+    lines = context_lines(result)
+    check("an A whose newest turnOrigin record has a string message exits 0 and keeps A's lines",
+          result.returncode == 0 and any(line.startswith("A means approve") for line in lines),
+          f"exit {result.returncode}, stdout {result.stdout!r}, stderr {result.stderr!r}")
+    result = case.run("take the other option", transcript_path=transcript)
+    lines = context_lines(result)
+    check("a reply in his own words with that record names the failed transcript read and exits 0",
+          result.returncode == 0 and len(lines) == 3 and "could not tell who wrote this prompt" in lines[1]
+          and "AttributeError" in lines[1] and lines[2] == SETTLED_LINE,
+          f"exit {result.returncode}, stdout {result.stdout!r}, stderr {result.stderr!r}")
+
+
+def test_own_words_output_given_the_walk_state_already_read_does_not_read_it_again():
+    import types
+    hook = load_module_by_path("short_answer_hook_under_test", HOOK_SCRIPT)
+    hook.agent_session_unattended = lambda: False
+
+    def read_again():
+        raise AssertionError("the approval-walk state was read a second time")
+    hook.load_walk_finder = read_again
+    payload = {"prompt": "repeat 99", "cwd": "/nonexistent"}
+    walk = types.SimpleNamespace(item="item 4 of 9", name=WALK_NAME)
+    try:
+        output = hook.own_words_output(payload, walk)
+        context = output["hookSpecificOutput"]["additionalContext"].split("\n")
+    except Exception as error:
+        context = [repr(error)]
+    check("given read_walk's result, own_words_output names its item and does not read the walk again",
+          context[0].endswith(f"item 4 of 9 of approval-walk {WALK_NAME} is waiting for the user's answer, and his "
+                              "reply is in his own words.") and context[-1] == SETTLED_LINE, f"context {context!r}")
+    output = hook.own_words_output(payload, None)
+    check("given read_walk's result of no open walk, own_words_output prints nothing", output is None, repr(output))
+
+
+def test_settled_line_follows_every_line_of_an_answer_typed_on_several_lines():
+    case = Case(next_to_present="item 4 of 9")
+    context = "\n".join(context_lines(case.run("a, keep it short\nand also rename it")))
+    check("the settled line is not inside the user's quoted answer",
+          SETTLED_LINE in context and "and also rename it" in context
+          and context.index("and also rename it") < context.index(SETTLED_LINE), context)
+
+
+def test_settled_line_failure_reading_the_walk_keeps_short_answer_output_and_reports_on_own_words():
+    case = Case(next_to_present="item 4 of 9")
+    (case.walk / f"{WALK_NAME}-minutes.md").write_bytes(b"#next_to_present item 4 of 9\n\xff\xfe")
+    result = case.run("a")
+    lines = context_lines(result)
+    check("A with unreadable minutes keeps its existing output, with the settled line, exit 0",
+          result.returncode == 0 and lines and "could not tell whether an approval-walk is open" in lines[0]
+          and any(line.startswith("A means approve") for line in lines) and SETTLED_LINE in lines,
+          f"exit {result.returncode}, stdout {result.stdout!r}, stderr {result.stderr!r}")
+    result = case.run("take the other option")
+    lines = context_lines(result)
+    check("a reply in the user's own words with unreadable minutes says what failed, shows the line, and exits 0",
+          result.returncode == 0 and len(lines) == 2 and lines[0].startswith(OWN_WORDS_RULE_OPENING)
+          and "could not tell" in lines[0] and lines[1] == SETTLED_LINE,
+          f"exit {result.returncode}, stdout {result.stdout!r}, stderr {result.stderr!r}")
 
 
 NO_DECISION_SUB_STEP_DOCUMENT = """# A walk
@@ -3290,7 +3533,9 @@ def test_an_answer_to_a_no_decision_sub_step_records_nothing():
     text = "\n".join(case.lines("r", case.transcript("Here.")) or [])
     check("R on a no-decision sub-step repeats the no-decision line", NO_DECISION_LINE in text
           and "A approve" not in text, text)
-    check("N is left to the agent as a navigation word", case.lines("n", case.transcript("Here.")) is None, "")
+    lines = context_lines(case.run("n", transcript_path=case.transcript("Here.")))
+    check("N is left to the agent as a navigation word: it gets only what a reply in the user's own words gets",
+          len(lines) == 2 and lines[0].startswith(OWN_WORDS_RULE_OPENING) and lines[1] == SETTLED_LINE, lines)
 
 
 def test_an_answer_to_a_sub_step_that_asks_a_decision_still_counts():
