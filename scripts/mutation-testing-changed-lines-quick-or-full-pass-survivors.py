@@ -1591,13 +1591,22 @@ def hunk_replaced_lines(old, new):
     return old[start:len(old) - end]
 
 
+def git_failure(completed):
+    """The failed git command and what it printed, for a could-not-be-judged reason."""
+    printed = (completed.stderr or completed.stdout).strip() or "no error text"
+    return f"`{shlex.join(completed.args)}` exited {completed.returncode}: {printed}"
+
+
 def commit_on_main_holding_recorded_hunk(checkout, main, path, old_start, old, environment):
-    """The newest first-parent commit of main that changed path and has the hunk's old lines at
-    the hunk's own line, or None when git cannot read a commit's file or none has them."""
-    listed = run(["git", "log", "--first-parent", "--format=%H", main, "--", path], checkout,
-                 environment)
+    """(commit, None) for the newest first-parent commit of main that changed path and has the
+    hunk's old lines at the hunk's own line; (None, None) when none has them; (None, why) when
+    git cannot list the commits or read a commit's file, why naming the command and its error."""
+    # A signed commit's signature text would otherwise come before its hash when the user's git
+    # config sets log.showSignature.
+    listed = run(["git", "log", "--no-show-signature", "--first-parent", "--format=%H", main,
+                  "--", path], checkout, environment)
     if listed.returncode:
-        return None
+        return None, git_failure(listed)
     at = old_start - 1
     for commit in listed.stdout.split():
         shown = run(["git", "show", f"{commit}:{path}"], checkout, environment)
@@ -1605,18 +1614,21 @@ def commit_on_main_holding_recorded_hunk(checkout, main, path, old_start, old, e
             # The commit that deleted the file is listed too, and has no such file. Any other
             # failure must stop the search: an older copy would end the line that this one holds.
             in_tree = run(["git", "ls-tree", commit, "--", path], checkout, environment)
-            if in_tree.returncode or in_tree.stdout.strip():
-                return None
+            if in_tree.returncode:
+                return None, git_failure(in_tree)
+            if in_tree.stdout.strip():
+                return None, git_failure(shown)
             continue
         if shown.stdout.split("\n")[at:at + len(old)] == old:
-            return commit
-    return None
+            return commit, None
+    return None, None
 
 
 def recorded_hunk_replaced_lines_traced_to_main(checkout, main, path, hunk, environment):
     """("present", "file:line") when reverse blame follows a replaced line to main; ("gone",
     None) when it ends every replaced line before main and no file it followed them through
-    holds their text on main; (None, None) when it cannot tell.
+    holds their text on main; (None, why) when it cannot tell, why naming the git command that
+    failed, or None when no git command failed.
 
     Text alone cannot decide: a renamed file holds the line at another path, and a short line
     such as `return True` has unrelated copies. Blame alone cannot either: each flag set aligns
@@ -1627,10 +1639,10 @@ def recorded_hunk_replaced_lines_traced_to_main(checkout, main, path, hunk, envi
     count = len(old) - end - start
     if count <= 0:
         return None, None
-    recording = commit_on_main_holding_recorded_hunk(checkout, main, path, old_start, old,
-                                                     environment)
+    recording, why = commit_on_main_holding_recorded_hunk(checkout, main, path, old_start, old,
+                                                          environment)
     if recording is None:
-        return None, None
+        return None, why
     first = old_start + start
     names = {path}
     for flags in ([], ["-w", "-M", "-C"]):
@@ -1638,7 +1650,7 @@ def recorded_hunk_replaced_lines_traced_to_main(checkout, main, path, hunk, envi
                       "-L", f"{first},{first + count - 1}", f"{recording}..{main}", "--", path],
                      checkout, environment)
         if blamed.returncode:
-            return None, None
+            return None, git_failure(blamed)
         traced = []
         for text in blamed.stdout.split("\n"):
             header = REVERSE_BLAME_LINE_HEADER.match(text)
@@ -1656,11 +1668,13 @@ def recorded_hunk_replaced_lines_traced_to_main(checkout, main, path, hunk, envi
     for name in names:
         listed = run(["git", "ls-tree", main, "--", name], checkout, environment)
         if listed.returncode:
-            return None, None
+            return None, git_failure(listed)
         if not listed.stdout.strip():
             continue
         shown = run(["git", "show", f"{main}:{name}"], checkout, environment)
-        if shown.returncode or places_of_lines(shown.stdout.split("\n"), replaced):
+        if shown.returncode:
+            return None, git_failure(shown)
+        if places_of_lines(shown.stdout.split("\n"), replaced):
             return None, None
     return "gone", None
 
@@ -1669,8 +1683,9 @@ def recorded_mutant_lines_on_main(checkout, path, hunks, environment):
     """(state, place): ("applies", None) when origin/main's file takes the mutant; ("present",
     "file:line") when a replaced line is still on origin/main though the diff does not apply;
     ("gone", None) when reverse blame ends every replaced line of every hunk before
-    origin/main; (None, None) when it cannot tell: no origin/main, git fails, no commit on
-    origin/main holds a hunk at its own line, or a hunk replaces no line."""
+    origin/main; (None, why) when it cannot tell: no origin/main, git fails, no commit on
+    origin/main holds a hunk at its own line, or a hunk replaces no line, why naming the git
+    command that failed, or None when no git command failed."""
     named = run(["git", "rev-parse", "--verify", "--quiet", "refs/remotes/origin/main^{commit}"],
                 checkout, environment)
     if named.returncode:
@@ -1678,11 +1693,11 @@ def recorded_mutant_lines_on_main(checkout, path, hunks, environment):
     main = named.stdout.strip()
     listed = run(["git", "ls-tree", main, "--", path], checkout, environment)
     if listed.returncode:
-        return None, None
+        return None, git_failure(listed)
     if listed.stdout.strip():
         shown = run(["git", "show", f"{main}:{path}"], checkout, environment)
         if shown.returncode:
-            return None, None
+            return None, git_failure(shown)
         if source_with_recorded_mutant_applied(shown.stdout, hunks) is not None:
             return "applies", None
     traced = [recorded_hunk_replaced_lines_traced_to_main(checkout, main, path, hunk, environment)
@@ -1692,7 +1707,7 @@ def recorded_mutant_lines_on_main(checkout, path, hunks, environment):
             return state, place
     if all(state == "gone" for state, _ in traced):
         return "gone", None
-    return None, None
+    return None, next((why for state, why in traced if state is None and why), None)
 
 
 def recorded_mutant_run_verdict(exit_code, output, runner):
@@ -1842,7 +1857,8 @@ def recorded_mutant_not_applied_verdict(checkout, path, hunks, head, why_not_app
         f"the diff's lines at the diff's line number, the diff replaces no line, or git blame "
         f"ended those lines but a copy of their text is still in the file, which may be "
         f"unrelated.\n"
-        f"If `git rev-parse --verify origin/main` fails: run `git fetch origin main`, then run "
+        + (f"Git failed here: {place}.\n" if place else "")
+        + f"If `git rev-parse --verify origin/main` fails: run `git fetch origin main`, then run "
         f"this command again once. If the fetch fails, report its error to whoever gave you "
         f"this work.\n"
         f"If your branch changed those lines on purpose, the mutant is gone from your branch: "

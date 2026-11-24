@@ -2721,8 +2721,13 @@ def run_recorded_mutant_lines_on_main_traced_through_history_cases():
                                                               None)
             finally:
                 survivors.run = real_run
+            wanted_reason = (None if replacement is not None
+                             else f"`git {failing_word} ")
             check(f"a recorded mutant is not called gone when its history cannot be read, and "
-                  f"could not be judged: {name}", got == (None, None), got)
+                  f"could not be judged, naming the git command that failed: {name}",
+                  got[0] is None and (got[1] is None if wanted_reason is None else
+                                      got[1].startswith(wanted_reason)
+                                      and got[1].endswith(": injected failure")), got)
 
     # The file is renamed, then the line is edited, so only the later name is read for a copy.
     renamed_versions = [{path: "a\nb\nc\n" + unrelated},
@@ -2746,7 +2751,10 @@ def run_recorded_mutant_lines_on_main_traced_through_history_cases():
             finally:
                 survivors.run = real_run
             check(f"a recorded mutant is not called gone when a file its line was followed "
-                  f"through cannot be read on origin/main: {name}", got == (None, None), got)
+                  f"through cannot be read on origin/main, and the reason names the git command "
+                  f"that failed: {name}",
+                  got[0] is None and got[1].startswith(f"`git {failing_word} ")
+                  and got[1].endswith(": injected failure"), got)
 
     # Present, deleted, restored, then re-indented: a failed git show on the restoring commit
     # must not let the search fall back to the copy before the deletion, where blame ends the line.
@@ -2772,7 +2780,30 @@ def run_recorded_mutant_lines_on_main_traced_through_history_cases():
             finally:
                 survivors.run = real_run
             check(f"a recorded mutant is not called gone when a commit's copy of the file cannot "
-                  f"be read, and could not be judged: {name}", got == (None, None), got)
+                  f"be read, and could not be judged, naming the git command that failed: {name}",
+                  got[0] is None and restoring_commit in got[1]
+                  and got[1].endswith("exited 128: injected failure"), got)
+
+    # With log.showSignature set in the user's git config, git log prints a signed commit's
+    # signature text before its hash, unless --no-show-signature is given.
+    def signature_printing_log(command, cwd, environment=None):
+        listed = real_run(command, cwd, environment)
+        if command[1] == "log" and "--no-show-signature" not in command:
+            signed = "".join(f"gpg: Signature made by a test key\n{commit}\n"
+                             for commit in listed.stdout.split())
+            return subprocess.CompletedProcess(command, listed.returncode, signed, listed.stderr)
+        return listed
+    with tempfile.TemporaryDirectory() as scratch_name:
+        repository, _, _ = scratch_repository(scratch_name, {"README2": "x\n"})
+        commits_on_origin_main(repository, [{path: "a\nb\nc\n" + unrelated},
+                                            {path: "a\nedited\nc\n" + unrelated}])
+        survivors.run = signature_printing_log
+        try:
+            got = survivors.recorded_mutant_lines_on_main(repository, path, [one_line_hunk], None)
+        finally:
+            survivors.run = real_run
+        check("a recorded mutant whose line was edited away is gone when git log would print "
+              "signatures before the commits it lists", got == ("gone", None), got)
 
 
 def run_cases():
