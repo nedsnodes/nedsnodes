@@ -706,10 +706,15 @@ def round_facts(number, reviewer_login):
         carried_blocking, carried_nits = unanswered_round_findings_of_replaced_pull_requests(replaced, reviewer_login)
         findings = without_reposts(findings + carried_blocking)
         nits = without_reposts(nits + carried_nits)
+    # A second changes-requested review on the same frozen-head before the round is answered stays in the round,
+    # so the round's first one names its copies directory, which that second review leaves as it was.
+    first_requesting = next((review for review in reviews
+                             if (review.get("user") or {}).get("login") == reviewer_login
+                             and does_merge_lane_review_ask_for_fix_round(review, author, reviewer_login)), anchor)
     return (url, head, branch, review_links(latest_first(anchor, reviews)), frozen_head,
             findings, nits, fix_round_number,
             None if recorded else [review.get("id") for review in reviews], anchor.get("submitted_at"),
-            anchor.get("id"))
+            first_requesting.get("id"))
 
 
 def conflict_check_report(number):
@@ -836,9 +841,9 @@ def answers_file_answers_every_finding_of_round(path, finding_count, review_subm
 
 def pull_request_fix_round_answers_kept_copies_directory_path_named_by_changes_requested_review(worktree, number, round_review_id):
     """Where this round's copies of the answers file go: in the common git directory, because removing a linked
-    worktree deletes its own git directory; one directory per round, named by the changes-requested review the
-    round answers, which a rerun shares and a later round on the same frozen-head does not, so that a brief names
-    only this round's copies."""
+    worktree deletes its own git directory; one directory per round, named by the round's first changes-requested
+    review, which a rerun shares and a later round on the same frozen-head does not, so that a brief names only
+    this round's copies."""
     common = git(["-C", str(worktree), "rev-parse", "--path-format=absolute", "--git-common-dir"]).strip()
     return Path(common) / ANSWERS_KEPT_COPIES_DIRECTORY_NAME / f"pr-{number}-review-{round_review_id}"
 
@@ -939,7 +944,10 @@ def topic_worktree_at_frozen_head(number, reviewer_login, branch, frozen_head, f
                       "If an earlier fix-round subagent left them, read them, keep what the next subagent "
                       "should know, then remove them with these two commands, which leave the answers file "
                       f"{answers_name} in place:\n"
-                      f"git -C {quoted} restore --staged --worktree .\n"
+                      # The exclude keeps an answers file git add -A staged, which restoring "." would delete,
+                      # because HEAD does not hold it.
+                      f"git -C {quoted} restore --staged --worktree -- . "
+                      f"{shlex.quote(':(exclude)' + answers_name)}\n"
                       # --exclude, because a branch whose .gitignore does not name the answers file would
                       # otherwise lose it to clean, along with a temporary file a killed brief run left beside it.
                       f"git -C {quoted} clean -d --force --exclude={shlex.quote('/' + answers_name)}\n"

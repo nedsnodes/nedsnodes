@@ -962,6 +962,20 @@ def stopped_round_cases(root, repository, made, frozen_head, dated_routes, submi
           len(new_copies) == 1
           and 0 <= out.find(f"copied it unchanged to {next(iter(kept_copies))}")
           < out.find(f"copied it unchanged to {new_copies[0]}"), out)
+    first_review = json.loads(dated_routes[REVIEWS]["stdout"].splitlines()[0])
+    second_part_routes = routes_for(frozen_head, [first_review, dict(first_review, id=12,
+                                                                     html_url=f"{URL}#pullrequestreview-12")],
+                                    review_id=12)
+    second_part_routes.update({key: route for key, route in dated_routes.items() if "/reviews/11/" in key})
+    copies_of_round = sorted(kept_directory.iterdir())
+    write_answers(partial, 60)
+    code, out, err = run(root, repository, second_part_routes)
+    check("answers kept: a rerun after merge-lane-2 posts a second changes-requested review on the same frozen-head "
+          "keeps the round's copies directory and names every copy made before it",
+          code == 0 and len(list(kept_directory.iterdir())) == len(copies_of_round) + 1
+          and all(f"copied it unchanged to {path}" in out for path in copies_of_round), err + out)
+    for path in set(kept_directory.iterdir()) - set(copies_of_round):
+        path.unlink()
     copies_before = sorted(kept_directory.iterdir())
     write_answers(partial, 60)
     before = answers.read_bytes()
@@ -1108,6 +1122,22 @@ def topic_worktree_cases(root, repository, base, frozen_head):
     check("topic-worktree: the printed clean command, on a branch whose .gitignore does not name the answers file, "
           "keeps the answers file and removes a temporary file a killed brief run left",
           (unignored / ANSWERS_NAME).read_text() == GOOD_ANSWERS and not leftover.exists(), clean_line)
+    restore_line = next((line for line in err.splitlines() if " restore --staged --worktree" in line), "")
+    staged = root / "branch-whose-answers-file-git-add-staged"
+    git(root, "init", "-q", str(staged))
+    (staged / "hook.py").write_text("committed\n")
+    git(staged, "add", "hook.py")
+    git(staged, "-c", "user.name=t", "-c", "user.email=t@t", "commit", "-q", "-m", "base")
+    (staged / ANSWERS_NAME).write_text(GOOD_ANSWERS)
+    (staged / "hook.py").write_text("changed\n")
+    git(staged, "add", "-A")
+    for line in (restore_line, clean_line):
+        subprocess.run(line.replace(str(made), str(staged)), shell=True, check=True, capture_output=True)
+    check("topic-worktree: the two printed commands, run in order where git add -A staged the answers file beside "
+          "another change, keep the answers file and undo the other change",
+          (staged / ANSWERS_NAME).exists() and (staged / ANSWERS_NAME).read_text() == GOOD_ANSWERS
+          and (staged / "hook.py").read_text() == "committed\n",
+          restore_line + "\n" + clean_line)
     (made / "stray.txt").unlink()
     (made / "hook.py").write_text("changed\n")
     code, out, err = run(root, repository, routes)

@@ -133,12 +133,12 @@ mutation testing program on each as the first pass does, but with
 --mutants-run-at-most-shared-evenly-among-changed-files, so every mutant of
 the merge not yet run is run, until that time. That time is
 --second-pass-stops-starting-mutants-seconds-before-next-scheduled-run, by
-default 30 minutes, before cron next starts this program on ned-box, which
-this program reads from its schedule in --scheduled-jobs-on-each-machine-json-file,
-by default nn-systems/general-tools/scheduled-jobs-on-each-machine.json, a
-schedule of the form `<minute> <hour> * * *`: a run still going when cron
-starts the next one would make that one exit
-EXIT_ANOTHER_RUN_HOLDS_THE_LOCK. From that time on the second pass starts on
+default 30 minutes, before the next time given by this program's schedule in
+--scheduled-jobs-on-each-machine-json-file, a schedule of the form
+`<minute> <hour> * * *`. The default file,
+nn-systems/general-tools/scheduled-jobs-on-each-machine.json, no longer
+schedules this program, so a run by hand passes a file of its own; the
+StepFailed message gives its form. From that time on the second pass starts on
 no further merge. The mutation testing program is sent SIGTERM when it is
 still going after --merge-timeout-seconds or, when sooner, once half of
 --second-pass-stops-starting-mutants-seconds-before-next-scheduled-run has
@@ -326,18 +326,17 @@ This program runs on ned-box only, so the record is written locally. A record
 that cannot be written is printed on standard output instead, and the run
 exits EXIT_RECORD_NOT_WRITTEN.
 
-SCHEDULE. Installed on ned-box by
-nn-systems/general-tools/install-scheduled-jobs-on-this-machine.py from
-nn-systems/general-tools/scheduled-jobs-on-each-machine.json, with both output
-streams appended to its log, which, with the record, is where its failures
-are read. Run by hand on ned-box, from an agent's shell too, as a unit of the
-user's systemd, which outlives the shell, with its output in the same log:
+SCHEDULE. Not scheduled: the user stopped its nightly run, so
+nn-systems/general-tools/scheduled-jobs-on-each-machine.json no longer lists
+it. Run by hand on ned-box, from an agent's shell too, as a unit of the
+user's systemd, which outlives the shell, with both output streams appended
+to its log, which, with the record, is where its failures are read:
 
     systemd-run --user --unit=scheduled-full-mutation-pass-of-merged-pull-requests-and-survivor-tasks-open-by-hand --collect -p StandardOutput=append:/home/nedlern/.claude/scheduled-full-mutation-pass-of-merged-pull-requests-and-survivor-tasks-open.log -p StandardError=append:/home/nedlern/.claude/scheduled-full-mutation-pass-of-merged-pull-requests-and-survivor-tasks-open.log /usr/bin/python3 /home/nedlern/Projects/nedsnodes/scripts/scheduled-full-mutation-pass-of-merged-pull-requests-and-survivor-tasks-open.py
 
-The cron line, at 00:30 in ned-box's local time, America/Los_Angeles (Pacific):
-
-    30 0 * * * /usr/bin/python3 /home/nedlern/Projects/nedsnodes/scripts/scheduled-full-mutation-pass-of-merged-pull-requests-and-survivor-tasks-open.py >> /home/nedlern/.claude/scheduled-full-mutation-pass-of-merged-pull-requests-and-survivor-tasks-open.log 2>&1
+Run so, the first pass runs and the second exits EXIT_STEP_FAILED; to run
+the second pass too, add --scheduled-jobs-on-each-machine-json-file with a
+file giving the program a schedule, as above.
 
 Exit codes: 0 every survivor task was rechecked and every merge since the last
 run had its first pass and its survivors and ERRORED mutants given tasks, or
@@ -1379,10 +1378,13 @@ def unix_time_cron_next_starts_this_program_on_ned_box(scheduled_jobs_file, now)
             f"the schedule of {PROGRAM} on ned-box cannot be read from {scheduled_jobs_file} "
             f"({type(error).__name__}: {error}), so the second pass does not know when to "
             f"stop for the next scheduled run, and ran no mutant. The first pass is done.\n"
-            f"Give the job named {PROGRAM} in that file, under on, ned-box, a schedule of the "
-            f"form `<minute> <hour> * * *`, or, when the job must run on another schedule, "
-            f"change unix_time_cron_next_starts_this_program_on_ned_box() in "
-            f"scripts/{PROGRAM}.py to read it.") from error
+            f"The scheduled-jobs table does not schedule {PROGRAM}, because the user stopped "
+            f"its nightly run; do not add it back. To run the second pass by hand, write a file "
+            f"holding {{\"jobs\": [{{\"name\": \"{PROGRAM}\", \"on\": {{\"ned-box\": "
+            f"{{\"schedule\": \"<minute> <hour> * * *\"}}}}}}]}}, the daily time the second pass "
+            f"must stop {DEFAULT_SECOND_PASS_STOPS_STARTING_MUTANTS_SECONDS_BEFORE_NEXT_SCHEDULED_RUN // 60:.0f} "
+            f"minutes before, and run this program again with "
+            f"--scheduled-jobs-on-each-machine-json-file <that file>.") from error
     today = time.localtime(now)
     for day in (today.tm_mday, today.tm_mday + 1):
         # mktime reads a day past the month's end as a day of the next month.

@@ -6,8 +6,8 @@ Not a program to run. It holds each field name as a constant, the fields every v
 those it may carry, and the values a rule, decision, sentence kind and code reading may take.
 verdict_field_problems() below says which fields a verdict must and may have. The printing program's
 test checks every verdict it prints with verdict_field_problems(), and the program that judges and
-sends reads verdicts by these names, so a field renamed in one place and not the other fails a test
-instead of being read as missing.
+sends reads verdicts by the names here, so a field renamed in one place and not the other fails a
+test instead of being read as missing.
 """
 
 AGENT_SEAT = "agent_seat"
@@ -62,7 +62,7 @@ HANDOFF_DEFERRED_MARKER = "handoff_deferred_marker"  # path or null
 USAGE_LIMIT = "usage_limit"
 SENTENCES = "sentences"
 OPEN_TASKS_NOTHING_HOLDS = "open_tasks_nothing_holds"  # [{"id", "subject"}]
-# [{"kind", "number"}], once each, at rules 3 to 5: each prerequisite of an open task, such as
+# [{"kind", "number"}], once each, at rules 3 to 5, and at rule 2 when its fallback reached them: each prerequisite of an open task, such as
 # {"kind": "pr_merged", "number": 50}, that was not asked of GitHub because the due-task hook's
 # GitHubConditionChecker had spent its time budget, so the task it holds may be free; absent when none
 GITHUB_CONDITIONS_SKIPPED_FOR_BUDGET = "github_conditions_skipped_for_budget"
