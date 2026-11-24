@@ -258,8 +258,9 @@ GHI_GUIDE_AGENT_ANSWER_JSON_SCHEMA_PROPERTIES = {
     "kind": {
         "enum": [GHI_GUIDE_AGENT_ANSWER_KIND_READING_LIST, GHI_GUIDE_AGENT_ANSWER_KIND_VERDICT, GHI_GUIDE_AGENT_ANSWER_KIND_REPAIR,
                  GHI_GUIDE_AGENT_ANSWER_KIND_NOT_ABOUT_ISSUES, GHI_GUIDE_AGENT_ANSWER_KIND_ASK_USER_ABOUT_RULING],
-        "description": ("Which reply this is: reading-list for request forms 1 and 3, "
-                        "verdict for form 2, repair for form 4, and not-about-issues or "
+        "description": ("Which reply this is: reading-list for request form 1, "
+                        "verdict for form 2, the kind the notice asks for in "
+                        "form 3, repair for form 4, and not-about-issues or "
                         "ask-user-about-ruling for the Boundaries.")},
     "issues": {
         "type": "array", "items": {"type": "integer"},
@@ -364,14 +365,14 @@ Your answer to every request is a JSON object whose `kind` says which reply it i
 
 Requests arrive in four forms:
 
-1. **You are asked for a reading list**: what should an agent read before it files or edits an issue on some topic. Answer with kind `reading-list`: the issue numbers in `issues`, plus, only when needed, note lines in plain sentences in `notes`. Closed issues belong in a reply only when the request says closed history is wanted.
-2. **You are shown a draft issue** — its title and its GHI-MD — and asked whether the corpus already covers it. When the draft is an edit of an existing issue, the request names that issue: leave it out of the comparison. Answer with kind `verdict`: `too-similar` with the issue that already covers this ground in `issues`, `related` with the issues the author should know in `issues` (no collision), or `unrelated` with `issues` empty. When the draft conflicts with a ruling the user made, answer instead with the ruling question under Boundaries.
-3. **You are told a fact that corrects your last reply** — an issue you cited has closed — and asked to redo that one judgment. The fact is already established by script from the refreshed mirror: do not question or verify it; re-read the named entry in issues-closed.md, including any Superseded-by: link, and answer with a corrected reading list.
+1. **You are asked for a reading list**: what should an agent read before it files or edits an issue on some topic. Answer with kind `reading-list`: the issue numbers in `issues`, plus, only when needed, note lines in plain sentences in `notes`; when no issue bears on the topic, `issues` is empty and a note says so. Closed issues belong in a reply only when the request says closed history is wanted.
+2. **You are shown a draft issue** — its title and its GHI-MD — and asked whether the corpus already covers it. When the draft is an edit of an existing issue, the request names that issue: leave it out of the comparison. Answer with kind `verdict` and, in `verdict`, one of: `too-similar` with the issue that already covers this ground in `issues`, `related` with the issues the author should know in `issues` (no collision), or `unrelated` with `issues` empty. When the draft conflicts with a ruling the user made, answer instead with the ruling question under Boundaries.
+3. **You are told a fact that corrects your last reply** — an issue you cited has closed — and asked to redo that one judgment. The fact is already established by script from the refreshed mirror: do not question or verify it; re-read the named entry in issues-closed.md, including any Superseded-by: link, and answer with the corrected reply the notice asks for.
 4. **You are asked to repair a link** — a cross-reference the maintenance sweep found broken. The request states the defect; repair exactly that link and nothing else. Issue edits go through gh as normal; document-side changes are landed through `scripts/ghi-issue-write.py`, whose pull request merge-lane-2 reviews and merges; never push to main yourself. Answer with kind `repair`: `outcome` done and the repair in `sentence`, no-change and why no change was needed in `sentence`, or blocked and what stopped you in `sentence`.
 
 Boundaries:
 
-- Asked a question about anything beyond the issue corpus — the wiki, the code, anything else — answer with kind `not-about-issues`.
+- Asked a question about anything beyond the issue corpus — the wiki, the code, anything else — answer with kind `not-about-issues` and no other field.
 - Whether an old ruling still binds is never yours to judge. Answer with kind `ask-user-about-ruling`: the issue that holds the ruling in `ruling_issue`, and one sentence naming the ruling and the doubt in `sentence`.
 - A draft-body request gets a verdict, except that a draft that conflicts with a ruling the user made gets the ruling question: whether the ruling still binds, or still binds this draft, is the user's to settle. A question beyond the corpus gets not-about-issues even when it touches a ruling."""
 
@@ -408,15 +409,21 @@ def compose_resume_ask_prompt(question: str, include_closed: bool, changed_numbe
     return "\n\n".join(parts)
 
 
-def compose_drift_notice(unexpected_closed) -> str:
+def compose_drift_notice(unexpected_closed, corrected_kind: str) -> str:
     """§ Prompts: Drift notice. One line per flagged pointer; "one recheck
-    per ask" means one turn total, not one turn per flagged pointer."""
+    per ask" means one turn total, not one turn per flagged pointer.
+
+    `corrected_kind` is the kind of the answer being corrected: a draft-verdict
+    ask's schema allows no reading list, and a verdict that still cites a
+    closed GHI is rejected."""
+    corrected = {GHI_GUIDE_AGENT_ANSWER_KIND_READING_LIST: "a corrected reading list",
+                 GHI_GUIDE_AGENT_ANSWER_KIND_VERDICT: "a corrected verdict that cites no closed GHI"}[corrected_kind]
     lines = []
     for number, closed_date in unexpected_closed:
         lines.append(
             f"#{number} closed on {closed_date} — the mirror is current; "
             "re-read its entry in issues-closed.md, including any "
-            "Superseded-by: link, and give a corrected reading list."
+            f"Superseded-by: link, and give {corrected}."
         )
     return "\n".join(lines)
 
@@ -1002,7 +1009,7 @@ def _ask_within_lock(question, include_closed, seat_dir, repo, projects_root,
             answer_issue_numbers(answer), cache, include_closed)
         if unexpected:
             stale = True
-            drift_reply, error = turn(compose_drift_notice(unexpected), session_id)
+            drift_reply, error = turn(compose_drift_notice(unexpected, answer["kind"]), session_id)
             if drift_reply is None:
                 corrected, recheck_problem = None, f"the turn failed: {error}"
             else:
