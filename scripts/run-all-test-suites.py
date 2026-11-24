@@ -882,6 +882,7 @@ TEST_SUITE_PATHSPEC = "*-test.py"
 # would miss inputs. Leave shell suites unrecorded so selection always runs them.
 SHELL_TEST_SUITE_PATHSPEC = "*-test.sh"
 SKIPPED_CASE_LINE = re.compile(r"^SKIP\s")
+UNCAUGHT_PYTHON_TRACEBACK_LINE = "Traceback (most recent call last):"
 SKIPPED_CASE_THIS_MACHINE_CANNOT_RUN_MARKER = "[this machine cannot run it]"
 SKIPPED_CASE_LINE_THIS_MACHINE_CANNOT_RUN = re.compile(
     r"^SKIP\s+" + re.escape(SKIPPED_CASE_THIS_MACHINE_CANNOT_RUN_MARKER))
@@ -2921,9 +2922,63 @@ def copy_lines_of_suite_output(stream, log, started, cases):
             name, detail = text.split(": ", 1)
         begun = cases[-1]["ended"] if cases else 0.0
         cases.append({"verdict": "FAIL" if found["verdict"] == "FAIL" else "PASS",
-                      "name": name.strip(), "detail": detail.strip(),
+                      "name": name.strip(), "detail": detail.strip(), "text": text.strip(),
                       "began": begun, "ended": arrived, "seconds": arrived - begun,
                       "unix_time": time.time()})
+
+
+def test_cases_with_failing_case_names_resolved_against_the_suites_other_case_names(cases):
+    """Give each FAIL case the name its suite's other case lines show it has.
+
+    A FAIL line prints a case's name, then ": " and a detail, and a name may itself hold ": ",
+    as in "--failures-only: prints X", so the line alone cannot say where the name ends. The
+    name is the shortest prefix of the line's text, ending just before a ": ", that no PASS case
+    of the suite has as its name or as the start of its name followed by ": ", and that no other
+    FAIL line of the suite starts with followed by ": "; when there is none, the whole text."""
+    passed = [case["name"] for case in cases if case["verdict"] == "PASS"]
+    failing = [case["text"] for case in cases if case["verdict"] == "FAIL"]
+    for case in cases:
+        if case["verdict"] != "FAIL":
+            continue
+        text = case["text"]
+        cuts = [index for index in range(len(text)) if text.startswith(": ", index)]
+        for name in [text[:cut] for cut in cuts] + [text]:
+            start = name + ": "
+            if name == text or not (
+                    name in passed or any(other.startswith(start) for other in passed)
+                    or any(other != text and other.startswith(start) for other in failing)):
+                case["name"], case["detail"] = name, text[len(start):].strip()
+                break
+    return cases
+
+
+def skipped_case_line_text_without_skip_prefix_and_this_machine_cannot_run_marker(line):
+    """A SKIP line's case text, without SKIP or the this-machine-cannot-run-it mark."""
+    text = SKIPPED_CASE_LINE.sub("", line, count=1).strip()
+    if text.startswith(SKIPPED_CASE_THIS_MACHINE_CANNOT_RUN_MARKER):
+        text = text[len(SKIPPED_CASE_THIS_MACHINE_CANNOT_RUN_MARKER):].strip()
+    return text
+
+
+def test_suite_ran_to_the_end(result):
+    """Whether the suite ended on its own, after running every case it would run.
+
+    A suite killed by a signal or its time limit, or one with case lines that exited nonzero
+    with no FAIL line or printed an uncaught Python traceback, stopped partway, as did a suite
+    NOT RUN or stopped by the run, which has no verdict of its own: its JUnit XML says
+    judged="false"."""
+    if (result["exit"] < 0 or result.get("timeout") is not None or suite_not_run(result)
+            or result.get("stopped by")):
+        return False
+    if not result.get("cases") or result["exit"] == 0:
+        return True
+    if not any(case["verdict"] == "FAIL" for case in result["cases"]):
+        return False
+    try:
+        text = read_text_without_following_symlinks(result["log"], errors="replace")
+    except OSError:
+        return False
+    return not any(line.startswith(UNCAUGHT_PYTHON_TRACEBACK_LINE) for line in text.splitlines())
 
 
 def write_case_times_suite_resources_and_junit_xml_of_run(log_dir, results):
@@ -2956,7 +3011,15 @@ def write_case_times_suite_resources_and_junit_xml_of_run(log_dir, results):
             root, "testsuite", name=result["suite"],
             tests=str(len(cases) + failed_after_last_case if cases else 1),
             failures=str(failed + failed_after_last_case if cases else int(result["exit"] != 0)),
-            skipped=str(len(result["skips"])), time=f"{result['seconds']:.3f}")
+            skipped=str(len(result["skips"])), time=f"{result['seconds']:.3f}",
+            ran_to_the_end=str(test_suite_ran_to_the_end(result)).lower(),
+            judged=str(not (suite_not_run(result) or result.get("stopped by"))).lower())
+        for line in result["skips"]:
+            skipped_element = xml.etree.ElementTree.SubElement(
+                suite_element, "testcase", classname=result["suite"],
+                name=skipped_case_line_text_without_skip_prefix_and_this_machine_cannot_run_marker(
+                    line), time="0.000")
+            xml.etree.ElementTree.SubElement(skipped_element, "skipped")
         if not cases:
             # A suite that printed no case line is one case, judged by its exit code.
             case_element = xml.etree.ElementTree.SubElement(
@@ -3849,7 +3912,8 @@ def run_one_suite(top, interpreter, suite, log_dir, recorder=None, sandbox_prefi
         "seconds": seconds,
         "log": log_file,
         "skips": skipped_case_lines(log_file),
-        "cases": list(cases),
+        "cases": test_cases_with_failing_case_names_resolved_against_the_suites_other_case_names(
+            list(cases)),
         "output_note": output_note,
         "cpu_seconds": None,
         "peak_memory_bytes": None,

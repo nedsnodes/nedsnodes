@@ -676,7 +676,8 @@ def case_no_sandbox_notice_program_failing_is_said_and_the_gate_goes_on(gate):
 
 FAILED_SUITES_NOTICE_HEADING = "FAILED TEST SUITES ON MAIN"
 FAILED_SUITES_RECORD = {"scripts/broken-test.py": {"failed_tests": {"scripts/broken-test.py": {
-    "commit": "b46d47c2bdbe0000000000000000000000000000", "pull_request": "3899",
+    "commit": "b46d47c2bdbe0000000000000000000000000000",
+    "last_failed_commit": "b46d47c2bdbe0000000000000000000000000000", "pull_request": "3899",
     "log": "/logs/broken-test.py.log", "failed_at": "2026-11-20T17:18:00Z",
     "repair_task_agent_seat": "MD-skills", "repair_task_id": 7}}}}
 

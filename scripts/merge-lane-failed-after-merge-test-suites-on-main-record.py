@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Keep each test that failed an after-merge test run of main until it passes.
+"""Keep each test that failed an after-merge test run of main until it passes or is gone.
 
 Usage:
   python3 scripts/merge-lane-failed-after-merge-test-suites-on-main-record.py --print-merge-gate-notice
@@ -11,8 +11,10 @@ the record.
 
 The record is the JSON object in ~/.local/state/nedsnodes/failed-after-merge-test-suites-on-main.json,
 one key per suite path, each holding failed_tests, an object with one key per failing test, as
-junit.xml names it. Each test holds commit, pull_request, log, failed_at, repair_task_agent_seat
-and repair_task_id; the last two are null when no repair task was opened.
+junit.xml names it. Each test holds commit, the merge commit whose after-merge test run first
+failed it; last_failed_commit, the newest commit at which a run has seen it fail since;
+pull_request, log, failed_at, repair_task_agent_seat and repair_task_id; the last two are null
+when no repair task was opened.
 
 Exit codes: 0 the notice, if any, was printed; 1 the record could not be read, and stderr says why.
 """
@@ -26,7 +28,7 @@ import tempfile
 from pathlib import Path
 
 NOTICE_HEADING = "FAILED TEST SUITES ON MAIN"
-TEST_FIELD_TYPES = {"commit": str, "pull_request": str, "log": (str, type(None)),
+TEST_FIELD_TYPES = {"commit": str, "last_failed_commit": str, "pull_request": str, "log": (str, type(None)),
                     "failed_at": str, "repair_task_agent_seat": (str, type(None)),
                     "repair_task_id": (int, str, type(None))}
 
@@ -93,8 +95,8 @@ def merge_gate_notice(suites):
     count = sum(len(suite["failed_tests"]) for suite in suites.values())
     lines = [f"{NOTICE_HEADING}: {count} test(s) in {len(suites)} test suite(s) failed an "
              f"after-merge test run of main and have not passed since. The gate goes on; each "
-             f"later after-merge test run runs them again, and a test that passes leaves this "
-             f"notice."]
+             f"later after-merge test run runs them again, and a test that passes, or that a suite "
+             f"run to the end no longer reports, leaves this notice."]
     for suite, entry in sorted(suites.items()):
         for test, fields in sorted(entry["failed_tests"].items()):
             task = (f"repair task #{fields['repair_task_id']} on "

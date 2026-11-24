@@ -139,28 +139,33 @@ answer = os.path.join(directory, "runner")
 if "--only-suites-named" in sys.argv and os.path.exists(answer + "-rerun.out"):
     answer += "-rerun"
 if os.path.exists(answer + ".out"):
-    output = open(answer + ".out").read()
-    if "SUMMARY:" in output and "--log-dir" in sys.argv and not os.path.exists(
-            os.path.join(directory, "runner-writes-no-junit")):
-        log_dir = sys.argv[sys.argv.index("--log-dir") + 1]
-        os.makedirs(log_dir, exist_ok=True)
-        if os.path.exists(answer + ".junit"):
-            junit = open(answer + ".junit").read()
-        else:
-            failing = sorted({line.split()[1] for line in output.splitlines()
-                              if line.startswith("FAIL ")})
-            junit = "<testsuites>" + "".join(
-                f'<testsuite name="{suite}"><testcase name="{suite}"><failure message="x"/>'
-                f"</testcase></testsuite>" for suite in failing) + "</testsuites>"
-        open(os.path.join(log_dir, "junit.xml"), "w").write(junit)
-    sys.stdout.write(output)
-    sys.stdout.flush()
-    code = int(open(answer + ".exit").read())
-    if code < 0:
-        os.kill(os.getpid(), -code)
-    sys.exit(code)
-print("PASS scripts/some-test.py (1s)")
-print("SUMMARY: 1 passed, 0 failed, 1 total; fake runner")
+    output, code = open(answer + ".out").read(), int(open(answer + ".exit").read())
+else:
+    output, code = ("PASS scripts/some-test.py (1s)\n"
+                    "SUMMARY: 1 passed, 0 failed, 1 total; fake runner\n"), 0
+if "SUMMARY:" in output and "--log-dir" in sys.argv and not os.path.exists(
+        os.path.join(directory, "runner-writes-no-junit")):
+    log_dir = sys.argv[sys.argv.index("--log-dir") + 1]
+    os.makedirs(log_dir, exist_ok=True)
+    if os.path.exists(answer + ".junit"):
+        junit = open(answer + ".junit").read()
+    else:
+        # Each suite on a PASS or FAIL line is the one test named for it, as the runner writes a
+        # suite that printed no case line.
+        verdicts, failure = {}, '<failure message="x"/>'
+        for line in output.splitlines():
+            if line.startswith(("PASS ", "FAIL ")):
+                verdicts.setdefault(line.split()[1], line.startswith("FAIL "))
+        junit = "<testsuites>" + "".join(
+            f'<testsuite name="{suite}" ran_to_the_end="true" judged="true">'
+            f'<testcase name="{suite}">{failure if failed else ""}'
+            f"</testcase></testsuite>" for suite, failed in sorted(verdicts.items())) + "</testsuites>"
+    open(os.path.join(log_dir, "junit.xml"), "w").write(junit)
+sys.stdout.write(output)
+sys.stdout.flush()
+if code < 0:
+    os.kill(os.getpid(), -code)
+sys.exit(code)
 '''
 # The clone's upload-pack for origin. Once the merge has run, at the first fetch that asks
 # origin for objects, it runs another fetch into the clone to its end before serving the
@@ -576,26 +581,29 @@ def failed_suites_record_written(directory, suite="scripts/broken-test.py", test
                                capture_output=True, text=True, env=GIT_ENVIRONMENT,
                                check=True).stdout.strip()
     record.write_text(json.dumps({suite: {"failed_tests": {test: {
-        "commit": seed_head, "pull_request": "9",
+        "commit": seed_head, "last_failed_commit": seed_head, "pull_request": "9",
         "log": "/logs/old.log", "failed_at": "2026-11-20T17:18:00Z",
         "repair_task_agent_seat": "author-seat", "repair_task_id": 3}
         for test in (tests or [suite])}}}))
 
 
-def junit_of_broken_suite(failing, passing):
+def junit_of_broken_suite(failing, passing, skipped=(), ran_to_the_end=True):
     cases = ("".join(f'<testcase name="{name}"><failure message="x"/></testcase>' for name in failing)
-             + "".join(f'<testcase name="{name}"/>' for name in passing))
-    return f'<testsuites><testsuite name="scripts/broken-test.py">{cases}</testsuite></testsuites>'
+             + "".join(f'<testcase name="{name}"/>' for name in passing)
+             + "".join(f'<testcase name="{name}"><skipped/></testcase>' for name in skipped))
+    return (f'<testsuites><testsuite name="scripts/broken-test.py" judged="true" '
+            f'ran_to_the_end="{str(ran_to_the_end).lower()}">{cases}</testsuite></testsuites>')
 
 
 def recorded_tests_with_task(tests, failing, passing, task_text='{"status": "pending"}',
-                             rerun=False):
+                             rerun=False, skipped=(), ran_to_the_end=True):
     def prepare(directory):
         task_list = author_seat_made(directory)
         failed_suites_record_written(directory, tests=tests)
         (task_list / "3.json").write_text(task_text)
         name = "runner-rerun" if rerun else "runner"
-        (directory / f"{name}.junit").write_text(junit_of_broken_suite(failing, passing))
+        (directory / f"{name}.junit").write_text(
+            junit_of_broken_suite(failing, passing, skipped, ran_to_the_end))
         if rerun:
             (directory / "runner-rerun.out").write_text(RUNNER_FAILED)
             (directory / "runner-rerun.exit").write_text("1")
@@ -694,7 +702,7 @@ def failed_suites_kept_in_view_cases(scratch):
             origin_files=broken_on_origin, before_the_program_runs=recorded_and_rerun(
                 "PASS scripts/broken-test.py (1s)\nrunner could not finish\n", 2))
         check("a rerun with no verdict exits 3, and keeps the suite even if a PASS line was printed",
-              exit_code == 3 and "could not be run again" in output
+              exit_code == 3 and "could not all be run again" in output
               and "scripts/broken-test.py" in failed_suites_record_of(
                   scratch / "failed-suite-rerun-could-not-run"),
               f"exit {exit_code}\n{output}")
@@ -740,7 +748,7 @@ def failed_suites_kept_in_view_cases(scratch):
 
         exit_code, output, _, _, _ = run_case(
             scratch, "failed-suite-record-not-written", [(GATE_PASSED, 0)], default_routes([]),
-            before_the_program_runs=lock_blocked)
+            runner_answer=(RUNNER_FAILED, 1), before_the_program_runs=lock_blocked)
         check("a record that cannot be written exits 3, and says so",
               exit_code == 3 and "the failed suites record was not updated: could not write" in output,
               f"exit {exit_code}\n{output}")
@@ -775,21 +783,28 @@ def failed_suites_kept_in_view_cases(scratch):
                   and "Tell the pull request's author, and the user" in output,
                   f"exit {exit_code}\n{output}")
 
-        for name, answer in (
-                ("not-run", "NOT RUN scripts/unjudged-test.py no slot — log /logs/unjudged.log\n"
-                            + RUNNER_FAILED),
-                ("cut-short", "FAIL scripts/broken-test.py exit 1 (2s)\n"
-                              f"{program.common.run_all_test_suites.NOT_RUN_TO_THE_END_LINE_PREFIX}"
-                              " — stopped by SIGTERM.\n")):
-            exit_code, output, _, _, _ = run_case(
-                scratch, f"failed-suite-new-and-{name}", [(GATE_PASSED, 0)], default_routes([]),
-                runner_answer=(answer, 1), before_the_program_runs=author_seat_made)
-            check(f"a new failure with no verdict on the rest of the run ({name}) still tells the "
-                  "author and the user",
-                  exit_code == 3 and "nothing needs sending" not in output
-                  and "covers only the newly failed tests" in output
-                  and "Tell the pull request's author, and the user" in output,
-                  f"exit {exit_code}\n{output}")
+        exit_code, output, _, _, _ = run_case(
+            scratch, "failed-suite-new-and-not-run", [(GATE_PASSED, 0)], default_routes([]),
+            runner_answer=("NOT RUN scripts/unjudged-test.py no slot — log /logs/unjudged.log\n"
+                           + RUNNER_FAILED, 1), before_the_program_runs=author_seat_made)
+        check("a new failure with no verdict on the rest of the run (not-run) still tells the "
+              "author and the user",
+              exit_code == 3 and "nothing needs sending" not in output
+              and "covers only the newly failed tests" in output
+              and "Tell the pull request's author, and the user" in output,
+              f"exit {exit_code}\n{output}")
+
+        exit_code, output, _, _, _ = run_case(
+            scratch, "failed-suite-new-and-cut-short", [(GATE_PASSED, 0)], default_routes([]),
+            runner_answer=("FAIL scripts/broken-test.py exit 1 (2s)\n"
+                           f"{program.common.run_all_test_suites.NOT_RUN_TO_THE_END_LINE_PREFIX}"
+                           " — stopped by SIGTERM.\n", 1), before_the_program_runs=author_seat_made)
+        check("a run cut short before its junit.xml is a STOP that sends its failed suites to the "
+              "author and the user, and never says nothing needs sending",
+              exit_code == 3 and "nothing needs sending" not in output
+              and "failed tests could not be named" in output
+              and "Tell the pull request's author, and the user" in output,
+              f"exit {exit_code}\n{output}")
 
         exit_code, output, _, _, _ = run_case(
             scratch, "failed-suite-new-and-not-run-no-task", [(GATE_PASSED, 0)], default_routes([]),
@@ -806,7 +821,7 @@ def failed_suites_kept_in_view_cases(scratch):
                 "NOT RUN scripts/other-test.py no slot (0s)\n"
                 "SUMMARY: 0 passed, 1 failed, 1 not run, 2 total\n", 1))
         check("a rerun that fails one suite and leaves another not run exits 3, not a known failure",
-              exit_code == 3 and "could not be run again" in output
+              exit_code == 3 and "could not all be run again" in output
               and "scripts/broken-test.py" in failed_suites_record_of(
                   scratch / "failed-suite-rerun-fail-and-not-run"),
               f"exit {exit_code}\n{output}")
@@ -846,15 +861,6 @@ def failed_suites_kept_in_view_cases(scratch):
         check("a recorded test the failing suite did not reach stays on the record",
               exit_code == 0 and sorted(tests) == ["case a", "case b"],
               f"exit {exit_code}\n{output}\n{tests}")
-
-        exit_code, output, _, _, _ = run_case(
-            scratch, "stand-in-test-gone", [(GATE_PASSED, 0)], default_routes([]),
-            runner_answer=(RUNNER_FAILED, 1), before_the_program_runs=recorded_tests_with_task(
-                ["scripts/broken-test.py exit", "case b"], ["case b"], []))
-        tests = failed_suites_record_of(scratch / "stand-in-test-gone")[
-            "scripts/broken-test.py"]["failed_tests"]
-        check("a recorded failure after the last case line leaves once the suite no longer has one",
-              exit_code == 0 and list(tests) == ["case b"], f"exit {exit_code}\n{output}\n{tests}")
 
         for name, task_text in (("completed", '{"status": "completed"}'), ("unreadable", "not json")):
             exit_code, output, _, _, _ = run_case(
@@ -900,6 +906,90 @@ def failed_suites_kept_in_view_cases(scratch):
               and "--only-suites-named" in calls[1]["argv"]
               and "the rerun of the recorded failed suites failed tests not on the record" in output,
               f"exit {exit_code}\n{output}\n{tests}")
+
+        exit_code, output, _, _, _ = run_case(
+            scratch, "names-sharing-a-start", [(GATE_PASSED, 0)], default_routes([]),
+            runner_answer=(RUNNER_FAILED, 1), before_the_program_runs=recorded_tests_with_task(
+                ["--failures-only: prints X"],
+                ["--failures-only: prints X", "--failures-only: prints Y"], []))
+        tests = failed_suites_record_of(scratch / "names-sharing-a-start")[
+            "scripts/broken-test.py"]["failed_tests"]
+        check("two failing tests whose names share the text before their first ': ' are two "
+              "tests, so the second is a new failure and a STOP",
+              exit_code == 3 and sorted(tests) == ["--failures-only: prints X",
+                                                   "--failures-only: prints Y"]
+              and "failed only suites already" not in output, f"exit {exit_code}\n{output}\n{tests}")
+
+        exit_code, output, _, _, _ = run_case(
+            scratch, "known-failure-suite-cut-short", [(GATE_PASSED, 0)], default_routes([]),
+            runner_answer=(RUNNER_FAILED, 1), before_the_program_runs=recorded_tests_with_task(
+                ["case a"], ["case a"], [], ran_to_the_end=False))
+        check("a known failure in a suite that did not run to the end is a STOP, not a known "
+              "failure",
+              exit_code == 3 and "STOP: merged, but scripts/broken-test.py did not run to the end"
+              in output and "failed only suites already" not in output
+              and "nothing needs sending" not in output, f"exit {exit_code}\n{output}")
+
+        def partial_rerun_with_a_new_failure(directory):
+            recorded_tests_with_task(["case a"], ["case a", "case b"], [], rerun=True)(directory)
+            (directory / "runner-rerun.out").write_text(
+                "FAIL scripts/broken-test.py exit 1 (1s)\n"
+                "NOT RUN scripts/other-test.py no slot (0s)\n"
+                "SUMMARY: 0 passed, 1 failed, 1 not run, 2 total\n")
+
+        exit_code, output, _, _, _ = run_case(
+            scratch, "partial-rerun-keeps-finished-verdicts", [(GATE_PASSED, 0)],
+            default_routes([]), origin_files=broken_on_origin,
+            before_the_program_runs=partial_rerun_with_a_new_failure)
+        tests = failed_suites_record_of(scratch / "partial-rerun-keeps-finished-verdicts")[
+            "scripts/broken-test.py"]["failed_tests"]
+        check("a partial rerun keeps the verdicts of the suites that finished: a new failing test "
+              "in one is recorded and named, with a STOP that never says nothing needs sending",
+              exit_code == 3 and sorted(tests) == ["case a", "case b"]
+              and "could not all be run again" in output and "case b" in output
+              and "nothing needs sending" not in output
+              and "covers only the newly failed tests" in output,
+              f"exit {exit_code}\n{output}\n{tests}")
+
+        def new_failure_and_rerun_not_run(directory):
+            recorded_tests_with_task(["case a"], [], [], rerun=True)(directory)
+            (directory / "runner-rerun.out").write_text("NOT RUN scripts/broken-test.py no slot\n")
+            (directory / "runner-rerun.exit").write_text("2")
+
+        exit_code, output, _, _, _ = run_case(
+            scratch, "new-failure-and-rerun-not-run", [(GATE_PASSED, 0)], default_routes([]),
+            runner_answer=(RUNNER_FAILED.replace("broken-test.py", "new-broken-test.py"), 1),
+            origin_files=broken_on_origin, before_the_program_runs=new_failure_and_rerun_not_run)
+        check("a new failure with a repair task, when the rerun exits 2 with NOT RUN, never says "
+              "nothing needs sending",
+              exit_code == 3 and "could not all be run again" in output
+              and "nothing needs sending" not in output
+              and "covers only the newly failed tests" in output, f"exit {exit_code}\n{output}")
+
+        def new_failure_and_closed_task_not_replaced(directory):
+            completed_task_and_no_checkout(directory)
+            (directory / "runner.junit").write_text(junit_of_broken_suite(["case a", "case b"], []))
+
+        saved_opened = program.repair_task_opened
+
+        def opened_only_for_the_new_test(arguments, merge_commit, seat, failed_tests):
+            if any("case b" in tests for tests in failed_tests.values()):
+                return "author-seat", 7, None
+            return None, None, "the author-seat has no checkout"
+
+        program.repair_task_opened = opened_only_for_the_new_test
+        try:
+            exit_code, output, _, _, _ = run_case(
+                scratch, "new-failure-and-closed-task-not-replaced", [(GATE_PASSED, 0)],
+                default_routes([]), runner_answer=(RUNNER_FAILED, 1),
+                before_the_program_runs=new_failure_and_closed_task_not_replaced)
+        finally:
+            program.repair_task_opened = saved_opened
+        check("a new failure with a repair task, when a closed task cannot be replaced, never "
+              "says nothing needs sending",
+              exit_code == 3 and "no new one could be opened" in output
+              and "nothing needs sending" not in output
+              and "covers only the newly failed tests" in output, f"exit {exit_code}\n{output}")
 
         def no_junit(directory):
             recorded_with_author(directory)
@@ -979,45 +1069,125 @@ def failed_suites_kept_in_view_cases(scratch):
     older, newer = (subprocess.run(["git", "-C", str(author_repository), "rev-parse", name],
                                    capture_output=True, text=True, env=GIT_ENVIRONMENT,
                                    check=True).stdout.strip() for name in ("HEAD~1", "HEAD"))
+    runs = iter(range(1000))
 
-    def kept_in_view_after_a_pass(recorded_commit, tested_commit):
-        home = scratch / f"ancestor-home-{recorded_commit[:7]}-{tested_commit[:7]}"
+    def kept_in_view_directly(last_failed_commit, tested_commit, junit,
+                              test="scripts/x-test.py"):
+        run = next(runs)
+        home = scratch / f"direct-home-{run}"
+        log_dir = scratch / f"direct-logs-{run}"
+        log_dir.mkdir()
+        (log_dir / "junit.xml").write_text(junit)
         saved_home = os.environ.get("HOME")
         os.environ["HOME"] = str(home)
         try:
             record = (home / ".local" / "state" / "nedsnodes"
                       / "failed-after-merge-test-suites-on-main.json")
             record.parent.mkdir(parents=True)
-            record.write_text(json.dumps({"scripts/x-test.py": {"failed_tests": {
-                "scripts/x-test.py": {
-                    "commit": recorded_commit, "pull_request": "9", "log": None,
-                    "failed_at": "2026-11-20T17:18:00Z", "repair_task_agent_seat": None,
-                    "repair_task_id": None}}}}))
+            record.write_text(json.dumps({"scripts/x-test.py": {"failed_tests": {test: {
+                "commit": older if last_failed_commit != "0" * 40 else last_failed_commit,
+                "last_failed_commit": last_failed_commit, "pull_request": "9", "log": None,
+                "failed_at": "2026-11-20T17:18:00Z", "repair_task_agent_seat": None,
+                "repair_task_id": None}}}}))
             printed = io.StringIO()
             with contextlib.redirect_stdout(printed):
-                result = program.failed_suites_kept_in_view(
+                kept = program.failed_suites_kept_in_view(
                     argparse.Namespace(pull_request="10"), tested_commit, author_repository,
-                    scratch / "ancestor-logs", GIT_ENVIRONMENT,
-                    ["PASS scripts/x-test.py (1s)"], False)
-            return result[0], json.loads(record.read_text()), printed.getvalue()
+                    log_dir, GIT_ENVIRONMENT,
+                    ["FAIL scripts/x-test.py exit 1 — log /logs/x.log"])
+            return kept["complete"], json.loads(record.read_text()), printed.getvalue()
         finally:
             if saved_home is None:
                 del os.environ["HOME"]
             else:
                 os.environ["HOME"] = saved_home
 
-    worked, left, output = kept_in_view_after_a_pass(newer, older)
-    check("a pass at an older commit keeps a suite a newer merge recorded",
+    def x_suite(cases, ran_to_the_end=True):
+        return (f'<testsuites><testsuite name="scripts/x-test.py" judged="true" '
+                f'ran_to_the_end="{str(ran_to_the_end).lower()}">{cases}</testsuite></testsuites>')
+
+    passed = x_suite('<testcase name="scripts/x-test.py"/>')
+    worked, left, output = kept_in_view_directly(newer, older, passed)
+    check("a pass at an older commit keeps a test a newer run saw fail",
           worked and "scripts/x-test.py" in left and "left the failed suites record" not in output,
           f"{worked} {left}\n{output}")
-    worked, left, output = kept_in_view_after_a_pass(older, newer)
-    check("a pass at a descendant of the recorded commit removes the suite",
+    worked, left, output = kept_in_view_directly(older, newer, passed)
+    check("a pass at a descendant of the commit the test last failed at removes it",
           worked and left == {} and "left the failed suites record: it passed" in output,
           f"{worked} {left}\n{output}")
-    worked, left, output = kept_in_view_after_a_pass("0" * 40, newer)
-    check("a recorded commit git cannot judge keeps the suite and is a STOP",
+    worked, left, output = kept_in_view_directly("0" * 40, newer, passed)
+    check("a commit git cannot judge keeps the test and is a STOP",
           not worked and "scripts/x-test.py" in left and "STOP: merged, but scripts/x-test.py stays"
           in output, f"{worked} {left}\n{output}")
+
+    still_failing = x_suite('<testcase name="scripts/x-test.py"><failure message="x"/></testcase>')
+    worked, left, _ = kept_in_view_directly(older, newer, still_failing)
+    refreshed = left["scripts/x-test.py"]["failed_tests"]["scripts/x-test.py"]
+    worked_after, left_after, output = kept_in_view_directly(
+        refreshed["last_failed_commit"], older, passed)
+    check("runs finishing out of order, A, C, B: a known failure at C records C, so a later "
+          "pass at the older B keeps the test",
+          worked and refreshed["last_failed_commit"] == newer and refreshed["commit"] == older
+          and worked_after and "scripts/x-test.py" in left_after,
+          f"{left}\n{left_after}\n{output}")
+
+    other_case = x_suite('<testcase name="case b"/>')
+    worked, left, output = kept_in_view_directly(older, newer, other_case, test="case a")
+    check("a recorded test its suite, run to the end at a later commit, no longer reports leaves "
+          "the record, and its name is printed",
+          worked and left == {}
+          and "scripts/x-test.py: case a left the failed suites record: its suite ran to the end "
+              "and reported nothing for it" in output, f"{worked} {left}\n{output}")
+    worked, left, output = kept_in_view_directly(newer, newer, other_case, test="case a")
+    check("a recorded test not reported at the commit where it last failed stays",
+          worked and "case a" in left["scripts/x-test.py"]["failed_tests"], f"{left}\n{output}")
+    worked, left, output = kept_in_view_directly(
+        older, newer, x_suite('<testcase name="case b"/>', ran_to_the_end=False), test="case a")
+    check("a suite that did not run to the end clears no recorded test, and is a STOP",
+          not worked and "case a" in left["scripts/x-test.py"]["failed_tests"]
+          and "STOP: merged, but scripts/x-test.py did not run to the end" in output,
+          f"{left}\n{output}")
+    worked, left, output = kept_in_view_directly(
+        older, newer, x_suite('<testcase name="case b"/><testcase name="case a: no Mac">'
+                              '<skipped/></testcase>'), test="case a")
+    check("a recorded test that is skipped stays on the record",
+          worked and "case a" in left["scripts/x-test.py"]["failed_tests"], f"{left}\n{output}")
+    worked, left, output = kept_in_view_directly(
+        older, newer, x_suite('<testcase name="case a"/>'), test="scripts/x-test.py")
+    check("a test named for its suite, recorded when the suite failed with no case line, leaves "
+          "once the suite runs to the end with case lines",
+          worked and left == {} and "reported nothing for it" in output, f"{left}\n{output}")
+    worked, left, output = kept_in_view_directly(
+        older, newer, x_suite('<testcase name="case b"><failure message="x"/></testcase>'),
+        test="scripts/x-test.py exit")
+    check("a recorded failure after the last case line leaves once the suite runs to the end "
+          "without one",
+          "scripts/x-test.py exit" not in left["scripts/x-test.py"]["failed_tests"]
+          and "case b" in left["scripts/x-test.py"]["failed_tests"],
+          f"{left}\n{output}")
+    worked, left, output = kept_in_view_directly(
+        "0" * 40, newer, x_suite('<testcase name="scripts/x-test.py"><failure message="x"/>'
+                                 '</testcase><testcase name="case n"><failure message="x"/>'
+                                 '</testcase>'))
+    printed = io.StringIO()
+    with contextlib.redirect_stdout(printed):
+        stop = program.after_merge_test_run_closing_message_printed_returning_whether_stop(
+            argparse.Namespace(pull_request="10"), newer, 1, ["SUMMARY: 0 passed, 1 failed"], True,
+            {"complete": worked, "new_tests": {"scripts/x-test.py": {"case n": None}},
+             "seat": "author-seat", "task_id": 7, "why_none": None}, worked, "by hand")
+    check("a new failure with a repair task, when git cannot judge a recorded commit, never says "
+          "nothing needs sending",
+          not worked and stop and "STOP: merged, but scripts/x-test.py stays" in output
+          and "nothing needs sending" not in printed.getvalue()
+          and "covers only the newly failed tests" in printed.getvalue(),
+          f"{output}\n{printed.getvalue()}")
+    junit_file = scratch / "not-judged-junit.xml"
+    junit_file.write_text('<testsuites><testsuite name="scripts/x-test.py" judged="false" '
+                          'ran_to_the_end="false"><testcase name="scripts/x-test.py">'
+                          '<failure message="x"/></testcase></testsuite></testsuites>')
+    verdicts, error = program.run_verdicts_by_suite([], junit_file)
+    check("a suite NOT RUN or stopped by the run gives no verdict, not even a failure",
+          verdicts == {} and error is None, f"{verdicts} {error}")
 
 
 def main():
