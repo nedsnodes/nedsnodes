@@ -3014,7 +3014,9 @@ def write_case_times_suite_resources_and_junit_xml_of_run(log_dir, results):
     root = xml.etree.ElementTree.Element("testsuites", name=PROGRAM_FILE_NAME_STEM)
     for result in results:
         cases = result.get("cases") or []
-        failed = sum(1 for case in cases if case["verdict"] == "FAIL")
+        # The exit code is the suite's verdict: a FAIL line from a suite that exits 0, such as a
+        # child suite's output it passes through, fails nothing.
+        failed = sum(1 for case in cases if case["verdict"] == "FAIL") if result["exit"] else 0
         # A suite that fails after its last case line gets one more, failing, case below.
         failed_after_last_case = int(bool(cases) and result["exit"] != 0 and not failed)
         suite_element = xml.etree.ElementTree.SubElement(
@@ -3043,7 +3045,7 @@ def write_case_times_suite_resources_and_junit_xml_of_run(log_dir, results):
             case_element = xml.etree.ElementTree.SubElement(
                 suite_element, "testcase", classname=result["suite"], name=case["name"],
                 time=f"{case['seconds']:.3f}")
-            if case["verdict"] == "FAIL":
+            if case["verdict"] == "FAIL" and result["exit"]:
                 xml.etree.ElementTree.SubElement(case_element, "failure",
                                                  message=case["detail"] or case["name"])
         if failed_after_last_case:
