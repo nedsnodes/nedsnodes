@@ -577,6 +577,22 @@ def main():
               code == 1 and "\n".join(stop) in message and "merge line two" not in message,
               f"exit {code}\n{output}\n{message}")
 
+        scratch = Scratch(root, "merge-two-stops-further-apart-than-the-line-limit")
+        (scratch.directory / "merge.exit").write_text("3")
+        first_stop = "STOP: merged, but the branch b could not be deleted."
+        between = [f"between line {number}" for number in range(1, program.MERGE_OUTPUT_LINES_IN_MESSAGE + 2)]
+        last_stop = "STOP: the after-merge test run failed."
+        (scratch.directory / "merge.stdout").write_text(
+            "\n".join(["merge line one", first_stop, *between, last_stop, "last line"]) + "\n")
+        scratch.routes(routes_for())
+        code, output = scratch.run()
+        message = scratch.message(f"pr9-{HEAD[:12]}.txt")
+        check("two merge program STOPs further apart than the line limit are both reported, "
+              "from the first STOP line on, exit 1",
+              code == 1 and first_stop in message and last_stop in message
+              and "merge line one" not in message,
+              f"exit {code}\n{output}\n{message}")
+
         scratch = Scratch(root, "approval-refused-then-next-merged")
         refused, passing = routes_for(review_exit=1), routes_for(number=10, head=NEW_HEAD)
         scratch.routes({**refused, **passing, "pr list": {"out": listed(
