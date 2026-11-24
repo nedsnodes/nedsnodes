@@ -414,6 +414,7 @@ LEGACY_DONT_RESTART_FIELD = session_handoff_field_names.LEGACY_DONT_RESTART_FIEL
 COLD_READ_FULL_RUN_COMMAND_REFUSED_DURING_HANDOFF_DEFERRAL_FIELD_PREFIX = (
     "cold-read-full-run-command-refused-during-handoff-deferral-")
 BACKGROUND_TASK_PAST_WAIT_LIMIT_FIELD_PREFIX = "background-task-past-wait-limit-"
+SESSION_HANDOFF_WRITER_WARNING_FIELD_PREFIX = session_handoff_field_names.SESSION_HANDOFF_WRITER_WARNING_FIELD_PREFIX
 WRITTEN_BY_SESSION_UNKNOWN_VALUE = "unknown"
 
 # The prompt goes on to the next step; a stop must hold that back too.
@@ -617,6 +618,15 @@ BACKGROUND_TASKS_PAST_WAIT_LIMIT_SENTENCE_TEMPLATE = (
     "{joined_tasks}. Run each again, then look first for a way to make it faster, such as removing "
     "repeated work or running its steps in parallel, and raise its kind's wait-limit in the "
     "wait-limit table only when you find no such way."
+)
+
+SESSION_HANDOFF_WRITER_WARNINGS_SENTENCE_TEMPLATE = (
+    "When the session you are replacing wrote its session-handoff, the writer script printed "
+    "{warning_count} warning(s) addressed to that session, which ended before it could act on them: "
+    "{joined_warnings}. Act on each yourself: where a warning says to name something in the next "
+    "step or to run the writer script again, find what it names in the dialog you read first or in "
+    "that session's transcript, and carry it on; where it says to tell the user a line, tell the "
+    "user that line in your first message."
 )
 
 COLD_READ_FULL_RUN_COMMANDS_REFUSED_DURING_HANDOFF_DEFERRAL_SENTENCE_TEMPLATE = (
@@ -1349,6 +1359,10 @@ def build_ignition_prompt(extract_path: Path, handoff_fields: dict,
     if refused_commands:
         lines.append(COLD_READ_FULL_RUN_COMMANDS_REFUSED_DURING_HANDOFF_DEFERRAL_SENTENCE_TEMPLATE.format(
             command_count=len(refused_commands), joined_commands="; ".join(refused_commands)))
+    writer_warnings = numbered_field_values_from(handoff_fields, SESSION_HANDOFF_WRITER_WARNING_FIELD_PREFIX)
+    if writer_warnings:
+        lines.append(SESSION_HANDOFF_WRITER_WARNINGS_SENTENCE_TEMPLATE.format(
+            warning_count=len(writer_warnings), joined_warnings="; ".join(writer_warnings)))
     preamble = " ".join(lines)
     if handoff_fields.get(NEXT_STEP_BLOCK_UNTERMINATED_FIELD):
         preamble += UNTERMINATED_NEXT_STEP_BLOCK_NOTE

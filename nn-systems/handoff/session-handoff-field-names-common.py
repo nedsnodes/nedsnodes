@@ -22,6 +22,8 @@ SPAWNED_SUBAGENT_FIELD_PREFIX = "spawned-subagent-"
 # shares the prefix, and a session-handoff written before the field was retired can carry
 # background-task-started-during-handoff-deferral-<n>.
 SESSION_HANDOFF_BACKGROUND_TASK_STILL_RUNNING_FIELD_PREFIX = "background-task-"
+# Numbered for the same reason: one per writer line that asked the old agent-session to act after the session-handoff was written.
+SESSION_HANDOFF_WRITER_WARNING_FIELD_PREFIX = "session-handoff-writer-warning-"
 NEXT_STEP_VERBATIM_FIELD = "next-step-verbatim"
 NEXT_STEP_BLOCK_OPENING_MARKER = "<<END-OF-NEXT-STEP"
 NEXT_STEP_BLOCK_TERMINATOR = "END-OF-NEXT-STEP"

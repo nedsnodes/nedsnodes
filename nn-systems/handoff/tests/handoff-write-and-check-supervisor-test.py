@@ -1440,6 +1440,11 @@ def run_roster_never_blocks_a_handoff_cases(workspace: Path):
           "spawned-subagent-" not in missing_body, missing_body)
     check("a missing transcript tells the agent to name its subagents by hand",
           "not derived" in missing.stdout and "by hand" in missing.stdout, missing.stdout)
+    missing_warning = writer.supervisor.parse_handoff_file(
+        handoffs / "rostermissingcase-handoff.md").get("session-handoff-writer-warning-1", "")
+    check("a subagent roster that could not be derived is written into the handoff as a writer warning",
+          missing_warning.startswith("spawned-subagent roster: not derived") and "by hand" in missing_warning,
+          missing_body)
 
     # The session's transcript in two project folders, neither keyed: no one of them is the session's.
     two_folders_session_id = "00000000-0000-4000-8000-0000000002f0"
@@ -1850,6 +1855,13 @@ def run_completed_task_prune_cases(workspace: Path):
     line = prune_line(completed)
     check("when the high-water mark cannot be written, nothing is removed and the line says why",
           fixture.present("9.json") and "high-water mark" in line and "removed nothing" in line, line)
+    # The fixture runs with no session id, so the roster's warning comes first.
+    prune_warning = next((value for key, value in writer.supervisor.parse_handoff_file(
+        fixture.handoffs / "prunecase-handoff.md").items()
+        if key.startswith("session-handoff-writer-warning-") and value.startswith("completed tasks pruned:")), "")
+    check("a failed prune is written into the handoff as a writer warning, as one line",
+          prune_warning.startswith("completed tasks pruned: removed nothing")
+          and prune_warning.endswith(writer.TELL_USER_THIS_PRUNE_LINE_SENTENCE), prune_warning)
     check("a high-water mark that could not be written leaves no partial file behind",
           not (fixture.list_directory / ".highwatermark.partial").exists(), line)
 
@@ -2224,6 +2236,9 @@ def run_handoff_deferral_fields_cases(workspace: Path):
           "during-handoff-deferral-" not in handoff_text(handoffs, "nodeferralcase")
           and "handoff-deferral: no refused cold-read-full-run command to record" in plain.stdout,
           plain.stdout)
+    check("a handoff with no warning carries no writer-warning field",
+          "session-handoff-writer-warning-" not in handoff_text(handoffs, "nodeferralcase"),
+          handoff_text(handoffs, "nodeferralcase"))
 
     # A refused command with no marker file left, as after a compaction, is still carried.
     markers.cold_read_full_run_command_refused_during_handoff_deferral_append(
@@ -2264,6 +2279,11 @@ def run_handoff_deferral_fields_cases(workspace: Path):
     check("an unreadable file of refused commands is reported, with what to do",
           "handoff-deferral: the refused cold-read-full-run commands are not listed" in bad_refused.stdout
           and "run this script again" in bad_refused.stdout, bad_refused.stdout)
+    check("an unreadable file of refused commands is written into the handoff as a writer warning",
+          writer.supervisor.parse_handoff_file(handoffs / "badrefusedcase-handoff.md")
+          .get("session-handoff-writer-warning-1", "").startswith(
+              "handoff-deferral: the refused cold-read-full-run commands are not listed"),
+          bad_refused_body)
     clear()
 
     unidentified = run_writer(handoffs, "carry on\n", "--agent", "deferralnosessioncase",
