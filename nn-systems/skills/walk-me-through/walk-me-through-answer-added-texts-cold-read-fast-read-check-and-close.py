@@ -2829,7 +2829,8 @@ def settling_left_unclosed(walk_finder, minutes, parser, named):
     it, as when the advisor objected: the item is then shown, and rerunning the settling would record it twice."""
     match = unclosed_last_answer(walk_finder, minutes, parser)
     settled = {f"not asked, {not_asked_label(kind)}" for kind in NOT_ASKED_KINDS + NOT_ASKED_NO_KIND_VALUES}
-    return bool(match and match["item"].lower() == named.lower() and match["answered"] in settled)
+    return bool(match and match["item"].lower() == named.lower()
+                and (match["answered"] in settled or match["answered"].startswith(ALREADY_DECIDED_PREFIX)))
 
 
 NO_ANSWER_ROWS_HEADING = ("Rows of the no-answer table {item} could settle by; if a row's meaning fits {item}, do "

@@ -5054,6 +5054,45 @@ def test_read_step_offers_a_removal_that_lacks_only_its_touches_line_while_the_r
           and check_command_for(case, "--not-asked", "3") in kind_3[0], described(result))
 
 
+def test_read_step_offers_a_rename_that_lacks_only_its_touches_line_while_the_old_name_is_still_in_files():
+    case = rated_none_case(touches="#not_asked_rename poem-list poem-index\n\n", rating=WEAK_COST_ONLY)
+    (case.checkout / "docs" / "about.md").parent.mkdir(parents=True, exist_ok=True)
+    (case.checkout / "docs" / "about.md").write_text("See the poem-list.\n")
+    (case.checkout / "docs" / "poems-glossary.md").write_text("- **poem-index** — the page that lists every poem.\n")
+    result = case.run(WAITING_ITEM_READ)
+    kind_4 = [row for row in no_answer_rows_printed(result) if row.startswith("- kind 4:")]
+    check("a rename with a rename line and no touches line is offered kind 4 as lacking only the touches line",
+          len(kind_4) == 1 and "Only evidence is missing" in kind_4[0] and "#not_asked_touches" in kind_4[0]
+          and check_command_for(case, "--not-asked", "4") in kind_4[0], described(result))
+
+
+def test_read_step_row_not_offered_for_a_failed_glossary_listing_gives_git_failure_without_a_rerun_step():
+    case = rated_none_case(touches="#not_asked_touches docs/poems-glossary.md\n\n", rating=WEAK_COST_ONLY,
+                           files=("docs/poems-glossary.md",))
+    result = case.run(WAITING_ITEM_READ, environment=stubbed_git_failing_on(case, "ls-files"))
+    kind_7 = [line for line in result.stdout.splitlines() if line.startswith("- kind 7:")]
+    check("a `git ls-files` that fails while checking kind 7 is reported on that row, which is not offered",
+          len(kind_7) == 1 and "its evidence could not be checked" in kind_7[0]
+          and "fatal: stub ls-files failure" in kind_7[0], described(result))
+    check("the row that is not offered gives git's failure alone, with no step to run anything again",
+          "run this suite again" not in result.stdout
+          and f"{check_command_for(case, '--not-asked', '7')}` again once" not in result.stdout, described(result))
+
+
+def test_read_step_offers_no_row_again_after_the_handoff_row_settled_the_item_and_close_has_not_run():
+    document = RATED_NONE_DOCUMENT.replace("print the poem count after the list",
+                                           "shorten the session-handoff file's opening").replace(
+        "#case_against none.\n\nRecommendation: print it.",
+        f"#case_against {WEAK_COST_ONLY}\n\nRecommendation: print it.", 1)
+    case = Case(next_to_present="item 1 of 3", document=document)
+    settled = case.run("check", "--already-decided",
+                       "the user-ruling on the handoff's internals in nn-systems/handoff/handoff.system.design.md")
+    result = case.run(WAITING_ITEM_READ)
+    check("after the handoff row's `check --already-decided` and before close, the read step offers no row, so the "
+          "settling is not recorded twice",
+          settled.returncode == 0 and no_answer_rows_printed(result) == [], described(settled) + described(result))
+
+
 def test_read_step_offers_the_handoff_row_only_for_an_item_naming_the_handoff():
     document = RATED_NONE_DOCUMENT.replace("print the poem count after the list",
                                            "shorten the session-handoff file's opening").replace(
