@@ -237,6 +237,8 @@ FAILED_PROMISE_MESSAGES = "failed_promise_messages"
 SEND_ANSWER_SCHEMA = {"type": "object", "required": ["sent", "reason"],
                       "properties": {"sent": {"type": "boolean"}, "reason": {"type": "string"}}}
 OPEN_TASK_IDS_RAISED = "open_task_ids_raised"
+OPEN_TASK_IDS_OFFERED_NOT_RAISED = "open_task_ids_offered_not_raised"
+EARLIER_TEXTS_SENT = "earlier_texts_sent"
 IDLE_JUDGE_ANSWER_SCHEMA = {
     "type": "object", "required": ["send", "message", "reason", OPEN_TASK_IDS_RAISED],
     "properties": {"send": {"type": "boolean"}, "message": {"type": "string"},
@@ -447,7 +449,9 @@ class SweepLog:
                 if event["step"] == NUDGE:
                     wait = {"session_id": event["session_id"],
                             "first_idle_at": event["first_idle_at"], NUDGE: event["at"],
-                            "nudge_text": event["text"], PROMISE_MESSAGES: [],
+                            "nudge_text": event["text"],
+                            OPEN_TASK_IDS_RAISED: event.get(OPEN_TASK_IDS_RAISED, []),
+                            PROMISE_MESSAGES: [],
                             FAILED_PROMISE_MESSAGES: []}
                     owed = False
                     if event.get("rule") != 2:
@@ -753,12 +757,12 @@ def sent_texts_other_than_code_wrote(outcome, refs, text):
             and " ".join(send["message"].split()) != " ".join(text.split())]
 
 
-def text_sent_to(outcome, refs, seat, text):
-    """The message of the last send to the agent-seat that succeeded, or code's text when none
-    did: the text the delivery check looks for."""
+def texts_sent_to(outcome, refs, seat, text):
+    """The message of each send to the agent-seat that succeeded, in order, or [code's text] when
+    none did; the delivery check looks for the last."""
     sent = [send["message"] for send in outcome.sends
             if send["succeeded"] and entry_seat(send["to"], refs) == seat]
-    return sent[-1] if sent else text
+    return sent or [text]
 
 
 def owning_agent_seat_task_opened_unless_open(tasks_root, subject, description):
@@ -947,13 +951,15 @@ class Sweep:
         if problems:
             self.headless_failed(seat, f"send its {step} message", "; ".join(problems), SENDS_WRONG)
             return False
-        return self.message_sent(seat, verdict, text_sent_to(outcome, refs, seat, text), step,
+        return self.message_sent(seat, verdict, texts_sent_to(outcome, refs, seat, text), step,
                                  started_at)
 
-    def message_sent(self, seat, verdict, text, step, started_at):
+    def message_sent(self, seat, verdict, texts, step, started_at):
         # The delivery check compares transcript times with the send's start: a sender may run on
         # for minutes after its SendMessage, and the record is written when it ends.
-        return self.record({"event": "message_sent", "agent_seat": seat, "step": step, "text": text,
+        return self.record({"event": "message_sent", "agent_seat": seat, "step": step,
+                            "text": texts[-1],
+                            **({EARLIER_TEXTS_SENT: texts[:-1]} if texts[1:] else {}),
                             "send_started_at": iso(started_at), "message_id": uuid.uuid4().hex,
                             "session_id": verdict.get(fields.SESSION_ID),
                             "transcript_path": verdict.get(fields.TRANSCRIPT_PATH)})
@@ -1003,7 +1009,7 @@ class Sweep:
         # The delivery check looks in the transcript of every agent-seat the notice was for, whether
         # its send succeeded or not.
         for seat in refs:
-            self.message_sent(seat, verdicts[seat], text_sent_to(outcome, refs, seat, text),
+            self.message_sent(seat, verdicts[seat], texts_sent_to(outcome, refs, seat, text),
                               ACCOUNT_NOTICE, started_at)
             limit = verdicts[seat].get(fields.USAGE_LIMIT)
             if verdicts[seat].get(fields.RULE) == 1 and limit:
@@ -1196,10 +1202,10 @@ class Sweep:
     def end_wait(self, seat, why, **details):
         self.record({"event": "wait_ended", "agent_seat": seat, "why": why, **details})
 
-    def start_wait(self, seat, verdict, stretch, step_text, rule):
+    def start_wait(self, seat, verdict, stretch, step_text, rule, open_task_ids_raised=()):
         self.record({"event": "wait_step", "agent_seat": seat, "step": NUDGE, "rule": rule,
                      "session_id": verdict[fields.SESSION_ID], "first_idle_at": stretch,
-                     "text": step_text})
+                     "text": step_text, OPEN_TASK_IDS_RAISED: list(open_task_ids_raised)})
 
     def due_step(self, seat, verdict, wait):
         """The step of an open wait that is due: the escalation 15 minutes after the nudge, then
@@ -1237,7 +1243,10 @@ class Sweep:
                         quoted_text=quoted(message["text"]))
                     for message in failed)
             self.record({"event": "wait_step", "agent_seat": seat, "step": ESCALATE, "text": text})
-            self.send(seat, verdict, text, ESCALATE)
+            sent = self.send(seat, verdict, text, ESCALATE)
+            # The escalation quotes the nudge's listing, so it reminds of a task the nudge's sender
+            # dropped, or of every listed task when the nudge's send failed.
+            self.open_tasks_reminder_sent(seat, verdict, sent, wait[OPEN_TASK_IDS_RAISED])
 
     def nudge(self, seat, verdict, rule, text, stretch):
         if rule == 3:
@@ -1266,6 +1275,12 @@ class Sweep:
                 last_held_at[subject] = max(moment, last_held_at.get(subject, moment))
         return self.log.reminded_subjects(seat, verdict[fields.SESSION_ID],
                                           verdict.get(fields.LAST_USER_TYPED_AT), last_held_at)
+
+    def open_tasks_reminder_sent(self, seat, verdict, sent, task_ids):
+        # The listing, not the judge's own words, says which tasks the message covers, and a task
+        # the sender left out of every text sent was never reminded of.
+        self.reminder_sent(seat, verdict, sent, [open_task_subject(task_id) for task_id in
+                                                 open_tasks_listed_in(sent, task_ids)] if sent else [])
 
     def reminder_sent(self, seat, verdict, sent, subjects):
         if sent:
@@ -1354,20 +1369,22 @@ class Sweep:
             raised = [task for task in facts["open_tasks_nothing_holds"]
                       if task["id"] in answer[OPEN_TASK_IDS_RAISED]]
             message = answer["message"] + open_tasks_raised_listing(raised)
-            self.start_wait(seat, verdict, stretch, message, 5)
+            self.start_wait(seat, verdict, stretch, message, 5,
+                            open_task_ids_raised=[task["id"] for task in raised])
             sent = self.send(seat, verdict, message, NUDGE)
-            # The listing, not the judge's own words, says which tasks the message covers, and a
-            # task the sender left out of the text sent was never reminded of.
-            self.reminder_sent(seat, verdict, sent, [
-                open_task_subject(task["id"]) for task in raised
-                if sent and open_task_listed_in(sent["text"], task["id"])])
+            self.open_tasks_reminder_sent(seat, verdict, sent, [task["id"] for task in raised])
         # Work counts as asked about only once a message reached the agent-seat: a failed send
         # leaves it for a later sweep to hand to the judge again.
         self.record({"event": "judge_answer", "agent_seat": seat, "rule": 5,
                      "session_id": verdict[fields.SESSION_ID], "last_activity": stretch,
                      "send": send, "reason": answer.get("reason"), "failed": bool(problem),
                      RUNNING_WORK_ASKED_ABOUT: running_work_named_in(facts, answer["message"])
-                     if sent else [], **({"message_id": sent["message_id"]} if sent else {})})
+                     if sent else [], **({"message_id": sent["message_id"]} if sent else {}),
+                     # An offered task left out comes back to the judge at the next sweep, which can
+                     # wake the agent-seat again with no typing: this shows which.
+                     **({OPEN_TASK_IDS_OFFERED_NOT_RAISED: [
+                         task["id"] for task in facts["open_tasks_nothing_holds"]
+                         if task["id"] not in answer[OPEN_TASK_IDS_RAISED]]} if send else {})})
         if problem:
             self.headless_failed(seat, "judge whether it could act now", problem,
                                  outcome.error_kind or JUDGE_ANSWER_UNUSABLE, outcome)
@@ -1492,8 +1509,12 @@ def open_tasks_raised_listing(tasks):
         f'#{task["id"]} "{task.get("subject") or ""}"' for task in tasks) + "."
 
 
-def open_task_listed_in(text, task_id):
-    return re.search(rf"(?<![\w#])#{re.escape(task_id)}(?![\w])", text) is not None
+def open_tasks_listed_in(sent, task_ids):
+    """The ids among task_ids that an entry of open_tasks_raised_listing names in any text of the
+    message_sent event sent; an id inside another entry's quoted subject is no entry."""
+    texts = [sent["text"], *sent.get(EARLIER_TEXTS_SENT, [])]
+    return [task_id for task_id in task_ids if any(re.search(
+        rf'(?:Open tasks nothing holds:|;)\s+#{re.escape(task_id)}\s+"', text) for text in texts)]
 
 
 def idle_judge_answer_problem(answer, open_task_ids):

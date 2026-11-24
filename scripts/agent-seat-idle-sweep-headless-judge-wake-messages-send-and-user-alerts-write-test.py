@@ -2723,6 +2723,8 @@ check("rule 5: code lists every raised task in the message, whatever examples th
       == [["open task: 1", "open task: 2", "open task: 3"]], sent_text)
 answered_with_a_tool_call_and_idle_again(machine, 10)
 calls, _ = judge_asked_at(machine, 20)
+# This case passes too where code recorded the judge's ids without listing them; it guards that
+# the listing, now what decides a task's reminder, covers every raised task.
 check("rule 5: one backlog gives one reminder, though the judge's words named one task", not calls,
       calls)
 
@@ -2738,6 +2740,62 @@ machine.run(0)
 check("rule 5: a task the sender left out of the text sent is not recorded as reminded",
       [event["subjects"] for event in machine.events("reminder_sent")] == [["open task: 1"]],
       machine.events("reminder_sent"))
+
+machine = Machine()
+machine.seat("alpha", DONE_TURN)
+machine.task("alpha", "1")
+machine.task("alpha", "2")
+machine.script(judged(True, "You have open tasks.", raised=["1", "2"]),
+               {"sends": [send_to("alpha", 'You have open tasks. Open tasks nothing holds: #2 '
+                                  f'"Answer the review of #1".\n\n{DO_NOT_REPLY}')],
+                "answer": {"sent": True, "reason": "sent"}})
+machine.run(0)
+check("rule 5: a task id inside another listed task's subject does not count as listing that task",
+      [event["subjects"] for event in machine.events("reminder_sent")] == [["open task: 2"]],
+      machine.events("reminder_sent"))
+
+machine = Machine()
+machine.seat("alpha", DONE_TURN)
+machine.task("alpha", "1")
+machine.task("alpha", "2")
+machine.script(judged(True, "You have open tasks.", raised=["1", "2"]),
+               {"sends": [send_to("alpha"),
+                          send_to("alpha", 'You have open tasks. Open tasks nothing holds: #1 '
+                                  f'"task 1".\n\n{DO_NOT_REPLY}')],
+                "answer": {"sent": True, "reason": "sent"}})
+machine.run(0)
+check("rule 5: a task one of two successful sends listed is recorded as reminded",
+      [event["subjects"] for event in machine.events("reminder_sent")]
+      == [["open task: 1", "open task: 2"]], machine.events("reminder_sent"))
+
+machine = Machine()
+machine.seat("alpha", DONE_TURN)
+for task_id in ("1", "2", "3"):
+    machine.task("alpha", task_id)
+machine.script(judged(True, "You have open tasks, such as #1.", raised=["1"]), sent_ok())
+machine.run(0)
+check("rule 5: the judge's answer logs each offered open task it left out of the listing",
+      [event.get("open_task_ids_offered_not_raised") for event in machine.events("judge_answer")]
+      == [["2", "3"]], machine.events("judge_answer"))
+
+machine = Machine()
+machine.seat("alpha", DONE_TURN)
+machine.task("alpha", "1")
+machine.task("alpha", "2")
+machine.script(judged(True, "You have open tasks.", raised=["1", "2"]),
+               {"sends": [send_to("alpha", 'You have open tasks. Open tasks nothing holds: #1 '
+                                  f'"task 1".\n\n{DO_NOT_REPLY}')],
+                "answer": {"sent": True, "reason": "sent"}})
+machine.run(0)
+machine.append("alpha", cross_session(machine.events("message_sent")[-1]["text"], at(0.5)),
+               assistant("Waiting.", when=at(0.6)), turn_end(at(0.7)))
+machine.script(sent_ok())
+machine.run(16)
+check("rule 5: an escalation quoting the nudge's listing records the task the nudge's sender dropped",
+      [step["step"] for step in machine.events("wait_step")] == ["nudge", "escalate"]
+      and [event["subjects"] for event in machine.events("reminder_sent")]
+      == [["open task: 1"], ["open task: 1", "open task: 2"]],
+      (machine.events("wait_step"), machine.events("reminder_sent")))
 
 for name, bad_raised in (("an id it was not given", ["9"]), ("no list", None)):
     machine = Machine()
