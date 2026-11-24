@@ -13,7 +13,9 @@ Each invocation, under a lock that keeps two from overlapping:
    checked.
 2. Takes slice 1's verdict for each agent-seat, by calling verdict_for_seat in
    scripts/agent-seat-idle-sweep-verdicts-print.py, which is the only reader of the transcripts,
-   walk-minutes and task lists.
+   walk-minutes and task lists. Each prerequisite a verdict names as not asked of GitHub because
+   the time budget for GitHub calls was spent is logged, at every invocation that skips it, as a
+   github_conditions_skipped_for_budget event.
 3. When `oauthAccount.accountUuid` in ~/.claude.json differs from the account last logged, sends
    every agent-seat with a running agent-session the account-change notice, through one headless
    agent-session; for an agent-seat idle at a usage limit, that notice is its limit wake.
@@ -1539,6 +1541,9 @@ def sweep(arguments, now):
             verdict = verdicts_print.verdict_for_seat(seat, paths, now, None, checker, parser,
                                                       skipped)
         verdicts[seat] = verdict
+        if verdict.get(fields.GITHUB_CONDITIONS_SKIPPED_FOR_BUDGET):
+            run.record({"event": fields.GITHUB_CONDITIONS_SKIPPED_FOR_BUDGET, "agent_seat": seat,
+                        "conditions": verdict[fields.GITHUB_CONDITIONS_SKIPPED_FOR_BUDGET]})
     run.account_change(verdicts)
     run.delivery_checks(verdicts)
     for seat, verdict in verdicts.items():

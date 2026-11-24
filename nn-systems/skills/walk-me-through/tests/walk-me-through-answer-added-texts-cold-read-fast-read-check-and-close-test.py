@@ -4976,6 +4976,87 @@ ANSWER_FLAGS_TAKING_A_REPLY = {"--obvious": (), "--after-advisor": (), "--disapp
                                "--moved-on-no-decision": (), "--option": ("2",), "--part-answer": ("1=A",)}
 
 
+def no_answer_rows_printed(result):
+    """The lines of the read step's stdout that are rows of the no-answer table."""
+    return [line for line in result.stdout.splitlines()
+            if line.startswith("- ") and ("Its evidence passes" in line or "Only evidence is missing" in line
+                                          or "could not be checked" in line)]
+
+
+def test_help_prints_every_row_of_the_no_answer_table():
+    usage = subprocess.run([sys.executable, str(PROGRAM), "--help"], capture_output=True, text=True).stdout
+    for value in (1, 2, 3, 4, 5, 6, 7, "none", "weak-cost-only", "weak-alters-earlier-approved-text-only"):
+        check(f"--help lists the no-answer table's row --not-asked {value}",
+              f"\n  --not-asked {value}: " in usage, usage[-3000:])
+    check("--help lists the handoff row with its citation",
+          '\n  --already-decided "the user-ruling on the handoff\'s internals in '
+          'nn-systems/handoff/handoff.system.design.md": ' in usage, usage[-3000:])
+    check("--help carries the rule to ask the advisor and to show the item on a refusal",
+          "ask the advisor whether a later ruling or another open item overtakes it; if the program refuses, the "
+          "advisor objects or the advisor call fails, show the item." in usage, usage[-3000:])
+
+
+def test_read_step_offers_a_row_that_lacks_only_an_evidence_line_with_the_line_to_add_and_its_command():
+    case = rated_none_case(touches="", rating=WEAK_COST_ONLY)
+    result = case.run(WAITING_ITEM_READ)
+    rows = no_answer_rows_printed(result)
+    kind_5 = [row for row in rows if row.startswith("- kind 5:")]
+    check("an item with no evidence lines is offered kind 5, naming the line to add and the command to run after",
+          len(kind_5) == 1 and "Only evidence is missing" in kind_5[0] and "#not_asked_source" in kind_5[0]
+          and check_command_for(case, "--not-asked", "5") in kind_5[0], described(result))
+    cost_only = [row for row in rows if row.startswith("- case against weak, cost only:")]
+    check("an item rated weak with no touches line is offered weak-cost-only, naming the touches line",
+          len(cost_only) == 1 and "#not_asked_touches" in cost_only[0]
+          and check_command_for(case, "--not-asked", "weak-cost-only") in cost_only[0], described(result))
+    check("an item rated weak is not offered the row for a case against rated none",
+          not any(row.startswith("- case against none:") for row in rows), described(result))
+
+
+def test_read_step_offers_a_passing_row_and_leaves_out_a_row_the_change_itself_fails():
+    case = rated_none_case(rating=WEAK_COST_ONLY)
+    result = case.run(WAITING_ITEM_READ)
+    check("a row whose evidence passes is printed with its exact command",
+          any(row.startswith("- case against weak, cost only:") and "Its evidence passes" in row
+              and check_command_for(case, "--not-asked", "weak-cost-only") in row
+              for row in no_answer_rows_printed(result)), described(result))
+    case = rated_none_case(touches="#not_asked_touches tools/counter.py CLAUDE.md\n\n", rating=WEAK_COST_ONLY,
+                           files=("CLAUDE.md",))
+    result = case.run(WAITING_ITEM_READ)
+    check("a row refused for a guarded Markdown file, which no evidence line cures, is not printed",
+          not any(row.startswith("- case against weak, cost only:") for row in no_answer_rows_printed(result)),
+          described(result))
+
+
+def test_read_step_reports_a_row_whose_check_fails_and_still_offers_the_others():
+    case = rated_none_case(touches="#not_asked_touches tools/counter.py\n\n#not_asked_unused old_reader\n\n",
+                           rating=WEAK_COST_ONLY)
+    result = case.run(WAITING_ITEM_READ, environment=stubbed_git_failing_on(case, "grep"))
+    rows = no_answer_rows_printed(result)
+    check("a `git grep` that fails while checking kind 3 is reported on that row, which is not offered as passing",
+          any(row.startswith("- kind 3: its evidence could not be checked") and "fatal: stub grep failure" in row
+              for row in rows)
+          or any("- kind 3: its evidence could not be checked" in line for line in result.stdout.splitlines()),
+          described(result))
+    check("the other rows are still offered", any(row.startswith("- case against weak, cost only:") for row in rows),
+          described(result))
+
+
+def test_read_step_offers_the_handoff_row_only_for_an_item_naming_the_handoff():
+    document = RATED_NONE_DOCUMENT.replace("print the poem count after the list",
+                                           "shorten the session-handoff file's opening").replace(
+        "#case_against none.\n\nRecommendation: print it.",
+        f"#case_against {WEAK_COST_ONLY}\n\nRecommendation: print it.", 1)
+    result = Case(next_to_present="item 1 of 3", document=document).run(WAITING_ITEM_READ)
+    check("an item naming the session-handoff is offered the handoff row with --already-decided and its citation",
+          any(row.startswith("- the handoff's own internals:") and "--already-decided" in row
+              and "nn-systems/handoff/handoff.system.design.md" in row for row in no_answer_rows_printed(result)),
+          described(result))
+    result = rated_none_case(rating=WEAK_COST_ONLY).run(WAITING_ITEM_READ)
+    check("an item that does not name the handoff is not offered the handoff row",
+          not any(row.startswith("- the handoff's own internals:") for row in no_answer_rows_printed(result)),
+          described(result))
+
+
 def test_every_answer_flag_is_covered_by_the_rerun_command_cases():
     usage = subprocess.run([sys.executable, str(PROGRAM), "--help"], capture_output=True, text=True)
     group = re.search(r"\[(--obvious[^\]]*)\]", " ".join(usage.stdout.split()))
@@ -5176,7 +5257,7 @@ def test_close_reads_the_item_after_the_next_one_ahead_and_the_read_step_uses_it
                             "later and it recommends now: then run "
                             f"`{check_command_for(case, '--now-over-later-already-decided')}`, then the "
                             "close command it prints.")
-          and f"{WAITING_ITEM_READ} {AFTER_FIXES} --cwd" in lines[2], described(first))
+          and f"{WAITING_ITEM_READ} {AFTER_FIXES} --cwd" in lines[-3], described(first))
     answered_and_closed(case)
     ahead = case.run(WAITING_ITEM_READ)
     check("the read step hands over the read ahead of an unchanged item without reading it again",
@@ -6639,6 +6720,12 @@ def test_bump_refuses_an_item_no_heading_has_or_one_already_shown_writing_nothin
           missing.returncode == 1 and "no item heading in the walk-document" in missing.stderr
           and "`four`" in missing.stderr and f"`{check_command_for(case, '--bump', 'two')}`" in missing.stderr,
           described(missing))
+    indented = Case(next_to_present="item 1 of 9", document=bump_walk().replace("\n## two", "\n  ## two"))
+    missing_indented = indented.run("check", "--bump", "four", reply="bump four")
+    check("check --bump's refusal names an unshown item by its title when that item's heading is indented",
+          missing_indented.returncode == 1
+          and f"`{check_command_for(indented, '--bump', 'two')}`" in missing_indented.stderr,
+          described(missing_indented))
     shown = case.run("check", "--bump", "one", reply="bump one")
     check("check --bump refuses the waiting item, which has been shown and is not decided",
           shown.returncode == 1 and "`## Item 1 of 9: one`" in shown.stderr
