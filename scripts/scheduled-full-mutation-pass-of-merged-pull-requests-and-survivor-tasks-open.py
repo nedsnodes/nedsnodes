@@ -40,8 +40,9 @@ WHAT ONE RUN DOES, in order.
      scheduled-full-mutation-pass-of-merged-pull-requests-and-survivor-tasks-open.lock
      in --state-directory; while another run holds it, this run exits
      EXIT_ANOTHER_RUN_HOLDS_THE_LOCK having done nothing, and the next
-     scheduled run carries on. The command a job failure task gives for a
-     hand run of one merge takes the same lock, but waits for it instead of
+     scheduled run carries on. A hand run of one merge, the systemd-run
+     command that mutation_testing_hand_run_command() builds and a job
+     failure task prints, takes the same lock, but waits for it instead of
      exiting: that hand run resumes the kept sessions this program uses.
   2. Runs `git fetch origin main` in the clone and resolves origin/main.
   3. Reads the state file. With no state file, it writes one naming
@@ -132,12 +133,12 @@ mutation testing program on each as the first pass does, but with
 --mutants-run-at-most-shared-evenly-among-changed-files, so every mutant of
 the merge not yet run is run, until that time. That time is
 --second-pass-stops-starting-mutants-seconds-before-next-scheduled-run, by
-default 30 minutes, before cron next starts this program on ned-box, which
-this program reads from its schedule in --scheduled-jobs-on-each-machine-json-file,
-by default nn-systems/general-tools/scheduled-jobs-on-each-machine.json, a
-schedule of the form `<minute> <hour> * * *`: a run still going when cron
-starts the next one would make that one exit
-EXIT_ANOTHER_RUN_HOLDS_THE_LOCK. From that time on the second pass starts on
+default 30 minutes, before the next time given by this program's schedule in
+--scheduled-jobs-on-each-machine-json-file, a schedule of the form
+`<minute> <hour> * * *`. The default file,
+nn-systems/general-tools/scheduled-jobs-on-each-machine.json, no longer
+schedules this program, so a run by hand passes a file of its own; the
+StepFailed message gives its form. From that time on the second pass starts on
 no further merge. The mutation testing program is sent SIGTERM when it is
 still going after --merge-timeout-seconds or, when sooner, once half of
 --second-pass-stops-starting-mutants-seconds-before-next-scheduled-run has
@@ -325,18 +326,17 @@ This program runs on ned-box only, so the record is written locally. A record
 that cannot be written is printed on standard output instead, and the run
 exits EXIT_RECORD_NOT_WRITTEN.
 
-SCHEDULE. Installed on ned-box by
-nn-systems/general-tools/install-scheduled-jobs-on-this-machine.py from
-nn-systems/general-tools/scheduled-jobs-on-each-machine.json, with both output
-streams appended to its log, which, with the record, is where its failures
-are read. Run by hand on ned-box, from an agent's shell too, as a unit of the
-user's systemd, which outlives the shell, with its output in the same log:
+SCHEDULE. Not scheduled: the user stopped its nightly run, so
+nn-systems/general-tools/scheduled-jobs-on-each-machine.json no longer lists
+it. Run by hand on ned-box, from an agent's shell too, as a unit of the
+user's systemd, which outlives the shell, with both output streams appended
+to its log, which, with the record, is where its failures are read:
 
     systemd-run --user --unit=scheduled-full-mutation-pass-of-merged-pull-requests-and-survivor-tasks-open-by-hand --collect -p StandardOutput=append:/home/nedlern/.claude/scheduled-full-mutation-pass-of-merged-pull-requests-and-survivor-tasks-open.log -p StandardError=append:/home/nedlern/.claude/scheduled-full-mutation-pass-of-merged-pull-requests-and-survivor-tasks-open.log /usr/bin/python3 /home/nedlern/Projects/nedsnodes/scripts/scheduled-full-mutation-pass-of-merged-pull-requests-and-survivor-tasks-open.py
 
-The cron line, at 00:30 in ned-box's local time, America/Los_Angeles (Pacific):
-
-    30 0 * * * /usr/bin/python3 /home/nedlern/Projects/nedsnodes/scripts/scheduled-full-mutation-pass-of-merged-pull-requests-and-survivor-tasks-open.py >> /home/nedlern/.claude/scheduled-full-mutation-pass-of-merged-pull-requests-and-survivor-tasks-open.log 2>&1
+Run so, the first pass runs and the second exits EXIT_STEP_FAILED; to run
+the second pass too, add --scheduled-jobs-on-each-machine-json-file with a
+file giving the program a schedule, as above.
 
 Exit codes: 0 every survivor task was rechecked and every merge since the last
 run had its first pass and its survivors and ERRORED mutants given tasks, or
@@ -539,8 +539,9 @@ def read_state(state_file):
             f"If the file can be repaired by hand, repair it: it holds last_tested_main_commit, "
             f"a commit hash, and tasks_opened, an object, and may hold "
             f"{MERGES_WITH_MUTANTS_NOT_RUN_STATE_KEY}, an object that gives each merge an "
-            f"object holding merged_at_unix_seconds and mutants_not_run_count, both whole "
-            f"numbers, and surviving_mutant_keys_already_handled, a list, and may hold "
+            f"object of its own. Each merge's object holds merged_at_unix_seconds and "
+            f"mutants_not_run_count, both whole numbers, and "
+            f"surviving_mutant_keys_already_handled, a list, and may also hold "
             f"{ERRORED_MUTANT_KEYS_ALREADY_REPORTED_STATE_KEY}, a list.\n"
             f"Otherwise delete it: the next run then starts from origin/main, and merges since "
             f"the last good run go untested.") from error
@@ -1107,10 +1108,12 @@ def errored_mutants_job_failure_task_opened(arguments, merge, merge_subject, err
     except OSError as error:
         raise StepFailed(
             f"merge {merge[:12]} ({merge_subject}): {len(errored)} of its mutants ended "
-            f"ERRORED, but their job failure task could not be opened or added to on "
+            f"ERRORED, but the job failure task that names ERRORED mutants could not be "
+            f"opened, nor could the open one have them added to its description, on "
             f"{JOB_FAILURE_TASK_AGENT_SEAT}'s task list ({type(error).__name__}: {error}), so "
             f"the merge is not recorded as tested and no later merge is tested. The next run "
-            f"tries this merge again, and gives no surviving mutant a second task.\n"
+            f"tries this merge again and reports these ERRORED mutants in that task; the "
+            f"surviving mutants this run already gave tasks get none again.\n"
             f"Fix what the error names, such as a task list directory that does not exist, "
             f"then run this program again on ned-box: {RUN_BY_HAND}") from error
     for mutant in errored:
@@ -1375,10 +1378,13 @@ def unix_time_cron_next_starts_this_program_on_ned_box(scheduled_jobs_file, now)
             f"the schedule of {PROGRAM} on ned-box cannot be read from {scheduled_jobs_file} "
             f"({type(error).__name__}: {error}), so the second pass does not know when to "
             f"stop for the next scheduled run, and ran no mutant. The first pass is done.\n"
-            f"Give the job named {PROGRAM} in that file, under on, ned-box, a schedule of the "
-            f"form `<minute> <hour> * * *`, or, when the job must run on another schedule, "
-            f"change unix_time_cron_next_starts_this_program_on_ned_box() in "
-            f"scripts/{PROGRAM}.py to read it.") from error
+            f"The scheduled-jobs table does not schedule {PROGRAM}, because the user stopped "
+            f"its nightly run; do not add it back. To run the second pass by hand, write a file "
+            f"holding {{\"jobs\": [{{\"name\": \"{PROGRAM}\", \"on\": {{\"ned-box\": "
+            f"{{\"schedule\": \"<minute> <hour> * * *\"}}}}}}]}}, the daily time the second pass "
+            f"must stop {DEFAULT_SECOND_PASS_STOPS_STARTING_MUTANTS_SECONDS_BEFORE_NEXT_SCHEDULED_RUN // 60:.0f} "
+            f"minutes before, and run this program again with "
+            f"--scheduled-jobs-on-each-machine-json-file <that file>.") from error
     today = time.localtime(now)
     for day in (today.tm_mday, today.tm_mday + 1):
         # mktime reads a day past the month's end as a day of the next month.

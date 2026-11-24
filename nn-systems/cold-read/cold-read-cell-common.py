@@ -84,7 +84,10 @@ CREDENTIAL_FILES_ON_NED_BOX = tuple(pathlib.Path.home() / path for path in (
 # the patterns only find files to ask the user about: nn-systems/cold-read/
 # cold-read-cell-credential-files-outside-denied-directories-daily-check-user-alert-write.py reports each file so
 # named that CREDENTIAL_FILES_ON_NED_BOX leaves out. The keychain remains accessible because masking it logs the
-# agent-binaries out.
+# agent-binaries out. gh still fails inside the Mac sandbox, though its login is in the keychain: with GH_CONFIG_DIR
+# and XDG_CONFIG_HOME unset, gh reads its configuration directory ~/.config/gh, denied here, and exits with "failed to
+# read configuration" before it looks for a stored login. The launchers keep both variables, so when either points gh
+# at a readable directory, gh starts and can use the keychain login.
 CREDENTIAL_DIRECTORIES = (
     pathlib.Path.home() / ".config" / "nedsnodes",
     pathlib.Path.home() / ".config" / "gh",
@@ -102,6 +105,10 @@ REVIEWER_PROGRAM_LOGIN_FILES = {
             pathlib.Path.home() / ".gemini" / "oauth_creds.json",
             pathlib.Path.home() / ".gemini" / "antigravity-cli" / "antigravity-oauth-token"),
 }
+
+# The Codex and agy launchers remove these from the reviewer's environment; the Claude cold-read-cell
+# runs without Bash, so it cannot run gh.
+COLD_READ_CELL_REVIEWER_PROGRAM_ENVIRONMENT_REMOVED_GITHUB_TOKEN_VARIABLES = ("GH_TOKEN", "GITHUB_TOKEN")
 
 
 def reviewer_program_login_files(except_program: str = None,
@@ -690,7 +697,8 @@ def run_reviewer_program_in_own_process_group_until_timeout(
     """Run `command` in a session of its own and return its result; when it
     runs past `timeout_seconds`, kill its whole process group and return a
     result whose returncode is None. The group is also killed when this
-    process is interrupted or sent SIGTERM while waiting.
+    process is interrupted while waiting, or sent SIGTERM at any point from
+    the program's start on.
 
     With `parse_agent_binary_final_result_from_stdout_line`, a function given each
     stdout line that returns None or (exit code, response text), the first
@@ -710,14 +718,30 @@ def run_reviewer_program_in_own_process_group_until_timeout(
     holds them past that loses what it printed after, and stderr says so."""
     # The reviewer's own session puts it outside the group the grid stops, so
     # SIGTERM must reach the except BaseException handler below that stops
-    # the reviewer's group.
-    signal.signal(signal.SIGTERM, exit_on_sigterm)
-    process = subprocess.Popen(
-        command,
-        # communicate closes stdin after writing stdin_text, or at once when it is None.
-        stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
-        cwd=REPO_ROOT, env=child_environment, text=True, start_new_session=True, pass_fds=pass_fds)
+    # the reviewer's group. Until `process` is bound inside that try, SIGTERM
+    # is only recorded: raised inside Popen after the fork, it would leave the
+    # started reviewer running with nothing to stop it. A Python handler is
+    # reset at exec, unlike SIG_IGN or a blocked signal, so the reviewer still
+    # starts with SIGTERM's default action.
+    sigterm_during_launch = []
+    signal.signal(signal.SIGTERM, lambda number, _frame: sigterm_during_launch.append(number))
+
+    def exit_on_sigterm_from_now_and_now_if_one_came_during_launch():
+        signal.signal(signal.SIGTERM, exit_on_sigterm)
+        if sigterm_during_launch:
+            exit_on_sigterm(sigterm_during_launch[0], None)
+
     try:
+        process = subprocess.Popen(
+            command,
+            # communicate closes stdin after writing stdin_text, or at once when it is None.
+            stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
+            cwd=REPO_ROOT, env=child_environment, text=True, start_new_session=True, pass_fds=pass_fds)
+    except BaseException:
+        exit_on_sigterm_from_now_and_now_if_one_came_during_launch()
+        raise
+    try:
+        exit_on_sigterm_from_now_and_now_if_one_came_during_launch()
         if parse_agent_binary_final_result_from_stdout_line is not None:
             return run_reviewer_program_until_its_result_line(
                 process, command, stdin_text, timeout_seconds,
@@ -1001,10 +1025,13 @@ def run_cell(
     per_model_run_timeout_seconds=None, parse_agent_binary_final_result_from_stdout_line=None,
     report_wait_after_result_line_seconds: float = 0.0,
     cold_read_cell_launcher_own_command_line_options_adder=None,
+    pass_cold_read_tier_to_invocation_builder: bool = False,
 ) -> int:
     """cold_read_cell_launcher_own_command_line_options_adder, when given, adds
     one launcher's own options to the parser, and invocation_builder then also
-    gets the parsed arguments as parsed_arguments=."""
+    gets the parsed arguments as parsed_arguments=. With
+    pass_cold_read_tier_to_invocation_builder, invocation_builder also gets the
+    cold-read-tier as tier=."""
     # Include failed attempts in the cell's total cost.
     cell_started_at = time.time()
     parser = build_argument_parser(
@@ -1058,6 +1085,8 @@ def run_cell(
     launcher_own_option_arguments = (
         {"parsed_arguments": args}
         if cold_read_cell_launcher_own_command_line_options_adder else {})
+    if pass_cold_read_tier_to_invocation_builder:
+        launcher_own_option_arguments["tier"] = args.tier
     build_invocation = (invocation_builder(effort, staging_directory, **launcher_own_option_arguments)
                         if stage_report_outside_checkout
                         else invocation_builder(effort, **launcher_own_option_arguments))

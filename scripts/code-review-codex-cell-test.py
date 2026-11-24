@@ -476,6 +476,11 @@ with tempfile.TemporaryDirectory() as scratch:
     denied_table = next((override.split("=", 1)[1] for override in overrides_after_review
                          if override.startswith("permissions.code-review-no-credentials.filesystem=")),
                         "")
+    check("codex requests the Fast service tier, id \"priority\", after `review`",
+          'service_tier="priority"' in overrides_after_review
+          and not [override for override in overrides_before_review
+                   if override.startswith("service_tier=")],
+          repr(launched_command))
     check("codex runs under no --sandbox, which Codex will not combine with a profile",
           "--sandbox" not in launched_command, f"composed command was {launched_command}")
     check("codex runs under the credential-denying profile, extending :read-only, after `review`",
