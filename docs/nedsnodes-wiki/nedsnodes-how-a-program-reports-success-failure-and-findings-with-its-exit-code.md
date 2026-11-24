@@ -55,7 +55,7 @@ Exit 1 for work that did not all get done keeps the rule above: 1 when the progr
 A hook follows the exit codes its host defines, not the three above:
 
 - **A Claude Code hook** exits 0 to let the act go ahead, with any reminder in its output, and refuses the act on purpose either by exiting 2 or by a decision in its JSON output at exit 0, such as `"permissionDecision": "deny"`, as the Claude Code hooks reference (https://code.claude.com/docs/en/hooks) defines. What exit 2 does differs by hook event; the hooks reference's table "Exit code 2 behavior per event" gives each. When the hook itself breaks, for example because a command it runs fails, it exits 1 and prints what broke on its error output: on most events Claude Code then lets the act go ahead and shows the user a hook error notice with the first line of that output, so the break is seen and work is not stopped. When the agent's next act depends on whether the hook could do its checking, as with a guard that could not check a command, the hook instead exits 0 and tells the agent in `additionalContext`. A hook never turns its own failure into a silent 0.
-- **A git hook** exits 0 to let the push or commit go ahead and 1 to refuse it; git refuses on any nonzero code. Each program the hook runs to check something is one as this page defines it, exiting 0, 1 or 2. The hook refuses on such a program's 1. On such a program's 2 it lets the push go ahead and prints that the program could not run and why, so that one broken check does not stop every agent-seat's pushes.
+- **A git hook** exits 0 to let the push or commit go ahead and 1 to refuse it; git refuses on any nonzero code. Each program the hook runs to check something is a program that checks something as this page defines one, exiting 0, 1 or 2. The hook refuses on such a program's 1. On such a program's 2 it lets the push go ahead and prints that the program could not run and why, so that one broken check does not stop every agent-seat's pushes.
 
 ### What a Claude Code hook prints on each stream
 
@@ -94,7 +94,7 @@ These rules are exceptions to the rest of this page. Exit 2 from a Claude Code h
 
 ## A caller
 
-- A shell line, a CI step or a program that runs a program that checks or searches something decides on the code, 0, 1 or 2, and treats any code above 2, such as one a shell gives for a killed program, as 2. It never treats "nonzero" as one outcome when the program can exit 1 with an answer.
+- A shell line, a CI step or a program that runs a search or runs a program that checks something decides on the code, 0, 1 or 2, and treats any code above 2, such as one a shell gives for a killed program, as 2. It never treats "nonzero" as one outcome when the program can exit 1 with an answer.
 - A caller that runs a program and continues anyway, such as with `|| true`, says in its own output that it continued after a failure.
 - A function called from other code reports a failure by raising an error, not by returning a code; only a program's top level turns that error into an exit code.
 
