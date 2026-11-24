@@ -175,6 +175,23 @@ due_task_hook.GitHubConditionChecker.clock = staticmethod(
     lambda: next(readings, due_task_hook.GH_CALLS_TOTAL_BUDGET_SECONDS + 1))
 sys.exit(sweep.main(sys.argv[2:]))
 '''
+# The first read, of the turns since the last check, finds a budget skip; the reread of a new
+# agent-session finds none, as when that agent-session is busy by then.
+FIRST_READ_ONLY_BUDGET_SKIP_RUNNER = r'''
+import importlib.util, sys
+spec = importlib.util.spec_from_file_location("sweep", sys.argv[1])
+sweep = importlib.util.module_from_spec(spec)
+spec.loader.exec_module(sweep)
+verdict_for_seat = sweep.verdicts_print.verdict_for_seat
+def first_read_skips(seat, paths, now, since, *rest):
+    verdict = verdict_for_seat(seat, paths, now, since, *rest)
+    if since is not None:
+        verdict[sweep.fields.GITHUB_CONDITIONS_SKIPPED_FOR_BUDGET] = [
+            {"kind": "pr_merged", "number": 50}]
+    return verdict
+sweep.verdicts_print.verdict_for_seat = first_read_skips
+sys.exit(sweep.main(sys.argv[2:]))
+'''
 
 
 def judged(send, message="", reason="r", raised=()):
@@ -288,7 +305,7 @@ class Machine:
         return ([json.loads(path.read_text()) for path in sorted(pending.glob("*.json"))]
                 if pending.is_dir() else [])
 
-    def run(self, minutes, *extra, path_has_fake=True, github_budget_spent=False):
+    def run(self, minutes, *extra, path_has_fake=True, github_budget_spent=False, runner_source=None):
         environment = dict(os.environ)
         environment["HOME"] = str(self.home)
         # Python finds the user's site-packages from HOME, and on the Mac markdown-it-py is installed there.
@@ -302,7 +319,9 @@ class Machine:
         environment["FAKE_CLAUDE_CALLS"] = str(self.calls)
         environment["FAKE_CLAUDE_ANSWERS"] = str(self.answers)
         environment["FAKE_CLAUDE_PROJECTS"] = str(self.projects)
-        runner = ["-c", GITHUB_BUDGET_SPENT_RUNNER] if github_budget_spent else []
+        if github_budget_spent:
+            runner_source = GITHUB_BUDGET_SPENT_RUNNER
+        runner = ["-c", runner_source] if runner_source else []
         completed = subprocess.run(
             [sys.executable, *runner, str(PROGRAM), "--now", at(minutes), "--handoff-directory",
              str(self.handoffs), "--agents-root", str(self.agents), "--projects-root",
@@ -1328,6 +1347,23 @@ machine.script(judged(False, reason="r"))
 code, output = machine.run(0, github_budget_spent=True)
 skipped = [{"kind": "pr_merged", "number": 50}]
 check("a prerequisite the GitHub budget left unasked: logged by name",
+      code == 0 and [(event["agent_seat"], event["conditions"]) for event in
+                     machine.events("github_conditions_skipped_for_budget")] == [("alpha", skipped)],
+      (code, output, machine.events()))
+calls, judge_facts = rule_five_judge_facts(machine)
+check("a prerequisite the GitHub budget left unasked: the rule 5 judge is called, is not told of "
+      "the skip, and is told of no open task nothing holds",
+      len(calls) == 1 and "github_conditions_skipped_for_budget" not in judge_facts
+      and judge_facts.get("open_tasks_nothing_holds") == [], (calls, judge_facts))
+
+machine = Machine()
+machine.seat("alpha", DONE_TURN)
+machine.script()
+machine.run(0)
+machine.seat("alpha", DONE_TURN, session="s-2")
+machine.script()
+code, output = machine.run(20, runner_source=FIRST_READ_ONLY_BUDGET_SKIP_RUNNER)
+check("a budget skip the first read found and a new agent-session's reread did not: still logged",
       code == 0 and [(event["agent_seat"], event["conditions"]) for event in
                      machine.events("github_conditions_skipped_for_budget")] == [("alpha", skipped)],
       (code, output, machine.events()))
