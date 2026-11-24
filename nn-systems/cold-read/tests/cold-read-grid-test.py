@@ -476,11 +476,12 @@ runpy.run_path(grid, run_name="__main__")
 
 def run_grid(repository, stub_directory, environment_overrides=None,
              target_relative_path=TARGET_RELATIVE_PATH, extra_arguments=(),
-             current_directory=None, launcher_arguments_before_grid=None):
+             current_directory=None, launcher_arguments_before_grid=None, timeout_seconds=None):
     """The grid in `repository` as a subprocess, run from `current_directory`,
     by default `repository`. `launcher_arguments_before_grid`, when given, is
     (launcher file, report count, jump seconds) for
-    GRID_WITH_CLOCK_JUMPED_ONCE_REPORTS_EXIST."""
+    GRID_WITH_CLOCK_JUMPED_ONCE_REPORTS_EXIST. Past `timeout_seconds` the grid is
+    killed and subprocess.TimeoutExpired raised; its cells keep running."""
     stub_directory.mkdir(parents=True, exist_ok=True)
     for runtime_name in ("claude", "codex", "agy"):
         stub = stub_directory / runtime_name
@@ -512,7 +513,7 @@ def run_grid(repository, stub_directory, environment_overrides=None,
            else [str(repository / "nn-systems" / "cold-read" / "cold-read-grid.py")]),
          "--target", target_relative_path, *extra_arguments],
         capture_output=True, text=True, check=False, env=environment,
-        cwd=current_directory or repository,
+        cwd=current_directory or repository, timeout=timeout_seconds,
     )
 
 
@@ -721,6 +722,11 @@ try:
                                  capture_output=True, text=True, check=False).stdout
         return [line.strip() for line in listing.splitlines()
                 if any(fragment in line for fragment in fragments)]
+
+    def kill_processes_mentioning(*fragments):
+        for line in processes_mentioning(*fragments):
+            with contextlib.suppress(ProcessLookupError):
+                os.kill(int(line.split()[0]), signal.SIGKILL)
 
     repository = build_scratch_repository(scratch, "checkout-target-moves-mid-run")
     slow_stubs = scratch / "stub-bin-target-moves-mid-run"
@@ -1130,12 +1136,17 @@ try:
     stub_reading_seconds = 8
     repository = build_scratch_repository(scratch, "checkout-attempts-timed-out")
     finished_reading_markers = scratch / "timed-out-stubs-finished-reading-markers"
+    timed_out_stubs = scratch / "stub-bin-attempts-timed-out"
     started = time.monotonic()
-    result = run_grid(repository, stubs, {
+    result = run_grid(repository, timed_out_stubs, {
         "COLD_READ_GRID_TEST_STUB_SLEEP_SECONDS": str(stub_reading_seconds),
         "COLD_READ_GRID_TEST_STUB_FINISHED_READING_MARKER_DIRECTORY": str(finished_reading_markers),
         "COLD_READ_GRID_CELL_ATTEMPT_TIMEOUT_SECONDS": "2"})
     elapsed = time.monotonic() - started
+    # Read before anything else: a stub the grid left running could still write its marker later.
+    left_running = processes_mentioning(str(timed_out_stubs), str(repository))
+    finished_before_the_grid_returned = sorted(path.name for path in finished_reading_markers.glob("*"))
+    kill_processes_mentioning(str(timed_out_stubs), str(repository))
     failed_lines = lines_opening(result, "FAILED")
     check("every attempt past the limit, the Question 4 cell's included, is FAILED as timed out, "
           "with no RETRYING line",
@@ -1151,14 +1162,13 @@ try:
           lines_opening(result, "WRITE CHECK DID NOT RUN:") == []
           and lines_opening(result, "STRAY WRITE:") == []
           and "Tell the user:" not in result.stdout, repr(result.stdout))
-    time.sleep(stub_reading_seconds + 1 - elapsed if elapsed < stub_reading_seconds else 0)
     record_directory = record_directory_of(repository)
     check("the stopped stubs never wrote their reports",
           sorted(path.name for path in record_directory.glob("*.md")) == ["cold-read-reference-check.md"],
           sorted(path.name for path in record_directory.glob("*.md")))
     check("the grid stopped every timed-out stub instead of waiting for it to finish",
-          not finished_reading_markers.exists() or not any(finished_reading_markers.iterdir()),
-          sorted(path.name for path in finished_reading_markers.glob("*")))
+          finished_before_the_grid_returned == [], finished_before_the_grid_returned)
+    check("no timed-out stub or its launcher is left running", left_running == [], left_running)
 
     # --- Stopped cells that wrote outside their reports ------------------------
     # Every cell writes two files before it is stopped: a new file, and a committed one
@@ -1211,18 +1221,32 @@ try:
 
     # --- A cell that writes its report and then hangs is stopped, report deleted
     # The clock jumps only once all eight have written, so no stub may exit before the last
-    # writes, however loaded the machine. This bound also ends the case if the grid never stops them.
-    hang_seconds = 600
+    # writes, however loaded the machine: each hangs until stopped. The deadline is this
+    # driver's, and short of a 600-second suite limit, so a grid that never stops them fails here.
+    hang_seconds = 86400
+    grid_deadline_seconds = 240
     repository = build_scratch_repository(scratch, "checkout-wrote-then-hung")
+    hung_after_writing_stubs = scratch / "stub-bin-wrote-then-hung"
     attempt_limit_seconds = 3600
     clock_launcher = scratch / "grid-with-clock-jumped-once-reports-exist.py"
     clock_launcher.write_text(GRID_WITH_CLOCK_JUMPED_ONCE_REPORTS_EXIST, encoding="utf-8")
     started = time.monotonic()
-    result = run_grid(repository, stubs, {
-        "COLD_READ_GRID_TEST_STUB_HANG_AFTER_WRITING_REPORT_SECONDS": str(hang_seconds),
-        "COLD_READ_GRID_CELL_ATTEMPT_TIMEOUT_SECONDS": str(attempt_limit_seconds)},
-        launcher_arguments_before_grid=(clock_launcher, 8, attempt_limit_seconds))
+    try:
+        result = run_grid(repository, hung_after_writing_stubs, {
+            "COLD_READ_GRID_TEST_STUB_HANG_AFTER_WRITING_REPORT_SECONDS": str(hang_seconds),
+            "COLD_READ_GRID_CELL_ATTEMPT_TIMEOUT_SECONDS": str(attempt_limit_seconds)},
+            launcher_arguments_before_grid=(clock_launcher, 8, attempt_limit_seconds),
+            timeout_seconds=grid_deadline_seconds)
+    except subprocess.TimeoutExpired as expired:
+        result = subprocess.CompletedProcess(
+            expired.cmd, -signal.SIGKILL, f"the grid had not returned after {grid_deadline_seconds} s", "")
+    finally:
+        left_running = processes_mentioning(str(hung_after_writing_stubs), str(repository))
+        kill_processes_mentioning(str(hung_after_writing_stubs), str(repository))
     elapsed = time.monotonic() - started
+    check("the grid returned and left no hung stub or launcher running",
+          result.returncode != -signal.SIGKILL and left_running == [],
+          f"exit {result.returncode}; still running: {left_running}")
     failed_lines = lines_opening(result, "FAILED")
     check("a timed-out cell that had written its report: FAILED says the unfinished report is deleted",
           lines_opening(result, "saved:") == []
@@ -1891,6 +1915,48 @@ try:
           and (clean_removed_repository / "tracked.md").read_text(encoding="utf-8") == "Committed.\n"
           and clean_removed_git("status", "--porcelain").stdout == "", repr(clean_removed_lines))
 
+    # A clean file renamed and re-created: status lists its name as a rename source and as ??.
+    renamed_repository, renamed_git = repository_with_committed_file("checkout-stopped-cell-renames-a-clean-file")
+    with mock.patch.object(grid_module.cell_common, "REPO_ROOT", renamed_repository):
+        renamed_baseline = grid_module.cell_common.working_tree_state()
+        renamed_git("mv", "tracked.md", "moved.md")
+        (renamed_repository / "tracked.md").write_text("A reviewer's new file.\n", encoding="utf-8")
+        renamed_lines = grid_module.stopped_cells_write_check_lines(
+            [scratch / "claude-hunt-deep.md"], renamed_baseline, None, set())
+    renamed_commands = [command for line in renamed_lines for command in commands_in_line(line)]
+    renamed_removals = [line for line in renamed_lines if "rm -r -- " in line]
+    for command in renamed_commands:
+        subprocess.run(shlex.split(command), capture_output=True, text=True)
+    check("the undo given for a clean file renamed and re-created restores it and removes the rename's new name",
+          len(renamed_lines) == 2 and len(renamed_commands) == 2 and not renamed_removals
+          and (renamed_repository / "tracked.md").read_text(encoding="utf-8") == "Committed.\n"
+          and not (renamed_repository / "moved.md").exists()
+          and renamed_git("status", "--porcelain").stdout == "", repr(renamed_lines))
+
+    # A rename source's restore must read a glob-named path literally, or it discards a neighbor's edits.
+    renamed_glob_repository, renamed_glob_git = repository_with_committed_file(
+        "checkout-stopped-cell-renames-a-glob-named-file")
+    (renamed_glob_repository / "ch[1].md").write_text("Committed bracket chapter.\n", encoding="utf-8")
+    (renamed_glob_repository / "ch1.md").write_text("Committed plain chapter, other words.\n", encoding="utf-8")
+    renamed_glob_git("add", "ch[1].md", "ch1.md")
+    renamed_glob_git("commit", "--quiet", "-m", "chapters")
+    (renamed_glob_repository / "ch1.md").write_text("The agent's uncommitted edit.\n", encoding="utf-8")
+    with mock.patch.object(grid_module.cell_common, "REPO_ROOT", renamed_glob_repository):
+        renamed_glob_baseline = grid_module.cell_common.working_tree_state()
+        renamed_glob_git("mv", "--", "ch[1].md", "moved.md")
+        (renamed_glob_repository / "ch[1].md").write_text("A reviewer's new file.\n", encoding="utf-8")
+        renamed_glob_lines = grid_module.stopped_cells_write_check_lines(
+            [scratch / "claude-hunt-deep.md"], renamed_glob_baseline, None, set())
+    renamed_glob_commands = [command for line in renamed_glob_lines for command in commands_in_line(line)]
+    for command in renamed_glob_commands:
+        subprocess.run(shlex.split(command), capture_output=True, text=True)
+    check("the undo given for a glob-named file renamed and re-created keeps a matching file's uncommitted edits",
+          len(renamed_glob_commands) == 2
+          and all(" restore " in command for command in renamed_glob_commands)
+          and (renamed_glob_repository / "ch[1].md").read_text(encoding="utf-8") == "Committed bracket chapter.\n"
+          and (renamed_glob_repository / "ch1.md").read_text(encoding="utf-8") == "The agent's uncommitted edit.\n"
+          and not (renamed_glob_repository / "moved.md").exists(), repr(renamed_glob_lines))
+
     # A glob character in a path must not widen the undo to a file with uncommitted edits.
     glob_repository, glob_git = repository_with_committed_file("checkout-stopped-cell-unstages-a-glob-named-file")
     (glob_repository / "chapter[1].md").write_text("Committed.\n", encoding="utf-8")
@@ -2183,39 +2249,50 @@ try:
 
     # --- A stray-write line from a timed-out cell reaches a piped reader at once ----
     # The grid's stdout is a pipe, so a line not flushed waits in the buffer while the
-    # other cells run on, for hours at the real timeout. The cell still running exits
-    # only once its poll has read the line from the pipe, or after a poll budget.
+    # other cells run on, for hours at the real timeout. The grid prints the line after
+    # the sweep that stops the cell, so the other cell's next poll must find it in the pipe.
     flush_directory = scratch / "stray-write-line-flushed-while-a-cell-runs"
     flush_directory.mkdir()
     timed_out_report = flush_directory / "claude-hunt-deep.md"
-    timed_out_attempt = grid_module.start_attempt(
-        [sys.executable, "-c", "import time; time.sleep(120)"],
-        timed_out_report, 1, flush_directory / "claude-hunt-deep.stderr.log")
-    timed_out_attempt = timed_out_attempt._replace(started_at=time.monotonic() - 3600)
+    timed_out_stderr = flush_directory / "claude-hunt-deep.stderr.log"
+    timed_out_stderr.write_text("", encoding="utf-8")
+
+    class TimedOutCell:
+        """A cell process that never exits by itself; the stubbed stop gives it a return code."""
+        returncode = None
+
+        def poll(self):
+            return self.returncode
+
+    def stop_timed_out_cell(process, **_):
+        process.returncode = -15
+
+    timed_out_attempt = grid_module.CellAttempt(
+        timed_out_report, ["unused"], 1, TimedOutCell(), timed_out_stderr, "", time.monotonic() - 3600)
     stray_line_for_the_pipe = "STRAY WRITE: notes-a-reviewer-left.md changed while the grid waited"
     read_end, write_end = os.pipe()
     os.set_blocking(read_end, False)
     piped_stdout = io.TextIOWrapper(io.BufferedWriter(io.FileIO(write_end, "w")), encoding="utf-8")
 
-    class StillRunningCellUntilTheLineIsRead:
-        """A cell process that runs until the grid's pipe holds the stray-write line."""
+    class CellThatReadsThePipeOnThePollAfterTheTimeOut:
+        """A cell process polled once in the sweep that stops the other cell, and ended by its next poll."""
         returncode = None
 
         def __init__(self, report_path):
             self.report_path = report_path
             self.read_so_far = b""
-            self.polls_left = 200
+            self.polls_made = 0
             self.line_seen_while_running = False
 
         def poll(self):
+            self.polls_made += 1
+            if self.polls_made == 1:
+                return None
             try:
                 self.read_so_far += os.read(read_end, 65536)
             except BlockingIOError:
                 pass
             self.line_seen_while_running = stray_line_for_the_pipe.encode() in self.read_so_far
-            self.polls_left -= 1
-            if not self.line_seen_while_running and self.polls_left > 0:
-                return None
             self.report_path.write_text("STUB REVIEW\n", encoding="utf-8")
             self.returncode = 0
             return 0
@@ -2223,20 +2300,19 @@ try:
     running_report = flush_directory / "codex-hunt-deep.md"
     running_stderr = flush_directory / "codex-hunt-deep.stderr.log"
     running_stderr.write_text("", encoding="utf-8")
-    running_process = StillRunningCellUntilTheLineIsRead(running_report)
+    running_process = CellThatReadsThePipeOnThePollAfterTheTimeOut(running_report)
     running_attempt = grid_module.CellAttempt(
         running_report, ["unused"], 1, running_process, running_stderr, "", time.monotonic())
     try:
         with mock.patch.object(grid_module, "stopped_cells_write_check_lines",
                                return_value=[stray_line_for_the_pipe]), \
+                mock.patch.object(grid_module.cell_common, "stop_process_tree", stop_timed_out_cell), \
                 mock.patch.object(sys, "stdout", piped_stdout):
             grid_module.wait_for_cells(
                 {timed_out_report: timed_out_attempt, running_report: running_attempt},
                 lambda: None, cell_poll_interval_seconds=0.01,
                 cell_attempt_timeout_seconds=60)
     finally:
-        if timed_out_attempt.process.returncode is None:
-            grid_module.cell_common.stop_process_tree(timed_out_attempt.process, grace_seconds=0.1)
         piped_stdout.close()
         os.close(read_end)
     check("a timed-out cell's stray-write line reaches the grid's piped stdout while another cell still runs",

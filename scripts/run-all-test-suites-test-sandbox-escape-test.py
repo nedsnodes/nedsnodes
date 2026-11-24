@@ -354,40 +354,42 @@ def listening_unix_sockets_of_this_machine():
 
 
 TARGET_NAME_PREFIX = "run-all-test-suites-escape-test-"
-# Every name run_probe gives what it makes outside its scratch directory, so a later run
-# can find what a run killed before its cleanup left.
-TARGET_NAME_PATTERN = re.compile(
-    r"\.?" + re.escape(TARGET_NAME_PREFIX) + r"(\d+)(-unlisted|-log|-probe|-late\.sock|\.sock)?")
-# run_probe's mkdtemp directory, whose 8 characters are mkdtemp's, made only in /tmp.
-TMP_TARGET_NAME_PATTERN = re.compile(re.escape(TARGET_NAME_PREFIX) + r"(\d+)-[a-z0-9_]{8}")
-# The main-worktree case's checkout, made only in the home directory's .cache.
-CACHE_TARGET_NAME_PATTERN = re.compile(re.escape(TARGET_NAME_PREFIX) + r"(\d+)-main-worktree")
+RUN_NAME = re.escape(TARGET_NAME_PREFIX) + r"(\d+)"
+# The probe tries to write this name in every directory it can reach.
+PROBE_FILE_NAME = RUN_NAME + "-probe"
+# The names run_probe gives what it makes in each directory outside its scratch directory,
+# so a later run can find what a killed run left and keep an unrelated entry of a like name.
+# Each alternative holds one group, the PID.
+HOME_TARGET_NAME_PATTERN = re.compile(rf"\.{RUN_NAME}-unlisted|{PROBE_FILE_NAME}")
+CACHE_TARGET_NAME_PATTERN = re.compile(
+    rf"{RUN_NAME}|{RUN_NAME}-log|{RUN_NAME}-main-worktree|{PROBE_FILE_NAME}")
+# The 8 characters are mkdtemp's.
+TMP_TARGET_NAME_PATTERN = re.compile(rf"{RUN_NAME}-[a-z0-9_]{{8}}|{PROBE_FILE_NAME}")
+TMUX_TARGET_NAME_PATTERN = re.compile(RUN_NAME)
+VAR_TMP_TARGET_NAME_PATTERN = re.compile(rf"{RUN_NAME}-late\.sock|{PROBE_FILE_NAME}")
+DEV_SHM_TARGET_NAME_PATTERN = re.compile(PROBE_FILE_NAME)
+RUNTIME_TARGET_NAME_PATTERN = re.compile(rf"{RUN_NAME}\.sock|{PROBE_FILE_NAME}")
 
 
-def remove_targets_left_by_ended_runs(directories, tmp_directory, cache_directory):
-    """Remove each target in directories named for a process that no longer runs, or for
-    this process, whose PID an ended run may have had; return the paths removed. A name
-    run_probe makes only in /tmp or only in .cache counts only in tmp_directory or
-    cache_directory.
+def remove_targets_left_by_ended_runs(target_name_pattern_by_directory):
+    """Remove each entry whose name its directory's pattern matches and whose PID is of a
+    process that no longer runs, or of this process, which an ended run may have had;
+    return the paths removed.
 
     The runner ends a suite past its time limit, or every suite of a stopped run, with
     SIGKILL, so run_probe's own cleanup never runs and the targets stay, among them a
     directory in the real home directory holding a planted credential."""
     removed = []
-    for directory in directories:
+    for directory, target_name_pattern in target_name_pattern_by_directory.items():
         try:
             entries = sorted(pathlib.Path(directory).iterdir())
         except FileNotFoundError:
             continue
         for path in entries:
-            matched = TARGET_NAME_PATTERN.fullmatch(path.name)
-            if not matched and pathlib.Path(directory) == pathlib.Path(tmp_directory):
-                matched = TMP_TARGET_NAME_PATTERN.fullmatch(path.name)
-            if not matched and pathlib.Path(directory) == pathlib.Path(cache_directory):
-                matched = CACHE_TARGET_NAME_PATTERN.fullmatch(path.name)
+            matched = target_name_pattern.fullmatch(path.name)
             if not matched:
                 continue
-            pid = int(matched.group(1))
+            pid = int(matched.group(matched.lastindex))
             if pid != os.getpid():
                 try:
                     os.kill(pid, 0)
@@ -451,10 +453,15 @@ def run_probe(scratch):
     home = pathlib.Path(runner.REAL_HOME_DIRECTORY_PATH_HIDDEN_BY_EMPTY_TMPFS_IN_TEST_SANDBOX)
     runtime = pathlib.Path(runner.XDG_RUNTIME_DIRECTORY_PATH_HIDDEN_BY_EMPTY_TMPFS_IN_TEST_SANDBOX)
     name = f"{TARGET_NAME_PREFIX}{os.getpid()}"
-    left = remove_targets_left_by_ended_runs(
-        [home, home / ".cache", "/tmp", pathlib.Path("/tmp") / f"tmux-{os.getuid()}",
-         "/var/tmp", "/dev/shm", runtime],
-        tmp_directory="/tmp", cache_directory=home / ".cache")
+    left = remove_targets_left_by_ended_runs({
+        home: HOME_TARGET_NAME_PATTERN,
+        home / ".cache": CACHE_TARGET_NAME_PATTERN,
+        "/tmp": TMP_TARGET_NAME_PATTERN,
+        pathlib.Path("/tmp") / f"tmux-{os.getuid()}": TMUX_TARGET_NAME_PATTERN,
+        "/var/tmp": VAR_TMP_TARGET_NAME_PATTERN,
+        "/dev/shm": DEV_SHM_TARGET_NAME_PATTERN,
+        runtime: RUNTIME_TARGET_NAME_PATTERN,
+    })
     if left:
         print(f"removed {len(left)} target(s) runs killed before their cleanup left: "
               + ", ".join(left))
@@ -985,9 +992,11 @@ def check_targets_of_a_killed_run_removed_by_the_next(scratch):
     """What a run killed with SIGKILL planted is removed by the next run's start, while a
     running run's targets and names this file never makes are kept."""
     home, cache, tmp = scratch / "home", scratch / "cache", scratch / "tmp"
+    var_tmp = scratch / "var-tmp"
     home.mkdir()
     cache.mkdir()
     tmp.mkdir()
+    var_tmp.mkdir()
     planter = subprocess.Popen(
         [sys.executable, "-c",
          "import os, pathlib, sys, time\n"
@@ -1021,15 +1030,17 @@ def check_targets_of_a_killed_run_removed_by_the_next(scratch):
         return real_kill(pid, signal_number)
 
     tmp_target = tmp / f"{killed}-abc_1234"
+    var_tmp_target = var_tmp / f"{killed}-late.sock"
     try:
         kept = [home / f".{TARGET_NAME_PREFIX}{running.pid}-unlisted",
                 home / f".{TARGET_NAME_PREFIX}{unsignalable_pid}-unlisted",
                 home / f".{killed}-unlisted-by-someone-else", cache / f"{TARGET_NAME_PREFIX}notes",
                 cache / f"{killed}-abc_1234", home / f"{killed}-main-worktree",
-                tmp / f"{killed}-main-worktree"]
+                tmp / f"{killed}-main-worktree", var_tmp / f"{killed}-log"]
         for path in kept:
             path.mkdir()
         tmp_target.mkdir()
+        var_tmp_target.mkdir()
         own = cache / f"{TARGET_NAME_PREFIX}{os.getpid()}-log"
         own.mkdir()
         check("a run killed with SIGKILL leaves its targets, among them a planted credential",
@@ -1037,17 +1048,20 @@ def check_targets_of_a_killed_run_removed_by_the_next(scratch):
               planted_line)
         os.kill = kill_refusing_the_unsignalable_pid
         try:
-            removed = remove_targets_left_by_ended_runs(
-                [home, cache, tmp, scratch / "missing"], tmp_directory=tmp, cache_directory=cache)
+            removed = remove_targets_left_by_ended_runs({
+                home: HOME_TARGET_NAME_PATTERN, cache: CACHE_TARGET_NAME_PATTERN,
+                tmp: TMP_TARGET_NAME_PATTERN, var_tmp: VAR_TMP_TARGET_NAME_PATTERN,
+                scratch / "missing": DEV_SHM_TARGET_NAME_PATTERN})
         finally:
             os.kill = real_kill
         check("the next run removes every target the killed run left, its mkdtemp directory "
               "in /tmp among them, and one named for its own PID",
-              not any(path.exists() for path in [*killed_paths, tmp_target, own])
-              and sorted(removed) == sorted(map(str, [*killed_paths, tmp_target, own])), removed)
+              not any(path.exists() for path in [*killed_paths, tmp_target, var_tmp_target, own])
+              and sorted(removed) == sorted(
+                  map(str, [*killed_paths, tmp_target, var_tmp_target, own])), removed)
         check("the next run keeps a running run's targets, one named for a process it may not "
-              "signal, names this file never makes, a mkdtemp-like name outside /tmp, and a "
-              "main-worktree name outside .cache",
+              "signal, names this file never makes, a mkdtemp-like name outside /tmp, and "
+              "main-worktree and log names outside .cache",
               all(path.exists() for path in kept))
 
         # Another run removes the same target between this run's listing and its removal.
@@ -1061,8 +1075,7 @@ def check_targets_of_a_killed_run_removed_by_the_next(scratch):
 
         shutil.rmtree = rmtree_after_another_run_removed_it
         try:
-            raced_removed = remove_targets_left_by_ended_runs(
-                [cache], tmp_directory=tmp, cache_directory=cache)
+            raced_removed = remove_targets_left_by_ended_runs({cache: CACHE_TARGET_NAME_PATTERN})
             raised = None
         except OSError as error:
             raced_removed, raised = [], error
