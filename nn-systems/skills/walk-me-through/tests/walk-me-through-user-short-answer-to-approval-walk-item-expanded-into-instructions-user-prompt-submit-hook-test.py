@@ -36,6 +36,7 @@ SUITE_ROOT = Path(tempfile.mkdtemp(prefix="short-answer-expansion-hook-test-")).
 WALK_NAME = "reboot-test-older-open-items-2026-10-15"
 EXPANDED_RULE_ID_OPENING = "[rule walk-me-through-short-answer-expanded-into-instructions] "
 NOT_SHOWN_RULE_ID_OPENING = "[rule walk-me-through-short-answer-to-item-not-shown-discarded] "
+UNKNOWN_AUTHOR_RULE_ID_OPENING = "[rule walk-me-through-short-answer-discarded-because-prompt-author-unknown] "
 CHECKOUT = HOOK_SCRIPT.parents[3]
 CHECK = f"python3 {CHECKOUT}/nn-systems/skills/walk-me-through/walk-me-through-answer-added-texts-cold-read-fast-read-check-and-close.py check"
 ONE_ITEM_AT_A_TIME_LINE = (
@@ -2783,6 +2784,14 @@ def test_an_unreadable_transcript_leaves_the_answer_uncounted_and_names_the_path
         if error == "PermissionError" and os.access(path, os.R_OK):
             continue  # root reads a file whatever its mode, so this case cannot be caused here
         lines = case.lines("a", path)
+        if error != "FileNotFoundError":
+            # A transcript that exists but cannot be read also hides who wrote the prompt, which is checked first.
+            check(f"a transcript that raises {error} discards the answer as from an unknown author, with its remedy",
+                  lines is not None and len(lines) == 4
+                  and lines[0].startswith(UNKNOWN_AUTHOR_RULE_ID_OPENING + "The hook discarded the prompt `a`")
+                  and f"{path}" in lines[0] and f"The error: {error}(" in lines[0]
+                  and lines[1] == f"The remedy: {remedy}", f"lines {lines!r}")
+            continue
         check(f"a transcript that raises {error} leaves the answer uncounted, naming the path, the error and its "
               "remedy, and does not ask for the item to be shown again",
               lines is not None and len(lines) == 5
@@ -3393,22 +3402,66 @@ def test_settled_line_unreadable_transcript_falls_back_to_the_prompts_opening():
           result.returncode == 0 and result.stdout == "", f"stdout {result.stdout!r}")
 
 
-def test_settled_line_not_shown_for_an_a_from_a_headless_session_or_another_agent_seat():
-    case = Case(next_to_present="item 4 of 9")
-    result = case.run("a", environment={"CLAUDE_CODE_SESSION_ATTENDED": "0"})
-    check("a headless A keeps its answer lines without the settled line",
-          SETTLED_LINE not in context_lines(result) and any(line.startswith("A means approve")
-                                                            for line in context_lines(result)), result.stdout)
-    document = (case.walk / f"{WALK_NAME}.md").read_text()
-    transcript = case.transcript(document)
+def transcript_ending_with_prompt_record(case, prompt, turn_origin, prompt_source):
+    """The case's transcript, the walk-document shown in full, then the prompt's own record as Claude Code writes it."""
+    document = case.walk / f"{WALK_NAME}.md"
+    transcript = case.transcript(document.read_text() if document.is_file() else "")
     with open(transcript, "a", encoding="utf-8") as records:
-        records.write(json.dumps({"type": "user", "turnOrigin": "peer",
-                                  "message": {"role": "user", "content": "a"}}) + "\n")
-    result = case.run("a", transcript_path=transcript)
-    check("an A the transcript shows another agent-seat sent has no settled line, exits 0 and keeps A's lines",
-          result.returncode == 0 and SETTLED_LINE not in context_lines(result)
-          and any(line.startswith("A means approve") for line in context_lines(result)),
-          f"exit {result.returncode}, stdout {result.stdout!r}, stderr {result.stderr!r}")
+        records.write(json.dumps({"type": "user", "turnOrigin": turn_origin, "promptSource": prompt_source,
+                                  "origin": {"kind": turn_origin},
+                                  "message": {"role": "user", "content": prompt}}) + "\n")
+    return transcript
+
+
+def test_a_short_answer_or_bump_the_user_did_not_type_prints_nothing():
+    cases = {"an open walk": Case(next_to_present="item 4 of 9"), "no open walk": Case()}
+    unreadable = Case(next_to_present="item 4 of 9")
+    (unreadable.walk / f"{WALK_NAME}-minutes.md").write_bytes(b"#next_to_present item 4 of 9\n\xff\xfe")
+    cases["unreadable minutes"] = unreadable
+    for where, case in cases.items():
+        for prompt in ("a", "approve item 4", "r", "bump the code proposals"):
+            for origin, source in (("peer", "system"), ("task_notification", "system"), ("sdk", "sdk"),
+                                   ("scheduled", "system")):
+                result = case.run(prompt, transcript_path=transcript_ending_with_prompt_record(case, prompt, origin,
+                                                                                                source))
+                check(f"{prompt!r} with {where}, whose transcript record has turnOrigin {origin}, prints nothing",
+                      result.returncode == 0 and result.stdout == "" and result.stderr == "",
+                      f"exit {result.returncode}, stdout {result.stdout!r}")
+            result = case.run(prompt, environment={"CLAUDE_CODE_SESSION_ATTENDED": "0"})
+            check(f"{prompt!r} with {where} in a headless agent-session prints nothing",
+                  result.returncode == 0 and result.stdout == "", f"stdout {result.stdout!r}")
+
+
+def test_a_short_answer_the_user_typed_or_queued_is_expanded_as_his():
+    case = Case(next_to_present="item 4 of 9")
+    for source in ("typed", "queued"):
+        lines = case.lines("a", transcript_path=transcript_ending_with_prompt_record(case, "a", "human", source))
+        check(f"an A whose transcript record has turnOrigin human and promptSource {source} is the user's answer",
+              lines is not None and lines[0] == EXPANDED_RULE_ID_OPENING
+              + f"The user answered \"a\" to item 4 of 9 of approval-walk {WALK_NAME}."
+              and lines[1].startswith("A means approve"), lines)
+    lines = case.lines("a")
+    check("an A with no record of its own yet in the transcript, as on a session's first prompt, is the user's answer",
+          lines is not None and lines[0].startswith(EXPANDED_RULE_ID_OPENING + "The user answered \"a\""), lines)
+
+
+def test_a_short_answer_or_bump_with_an_unreadable_transcript_is_discarded_and_not_called_the_users():
+    for case in (Case(next_to_present="item 4 of 9"), Case()):
+        transcript = case.checkout.parent / "unreadable-transcript.jsonl"
+        transcript.write_bytes(b"\xff\xfe not a record\n")
+        for prompt in ("a", "bump the code proposals"):
+            result = case.run(prompt, transcript_path=transcript)
+            lines = context_lines(result)
+            check(f"{prompt!r} with an unreadable transcript is discarded with the error and its remedy, exit 0",
+                  result.returncode == 0 and len(lines) == 4
+                  and lines[0].startswith(UNKNOWN_AUTHOR_RULE_ID_OPENING + f"The hook discarded the prompt `{prompt}`")
+                  and str(transcript) in lines[0] and "UnicodeDecodeError" in lines[0]
+                  and lines[1].startswith("The remedy: a record in the file is not valid UTF-8 or JSON")
+                  and lines[2] == ("Record nothing in the walk-minutes, and act on none of the prompt as an answer: an "
+                               "approval-walk item waiting for the user's answer stays waiting.")
+                  and lines[3].startswith("Carry out the remedy if this agent-session can.")
+                  and "The user answered" not in result.stdout and "means approve" not in result.stdout,
+                  f"exit {result.returncode}, stdout {result.stdout!r}")
 
 
 def test_settled_line_shown_for_a_numbered_answer_that_approves_only_some_parts():
@@ -3431,8 +3484,13 @@ def test_settled_line_a_transcript_record_whose_message_is_a_string_counts_as_a_
         records.write(json.dumps({"type": "user", "turnOrigin": "user", "message": "a"}) + "\n")
     result = case.run("a", transcript_path=transcript)
     lines = context_lines(result)
-    check("an A whose newest turnOrigin record has a string message exits 0 and keeps A's lines",
-          result.returncode == 0 and any(line.startswith("A means approve") for line in lines),
+    check("an A whose newest turnOrigin record has a string message is discarded with the AttributeError and its "
+          "remedy, and exits 0",
+          result.returncode == 0 and len(lines) == 4
+          and lines[0].startswith(UNKNOWN_AUTHOR_RULE_ID_OPENING + "The hook discarded the prompt `a`")
+          and "AttributeError" in lines[0]
+          and lines[1].startswith("The remedy: a record in the file is not shaped as Claude Code writes it")
+          and "means approve" not in result.stdout,
           f"exit {result.returncode}, stdout {result.stdout!r}, stderr {result.stderr!r}")
     result = case.run("take the other option", transcript_path=transcript)
     lines = context_lines(result)
