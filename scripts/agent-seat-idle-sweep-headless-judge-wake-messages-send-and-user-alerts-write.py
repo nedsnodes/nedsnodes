@@ -37,7 +37,11 @@ Each invocation, under a lock that keeps two from overlapping:
    promises to act after an event and hold sentences ends when the agent-seat has recorded, after each
    message, one task per sentence it and the later messages named, a message whose send failed
    included, each with a TaskCreate or TaskUpdate call whose result
-   succeeded and that sets `metadata.prerequisites` or `addBlockedBy`. A message starts a wait, unless a wait is
+   succeeded and that sets `metadata.prerequisites` or `addBlockedBy`. Every rule 2 and rule 5
+   message and every escalation offers, before its do-not-reply sentence, the command
+   `python3 scripts/agent-seat-idle-sweep-received-wake-message-mark-irrelevant-by-message-id.py
+   <message_id>` with the message's own id filled in; any wait ends once the agent-seat has run
+   that command with the id of a message sent on the wait. A message starts a wait, unless a wait is
    already open: 15 minutes later, if the agent-seat is idle, code sends the escalation, which
    quotes the message that opened the wait and each rule 2 message whose send on the open wait
    failed, and 15 minutes after that writes the user a user-alert, once, which names the sentences
@@ -63,7 +67,8 @@ agent-seat's step, and the lock makes the next minute's invocation skip, until i
 does not end when the agent-seat only replies to a message in text; it ends when the agent-seat
 makes a tool call after the nudge that opened the wait or has nothing to do (rule 4), in either
 case only when no rule 2 message was sent on the wait, makes the task call a rule 2 message
-asked for, as step 5 says, stops at a usage limit (rule 1), starts a
+asked for, as step 5 says, marks a message sent on the wait irrelevant, as step 5 says, stops at a
+usage limit (rule 1), starts a
 new agent-session, or spends tokens after the user was told. So an agent-seat that answers a
 rule 3 or rule 5 message with a tool call and goes idle again is nudged again only about something
 new, or once the user has typed, and is not escalated; a command that hangs after the one
@@ -201,17 +206,33 @@ ACCOUNT_NOTICE_TEXT = (
     "LAN, for approval-walk item pages and other pages agents publish to claude.ai that only show "
     "text](https://github.com/nedsnodes/nedsnodes/issues/2175) covers serving such pages from "
     "ned-box.")
+# Added, with the message's own id, to every rule 2 and rule 5 message and every escalation, before
+# DO_NOT_REPLY_SENTENCE.
+MARK_IRRELEVANT_TEXT = (
+    "If this reminder does not help, for example because the work is done, a task, GHI or monitor "
+    "already tracks it, or you will get a message when it ends, run `python3 "
+    + verdicts_print.AGENT_SEAT_IDLE_SWEEP_RECEIVED_WAKE_MESSAGE_MARK_IRRELEVANT_PROGRAM_PATH
+    + " {message_id}`; the idle sweep then stops this reminder.")
+# Added after a rule 5 message that names running work.
+RUNNING_WORK_TRACKED_AUTOMATICALLY_TEXT = (
+    "A background command or subagent you started tells you itself when it ends. If you are "
+    "waiting for a pull request, stop any polling command and record a task with prerequisites "
+    "[{\"pr_merged\": <number>}], which raises the task when it merges.")
 UNBACKED_SENTENCE_LINES = {
     fields.ANNOUNCED_ACTION: ("You said \"{sentence}\" {minutes} minutes ago and have not done it. "
                               "Do it now, or tell the user why not."),
     fields.PROMISE_AFTER_EVENT: ("You promised \"{sentence}\". Record it as a task whose "
-                                 "prerequisites name the event, or tell the user you take the "
-                                 "promise back."),
+                                 "prerequisites name the event, such as [{{\"pr_merged\": "
+                                 "<number>}}] or [{{\"issue_closed\": <number>}}], which raises "
+                                 "the task when it happens; or tell the user you take the promise "
+                                 "back."),
     fields.STANDING_RULE: ("You said \"{sentence}\". Back it with the hook or test that enforces it, "
                            "or a task to build one and a proposal to the user, or tell the user you "
                            "take it back."),
     fields.HOLD: ("You said \"{sentence}\". Record a task whose prerequisites name what releases the "
-                  "hold, or tell the user you are no longer holding."),
+                  "hold, such as [{{\"pr_merged\": <number>}}] or [{{\"issue_closed\": <number>}}], "
+                  "which raises the task when it happens; or tell the user you are no longer "
+                  "holding."),
 }
 # The kinds of sentence whose message asks for a task call that code can see: one that sets
 # prerequisites or addBlockedBy. An announced action or a standing rule only the judge finds done.
@@ -231,6 +252,8 @@ PROMISE_MESSAGES = "promise_messages"
 PROMISE_MESSAGE_SEND_FAILED = "promise_message_send_failed"
 # On an open wait: the rule 2 messages whose send on it failed, [{"at", "kinds", "sentences", "text"}].
 FAILED_PROMISE_MESSAGES = "failed_promise_messages"
+# On an open wait: the message_id of each nudge, rule 2 message and escalation sent on it.
+MESSAGE_IDS = "message_ids"
 
 SEND_ANSWER_SCHEMA = {"type": "object", "required": ["sent", "reason"],
                       "properties": {"sent": {"type": "boolean"}, "reason": {"type": "string"}}}
@@ -419,9 +442,12 @@ class SweepLog:
         # step.
         owed, owed_by = False, None
         for event in self.of_seat(seat, "wait_step", "wait_ended", PROMISE_MESSAGE,
-                                  PROMISE_MESSAGE_SEND_FAILED):
+                                  PROMISE_MESSAGE_SEND_FAILED, "message_sent"):
             invocation = event.get("agent_seat_idle_sweep_invocation_started_at")
-            if event["event"] == "wait_ended":
+            if event["event"] == "message_sent":
+                if wait is not None and event.get("step") in (NUDGE, ESCALATE):
+                    wait[MESSAGE_IDS].append(event.get("message_id"))
+            elif event["event"] == "wait_ended":
                 wait, owed = None, False
             elif event["event"] == PROMISE_MESSAGE_SEND_FAILED:
                 if wait is not None:
@@ -444,7 +470,7 @@ class SweepLog:
                     wait = {"session_id": event["session_id"],
                             "first_idle_at": event["first_idle_at"], NUDGE: event["at"],
                             "nudge_text": event["text"], PROMISE_MESSAGES: [],
-                            FAILED_PROMISE_MESSAGES: []}
+                            FAILED_PROMISE_MESSAGES: [], MESSAGE_IDS: []}
                     owed = False
                     if event.get("rule") != 2:
                         continue
@@ -922,14 +948,18 @@ class Sweep:
                                self.timeout_seconds)
         return text, outcome, started_at
 
-    def send(self, seat, verdict, text, step):
-        """Send code's text to one agent-seat; log the send for the delivery check. Returns the
-        message_sent event, or False when the send failed."""
+    def send(self, seat, verdict, text, step, mark_irrelevant_offered=False):
+        """Send code's text to one agent-seat; log the send for the delivery check. With
+        mark_irrelevant_offered, the text first gets MARK_IRRELEVANT_TEXT with the message's own id.
+        Returns the message_sent event, or False when the send failed."""
         ref = list_agents_tool_entry_ref_of_running_agent_session_id(verdict.get(fields.SESSION_ID))
         if ref is None:
             self.entry_not_found(seat, f"send its {step} message", verdict.get(fields.SESSION_ID))
             return False
         refs = {seat: ref}
+        message_id = uuid.uuid4().hex
+        if mark_irrelevant_offered:
+            text = f"{text}\n\n{MARK_IRRELEVANT_TEXT.format(message_id=message_id)}"
         text, outcome, started_at = self.send_wake_message(refs, text)
         if outcome.error:
             self.headless_failed(seat, f"send its {step} message", outcome.error,
@@ -941,13 +971,13 @@ class Sweep:
             self.headless_failed(seat, f"send its {step} message", "; ".join(problems), SENDS_WRONG)
             return False
         return self.message_sent(seat, verdict, text_sent_to(outcome, refs, seat, text), step,
-                                 started_at)
+                                 started_at, message_id)
 
-    def message_sent(self, seat, verdict, text, step, started_at):
+    def message_sent(self, seat, verdict, text, step, started_at, message_id):
         # The delivery check compares transcript times with the send's start: a sender may run on
         # for minutes after its SendMessage, and the record is written when it ends.
         return self.record({"event": "message_sent", "agent_seat": seat, "step": step, "text": text,
-                            "send_started_at": iso(started_at), "message_id": uuid.uuid4().hex,
+                            "send_started_at": iso(started_at), "message_id": message_id,
                             "session_id": verdict.get(fields.SESSION_ID),
                             "transcript_path": verdict.get(fields.TRANSCRIPT_PATH)})
 
@@ -997,7 +1027,7 @@ class Sweep:
         # its send succeeded or not.
         for seat in refs:
             self.message_sent(seat, verdicts[seat], text_sent_to(outcome, refs, seat, text),
-                              ACCOUNT_NOTICE, started_at)
+                              ACCOUNT_NOTICE, started_at, uuid.uuid4().hex)
             limit = verdicts[seat].get(fields.USAGE_LIMIT)
             if verdicts[seat].get(fields.RULE) == 1 and limit:
                 self.record({"event": "limit_wake", "agent_seat": seat,
@@ -1090,6 +1120,12 @@ class Sweep:
                 self.end_wait(seat, "a usage limit")
             self.usage_limit(seat, verdict)
             return
+        marked = [message_id for message_id in wait[MESSAGE_IDS] if message_id in set(
+            verdict.get(fields.IDLE_SWEEP_REMINDER_MESSAGE_IDS_MARKED_IRRELEVANT) or [])] if wait else []
+        if marked:
+            self.end_wait(seat, "it marked a reminder sent on the wait irrelevant",
+                          message_ids=marked)
+            wait = None
         # A tool call does not settle a promise a rule 2 message named, as rule 4 below does not.
         worked_at = verdict.get(fields.LAST_TOOL_CALL_AT)
         if (wait and PROMISE not in wait and worked_at
@@ -1167,14 +1203,14 @@ class Sweep:
                 self.start_wait(seat, verdict, stretch, promise_text, 2)
                 self.record({"event": PROMISE_MESSAGE, "agent_seat": seat, "kinds": promise_kinds,
                              "sentences": promise_sentences})
-                self.send(seat, verdict, promise_text, NUDGE)
+                self.send(seat, verdict, promise_text, NUDGE, mark_irrelevant_offered=True)
             else:
                 # The promise step is logged whether or not the send succeeds: its sentences are
                 # already logged as checked, so only the wait's escalation and user-alert can
                 # still report the promise, and they read a failed message from its own event.
                 if PROMISE not in wait:
                     self.record({"event": "wait_step", "agent_seat": seat, "step": PROMISE})
-                sent = self.send(seat, verdict, promise_text, NUDGE)
+                sent = self.send(seat, verdict, promise_text, NUDGE, mark_irrelevant_offered=True)
                 if sent:
                     self.record({"event": PROMISE_MESSAGE, "agent_seat": seat,
                                  "kinds": promise_kinds, "sentences": promise_sentences,
@@ -1230,7 +1266,7 @@ class Sweep:
                         quoted_text=quoted(message["text"]))
                     for message in failed)
             self.record({"event": "wait_step", "agent_seat": seat, "step": ESCALATE, "text": text})
-            self.send(seat, verdict, text, ESCALATE)
+            self.send(seat, verdict, text, ESCALATE, mark_irrelevant_offered=True)
 
     def nudge(self, seat, verdict, rule, text, stretch):
         if rule == 3:
@@ -1344,8 +1380,11 @@ class Sweep:
         send = not problem and answer["send"]
         sent = False
         if send:
-            self.start_wait(seat, verdict, stretch, answer["message"], 5)
-            sent = self.send(seat, verdict, answer["message"], NUDGE)
+            message = answer["message"]
+            if running_work_named_in(facts, message):
+                message = f"{message}\n\n{RUNNING_WORK_TRACKED_AUTOMATICALLY_TEXT}"
+            self.start_wait(seat, verdict, stretch, message, 5)
+            sent = self.send(seat, verdict, message, NUDGE, mark_irrelevant_offered=True)
             self.reminder_sent(seat, verdict, sent, [open_task_subject(task_id)
                                                      for task_id in answer[OPEN_TASK_IDS_RAISED]])
         # Work counts as asked about only once a message reached the agent-seat: a failed send

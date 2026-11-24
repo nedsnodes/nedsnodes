@@ -1077,9 +1077,31 @@ try:
     check("the newest tool call of the agent-session's own transcript is its last tool call, and a "
           "later text-only reply does not move it",
           verdicts["alpha"].get("last_tool_call_at") == "2026-11-02T11:45:00Z", verdicts["alpha"])
+    marked_id, other_id = "3f9a1c0e5b7d4e2a9c8b1f6d0e4a7c3b", "aaaabbbbccccddddeeeeffff00001111"
+    mark_program = "scripts/agent-seat-idle-sweep-received-wake-message-mark-irrelevant-by-message-id.py"
+    machine = Machine()
+    machine.seat("alpha", [user("go"),
+                           assistant(tool=("Bash", {"command": f"python3 {mark_program} {marked_id}"}),
+                                     at="2026-11-02T11:40:00Z", tool_id="m1"),
+                           assistant(tool=("Bash", {"command": f"cat {mark_program}"}),
+                                     at="2026-11-02T11:41:00Z", tool_id="m2"),
+                           assistant(tool=("Read", {"file_path": f"{mark_program} {other_id}"}),
+                                     at="2026-11-02T11:42:00Z", tool_id="m3"),
+                           assistant(tool=("Bash", {"command": f"cd /x && python3 {mark_program} "
+                                                                f"'{other_id}'"}),
+                                     at="2026-11-02T11:43:00Z", tool_id="m4"),
+                           assistant("Done.", at="2026-11-02T11:48:00Z"), turn_end()])
+    _, verdicts, _ = machine.run()
+    check("each Bash call that runs the mark-irrelevant program with a message_id lists that id, "
+          "oldest first; a Bash call naming the program with no id, and another tool's call, do not",
+          verdicts["alpha"].get("idle_sweep_reminder_message_ids_marked_irrelevant")
+          == [marked_id, other_id], verdicts["alpha"])
     machine = Machine()
     machine.seat("alpha", IDLE_TURN)
     _, verdicts, _ = machine.run()
+    check("an agent-session with no tool call: no reminder marked irrelevant",
+          verdicts["alpha"].get("idle_sweep_reminder_message_ids_marked_irrelevant") == [],
+          verdicts["alpha"])
     check("an agent-session with no tool call: last tool call null",
           "last_tool_call_at" in verdicts["alpha"] and verdicts["alpha"]["last_tool_call_at"] is None,
           verdicts["alpha"])
