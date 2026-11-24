@@ -1549,7 +1549,8 @@ def item_numbers_an_opening_names(words):
     Not handled: `Item 5, 2 things changed`, `Item 5:foo` and `Item 5,foo` name no item, so last_showing_message does
     not end another item's shown text at them, though message_copy_of_item can still cut its copy at such a heading;
     and a deeper heading that only mentions items, as `### Items 2 and 3 are prerequisites`, names them, so it ends the
-    shown text of an item that holds it and that it does not name."""
+    shown text of the item that holds it when this function reads a number from the holder's heading, as from `Item 4:
+    x` but not `Item 4 of 9: x`, and the deeper heading names neither that number nor one of its sub-steps."""
     walk_finder = load_walk_finder()
     opening = walk_finder.ITEM_LABEL_WITHOUT_COUNT.match(words)
     if not opening:
