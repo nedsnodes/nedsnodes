@@ -430,8 +430,7 @@ def remove_targets_left_by_ended_runs(target_name_pattern_by_directory):
             is_the_type_run_probe_makes = file_type_test_for_what_run_probe_makes(
                 path, target_name_pattern)
             # Another run starting at the same time may remove the same path first, or put a
-            # directory where this run found a socket or file, which unlink then refuses:
-            # Linux with EISDIR, macOS with EPERM.
+            # directory where this run found a socket or file, which unlink then refuses.
             try:
                 if not is_the_type_run_probe_makes(os.lstat(path).st_mode):
                     continue
@@ -441,10 +440,6 @@ def remove_targets_left_by_ended_runs(target_name_pattern_by_directory):
                     path.unlink()
             except (FileNotFoundError, IsADirectoryError):
                 continue
-            except PermissionError:
-                if os.path.isdir(path) and not os.path.islink(path):
-                    continue
-                raise
             removed.append(str(path))
     return removed
 
@@ -1141,35 +1136,22 @@ def check_targets_of_a_killed_run_removed_by_the_next(scratch):
         regular_file_status = os.lstat(__file__)
         real_lstat = os.lstat
 
+        real_unlink = pathlib.Path.unlink
+
         def lstat_seeing_a_file_where_a_directory_now_is(path, *arguments, **keywords):
             if pathlib.Path(path) == replaced:
                 return regular_file_status
             return real_lstat(path, *arguments, **keywords)
 
-        os.lstat = lstat_seeing_a_file_where_a_directory_now_is
-        try:
-            replaced_removed = remove_targets_left_by_ended_runs(
-                {replaced.parent: re.compile(PROBE_FILE_NAME)})
-            raised = None
-        except OSError as error:
-            replaced_removed, raised = [], error
-        finally:
-            os.lstat = real_lstat
-        check("the next run never removes recursively a directory put where it found a probe "
-              "file",
-              raised is None and (replaced / "kept.txt").exists()
-              and str(replaced) not in replaced_removed, (raised, replaced_removed))
-
-        # The same race where unlink refuses a directory as macOS does, with EPERM.
-        real_unlink = pathlib.Path.unlink
-
-        def unlink_refusing_a_directory_as_macos_does(self, *arguments, **keywords):
+        # Linux's error, injected, since macOS refuses with EPERM, which the sweep must not
+        # swallow.
+        def unlink_refusing_a_directory_as_linux_does(self, *arguments, **keywords):
             if self == replaced:
-                raise PermissionError(errno.EPERM, os.strerror(errno.EPERM), str(self))
+                raise IsADirectoryError(errno.EISDIR, os.strerror(errno.EISDIR), str(self))
             return real_unlink(self, *arguments, **keywords)
 
         os.lstat = lstat_seeing_a_file_where_a_directory_now_is
-        pathlib.Path.unlink = unlink_refusing_a_directory_as_macos_does
+        pathlib.Path.unlink = unlink_refusing_a_directory_as_linux_does
         try:
             replaced_removed = remove_targets_left_by_ended_runs(
                 {replaced.parent: re.compile(PROBE_FILE_NAME)})
@@ -1179,10 +1161,29 @@ def check_targets_of_a_killed_run_removed_by_the_next(scratch):
         finally:
             os.lstat = real_lstat
             pathlib.Path.unlink = real_unlink
-        check("the next run passes over a directory put where it found a probe file when "
-              "unlink refuses it with EPERM, as on macOS",
+        check("the next run never removes recursively a directory put where it found a probe "
+              "file",
               raised is None and (replaced / "kept.txt").exists()
               and str(replaced) not in replaced_removed, (raised, replaced_removed))
+
+        # The sweep cannot remove a stale directory a killed run left.
+        unremovable = cache / f"{killed}-log"
+        unremovable.mkdir()
+
+        def rmtree_refused(path, *arguments, **keywords):
+            raise PermissionError(errno.EACCES, os.strerror(errno.EACCES), str(path))
+
+        shutil.rmtree = rmtree_refused
+        try:
+            remove_targets_left_by_ended_runs({cache: CACHE_TARGET_NAME_PATTERN})
+            raised = None
+        except PermissionError as error:
+            raised = error
+        finally:
+            shutil.rmtree = real_rmtree
+        check("the next run fails when it cannot remove a stale directory a killed run left",
+              raised is not None, raised)
+        real_rmtree(unremovable)
         shutil.rmtree(replaced)
 
         # The map is built as run_probe builds it, from a simulated writable-directory scan.
