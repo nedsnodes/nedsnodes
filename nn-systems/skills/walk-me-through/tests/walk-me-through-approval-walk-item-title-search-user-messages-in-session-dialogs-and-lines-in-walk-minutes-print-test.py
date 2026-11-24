@@ -13,11 +13,11 @@ from pathlib import Path
 
 PROGRAM = (Path(__file__).resolve().parents[1]
            / "walk-me-through-approval-walk-item-title-search-user-messages-in-session-dialogs-and-lines-in-walk-minutes-print.py")
-LOG_STORE_ROOT_OVERRIDE_ENVIRONMENT_VARIABLE = "LOG_STORE_PAST_DISCUSSIONS_SEARCH_LOG_STORE_ROOT_OVERRIDE"
-RIPGREP_OVERRIDE_ENVIRONMENT_VARIABLE = "LOG_STORE_PAST_DISCUSSIONS_SEARCH_RIPGREP_PROGRAM_OVERRIDE"
+LOG_STORE_PAST_DISCUSSIONS_SEARCH_ROOT_OVERRIDE_ENVIRONMENT_VARIABLE = "LOG_STORE_PAST_DISCUSSIONS_SEARCH_LOG_STORE_ROOT_OVERRIDE"
+LOG_STORE_PAST_DISCUSSIONS_SEARCH_RIPGREP_OVERRIDE_ENVIRONMENT_VARIABLE = "LOG_STORE_PAST_DISCUSSIONS_SEARCH_RIPGREP_PROGRAM_OVERRIDE"
 AGENT_HOMES_DIRECTORY_OVERRIDE_ENVIRONMENT_VARIABLE = "WALK_ME_THROUGH_AGENT_HOMES_DIRECTORY_OVERRIDE"
-THIS_MACHINE_OVERRIDE_ENVIRONMENT_VARIABLE = "LOG_STORE_PAST_DISCUSSIONS_SEARCH_THIS_MACHINE_OVERRIDE"
-SSH_OVERRIDE_ENVIRONMENT_VARIABLE = "LOG_STORE_PAST_DISCUSSIONS_SEARCH_SSH_PROGRAM_OVERRIDE"
+LOG_STORE_PAST_DISCUSSIONS_SEARCH_THIS_MACHINE_OVERRIDE_ENVIRONMENT_VARIABLE = "LOG_STORE_PAST_DISCUSSIONS_SEARCH_THIS_MACHINE_OVERRIDE"
+LOG_STORE_PAST_DISCUSSIONS_SEARCH_SSH_OVERRIDE_ENVIRONMENT_VARIABLE = "LOG_STORE_PAST_DISCUSSIONS_SEARCH_SSH_PROGRAM_OVERRIDE"
 ITEM_6_TITLE = "How long the successor looks for a speed-up"
 RULING = ("I had a discussion on this topic - check the session dialogs. I thought we agree to split tasks into "
           "those that could and should be backgrounded and others that should not")
@@ -80,7 +80,7 @@ class Store:
 
     def run(self, *words, environment=None):
         environment = dict(os.environ, **(environment or {}))
-        environment[LOG_STORE_ROOT_OVERRIDE_ENVIRONMENT_VARIABLE] = str(self.log_store)
+        environment[LOG_STORE_PAST_DISCUSSIONS_SEARCH_ROOT_OVERRIDE_ENVIRONMENT_VARIABLE] = str(self.log_store)
         environment[AGENT_HOMES_DIRECTORY_OVERRIDE_ENVIRONMENT_VARIABLE] = str(self.agent_homes)
         return subprocess.run([sys.executable, str(PROGRAM), *words], capture_output=True, text=True,
                               env=environment)
@@ -157,7 +157,7 @@ def test_nothing_found_exits_1(root):
 def test_ripgrep_that_cannot_run_is_a_failure(root):
     store, _, _ = item_6_store(root)
     result = store.run("--title", ITEM_6_TITLE, "--item-number", "6",
-                       environment={RIPGREP_OVERRIDE_ENVIRONMENT_VARIABLE: str(root / "no-such-rg")})
+                       environment={LOG_STORE_PAST_DISCUSSIONS_SEARCH_RIPGREP_OVERRIDE_ENVIRONMENT_VARIABLE: str(root / "no-such-rg")})
     check("a ripgrep that cannot be run prints a FAILED line and exits 2",
           result.returncode == 2 and result.stderr.startswith("FAILED: ripgrep (")
           and "is not installed" in result.stderr,
@@ -171,7 +171,7 @@ def test_a_dialog_whose_transcript_is_gone_is_named_for_the_agent_to_read(root):
     check("a dialog naming the title whose transcript is not in the log-store is named for the agent to read, "
           "and is no failure",
           result.returncode == 0 and result.stderr == ""
-          and f"its transcript " in result.stdout and f'read its "## User" turns in {dialog} yourself.' in result.stdout,
+          and "its transcript " in result.stdout and f'read its "## User" turns in {dialog} yourself.' in result.stdout,
           result.stdout + result.stderr)
 
 
@@ -202,7 +202,7 @@ def test_no_log_store_on_ned_box_is_a_failure_and_from_another_machine_runs_ned_
     store = Store(root)
     shutil.rmtree(store.log_store)
     on_ned_box = store.run("--title", ITEM_6_TITLE, "--item-number", "6",
-                           environment={THIS_MACHINE_OVERRIDE_ENVIRONMENT_VARIABLE: "ned-box"})
+                           environment={LOG_STORE_PAST_DISCUSSIONS_SEARCH_THIS_MACHINE_OVERRIDE_ENVIRONMENT_VARIABLE: "ned-box"})
     check("no log-store on ned-box prints a FAILED line and exits 2",
           on_ned_box.returncode == 2 and on_ned_box.stderr.startswith("FAILED: there is no log-store at "),
           on_ned_box.stdout + on_ned_box.stderr)
@@ -212,8 +212,8 @@ def test_no_log_store_on_ned_box_is_a_failure_and_from_another_machine_runs_ned_
                    f"open({str(calls)!r}, 'w').write(json.dumps(sys.argv[1:]))\nprint('from ned-box')\n")
     ssh.chmod(0o755)
     on_mac = store.run("--title", ITEM_6_TITLE, "--item-number", "6",
-                       environment={THIS_MACHINE_OVERRIDE_ENVIRONMENT_VARIABLE: "mac",
-                                    SSH_OVERRIDE_ENVIRONMENT_VARIABLE: str(ssh)})
+                       environment={LOG_STORE_PAST_DISCUSSIONS_SEARCH_THIS_MACHINE_OVERRIDE_ENVIRONMENT_VARIABLE: "mac",
+                                    LOG_STORE_PAST_DISCUSSIONS_SEARCH_SSH_OVERRIDE_ENVIRONMENT_VARIABLE: str(ssh)})
     remote = json.loads(calls.read_text())[-1] if calls.is_file() else ""
     check("from another machine without the log-store, ned-box's copy of this program runs over ssh",
           on_mac.returncode == 0 and on_mac.stdout == "from ned-box\n"

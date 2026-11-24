@@ -58,7 +58,7 @@ SUITE_ROOT = _scratch_directory_common.make_test_scratch_directory_after_removin
     "answer-added-texts-fast-read-check-test-")
 WALK_NAME = "poem-page-2026-10-12"
 FAILURE_PREFIX = "walk-me-through-answer-added-texts-cold-read-fast-read-check-and-close "
-LOG_STORE_ROOT_OVERRIDE_ENVIRONMENT_VARIABLE = "LOG_STORE_PAST_DISCUSSIONS_SEARCH_LOG_STORE_ROOT_OVERRIDE"
+LOG_STORE_PAST_DISCUSSIONS_SEARCH_ROOT_OVERRIDE_ENVIRONMENT_VARIABLE = "LOG_STORE_PAST_DISCUSSIONS_SEARCH_LOG_STORE_ROOT_OVERRIDE"
 AGENT_HOMES_DIRECTORY_OVERRIDE_ENVIRONMENT_VARIABLE = "WALK_ME_THROUGH_AGENT_HOMES_DIRECTORY_OVERRIDE"
 failures = []
 
@@ -306,7 +306,7 @@ class Case:
                            STAND_IN_ARGUMENTS=str(self.fast_read_arguments),
                            STAND_IN_RECORDS=str(self.records), TMPDIR=str(self.temporary_directory),
                            GH_STAND_IN_CALLS=str(self.gh_calls))
-        environment.setdefault(LOG_STORE_ROOT_OVERRIDE_ENVIRONMENT_VARIABLE, str(self.log_store))
+        environment.setdefault(LOG_STORE_PAST_DISCUSSIONS_SEARCH_ROOT_OVERRIDE_ENVIRONMENT_VARIABLE, str(self.log_store))
         environment.setdefault(AGENT_HOMES_DIRECTORY_OVERRIDE_ENVIRONMENT_VARIABLE, str(self.agent_homes))
 
         def stop_signal_dispositions():
@@ -6966,7 +6966,9 @@ def run_printed_command(case, command):
         capture_output=True, text=True, cwd=case.root,
         env=dict(os.environ, STAND_IN_MODE="", STAND_IN_CALLS=str(case.calls),
                  STAND_IN_ARGUMENTS=str(case.fast_read_arguments), STAND_IN_RECORDS=str(case.records),
-                 TMPDIR=str(case.temporary_directory), GH_STAND_IN_CALLS=str(case.gh_calls)))
+                 TMPDIR=str(case.temporary_directory), GH_STAND_IN_CALLS=str(case.gh_calls),
+                 **{LOG_STORE_PAST_DISCUSSIONS_SEARCH_ROOT_OVERRIDE_ENVIRONMENT_VARIABLE: str(case.log_store),
+                    AGENT_HOMES_DIRECTORY_OVERRIDE_ENVIRONMENT_VARIABLE: str(case.agent_homes)}))
 
 
 def printed_command_with(result, words):
