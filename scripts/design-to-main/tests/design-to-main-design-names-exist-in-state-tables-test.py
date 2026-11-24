@@ -166,8 +166,10 @@ BACKTICKED_TOKENS_THAT_ARE_NOT_MACHINE_NAMES = {
                          "of their decision (sections 6.2, 6.6 and 11)",
     "Defects fixed": "a section heading of a design, whose lines the machine copies into "
                      "the gate's pull request (sections 3.4, 6.2 and 6.6)",
-    "#rejected": "the hashtag that begins a deferred-decisions line the user turned down "
+    "#rejected": "the hashtag that begins a rejected-decisions line the user turned down "
                  "(sections 6.2 and 6.6)",
+    "Rejected-decisions": "a section heading of a design, whose lines each begin with "
+                          "#rejected (sections 6.2 and 6.6)",
 }
 
 # Names in the design that no code defines, found when this test was

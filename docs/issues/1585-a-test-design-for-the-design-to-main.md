@@ -25,7 +25,7 @@ The design has a test-design for each component that design-to-main builds, but 
 
 ## Next action
 
-After the deferred-decisions pull request under GHI 282 merges, prime-intellect reads the design whole and the lessons file, writes the test-design and the review's findings as one document, `nedlern@ned-box:/home/nedlern/nedsnodes-logs/seats/prime-intellect/design-to-main-test-design-and-design-review-<date>.md`, gives it a /cold-read, and walks it with the user. The changes the user approves land on the design by one pull request; a finding he rejects is recorded in the design as a `#rejected` line.
+After the deferred-decisions pull request under GHI 282 merges, prime-intellect reads the design whole and the lessons file, writes the test-design and the review's findings as one document, `nedlern@ned-box:/home/nedlern/nedsnodes-logs/seats/prime-intellect/design-to-main-test-design-and-design-review-<date>.md`, gives it a /cold-read, and walks it with the user. The changes the user approves land on the design by one pull request; a finding he rejects is recorded in the design as a `#rejected` line under the heading `Rejected-decisions`.
 
 ## Outcome
 
