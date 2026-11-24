@@ -1358,6 +1358,26 @@ def build_ignition_prompt(extract_path: Path, handoff_fields: dict,
     return f"{preamble}{NEXT_STEP_HEADING}{next_step}"
 
 
+CONVERSATION_TAIL_LAST_LINE_COUNT_COPIED_INTO_INITIAL_AGENT_INSTRUCTIONS = 100
+CONVERSATION_TAIL_LAST_LINES_HEADING_TEMPLATE = (
+    "\n\nThe end of the last session: the last {line_count} lines of {conversation_tail_path}, "
+    "copied here so the user can scroll up to where that session ended. They are context; "
+    "the instructions above say what to do.\n\n")
+
+
+def successor_initial_agent_instructions_ending_with_conversation_tail_last_lines(
+        initial_agent_instructions: str, conversation_tail_path: Optional[Path]) -> str:
+    """The initial-agent-instructions with the conversation-tail's last lines after them, so the
+    user, scrolling up in the successor's terminal, sees where the last session ended."""
+    if conversation_tail_path is None:
+        return initial_agent_instructions
+    last_lines = conversation_tail_path.read_text(encoding="utf-8").splitlines()[
+        -CONVERSATION_TAIL_LAST_LINE_COUNT_COPIED_INTO_INITIAL_AGENT_INSTRUCTIONS:]
+    heading = CONVERSATION_TAIL_LAST_LINES_HEADING_TEMPLATE.format(
+        line_count=len(last_lines), conversation_tail_path=conversation_tail_path)
+    return initial_agent_instructions + heading + "\n".join(last_lines)
+
+
 @dataclass
 class DialogIgnitionPlan:
     """Prompt inputs held until the launch-time-git-sync can supply its report."""
@@ -2603,6 +2623,8 @@ def supervise_sessions(settings: SupervisorSettings) -> int:
 
     # Compose at launch so the branch-state line reports the sync performed for that launch.
     ignition_plan = None
+    # Set only for the launch an ignition plan with a conversation-tail composes, not for a later resume.
+    conversation_tail_path_for_next_launch = None
     # Reusing a state-file ID for a fresh launch can collide with an existing transcript or live session.
     next_launch_resumes_the_session = bool(settings.resume_session_id)
     # Charge at launch so startup resumes count, and a successor does not inherit a predecessor's spent budget.
@@ -2736,6 +2758,8 @@ def supervise_sessions(settings: SupervisorSettings) -> int:
                 launch_time_git_sync_report, overview_refresh_due, memory_review_due,
                 branch_state_instruction=branch_state_instruction,
                 waiting_approval_walk_item=waiting_approval_walk_item)
+            if isinstance(ignition_plan, DialogIgnitionPlan):
+                conversation_tail_path_for_next_launch = ignition_plan.extract_path
             ignition_plan = None
             if successor_notice:
                 prompt += " " + successor_notice
@@ -2768,6 +2792,10 @@ def supervise_sessions(settings: SupervisorSettings) -> int:
         launch_prompt = launch_prompt_with_leftovers_before_the_next_step(
             prompt, (leftover_work_snapshots, worktrees_and_branches),
             leftover_prompt_listing_counts_path(settings.handoff_directory, settings.agent))
+        # Appended here, not in build_ignition_prompt, so that it follows the successor notice and the leftovers.
+        launch_prompt = successor_initial_agent_instructions_ending_with_conversation_tail_last_lines(
+            launch_prompt, conversation_tail_path_for_next_launch)
+        conversation_tail_path_for_next_launch = None
         process = launch_agent_session(
             settings.agent_command, session_id, settings.working_directory, launch_prompt,
             resume=next_launch_resumes_the_session, remote_control_name=settings.agent,

@@ -2805,6 +2805,112 @@ def run_generation_continues_past_numbered_files_on_disk_cases(workspace: Path):
           state.get("generation") == 21, str(state))
 
 
+def run_conversation_tail_last_lines_cases(workspace: Path):
+    """The successor's initial-agent-instructions end with the conversation-tail's last 100
+    lines under a heading, so the user can scroll up to where the last session ended; a
+    shorter conversation-tail is copied whole, and with no conversation-tail nothing is added."""
+    directory = workspace / "conversationtaillastlines"
+    directory.mkdir(parents=True)
+    instructions = f"Read the dialog.{supervisor.NEXT_STEP_HEADING}resume the audit"
+
+    def heading(line_count, path):
+        return supervisor.CONVERSATION_TAIL_LAST_LINES_HEADING_TEMPLATE.format(
+            line_count=line_count, conversation_tail_path=path)
+
+    long_tail = directory / "long-dialog-0002.md"
+    long_tail.write_text("".join(f"dialog line {number}\n" for number in range(1, 102)),
+                         encoding="utf-8")
+    check("CONVERSATION-TAIL LAST LINES: a conversation-tail of 101 lines gives exactly its last "
+          "100, under the heading, after the instructions",
+          supervisor.successor_initial_agent_instructions_ending_with_conversation_tail_last_lines(
+              instructions, long_tail)
+          == instructions + heading(100, long_tail)
+          + "\n".join(f"dialog line {number}" for number in range(2, 102)))
+
+    for line_count in (100, 37):
+        short_tail = directory / f"short-{line_count}-dialog-0002.md"
+        short_text = "".join(f"short line {number}\n" for number in range(1, line_count + 1))
+        short_tail.write_text(short_text, encoding="utf-8")
+        check(f"CONVERSATION-TAIL LAST LINES: a conversation-tail of {line_count} lines is copied whole",
+              supervisor.successor_initial_agent_instructions_ending_with_conversation_tail_last_lines(
+                  instructions, short_tail)
+              == instructions + heading(line_count, short_tail) + short_text.rstrip("\n"))
+
+    check("CONVERSATION-TAIL LAST LINES: with no conversation-tail the instructions are unchanged",
+          supervisor.successor_initial_agent_instructions_ending_with_conversation_tail_last_lines(
+              instructions, None) == instructions)
+
+    def handoff_launch(agent, extract_dialog, successor_notice=""):
+        """One in-process handoff carry-over at boot; returns the prompts launched."""
+        handoff_directory = directory / agent
+        handoff_directory.mkdir()
+        settings = supervisor.SupervisorSettings(
+            agent=agent, working_directory=workspace, handoff_directory=handoff_directory,
+            agent_command="unused-stub-agent", first_prompt="")
+        settings.handoff_path.write_text(
+            "written-at: 2026-11-24T00:00:00Z\nnext-step: resume the audit\n"
+            "session-handoff-sequence-number: 5\nwritten-by-session: retiring-session\n",
+            encoding="utf-8")
+        supervisor.write_supervisor_state(
+            settings.state_path,
+            {"consumed_counter": 4, "launched_session_id": "retiring-session", "generation": 1})
+        launched_prompts = []
+
+        def launch_recording(agent_command, session_id, working_directory, prompt, **_):
+            launched_prompts.append(prompt)
+            return StubLaunchedSession(0)
+
+        with supervisor_names_replaced(
+                extract_dialog=extract_dialog,
+                launch_agent_session=launch_recording,
+                launch_time_git_sync=lambda working_directory: "launch-time-git-sync: stubbed",
+                memory_review_due_lines=lambda: (),
+                stdin_isatty=False), \
+                contextlib.redirect_stdout(io.StringIO()), contextlib.redirect_stderr(io.StringIO()):
+            supervisor.supervise_sessions(settings)
+        return handoff_directory, launched_prompts
+
+    def writing_extract_dialog(session_id, working_directory, output_path):
+        output_path.write_text("".join(f"turn {number}\n" for number in range(1, 151)),
+                               encoding="utf-8")
+        return True
+
+    handoff_directory, launched = handoff_launch("tailedsuccessor", writing_extract_dialog)
+    extract_path = handoff_directory / "tailedsuccessor-dialog-0002.md"
+    expected_block = heading(100, extract_path) + "\n".join(
+        f"turn {number}" for number in range(51, 151))
+    check("CONVERSATION-TAIL LAST LINES: the launched successor's prompt ends with the last 100 "
+          "lines of its conversation-tail, after the next step",
+          len(launched) == 1 and launched[0].endswith(expected_block)
+          and launched[0].index(supervisor.NEXT_STEP_HEADING + "resume the audit")
+          < launched[0].index(expected_block),
+          repr(launched)[-600:])
+    check("CONVERSATION-TAIL LAST LINES: the launched prompt is still recognized as written by a "
+          "program, not typed by the user, though it quotes the old dialog",
+          len(launched) == 1
+          and supervisor_prompt_is_recognized_as_a_programs(launched[0]),
+          repr(launched)[:300])
+
+    def failing_extract_dialog(session_id, working_directory, output_path):
+        return False
+
+    _, untailed = handoff_launch("untailedsuccessor", failing_extract_dialog)
+    check("CONVERSATION-TAIL LAST LINES: when the extraction fails, the successor's prompt has no "
+          "copied lines",
+          len(untailed) == 1 and "The end of the last session" not in untailed[0]
+          and untailed[0].endswith(supervisor.NEXT_STEP_HEADING + "resume the audit"),
+          repr(untailed)[-400:])
+
+
+def supervisor_prompt_is_recognized_as_a_programs(prompt: str) -> bool:
+    search_spec = importlib.util.spec_from_file_location(
+        "search_user_messages_in_transcripts",
+        REPOSITORY_ROOT / "scripts" / "search-user-messages-in-transcripts.py")
+    search_module = importlib.util.module_from_spec(search_spec)
+    search_spec.loader.exec_module(search_module)
+    return search_module.written_by_a_program({"origin": {"kind": "human"}}, prompt)
+
+
 def run_spawned_subagent_roster_cases(workspace: Path, recent: str):
     """The successor is told which subagents were still working when the
     session it replaces ended, and that it may need to re-commission
@@ -3147,6 +3253,7 @@ with fixture.handoff_supervisor_suite_workspace() as workspace:
     run_boot_ignition_case(workspace)
     run_boot_ignition_without_a_conversation_tail_cases(workspace)
     run_generation_continues_past_numbered_files_on_disk_cases(workspace)
+    run_conversation_tail_last_lines_cases(workspace)
     run_first_prompt_file_cases(workspace)
     run_multi_line_next_step_cases(workspace, recent_timestamp)
     run_launch_and_retention_cases(workspace, recent_timestamp)
