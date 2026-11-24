@@ -22,6 +22,7 @@ import json
 import os
 import subprocess
 import sys
+import types
 import tempfile
 import time
 from pathlib import Path
@@ -1361,11 +1362,55 @@ for resume in (False, True):
         check(f"a launch with {flag} names the session after its agent-seat, "
               "locally and on Remote Control",
               arguments == [flag, "session-named-after-seat",
-                            "--remote-control", "merge-lane-2",
-                            "--name", "merge-lane-2",
-                            "--remote-control-session-name-prefix", "merge-lane-2",
+                            "--remote-control=merge-lane-2",
+                            "--name=merge-lane-2",
+                            "--remote-control-session-name-prefix=merge-lane-2",
                             "the", "prompt"],
               str(arguments))
+
+with tempfile.TemporaryDirectory() as rename_directory:
+    handoffs = Path(rename_directory) / "handoffs"
+    projects = Path(rename_directory) / "project"
+    handoffs.mkdir()
+    projects.mkdir()
+    rename_settings = types.SimpleNamespace(agent="seat-a", handoff_directory=handoffs,
+                                            working_directory=Path(rename_directory))
+    real_project_directory = supervisor.project_directory_for_working_directory
+    supervisor.project_directory_for_working_directory = lambda _: projects
+    try:
+        (projects / "retiring.jsonl").write_text(
+            '{"type":"custom-title","customTitle":"seat-a"}\n', encoding="utf-8")
+        check("an unchanged title leaves the successor's notice as it is",
+              supervisor.successor_notice_with_remote_control_rename(
+                  rename_settings, "earlier notice", "retiring") == "earlier notice")
+        check("a launch with no stored name uses the agent-seat name",
+              supervisor.remote_control_name_for_launch("seat-a", handoffs) == "seat-a")
+        (projects / "retiring.jsonl").write_text(
+            '{"type":"custom-title","customTitle":"--renamed"}\n', encoding="utf-8")
+        notice = supervisor.successor_notice_with_remote_control_rename(
+            rename_settings, "earlier notice", "retiring")
+        check("a rename found at stop keeps the earlier notice and has the successor send the line",
+              notice.startswith("earlier notice ")
+              and "seat-a is now --renamed in Remote Control; message it there." in notice, notice)
+        check("the successor launches under the stored name",
+              supervisor.remote_control_name_for_launch("seat-a", handoffs) == "--renamed")
+        check("a second read of the same title sends nothing again",
+              supervisor.successor_notice_with_remote_control_rename(
+                  rename_settings, "", "retiring") == "")
+        (handoffs / "seat-a-remote-control-name").unlink()
+        (handoffs / "seat-a-remote-control-name").mkdir()
+        errors = io.StringIO()
+        with contextlib.redirect_stderr(errors):
+            name = supervisor.remote_control_name_for_launch("seat-a", handoffs)
+            kept = supervisor.successor_notice_with_remote_control_rename(
+                rename_settings, "earlier notice", "retiring")
+        check("an unreadable stored name launches under the agent-seat name and reports it",
+              name == "seat-a" and "could not be read" in errors.getvalue(), errors.getvalue())
+        check("a rename that cannot be stored keeps the notice and reports it",
+              kept == "earlier notice" and "not carried to the successor" in errors.getvalue(),
+              errors.getvalue())
+    finally:
+        supervisor.project_directory_for_working_directory = real_project_directory
 
 with tempfile.TemporaryDirectory() as naming_workspace:
     agent = an_agent_recording_its_invocations(naming_workspace)

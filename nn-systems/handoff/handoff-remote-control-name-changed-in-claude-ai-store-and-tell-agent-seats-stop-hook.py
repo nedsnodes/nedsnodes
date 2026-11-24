@@ -1,0 +1,60 @@
+#!/usr/bin/env python3
+"""At each turn's end, store a claude.ai rename and tell the agent to tell the other agent-seats.
+
+A Stop hook. In an agent-session a handoff-supervisor launched, it compares the transcript's latest
+custom-title with the agent-seat's stored Remote Control name. On a difference it stores the title
+and prints {"hookSpecificOutput": {"hookEventName": "Stop", "additionalContext": <instruction>}}.
+
+A fault, such as stdin that is not a JSON object: one line on stderr naming the hook and the
+fault, nothing on stdout, exit 1, which Claude Code records as a non-blocking error.
+"""
+
+import importlib.util
+import json
+import os
+import sys
+from pathlib import Path
+
+PROGRAM = "handoff-remote-control-name-changed-in-claude-ai-store-and-tell-agent-seats-stop-hook"
+HANDOFF_SUPERVISOR_AGENT_NAME_ENVIRONMENT_VARIABLE = "NEDSNODES_HANDOFF_SUPERVISOR_AGENT_NAME"
+
+_common_specification = importlib.util.spec_from_file_location(
+    "handoff_remote_control_name_common",
+    Path(__file__).with_name("handoff-remote-control-name-carried-from-claude-ai-rename-common.py"))
+remote_control_name_common = importlib.util.module_from_spec(_common_specification)
+_common_specification.loader.exec_module(remote_control_name_common)
+
+# Messages below follow docs/nedsnodes-wiki/nedsnodes-how-to-write-a-tool-message-to-agent-such-as-a-hook-refusal-or-script-error.md.
+REMOTE_CONTROL_RENAMED_REMINDER_MESSAGE = (
+    "[rule handoff-remote-control-name-changed-in-claude-ai-tell-other-agent-seats] {instruction}")
+
+HOOK_FAILED_MESSAGE = (
+    PROGRAM + ": a claude.ai rename of this agent-seat, if there was one, was not stored, because "
+    "the hook failed: {error}. The hook tries again at the next turn's end.")
+
+
+def main() -> int:
+    try:
+        payload = json.loads(sys.stdin.read())
+        if not isinstance(payload, dict):
+            raise ValueError("the input on the hook's stdin is JSON, but not an object")
+        agent_seat = os.environ.get(HANDOFF_SUPERVISOR_AGENT_NAME_ENVIRONMENT_VARIABLE, "").strip()
+        transcript_path = payload.get("transcript_path")
+        if not agent_seat or not isinstance(transcript_path, str) or not transcript_path:
+            return 0
+        rename = remote_control_name_common.store_remote_control_name_when_transcript_title_changed(
+            Path.home() / ".claude" / "handoffs", agent_seat, transcript_path)
+    except (OSError, ValueError) as error:
+        print(HOOK_FAILED_MESSAGE.format(error=error), file=sys.stderr)
+        return 1
+    if rename:
+        print(json.dumps({"hookSpecificOutput": {
+            "hookEventName": "Stop",
+            "additionalContext": REMOTE_CONTROL_RENAMED_REMINDER_MESSAGE.format(
+                instruction=remote_control_name_common.remote_control_rename_instruction(rename)),
+        }}))
+    return 0
+
+
+if __name__ == "__main__":
+    sys.exit(main())
