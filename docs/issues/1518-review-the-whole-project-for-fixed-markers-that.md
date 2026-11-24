@@ -15,7 +15,7 @@ A hashtag — `#` followed by lowercase words joined by underscores, such as `#n
 The design-to-main proposal for sorting a design's deferred-decisions (nedlern@ned-box:/home/nedlern/nedsnodes-logs/seats/prime-intellect/design-to-main-deferred-decisions-proposal-2026-10-15.md) marks each line of a design's `Deferred-decisions` section that the user has deferred. The approval-walk on that proposal, design-to-main-deferred-decisions-proposal-two-buckets-2026-10-15 (item 1.1, before the user when this GHI-MD was written; its minutes ship to nedlern@ned-box:/home/nedlern/nedsnodes-logs/walk/design-to-main-deferred-decisions-proposal-two-buckets-2026-10-15-minutes.md when it closes), proposes the markers as hashtags:
 
 - `#not_in_this_run` begins a deferred line: "#not_in_this_run retry a failed push. Reason: an optimisation; one failure stops the run and tells the user."
-- `#rejected` begins a line the user turned down for good, which goes under a heading `Rejected-decisions`.
+- `#rejected` begins a line the user turned down for good.
 - `#revisit_before` names the event after which a deferred decision becomes expensive to change, and `#revisit_after` names the event the deferred work waits on; either is left off when no such event can be named.
 
 The hashtag form is proposed, not yet a project convention. If the user rejects item 1.1, this review still asks whether a shared marker form is worth having, without assuming hashtags.
