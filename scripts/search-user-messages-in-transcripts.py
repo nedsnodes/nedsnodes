@@ -146,9 +146,10 @@ def is_interrupt_notice(record):
                  if isinstance(block, dict) and block.get("type") == "text"]
     else:
         return False
-    # The whole notice, so that a prompt the user typed opening with a pasted notice is still his.
-    return any(isinstance(text, str) and INTERRUPT_NOTICE_PATTERN.fullmatch(text.strip())
-               for text in texts)
+    # The message's whole text, so that a prompt the user typed holding a notice, pasted or in a
+    # block of its own after his words, is still his.
+    return bool(INTERRUPT_NOTICE_PATTERN.fullmatch(
+        "".join(text for text in texts if isinstance(text, str)).strip()))
 
 
 def assistant_text(record):

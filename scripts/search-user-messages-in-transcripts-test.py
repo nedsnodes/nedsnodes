@@ -323,6 +323,10 @@ pasted = "[Request interrupted by user] was all I saw; please carry on."
 check("a prompt the user typed that opens with a pasted interrupt notice is not a notice, and is his turn",
       not search_module.is_interrupt_notice(typed(pasted))
       and search_module.TurnReader().turn(typed(pasted)) == ("user", pasted))
+check("a prompt the user typed with an interrupt notice in a later text block is not a notice",
+      not search_module.is_interrupt_notice({"type": "user", "message": {"content": [
+          {"type": "text", "text": "Please carry on."},
+          {"type": "text", "text": "[Request interrupted by user]"}]}}))
 
 
 def search(directory, *arguments):
