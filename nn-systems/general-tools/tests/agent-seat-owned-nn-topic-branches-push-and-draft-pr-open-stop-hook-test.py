@@ -13,17 +13,25 @@ import shutil
 import subprocess
 import sys
 import tempfile
+import time
 import unittest
 from pathlib import Path
+from unittest import mock
 
 REPO_ROOT = Path(__file__).resolve().parents[3]
 HOOK = REPO_ROOT / "nn-systems" / "general-tools" / "agent-seat-owned-nn-topic-branches-push-and-draft-pr-open-stop-hook.py"
+CATCH_UP = REPO_ROOT / "scripts" / "checkout-freshness-catch-up.py"
 SEAT = "test-seat"
 
 _specification = importlib.util.spec_from_file_location(
     "worktree_owner_file_read_and_write", REPO_ROOT / "scripts" / "worktree-owner-file-read-and-write.py")
 worktree_owner_file = importlib.util.module_from_spec(_specification)
 _specification.loader.exec_module(worktree_owner_file)
+
+_hook_specification = importlib.util.spec_from_file_location(
+    "agent_seat_owned_nn_topic_branches_push_and_draft_pr_open_stop_hook", HOOK)
+hook = importlib.util.module_from_spec(_hook_specification)
+_hook_specification.loader.exec_module(hook)
 
 _git_environment_fixture_specification = importlib.util.spec_from_file_location(
     "git_redirecting_environment_removal_test_fixture",
@@ -33,10 +41,13 @@ _git_environment_fixture_specification.loader.exec_module(_git_environment_fixtu
 _git_environment_fixture.remove_git_redirecting_environment_variables_from_this_process()
 
 FAKE_GH = """#!/usr/bin/env python3
-import json, os, sys
+import json, os, sys, time
 with open(os.environ["FAKE_GH_CALLS"], "a") as calls:
     calls.write(json.dumps(sys.argv[1:]) + "\\n")
 kind = sys.argv[2] if len(sys.argv) > 2 else ""
+slow_head = os.environ.get("FAKE_GH_SLOW_FOR_HEAD")
+if slow_head and slow_head in sys.argv:
+    time.sleep(float(os.environ["FAKE_GH_SLOW_SECONDS"]))
 sys.stdout.write(os.environ.get("FAKE_GH_" + kind.upper() + "_STDOUT", ""))
 sys.stderr.write(os.environ.get("FAKE_GH_" + kind.upper() + "_STDERR", ""))
 sys.exit(int(os.environ.get("FAKE_GH_" + kind.upper() + "_STATUS", "0")))
@@ -218,6 +229,84 @@ class StopHookTest(unittest.TestCase):
         self.assertIn("branch topic-a: pushed, but its draft pull request could not be opened", context)
         self.assertIn("rate limited", context)
         self.assertIn("gh pr create --draft --base main --head topic-a", context)
+
+    def run_hook_in_process_with_seconds_left(self, seconds_left, **environment_changes):
+        environment = {**self.environment, **environment_changes}
+        payload = json.dumps({"cwd": str(self.root), "stop_hook_active": False})
+        started = time.monotonic() - hook.PUSH_AND_DRAFT_PR_OPEN_STOP_HOOK_BUDGET_SECONDS + seconds_left
+        with mock.patch.dict(os.environ, environment, clear=True):
+            return hook.run(payload, environment, str(self.clone), started=started)
+
+    def test_draft_failure_found_early_is_still_reported_when_a_later_command_runs_out_of_time(self):
+        self.worktree("topic-a")
+        self.worktree("topic-b")
+        self.worktree("topic-c")
+        stdout, _, status = self.run_hook_in_process_with_seconds_left(
+            6, FAKE_GH_CREATE_STATUS="1", FAKE_GH_CREATE_STDERR="rate limited",
+            FAKE_GH_SLOW_FOR_HEAD="topic-b", FAKE_GH_SLOW_SECONDS="30")
+        self.assertEqual(status, 0)
+        context = json.loads(stdout)["hookSpecificOutput"]["additionalContext"]
+        self.assertIn("branch topic-a: pushed, but its draft pull request could not be opened", context)
+        self.assertIn("rate limited", context)
+        self.assertIn("branch topic-b: `gh pr list --head topic-b", context)
+        self.assertIn("ran out, so the hook stopped there", context)
+        self.assertIn("not tried this turn end, because the hook's time ran out: topic-c", context)
+        self.assertFalse(self.on_origin("topic-c"))
+
+    def test_draft_command_that_runs_out_of_time_says_to_check_and_names_the_command(self):
+        self.worktree("topic-a")
+        self.worktree("topic-b")
+        stdout, _, status = self.run_hook_in_process_with_seconds_left(
+            6, FAKE_GH_SLOW_FOR_HEAD="--draft", FAKE_GH_SLOW_SECONDS="30")
+        self.assertEqual(status, 0)
+        context = json.loads(stdout)["hookSpecificOutput"]["additionalContext"]
+        self.assertIn("pushed, but `gh pr create` did not finish before the hook's time ran out", context)
+        self.assertIn("gh pr create --draft --base main --head topic-a", context)
+        self.assertNotIn("so the hook stopped there", context)
+        self.assertIn("not tried this turn end, because the hook's time ran out: topic-b", context)
+
+    def test_push_waits_for_the_branch_lock_and_then_pushes_the_rebased_head(self):
+        path = self.worktree("topic-a")
+        git_directory = git(path, "rev-parse", "--absolute-git-dir")
+        with hook.branch_lock.branch_rebase_and_push_per_checkout_mutual_exclusion_lock(git_directory, 0) as held:
+            self.assertTrue(held)
+            running = subprocess.Popen(
+                [sys.executable, str(HOOK)], stdin=subprocess.PIPE, stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE, text=True, env=self.environment, cwd=self.clone)
+            running.stdin.write(json.dumps({"cwd": str(self.root), "stop_hook_active": False}))
+            running.stdin.close()
+            deadline = time.monotonic() + 30
+            while not [call for call in self.gh_calls() if call[:2] == ["pr", "list"]]:
+                self.assertLess(time.monotonic(), deadline, "the hook never asked GitHub")
+                time.sleep(0.05)
+            time.sleep(1)
+            self.assertFalse(self.on_origin("topic-a"))
+            git(path, "commit", "--quiet", "--amend", "--allow-empty", "-m", "rebased work on topic-a")
+        _, stderr_text = running.communicate(timeout=60)
+        self.assertEqual(running.returncode, 0, stderr_text)
+        self.assertEqual(git(self.origin, "rev-parse", "topic-a"), git(path, "rev-parse", "HEAD"))
+
+    def test_catch_up_and_this_hook_run_together_leave_the_branch_one_head_on_origin_and_here(self):
+        for attempt in range(3):
+            with self.subTest(attempt=attempt):
+                git(self.clone, "commit", "--quiet", "--allow-empty", "-m", f"main moves {attempt}")
+                git(self.clone, "push", "--quiet", "origin", "HEAD:main")
+                branch = f"never-pushed-{attempt}"
+                path = self.root / branch
+                git(self.clone, "worktree", "add", "--quiet", "-b", branch, str(path), "HEAD~1")
+                git(path, "commit", "--quiet", "--allow-empty", "-m", f"work on {branch}")
+                worktree_owner_file.worktree_owner_file_write(path, "agent-seat", SEAT)
+                git(path, "fetch", "--quiet", "origin")
+                payload = json.dumps({"cwd": str(path), "stop_hook_active": False})
+                both = [subprocess.Popen(command, stdin=subprocess.PIPE, stdout=subprocess.PIPE,
+                                         stderr=subprocess.PIPE, text=True, cwd=path,
+                                         env={**self.environment, "CLAUDE_PROJECT_DIR": str(path)})
+                        for command in ([sys.executable, str(CATCH_UP), "--interval-seconds", "0",
+                                         "--cwd", str(path)],
+                                        [sys.executable, str(HOOK)])]
+                for running in both:
+                    running.communicate(payload, timeout=120)
+                self.assertEqual(git(self.origin, "rev-parse", branch), git(path, "rev-parse", "HEAD"))
 
     def test_unreadable_owner_file_is_reported_and_its_branch_not_pushed(self):
         path = self.worktree("topic-a", owner_seat=None)

@@ -342,7 +342,7 @@ def run_missing_launcher_case(workspace: Path):
     # pattern module; the Stop hooks the supervisor loads from scripts/ load
     # from here the shared rule that Stop hooks stay silent while the agent
     # answers a Stop hook; and checkout-freshness-catch-up.py loads from here the
-    # rule for which changed files are reusable-prompts.
+    # rule for which changed files are reusable-prompts, and the lock it rebases under.
     for general_tools_module in (
             "git-machine-readable-output-runner-and-parser-common.py",
             "agent-seat-task-list-new-pending-task-write-common.py",
@@ -353,7 +353,8 @@ def run_missing_launcher_case(workspace: Path):
             "mac-reference-checkout-launcher-scripts-directory-path-constant-common.py",
             "failed-command-tool-message-to-agent-rerun-once-then-stop-and-report-lines-common.py",
             "pull-request-conflict-with-main-rebase-or-replace-answer-common.py",
-            "reusable-prompt-file-recognized-by-name-ending-and-not-ghi-md-common.py"):
+            "reusable-prompt-file-recognized-by-name-ending-and-not-ghi-md-common.py",
+            "branch-rebase-and-push-per-checkout-mutual-exclusion-lock-common.py"):
         (general_tools_home / general_tools_module).write_text(
             (SUPERVISOR_SCRIPT.parents[1] / "general-tools" / general_tools_module)
             .read_text(encoding="utf-8"), encoding="utf-8")

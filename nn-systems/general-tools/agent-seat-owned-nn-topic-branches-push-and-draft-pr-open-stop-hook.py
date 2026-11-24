@@ -34,6 +34,19 @@ agent leaves unfixed is reported again at its next turn end. A failure that stop
 
 A draft that fails to open after its push succeeded is not tried again at the next turn end,
 because the branch then has no commit origin lacks; its failure line gives the command to run.
+
+TIME. Claude Code kills the hook at the timeout .claude/settings.json gives it, and a killed hook
+prints nothing, which would lose the failures already found. So every command is bounded by the time
+left before PUSH_AND_DRAFT_PR_OPEN_STOP_HOOK_BUDGET_SECONDS, and a command that runs out of it ends the pushing: the hook reports
+the failures found so far, that command, and the branches it did not try, which the next turn end
+tries again.
+
+ORDER WITH CATCH-UP. scripts/checkout-freshness-catch-up.py runs in the same Stop group, in parallel,
+and rebases a never-pushed branch. Each `git push` is made holding the checkout's lock from
+nn-systems/general-tools/branch-rebase-and-push-per-checkout-mutual-exclusion-lock-common.py, which catch-up
+holds from deciding the branch was never pushed until its rebase ends, so the push sends either the
+head before that decision, after which catch-up sees the branch pushed and leaves it, or the rebased
+head.
 """
 
 import importlib.util
@@ -42,11 +55,14 @@ import os
 import shlex
 import subprocess
 import sys
+import time
 from pathlib import Path
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
 HOOK_NAME = "agent-seat-owned-nn-topic-branches-push-and-draft-pr-open-stop-hook"
 MAIN_BRANCH = "main"
+# Ten seconds under the 180-second timeout .claude/settings.json gives this hook, to print.
+PUSH_AND_DRAFT_PR_OPEN_STOP_HOOK_BUDGET_SECONDS = 170
 DRAFT_PULL_REQUEST_DESCRIPTION = (
     "Draft opened by the turn-end hook, "
     "nn-systems/general-tools/agent-seat-owned-nn-topic-branches-push-and-draft-pr-open-stop-hook.py, "
@@ -76,6 +92,9 @@ stop_hooks_stay_silent_rule = load_module(
     "claude_code_stop_hooks_stay_silent_while_agent_answers_a_stop_hook_rule_common",
     REPO_ROOT / "nn-systems" / "general-tools"
     / "claude-code-stop-hooks-stay-silent-while-agent-answers-a-stop-hook-rule-common.py")
+branch_lock = load_module(
+    "branch_rebase_and_push_per_checkout_mutual_exclusion_lock_common",
+    REPO_ROOT / "nn-systems" / "general-tools" / "branch-rebase-and-push-per-checkout-mutual-exclusion-lock-common.py")
 attendance = load_module(
     "agent_session_unattended_by_user_check_common",
     REPO_ROOT / "nn-systems" / "general-tools" / "agent-session-unattended-by-user-check-common.py")
@@ -85,8 +104,24 @@ class HookFailure(Exception):
     pass
 
 
-def run_command(arguments, directory):
-    return subprocess.run(arguments, cwd=directory, capture_output=True, text=True)
+class OutOfTime(Exception):
+    """A command did not finish before the hook's budget ran out; reported is True once a failure
+    line already says so."""
+    reported = False
+
+
+def seconds_left(deadline):
+    return deadline - time.monotonic()
+
+
+def run_command(arguments, directory, deadline):
+    left = seconds_left(deadline)
+    if left <= 0:
+        raise OutOfTime(shlex.join(arguments))
+    try:
+        return subprocess.run(arguments, cwd=directory, capture_output=True, text=True, timeout=left)
+    except subprocess.TimeoutExpired:
+        raise OutOfTime(shlex.join(arguments)) from None
 
 
 def single_line(text):
@@ -97,9 +132,9 @@ def command_error(result):
     return single_line(result.stderr or result.stdout) or f"exit status {result.returncode}, no output"
 
 
-def worktrees_with_branches(clone_directory):
+def worktrees_with_branches(clone_directory, deadline):
     """(worktree path, branch) for each linked worktree of the clone with a branch checked out."""
-    result = run_command(["git", "worktree", "list", "--porcelain"], clone_directory)
+    result = run_command(["git", "worktree", "list", "--porcelain"], clone_directory, deadline)
     if result.returncode != 0:
         raise HookFailure(f"`git worktree list` failed in {clone_directory}, so no branch was pushed: "
                           f"{command_error(result)}")
@@ -114,10 +149,11 @@ def worktrees_with_branches(clone_directory):
     return found
 
 
-def agent_seat_owned_nn_topic_branches_with_commits_origin_lacks(clone_directory, agent_seat, failures):
+def agent_seat_owned_nn_topic_branches_with_commits_origin_lacks(clone_directory, agent_seat, failures,
+                                                                 deadline):
     """(worktree, branch) pairs to push; an owner file that cannot be read adds a line to failures."""
     owned = []
-    for worktree, branch in worktrees_with_branches(clone_directory):
+    for worktree, branch in worktrees_with_branches(clone_directory, deadline):
         if branch == MAIN_BRANCH:
             continue
         try:
@@ -129,7 +165,7 @@ def agent_seat_owned_nn_topic_branches_with_commits_origin_lacks(clone_directory
         if owner is None or owner["agent_seat"] != agent_seat:
             continue
         unpushed = run_command(["git", "rev-list", "--max-count=1", f"refs/heads/{branch}",
-                                "--not", "--remotes=origin"], worktree)
+                                "--not", "--remotes=origin"], worktree, deadline)
         if unpushed.returncode != 0:
             failures.append(f"branch {branch}: `git rev-list` failed in {worktree}, so the branch was "
                             f"not pushed: {command_error(unpushed)}")
@@ -138,9 +174,9 @@ def agent_seat_owned_nn_topic_branches_with_commits_origin_lacks(clone_directory
     return owned
 
 
-def branch_push_and_draft_open(worktree, branch, failures):
+def branch_push_and_draft_open(worktree, branch, failures, deadline):
     asked = run_command(["gh", "pr", "list", "--head", branch, "--state", "open",
-                         "--json", "number,isDraft"], worktree)
+                         "--json", "number,isDraft"], worktree, deadline)
     try:
         open_pull_requests = json.loads(asked.stdout) if asked.returncode == 0 else None
     except json.JSONDecodeError:
@@ -151,18 +187,38 @@ def branch_push_and_draft_open(worktree, branch, failures):
         return
     if any(not pull_request.get("isDraft") for pull_request in open_pull_requests):
         return
-    pushed = run_command(["git", "push", "origin", f"refs/heads/{branch}:refs/heads/{branch}"], worktree)
+    git_directory = run_command(["git", "rev-parse", "--absolute-git-dir"], worktree, deadline)
+    if git_directory.returncode != 0:
+        failures.append(f"branch {branch}: `git rev-parse --absolute-git-dir` failed in {worktree}, so "
+                        f"the branch was not pushed: {command_error(git_directory)}")
+        return
+    with branch_lock.branch_rebase_and_push_per_checkout_mutual_exclusion_lock(
+            git_directory.stdout.strip(), seconds_left(deadline)) as held:
+        if not held:
+            raise OutOfTime(f"waiting for scripts/checkout-freshness-catch-up.py to finish with {worktree}")
+        pushed = run_command(["git", "push", "origin", f"refs/heads/{branch}:refs/heads/{branch}"],
+                             worktree, deadline)
     if pushed.returncode != 0:
         failures.append(f"branch {branch}: `git push origin {branch}` from {worktree} failed, so it was "
                         f"not pushed: {command_error(pushed)}")
         return
     if open_pull_requests:
         return
-    title = run_command(["git", "log", "-1", "--format=%s", f"refs/heads/{branch}"], worktree).stdout.strip()
+    title = run_command(["git", "log", "-1", "--format=%s", f"refs/heads/{branch}"], worktree,
+                        deadline).stdout.strip()
     title = title or branch
     create = ["gh", "pr", "create", "--draft", "--base", MAIN_BRANCH, "--head", branch,
               "--title", title, "--body", DRAFT_PULL_REQUEST_DESCRIPTION]
-    created = run_command(create, worktree)
+    try:
+        created = run_command(create, worktree, deadline)
+    except OutOfTime as error:
+        failures.append(
+            f"branch {branch}: pushed, but `gh pr create` did not finish before the hook's time ran "
+            f"out, so its draft pull request may not be open, and the next turn end will not try "
+            f"again. Check with `gh pr list --head {branch}` and, if none is open, open it yourself "
+            f"from {worktree} with: {shlex.join(create)}")
+        error.reported = True
+        raise
     if created.returncode != 0:
         failures.append(
             f"branch {branch}: pushed, but its draft pull request could not be opened, and the next "
@@ -170,8 +226,9 @@ def branch_push_and_draft_open(worktree, branch, failures):
             f"Open it yourself from {worktree} with: {shlex.join(create)}")
 
 
-def run(stdin_text, environment, default_directory):
+def run(stdin_text, environment, default_directory, started=None):
     """(stdout text, stderr text, exit status)."""
+    deadline = (time.monotonic() if started is None else started) + PUSH_AND_DRAFT_PR_OPEN_STOP_HOOK_BUDGET_SECONDS
     try:
         payload = json.loads(stdin_text)
     except json.JSONDecodeError as error:
@@ -186,9 +243,26 @@ def run(stdin_text, environment, default_directory):
     # Not the payload's cwd first: it follows the agent's `cd`, which can leave the clone.
     clone_directory = environment.get("CLAUDE_PROJECT_DIR") or payload.get("cwd") or default_directory
     failures = []
-    for worktree, branch in agent_seat_owned_nn_topic_branches_with_commits_origin_lacks(
-            clone_directory, agent_seat, failures):
-        branch_push_and_draft_open(worktree, branch, failures)
+    try:
+        to_push = agent_seat_owned_nn_topic_branches_with_commits_origin_lacks(
+            clone_directory, agent_seat, failures, deadline)
+    except OutOfTime as error:
+        raise HookFailure(f"`{error}` did not finish within {PUSH_AND_DRAFT_PR_OPEN_STOP_HOOK_BUDGET_SECONDS} seconds, "
+                          f"so no branch was pushed") from None
+    for index, (worktree, branch) in enumerate(to_push):
+        try:
+            branch_push_and_draft_open(worktree, branch, failures, deadline)
+        except OutOfTime as error:
+            not_tried = [later_branch for _, later_branch in to_push[index + 1:]]
+            if not error.reported:
+                failures.append(
+                    f"branch {branch}: `{error}` did not finish before the hook's {PUSH_AND_DRAFT_PR_OPEN_STOP_HOOK_BUDGET_SECONDS} "
+                    f"seconds ran out, so the hook stopped there. The next turn end tries again each "
+                    f"branch that still has commits origin lacks.")
+            if not_tried:
+                failures.append(f"not tried this turn end, because the hook's time ran out: "
+                                f"{', '.join(not_tried)}; the next turn end tries them.")
+            break
     if not failures:
         return "", "", 0
     lines = [BRANCHES_NOT_FULLY_ON_GITHUB_OPENING_MESSAGE, *(f"- {failure}" for failure in failures),
