@@ -1856,8 +1856,8 @@ def run_cases_of_the_commit_the_run_was_asked_to_test(workspace: Path):
           and "Run `pgrep -af merge-lane-pull-request-head-test-run-on-merged-worktree.py`."
           in refused.stderr
           and "repeat the pgrep command once a minute" in refused.stderr
-          and "When it lists none for that pull request, run the head test run command you "
-              "first typed again" in refused.stderr,
+          and "When it lists none for that pull request, run scripts/merge-lane-pull-request-"
+              "head-test-run-on-merged-worktree.py with that number" in refused.stderr,
           repr(refused))
     passed = fixture.run(extra_arguments=("--refuse-unless-checkout-head-is-commit", fixture.head))
     check("a checkout at the commit asked for runs as usual",
