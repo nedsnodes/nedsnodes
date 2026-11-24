@@ -387,6 +387,15 @@ def merged_branch_deleted(branch, environment):
         if reread.returncode != 0 and "HTTP 404" in reread.stderr:
             print(f"the branch {branch} is gone from GitHub")
             return EXIT_MERGED
+        if reread.returncode != 0:
+            print(f"STOP: merged, but the branch {branch} could not be deleted, and whether it "
+                  f"is gone from GitHub could not be read.\n"
+                  f"The deletion's error: {gh_error(deletion)}\n"
+                  f"The read's error: {gh_error(reread)}\n"
+                  f"If it is still there, delete it: {by_hand}\n"
+                  f"If that fails, tell the user this message as printed, from its STOP line "
+                  f"through this line, and the error the deletion command printed.")
+            return EXIT_MERGED_BUT_A_STEP_AFTER_THE_MERGE_NOT_DONE
         print(f"STOP: merged, but the branch {branch} is still on GitHub and could not be "
               f"deleted: {gh_error(deletion)}\n"
               f"Delete it: {by_hand}\n"

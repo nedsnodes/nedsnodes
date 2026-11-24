@@ -2803,7 +2803,7 @@ machine.append("alpha",
 machine.script()
 machine.run(45)
 check("rule 5: an addBlocks call that failed does not count as a hold, so the reminder stays withheld",
-      not machine.claude_calls()[1:], machine.claude_calls())
+      not machine.claude_calls(), machine.claude_calls())
 
 machine = Machine()
 machine.seat("alpha", DONE_TURN)
@@ -2915,6 +2915,32 @@ machine.run(0)
 check("rule 3: the handoff message, which is not a rule 2 or rule 5 message, names no command",
       "mark-irrelevant" not in machine.events("message_sent")[-1]["text"],
       machine.events("message_sent"))
+
+import importlib.util
+_spec = importlib.util.spec_from_file_location("idle_sweep_program", PROGRAM)
+idle_sweep_program = importlib.util.module_from_spec(_spec)
+_spec.loader.exec_module(idle_sweep_program)
+
+
+def reminded(events, typed=None, held=None):
+    path = SUITE_ROOT / f"reminded-{len(list(SUITE_ROOT.iterdir()))}.jsonl"
+    path.write_text("".join(json.dumps({"agent_seat": "alpha", **event}) + "\n" for event in events))
+    return idle_sweep_program.SweepLog(path).reminded_subjects(
+        "alpha", "s1", typed, {subject: idle_sweep_program.parse_time(time)
+                               for subject, time in (held or {}).items()})
+
+
+REMINDER = {"event": "reminder_sent", "session_id": "s1", "message_id": "m1",
+            "subjects": ["open task: 1"], "send_started_at": at(0), "at": at(0.1)}
+ARRIVED = {"event": "delivery_checked", "message_id": "m1", "found": True, "received_at": at(0.5)}
+check("a hold made while the sender ran, before the reminder arrived, has not answered it",
+      reminded([REMINDER, ARRIVED], held={"open task: 1": at(0.3)}) == {"open task: 1"})
+check("a hold made after the reminder arrived frees the task to be raised again",
+      reminded([REMINDER, ARRIVED], held={"open task: 1": at(0.7)}) == set())
+check("before the delivery check, typing before the send was logged has not answered the reminder",
+      reminded([REMINDER], typed=at(0.05)) == {"open task: 1"})
+check("before the delivery check, typing after the send was logged answers the reminder",
+      reminded([REMINDER], typed=at(0.2)) == set())
 
 if failures:
     print(f"{len(failures)} case(s) failed")

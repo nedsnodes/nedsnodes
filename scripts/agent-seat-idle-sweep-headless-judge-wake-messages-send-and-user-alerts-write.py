@@ -496,21 +496,24 @@ class SweepLog:
     def reminded_subjects(self, seat, session_id, last_user_typed_at, last_held_at):
         """What a rule 3 or rule 5 message has reminded this agent-session of since the user last
         typed in it, less what a message the delivery check did not find named and what
-        last_held_at, {subject: time}, shows was held after the message."""
+        last_held_at, {subject: time}, shows was held after the message arrived."""
         not_found = {event["message_id"] for event in self.of_seat(seat, "delivery_checked")
                      if not event["found"]}
-        # The user typing while the sender runs, before the message arrives, has not answered it:
+        # Typing or a hold while the sender runs, before the message arrives, has not answered it:
         # until the delivery check gives the time it arrived, the time the send was logged stands in.
         received_at = {event["message_id"]: event["received_at"]
                        for event in self.of_seat(seat, "delivery_checked") if event.get("received_at")}
         typed = parse_time(last_user_typed_at) if last_user_typed_at else None
-        return {subject for event in self.of_seat(seat, REMINDER_SENT)
-                if event["session_id"] == session_id and event["message_id"] not in not_found
-                and (typed is None
-                     or parse_time(received_at.get(event["message_id"], event["at"])) >= typed)
-                for subject in event["subjects"]
-                if subject not in last_held_at
-                or last_held_at[subject] < parse_time(event["send_started_at"])}
+        reminded = set()
+        for event in self.of_seat(seat, REMINDER_SENT):
+            if event["session_id"] != session_id or event["message_id"] in not_found:
+                continue
+            arrived = parse_time(received_at.get(event["message_id"], event["at"]))
+            if typed is not None and arrived < typed:
+                continue
+            reminded.update(subject for subject in event["subjects"]
+                            if subject not in last_held_at or last_held_at[subject] < arrived)
+        return reminded
 
     def checked_sentences(self, seat):
         return {(event["record_uuid"], event["sentence"])
