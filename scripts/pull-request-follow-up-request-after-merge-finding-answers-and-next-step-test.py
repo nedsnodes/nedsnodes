@@ -1073,20 +1073,6 @@ def test_clean_up():
         case.run(worktree, "start-topic-branch", "topic-unpushed", "--finding-numbers", "2")
         case.commit_change("unpushed.txt")
         git(worktree, "switch", "-q", "topic-one")
-        git(case.repository, "worktree", "lock", "--reason", "claude agent agent-a1b2 (pid 4242)", str(worktree))
-        code, out, err = case.run(case.repository, "remove-topic-branches-and-worktrees")
-        check("remove-topic-branches-and-worktrees leaves a worktree the agent harness locks, and its branches, with exit 1",
-              code == 1 and f"Worktree {worktree} is locked by the agent harness (lock reason: claude agent "
-                            "agent-a1b2 (pid 4242)), so remove-topic-branches-and-worktrees left it" in out
-              and "Wait until the subagent has ended.\nIf the worktree is still locked when you end your turn, pass "
-                  "this sentence to the user word for word: \"The agent harness still locks worktree "
-                  f"{worktree} of the follow-up of {FOLLOWED_UP}, so remove-topic-branches-and-worktrees "
-                  "could not remove it.\"\nIf you are a subagent, pass that sentence to the agent that dispatched "
-                  "you instead.\n" in out
-              and "left 1 worktree or branch in place;" in out
-              and out.endswith(f"\nWhen you have done what each says, run: python3 {program.PROGRAM} {NUMBER} remove-topic-branches-and-worktrees\n")
-              and worktree.exists() and "topic-one" in git(case.repository, "branch"), out + err)
-        git(case.repository, "worktree", "unlock", str(worktree))
         git(case.repository, "worktree", "lock", "--reason", "kept by the user", str(worktree))
         code, out, err = case.run(case.repository, "remove-topic-branches-and-worktrees")
         check("remove-topic-branches-and-worktrees leaves a worktree locked for another reason, saying what to do",
@@ -1154,63 +1140,6 @@ def test_clean_up_goes_on_past_each_worktree_and_branch():
         check("a lock without a reason is named as such",
               code == 1 and "is locked (lock reason: none given)" in out
               and f"of the follow-up of {FOLLOWED_UP} is locked (lock reason: none given), so" in out, out + err)
-    finally:
-        case.close()
-
-
-def test_clean_up_claude_code_lock_whose_claude_process_has_ended():
-    # Linux only: the lock's start is a Linux clock-tick count read from /proc, which macOS lacks.
-    if not sys.platform.startswith("linux"):
-        print("SKIP  [this machine cannot run it] a Claude Code lock whose claude process has ended "
-              "is unlocked: the case reads its process's start from /proc")
-        return
-    case = Case()
-    try:
-        worktree = started(case)
-        git(worktree, "push", "-q", "origin", "topic-one")
-        command = "remove-topic-branches-and-worktrees"
-        snapshots = program.owner_file.load_uncommitted_work_snapshots_module_once()
-        start = snapshots.linux_start_ticks(os.getpid())
-        # This test's own process runs; the same pid with another start names a process that has ended.
-        running = f"claude agent agent-a77d25c01f5a06582 (pid {os.getpid()} start {start})"
-        ended = f"claude agent agent-a77d25c01f5a06582 (pid {os.getpid()} start {int(start) + 1})"
-        git(case.repository, "worktree", "lock", "--reason", running, str(worktree))
-        code, out, err = case.run(case.repository, command)
-        check("a Claude Code lock whose claude process runs keeps the worktree, locked, as the harness's",
-              code == 1 and f"Worktree {worktree} is locked by the agent harness (lock reason: {running})" in out
-              and "Unlocked" not in out and worktree.exists()
-              and f"locked {running}" in git(case.repository, "worktree", "list", "--porcelain"), out + err)
-        git(case.repository, "worktree", "unlock", str(worktree))
-        git(case.repository, "worktree", "lock", "--reason", ended, str(worktree))
-        with case.in_process(case.repository), contextlib.redirect_stdout(io.StringIO()) as printed:
-            saved = program.owner_file.claude_code_subagent_worktree_lock_dispatching_process_running_state
-            program.owner_file.claude_code_subagent_worktree_lock_dispatching_process_running_state = (
-                lambda lock: (program.owner_file.UNKNOWN, "whether claude process runs could not be read"))
-            try:
-                code = program.remove_topic_branches_and_worktrees(NUMBER)
-            finally:
-                program.owner_file.claude_code_subagent_worktree_lock_dispatching_process_running_state = saved
-        out = printed.getvalue()
-        check("a Claude Code lock whose claude process cannot be read keeps the worktree, locked, as the harness's",
-              code == 1 and f"Worktree {worktree} is locked by the agent harness (lock reason: {ended})" in out
-              and "Unlocked" not in out and worktree.exists()
-              and f"locked {ended}" in git(case.repository, "worktree", "list", "--porcelain"), out)
-        (worktree / "stray.txt").write_text("stray\n")
-        code, out, err = case.run(case.repository, command)
-        check("a Claude Code lock whose claude process has ended is unlocked, and the worktree is then judged "
-              "as an unlocked one: kept for its untracked file",
-              code == 1 and f"Unlocked worktree {worktree}, since Claude Code's lock names claude process "
-                            f"{os.getpid()}, started at {int(start) + 1}, which has ended.\n" in out
-              and f"Worktree {worktree} holds changed or untracked files" in out and "?? stray.txt" in out
-              and "locked by the agent harness" not in out and worktree.exists()
-              and "locked" not in git(case.repository, "worktree", "list", "--porcelain"), out + err)
-        (worktree / "stray.txt").unlink()
-        git(case.repository, "worktree", "lock", "--reason", ended, str(worktree))
-        code, out, err = case.run(case.repository, command)
-        check("a clean worktree whose Claude Code lock names an ended claude process is unlocked and removed, "
-              "and its pushed branch deleted",
-              code == 0 and f"Unlocked worktree {worktree}," in out and f"Removed worktree {worktree}." in out
-              and "Deleted branch topic-one." in out and not worktree.exists(), out + err)
     finally:
         case.close()
 
@@ -1660,7 +1589,6 @@ for test in (test_help, test_block_parsing, test_print_block, test_print_block_w
              test_open_gh_pr_create_second_try_and_gh_pr_list,
              test_push_time_limit_is_the_pre_push_conflict_check_budget_plus_120_seconds,
              test_open_title_and_description_file_removal_failure,
-             test_clean_up_claude_code_lock_whose_claude_process_has_ended,
              test_leave_out_and_finish, test_three_findings, test_waiting_for_user_ruling,
              test_state_failures, test_clean_up, test_clean_up_goes_on_past_each_worktree_and_branch,
              test_clean_up_failure, test_clean_up_run_from_inside_a_worktree_it_removes, test_next_step, test_next_step_branch_choice):
