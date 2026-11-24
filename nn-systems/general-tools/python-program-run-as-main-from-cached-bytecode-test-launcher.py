@@ -23,8 +23,10 @@ if len(sys.argv) < 2:
     sys.exit(2)
 program = os.path.abspath(sys.argv[1])
 sys.argv = sys.argv[1:]
-# A direct run puts the directory of the script, with its symbolic links resolved, first on sys.path.
-sys.path[0] = os.path.dirname(os.path.realpath(program))
+# A direct run puts the directory of the script, with its symbolic links resolved, first on sys.path, unless
+# safe_path (-P or PYTHONSAFEPATH) is set, when it adds none and sys.path[0] is a real entry to keep.
+if not sys.flags.safe_path:
+    sys.path[0] = os.path.dirname(os.path.realpath(program))
 loader = importlib.machinery.SourceFileLoader("__main__", program)
 module = types.ModuleType("__main__")
 # As for a script run by path: no __spec__, which argparse reads to name the program in its usage line.
@@ -34,5 +36,4 @@ module.__loader__ = loader
 module.__builtins__ = __builtins__
 sys.modules["__main__"] = module
 code = loader.get_code("__main__")
-del importlib, types, loader
 exec(code, module.__dict__)
