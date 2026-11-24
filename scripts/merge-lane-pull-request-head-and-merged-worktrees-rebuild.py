@@ -127,9 +127,13 @@ def main(argv=None):
                   f"so another run rebuilt it while this one did, and a test run there would "
                   f"test that run's commit.\n"
                   f"Run `pgrep -af merge-lane-pull-request-head-test-run-on-merged-worktree.py`.\n"
-                  f"While it lists a run with the argument {number}, run it again once a minute.\n"
-                  f"When it lists none, run the command you ran that started this program "
-                  f"again, with the same options; it rebuilds pr{number}-merged.")
+                  f"While that pgrep command lists a process with the pull request argument "
+                  f"{number}, repeat the pgrep command once a minute, for at most 2 hours.\n"
+                  f"If it still lists one after 2 hours, tell the user that process's line, "
+                  f"because it may be hung; a subagent tells the agent that dispatched it.\n"
+                  f"When it lists none, run the command you first typed again, with the same "
+                  f"options, whether that was the head test run or this rebuild program; it "
+                  f"rebuilds pr{number}-merged.")
             return 1
         merged_short = git(checkout, "rev-parse", "--short", merged_full)
         merged_tree = git(checkout, "rev-parse", f"{merged_full}^{{tree}}")

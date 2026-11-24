@@ -173,8 +173,8 @@ def main():
               completed.returncode == 1 and "another run rebuilt it" in completed.stdout
               and "Run `pgrep -af merge-lane-pull-request-head-test-run-on-merged-worktree.py`."
               in completed.stdout
-              and "When it lists none, run the command you ran that started this program again"
-              in completed.stdout
+              and "repeat the pgrep command once a minute" in completed.stdout
+              and "When it lists none, run the command you first typed again" in completed.stdout
               and "merged commit:" not in completed.stdout,
               f"exit {completed.returncode}\n{completed.stdout}{completed.stderr}")
 

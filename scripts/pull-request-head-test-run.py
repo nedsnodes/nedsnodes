@@ -299,12 +299,15 @@ def main(argv=None, now=None, monotonic=time.monotonic) -> int:
                         f"would be a pass on another commit. Another run may have rebuilt this "
                         f"checkout.\n"
                         f"Run `pgrep -af merge-lane-pull-request-head-test-run-on-merged-worktree.py`.\n"
-                        f"While it lists a run for the pull request of {checkout.name}, run it "
-                        f"again once a minute.\n"
-                        f"When it lists none for that pull request, run scripts/merge-lane-pull-"
-                        f"request-head-test-run-on-merged-worktree.py <pull request number> "
-                        f"again from the main checkout, with the options the last run had; it "
-                        f"rebuilds this checkout and tests the commit it builds.")
+                        f"While that pgrep command lists a process with the pull request number "
+                        f"in the name {checkout.name}, repeat the pgrep command once a minute, "
+                        f"for at most 2 hours.\n"
+                        f"If it still lists one after 2 hours, tell the user that process's "
+                        f"line, because it may be hung; a subagent tells the agent that "
+                        f"dispatched it.\n"
+                        f"When it lists none for that pull request, run the head test run command "
+                        f"you first typed again, with the same options; it rebuilds this checkout "
+                        f"and tests the commit it builds.")
         return EXIT_CHECKOUT_REFUSED
     differing, why_status_failed = first_tracked_file_that_differs(checkout)
     if why_status_failed is not None:
