@@ -2825,7 +2825,8 @@ def run_conversation_tail_last_lines_cases(workspace: Path):
           supervisor.successor_initial_agent_instructions_ending_with_conversation_tail_last_lines(
               instructions, long_tail)
           == instructions + heading(100, long_tail)
-          + "\n".join(f"dialog line {number}" for number in range(2, 102)))
+          + "\n".join(f"dialog line {number}" for number in range(2, 102))
+          + supervisor.CONVERSATION_TAIL_LAST_LINES_END_LINE)
 
     for line_count in (100, 37):
         short_tail = directory / f"short-{line_count}-dialog-0002.md"
@@ -2834,7 +2835,8 @@ def run_conversation_tail_last_lines_cases(workspace: Path):
         check(f"CONVERSATION-TAIL LAST LINES: a conversation-tail of {line_count} lines is copied whole",
               supervisor.successor_initial_agent_instructions_ending_with_conversation_tail_last_lines(
                   instructions, short_tail)
-              == instructions + heading(line_count, short_tail) + short_text.rstrip("\n"))
+              == instructions + heading(line_count, short_tail) + short_text.rstrip("\n")
+              + supervisor.CONVERSATION_TAIL_LAST_LINES_END_LINE)
 
     check("CONVERSATION-TAIL LAST LINES: with no conversation-tail the instructions are unchanged",
           supervisor.successor_initial_agent_instructions_ending_with_conversation_tail_last_lines(
@@ -2878,7 +2880,7 @@ def run_conversation_tail_last_lines_cases(workspace: Path):
     handoff_directory, launched = handoff_launch("tailedsuccessor", writing_extract_dialog)
     extract_path = handoff_directory / "tailedsuccessor-dialog-0002.md"
     expected_block = heading(100, extract_path) + "\n".join(
-        f"turn {number}" for number in range(51, 151))
+        f"turn {number}" for number in range(51, 151)) + supervisor.CONVERSATION_TAIL_LAST_LINES_END_LINE
     check("CONVERSATION-TAIL LAST LINES: the launched successor's prompt ends with the last 100 "
           "lines of its conversation-tail, after the next step",
           len(launched) == 1 and launched[0].endswith(expected_block)
