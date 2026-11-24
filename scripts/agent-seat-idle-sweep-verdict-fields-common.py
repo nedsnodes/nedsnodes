@@ -59,9 +59,10 @@ HANDOFF_DEFERRED_MARKER = "handoff_deferred_marker"  # path or null
 USAGE_LIMIT = "usage_limit"
 SENTENCES = "sentences"
 OPEN_TASKS_NOTHING_HOLDS = "open_tasks_nothing_holds"  # [{"id", "subject"}]
-# [{"kind", "number"}], once each, at rules 3 to 5, and at rule 2 when its fallback reached them: each prerequisite of an open task, such as
-# {"kind": "pr_merged", "number": 50}, that was not asked of GitHub because the due-task hook's
-# GitHubConditionChecker had spent its time budget, so the task it holds may be free; absent when none
+# [{"kind", "number"}], once each: each prerequisite of an open task, such as
+# {"kind": "pr_merged", "number": 50}, that the open-task scan did not ask GitHub about because the
+# due-task hook's GitHubConditionChecker had spent its time budget, so the task it holds may be free.
+# Set whenever the scan runs, even when a gh failure ends it; absent when the scan skipped none.
 GITHUB_CONDITIONS_SKIPPED_FOR_BUDGET = "github_conditions_skipped_for_budget"
 TEXT = "text"                              # code's text to send as written, at rule 3
 IF_EVERY_SENTENCE_BACKED = "if_every_sentence_backed"  # {"rule", "decision", maybe "text"}
