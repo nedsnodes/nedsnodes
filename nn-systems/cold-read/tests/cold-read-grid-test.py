@@ -259,10 +259,8 @@ def reviews_saved_lines(result):
 # {"fragment", "attempts", "stdout", "stdout_by_attempt", "edit"}: a cell
 # whose report name contains "fragment" (the first matching entry wins)
 # writes nothing and exits 1 on its first "attempts" launches, printing
-# "stdout" on stdout first -- the real limit texts of the cases below, with
-# `{family}` standing for the model's family name (Opus, Fable), as the
-# `claude` agent-binary's model-limit message names it -- or the attempt's own
-# text from "stdout_by_attempt" ({"2": ...}), and appending to the file
+# "stdout" on stdout first -- the real texts of the cases below -- or the
+# attempt's own text from "stdout_by_attempt" ({"2": ...}), and appending to the file
 # "edit" before failing, for a stray write by a failed first attempt.
 # COLD_READ_GRID_TEST_STUB_SLEEP_SECONDS, when set, is how long the stub waits
 # before writing its report -- a reviewer still reading -- except in a cell
@@ -329,18 +327,13 @@ if counter_directory:
     attempt = len(counter.read_text().splitlines()) + 1 if counter.is_file() else 1
     with open(counter, "a", encoding="utf-8") as handle:
         handle.write(f"attempt {attempt}\n")
-model = ""
-for flag in ("--model", "-m"):
-    if flag in sys.argv:
-        model = sys.argv[sys.argv.index(flag) + 1]
-family = model.split("-")[1].capitalize() if model.count("-") else model
 for entry in json.loads(os.environ.get("COLD_READ_GRID_TEST_STUB_FAILURE_PLAN") or "[]"):
     if entry["fragment"] not in given.name:
         continue
     if attempt <= entry.get("attempts", 1):
         text = entry.get("stdout_by_attempt", {}).get(str(attempt), entry.get("stdout", ""))
         if text:
-            sys.stdout.write(text.replace("{family}", family) + "\n")
+            sys.stdout.write(text + "\n")
         if entry.get("edit"):
             with open(entry["edit"], "a", encoding="utf-8") as handle:
                 handle.write("The reviewer's own edit on a failed attempt.\n")
@@ -934,12 +927,8 @@ try:
 
     # --- Every failure case below, in the design's terms ---------------------
     # nn-systems/cold-read/cold-read-grid-cell-failure-handling.tool.design.md, section
-    # 8. The real limit text (section 4) is a fixture: the line of the
-    # kept log it cites, and the 2026-09-18 logged-out capture on ned-box.
+    # 8. The logged-out line (section 4) is a fixture: the 2026-09-18 capture on ned-box.
     LOGGED_OUT_LINE = "Not logged in · Please run /login"
-    MODEL_LIMIT_LINE = ("You've reached your {family} limit. Switch to another model, or "
-                        "manage usage credits at claude.ai/settings/usage?from=cc_cli_limit_message, "
-                        "to continue.")
 
     def lines_opening(result, prefix):
         return [line for line in result.stdout.splitlines() if line.startswith(prefix)]
@@ -1088,25 +1077,6 @@ try:
           and "- claude is down: logged-out — Not logged in · Please run /login; 2 reports absent" in result.stdout
           and result.returncode == 1 and len(reviews_saved_lines(result)) == 5,
           f"exit {result.returncode}; stdout={result.stdout!r}")
-
-    # --- All three Claude cells fail with a model limit: no agent-binary is down --
-    repository = build_scratch_repository(scratch, "checkout-model-limits")
-    result = run_grid(repository, stubs, {"COLD_READ_GRID_TEST_STUB_FAILURE_PLAN": json.dumps(
-        [{"fragment": "claude-", "attempts": 2, "stdout": MODEL_LIMIT_LINE}])})
-    check("a model limit on every Claude cell is three absences, not an agent-binary down",
-          "AGENT-BINARY DOWN:" not in result.stdout and "is down:" not in result.stdout
-          and len(lines_opening(result, "- claude-")) == 3, repr(result.stdout))
-    check("each absence names model-limit and the model's family",
-          any(line.startswith("- claude-hunt-deep: model-limit — Opus (log:")
-              for line in result.stdout.splitlines())
-          and any(line.startswith("- claude-hunt-second-strongest-model: model-limit — Fable (log:")
-                  for line in result.stdout.splitlines()), repr(result.stdout))
-    check("the user is told, one cause per agent-binary and class, on one FAILED line and at the end",
-          len([line for line in lines_opening(result, "FAILED")
-               if "Tell the user: claude model-limit — " in line]) == 1
-          and result.stdout.rstrip().splitlines()[-1].startswith("Tell the user: claude model-limit — ")
-          and result.stdout.count("Tell the user: claude model-limit — ") == 2,
-          repr(result.stdout))
 
     # --- Two Claude cells are logged out; one fails otherwise twice -----------
     repository = build_scratch_repository(scratch, "checkout-mixed-causes")

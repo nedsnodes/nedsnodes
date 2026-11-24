@@ -1096,7 +1096,7 @@ def announce_agent_binary_down(cells_by_runtime: dict, outcome: RunOutcome) -> N
         if any(cell not in outcome.absent and cell not in outcome.landed for cell in cells):
             continue
         classes = {report.cause_class for report in absences}
-        if len(classes) != 1 or not classes <= cell_common.AGENT_BINARY_WIDE_CAUSE_CLASSES:
+        if len(classes) != 1 or not classes <= cell_common.USER_CLEARABLE_CAUSE_CLASSES:
             continue
         last = absences[-1]
         outcome.down[runtime] = (last.cause_class, last.detail, len(absences))

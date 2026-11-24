@@ -112,7 +112,7 @@ def build_scratch_repository(scratch):
 # 0.153.4) from a scratch directory outside any checkout with an empty
 # CODEX_HOME: `CODEX_HOME=$(mktemp -d) codex exec --sandbox read-only
 # --skip-git-repo-check "say hi"`, exit 1, this line on stderr. Its source
-# is recorded beside recognised_failure_texts_for_model in the cell.
+# is recorded beside RECOGNISED_FAILURE_TEXTS in the cell.
 CODEX_LOGGED_OUT_LINE = (
     "2026-09-18T19:37:41.140816Z ERROR codex_api::endpoint::responses_websocket: "
     "failed to connect to websocket: HTTP error: 401 Unauthorized, "
@@ -285,7 +285,7 @@ with tempfile.TemporaryDirectory() as scratch:
         "cold_read_codex_cell_under_test", CELL_SCRIPT)
     codex_module = importlib.util.module_from_spec(codex_spec)
     codex_spec.loader.exec_module(codex_module)
-    recognised = codex_module.recognised_failure_texts_for_model("gpt-5-codex")
+    recognised = codex_module.RECOGNISED_FAILURE_TEXTS
     check("the launcher recognises one text, and it is logged-out",
           [text.cause_class for text in recognised] == ["logged-out"],
           repr(recognised))

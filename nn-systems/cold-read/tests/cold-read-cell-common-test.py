@@ -905,28 +905,26 @@ with tempfile.TemporaryDirectory() as scratch:
     PERMISSION_NOISE = ("Permission allow rule (/Users/el/.claude/settings.json): "
                         "Glob(//Users/el/agents/**) is not matched by file permission checks\n")
 
-    def classify(stdout="", stderr="", exit_code=1, model="claude-fable-5-1", start_error=""):
+    def classify(stdout="", stderr="", exit_code=1, start_error=""):
         return common_module.classify_failed_attempt(
             stdout=stdout, stderr=stderr, exit_code=exit_code,
-            recognised_texts=claude_module.recognised_failure_texts_for_model(model),
+            recognised_texts=claude_module.RECOGNISED_FAILURE_TEXTS,
             start_error=start_error)
 
     check("the weekly limit line is no recognised text: exit-N, the line as detail",
           classify(stdout=PERMISSION_NOISE + WEEKLY_LIMIT_LINE + "\n")
           == ("exit-1", WEEKLY_LIMIT_LINE),
           repr(classify(stdout=PERMISSION_NOISE + WEEKLY_LIMIT_LINE + "\n")))
-    check("the Fable limit line is model-limit for a Fable attempt, the family as detail",
-          classify(stdout=PERMISSION_NOISE + FABLE_LIMIT_LINE + "\n") == ("model-limit", "Fable"),
+    check("the Fable limit line is no recognised text: exit-N, the line as detail",
+          classify(stdout=PERMISSION_NOISE + FABLE_LIMIT_LINE + "\n")
+          == ("exit-1", FABLE_LIMIT_LINE[:120]),
           repr(classify(stdout=PERMISSION_NOISE + FABLE_LIMIT_LINE + "\n")))
-    check("the same line on an Opus attempt is not that model's limit: exit-N",
-          classify(stdout=FABLE_LIMIT_LINE + "\n", model="claude-opus-5")[0] == "exit-1",
-          repr(classify(stdout=FABLE_LIMIT_LINE + "\n", model="claude-opus-5")))
     check("the logged-out capture is logged-out with the whole line as detail",
           classify(stdout=LOGGED_OUT_LINE + "\n") == ("logged-out", LOGGED_OUT_LINE),
           repr(classify(stdout=LOGGED_OUT_LINE + "\n")))
-    check("a limit text inside a line, not at its start, is not recognised",
-          classify(stdout=f"The document quotes: {FABLE_LIMIT_LINE}\n")[0] == "exit-1",
-          repr(classify(stdout=f"The document quotes: {FABLE_LIMIT_LINE}\n")))
+    check("a recognised text inside a line, not at its start, is not recognised",
+          classify(stdout=f"The document quotes: {LOGGED_OUT_LINE}\n")[0] == "exit-1",
+          repr(classify(stdout=f"The document quotes: {LOGGED_OUT_LINE}\n")))
     check("an agent-binary that could not be started is agent-binary-missing with the error",
           classify(exit_code=None, start_error="[Errno 2] No such file or directory: 'claude'")
           == ("agent-binary-missing", "[Errno 2] No such file or directory: 'claude'"))
@@ -957,7 +955,7 @@ with tempfile.TemporaryDirectory() as scratch:
     def classify_codex(stdout="", stderr="", exit_code=1):
         return common_module.classify_failed_attempt(
             stdout=stdout, stderr=stderr, exit_code=exit_code,
-            recognised_texts=codex_module.recognised_failure_texts_for_model("gpt-5-codex"))
+            recognised_texts=codex_module.RECOGNISED_FAILURE_TEXTS)
 
     check("the Codex 401 capture on stderr is logged-out, the line after its timestamp as detail",
           classify_codex(stderr=CODEX_LOGGED_OUT_LINE + "\n")
@@ -978,19 +976,6 @@ with tempfile.TemporaryDirectory() as scratch:
           repr(classify_codex(stderr=f"{CODEX_LOGGED_OUT_TIMESTAMP} {WEEKLY_LIMIT_LINE}\n")))
     check("the Claude logged-out line still matches at column 0 with no timestamp",
           classify(stdout=LOGGED_OUT_LINE + "\n") == ("logged-out", LOGGED_OUT_LINE))
-    check("the family name is the model id's second word, capitalised",
-          claude_module.model_family_name("claude-fable-5-1") == "Fable"
-          and claude_module.model_family_name("claude-opus-5") == "Opus")
-    check("a one-word alias such as haiku is capitalised too, as Claude's model-limit message spells it",
-          claude_module.model_family_name("haiku") == "Haiku",
-          repr(claude_module.model_family_name("haiku")))
-    check("a two-word model id such as claude-haiku gives its second word",
-          claude_module.model_family_name("claude-haiku") == "Haiku",
-          repr(claude_module.model_family_name("claude-haiku")))
-    check("a model id whose second word is empty is capitalised whole",
-          claude_module.model_family_name("claude--x") == "Claude--x",
-          repr(claude_module.model_family_name("claude--x")))
-
     # Through the real cells: the cause line is the last line of the attempt
     # in the log the grid reads, in the form the grid parses.
     shutil.rmtree(repository)
@@ -1001,15 +986,15 @@ with tempfile.TemporaryDirectory() as scratch:
         {"claude-fable-5-1": {"exit": 1, "stdout": FABLE_LIMIT_LINE + "\n"}},
         report, "--tier", "second-strongest-model",
     )
-    check("a Claude cell that hit the Fable limit prints cause: model-limit — Fable",
+    check("a Claude cell that hit the Fable limit prints cause: exit-1 with the line as detail",
           result.returncode == 1
-          and "cold-read-claude-cell: cause: model-limit — Fable" in result.stderr,
+          and f"cold-read-claude-cell: cause: exit-1 — {FABLE_LIMIT_LINE[:120]}" in result.stderr,
           repr(result.stderr))
     cause_lines = [line for line in result.stderr.splitlines()
                    if line.startswith("cold-read-claude-cell: cause:")]
     check("the cause line is the last line of its own about the attempt",
           len(cause_lines) == 1
-          and result.stderr.index("failed (exit 1)") < result.stderr.index("cause: model-limit"),
+          and result.stderr.index("failed (exit 1)") < result.stderr.index("cause: exit-1"),
           repr(result.stderr))
     shutil.rmtree(repository)
     repository = build_scratch_repository(scratch)

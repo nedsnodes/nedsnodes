@@ -125,21 +125,9 @@ def invocation_builder(effort: str, parsed_arguments=None):
     return build_invocation
 
 
-def model_family_name(model: str) -> str:
-    """Return the family name used by Claude's model-limit messages."""
-    parts = model.split("-")
-    return (parts[1] if len(parts) > 1 and parts[1] else model).capitalize()
-
-
-# Match the CLI's failure messages at line starts; model-limit prefixes use the current model family.
-def recognised_failure_texts_for_model(model: str) -> list:
-    family = model_family_name(model)
-    return [
-        common.RecognisedFailureText(
-            "model-limit", f"You've reached your {family} limit", family),
-        common.RecognisedFailureText(
-            "logged-out", "Not logged in", common.DETAIL_IS_WHOLE_LINE),
-    ]
+RECOGNISED_FAILURE_TEXTS = (
+    common.RecognisedFailureText("logged-out", "Not logged in", common.DETAIL_IS_WHOLE_LINE),
+)
 
 
 def main() -> int:
@@ -149,7 +137,7 @@ def main() -> int:
         tier_to_model_chain=TIER_TO_CLAUDE_MODEL_CHAIN,
         tier_to_effort=TIER_TO_REASONING_EFFORT,
         invocation_builder=invocation_builder,
-        recognised_failure_texts_for_model=recognised_failure_texts_for_model,
+        recognised_failure_texts=RECOGNISED_FAILURE_TEXTS,
         cold_read_cell_launcher_own_command_line_options_adder=cold_read_cell_launcher_own_command_line_options_adder,
     )
 

@@ -35,7 +35,6 @@ HOOK = REPO_ROOT / "nn-systems" / "general-tools" / "agent-seat-worktree-create-
 CLAUDE_RUN_TIMEOUT_SECONDS = 600
 LOCK_POLL_SECONDS = 0.2
 SUBAGENT_WORKTREE_DIRECTORY_NAME = re.compile(r"worktree-agent-a[0-9a-f]{16}")
-CLAUDE_MODEL = "haiku"
 # `git worktree add` itself holds this lock while it checks the files out, and drops it when the add ends.
 GIT_WORKTREE_ADD_OWN_LOCK_LINE = "locked initializing"
 
@@ -102,12 +101,12 @@ def test_git_worktree_adds_own_lock_is_not_counted_as_a_lock():
 
 def claude_outside_cause_or_none(returncode, stdout, stderr):
     """"<cause class> — <claude's words>" when claude exited nonzero naming a cause outside this
-    repository, such as being logged out or a model's limit, else None."""
+    repository, such as being logged out, else None."""
     if returncode == 0:
         return None
     cause_class, detail = claude_cell.common.classify_failed_attempt(
         stdout=stdout, stderr=stderr, exit_code=returncode,
-        recognised_texts=claude_cell.recognised_failure_texts_for_model(CLAUDE_MODEL))
+        recognised_texts=claude_cell.RECOGNISED_FAILURE_TEXTS)
     return (f"{cause_class} — {detail}" if cause_class in claude_cell.common.USER_CLEARABLE_CAUSE_CLASSES
             else None)
 
@@ -117,10 +116,10 @@ def test_claude_outside_cause_is_told_from_a_failure():
     check("claude's weekly limit, exit 1, is not an outside cause the classifier names",
           claude_outside_cause_or_none(1, weekly_limit, "") is None,
           repr(claude_outside_cause_or_none(1, weekly_limit, "")))
-    check("claude's haiku model limit, as claude capitalises it, exit 1, is an outside cause",
-          (claude_outside_cause_or_none(1, "You've reached your Haiku limit · resets 3am\n", "") or "")
-          .startswith("model-limit — "),
-          repr(claude_outside_cause_or_none(1, "You've reached your Haiku limit · resets 3am\n", "")))
+    haiku_limit = "You've reached your Haiku limit · resets 3am\n"
+    check("claude's haiku model limit, exit 1, is not an outside cause the classifier names",
+          claude_outside_cause_or_none(1, haiku_limit, "") is None,
+          repr(claude_outside_cause_or_none(1, haiku_limit, "")))
     check("claude logged out, exit 1, is an outside cause",
           claude_outside_cause_or_none(1, "", "Not logged in · Please run /login\n")
           == "logged-out — Not logged in · Please run /login")

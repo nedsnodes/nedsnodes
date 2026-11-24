@@ -340,9 +340,8 @@ class WriteDetectorUnavailable(Exception):
 CAUSE_PHRASE = "cause:"
 CAUSE_SEPARATOR = " — "
 # Match line starts to avoid quoted document text, allowing the Codex tracing timestamp.
-AGENT_BINARY_WIDE_CAUSE_CLASSES = frozenset({"logged-out", "agent-binary-missing"})
-USER_CLEARABLE_CAUSE_CLASSES = frozenset(
-    {"logged-out", "agent-binary-missing", "model-limit"})
+# A cause the user can clear also fails every cold-read-cell of its agent-binary.
+USER_CLEARABLE_CAUSE_CLASSES = frozenset({"logged-out", "agent-binary-missing"})
 CAUSE_DETAIL_MAX_CHARACTERS = 120
 # Drop per-attempt timestamps from details that the grid reports for an entire agent-binary.
 DETAIL_IS_WHOLE_LINE = "whole-line"
@@ -851,7 +850,7 @@ def run_model_chain(
     prompt: str, report: pathlib.Path, cell: str, tier: str, target_argument: str,
     baseline, cell_started_at: float, prompt_file_argument: str = "",
     recover_report_from_stdout=None, model_to_effort=None,
-    recognised_failure_texts_for_model=None, child_environment=None,
+    recognised_failure_texts=(), child_environment=None,
     per_model_run_timeout_seconds=None, parse_agent_binary_final_result_from_stdout_line=None,
     report_wait_after_result_line_seconds: float = 0.0,
 ) -> int:
@@ -901,8 +900,6 @@ def run_model_chain(
                 stdout="", stderr="", exit_code=None, recognised_texts=(),
                 start_error=str(error))), file=sys.stderr)
             continue
-        recognised_texts = (recognised_failure_texts_for_model(model)
-                            if recognised_failure_texts_for_model else ())
         if completed.stderr:
             print(completed.stderr, file=sys.stderr, end="")
         if isinstance(completed, ReviewerRunEndedByResultLine):
@@ -927,7 +924,7 @@ def run_model_chain(
             print(f"{program}: {model} failed (exit {completed.returncode})", file=sys.stderr)
             print(cause_line(program, *classify_failed_attempt(
                 stdout=completed.stdout or "", stderr=completed.stderr or "",
-                exit_code=completed.returncode, recognised_texts=recognised_texts)),
+                exit_code=completed.returncode, recognised_texts=recognised_failure_texts)),
                 file=sys.stderr)
             continue
         # Recover only after exit 0; a failed model's leftover file is not an accepted review.
@@ -947,7 +944,7 @@ def run_model_chain(
             print(str(refusal), file=sys.stderr)
             print(cause_line(program, *classify_failed_attempt(
                 stdout=completed.stdout or "", stderr=completed.stderr or "",
-                exit_code=0, recognised_texts=recognised_texts)), file=sys.stderr)
+                exit_code=0, recognised_texts=recognised_failure_texts)), file=sys.stderr)
             continue
         produced_by = model
         # Use only this attempt's stderr: stdout may quote token counts, and earlier attempts cost other models.
@@ -1009,7 +1006,7 @@ def record_directory_being_written_lock_hold_shared_until_exit_unless_parent_pas
 def run_cell(
     *, program: str, runtime: str, description: str, model_help: str,
     tier_to_model_chain: dict, tier_to_effort: dict, invocation_builder,
-    recover_report_from_stdout=None, recognised_failure_texts_for_model=None,
+    recover_report_from_stdout=None, recognised_failure_texts=(),
     stage_report_outside_checkout: bool = False, child_environment=None,
     per_model_run_timeout_seconds=None, parse_agent_binary_final_result_from_stdout_line=None,
     report_wait_after_result_line_seconds: float = 0.0,
@@ -1089,7 +1086,7 @@ def run_cell(
             cell_started_at=cell_started_at,
             prompt_file_argument=args.prompt_file or "",
             recover_report_from_stdout=recover_report_from_stdout,
-            recognised_failure_texts_for_model=recognised_failure_texts_for_model,
+            recognised_failure_texts=recognised_failure_texts,
             child_environment=child_environment,
             per_model_run_timeout_seconds=per_model_run_timeout_seconds,
             parse_agent_binary_final_result_from_stdout_line=parse_agent_binary_final_result_from_stdout_line,
