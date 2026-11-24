@@ -323,6 +323,20 @@ with tempfile.TemporaryDirectory() as directory:
           turns == whole_turns and [t for t in turns if t] == [("user", "start"), ("user", "stop"),
                                                                 ("agent", "Stopped.")], turns)
 
+for notice in ("[Request interrupted by user]", "[Request interrupted by user for tool use]\n"):
+    check(f"{notice!r} is an interrupt notice",
+          search_module.is_interrupt_notice({"type": "user", "message": {"content": [
+              {"type": "text", "text": notice}]}}))
+pasted = "[Request interrupted by user] was all I saw; please carry on."
+check("a prompt the user typed that opens with a pasted interrupt notice is not a notice, and is his turn",
+      not search_module.is_interrupt_notice(typed(pasted))
+      and search_module.TurnReader().turn(typed(pasted)) == ("user", pasted))
+check("a prompt the user typed with an interrupt notice in a later text block is not a notice",
+      not search_module.is_interrupt_notice({"type": "user", "message": {"content": [
+          {"type": "text", "text": "Please carry on."},
+          {"type": "text", "text": "[Request interrupted by user]"}]}}))
+
+
 def search(directory, *arguments):
     return subprocess.run([sys.executable, str(SEARCH_SCRIPT), "--projects-dir", directory, *arguments],
                           capture_output=True, text=True)

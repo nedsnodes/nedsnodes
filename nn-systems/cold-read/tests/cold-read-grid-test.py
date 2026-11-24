@@ -146,6 +146,7 @@ import hashlib
 import importlib.util
 import inspect
 import io
+import itertools
 import json
 import re
 import os
@@ -537,6 +538,76 @@ def record_directory_of(repository):
     return directories[-1] if directories else None
 
 
+def processes_running_programs_under(*directories):
+    """The `ps` lines of processes whose program, or the script their Python runs, is under a
+    directory. Another process that only names such a path, such as `tail -F` on a log there,
+    is not the case's to report or stop."""
+    prefixes = tuple(f"{path}/" for directory in directories
+                     for path in (Path(directory), Path(directory).resolve()))
+    # -ww: without it `ps` may cut a piped line to the terminal's width, hiding a long scratch path.
+    listing = subprocess.run(["ps", "-A", "-ww", "-o", "pid=", "-o", "command="],
+                             capture_output=True, text=True, check=True).stdout
+    found = []
+    for line in listing.splitlines():
+        words = line.split()[1:]
+        # A `#!/usr/bin/env python3` script is listed as `env python3 <script>` until env execs.
+        if words and Path(words[0]).name == "env":
+            words = list(itertools.dropwhile(lambda word: word.startswith("-") or "=" in word, words[1:]))
+        if not words:
+            continue
+        if "python" in Path(words[0]).name.lower():
+            words = [word for word in words[1:] if not word.startswith("-")] or words
+        if words[0].startswith(prefixes):
+            found.append(line.strip())
+    return found
+
+
+def kill_processes_running_programs_under(*directories):
+    for line in processes_running_programs_under(*directories):
+        with contextlib.suppress(ProcessLookupError):
+            os.kill(int(line.split()[0]), signal.SIGKILL)
+
+
+def run_grid_stopped_at_deadline(repository, stub_directory, environment_overrides, deadline_seconds,
+                                 **run_grid_arguments):
+    """(the grid's result, the lines of its processes left running), after stopping them. A grid
+    past the deadline gets a result with exit -SIGKILL and stdout saying so."""
+    try:
+        result = run_grid(repository, stub_directory, environment_overrides,
+                          timeout_seconds=deadline_seconds, **run_grid_arguments)
+    except subprocess.TimeoutExpired as expired:
+        result = subprocess.CompletedProcess(
+            expired.cmd, -signal.SIGKILL, f"the grid had not returned after {deadline_seconds} s", "")
+    finally:
+        left_running = processes_running_programs_under(stub_directory, repository)
+        kill_processes_running_programs_under(stub_directory, repository)
+    return result, left_running
+
+
+def wrote_then_hung_checks(result, left_running, repository, elapsed):
+    """The (case name, condition, detail) checks of the wrote-then-hung run. A grid stopped at the
+    deadline gets only the first: it may have made no record for the others to read."""
+    stopped_at_deadline = f"; {result.stdout}" if result.returncode == -signal.SIGKILL else ""
+    checks = [("the grid returned and left no hung stub or launcher running",
+               result.returncode != -signal.SIGKILL and left_running == [],
+               f"exit {result.returncode}; still running: {left_running}{stopped_at_deadline}")]
+    if result.returncode == -signal.SIGKILL:
+        return checks
+    failed_lines = lines_opening(result, "FAILED")
+    checks.append(("a timed-out cell that had written its report: FAILED says the unfinished report is deleted",
+                   lines_opening(result, "saved:") == []
+                   and len(failed_lines) == 8
+                   and all(" — timed-out — timed out after 4 hours (stderr kept: " in line
+                           and line.endswith(".stderr.log); the unfinished report it had written is deleted")
+                           for line in failed_lines),
+                   f"elapsed {elapsed:.1f}s; stdout={result.stdout!r}"))
+    record_directory = record_directory_of(repository)
+    report_names = sorted(path.name for path in record_directory.glob("*.md")) if record_directory else None
+    checks.append(("the hung cells' unfinished reports are not left in the record",
+                   report_names == ["cold-read-reference-check.md"], report_names))
+    return checks
+
+
 def frozen_target_path_in_scratch_repository(repository, record_directory):
     """Where the grid in `repository` froze TARGET_RELATIVE_PATH inside
     `record_directory`, as frozen_target_path() itself answers it.
@@ -717,17 +788,6 @@ try:
     # once; the other six would read for two minutes.
     # A separate stub directory, so a stub left running is this case's and can
     # be found by its path.
-    def processes_mentioning(*fragments):
-        listing = subprocess.run(["ps", "-A", "-o", "pid=", "-o", "command="],
-                                 capture_output=True, text=True, check=False).stdout
-        return [line.strip() for line in listing.splitlines()
-                if any(fragment in line for fragment in fragments)]
-
-    def kill_processes_mentioning(*fragments):
-        for line in processes_mentioning(*fragments):
-            with contextlib.suppress(ProcessLookupError):
-                os.kill(int(line.split()[0]), signal.SIGKILL)
-
     repository = build_scratch_repository(scratch, "checkout-target-moves-mid-run")
     slow_stubs = scratch / "stub-bin-target-moves-mid-run"
     note_left_by_stopped_cells = "notes-left-before-the-frozen-copy-moved.md"
@@ -783,8 +843,8 @@ try:
           "it is stop 1 of 3 in a row because the frozen copy changed." in result.stdout,
           repr(result.stdout))
     check("no stopped reviewer or its launcher is left running",
-          processes_mentioning(str(slow_stubs), str(repository)) == [],
-          processes_mentioning(str(slow_stubs), str(repository)))
+          processes_running_programs_under(slow_stubs, repository) == [],
+          processes_running_programs_under(slow_stubs, repository))
     # A stopped cell never reaches its own stray-write check, so the grid checks for it.
     # The edit to the frozen copy is under the gitignored record, so the check reports
     # only the note the cells wrote outside their reports.
@@ -833,8 +893,8 @@ try:
               for name in hung_cells),
           repr(result.stdout))
     check("no cell stopped mid-report or its launcher is left running",
-          processes_mentioning(str(hung_stubs), str(repository)) == [],
-          processes_mentioning(str(hung_stubs), str(repository)))
+          processes_running_programs_under(hung_stubs, repository) == [],
+          processes_running_programs_under(hung_stubs, repository))
 
     # --- An original that moves while reviewers are still reading ------------
     # The other side of the same rule: one cell edits the original at once
@@ -1144,9 +1204,9 @@ try:
         "COLD_READ_GRID_CELL_ATTEMPT_TIMEOUT_SECONDS": "2"})
     elapsed = time.monotonic() - started
     # Read before anything else: a stub the grid left running could still write its marker later.
-    left_running = processes_mentioning(str(timed_out_stubs), str(repository))
+    left_running = processes_running_programs_under(timed_out_stubs, repository)
     finished_before_the_grid_returned = sorted(path.name for path in finished_reading_markers.glob("*"))
-    kill_processes_mentioning(str(timed_out_stubs), str(repository))
+    kill_processes_running_programs_under(timed_out_stubs, repository)
     failed_lines = lines_opening(result, "FAILED")
     check("every attempt past the limit, the Question 4 cell's included, is FAILED as timed out, "
           "with no RETRYING line",
@@ -1231,34 +1291,72 @@ try:
     clock_launcher = scratch / "grid-with-clock-jumped-once-reports-exist.py"
     clock_launcher.write_text(GRID_WITH_CLOCK_JUMPED_ONCE_REPORTS_EXIST, encoding="utf-8")
     started = time.monotonic()
+    result, left_running = run_grid_stopped_at_deadline(repository, hung_after_writing_stubs, {
+        "COLD_READ_GRID_TEST_STUB_HANG_AFTER_WRITING_REPORT_SECONDS": str(hang_seconds),
+        "COLD_READ_GRID_CELL_ATTEMPT_TIMEOUT_SECONDS": str(attempt_limit_seconds)}, grid_deadline_seconds,
+        launcher_arguments_before_grid=(clock_launcher, 8, attempt_limit_seconds))
+    for case_name, condition, detail in wrote_then_hung_checks(
+            result, left_running, repository, time.monotonic() - started):
+        check(case_name, condition, detail)
+
+    # --- The deadline passes before the grid has made a record -----------------
+    repository = build_scratch_repository(scratch, "checkout-deadline-before-any-record")
+    # The launcher sleeps instead of starting the grid, so no record exists when the deadline passes,
+    # however loaded the machine.
+    deadline_stubs = scratch / "stub-bin-deadline-before-any-record"
+    deadline_stubs.mkdir()
+    holding_launcher = deadline_stubs / "hold-instead-of-starting-the-grid.py"
+    holding_launcher.write_text("import time\ntime.sleep(86400)\n", encoding="utf-8")
+    deadline_seconds = 2
+    result, left_running = run_grid_stopped_at_deadline(
+        repository, deadline_stubs, {}, deadline_seconds,
+        launcher_arguments_before_grid=(holding_launcher, 0, 0))
+    deadline_checks = wrote_then_hung_checks(result, left_running, repository, deadline_seconds)
+    check("a grid stopped at the deadline before making a record fails on the deadline alone",
+          result.returncode == -signal.SIGKILL and record_directory_of(repository) is None
+          and [(name, condition) for name, condition, _ in deadline_checks]
+          == [("the grid returned and left no hung stub or launcher running", False)],
+          f"exit {result.returncode}; checks: {deadline_checks}")
+    check("the deadline failure's detail says the grid was stopped at the deadline",
+          f"the grid had not returned after {deadline_seconds} s" in deadline_checks[0][2], deadline_checks)
+
+    # --- A script started through `#!/usr/bin/env python3` is found while env is still starting it
+    env_listing_directory = scratch / "stub-bin-started-through-env"
+    env_listing = subprocess.CompletedProcess(["ps"], 0, (
+        f"  4242 /usr/bin/env python3 {env_listing_directory}/claude --print\n"
+        f"  4243 /usr/bin/env -S PYTHONUNBUFFERED=1 python3 -u {env_listing_directory}/codex\n"
+        f"  4244 /usr/bin/env tail -F {env_listing_directory}/watched.log\n"), "")
+    with mock.patch.object(subprocess, "run", return_value=env_listing):
+        listed_through_env = processes_running_programs_under(env_listing_directory)
+    check("a stub that env is still starting is found, and env running tail on a log there is not",
+          [int(line.split()[0]) for line in listed_through_env] == [4242, 4243], listed_through_env)
+
+    # --- Which processes a case reports and stops ------------------------------
+    long_directory = scratch / ("directory-longer-than-a-terminal-line-" + "x" * 100)
+    long_directory.mkdir()
+    sleeper_script = long_directory / "sleeper.py"
+    sleeper_script.write_text("import time\ntime.sleep(60)\n", encoding="utf-8")
+    watched_log = long_directory / "watched.log"
+    watched_log.write_text("", encoding="utf-8")
+    started_processes = []
     try:
-        result = run_grid(repository, hung_after_writing_stubs, {
-            "COLD_READ_GRID_TEST_STUB_HANG_AFTER_WRITING_REPORT_SECONDS": str(hang_seconds),
-            "COLD_READ_GRID_CELL_ATTEMPT_TIMEOUT_SECONDS": str(attempt_limit_seconds)},
-            launcher_arguments_before_grid=(clock_launcher, 8, attempt_limit_seconds),
-            timeout_seconds=grid_deadline_seconds)
-    except subprocess.TimeoutExpired as expired:
-        result = subprocess.CompletedProcess(
-            expired.cmd, -signal.SIGKILL, f"the grid had not returned after {grid_deadline_seconds} s", "")
+        sleeper = subprocess.Popen([sys.executable, str(sleeper_script)])  # pylint: disable=consider-using-with
+        started_processes.append(sleeper)
+        watcher = subprocess.Popen(  # pylint: disable=consider-using-with
+            ["tail", "-F", str(watched_log)], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+        started_processes.append(watcher)
+        with mock.patch.dict(os.environ, {"COLUMNS": "80"}):
+            listed = processes_running_programs_under(long_directory)
+            kill_processes_running_programs_under(long_directory)
+        check("a process running a script under a long path is found at a width of 80 columns",
+              [int(line.split()[0]) for line in listed] == [sleeper.pid], listed)
+        check("the case's process is stopped", sleeper.wait(timeout=10) == -signal.SIGKILL, sleeper.returncode)
+        check("a process that only names a path there, tail -F on a log, is left running",
+              watcher.poll() is None, watcher.returncode)
     finally:
-        left_running = processes_mentioning(str(hung_after_writing_stubs), str(repository))
-        kill_processes_mentioning(str(hung_after_writing_stubs), str(repository))
-    elapsed = time.monotonic() - started
-    check("the grid returned and left no hung stub or launcher running",
-          result.returncode != -signal.SIGKILL and left_running == [],
-          f"exit {result.returncode}; still running: {left_running}")
-    failed_lines = lines_opening(result, "FAILED")
-    check("a timed-out cell that had written its report: FAILED says the unfinished report is deleted",
-          lines_opening(result, "saved:") == []
-          and len(failed_lines) == 8
-          and all(" — timed-out — timed out after 4 hours (stderr kept: " in line
-                  and line.endswith(".stderr.log); the unfinished report it had written is deleted")
-                  for line in failed_lines),
-          f"elapsed {elapsed:.1f}s; stdout={result.stdout!r}")
-    record_directory = record_directory_of(repository)
-    check("the hung cells' unfinished reports are not left in the record",
-          sorted(path.name for path in record_directory.glob("*.md")) == ["cold-read-reference-check.md"],
-          sorted(path.name for path in record_directory.glob("*.md")))
+        for process in started_processes:
+            process.kill()
+            process.wait()
 
     # --- Three Codex cells fail both attempts with exit-N ----------------------
     repository = build_scratch_repository(scratch, "checkout-codex-exits")
@@ -3535,6 +3633,11 @@ try:
     check("an unreadable git history is reported as EARLIER COLD-READ-FULL-RUNS NOT COUNTED",
           "EARLIER COLD-READ-FULL-RUNS NOT COUNTED:" in result.stdout and "git log --follow" in result.stdout,
           f"exit {result.returncode}; stdout={result.stdout!r}; stderr={result.stderr!r}")
+
+    left_running_at_end = processes_running_programs_under(scratch)
+    kill_processes_running_programs_under(scratch)
+    check("no stub, launcher or grid the suite started is still running when it ends",
+          left_running_at_end == [], left_running_at_end)
 finally:
     shutil.rmtree(SCRATCH_ROOT, ignore_errors=True)
 

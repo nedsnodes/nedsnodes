@@ -561,10 +561,10 @@ with tempfile.TemporaryDirectory() as temporary:
     answer, closed_on, error = ghi_ask.ask("q", False, seat11, "x/y", timeout_seconds=300)
     check("all three turns of one ask draw on a single budget",
           len(budgets) == 3, budgets)
-    check("the cold-start turn gets the ask's budget plus COLD_START_EXTRA_SECONDS, and "
+    check("the cold-start turn gets the ask's budget plus GHI_GUIDE_AGENT_COLD_START_EXTRA_SECONDS, and "
           "each later turn only what the ask has left, never the full budget again",
           budgets == sorted(budgets, reverse=True)
-          and 300 < budgets[0] <= 300 + ghi_ask.COLD_START_EXTRA_SECONDS
+          and 300 < budgets[0] <= 300 + ghi_ask.ghi_issue_write.GHI_GUIDE_AGENT_COLD_START_EXTRA_SECONDS
           and budgets[1] <= budgets[0] and budgets[-1] < budgets[0],
           budgets)
 
