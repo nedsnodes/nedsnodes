@@ -48,7 +48,7 @@ and the numbers are listed on stderr instead, each with its line
 (user-ruled 2026-09-17, item 5 of nedschorus#418: the walk-me-through skill
 forbids bare numbers, and walk files had carried 33 and 35 of them
 unchecked). Bare file names are deliberately not checked, by the same rulings;
-the walk's 300-word item limit is checked by the walk check program,
+the walk's word limit for an item is checked by the walk check program,
 nn-systems/skills/walk-me-through/walk-me-through-answer-added-texts-cold-read-fast-read-check-and-close.py,
 before it reads an item. Every cold-read-cell's own progress -- the
 launcher's stderr, the agent-binary's stderr, the stray-write and recovery lines --
@@ -902,7 +902,7 @@ def record_clock_reading() -> datetime.datetime:
     taken from, so the two cannot disagree across midnight.
 
     COLD_READ_RECORD_CLOCK_OVERRIDE, when set as `YYYY-MM-DDTHH:MM`, is read
-    instead of the clock: it is how the nc-test-suites name a cold-read-record
+    instead of the clock: it is how the nn-test-suites name a cold-read-record
     exactly without depending on the wall clock or flaking across a minute
     boundary.
     The override is a clock value, not a finished name, so the tests still go

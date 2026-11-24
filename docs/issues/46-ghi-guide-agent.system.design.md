@@ -20,7 +20,7 @@ Issue [Build ghi-guide-agent — the GHI knowledge agent](https://github.com/ned
 - **The write tool:** `scripts/ghi-issue-write.py`, with its create and edit operations. It has no comment operation: the user ruled on 2026-09-24 that agents write no issue comments.
 - **The redirect hook:** `.claude/guard-hooks/ghi-issue-write-hand-typed-gh-command-refusal.py`. It refuses a hand-typed write rather than rewriting it into the tool as § The GHI write path describes; its docstring says why.
 - **The corpus migration:** done 2026-09-27, when every open issue's body became the links to its files (by a one-time migration program, deleted once the migration finished).
-- **Not built:** the maintenance sweep and fixer spawning (§ Maintenance and fixers); the decisions in § Decided and not yet built; the refresh's second feed and each entry's activity-relative freshness (§ The GHI mirror); the killed-ask message that tells the asker to ask with fewer tasks (§ The ask path); and the rule for reading a GHI-MD in the `ghi-write` skill (§ The GHI write path).
+- **Not built:** the maintenance sweep and fixer spawning (§ Maintenance and fixers); the decisions in § Decided and not yet built; the refresh's second feed and each entry's activity-relative freshness (§ The GHI mirror); the killed-ask message that tells the asker to ask with fewer tasks (§ The ask path); the tools a link repair needs ghi-guide-agent to use (§ Link-repair request); and the rule for reading a GHI-MD in the `ghi-write` skill (§ The GHI write path).
 
 ## Decided and not yet built
 
@@ -76,7 +76,7 @@ Two files, split by state: `issues-open.md` — every open issue near-raw (numbe
 1. Run the mirror refresh (delta).
 2. Run the ask in a fork of the stored session: `claude -p --resume <stored session> --fork-session`. The fork starts with the stored session's whole context, answers the ask, takes step 4's drift notice when there is one, and is then discarded, so the stored session is left as it was. Every ask gets a fork of its own, so when two asks arrive together neither waits for the other, and no two share a transcript. Cold-start the stored session first when none exists or a reincarnation trigger has fired.
 3. Prompt: the question — plus, on resume, the changed-issue numbers with the instruction to re-read those entries from the mirror before answering. `--include-closed` marks a deliberate closed-history question (precedent, absence): `ghi-guide-agent` greps the closed file, and closed pointers are expected.
-4. Post-check: every returned pointer is verified against the mirror — plain script work; the fact is established here, never by the agent. An unexpected closed pointer triggers one drift notice back to the fork that gave the reply, carrying the fact and asking only for a judgment redo: "#31 closed on <date> — the mirror is current; re-read its entry in `issues-closed.md`, including any `Superseded-by:` link, and give a corrected reading list." One recheck per ask; the agent reads only the mirror, the files its open issues link to in its agent-home and its proposed-improvements-or-changes-files in the log-store, and never calls GitHub. Whatever remains is delivered with truthful tags ("#31 (closed 2026-08-08)"); note lines are plain sentences. Replies that are not reading lists — `ask-user-about-ruling:`, `not-about-issues` — pass through to the caller verbatim; the caller owns the escalation and must not swallow it. Unexpected closed pointers count toward the stale-match trigger; expected ones do not.
+4. Post-check: every returned pointer is verified against the mirror — plain script work; the fact is established here, never by the agent. An unexpected closed pointer triggers one drift notice back to the fork that gave the reply, carrying the fact and asking only for a judgment redo: "#31 closed on <date> — the mirror is current; re-read its entry in `issues-closed.md`, including any `Superseded-by:` link, and give a corrected reading list." After a verdict, the notice ends "and give a corrected verdict that cites no closed GHI." One recheck per ask; the agent reads only the mirror, the files its open issues link to in its agent-home and its proposed-improvements-or-changes-files in the log-store, and never calls GitHub. Whatever remains is delivered with truthful tags ("#31 (closed 2026-08-08)"); note lines are plain sentences. Replies that are not reading lists — `ask-user-about-ruling:`, `not-about-issues` — pass through to the caller verbatim; the caller owns the escalation and must not swallow it. Unexpected closed pointers count toward the stale-match trigger; expected ones do not.
 5. Print the list.
 
 One overall timeout (inside the hook budget); a killed run is a named failure. Auth is the box's two credentials — its `gh` login and its long-lived Claude token (interactive logins expire unattended). Precedent: nedsmessenger runs this pattern live (`~/Projects/nedsmessenger/adapter/adapter.py`, `ask_claude` — headless `claude -p --resume`, answer off the exit stream; NM runs three watchdogs where version 1 here starts with one timeout).
@@ -162,6 +162,10 @@ Every prompt this design depends on, verbatim (user-ruled 2026-08-09/11): a prom
 
 > #\<n\> closed on \<date\> — the mirror is current; re-read its entry in `issues-closed.md`, including any `Superseded-by:` link, and give a corrected reading list.
 
+After a verdict:
+
+> #\<n\> closed on \<date\> — the mirror is current; re-read its entry in `issues-closed.md`, including any `Superseded-by:` link, and give a corrected verdict that cites no closed GHI.
+
 ### Cold-start prompt (ghi-guide-agent session birth)
 
 Delivered as the first prompt of a fresh session — cold start fires when no stored session exists or a reincarnation trigger has fired (ghi-guide-agent-ask step 2). The ask itself follows, worded per the resume-ask prompt. `<mirror-path>` and `<question-files-path>` are wrapper-filled.
@@ -180,7 +184,7 @@ Delivered as the first prompt of a fresh session — cold start fires when no st
 >
 > 1. **You are asked for a reading list**: what should an agent read before it files or edits an issue on some topic. Reply with a bare list — "read #13, #24, #31" — plus, only when needed, note lines in plain sentences. Closed issues belong in a reply only when the request says closed history is wanted; tag each truthfully: "#31 (closed 2026-08-08)".
 > 2. **You are shown a draft issue** — its title and its GHI-MD — and asked whether the corpus already covers it. When the draft is an edit of an existing issue, the request names that issue: leave it out of the comparison. Reply with exactly one line, nothing else: `verdict: too-similar #n` (an existing issue already covers this ground; #n is that issue), or `verdict: related #n,#m` (no collision, but the author should know these), or `verdict: unrelated`. In these shapes #n,#m stands for one or more issue numbers. A reply in any other shape is thrown away.
-> 3. **You are told a fact that corrects your last reply** — an issue you cited has closed — and asked to redo that one judgment. The fact is already established by script from the refreshed mirror: do not question or verify it; re-read the named entry in issues-closed.md, including any `Superseded-by:` link, and reply with a corrected reading list.
+> 3. **You are told a fact that corrects your last reply** — an issue you cited has closed — and asked to redo that one judgment. The fact is already established by script from the refreshed mirror: do not question or verify it; re-read the named entry in issues-closed.md, including any `Superseded-by:` link, and answer with the corrected reply the notice asks for.
 > 4. **You are asked to repair a link** — a cross-reference the maintenance sweep found broken. The request states the defect; repair exactly that link and nothing else. Issue edits go through gh as normal; document-side changes are landed through `scripts/ghi-issue-write.py`, whose pull request merge-lane-2 reviews and merges; never push to main yourself. Reply done: \<the repair\>, done: no change needed — \<why\>, or blocked: \<what stopped you\>.
 >
 > Boundaries:
@@ -222,6 +226,8 @@ Sent by the write tool for every body-bearing create or edit, before the write. 
 ### Link-repair request (sweep → ghi-guide-agent)
 
 Sent by the sweep for each link-integrity finding — `ghi-guide-agent`'s one write class. Rides the same wrapper as the other requests, hence the same changed-entries preamble. The done/blocked reply contract mirrors the fixer briefs'.
+
+Not built yet, and to be built with the sweep, which is the only sender of a link-repair request: `scripts/ghi-guide-agent-ask.py` runs every ask in dontAsk mode with `--allowedTools Read,Grep,Glob`, so ghi-guide-agent can neither run the `gh issue edit` that the GHI side of a repair needs nor change a file and run `scripts/ghi-issue-write.py`, which the document side needs (form 4 of § Cold-start prompt), and a link-repair request would end blocked today. The ask program is to allow those tools on a link-repair request only, because § Cold-start prompt makes a link repair ghi-guide-agent's one use of gh and its one write.
 
 > \<only on resume, and only when the refresh changed entries:\> Since your last request, these mirror entries changed: #\<n\>, #\<m\>. Re-read them in the mirror before answering.
 >

@@ -78,6 +78,17 @@ with tempfile.TemporaryDirectory() as scratch_name:
         "merge-lane-2", time.strptime("2026-11-05 14:03:22", "%Y-%m-%d %H:%M:%S"), Path("/r"))
     check("a terminal capture is <directory>/<agent-seat>/<UTC start>-<agent-seat>-terminal-capture.log",
           named == Path("/r/merge-lane-2/20261105T140322Z-merge-lane-2-terminal-capture.log"), str(named))
+    check("the name the writer builds is accepted as that agent-seat's terminal capture",
+          captures.agent_seat_terminal_capture_file_name_matches_exact_format_for_agent_seat(named.name, "merge-lane-2"))
+    for rejected_name, why in (
+            ("README.txt", "it has no start time"),
+            ("00-notes.txt", "its first part is not a start time"),
+            ("20261105T140322Z-merge-lane-3-terminal-capture.log", "it names another agent-seat"),
+            ("20261399T140322Z-merge-lane-2-terminal-capture.log", "its start time is not a real date"),
+            ("2026115T140322Z-merge-lane-2-terminal-capture.log", "its start time is not zero-padded"),
+            ("20261105T140322Z-merge-lane-2-terminal-capture.log.bak", "it has text after the format")):
+        check(f"{rejected_name} is not a terminal capture of merge-lane-2: {why}",
+              not captures.agent_seat_terminal_capture_file_name_matches_exact_format_for_agent_seat(rejected_name, "merge-lane-2"))
 
     # -- the start of a terminal capture, and each way it fails -----------------------------------------
     captures_directory = scratch / "captures with a space"
@@ -140,6 +151,34 @@ with tempfile.TemporaryDirectory() as scratch_name:
                   and not any((unwritable_captures_directory / "MD-skills").iterdir()), line)
     finally:
         (unwritable_captures_directory / "MD-skills").chmod(0o700)
+
+    unsearchable_captures_directory = scratch / "unsearchable captures"
+    (unsearchable_captures_directory / "MD-skills").mkdir(parents=True)
+    (unsearchable_captures_directory / "MD-skills").chmod(0o600)
+
+    def path_exists_as_python_3_13_does(path, *args, **kwargs):
+        if not os.access(path.parent, os.X_OK):
+            raise PermissionError(13, "Permission denied", str(path))
+        return os.path.exists(path)
+
+    try:
+        # Python 3.14's Path.exists returns False here; the patch makes it raise, as 3.13's does.
+        with mock.patch.object(captures.socket, "gethostname", return_value="ned-box"), \
+                mock.patch.object(captures, "AGENT_SEAT_TERMINAL_CAPTURE_FILE_APPEAR_WAIT_SECONDS", 0.3), \
+                mock.patch.object(Path, "exists", path_exists_as_python_3_13_does):
+            try:
+                line = start_with(dict(in_pane_environment, **{OVERRIDE: str(unsearchable_captures_directory)},
+                                       PATH=f"{succeeding}{os.pathsep}{base_environment.get('PATH', '')}"))
+            except PermissionError as error:
+                line = f"raised {error!r}"
+        check("an agent-seat directory without search permission, where Path.exists raises as on Python "
+              "3.13: the start does not raise, and the line says the capture file did not appear",
+              line.startswith("this agent-seat's terminal output is not being captured to a file: "
+                              "tmux pipe-pane started, but the terminal capture file "
+                              f"{unsearchable_captures_directory}/MD-skills/")
+              and "did not appear within 0.3 seconds" in line, line)
+    finally:
+        (unsearchable_captures_directory / "MD-skills").chmod(0o700)
 
     for label, body, expected in (
             ("exits nonzero with an error", "sys.stderr.write('no such pane: %7\\n'); sys.exit(1)\n",

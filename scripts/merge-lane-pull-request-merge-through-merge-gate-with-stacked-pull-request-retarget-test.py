@@ -177,8 +177,10 @@ answer = json.load(open(os.path.join(directory, "go-ahead-answer.json")))
 sys.stdout.write(answer[0])
 sys.exit(answer[1])
 '''
-GO_AHEAD_COUNT_ONLY = ("12 open pull requests, not drafts, have no review from ned-review-merge "
-                       "on their head commit; fake go-ahead\n", 1)
+GO_AHEAD_COUNT_ONLY = ("12 open pull requests that are not drafts wait for merge-lane-2 to review "
+                       "or merge them. ... The count is over 10, the most at which merge-lane-2's "
+                       "queue is quiet, so no agent-seat holding mutant-test tasks is released; "
+                       "fake go-ahead\n", 3)
 RUNNER_PASSED_SUMMARY ="SUMMARY: 1 passed, 0 failed, 1 total; fake runner"
 RUNNER_FAILED = ("PASS scripts/some-test.py (1s)\n"
                  "FAIL scripts/broken-test.py exit 1 (2s)\n"
@@ -546,6 +548,10 @@ def blob_of(directory, suite):
 
 
 def main():
+    # Every other case runs a fake go-ahead program in its place.
+    check("the go-ahead program the merge script runs after a merge is a file",
+          program.SURVIVING_MUTANT_TEST_PRS_GO_AHEAD_PROGRAM.is_file(),
+          str(program.SURVIVING_MUTANT_TEST_PRS_GO_AHEAD_PROGRAM))
     # Resolved, because macOS's mkdtemp path is a symlink and the program resolves its paths.
     scratch = Path(tempfile.mkdtemp(prefix="merge-lane-merge-test-")).resolve()
     try:
@@ -606,6 +612,7 @@ def main():
             "import os\nos.kill(os.getpid(), 9)\n"))
         for name, answer, before, code in (
                 ("go-ahead-could-not-tell", ("could not tell: gh failed\n", 2), None, 2),
+                ("go-ahead-crashed", ("Traceback (most recent call last):\n", 1), None, 1),
                 ("go-ahead-killed", ("", 0), killed, -9)):
             exit_code, output, _, _, _ = run_case(
                 scratch, name, [(GATE_PASSED, 0)], default_routes(STACKED_AND_NOT),
@@ -975,7 +982,7 @@ def main():
         check("with no head test run record, after the merge the runner in a worktree at the "
               "merge commit runs the suites whose recorded inputs changed since the reviewed "
               "head, its logs in the outputs directory, and says it fell back to the head",
-              f"selecting the nc-test-suites whose recorded inputs changed since the head "
+              f"selecting the nn-test-suites whose recorded inputs changed since the head "
               f"commit {HEAD[:12]}, which selects more suites than the merge changed: no "
               f"readable head test run record under" in output
               and len(calls) == 1 and calls[0]["cwd"] == str(merge_commit_worktree)
@@ -1247,7 +1254,7 @@ def main():
                   "--only-suites-whose-recorded-inputs-changed-since", merged]
               and tree_of(scratch, name, merged)
               == tree_of(scratch, name, origin_commit(scratch, name))
-              and f"selecting the nc-test-suites whose recorded inputs changed since "
+              and f"selecting the nn-test-suites whose recorded inputs changed since "
                   f"{merged[:12]}, the commit the head test run passed on: "
                   f"pull request 10's head merged with main as main was when that run started"
                   in output
@@ -1386,6 +1393,46 @@ def main():
                   f"{TELL_THE_USER_WITH_BOTH_GH_ERRORS}" in output
               and not (review_worktrees / "pr10-merged").exists()
               and len(runner_calls(scratch, "merged-branch-not-deleted")) == 1,
+              f"exit {exit_code}\n{output}")
+
+        routes = default_routes(STACKED_AND_NOT)
+        routes["pr merge"] = merge_502
+        routes["api-read-branch"] = [{"stdout": json.dumps({"name": BRANCH})},
+                                     {"exit": 1, "stderr": "gh: Branch not found (HTTP 404)\n"}]
+        routes["api-delete-branch"] = {"exit": 1,
+                                       "stderr": "gh: Reference does not exist (HTTP 422)\n"}
+        exit_code, output, gh_calls, _, _ = run_case(
+            scratch, "merged-branch-gone-before-its-delete", [(GATE_PASSED, 0)], routes)
+        branch_calls = [argv for argv in argvs(gh_calls) if argv[:1] == ["api"]]
+        check("a branch that GitHub deletes between the program's read and its delete is "
+              "found gone by a second read after the delete, and the program exits 0 "
+              "without a STOP",
+              exit_code == 0 and f"the branch {BRANCH} is gone from GitHub" in output
+              and "STOP" not in output
+              and branch_calls == [["api", branch_path],
+                                   ["api", ref_path, "-X", "DELETE"],
+                                   ["api", branch_path]]
+              and len(runner_calls(scratch, "merged-branch-gone-before-its-delete")) == 1,
+              f"exit {exit_code}\n{output}\n{json.dumps(branch_calls)}")
+
+        routes = default_routes(STACKED_AND_NOT)
+        routes["pr merge"] = merge_502
+        routes["api-read-branch"] = [{"stdout": json.dumps({"name": BRANCH})},
+                                     {"exit": 1, "stderr": "gh: Bad Gateway (HTTP 502)\n"}]
+        routes["api-delete-branch"] = {"exit": 1,
+                                       "stderr": "gh: Reference does not exist (HTTP 422)\n"}
+        exit_code, output, _, _, _ = run_case(
+            scratch, "merged-branch-reread-fails", [(GATE_PASSED, 0)], routes)
+        check("a failed delete whose second read fails other than with HTTP 404 exits 3, "
+              "says whether the branch is gone could not be read, and quotes both errors",
+              exit_code == 3
+              and f"STOP: merged, but the branch {BRANCH} could not be deleted, and whether "
+                  "it is gone from GitHub could not be read." in output
+              and "The deletion's error: gh: Reference does not exist (HTTP 422)" in output
+              and "The read's error: gh: Bad Gateway (HTTP 502)" in output
+              and "is still on GitHub" not in output
+              and f"If it is still there, delete it: gh api -X DELETE {ref_path}\n" in output
+              and len(runner_calls(scratch, "merged-branch-reread-fails")) == 1,
               f"exit {exit_code}\n{output}")
 
         routes = default_routes(STACKED_AND_NOT)

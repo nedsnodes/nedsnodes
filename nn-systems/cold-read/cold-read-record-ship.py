@@ -341,6 +341,9 @@ in the nedschorus repository, which this machine also clones:
   `scripts/sanity-check-record-ship.py`
 - `walk/` -- approval-walk files, named by the walk-me-through skill, shipped
   by `nn-systems/skills/walk-me-through/walk-files-ship.py`
+- `walk-document-copies/` -- timestamped copies of each open walk's walk-document, the newest
+  20 of each walk, written by
+  `nn-systems/skills/walk-me-through/walk-me-through-answer-added-texts-cold-read-fast-read-check-and-close.py`
 - `agent-session-files-by-machine/` -- each machine's session transcripts, handoffs,
   task lists, seat-briefs and global CLAUDE.md, mirrored by
   `scripts/transcript-mirror-to-log-store.py`
@@ -349,7 +352,7 @@ in the nedschorus repository, which this machine also clones:
 - `seats/` -- a seat's shared files, shipped by
   `scripts/seat-shared-file-ship.py`
 - `analysis/` -- analyses, placed by hand
-- `scheduled-full-test-runs-of-main/` -- each machine's scheduled run of every nc-test-suite on
+- `scheduled-full-test-runs-of-main/` -- each machine's scheduled run of every nn-test-suite on
   main, written by `scripts/scheduled-full-test-run-of-main.py`
 - `pull-request-head-test-runs/` -- each machine's test log of a pull request's
   head, one per commit, written by `scripts/pull-request-head-test-run.py`

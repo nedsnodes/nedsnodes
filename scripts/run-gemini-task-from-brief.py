@@ -26,11 +26,12 @@ logins, recover reports from chat, retry models, or verify report content.
 
 agy runs on its own Google login, never on a Gemini API key: the launcher
 removes GEMINI_API_KEY from agy's environment, because a key is billed per
-call. When agy has no login, its "Authentication required." message is in
+call. It also removes GH_TOKEN and GITHUB_TOKEN, so agy gets no GitHub token from its caller;
+how gh behaves inside the macOS sandbox is said beside CREDENTIAL_DIRECTORIES in nn-systems/cold-read/cold-read-cell-common.py. When agy has no login, its "Authentication required." message is in
 the log.
 
 Runs `agy models` inside the same sandbox before starting the task, refusing
-unknown names with the known names. The default is gemini-4-argon-high.
+unknown names with the known names. The default is gemini-4-neon-high.
 Closes stdin and logs both output streams to REPORT.run.log, or to
 --run-log; an existing log at that path is overwritten. The
 deadline covers model discovery and task execution after sandbox setup;
@@ -74,7 +75,7 @@ def _parser():
     parser.add_argument("--brief", required=True)
     parser.add_argument("-o", dest="report", required=True)
     parser.add_argument("--sandbox", choices=("read-only", "workspace-write"), default="read-only")
-    parser.add_argument("-m", dest="model", default="gemini-4-argon-high")
+    parser.add_argument("-m", dest="model", default="gemini-4-neon-high")
     parser.add_argument("--effort")
     parser.add_argument("--writable-root", action="append", default=[])
     parser.add_argument("--network", action="store_true")
@@ -122,7 +123,7 @@ def main(argv=None):
         if not prompt.strip():
             raise RuntimeError("the brief is empty")
         stage = "preparing the sandbox"
-        environment = agy_cell.agy_environment_copy_without_gemini_api_key(os.environ)
+        environment = agy_cell.agy_environment_copy_without_gemini_api_key_or_github_token(os.environ)
         writable_folders = [checkout, *roots] if args.sandbox == "workspace-write" else []
         prefix = agy_cell.credential_sandbox_prefix(
             writable_paths=[(report, False), *((folder, True) for folder in writable_folders)],

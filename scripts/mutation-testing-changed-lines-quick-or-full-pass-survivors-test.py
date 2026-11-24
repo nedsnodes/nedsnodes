@@ -5,7 +5,7 @@ Run: python3 scripts/mutation-testing-changed-lines-quick-or-full-pass-survivors
 Prints one line per case and exits non-zero if any case fails.
 
 No case runs the real cosmic-ray. Each case builds a scratch repository with
-a base commit and a nc-head-commit, and points --cosmic-ray-venv at a fake venv
+a base commit and an nn-head-commit, and points --cosmic-ray-venv at a fake venv
 whose cosmic-ray and cr-filter-git record every call and behave as the
 case's plan file says; with run_test_command, the fake's baseline runs the
 test command, the suite runner on fixture suites, as cosmic-ray runs it.
@@ -144,9 +144,10 @@ if command == "baseline":
         (control / "plan.json").write_text(json.dumps(plan))
         sys.exit(0 if completed.returncode == 0 else 1)
     sys.exit(plan.get("baseline_exit", 0))
-if command == "init" and plan.get("init_sessions"):
+if command == "init" and not plan.get("init_writes_a_file_that_is_no_sqlite_session"):
     # A session as cosmic-ray 8.7.0 makes it: a random job_id for each mutant at every init,
-    # and a SKIPPED result for a mutant a filter skipped.
+    # and a SKIPPED result for a mutant a filter skipped. With no init_sessions, one mutant
+    # with no result.
     import sqlite3, uuid
     config_text = pathlib.Path(arguments[1]).read_text()
     module_path = json.loads(re.search(r"^module-path = (.*)$", config_text,
@@ -159,7 +160,9 @@ if command == "init" and plan.get("init_sessions"):
         "job_id TEXT PRIMARY KEY);"
         "CREATE TABLE work_results (job_id TEXT PRIMARY KEY, worker_outcome, output, "
         "test_outcome, diff);")
-    for operator, line, skipped_by_a_filter in plan["init_sessions"][module_path]:
+    for operator, line, skipped_by_a_filter in (
+            plan["init_sessions"][module_path] if plan.get("init_sessions")
+            else [["core/ReplaceBinaryOperator_Add_Sub", 2, False]]):
         job_id = uuid.uuid4().hex
         connection.execute("INSERT INTO work_items VALUES (?)", (job_id,))
         connection.execute("INSERT INTO mutation_specs VALUES (?, ?, '{{}}', 0, ?, 4, ?, 9, NULL, ?)",
@@ -169,12 +172,12 @@ if command == "init" and plan.get("init_sessions"):
                                "VALUES (?, 'SKIPPED')", (job_id,))
     connection.commit()
     connection.close()
-    sys.exit(0)
-if command == "init":
-    pathlib.Path(arguments[2]).write_text("session")
     if plan.get("init_makes_kept_session_a_directory"):
         kept = pathlib.Path(arguments[2][:-len(".partial")])
         (kept / "in-the-way").mkdir(parents=True)
+    sys.exit(0)
+if command == "init":
+    pathlib.Path(arguments[2]).write_text("session")
     sys.exit(0)
 if command == "exec":
     import time
@@ -237,7 +240,7 @@ def git(repository, *arguments):
 
 
 def scratch_repository(directory, head_files):
-    """A repository with a base commit and a nc-head-commit adding head_files."""
+    """A repository with a base commit and an nn-head-commit adding head_files."""
     repository = Path(directory) / "repository"
     repository.mkdir()
     git(repository, "init", "-q", "-b", "main")
@@ -386,7 +389,7 @@ def runner_output_with_suites_timed_out(timed_out, others=()):
 
 
 def runner_output_with_test_sandbox_not_started(suite):
-    """The suite runner's NOT RUN lines for a suite whose nc-test-sandbox did not start, from its code."""
+    """The suite runner's NOT RUN lines for a suite whose nn-test-sandbox did not start, from its code."""
     runner = load_test_suite_runner()
     not_run = {"suite": suite, "exit": 1, "seconds": 0.1, "skips": [],
                "test sandbox did not start": True}
@@ -416,7 +419,7 @@ def test_command_output_when_the_machine_lock_is_held(scratch):
     repository, _, _ = scratch_repository(scratch, HEAD_FILES)
     lock_file = Path(scratch) / "machine.lock"
     environment = dict(os.environ)
-    # Suites without an nc-test-sandbox: the path that takes the machine lock.
+    # Suites without an nn-test-sandbox: the path that takes the machine lock.
     environment[load_test_suite_runner().SIGNAL_SANDBOX_INSIDE_VARIABLE] = "1"
     with open(lock_file, "a+") as holder:
         fcntl.flock(holder, fcntl.LOCK_EX)
@@ -483,22 +486,33 @@ def suites_named(control):
 
 def run_recorded_mutant_killed_check(scratch_name, head_files, diff_text, *flags,
                                      origin_main_files=None, before_run=None,
-                                     extra_environment=None, more_diff_texts=()):
+                                     extra_environment=None, more_diff_texts=(),
+                                     origin_main_earlier_files=None):
     """Run --recorded-mutant-killed-check on a scratch repository holding head_files, given
     mutant.diff holding diff_text, then mutant-2.diff and on holding more_diff_texts.
 
-    With origin_main_files, refs/remotes/origin/main names a commit on the base holding them.
+    With origin_main_files, refs/remotes/origin/main names a commit on the base holding them;
+    with origin_main_earlier_files too, that commit follows one holding those, and a path only
+    the earlier commit has is deleted, so the mutant's lines have a history on origin/main.
     before_run, given the repository, runs just before the check.
     The suites are real fixture suites, run by the real suite runner; no cosmic-ray is given."""
     survivors = load_script_module()
     repository, base, head = scratch_repository(scratch_name, head_files)
     if origin_main_files is not None:
         git(repository, "checkout", "-q", "--detach", base)
+        for path, text in (origin_main_earlier_files or {}).items():
+            (repository / path).parent.mkdir(parents=True, exist_ok=True)
+            (repository / path).write_text(text)
+        if origin_main_earlier_files:
+            git(repository, "add", "-A")
+            git(repository, "commit", "-q", "-m", "origin main earlier")
+            for path in set(origin_main_earlier_files) - set(origin_main_files):
+                (repository / path).unlink()
         for path, text in origin_main_files.items():
             (repository / path).parent.mkdir(parents=True, exist_ok=True)
             (repository / path).write_text(text)
         git(repository, "add", "-A")
-        git(repository, "commit", "-q", "-m", "origin main")
+        git(repository, "commit", "-q", "--allow-empty", "-m", "origin main")
         git(repository, "update-ref", "refs/remotes/origin/main", "HEAD")
         git(repository, "checkout", "-q", "main")
     control = Path(scratch_name) / "control"
@@ -521,15 +535,20 @@ def run_recorded_mutant_killed_check(scratch_name, head_files, diff_text, *flags
 
 def run_recorded_mutant_killed_check_root_commit_refusal_cases():
     """--recorded-mutant-killed-check run where git cannot list HEAD's root commits, so the
-    runner cannot name the recordings directory: the refusal's next steps follow git's error."""
+    runner cannot name the recordings directory: the refusal's next steps follow git's error,
+    and only the refusal's first word, the runner's name, becomes this program's."""
     survivors = load_script_module()
-    for how, lock_file_in_error in (("names a lock file", True), ("names no lock file", False)):
+    runner = load_test_suite_runner()
+    for how, lock_file_in_error in (("names a lock file", True), ("names no lock file", False),
+                                    ("quotes the suite runner's name", False)):
         with tempfile.TemporaryDirectory() as scratch_name:
             repository, _, head = scratch_repository(scratch_name, HEAD_FILES)
             control = Path(scratch_name) / "control"
             control.mkdir()
             lock_file = repository / ".git" / "index.lock"
             git_error = (f"fatal: Unable to create '{lock_file}': File exists." if lock_file_in_error
+                         else f"fatal: injected root-commit failure in {runner.PROGRAM}: quoted"
+                         if how == "quotes the suite runner's name"
                          else "fatal: injected root-commit failure")
             shim = Path(scratch_name) / "bin"
             shim.mkdir()
@@ -776,7 +795,8 @@ def run_recorded_mutant_killed_check_cases():
         with tempfile.TemporaryDirectory() as scratch_name:
             completed, _, _, _ = run_recorded_mutant_killed_check(
                 scratch_name, killing_files, SURVIVOR_DIFF.replace("thing.py", "gone.py"),
-                origin_main_files=origin_main_files, more_diff_texts=[SURVIVOR_DIFF])
+                origin_main_files=origin_main_files, more_diff_texts=[SURVIVOR_DIFF],
+                origin_main_earlier_files={"scripts/gone.py": HEAD_FILES["scripts/thing.py"]})
             check(f"a recorded mutant whose file and suites are gone from the head is judged by "
                   f"whether it still exists before whether a suite reads it, and the mutant "
                   f"given after it is still judged: {case_name}",
@@ -880,11 +900,29 @@ def run_recorded_mutant_killed_check_cases():
          "replaced line and the branch changed it, exit 2",
          {"scripts/thing.py": "def double(x):\n    # doubled\n    return x + x\n"},
          could_not_be_judged_line, "so your branch changed them", 2),
+        ("origin/main renamed the file and kept the line, so it is not gone, exit 2",
+         {"scripts/renamed-thing.py": HEAD_FILES["scripts/thing.py"]}, could_not_be_judged_line,
+         "git blame follows a line it replaces to scripts/renamed-thing.py:2 on origin/main, so "
+         "the mutant is not gone, and no suite was run.\n"
+         "If your branch removed or changed that line on purpose: the mutant is gone from your "
+         "branch; leave the survivor task that names this diff file open, and the nightly "
+         "mutation pass rechecks it once your branch is merged.\n"
+         "If your branch changed that line by accident: run git checkout origin/main -- "
+         "scripts/renamed-thing.py, commit, and run this command again.\n"
+         "Otherwise, make the diff's change by hand at scripts/renamed-thing.py:2, run that "
+         "file's suites, and put the line back before you commit.\n"
+         "If a suite fails: the mutant is killed, so no new test is needed; mark the survivor "
+         "task that names this diff file completed, naming the suite that failed.\n"
+         "If every suite passes: write a test that fails with the change made, put the line "
+         "back, commit the test, and mark that task completed once the pull request carrying "
+         "the test merges. This command gives this same verdict after that merge, because the "
+         "diff still does not apply.", 2),
     ]:
         with tempfile.TemporaryDirectory() as scratch_name:
             completed, _, _, _ = run_recorded_mutant_killed_check(
                 scratch_name, branch_changed_files, SURVIVOR_DIFF,
-                origin_main_files=origin_main_files)
+                origin_main_files=origin_main_files,
+                origin_main_earlier_files={"scripts/thing.py": HEAD_FILES["scripts/thing.py"]})
             check(f"a recorded mutant that does not apply at the head: {case_name}",
                   completed.returncode == wanted_exit and wanted_line in "\n" + completed.stdout
                   and wanted in completed.stdout,
@@ -927,6 +965,18 @@ def run_recorded_mutant_killed_check_cases():
         check("a recorded mutant that does not apply at the head, with no origin/main: it could "
               "not be judged, and says what to do",
               completed.returncode == 2 and cannot_tell in completed.stdout
+              and "git blame ended those lines but a copy of their text is still in the file"
+                  in completed.stdout
+              and "If `git rev-parse --verify origin/main` fails: run `git fetch origin main`, "
+                  "then run this command again once." in completed.stdout
+              and "If scripts/thing.py at your head is as origin/main has it, as in the nightly "
+                  "mutation pass: read the copies of the lines it replaces" in completed.stdout
+              and "A copy is the mutant's own line when it stands in the function"
+                  in completed.stdout
+              and "When the file has no copy, or no copy is the mutant's own line: mark the survivor"
+                  in completed.stdout
+              and "When one or more may be: for each in turn, make the diff's change by hand"
+                  in completed.stdout
               and "make sure your branch's head has scripts/thing.py as origin/main has it"
                   in completed.stdout,
               f"rc={completed.returncode} out={completed.stdout}")
@@ -1840,11 +1890,12 @@ def run_mutants_run_at_most_and_no_mutant_started_after_unix_time_cases():
     for name in ("a", "b", "c"):
         head_files[f"scripts/{name}.py"] = "def double(x):\n    return x + x\n"
         head_files[f"scripts/{name}-test.py"] = "import sys\nsys.exit(0)\n"
-    # Eight mutants no filter skipped: three in a.py, three in b.py and two in c.py.
+    # Eight mutants no filter skipped, each on a line of its own: three in a.py, three in b.py
+    # and two in c.py.
     init_sessions = {
-        "scripts/a.py": [["core/One", 2, False], ["core/Two", 2, False], ["core/Three", 2, False]],
-        "scripts/b.py": [["core/One", 2, False], ["core/Two", 2, False], ["core/Three", 2, False]],
-        "scripts/c.py": [["core/One", 2, False], ["core/Two", 2, False], ["core/Three", 2, True]]}
+        "scripts/a.py": [["core/One", 2, False], ["core/Two", 3, False], ["core/Three", 4, False]],
+        "scripts/b.py": [["core/One", 2, False], ["core/Two", 3, False], ["core/Three", 4, False]],
+        "scripts/c.py": [["core/One", 2, False], ["core/Two", 3, False], ["core/Three", 4, True]]}
     plan = {"init_sessions": init_sessions, "killed_output": SUITE_FAILED_RUNNER_OUTPUT}
 
     def steps_of(control):
@@ -1962,8 +2013,8 @@ def run_mutants_run_at_most_and_no_mutant_started_after_unix_time_cases():
 
     with tempfile.TemporaryDirectory() as scratch_name:
         repository, base, head = scratch_repository(scratch_name, head_files)
-        # No init_sessions: this fake's init writes a session that is no sqlite file.
-        venv, control = fake_venv(scratch_name, {"dump": []})
+        venv, control = fake_venv(scratch_name, {
+            "dump": [], "init_writes_a_file_that_is_no_sqlite_session": True})
         sessions = Path(scratch_name) / "sessions"
         completed, written = run_limited(repository, control, base, head, venv, sessions,
                                          at_most_flag, "2")
@@ -1975,6 +2026,265 @@ def run_mutants_run_at_most_and_no_mutant_started_after_unix_time_cases():
               and "Delete that session file" in completed.stderr
               and "baseline" not in steps_of(control) and len(worktrees_of(repository)) == 1,
               f"rc={completed.returncode} steps={steps_of(control)} err={completed.stderr}")
+
+
+def kept_session_mutants_by_line(sessions):
+    """{(file, line): sorted [(operator, worker outcome or None, output)]} of every mutant in
+    the kept sessions."""
+    found = {}
+    for session in sorted(Path(sessions).glob("*.sqlite")):
+        connection = sqlite3.connect(session)
+        for path, operator, line, outcome, output in connection.execute(
+                "SELECT module_path, operator_name, end_pos_row, worker_outcome, output "
+                "FROM mutation_specs LEFT JOIN work_results USING (job_id)"):
+            found.setdefault((path, line), []).append((operator, outcome, output))
+        connection.close()
+    return {key: sorted(value, key=str) for key, value in found.items()}
+
+
+def head_committed_at(repository, unix_time):
+    """Commit the head again with this committer time; return the new head."""
+    subprocess.run(["git", "-C", str(repository), "commit", "-q", "--amend", "--no-edit"],
+                   check=True, capture_output=True,
+                   env=dict(os.environ, GIT_COMMITTER_DATE=f"@{unix_time} +0000"))
+    return git(repository, "rev-parse", "HEAD")
+
+
+def run_one_mutant_per_changed_line_and_kept_sessions_of_heads_before_cutoff_cases():
+    script = load_script_module()
+    one_per_line = script.ONE_MUTANT_PER_CHANGED_LINE_SKIPPED_OUTPUT
+    before_cutoff = script.KEPT_COSMIC_RAY_SESSION_MUTANT_SKIPPED_WHEN_HEAD_COMMIT_BEFORE_CUTOFF_RESULT_OUTPUT_TEXT
+    cutoff = \
+        script.KEPT_COSMIC_RAY_SESSION_MUTANTS_WITH_NO_RESULT_ALL_SKIPPED_WHEN_HEAD_COMMIT_UNIX_TIME_BEFORE_THIS_CUTOFF
+    at_most_flag = script.MUTANTS_RUN_AT_MOST_SHARED_EVENLY_AMONG_CHANGED_FILES_FLAG
+    stop_flag = script.NO_MUTANT_STARTED_AFTER_UNIX_TIME_FLAG
+    kept_flag = script.COSMIC_RAY_SESSIONS_DIRECTORY_KEPT_TO_RESUME_FLAG
+    backlog_flag = script.MUTANTS_WITH_NO_RESULT_IN_KEPT_COSMIC_RAY_SESSIONS_MARKED_SKIPPED_WHEN_HEAD_COMMIT_BEFORE_CUTOFF_COMMAND_LINE_FLAG
+    future = repr(time.time() + 3600)
+
+    def run_full(repository, control, base, head, venv, sessions, *flags):
+        (control / "calls.log").write_text("")
+        json_file = control / "mutants.json"
+        json_file.unlink(missing_ok=True)
+        completed = run_script(repository, control, "--head", head, "--base", base,
+                               "--cosmic-ray-venv", str(venv),
+                               script.PARALLEL_MUTANT_WORKERS_FLAG, "1", kept_flag,
+                               str(sessions), "--survived-and-errored-mutants-json-file",
+                               str(json_file), *flags)
+        return completed, (json.loads(json_file.read_text()) if json_file.exists() else None)
+
+    def judged(by_line):
+        """{(file, line): operators with a result no filter gave} of each line."""
+        return {key: [operator for operator, outcome, _ in mutants
+                      if outcome not in (None, "SKIPPED")]
+                for key, mutants in by_line.items()}
+
+    # ------------------------------------------------------------------
+    # The full pass keeps one mutant per changed line, the same one at every init.
+    # ------------------------------------------------------------------
+    head_files = {"scripts/a.py": "def double(x):\n    return x + x\n",
+                  "scripts/a-test.py": "import sys\nsys.exit(0)\n",
+                  "scripts/b.py": "def double(x):\n    return x + x\n",
+                  "scripts/b-test.py": "import sys\nsys.exit(0)\n"}
+    plan = {"init_sessions": {
+        "scripts/a.py": [["core/One", 2, False], ["core/Two", 2, False], ["core/Three", 2, False],
+                         ["core/Four", 2, False], ["core/Five", 3, True], ["core/Six", 4, False],
+                         ["core/Seven", 4, False]],
+        "scripts/b.py": [["core/One", 2, False]]},
+        "killed_output": SUITE_FAILED_RUNNER_OUTPUT}
+    with tempfile.TemporaryDirectory() as scratch_name:
+        repository, base, head = scratch_repository(scratch_name, head_files)
+        venv, control = fake_venv(scratch_name, plan)
+        sessions = Path(scratch_name) / "sessions"
+        completed, written = run_full(repository, control, base, head, venv, sessions,
+                                      stop_flag, future)
+        by_line = kept_session_mutants_by_line(sessions)
+        first = judged(by_line)
+        check("the full pass runs one mutant of each changed line, and marks the line's others "
+              "skipped as not run under one mutant per changed line; a line whose only mutant "
+              "a filter skipped runs none",
+              completed.returncode == 0
+              and {key: len(operators) for key, operators in first.items()}
+              == {("scripts/a.py", 2): 1, ("scripts/a.py", 3): 0, ("scripts/a.py", 4): 1,
+                  ("scripts/b.py", 2): 1}
+              and sum(output == one_per_line for mutants in by_line.values()
+                      for _, _, output in mutants) == 4
+              and by_line[("scripts/a.py", 3)] == [("core/Five", "SKIPPED", None)]
+              and "3 killed, 0 survived, 0 errored, 0 not run" in completed.stdout
+              and written["mutants_not_run_count"] == 0,
+              f"rc={completed.returncode} by_line={by_line} out={completed.stdout} "
+              f"err={completed.stderr}")
+        for _ in range(2):
+            for session in sessions.glob("*.sqlite"):
+                session.unlink()
+            run_full(repository, control, base, head, venv, sessions, stop_flag, future)
+            again = judged(kept_session_mutants_by_line(sessions))
+            check("with the sessions made anew, which gives every mutant a new job id, the same "
+                  "head runs the same mutant of each line", again == first, (again, first))
+
+    # ------------------------------------------------------------------
+    # The quick pass keeps one mutant per changed line too.
+    # ------------------------------------------------------------------
+    with tempfile.TemporaryDirectory() as scratch_name:
+        repository, base, head = scratch_repository(scratch_name, QUICK_HEAD_FILES)
+        venv, control = fake_venv(scratch_name, {"init_sessions": {"scripts/handler.py": [
+            ["core/One", 10, False], ["core/Two", 10, False], ["core/Three", 10, False],
+            ["core/Four", 14, False]]}})
+        sessions = Path(scratch_name) / "sessions"
+        completed = run_script(repository, control, "--quick-mutation-pass", "--head", head,
+                               "--base", base, "--cosmic-ray-venv", str(venv), kept_flag,
+                               str(sessions))
+        by_line = kept_session_mutants_by_line(sessions)
+        check("the quick pass leaves one mutant of each changed line to run, and marks the "
+              "line's others skipped",
+              [outcome for _, outcome, _ in by_line[("scripts/handler.py", 10)]].count(None) == 1
+              and [output for _, _, output in by_line[("scripts/handler.py", 10)]].count(
+                  one_per_line) == 2
+              and [outcome for _, outcome, _ in by_line[("scripts/handler.py", 14)]] == [None]
+              and "0 errored, 2 not run" in completed.stdout,
+              f"rc={completed.returncode} by_line={by_line} out={completed.stdout} "
+              f"err={completed.stderr}")
+
+    # ------------------------------------------------------------------
+    # A kept session of a head committed before the cutoff, given the backlog flag: its mutants
+    # with no result are skipped. At the cutoff, or without the flag, as when a first pass
+    # stopped after it made its sessions is resumed, they run.
+    # ------------------------------------------------------------------
+    plan = {"init_sessions": {"scripts/a.py": [["core/One", 2, False], ["core/Two", 2, False],
+                                               ["core/Three", 3, False]]},
+            "killed_output": SUITE_FAILED_RUNNER_OUTPUT}
+    head_files = {"scripts/a.py": "def double(x):\n    return x + x\n",
+                  "scripts/a-test.py": "import sys\nsys.exit(0)\n"}
+    for committed, backlog, skipped in ((cutoff - 1, True, True), (cutoff - 1, False, False),
+                                        (cutoff, True, False)):
+        with tempfile.TemporaryDirectory() as scratch_name:
+            repository, base, _ = scratch_repository(scratch_name, head_files)
+            head = head_committed_at(repository, committed)
+            venv, control = fake_venv(scratch_name, plan)
+            sessions = Path(scratch_name) / "sessions"
+            completed, written = run_full(repository, control, base, head, venv, sessions,
+                                          at_most_flag, "1")
+            check(f"a head committed {cutoff - committed} s before the cutoff, its session made "
+                  f"now: one mutant per changed line, one of them run, one waiting",
+                  completed.returncode == 1 and written["mutants_not_run_count"] == 1,
+                  f"rc={completed.returncode} json={written} err={completed.stderr}")
+            completed, written = run_full(repository, control, base, head, venv, sessions,
+                                          stop_flag, future, *([backlog_flag] if backlog else []))
+            by_line = kept_session_mutants_by_line(sessions)
+            ran = [c for c in calls(control) if c["tool"] == "python"]
+            backlog = [output for mutants in by_line.values() for _, _, output in mutants
+                       if output == before_cutoff]
+            if skipped:
+                check("its kept session, a run later: the waiting mutant is marked skipped as of "
+                      "a head committed before the cutoff, none runs, and none is left not run",
+                      completed.returncode == 0 and not ran and len(backlog) == 1
+                      and written["mutants_not_run_count"] == 0
+                      and "1 killed, 0 survived, 0 errored, 0 not run" in completed.stdout,
+                      f"rc={completed.returncode} ran={ran} by_line={by_line} "
+                      f"out={completed.stdout} err={completed.stderr}")
+            else:
+                check(f"a head committed {cutoff - committed} s before the cutoff, "
+                      f"{'given' if backlog else 'without'} the backlog flag: its kept "
+                      f"session's waiting mutant runs",
+                      completed.returncode == 0 and len(ran) == 1 and not backlog
+                      and "2 killed, 0 survived, 0 errored, 0 not run" in completed.stdout,
+                      f"rc={completed.returncode} ran={ran} by_line={by_line} "
+                      f"out={completed.stdout} err={completed.stderr}")
+
+    # A kept session holding every mutant of a line, of a head at the cutoff: a later run keeps
+    # the seed's mutant of each line, unless another mutant of the line has a result already.
+    for other_has_a_result in (False, True):
+        with tempfile.TemporaryDirectory() as scratch_name:
+            repository, base, _ = scratch_repository(scratch_name, head_files)
+            head = head_committed_at(repository, cutoff)
+            venv, control = fake_venv(scratch_name, plan)
+            sessions = Path(scratch_name) / "sessions"
+            run_full(repository, control, base, head, venv, sessions, stop_flag,
+                     repr(time.time() - 1))
+            line_two = kept_session_mutants_by_line(sessions)[("scripts/a.py", 2)]
+            picked = [operator for operator, outcome, _ in line_two if outcome is None]
+            other = [operator for operator, _, output in line_two if output == one_per_line]
+            for session in sessions.glob("*.sqlite"):
+                connection = sqlite3.connect(session)
+                with connection:
+                    connection.execute("DELETE FROM work_results WHERE output = ?",
+                                       (one_per_line,))
+                    if other_has_a_result:
+                        connection.execute(
+                            "INSERT INTO work_results (job_id, worker_outcome, output, "
+                            "test_outcome, diff) SELECT job_id, 'NORMAL', ?, 'KILLED', NULL "
+                            "FROM mutation_specs WHERE operator_name = ? AND end_pos_row = 2",
+                            (SUITE_FAILED_RUNNER_OUTPUT, other[0]))
+                connection.close()
+            completed, written = run_full(repository, control, base, head, venv, sessions,
+                                          stop_flag, future)
+            by_line = kept_session_mutants_by_line(sessions)
+            line_two = {operator: (outcome, output)
+                        for operator, outcome, output in by_line[("scripts/a.py", 2)]}
+            wanted = ({other[0]: ("NORMAL", SUITE_FAILED_RUNNER_OUTPUT),
+                       picked[0]: ("SKIPPED", one_per_line)} if other_has_a_result
+                      else {picked[0]: ("NORMAL", SUITE_FAILED_RUNNER_OUTPUT),
+                            other[0]: ("SKIPPED", one_per_line)})
+            check(f"a kept session with every mutant of a line waiting, of a head at the "
+                  f"cutoff, {'one of them' if other_has_a_result else 'none of them'} not the "
+                  f"seed's with a result: the next run "
+                  f"{'runs none of the line' if other_has_a_result else 'runs the one the seed picks'}, "
+                  f"and one of every other line",
+                  completed.returncode == 0 and len(picked) == 1 and len(other) == 1
+                  and line_two == wanted
+                  and len(judged(by_line)[("scripts/a.py", 3)]) == 1
+                  and written["mutants_not_run_count"] == 0,
+                  f"rc={completed.returncode} picked={picked} other={other} by_line={by_line} "
+                  f"err={completed.stderr}")
+
+    # A kept session of a head before the cutoff, run with no limit on the mutants run: its
+    # waiting mutants are skipped before the baseline, so neither the baseline nor a mutant runs.
+    with tempfile.TemporaryDirectory() as scratch_name:
+        repository, base, _ = scratch_repository(scratch_name, head_files)
+        head = head_committed_at(repository, cutoff - 1)
+        venv, control = fake_venv(scratch_name, plan)
+        sessions = Path(scratch_name) / "sessions"
+        run_script(repository, control, "--head", head, "--base", base, "--cosmic-ray-venv",
+                   str(venv), kept_flag, str(sessions))
+        waiting_after_first_run = sum(
+            outcome is None for mutants in kept_session_mutants_by_line(sessions).values()
+            for _, outcome, _ in mutants)
+        (control / "calls.log").write_text("")
+        completed = run_script(repository, control, "--head", head, "--base", base,
+                               "--cosmic-ray-venv", str(venv), kept_flag, str(sessions),
+                               backlog_flag)
+        steps = [c["arguments"][0] for c in calls(control)]
+        by_line = kept_session_mutants_by_line(sessions)
+        check("with no limit on the mutants run, a kept session of a head committed before the "
+              "cutoff, given the backlog flag: its waiting mutants are marked skipped, RESUMED is "
+              "printed, and only its dump runs",
+              waiting_after_first_run == 2 and steps == ["dump"]
+              and "RESUMED  scripts/a.py" in completed.stdout
+              and sum(output == before_cutoff for mutants in by_line.values()
+                      for _, _, output in mutants) == 2
+              and completed.returncode == 0,
+              f"rc={completed.returncode} waiting={waiting_after_first_run} steps={steps} "
+              f"by_line={by_line} out={completed.stdout} err={completed.stderr}")
+
+    # A kept session that cannot be written: exit 2, saying so, the worktree removed.
+    with tempfile.TemporaryDirectory() as scratch_name:
+        repository, base, _ = scratch_repository(scratch_name, head_files)
+        head = head_committed_at(repository, cutoff - 1)
+        venv, control = fake_venv(scratch_name, plan)
+        sessions = Path(scratch_name) / "sessions"
+        run_full(repository, control, base, head, venv, sessions, at_most_flag, "1")
+        for session in sessions.glob("*.sqlite"):
+            session.chmod(0o444)
+        completed, written = run_full(repository, control, base, head, venv, sessions,
+                                      stop_flag, future, backlog_flag)
+        check("a kept session whose waiting mutants cannot be marked skipped: exit 2, naming "
+              "the session and the error, the command to run again, and the worktree removed",
+              completed.returncode == 2 and written is None
+              and "cannot be written (OperationalError: attempt to write a readonly database)"
+              in completed.stderr
+              and "Then run the same command again:\n  python3 " in completed.stderr
+              and len(worktrees_of(repository)) == 1,
+              f"rc={completed.returncode} err={completed.stderr}")
 
 
 def run_mutants_run_at_most_case_with_real_cosmic_ray():
@@ -1990,9 +2300,11 @@ def run_mutants_run_at_most_case_with_real_cosmic_ray():
              "module = importlib.util.module_from_spec(spec)\n"
              "spec.loader.exec_module(module)\n"
              "assert module.double(3) == 6\nprint('all cases passed')\n")
-    head_files = {"scripts/thing.py": "def double(x):\n    return x + x\n",
+    # Two changed lines with mutants in each file, since the script runs one mutant per changed
+    # line.
+    head_files = {"scripts/thing.py": "def double(x):\n    y = x + 0\n    return x + y\n",
                   "scripts/thing-test.py": suite.format(name="thing"),
-                  "scripts/other.py": "def double(x):\n    return x * 2\n",
+                  "scripts/other.py": "def double(x):\n    y = x * 1\n    return y * 2\n",
                   "scripts/other-test.py": suite.format(name="other")}
     with tempfile.TemporaryDirectory() as scratch_name:
         repository, base, head = scratch_repository(scratch_name, head_files)
@@ -2023,7 +2335,7 @@ def run_mutants_run_at_most_case_with_real_cosmic_ray():
 
 
 def in_test_sandboxes_through_a_fake_bwrap(scratch_name):
-    """run_script's keyword arguments that make the suites run in nc-test-sandboxes, as on a
+    """run_script's keyword arguments that make the suites run in nn-test-sandboxes, as on a
     Linux machine with bwrap, through a fake bwrap on PATH; the variable that marks a run
     already inside the sandbox is dropped, since this file itself runs inside the suite
     runner's."""
@@ -2049,7 +2361,7 @@ def run_parallel_mutants_and_kept_sessions_cases():
               completed.returncode == 2 and wanted in completed.stderr, completed.stderr)
     if not sys.platform.startswith("linux"):
         print("SKIP  [this machine cannot run it] the parallel mutant workers' and kept "
-              "sessions' cases: parallel workers need nc-test-sandboxes, which bwrap gives only "
+              "sessions' cases: parallel workers need nn-test-sandboxes, which bwrap gives only "
               "on Linux, and the nightly pass that keeps sessions runs on ned-box only")
         return
     with tempfile.TemporaryDirectory() as scratch_name:
@@ -2110,9 +2422,19 @@ def run_parallel_mutants_and_kept_sessions_cases():
             connection = sqlite3.connect(kept_session)
             connection.executescript(
                 "CREATE TABLE work_items (job_id TEXT PRIMARY KEY);"
-                "CREATE TABLE work_results (job_id TEXT PRIMARY KEY);"
-                "INSERT INTO work_items VALUES ('done'); INSERT INTO work_results VALUES ('done');"
-                + ("INSERT INTO work_items VALUES ('waiting');" if pending else ""))
+                "CREATE TABLE mutation_specs (module_path, operator_name, operator_args, "
+                "occurrence, start_pos_row, start_pos_col, end_pos_row, end_pos_col, "
+                "definition_name, job_id TEXT PRIMARY KEY);"
+                "CREATE TABLE work_results (job_id TEXT PRIMARY KEY, worker_outcome, output, "
+                "test_outcome, diff);"
+                "INSERT INTO work_items VALUES ('done');"
+                "INSERT INTO mutation_specs VALUES "
+                "('scripts/thing.py', 'core/One', '{}', 0, 1, 4, 1, 9, NULL, 'done');"
+                "INSERT INTO work_results VALUES ('done', 'NORMAL', '', 'KILLED', NULL);"
+                + ("INSERT INTO work_items VALUES ('waiting');"
+                   "INSERT INTO mutation_specs VALUES "
+                   "('scripts/thing.py', 'core/Two', '{}', 0, 2, 4, 2, 9, NULL, 'waiting');"
+                   if pending else ""))
             connection.commit()
             connection.close()
             (control / "calls.log").write_text("")
@@ -2247,54 +2569,216 @@ def run_recorded_mutant_lines_on_main_search_cases():
             on_main = survivors.recorded_mutant_lines_on_main(repository, path, hunks, None)
             check(f"a recorded mutant whose replaced lines origin/main has once and twice is not "
                   f"gone, and whether it applies cannot be told: {path}",
-                  on_main is None, on_main)
+                  on_main == (None, None), on_main)
 
 
-def run_recorded_mutant_lines_on_main_context_lines_cases():
+# pull-request-review-plan.py's function as its surviving mutant was recorded, then after the
+# merge that rewrote the guard above the mutated `return True`. git blame -w ends that line
+# at the rewrite, while plain git blame follows it to the later version.
+RECORDED_GUARD_SOURCE = (
+    'def nearest_call_prints_its_argument(node, parents, helper_printers):\n'
+    '    """True when the call nearest above node, if any, is a printing call or helper printer, the\n'
+    '    exception a raise statement builds, or a method called on node itself, as .format is. The\n'
+    '    collector also counts a string inside any call nested in a printed argument, such as the\n'
+    '    pattern in print(re.sub("a", "b", text)), but such a string steers the call, not the text."""\n'
+    '    child = node\n'
+    '    parent = parents.get(child)\n'
+    '    while parent is not None and not isinstance(parent, ast.Call):\n'
+    '        if isinstance(parent, ast.stmt):\n'
+    '            return True\n'
+    '        child, parent = parent, parents.get(parent)\n'
+    '    if parent is None:\n'
+    '        return True\n'
+    '    call_name = ast.unparse(parent.func)\n'
+    '    return (call_name in PRINTING_CALL_NAMES\n'
+    '            or (isinstance(parent.func, ast.Name) and parent.func.id in helper_printers)\n'
+    '            or (isinstance(parents.get(parent), ast.Raise) and parents[parent].exc is parent)\n'
+    '            or (child is parent.func and isinstance(parent.func, ast.Attribute)))\n'
+    '\n'
+    '\n'
+    'def another_function(x):\n'
+    '    if x:\n'
+    '        return True\n'
+    '\n'
+)
+GUARD_REWRITTEN_ABOVE_THE_LINE_SOURCE = (
+    'def nearest_call_prints_its_argument(node, parents, helper_printers):\n'
+    '    """True when node\'s text reaches, unchanged, a statement or the argument of a printing call or\n'
+    '    helper printer, or the exception a raise statement builds. A str method that returns the text,\n'
+    '    as .format does, passes its result on up; one such as .startswith or .count turns the text into\n'
+    '    a value it steers, as a comparison does. The collector also counts a string inside any call nested\n'
+    '    in a printed argument, such as the pattern in print(re.sub("a", "b", text)), but such a string\n'
+    '    steers the call, not the text; and one inside a comparison, as in print(x == "yes") or\n'
+    '    print(x == "yes".upper()), which prints only a Boolean."""\n'
+    '    child = node\n'
+    '    parent = parents.get(child)\n'
+    '    while True:\n'
+    '        while passes_its_text_up(child, parent):\n'
+    '            child, parent = parent, parents.get(parent)\n'
+    '        call = parents.get(parent)\n'
+    '        if not (isinstance(parent, ast.Attribute) and parent.value is child\n'
+    '                and parent.attr in STR_METHODS_THAT_RETURN_THE_TEXT\n'
+    '                and isinstance(call, ast.Call) and call.func is parent):\n'
+    '            break\n'
+    '        child, parent = call, parents.get(call)\n'
+    '    if isinstance(parent, ast.stmt):\n'
+    '        return True\n'
+    '    if not isinstance(parent, ast.Call) or child is parent.func:\n'
+    '        return False\n'
+    '    call_name = ast.unparse(parent.func)\n'
+    '    return (call_name in PRINTING_CALL_NAMES\n'
+    '            or (isinstance(parent.func, ast.Name) and parent.func.id in helper_printers)\n'
+    '            or (isinstance(parents.get(parent), ast.Raise) and parents[parent].exc is parent))\n'
+    '\n'
+    '\n'
+    'def another_function(x):\n'
+    '    if x:\n'
+    '        return True\n'
+    '\n'
+)
+RECORDED_GUARD_HUNK = (10, ['            return True', '        child, parent = parent, parents.get(parent)', '    if parent is None:', '        return True', '    call_name = ast.unparse(parent.func)', '    return (call_name in PRINTING_CALL_NAMES', '            or (isinstance(parent.func, ast.Name) and parent.func.id in helper_printers)'],
+                       ['            return True', '        child, parent = parent, parents.get(parent)', '    if parent is None:', '        return False', '    call_name = ast.unparse(parent.func)', '    return (call_name in PRINTING_CALL_NAMES', '            or (isinstance(parent.func, ast.Name) and parent.func.id in helper_printers)'])
+RECORDED_GUARD_LINE_AFTER_THE_REWRITE = 21
+
+
+def commits_on_origin_main(repository, versions):
+    """Commit each {path: text or None} in order, None deleting the path, and name the last
+    commit refs/remotes/origin/main."""
+    for version in versions:
+        for path, text in version.items():
+            if text is None:
+                (repository / path).unlink()
+            else:
+                (repository / path).parent.mkdir(parents=True, exist_ok=True)
+                (repository / path).write_text(text)
+        git(repository, "add", "-A")
+        git(repository, "commit", "-q", "--allow-empty", "-m", "on origin main")
+    git(repository, "update-ref", "refs/remotes/origin/main", "HEAD")
+
+
+def run_recorded_mutant_lines_on_main_traced_through_history_cases():
     survivors = load_script_module()
-    # Each recorded hunk replaces a bare "continue"; each file has "continue" more than once,
-    # so no hunk is found once and the context lines beside each copy decide.
-    hunk = (100, ["b1", "b2", "continue", "a1", "a2"], ["b1", "b2", "break", "a1", "a2"])
-    blank_after = (100, ["b1", "continue", ""], ["b1", "break", ""])
-    blank_only = (100, ["", "continue", ""], ["", "break", ""])
-    # Adds a line between context lines that no file has, so it replaces no line.
-    insert_only = (100, ["q1", "q2"], ["q1", "added", "q2"])
-    cases = {
-        "context-gone-copies-in-the-middle.py": ("x\ncontinue\ny\nz\ncontinue\nw", [hunk], "gone"),
-        # A copy at the file's start has the file's last lines at negative offsets, and one
-        # at its end has no lines after it; neither is a context line beside the copy.
-        "context-lines-before-the-file-start.py": ("continue\nx\ncontinue\nb1\nb2", [hunk],
-                                                   "gone"),
-        "context-lines-past-the-file-end.py": ("a1\na2\ncontinue\nx\ncontinue", [hunk], "gone"),
-        "context-line-at-another-offset.py": ("a1\ncontinue\nb2\nx\ncontinue\nb1", [hunk],
-                                              "gone"),
-        "line-before-kept-beside-one-copy.py": ("b1\nchanged\ncontinue\nx\ncontinue", [hunk],
-                                                None),
-        "line-after-kept-beside-one-copy.py": ("continue\nx\ncontinue\nchanged\na2", [hunk],
-                                               None),
-        "line-after-kept-at-the-file-end.py": ("continue\nx\ncontinue\na1", [hunk], None),
-        "line-before-kept-at-the-file-start.py": ("b2\ncontinue\nx\ncontinue", [hunk], None),
-        "blank-context-line-beside-a-copy.py": ("x\ncontinue\n\ny\ncontinue", [blank_after],
-                                                "gone"),
-        "only-blank-context-lines.py": ("x\ncontinue\ny\ncontinue", [blank_only], None),
-        "insert-only-hunk-before-a-gone-hunk.py": ("x\ncontinue\ny\ncontinue",
-                                                   [insert_only, hunk], "gone"),
-    }
-    with tempfile.TemporaryDirectory() as scratch_name:
-        repository, _, head = scratch_repository(
-            scratch_name, {path: text for path, (text, _, _) in cases.items()})
-        git(repository, "update-ref", "refs/remotes/origin/main", head)
-        for path, (_, hunks, wanted) in cases.items():
-            on_main = survivors.recorded_mutant_lines_on_main(repository, path, hunks, None)
-            check(f"a recorded mutant whose short replaced line origin/main has more than once "
-                  f"is gone only when no non-blank context line stands beside any copy: {path}",
-                  on_main == wanted, f"want {wanted!r} got {on_main!r}")
+    path = "scripts/plan.py"
+    one_line_hunk = (1, ["a", "b", "c"], ["a", "B", "c"])
+    unrelated = "".join(f"unrelated line number {n} of this file\n" for n in range(12))
+    insert_only = (1, ["a", "b"], ["a", "added", "b"])
+    cases = [
+        ("the real case: the guard above the line was rewritten, so no context line stands "
+         "beside it and another function has a copy, and the line is still there",
+         [{path: RECORDED_GUARD_SOURCE}, {path: GUARD_REWRITTEN_ABOVE_THE_LINE_SOURCE}],
+         [RECORDED_GUARD_HUNK], ("present", f"{path}:{RECORDED_GUARD_LINE_AFTER_THE_REWRITE}")),
+        ("the file was renamed and the line kept",
+         [{path: "a\nb\nc\n" + unrelated}, {path: None, "scripts/renamed.py": "a\nb\nc\n" + unrelated},
+          {"scripts/renamed.py": "x\na\nb\nchanged\n" + unrelated}],
+         [one_line_hunk], ("present", "scripts/renamed.py:3")),
+        ("the line was re-indented",
+         [{path: "a\nb\nc\n" + unrelated}, {path: "a\n    b\nchanged\n" + unrelated}],
+         [one_line_hunk], ("present", f"{path}:2")),
+        ("the line was edited and no copy of its old text is left",
+         [{path: "a\nb\nc\n" + unrelated}, {path: "a\nedited\nc\n" + unrelated}],
+         [one_line_hunk], ("gone", None)),
+        ("blame ends the line, but a copy of its old text stands elsewhere, so which it is cannot "
+         "be told",
+         [{path: "a\nb\nc\n" + unrelated}, {path: "a\nedited\nc\n" + unrelated + "x\nb\ny\nb\n"}],
+         [one_line_hunk], (None, None)),
+        ("the file was deleted", [{path: "a\nb\nc\n" + unrelated}, {path: None, "OTHER": "x\n"}],
+         [one_line_hunk], ("gone", None)),
+        ("no commit on origin/main holds the hunk at its line", [{path: "x\ny\nz\n"}, {"OTHER": "2"}],
+         [one_line_hunk], (None, None)),
+        ("the hunk replaces no line", [{path: "a\nb\n"}, {path: "x\ny\n"}], [insert_only],
+         (None, None)),
+        ("one hunk's line is gone and another's is present",
+         [{path: "a\nb\nc\n" + unrelated + "p\nq\nr\n"},
+          {path: "a\nedited\nc\n" + unrelated + "p\nq\nchanged\n"}],
+         [one_line_hunk, (16, ["p", "q", "r"], ["p", "Q", "r"])], ("present", f"{path}:17")),
+    ]
+    for name, versions, hunks, wanted in cases:
+        with tempfile.TemporaryDirectory() as scratch_name:
+            repository, _, _ = scratch_repository(scratch_name, {"README2": "x\n"})
+            commits_on_origin_main(repository, versions)
+            got = survivors.recorded_mutant_lines_on_main(repository, path, hunks, None)
+            check(f"a recorded mutant's lines are judged by following them through origin/main's "
+                  f"history: {name}", got == wanted, f"want {wanted!r} got {got!r}")
+
+    real_run = survivors.run
+    for name, failing_word, replacement in [
+        ("git log fails listing the file's commits", "log", None),
+        ("git blame fails", "blame", None),
+        ("git blame prints no line for the replaced line", "blame", ""),
+    ]:
+        def failing_run(command, cwd, environment=None):
+            if command[1] == failing_word:
+                return subprocess.CompletedProcess(command, 0 if replacement is not None else 128,
+                                                   replacement or "", "injected failure")
+            return real_run(command, cwd, environment)
+        with tempfile.TemporaryDirectory() as scratch_name:
+            repository, _, _ = scratch_repository(scratch_name, {"README2": "x\n"})
+            commits_on_origin_main(repository, [{path: "a\nb\nc\n" + unrelated},
+                                                {path: "a\nedited\nc\n" + unrelated}])
+            survivors.run = failing_run
+            try:
+                got = survivors.recorded_mutant_lines_on_main(repository, path, [one_line_hunk],
+                                                              None)
+            finally:
+                survivors.run = real_run
+            check(f"a recorded mutant is not called gone when its history cannot be read, and "
+                  f"could not be judged: {name}", got == (None, None), got)
+
+    # The file is renamed, then the line is edited, so only the later name is read for a copy.
+    renamed_versions = [{path: "a\nb\nc\n" + unrelated},
+                        {path: None, "scripts/renamed.py": "a\nb\nc\n" + unrelated},
+                        {"scripts/renamed.py": "a\nedited\nc\n" + unrelated}]
+    for name, failing_word in [("git ls-tree fails on the renamed file", "ls-tree"),
+                               ("git show fails on the renamed file", "show")]:
+        def failing_on_renamed_file(command, cwd, environment=None):
+            if command[1] == failing_word and command[-1].endswith("scripts/renamed.py") \
+                    and (failing_word == "ls-tree" or command[-1].startswith(main_commit)):
+                return subprocess.CompletedProcess(command, 128, "", "injected failure")
+            return real_run(command, cwd, environment)
+        with tempfile.TemporaryDirectory() as scratch_name:
+            repository, _, _ = scratch_repository(scratch_name, {"README2": "x\n"})
+            commits_on_origin_main(repository, renamed_versions)
+            main_commit = git(repository, "rev-parse", "HEAD")
+            survivors.run = failing_on_renamed_file
+            try:
+                got = survivors.recorded_mutant_lines_on_main(repository, path, [one_line_hunk],
+                                                              None)
+            finally:
+                survivors.run = real_run
+            check(f"a recorded mutant is not called gone when a file its line was followed "
+                  f"through cannot be read on origin/main: {name}", got == (None, None), got)
+
+    # Present, deleted, restored, then re-indented: a failed git show on the restoring commit
+    # must not let the search fall back to the copy before the deletion, where blame ends the line.
+    for name, failing_words in [("git show fails on a commit that has the file", {"show"}),
+                                ("git show and git ls-tree both fail on that commit",
+                                 {"show", "ls-tree"})]:
+        with tempfile.TemporaryDirectory() as scratch_name:
+            repository, _, _ = scratch_repository(scratch_name, {"README2": "x\n"})
+            commits_on_origin_main(repository, [{path: "a\nb\nc\n" + unrelated},
+                                                {path: None, "OTHER": "x\n"},
+                                                {path: "a\nb\nc\n" + unrelated},
+                                                {path: "a\n    b\nchanged\n" + unrelated}])
+            restoring_commit = git(repository, "rev-parse", "HEAD~1")
+
+            def failing_on_restoring_commit(command, cwd, environment=None):
+                if command[1] in failing_words and restoring_commit in " ".join(command[2:]):
+                    return subprocess.CompletedProcess(command, 128, "", "injected failure")
+                return real_run(command, cwd, environment)
+            survivors.run = failing_on_restoring_commit
+            try:
+                got = survivors.recorded_mutant_lines_on_main(repository, path, [one_line_hunk],
+                                                              None)
+            finally:
+                survivors.run = real_run
+            check(f"a recorded mutant is not called gone when a commit's copy of the file cannot "
+                  f"be read, and could not be judged: {name}", got == (None, None), got)
 
 
 def run_cases():
     run_hunk_shared_context_line_counts_and_replaced_lines_cases()
     run_recorded_mutant_lines_on_main_search_cases()
-    run_recorded_mutant_lines_on_main_context_lines_cases()
+    run_recorded_mutant_lines_on_main_traced_through_history_cases()
     # ------------------------------------------------------------------
     # The config written, the worktree used, and survivors parsed.
     # ------------------------------------------------------------------
@@ -2567,20 +3051,20 @@ def run_cases():
                "failure history could not be written: full\n"
                "SUMMARY: 1 passed, 0 failed, 1 total\n")]],
          1, "0 killed, 0 survived, 1 errored"),
-        ("a killed mutant whose only failing suite's nc-test-sandbox did not start is ERRORED, "
+        ("a killed mutant whose only failing suite's nn-test-sandbox did not start is ERRORED, "
          "not killed",
          [[work_item("scripts/thing.py", 2, "core/NumberReplacer", "a"),
            killed_with_output(runner_output_with_test_sandbox_not_started(
                "scripts/thing-test.py"))]],
          1, "0 killed, 0 survived, 1 errored"),
-        ("the ERRORED line for a mutant whose only nonzero suite's nc-test-sandbox did not start "
+        ("the ERRORED line for a mutant whose only nonzero suite's nn-test-sandbox did not start "
          "quotes the runner's NOT RUN line, which names the suite",
          [[work_item("scripts/thing.py", 2, "core/NumberReplacer", "a"),
            killed_with_output(runner_output_with_test_sandbox_not_started(
                "scripts/thing-test.py"))]],
          1, "its output says: NOT RUN scripts/thing-test.py did not start: bwrap could not "
-            "build its nc-test-sandbox"),
-        ("a killed mutant with one suite failing beside an nc-test-sandbox that did not start is "
+            "build its nn-test-sandbox"),
+        ("a killed mutant with one suite failing beside an nn-test-sandbox that did not start is "
          "killed",
          [[work_item("scripts/thing.py", 2, "core/NumberReplacer", "a"),
            killed_with_output(runner_output_with_test_sandbox_not_started(
@@ -2873,7 +3357,7 @@ def run_cases():
               json.dumps(calls(control)))
 
     # ------------------------------------------------------------------
-    # A nc-head-commit already in the base, as a merged pull request's is:
+    # An nn-head-commit already in the base, as a merged pull request's is:
     # exit 2 before a worktree, not a 0-mutant success.
     # ------------------------------------------------------------------
     with tempfile.TemporaryDirectory() as scratch_name:
@@ -2882,11 +3366,11 @@ def run_cases():
         git(repository, "commit", "-q", "--allow-empty", "-m", "merged later")
         base_containing_head = git(repository, "rev-parse", "HEAD")
         for case_name, given_base in [
-                ("a base that contains the nc-head-commit", base_containing_head),
-                ("a base equal to the nc-head-commit", head)]:
+                ("a base that contains the nn-head-commit", base_containing_head),
+                ("a base equal to the nn-head-commit", head)]:
             completed = run_script(repository, control, "--head", head,
                                    "--base", given_base, "--cosmic-ray-venv", str(venv))
-            check(f"{case_name}: exit 2, saying the nc-head-commit is already in the base",
+            check(f"{case_name}: exit 2, saying the nn-head-commit is already in the base",
                   completed.returncode == 2
                   and f"head {head[:12]} is already in {given_base}" in completed.stderr
                   and "SUMMARY" not in completed.stdout,
@@ -3124,7 +3608,7 @@ def run_cases():
              + f"{runner.NOT_RUN_TO_THE_END_LINE_PREFIX}: stopped\n")]]},
          (), survivors_module.EXIT_COULD_NOT_RUN, ["fail on the unmutated head"],
          ["suite fails on unmutated head", "ran out of time"]),
-        ("a baseline killed with an nc-test-sandbox that did not start exits 2, naming no "
+        ("a baseline killed with an nn-test-sandbox that did not start exits 2, naming no "
          "suite as failing",
          {"baseline_exit": 1, "baseline_dump": [[baseline_item, killed_with_output(
              runner_output_with_test_sandbox_not_started("scripts/thing-test.py"))]]},
@@ -3239,8 +3723,10 @@ def run_cases():
             loaded_runner = load_runner_for_refusal()
 
             def refuse(given, top):
+                # Git's error quotes the runner's name, which must stay as git wrote it.
                 raise loaded_runner.CouldNotRun(
-                    f"{loaded_runner.PROGRAM}: not run — injected root-commit failure\n"
+                    f"{loaded_runner.PROGRAM}: not run — injected root-commit failure "
+                    f"({loaded_runner.PROGRAM}: quoted by git)\n"
                     + loaded_runner.git_failure_next_step_lines("fatal: injected"))
             loaded_runner.recordings_directory_for = refuse
             return loaded_runner
@@ -3261,11 +3747,12 @@ def run_cases():
         finally:
             del os.environ[CONTROL_DIRECTORY_VARIABLE]
         check("when the runner cannot name the recordings directory, the run exits 2 with "
-              "the runner's refusal under this program's name, its next steps unchanged",
+              "the runner's refusal under this program's name, its next steps and the runner's "
+              "name quoted in git's error unchanged",
               status == survivors_module.EXIT_COULD_NOT_RUN
               and printed.getvalue() == (
                   "mutation-testing-changed-lines-quick-or-full-pass-survivors: not run — injected root-commit "
-                  "failure\n" + survivors_module.load_test_suite_runner()
+                  "failure (scripts/run-all-test-suites.py: quoted by git)\n" + survivors_module.load_test_suite_runner()
                   .git_failure_next_step_lines("fatal: injected")
                   + "\n"), (status, printed.getvalue()))
 
@@ -3315,8 +3802,8 @@ def run_cases():
                                    path_override=f"{fake_bin}{os.pathsep}{os.environ['PATH']}",
                                    dropped_variables=(inside_variable,))
             _, words = config_and_test_command_words(control)
-            check("with the sandbox on, the run says each suite runs in its own nc-test-sandbox, named by the bwrap program",
-                  f"each suite runs in its own nc-test-sandbox: {fake_bin / 'bwrap'}"
+            check("with the sandbox on, the run says each suite runs in its own nn-test-sandbox, named by the bwrap program",
+                  f"each suite runs in its own nn-test-sandbox: {fake_bin / 'bwrap'}"
                   in completed.stdout, f"rc={completed.returncode} out={completed.stdout}")
             check("a suite listed to run outside the sandbox is named in a NO SANDBOX line",
                   f"NO SANDBOX  {outside_suite} runs WITHOUT the signal sandbox"
@@ -3445,6 +3932,7 @@ def run_cases():
     run_parallel_mutant_workers_cases_with_fake_cosmic_ray_package()
     run_parallel_mutant_workers_case_with_real_cosmic_ray()
     run_mutants_run_at_most_and_no_mutant_started_after_unix_time_cases()
+    run_one_mutant_per_changed_line_and_kept_sessions_of_heads_before_cutoff_cases()
     run_mutants_run_at_most_case_with_real_cosmic_ray()
 
     # ------------------------------------------------------------------

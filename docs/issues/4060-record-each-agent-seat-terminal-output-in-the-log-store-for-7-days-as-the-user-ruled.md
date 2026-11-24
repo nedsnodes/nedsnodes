@@ -1,8 +1,8 @@
 ---
-issue: "[Record each agent-seat's terminal output in the log-store for 7 days, as the user ruled](https://github.com/nedsnodes/nedsnodes/issues/4060)"
+issue: "[Record each agent-seat's terminal output in the log-store for 7 days](https://github.com/nedsnodes/nedsnodes/issues/4060)"
 ---
 
-# Record each agent-seat's terminal output in the log-store for 7 days, as the user ruled
+# Record each agent-seat's terminal output in the log-store for 7 days
 
 ## What is wrong
 
@@ -11,7 +11,7 @@ The handoff-system design, `nn-systems/handoff/handoff.system.design.md`, record
 - `grep -rln "pipe-pane" scripts nn-systems .claude` on main at 55626cb48 found nothing, and `grep -rln "terminal output"` over `docs/nedsnodes-wiki`, `nn-systems`, `scripts` and `.claude` found only that sentence and a line of `docs/nedsnodes-wiki/nedsnodes-file-naming-and-location-standards.md` about the `-capture` suffix.
 - The launchers `scripts/launch-claude-ubuntu` and `scripts/launch-claude-mac` mention neither the log-store nor tmux's capture or history settings.
 - The log-store, `nedlern@ned-box:/home/nedlern/nedsnodes-logs/`, has no directory for terminal output (listed on 2026-11-20).
-- Neither the design's components list nor the handoff-system's nc-architecture-overview, `docs/nedsnodes-wiki/nedsnodes-handoff-architecture-overview.md`, names a part that records terminal output.
+- Neither the design's components list nor the handoff-system's nn-architecture-overview, `docs/nedsnodes-wiki/nedsnodes-handoff-architecture-overview.md`, names a part that records terminal output.
 
 A program under a name none of these searches hit could still exist (unverified).
 
@@ -23,4 +23,4 @@ The user gave the reason with the ruling: when an agent-seat stalls, nothing els
 
 ## Next action
 
-The agent-seat that takes up this GHI first writes a test that fails when an agent-seat's tmux session starts with no recording of its pane, whichever program starts it: the launchers, `scripts/recover-crashed-seats.py`, `scripts/resupervise-seat.py`, or the restart at login. If the test passes on main, the recording exists: it records where in this GHI-MD, in the design and in the nc-architecture-overview, and closes this GHI. If it fails, it builds the recording in one pull request with that test: a recording of each agent-seat's pane on each machine, kept in a log-store directory whose name it checks with the naming page, `docs/nedsnodes-wiki/nedsnodes-how-to-choose-a-name-for-files-code-and-glossary-terms.md`; on the Mac, a local copy shipped to ned-box, since the log-store is there; a scheduled job on each machine, in `nn-systems/general-tools/scheduled-jobs-on-each-machine.json`, that deletes recordings older than 7 days and leaves the file of a pane still open; a test of each; and a line in the design and in the nc-architecture-overview that names the program.
+The agent-seat that takes up this GHI first writes a test that fails when an agent-seat's tmux session starts with no recording of its pane, whichever program starts it: the launchers, `scripts/recover-crashed-seats.py`, `scripts/resupervise-seat.py`, or the restart at login. If the test passes on main, the recording exists: it records where in this GHI-MD, in the design and in the nn-architecture-overview, and closes this GHI. If it fails, it builds the recording in one pull request with that test: a recording of each agent-seat's pane on each machine, kept in a log-store directory whose name it checks with the naming page, `docs/nedsnodes-wiki/nedsnodes-how-to-choose-a-name-for-files-code-and-glossary-terms.md`; on the Mac, a local copy shipped to ned-box, since the log-store is there; a scheduled job on each machine, in `nn-systems/general-tools/scheduled-jobs-on-each-machine.json`, that deletes recordings older than 7 days and leaves the file of a pane still open; a test of each; and a line in the design and in the nn-architecture-overview that names the program.
