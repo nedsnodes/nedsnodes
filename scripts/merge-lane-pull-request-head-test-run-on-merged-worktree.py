@@ -172,7 +172,7 @@ def merged_commit_rebuilt(arguments, number, head, main_commit, environment):
     if rebuild.returncode != 0:
         return None, (f"{MERGED_WORKTREE_REBUILD.name} exited {rebuild.returncode}:\n"
                       f"{rebuild.stdout.strip()}")
-    prefix = common.MERGE_LANE_REBUILT_MERGED_WORKTREE_COMMIT_LINE_PREFIX
+    prefix = common.MERGE_LANE_MERGED_WORKTREE_REBUILD_OUTPUT_MERGED_COMMIT_HASH_LINE_PREFIX
     commits = [line[len(prefix):] for line in rebuild.stdout.splitlines()
                if line.startswith(prefix)]
     if len(commits) != 1 or not re.fullmatch(r"[0-9a-f]{40}|[0-9a-f]{64}", commits[0]):

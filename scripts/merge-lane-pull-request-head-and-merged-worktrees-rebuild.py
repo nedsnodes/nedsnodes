@@ -76,7 +76,7 @@ def git(directory, *arguments):
     return completed.stdout.strip()
 
 
-def commit_is_main_merged_with_head(checkout, commit, main_full, head_full):
+def commit_is_merge_result_of_main_and_nn_head_commit(checkout, commit, main_full, head_full):
     parents = git(checkout, "rev-list", "--parents", "-n", "1", commit).split()[1:]
     if parents == [main_full, head_full]:
         return True
@@ -121,7 +121,7 @@ def main(argv=None):
         head_short = git(checkout, "rev-parse", "--short", head_full)
         merged_full = git(merged_worktree, "rev-parse", "--verify", "HEAD^{commit}")
         main_full = git(checkout, "rev-parse", "--verify", f"{arguments.main_commit}^{{commit}}")
-        if not commit_is_main_merged_with_head(checkout, merged_full, main_full, head_full):
+        if not commit_is_merge_result_of_main_and_nn_head_commit(checkout, merged_full, main_full, head_full):
             print(f"PR {number}: pr{number}-merged not usable: {merged_worktree} is at "
                   f"{merged_full}, which is not main {main_full} merged with head {head_full}, "
                   f"so another run rebuilt it while this one did, and a test run there would "
@@ -157,7 +157,7 @@ def main(argv=None):
         return 1
     print(f"PR {number}: head {head_short}, merged {merged_short} tree {merged_tree} "
           f"on main {arguments.main_commit[:8]}\n"
-          f"{common.MERGE_LANE_REBUILT_MERGED_WORKTREE_COMMIT_LINE_PREFIX}{merged_full}")
+          f"{common.MERGE_LANE_MERGED_WORKTREE_REBUILD_OUTPUT_MERGED_COMMIT_HASH_LINE_PREFIX}{merged_full}")
     return 0
 
 
