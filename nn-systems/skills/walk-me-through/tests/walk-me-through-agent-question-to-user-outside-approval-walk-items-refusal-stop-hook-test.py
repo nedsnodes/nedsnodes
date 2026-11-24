@@ -372,6 +372,16 @@ def test_the_item_the_block_message_asks_for_is_one_the_close_step_can_place():
           isinstance(placing, dict) and [key[0] for key, _ in placing.values()] == [1], placing)
 
 
+def test_the_closing_line_in_the_block_message_names_the_heading_its_of_m_picks():
+    case = Case(minutes="#item_page item 2 of 3 https://claude.ai/artifact/page2\n#next_to_present item 2 of 3",
+                document="# A walk\n\n## Item 2 of 3: keep it\n\nRecommendation: keep the filter.\n\n"
+                         "## Item 2 of 4: remove it\n\nRecommendation: remove the filter.\n")
+    case.reply("Should I merge the pull request now?")
+    reason = blocked_reason(case.run()) or ""
+    check("the block message's closing line has the point of the waiting item's own heading",
+          "Item 2 of" in reason and ", keep it]" in reason and ", remove it]" not in reason, reason)
+
+
 def test_the_block_message_says_what_to_do():
     case = Case()
     case.reply("Should I merge the pull request now?")

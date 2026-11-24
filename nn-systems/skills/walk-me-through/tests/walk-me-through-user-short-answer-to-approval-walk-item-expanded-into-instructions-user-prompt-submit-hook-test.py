@@ -3298,6 +3298,49 @@ def test_an_answer_to_a_sub_step_that_asks_a_decision_still_counts():
           "walk-me-through-short-answer-not-recorded-because-sub-step-asks-for-no-decision-hook-message-rule" not in text and "means approve" in text, text)
 
 
+TWO_HEADINGS_FOR_ITEM_2 = """# A walk
+
+## Item 2 of 3: keep it
+
+Recommendation: keep the filter.
+
+## Item 2 of 4: remove it
+
+Recommendation: remove the filter.
+
+## Item 7 of 9: another
+
+Recommendation: fix the path.
+"""
+
+
+def test_two_headings_for_one_number_never_give_an_item_the_other_headings_recommendation():
+    for waiting, wanted, other in (("item 2 of 3", "keep the filter", "remove the filter"),
+                                   ("item 2 of 4", "remove the filter", "keep the filter")):
+        case = Case(next_to_present=waiting, document=TWO_HEADINGS_FOR_ITEM_2)
+        text = "\n".join(case.lines("a") or [])
+        check(f"A on {waiting} gets the recommendation of the heading its `of M` picks",
+              wanted in text and other not in text, text)
+    for waiting in ("item 2", "item 2 of 5"):
+        case = Case(next_to_present=waiting, document=TWO_HEADINGS_FOR_ITEM_2)
+        text = "\n".join(case.lines("a") or [])
+        check(f"A on `{waiting}`, which picks neither heading, is refused, gets neither recommendation and says why",
+              "keep the filter" not in text and "remove the filter" not in text
+              and "The hook discarded this answer" in text and "more than one heading for `Item 2`" in text, text)
+
+
+def test_a_closing_line_never_takes_the_point_of_another_heading_for_its_number():
+    case = Case(next_to_present="item 2 of 3", document=TWO_HEADINGS_FOR_ITEM_2)
+    case.minutes("#item_page item 2 of 3 https://claude.ai/artifact/page2\n#next_to_present item 2 of 3")
+    text = "\n".join(case.lines("r") or [])
+    check("R on the waiting item 2 of 3 names its own heading's point", "Item 2 of 3, keep it" in text, text)
+    case = Case(next_to_present="item 7 of 9", document=TWO_HEADINGS_FOR_ITEM_2)
+    case.minutes("#item_page item 2 of 3 https://claude.ai/artifact/page2\n#next_to_present item 7 of 9")
+    text = "\n".join(case.lines("2 r") or [])
+    check("R on item 2 while item 7 waits names neither heading's point",
+          "keep it" not in text and "remove it" not in text and "page2" in text, text)
+
+
 def main():
     try:
         for name, function in sorted(globals().items()):
