@@ -1542,7 +1542,8 @@ def item_openings_as_shown(tokens, parser, env):
 def item_numbers_an_opening_names(words):
     """The item numbers of a message's heading or closing line, as shown_words gives it, with every range expanded:
     the numbers of the walk finder's ITEM_LABEL_WITHOUT_COUNT, as in `Item 5: ...`, `Items 3.1, 3.2 & 4.1 - ...`,
-    `Item 5, more` or `Item 5` alone. None when words open no item, as `Item 5 fixes a path`, a mention, does; [] for a
+    `Item 5, more`, `Item 5` alone, or with a note in parentheses after the number, as `Item 5 (revised): ...` or
+    `Item 5 (of 7) — ...`. None when words open no item, as `Item 5 fixes a path`, a mention, does; [] for a
     list the walk finder calls an unusable range.
 
     Not handled: `Item 5, 2 things changed`, `Item 5:foo` and `Item 5,foo` name no item, so last_showing_message does

@@ -203,9 +203,12 @@ RUNNING_COUNT_TOTAL = re.compile(rf"\b(items?\s+{NUMBER_LIST})\s+of\s+\d+\b", re
 # A `##` heading that opens with an item label but no `of M`, as in `## Item 3: corrections` over `### Item 3.1 of
 # 16`, or with `Items` and its numbers, as in `## Items 3 to 5 are smaller`, groups items and is not an item itself.
 # After `Item`, the numbers, read whole, must end the label, so a title that only opens with an item's number, as in
-# `## Item 36's three added texts`, is an unnumbered item. Group `numbers` holds the numbers.
+# `## Item 36's three added texts`, is an unnumbered item. One note in parentheses may sit between the numbers and the
+# label's end, as in `Item 4 (revised): Filter` or `Item 7 (of 7) \u2014 findings`, since agents' messages head items so
+# and a count shown without its `of M` leaves the note right after the number. Group `numbers` holds the numbers.
 ITEM_LABEL_WITHOUT_COUNT = re.compile(
-    rf"^[*_\s]*(?:item\s+(?P<numbers>(?>{NUMBER_LIST}))[*_]*(?:\s*[:.,\-\u2013\u2014][*_]*(?=\s|$)|\s*$)"
+    rf"^[*_\s]*(?:item\s+(?P<numbers>(?>{NUMBER_LIST}))(?:\s*\([^()\n]*\))?[*_]*"
+    rf"(?:\s*[:.,\-\u2013\u2014][*_]*(?=\s|$)|\s*$)"
     rf"|items\s+(?P<plural_numbers>(?>{NUMBER_LIST}))(?=[\s*_:.,;\-\u2013\u2014]|$))", re.I)
 UNNUMBERED_ITEM_HEADING_MARKUP = "##"
 # The close step of the answer program puts this right after a deferred item's running count. It holds a colon, so

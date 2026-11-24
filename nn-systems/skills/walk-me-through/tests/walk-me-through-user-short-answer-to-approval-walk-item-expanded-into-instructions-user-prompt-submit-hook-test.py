@@ -2602,9 +2602,59 @@ def test_a_heading_opens_another_item_by_the_expanded_numbers_of_a_dotted_range(
             ("Item 5 fixes a path", "Item 4: a filter", False),
             ("Items 3.1, 3.2 & 4.1 — Shared defaults", "Item 4: a filter", False),
             ("Items 3.1, 3.2 & 5.1 — Shared defaults", "Item 4: a filter", True),
-            ("Item 5 — the next item", "Item 4: a filter", True)):
+            ("Item 5 — the next item", "Item 4: a filter", True),
+            ("Item 5: next", "Item 4 (revised): Filter", True),
+            ("Item 5 (revised): next", "Item 4: a decision", True),
+            ("Item 4.1 (after the research): a sub-step", "Item 4 (revised): Filter", False),
+            ("Item 5 (revised) fixes a path", "Item 4: a filter", False),
+            ("Item 5 (see item 6) depends on it", "Item 4: a filter", False)):
         check(f"`{words}` below `{heading}` {'opens another item' if expected else 'does not open another item'}",
               hook.opens_another_item(words, heading) is expected, hook.opens_another_item(words, heading))
+
+
+def test_a_heading_with_a_note_in_parentheses_after_its_item_number_names_that_item():
+    hook = load_short_answer_hook_for_test()
+    parser = hook.load_walk_finder().markdown_parser()
+    for heading, expected in (("## Item 1 of 9 (revised): the walk hook shows the current item", ["1"]),
+                              ("## Item 3 of 12 (question 2): an unreadable supervisor state file", ["3"]),
+                              ("### Item 4.1 of 13 (after the research): what the lost-file research found", ["4.1"]),
+                              ("## Item 7 (of 7) — three smaller findings", ["7"]),
+                              ("## Items 3 and 4 of 9 (revised): grouped", ["3", "4"]),
+                              ("## Item 5 (revised)", ["5"])):
+        words = hook.shown_words(heading, parser, {})
+        check(f"`{heading}`, shown as `{words}`, names items {expected}",
+              hook.item_numbers_an_opening_names(words) == expected, hook.item_numbers_an_opening_names(words))
+
+
+def test_the_finder_keeps_a_heading_that_labels_the_unit_item_with_a_note_in_that_item():
+    specification = importlib.util.spec_from_file_location("item_finder", FINDER_MODULE_FILE)
+    finder = importlib.util.module_from_spec(specification)
+    specification.loader.exec_module(finder)
+    parser = finder.markdown_parser()
+    document = ("# Walk\n\n## Item 20 of 30: a filter\n\nText.\n\n## Item 20 (revised): amended filter\n\nMore.\n\n"
+                "## Item 21 of 30: next\n\nNext.\n")
+    spans = finder.item_unit_spans(document, parser)
+    check("`## Item 20 (revised): ...` under `## Item 20 of 30` stays in item 20's unit and is no unnumbered item",
+          [(numbers, first, end) for numbers, _, _, first, end in spans] == [(["20"], 2, 10), (["21"], 10, 14)],
+          f"spans {spans!r}")
+    check("`Item 7 (of 7) — findings` labels item 7 and `Item 7 (see below) fixes a path` labels nothing",
+          finder.label_numbers("Item 7 (of 7) — findings") == {"7"}
+          and finder.label_numbers("Item 7 (see below) fixes a path") == set())
+
+
+def test_a_revised_item_heading_ends_the_text_shown_for_the_item_above_it_and_is_ended_by_the_next():
+    hook = load_short_answer_hook_for_test()
+    parser = hook.load_walk_finder().markdown_parser()
+    for item_4, item_5 in (("## Item 4 of 9 (revised): Filter", "## Item 5 of 9: next"),
+                           ("## Item 4 of 9: a decision", "## Item 5 of 9 (revised): next"),
+                           ("## Item 4 of 9 (question 2): Filter", "## Item 5 (of 9) — next")):
+        transcript = SUITE_ROOT / "revised-heading-transcript.jsonl"
+        text = f"{item_4}\n\nItem four text.\n\n{item_5}\n\nItem five text.\n"
+        transcript.write_text(json.dumps({"type": "assistant", "timestamp": "2026-11-24T00:00:00Z",
+                                          "message": {"content": [{"type": "text", "text": text}]}}) + "\n")
+        shown = hook.last_showing_message(str(transcript), hook.shown_words(item_4, parser, {}), parser, {})
+        check(f"the text shown for `{item_4}` ends before `{item_5}`",
+              shown is not None and shown[1] == "\nItem four text.\n", shown and shown[1])
 
 
 def test_the_walk_finder_module_is_executed_once_however_many_headings_are_read():
