@@ -407,8 +407,10 @@ with tempfile.TemporaryDirectory() as temporary:
     answer, closed_on, error = ghi_ask.ask("q", False, seat5, "x/y")
     check("a closed pointer (not --include-closed) triggers a third claude call",
           len(claude_calls) == 3, claude_calls)
-    check("the drift notice names the issue and its close date",
-          "#13" in claude_calls[2][0] and "2026-08-08" in claude_calls[2][0], claude_calls)
+    check("the drift notice after a reading list is design 46's, naming the issue and its close date",
+          claude_calls[2][0] == "#13 closed on 2026-08-08 — the mirror is current; re-read its "
+          "entry in issues-closed.md, including any Superseded-by: link, and give a corrected "
+          "reading list.", claude_calls)
     check("the corrected answer from the recheck is the final answer",
           answer == reading_list(24) and closed_on == {}, (answer, closed_on))
     state5 = json.loads((seat5 / ghi_ask.STATE_FILE_NAME).read_text(encoding="utf-8"))
@@ -559,15 +561,21 @@ with tempfile.TemporaryDirectory() as temporary:
     answer, closed_on, error = ghi_ask.ask("q", False, seat11, "x/y", timeout_seconds=300)
     check("all three turns of one ask draw on a single budget",
           len(budgets) == 3, budgets)
-    check("each turn is handed only what the ask has left, never the full budget again",
-          budgets == sorted(budgets, reverse=True) and budgets[0] <= 300
-          and budgets[-1] < budgets[0],
+    check("the cold-start turn gets the ask's budget plus GHI_GUIDE_AGENT_COLD_START_EXTRA_SECONDS, and "
+          "each later turn only what the ask has left, never the full budget again",
+          budgets == sorted(budgets, reverse=True)
+          and 300 < budgets[0] <= 300 + ghi_ask.ghi_issue_write.GHI_GUIDE_AGENT_COLD_START_EXTRA_SECONDS
+          and budgets[1] <= budgets[0] and budgets[-1] < budgets[0],
           budgets)
 
     # An ask whose budget is already gone fails saying so, rather than
-    # starting a turn it cannot afford.
+    # starting a turn it cannot afford. A resumed session, since a cold
+    # start adds time of its own.
     seat12 = root / "seat12"
     seat12.mkdir()
+    ghi_ask.save_state(seat12 / ghi_ask.STATE_FILE_NAME,
+                       {ghi_ask.GHI_GUIDE_AGENT_SESSION_ID_STATE_KEY: "sess-S",
+                        "closes_since_birth": 0, "recent_matches": []})
     fake_refresh_queue([([1], {"1": issue(1)}, None)])
     spent_calls = fake_claude_queue([])
     answer, closed_on, error = ghi_ask.ask("q", False, seat12, "x/y", timeout_seconds=0)
@@ -996,6 +1004,17 @@ try:
           all(f"kind `{kind}`" in ghi_ask.COLD_START_PROMPT_TEMPLATE
               for kind in ghi_ask.GHI_GUIDE_AGENT_ANSWER_JSON_SCHEMA_PROPERTIES["kind"]["enum"]),
           ghi_ask.COLD_START_PROMPT_TEMPLATE[-1500:])
+    # The answer check refuses a reading list with no issue and no note, so
+    # the prompt asks for the note.
+    check("the cold-start prompt asks for a note when no issue bears on the topic",
+          "; when no issue bears on the topic, `issues` is empty and a note says so."
+          in ghi_ask.COLD_START_PROMPT_TEMPLATE, ghi_ask.COLD_START_PROMPT_TEMPLATE[-2500:])
+    check("the cold-start prompt answers a correction with the kind of the reply it corrects",
+          "and answer with the corrected reply the notice asks for."
+          in ghi_ask.COLD_START_PROMPT_TEMPLATE
+          and "the kind the notice asks for in form 3"
+          in ghi_ask.GHI_GUIDE_AGENT_ANSWER_JSON_SCHEMA_PROPERTIES["kind"]["description"],
+          ghi_ask.COLD_START_PROMPT_TEMPLATE[-2500:])
     check("the start-up prompt allows gh only for a link repair's issue edit, takes the issue's text from the mirror, and "
           "sends document changes through ghi-issue-write.py's pull request, never a push to main",
           "The one time you run gh is to make the issue edit a link repair (form 4) needs; "
@@ -1352,7 +1371,7 @@ with tempfile.TemporaryDirectory() as temporary:
             ("a ruling issue given as text fails the ask",
              {"kind": "ask-user-about-ruling", "ruling_issue": "#3", "sentence": "s"},
              "ruling_issue is not of the schema's type integer"),
-            ("a reading list with no issue and no note fails the ask",
+            ("a reading list with no issue and no note, which the cold-start prompt asks for when no issue bears on the topic, fails the ask",
              reading_list(), "names no issue and gives no note"),
             ("a reading list with no issue and only blank notes fails the ask",
              reading_list(notes=[" ", ""]), "names no issue and gives no note"),
@@ -1423,13 +1442,18 @@ with tempfile.TemporaryDirectory() as temporary:
     fake_refresh_queue([([13], {"13": issue(13, state="CLOSED", closed_at="2026-08-08T00:00:00Z"),
                                 "14": issue(14)}, None)])
     corrected_verdict = {"kind": "verdict", "verdict": "too-similar", "issues": [14]}
-    fake_claude_queue([
+    verdict_corrected_calls = fake_claude_queue([
         ({"session_id": "sess-X", "result": "(ack)"}, None),
         ({"session_id": "sess-X", "structured_output": first_verdict}, None),
         ({"session_id": "sess-X", "structured_output": corrected_verdict}, None),
     ])
     answer, closed_on, error = ghi_ask.ask("q", False, seat_verdict_corrected, "x/y",
                                            request_form="draft-verdict")
+    # The draft-verdict schema allows no reading list, so a notice asking for
+    # one leaves the recheck no answer it can give.
+    check("the drift notice after a verdict asks for a corrected verdict, not a reading list",
+          verdict_corrected_calls[2][0].endswith("Superseded-by: link, and give a corrected verdict that cites no closed GHI.")
+          and "reading list" not in verdict_corrected_calls[2][0], verdict_corrected_calls)
     check("a drift recheck after a verdict that cites only open GHIs is the final answer",
           answer == corrected_verdict and closed_on == {} and error is None,
           (answer, closed_on, error))
