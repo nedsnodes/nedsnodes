@@ -559,9 +559,8 @@ CONDITION_LINES = (
 )
 RIDER_LINES = (
     "The user added to the answer: \"{rest}\".",
-    "Act on the answer as the lines below say, then act on what he added.",
+    "Act on the answer as the lines below say, then make what he added the next item, as the walk-me-through skill says.",
     "If what he added contradicts or limits the answer, ask him which he means before acting on either.",
-    "If what he added cannot be done this turn, record it as a task.",
     "The answer itself means:",
 )
 # Every refusal opens with these words, so that the answer reads as dropped, not as held until the item is shown.

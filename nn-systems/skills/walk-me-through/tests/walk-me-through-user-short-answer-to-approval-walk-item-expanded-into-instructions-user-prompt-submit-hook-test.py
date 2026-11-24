@@ -1566,7 +1566,10 @@ def test_condition_and_rider():
         lines = case.lines(prompt)
         check(f"{prompt!r} applies the answer, then the rest",
               lines is not None and lines[1] == f"The user added to the answer: \"{rest}\"."
-              and lines[2] == "Act on the answer as the lines below say, then act on what he added."
+              and lines[2] == ("Act on the answer as the lines below say, then make what he added the next item, as the "
+                               "walk-me-through skill says.")
+              and lines[3] == "If what he added contradicts or limits the answer, ask him which he means before acting on either."
+              and lines[4] == "The answer itself means:"
               and any(line.startswith(meaning) for line in lines), f"lines {lines!r}")
 
 
