@@ -486,22 +486,33 @@ def suites_named(control):
 
 def run_recorded_mutant_killed_check(scratch_name, head_files, diff_text, *flags,
                                      origin_main_files=None, before_run=None,
-                                     extra_environment=None, more_diff_texts=()):
+                                     extra_environment=None, more_diff_texts=(),
+                                     origin_main_earlier_files=None):
     """Run --recorded-mutant-killed-check on a scratch repository holding head_files, given
     mutant.diff holding diff_text, then mutant-2.diff and on holding more_diff_texts.
 
-    With origin_main_files, refs/remotes/origin/main names a commit on the base holding them.
+    With origin_main_files, refs/remotes/origin/main names a commit on the base holding them;
+    with origin_main_earlier_files too, that commit follows one holding those, and a path only
+    the earlier commit has is deleted, so the mutant's lines have a history on origin/main.
     before_run, given the repository, runs just before the check.
     The suites are real fixture suites, run by the real suite runner; no cosmic-ray is given."""
     survivors = load_script_module()
     repository, base, head = scratch_repository(scratch_name, head_files)
     if origin_main_files is not None:
         git(repository, "checkout", "-q", "--detach", base)
+        for path, text in (origin_main_earlier_files or {}).items():
+            (repository / path).parent.mkdir(parents=True, exist_ok=True)
+            (repository / path).write_text(text)
+        if origin_main_earlier_files:
+            git(repository, "add", "-A")
+            git(repository, "commit", "-q", "-m", "origin main earlier")
+            for path in set(origin_main_earlier_files) - set(origin_main_files):
+                (repository / path).unlink()
         for path, text in origin_main_files.items():
             (repository / path).parent.mkdir(parents=True, exist_ok=True)
             (repository / path).write_text(text)
         git(repository, "add", "-A")
-        git(repository, "commit", "-q", "-m", "origin main")
+        git(repository, "commit", "-q", "--allow-empty", "-m", "origin main")
         git(repository, "update-ref", "refs/remotes/origin/main", "HEAD")
         git(repository, "checkout", "-q", "main")
     control = Path(scratch_name) / "control"
@@ -784,7 +795,8 @@ def run_recorded_mutant_killed_check_cases():
         with tempfile.TemporaryDirectory() as scratch_name:
             completed, _, _, _ = run_recorded_mutant_killed_check(
                 scratch_name, killing_files, SURVIVOR_DIFF.replace("thing.py", "gone.py"),
-                origin_main_files=origin_main_files, more_diff_texts=[SURVIVOR_DIFF])
+                origin_main_files=origin_main_files, more_diff_texts=[SURVIVOR_DIFF],
+                origin_main_earlier_files={"scripts/gone.py": HEAD_FILES["scripts/thing.py"]})
             check(f"a recorded mutant whose file and suites are gone from the head is judged by "
                   f"whether it still exists before whether a suite reads it, and the mutant "
                   f"given after it is still judged: {case_name}",
@@ -888,11 +900,29 @@ def run_recorded_mutant_killed_check_cases():
          "replaced line and the branch changed it, exit 2",
          {"scripts/thing.py": "def double(x):\n    # doubled\n    return x + x\n"},
          could_not_be_judged_line, "so your branch changed them", 2),
+        ("origin/main renamed the file and kept the line, so it is not gone, exit 2",
+         {"scripts/renamed-thing.py": HEAD_FILES["scripts/thing.py"]}, could_not_be_judged_line,
+         "git blame follows a line it replaces to scripts/renamed-thing.py:2 on origin/main, so "
+         "the mutant is not gone, and no suite was run.\n"
+         "If your branch removed or changed that line on purpose: the mutant is gone from your "
+         "branch; leave the survivor task that names this diff file open, and the nightly "
+         "mutation pass rechecks it once your branch is merged.\n"
+         "If your branch changed that line by accident: run git checkout origin/main -- "
+         "scripts/renamed-thing.py, commit, and run this command again.\n"
+         "Otherwise, make the diff's change by hand at scripts/renamed-thing.py:2, run that "
+         "file's suites, and put the line back before you commit.\n"
+         "If a suite fails: the mutant is killed, so no new test is needed; mark the survivor "
+         "task that names this diff file completed, naming the suite that failed.\n"
+         "If every suite passes: write a test that fails with the change made, put the line "
+         "back, commit the test, and mark that task completed once the pull request carrying "
+         "the test merges. This command gives this same verdict after that merge, because the "
+         "diff still does not apply.", 2),
     ]:
         with tempfile.TemporaryDirectory() as scratch_name:
             completed, _, _, _ = run_recorded_mutant_killed_check(
                 scratch_name, branch_changed_files, SURVIVOR_DIFF,
-                origin_main_files=origin_main_files)
+                origin_main_files=origin_main_files,
+                origin_main_earlier_files={"scripts/thing.py": HEAD_FILES["scripts/thing.py"]})
             check(f"a recorded mutant that does not apply at the head: {case_name}",
                   completed.returncode == wanted_exit and wanted_line in "\n" + completed.stdout
                   and wanted in completed.stdout,
@@ -935,6 +965,18 @@ def run_recorded_mutant_killed_check_cases():
         check("a recorded mutant that does not apply at the head, with no origin/main: it could "
               "not be judged, and says what to do",
               completed.returncode == 2 and cannot_tell in completed.stdout
+              and "git blame ended those lines but a copy of their text is still in the file"
+                  in completed.stdout
+              and "If `git rev-parse --verify origin/main` fails: run `git fetch origin main`, "
+                  "then run this command again once." in completed.stdout
+              and "If scripts/thing.py at your head is as origin/main has it, as in the nightly "
+                  "mutation pass: read the copies of the lines it replaces" in completed.stdout
+              and "A copy is the mutant's own line when it stands in the function"
+                  in completed.stdout
+              and "When the file has no copy, or no copy is the mutant's own line: mark the survivor"
+                  in completed.stdout
+              and "When one or more may be: for each in turn, make the diff's change by hand"
+                  in completed.stdout
               and "make sure your branch's head has scripts/thing.py as origin/main has it"
                   in completed.stdout,
               f"rc={completed.returncode} out={completed.stdout}")
@@ -2527,54 +2569,216 @@ def run_recorded_mutant_lines_on_main_search_cases():
             on_main = survivors.recorded_mutant_lines_on_main(repository, path, hunks, None)
             check(f"a recorded mutant whose replaced lines origin/main has once and twice is not "
                   f"gone, and whether it applies cannot be told: {path}",
-                  on_main is None, on_main)
+                  on_main == (None, None), on_main)
 
 
-def run_recorded_mutant_lines_on_main_context_lines_cases():
+# pull-request-review-plan.py's function as its surviving mutant was recorded, then after the
+# merge that rewrote the guard above the mutated `return True`. git blame -w ends that line
+# at the rewrite, while plain git blame follows it to the later version.
+RECORDED_GUARD_SOURCE = (
+    'def nearest_call_prints_its_argument(node, parents, helper_printers):\n'
+    '    """True when the call nearest above node, if any, is a printing call or helper printer, the\n'
+    '    exception a raise statement builds, or a method called on node itself, as .format is. The\n'
+    '    collector also counts a string inside any call nested in a printed argument, such as the\n'
+    '    pattern in print(re.sub("a", "b", text)), but such a string steers the call, not the text."""\n'
+    '    child = node\n'
+    '    parent = parents.get(child)\n'
+    '    while parent is not None and not isinstance(parent, ast.Call):\n'
+    '        if isinstance(parent, ast.stmt):\n'
+    '            return True\n'
+    '        child, parent = parent, parents.get(parent)\n'
+    '    if parent is None:\n'
+    '        return True\n'
+    '    call_name = ast.unparse(parent.func)\n'
+    '    return (call_name in PRINTING_CALL_NAMES\n'
+    '            or (isinstance(parent.func, ast.Name) and parent.func.id in helper_printers)\n'
+    '            or (isinstance(parents.get(parent), ast.Raise) and parents[parent].exc is parent)\n'
+    '            or (child is parent.func and isinstance(parent.func, ast.Attribute)))\n'
+    '\n'
+    '\n'
+    'def another_function(x):\n'
+    '    if x:\n'
+    '        return True\n'
+    '\n'
+)
+GUARD_REWRITTEN_ABOVE_THE_LINE_SOURCE = (
+    'def nearest_call_prints_its_argument(node, parents, helper_printers):\n'
+    '    """True when node\'s text reaches, unchanged, a statement or the argument of a printing call or\n'
+    '    helper printer, or the exception a raise statement builds. A str method that returns the text,\n'
+    '    as .format does, passes its result on up; one such as .startswith or .count turns the text into\n'
+    '    a value it steers, as a comparison does. The collector also counts a string inside any call nested\n'
+    '    in a printed argument, such as the pattern in print(re.sub("a", "b", text)), but such a string\n'
+    '    steers the call, not the text; and one inside a comparison, as in print(x == "yes") or\n'
+    '    print(x == "yes".upper()), which prints only a Boolean."""\n'
+    '    child = node\n'
+    '    parent = parents.get(child)\n'
+    '    while True:\n'
+    '        while passes_its_text_up(child, parent):\n'
+    '            child, parent = parent, parents.get(parent)\n'
+    '        call = parents.get(parent)\n'
+    '        if not (isinstance(parent, ast.Attribute) and parent.value is child\n'
+    '                and parent.attr in STR_METHODS_THAT_RETURN_THE_TEXT\n'
+    '                and isinstance(call, ast.Call) and call.func is parent):\n'
+    '            break\n'
+    '        child, parent = call, parents.get(call)\n'
+    '    if isinstance(parent, ast.stmt):\n'
+    '        return True\n'
+    '    if not isinstance(parent, ast.Call) or child is parent.func:\n'
+    '        return False\n'
+    '    call_name = ast.unparse(parent.func)\n'
+    '    return (call_name in PRINTING_CALL_NAMES\n'
+    '            or (isinstance(parent.func, ast.Name) and parent.func.id in helper_printers)\n'
+    '            or (isinstance(parents.get(parent), ast.Raise) and parents[parent].exc is parent))\n'
+    '\n'
+    '\n'
+    'def another_function(x):\n'
+    '    if x:\n'
+    '        return True\n'
+    '\n'
+)
+RECORDED_GUARD_HUNK = (10, ['            return True', '        child, parent = parent, parents.get(parent)', '    if parent is None:', '        return True', '    call_name = ast.unparse(parent.func)', '    return (call_name in PRINTING_CALL_NAMES', '            or (isinstance(parent.func, ast.Name) and parent.func.id in helper_printers)'],
+                       ['            return True', '        child, parent = parent, parents.get(parent)', '    if parent is None:', '        return False', '    call_name = ast.unparse(parent.func)', '    return (call_name in PRINTING_CALL_NAMES', '            or (isinstance(parent.func, ast.Name) and parent.func.id in helper_printers)'])
+RECORDED_GUARD_LINE_AFTER_THE_REWRITE = 21
+
+
+def commits_on_origin_main(repository, versions):
+    """Commit each {path: text or None} in order, None deleting the path, and name the last
+    commit refs/remotes/origin/main."""
+    for version in versions:
+        for path, text in version.items():
+            if text is None:
+                (repository / path).unlink()
+            else:
+                (repository / path).parent.mkdir(parents=True, exist_ok=True)
+                (repository / path).write_text(text)
+        git(repository, "add", "-A")
+        git(repository, "commit", "-q", "--allow-empty", "-m", "on origin main")
+    git(repository, "update-ref", "refs/remotes/origin/main", "HEAD")
+
+
+def run_recorded_mutant_lines_on_main_traced_through_history_cases():
     survivors = load_script_module()
-    # Each recorded hunk replaces a bare "continue"; each file has "continue" more than once,
-    # so no hunk is found once and the context lines beside each copy decide.
-    hunk = (100, ["b1", "b2", "continue", "a1", "a2"], ["b1", "b2", "break", "a1", "a2"])
-    blank_after = (100, ["b1", "continue", ""], ["b1", "break", ""])
-    blank_only = (100, ["", "continue", ""], ["", "break", ""])
-    # Adds a line between context lines that no file has, so it replaces no line.
-    insert_only = (100, ["q1", "q2"], ["q1", "added", "q2"])
-    cases = {
-        "context-gone-copies-in-the-middle.py": ("x\ncontinue\ny\nz\ncontinue\nw", [hunk], "gone"),
-        # A copy at the file's start has the file's last lines at negative offsets, and one
-        # at its end has no lines after it; neither is a context line beside the copy.
-        "context-lines-before-the-file-start.py": ("continue\nx\ncontinue\nb1\nb2", [hunk],
-                                                   "gone"),
-        "context-lines-past-the-file-end.py": ("a1\na2\ncontinue\nx\ncontinue", [hunk], "gone"),
-        "context-line-at-another-offset.py": ("a1\ncontinue\nb2\nx\ncontinue\nb1", [hunk],
-                                              "gone"),
-        "line-before-kept-beside-one-copy.py": ("b1\nchanged\ncontinue\nx\ncontinue", [hunk],
-                                                None),
-        "line-after-kept-beside-one-copy.py": ("continue\nx\ncontinue\nchanged\na2", [hunk],
-                                               None),
-        "line-after-kept-at-the-file-end.py": ("continue\nx\ncontinue\na1", [hunk], None),
-        "line-before-kept-at-the-file-start.py": ("b2\ncontinue\nx\ncontinue", [hunk], None),
-        "blank-context-line-beside-a-copy.py": ("x\ncontinue\n\ny\ncontinue", [blank_after],
-                                                "gone"),
-        "only-blank-context-lines.py": ("x\ncontinue\ny\ncontinue", [blank_only], None),
-        "insert-only-hunk-before-a-gone-hunk.py": ("x\ncontinue\ny\ncontinue",
-                                                   [insert_only, hunk], "gone"),
-    }
-    with tempfile.TemporaryDirectory() as scratch_name:
-        repository, _, head = scratch_repository(
-            scratch_name, {path: text for path, (text, _, _) in cases.items()})
-        git(repository, "update-ref", "refs/remotes/origin/main", head)
-        for path, (_, hunks, wanted) in cases.items():
-            on_main = survivors.recorded_mutant_lines_on_main(repository, path, hunks, None)
-            check(f"a recorded mutant whose short replaced line origin/main has more than once "
-                  f"is gone only when no non-blank context line stands beside any copy: {path}",
-                  on_main == wanted, f"want {wanted!r} got {on_main!r}")
+    path = "scripts/plan.py"
+    one_line_hunk = (1, ["a", "b", "c"], ["a", "B", "c"])
+    unrelated = "".join(f"unrelated line number {n} of this file\n" for n in range(12))
+    insert_only = (1, ["a", "b"], ["a", "added", "b"])
+    cases = [
+        ("the real case: the guard above the line was rewritten, so no context line stands "
+         "beside it and another function has a copy, and the line is still there",
+         [{path: RECORDED_GUARD_SOURCE}, {path: GUARD_REWRITTEN_ABOVE_THE_LINE_SOURCE}],
+         [RECORDED_GUARD_HUNK], ("present", f"{path}:{RECORDED_GUARD_LINE_AFTER_THE_REWRITE}")),
+        ("the file was renamed and the line kept",
+         [{path: "a\nb\nc\n" + unrelated}, {path: None, "scripts/renamed.py": "a\nb\nc\n" + unrelated},
+          {"scripts/renamed.py": "x\na\nb\nchanged\n" + unrelated}],
+         [one_line_hunk], ("present", "scripts/renamed.py:3")),
+        ("the line was re-indented",
+         [{path: "a\nb\nc\n" + unrelated}, {path: "a\n    b\nchanged\n" + unrelated}],
+         [one_line_hunk], ("present", f"{path}:2")),
+        ("the line was edited and no copy of its old text is left",
+         [{path: "a\nb\nc\n" + unrelated}, {path: "a\nedited\nc\n" + unrelated}],
+         [one_line_hunk], ("gone", None)),
+        ("blame ends the line, but a copy of its old text stands elsewhere, so which it is cannot "
+         "be told",
+         [{path: "a\nb\nc\n" + unrelated}, {path: "a\nedited\nc\n" + unrelated + "x\nb\ny\nb\n"}],
+         [one_line_hunk], (None, None)),
+        ("the file was deleted", [{path: "a\nb\nc\n" + unrelated}, {path: None, "OTHER": "x\n"}],
+         [one_line_hunk], ("gone", None)),
+        ("no commit on origin/main holds the hunk at its line", [{path: "x\ny\nz\n"}, {"OTHER": "2"}],
+         [one_line_hunk], (None, None)),
+        ("the hunk replaces no line", [{path: "a\nb\n"}, {path: "x\ny\n"}], [insert_only],
+         (None, None)),
+        ("one hunk's line is gone and another's is present",
+         [{path: "a\nb\nc\n" + unrelated + "p\nq\nr\n"},
+          {path: "a\nedited\nc\n" + unrelated + "p\nq\nchanged\n"}],
+         [one_line_hunk, (16, ["p", "q", "r"], ["p", "Q", "r"])], ("present", f"{path}:17")),
+    ]
+    for name, versions, hunks, wanted in cases:
+        with tempfile.TemporaryDirectory() as scratch_name:
+            repository, _, _ = scratch_repository(scratch_name, {"README2": "x\n"})
+            commits_on_origin_main(repository, versions)
+            got = survivors.recorded_mutant_lines_on_main(repository, path, hunks, None)
+            check(f"a recorded mutant's lines are judged by following them through origin/main's "
+                  f"history: {name}", got == wanted, f"want {wanted!r} got {got!r}")
+
+    real_run = survivors.run
+    for name, failing_word, replacement in [
+        ("git log fails listing the file's commits", "log", None),
+        ("git blame fails", "blame", None),
+        ("git blame prints no line for the replaced line", "blame", ""),
+    ]:
+        def failing_run(command, cwd, environment=None):
+            if command[1] == failing_word:
+                return subprocess.CompletedProcess(command, 0 if replacement is not None else 128,
+                                                   replacement or "", "injected failure")
+            return real_run(command, cwd, environment)
+        with tempfile.TemporaryDirectory() as scratch_name:
+            repository, _, _ = scratch_repository(scratch_name, {"README2": "x\n"})
+            commits_on_origin_main(repository, [{path: "a\nb\nc\n" + unrelated},
+                                                {path: "a\nedited\nc\n" + unrelated}])
+            survivors.run = failing_run
+            try:
+                got = survivors.recorded_mutant_lines_on_main(repository, path, [one_line_hunk],
+                                                              None)
+            finally:
+                survivors.run = real_run
+            check(f"a recorded mutant is not called gone when its history cannot be read, and "
+                  f"could not be judged: {name}", got == (None, None), got)
+
+    # The file is renamed, then the line is edited, so only the later name is read for a copy.
+    renamed_versions = [{path: "a\nb\nc\n" + unrelated},
+                        {path: None, "scripts/renamed.py": "a\nb\nc\n" + unrelated},
+                        {"scripts/renamed.py": "a\nedited\nc\n" + unrelated}]
+    for name, failing_word in [("git ls-tree fails on the renamed file", "ls-tree"),
+                               ("git show fails on the renamed file", "show")]:
+        def failing_on_renamed_file(command, cwd, environment=None):
+            if command[1] == failing_word and command[-1].endswith("scripts/renamed.py") \
+                    and (failing_word == "ls-tree" or command[-1].startswith(main_commit)):
+                return subprocess.CompletedProcess(command, 128, "", "injected failure")
+            return real_run(command, cwd, environment)
+        with tempfile.TemporaryDirectory() as scratch_name:
+            repository, _, _ = scratch_repository(scratch_name, {"README2": "x\n"})
+            commits_on_origin_main(repository, renamed_versions)
+            main_commit = git(repository, "rev-parse", "HEAD")
+            survivors.run = failing_on_renamed_file
+            try:
+                got = survivors.recorded_mutant_lines_on_main(repository, path, [one_line_hunk],
+                                                              None)
+            finally:
+                survivors.run = real_run
+            check(f"a recorded mutant is not called gone when a file its line was followed "
+                  f"through cannot be read on origin/main: {name}", got == (None, None), got)
+
+    # Present, deleted, restored, then re-indented: a failed git show on the restoring commit
+    # must not let the search fall back to the copy before the deletion, where blame ends the line.
+    for name, failing_words in [("git show fails on a commit that has the file", {"show"}),
+                                ("git show and git ls-tree both fail on that commit",
+                                 {"show", "ls-tree"})]:
+        with tempfile.TemporaryDirectory() as scratch_name:
+            repository, _, _ = scratch_repository(scratch_name, {"README2": "x\n"})
+            commits_on_origin_main(repository, [{path: "a\nb\nc\n" + unrelated},
+                                                {path: None, "OTHER": "x\n"},
+                                                {path: "a\nb\nc\n" + unrelated},
+                                                {path: "a\n    b\nchanged\n" + unrelated}])
+            restoring_commit = git(repository, "rev-parse", "HEAD~1")
+
+            def failing_on_restoring_commit(command, cwd, environment=None):
+                if command[1] in failing_words and restoring_commit in " ".join(command[2:]):
+                    return subprocess.CompletedProcess(command, 128, "", "injected failure")
+                return real_run(command, cwd, environment)
+            survivors.run = failing_on_restoring_commit
+            try:
+                got = survivors.recorded_mutant_lines_on_main(repository, path, [one_line_hunk],
+                                                              None)
+            finally:
+                survivors.run = real_run
+            check(f"a recorded mutant is not called gone when a commit's copy of the file cannot "
+                  f"be read, and could not be judged: {name}", got == (None, None), got)
 
 
 def run_cases():
     run_hunk_shared_context_line_counts_and_replaced_lines_cases()
     run_recorded_mutant_lines_on_main_search_cases()
-    run_recorded_mutant_lines_on_main_context_lines_cases()
+    run_recorded_mutant_lines_on_main_traced_through_history_cases()
     # ------------------------------------------------------------------
     # The config written, the worktree used, and survivors parsed.
     # ------------------------------------------------------------------
