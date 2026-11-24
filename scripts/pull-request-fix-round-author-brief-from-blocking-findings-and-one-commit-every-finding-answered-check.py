@@ -836,14 +836,21 @@ def pull_request_fix_round_answers_kept_copies_directory_path_for_frozen_head(wo
     """Where this round's copies of the answers file go: in the common git directory, because removing a linked
     worktree deletes its own git directory; one directory per round, so that a brief names only this round's copies."""
     common = git(["-C", str(worktree), "rev-parse", "--path-format=absolute", "--git-common-dir"]).strip()
-    return Path(common) / ANSWERS_KEPT_COPIES_DIRECTORY_NAME / f"pull-request-{number}-frozen-head-{frozen_head}"
+    return Path(common) / ANSWERS_KEPT_COPIES_DIRECTORY_NAME / f"pr-{number}-frozen-head-{frozen_head}"
 
 
 def answers_kept_copies_oldest_first(kept_copies_directory):
-    """Every whole copy in kept_copies_directory, oldest first."""
-    if not kept_copies_directory.is_dir():
-        return []
-    return sorted(kept_copies_directory.glob("*.md"), key=lambda copy: (copy.stat().st_mtime_ns, copy.name))
+    """Every whole copy in kept_copies_directory, oldest first; none when the directory is missing."""
+    try:
+        try:
+            names = os.listdir(kept_copies_directory)
+        except FileNotFoundError:
+            return []
+        copies = [kept_copies_directory / name for name in names if name.endswith(".md")]
+        return sorted(copies, key=lambda copy: (copy.stat().st_mtime_ns, copy.name))
+    except OSError as error:
+        raise StepFailed(f"could not list the kept copies of the answers file in {kept_copies_directory}: "
+                         f"{error}") from None
 
 
 def answers_file_text_kept_in_new_copy(path, kept_copies_directory):
@@ -873,7 +880,7 @@ def answers_file_text_kept_in_new_copy(path, kept_copies_directory):
 
 def answers_file_with_one_line_per_finding_write(path, finding_count, kept_copies_directory):
     """Write the answers file with a line "<n>. " per finding, which read_answers reads as no entry until the agent
-    writes the answer after it, and return the new copy of the text it held, or None."""
+    writes the answer after it."""
     kept = None
     try:
         kept = answers_file_text_kept_in_new_copy(path, kept_copies_directory)
@@ -890,7 +897,6 @@ def answers_file_with_one_line_per_finding_write(path, finding_count, kept_copie
     except OSError as error:
         copy_note = f" A copy of its text is in {kept}." if kept else ""
         raise StepFailed(f"could not write the answers file {path}: {error}.{copy_note}") from None
-    return kept
 
 
 def topic_worktree_at_frozen_head(number, reviewer_login, branch, frozen_head, finding_count, review_submitted_at):

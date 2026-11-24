@@ -940,7 +940,7 @@ def stopped_round_cases(root, repository, made, frozen_head, dated_routes, submi
           line == f"cd {made} && python3 scripts/{PROGRAM.name} {NUMBER}" and code == 0
           and answers.read_text() == "1. \n2. \n", line + err + out)
     kept_directory = (Path(git(made, "rev-parse", "--path-format=absolute", "--git-common-dir"))
-                      / "fix-round-answers-kept-copies" / f"pull-request-{NUMBER}-frozen-head-{frozen_head}")
+                      / "fix-round-answers-kept-copies" / f"pr-{NUMBER}-frozen-head-{frozen_head}")
     shutil.rmtree(kept_directory, ignore_errors=True)
     write_answers(GOOD_ANSWERS, -60)
     code, out, err = run(root, repository, dated_routes)
@@ -2188,6 +2188,19 @@ def answers_write_failure_cases(root, repository, _base, frozen_head):
     git(repository, "worktree", "remove", "--force", str(removed_worktree))
     check("answers kept: a copy outlives the removal of the linked worktree it was made for",
           surviving.read_text() == "1. An answer the worktree's removal must not delete.\n", str(surviving))
+    surviving_directory.chmod(0)
+    try:
+        error = None
+        try:
+            program.answers_kept_copies_oldest_first(surviving_directory)
+        except program.StepFailed as failure:
+            error = str(failure)
+    finally:
+        surviving_directory.chmod(0o755)
+    check("answers kept: a copies directory that cannot be listed fails instead of reading as empty",
+          error is not None and "could not list the kept copies" in error, str(error))
+    check("answers kept: a missing copies directory holds no copies",
+          program.answers_kept_copies_oldest_first(root / "no-copies-directory") == [], "")
     shutil.rmtree(surviving_directory)
 
 
