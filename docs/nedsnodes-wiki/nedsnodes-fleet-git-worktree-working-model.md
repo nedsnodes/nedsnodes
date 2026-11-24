@@ -1,14 +1,12 @@
 ---
 status: ruled — produced at the close of the git/worktree rules approval-walk
   (2026-08-17/18); every rule disposition below was user-ruled item by
-  item (the State-at-close candidates are recorded, not ruled).
+  item.
   Streamlined 2026-08-20 on the user's ruling: mechanism prose removed in
   favor of script citations; the full original text is this file's git
   history.
 scope: fleet-wide — both machines, every agent-seat, and the two agent runtimes,
   Claude Code and Codex
-supersedes: the uncommitted walk-minutes named under Provenance, which are
-  deleted once this document is verified on main
 ---
 
 # Fleet git and worktree working model
@@ -27,49 +25,6 @@ tomorrow; how a script satisfies its rule today is readable at the cited
 path. This boundary is itself a ruling (2026-08-20), made after three
 mechanism descriptions in this document went stale within hours of
 passing review.
-
-## Reader's key
-
-- **The user / the boss** — the same person: the project's one human
-  operator.
-- **The two machines** — the user's Mac (user `el`) and `ned-box` (Ubuntu,
-  user `nedlern`), each with its own clone. Path map:
-  `docs/nedsnodes-wiki/nedsnodes-mac-and-ned-box-machine-setup.md` (flagged stale
-  2026-08-17; verify before relying on specifics).
-- **Agent-seat** — a named, long-lived agent identity: home directory,
-  brief. **Session** — one running conversation occupying an
-  agent-seat; sessions end and are replaced, the agent-seat persists.
-  **Reincarnate-seat** — the handoff-supervisor replacing a session with a
-  fresh one, carrying the handoff forward. Definitions of record:
-  `docs/nedsnodes-wiki/nedsnodes-agent-seat-model.md`.
-- **The reference checkout** — the machine's checkout that handoff-supervisors
-  and launchers run from and other agents read expecting main. A standalone
-  clone is its own workspace, never "the reference" — where any mechanical
-  test disagrees with that definition, the definition governs (pinned
-  2026-08-17). The test the guards use lives in the guard scripts.
-- **Approved-by-walk** — approved by the user item by item, not by one
-  yes to a bundle (`docs/nedsnodes-wiki/nedsnodes-agent-seat-model.md` § The words this
-  model uses).
-- **The gatekeeper** — `nn-systems/main-gatekeeper/main-gatekeeper.py`, the main-gatekeeper:
-  the permanent and only way a change reaches main; specification
-  `nn-systems/main-gatekeeper/main-gatekeeper.system.design.md`
-  (canonical for everything gate-related, including credential ruling C2:
-  the credential able to push main belongs to a dedicated system user,
-  reached only through the main-gatekeeper, which logs every use). Dormant
-  until its credential work lands.
-- **The PR process** — until the gate activates: each pull request
-  merges one atomic nn-topic-branch, and
-  the merge-lane agent-seat reviews and merges every PR (deputization, recorded
-  at R13, is the ruled exception). Recorded in CLAUDE.md's PR-process paragraph.
-  The earlier form — commits accumulating on a seat-branch, cherry-picked
-  onto a fresh branch later — was retired 2026-08-28 after a three-commit
-  topic written on a Tuesday took until Friday to reach main, every
-  cherry-pick re-resolving conflicts against a head that had moved.
-- **The override markers** — `.walk-approved` (instruction-file guard) and `.location-write-approved` (session-location guard), both gitignored, each by convention holding the user's quoted approval words, consumed by the one guarded call it approves (see Marker honesty); `.walk-approved` holds instead `#pre_approved_change` and the reason for a change that `docs/nedsnodes-wiki/nedsnodes-which-changes-need-the-users-approval.md` does not require his approval for.
-- **The launchers** — `scripts/launch-claude-mac` and
-  `scripts/launch-claude-ubuntu`.
-- **#N** — nedsnodes's GitHub tracker; issue or pull request is labeled
-  at first use per row.
 
 ## Scope
 
@@ -97,6 +52,9 @@ The rungs that the Index's Rung column names (impossible, default, block, detect
 
 These govern every row below.
 
+- **The reference checkout** is the reference-checkout the glossary defines. A standalone clone is its own workspace, never the reference checkout; where a guard's mechanical test disagrees with that, the definition governs.
+- **The PR process**: each pull request merges one atomic nn-topic-branch, reviewed and merged as `CLAUDE.md`'s pull-request paragraph says; deputization, at R13, is the ruled exception.
+- **The override markers** — `.walk-approved` (instruction-file guard) and `.location-write-approved` (session-location guard), both gitignored, each holding the user's quoted approval words, consumed by the one guarded call it approves (see Marker honesty); `.walk-approved` holds instead `#pre_approved_change` and the reason for a change that `docs/nedsnodes-wiki/nedsnodes-which-changes-need-the-users-approval.md` does not require his approval for.
 - **Prose yields to code** (user-ruled 2026-08-19): anything that can move
   from CLAUDE.md — or any instruction prose — into a small program should
   move, and never the other way. A check in code runs; a check in prose
@@ -450,96 +408,32 @@ rulings; listed here to keep the numbering complete.
 
 ## Index
 
-| # | Rule | Rung | Status at close |
-|---|---|---|---|
-| R1 | Guards resolve roots correctly | — (foundation) | fixed, PR [guards: markers resolve from the session's own checkout, and the backup override lane is removed](https://github.com/nedsnodes/nedsnodes/pull/86); registration residue closed won't-fix 2026-08-22 (attempts recorded in PR [guard and catch-up review fixes: item 1 of the working model's build queue](https://github.com/nedsnodes/nedsnodes/pull/103)) |
-| R2 | Session states its git context | — (composition of R3/R5/R6) | satisfied by composition |
-| R3 | Detached/reference agent-seat refuses writes | block | built, PR [session-location write guard: no file writes from a detached HEAD or the reference checkout](https://github.com/nedsnodes/nedsnodes/pull/88) |
-| R4 | Stale base | — | absorbed by R15's catch-up |
-| R5 | Status line shows branch | default | kept; separators fixed, PR [status line: the │ separators become two plain spaces](https://github.com/nedsnodes/nedsnodes/pull/89) |
-| R6+R7 | No writes into the reference | block | built, PR [session-location guard: writes landing in the reference checkout are refused from any seat](https://github.com/nedsnodes/nedsnodes/pull/91) |
-| R8 | One live session per directory | — | waits on detection; build nothing |
-| R9 | One name = one agent-seat | default + block | built-live, PR [handoff: the agent name defaults to the seat's directory, and a foreign claim is refused](https://github.com/nedsnodes/nedsnodes/pull/72) |
-| R10 | The approval page sets which agent-instructions changes need approval | block | built-live; shell gap ruled unguarded |
-| R11 | Backups read-only to agents | block (no lane) | built-live; lane removed |
-| R12 | Agents never push to main | impossible (account tier) + text (agent tier) | partial; required reviews live 2026-08-20; C2 pending |
-| R13 | PR process + deputization | text (process) | built-live; deputization recorded at R13, PR [CLAUDE.md lane text: deputization recorded as the interim lane's exception](https://github.com/nedsnodes/nedsnodes/pull/93) |
-| R14 | One branch, one writer | default | satisfied by defaults; push check retired |
-| R15 | Landed changes reach running agent-seats | default + block (attention) | built, PRs [checkout freshness: mid-session catch-up Stop hook, status-line display, reference-checkout pull](https://github.com/nedsnodes/nedsnodes/pull/87)/PR [catch-up: the abort-failed state alone is delivered to the agent as a forced turn](https://github.com/nedsnodes/nedsnodes/pull/90) |
-| R16 | Binary updates at launch only | default | built-live; version check closed 2026-08-22, PR [Launcher update banner removed: background auto-update off fleet-wide, launch stays the one update moment](https://github.com/nedsnodes/nedsnodes/pull/135) — banner off via settings env |
-| R17 | Machinery self-updates at safe points | text (principle) | two open: Mac launcher runs the invoking checkout's supervisor; freshening failures are silent |
-| R18 | Hosts survive disconnects | default | checklist ruled; box done |
-| R19 | Snapshot cadence | default | live: box 10-min, Mac hourly |
-| R20 | Handoff preserves structure | default | built, PR [handoff: a multi-line next step survives the channel end to end (R20)](https://github.com/nedsnodes/nedsnodes/pull/108) |
-| R21 | Worktrees reaped when safe | detect + remind | built-live, PR [clean-worktrees: mechanical reaper for finished session worktrees, reporting at every seat launch](https://github.com/nedsnodes/nedsnodes/pull/73); vacancy proven, PR [worktree reaper: prove vacancy before reaping, instead of assuming it](https://github.com/nedsnodes/nedsnodes/pull/100) |
-| R22 | Junk ignored by pattern | default | ruled closed; issue [Worktree file hygiene: classify untracked files so junk is ignored rather than accumulating in search results](https://github.com/nedsnodes/nedsnodes/issues/50) closed |
-| R23 | Scratch lives in the scratchpad | default | satisfied by runtime default |
-| R24 | Surveys fetch before concluding | default + text | mostly encoded: the checkout-freshness Stop hook fetches origin each turn; exact surveys still fetch first |
-| R25 | Dead registrations surfaced | remind (report) | built, PR [clean-worktrees: one report line names dead registrations and the prune command (R25)](https://github.com/nedsnodes/nedsnodes/pull/112) |
-| R26 | New MDs land in canonical locations | remind | ruled-unbuilt, issue [MD-placement guidance as symmetric pre-tool remind hooks on both runtimes (boss-directed design, build deferred)](https://github.com/nedsnodes/nedsnodes/issues/11) |
-| R27 | On-machine records stay uncommitted | default | built-live |
-| R28 | Rules delivered at trigger | principle | governs all rows |
-
-## State at close — queued work and recorded candidates
-
-Depth convention (2026-08-19, set with merge-lane): each queued item
-is a *work order* — what is wrong plus what correct behavior looks like,
-built and reviewed directly against that statement — or *design-first*,
-for changes that are coupled or fleet-critical: the design lands in the
-document that owns the area and gets a cold read before code. Every queued
-PR's body states the intended behavior it should be reviewed against;
-merge-lane reviews against that statement and posts its review on the
-pull request.
-
-1. **Guard and catch-up review fixes** — LANDED (PR [guard and catch-up review fixes: item 1 of the working model's build queue](https://github.com/nedsnodes/nedsnodes/pull/103), merged
-   2026-08-19): fifteen of its sixteen entries, with the review
-   discussions permanent on the pull request. The sixteenth — the hook
-   re-registration (R1's residue) — was deliberately dropped with all
-   attempted forms recorded in that PR, and closed won't-fix 2026-08-22
-   (ruling and reopen trigger at R1).
-2. **R20** — the handoff both-ends structure fix — LANDED (PR [handoff: a multi-line next step survives the channel end to end (R20)](https://github.com/nedsnodes/nedsnodes/pull/108),
-   merged 2026-08-20; design section given a cold read in
-   `handoff.system.design.md` first, per design-first).
-3. **R25** — the dead-registration report line in `clean-worktrees.py` —
-   LANDED (PR [clean-worktrees: one report line names dead registrations and the prune command (R25)](https://github.com/nedsnodes/nedsnodes/pull/112), merged 2026-08-20), with the review discussion
-   permanent on the pull request.
-4. **Launcher version check** (user-ruled 2026-08-17) — CLOSED
-   2026-08-22 (PR [Launcher update banner removed: background auto-update off fleet-wide, launch stays the one update moment](https://github.com/nedsnodes/nedsnodes/pull/135)), no version check built. The queued question is answered
-   (claude-code-guide agent, from the official setup and settings docs):
-   `autoUpdatesChannel` exists — default `latest`, `stable` about a week
-   behind — and both the background auto-updater and `claude update`
-   honour it. A version check adds nothing: the launchers already run
-   `claude update` at launch. What the user actually wanted, ruled
-   2026-08-22: with launch-time updates, background auto-update is
-   unnecessary and its mid-session "update available" banner is clutter.
-   Built small instead: `DISABLE_AUTOUPDATER=1` in the checked-in
-   `.claude/settings.json` env block, which the docs state stops only
-   the background check while explicit `claude update` — the launchers'
-   path — keeps working. (`DISABLE_UPDATES` was rejected: it also blocks
-   `claude update`.) See R16 for the mechanism's history.
-
-Recorded candidates, unruled — an incident or a user pick is the trigger:
-R24's
-logic encoded into R22's future cleanup script; R8's session detector;
-machine-suffixed agent-seat names (rider 5); other-seat-home write blocking
-(R6's recorded-unbuilt half).
-
-## Provenance
-
-Produced at the close of the git/worktree rules approval-walk (fifteen items,
-2026-08-17/18, git-infra agent-seat, the user ruling item by item). The approval-walk
-shipped the six PRs from PR [guards: markers resolve from the session's own checkout, and the backup override lane is removed](https://github.com/nedsnodes/nedsnodes/pull/86) through PR [session-location guard: writes landing in the reference checkout are refused from any seat](https://github.com/nedsnodes/nedsnodes/pull/91), and PR [CLAUDE.md lane text: deputization recorded as the interim lane's exception](https://github.com/nedsnodes/nedsnodes/pull/93) and closed issue [Worktree file hygiene: classify untracked files so junk is ignored rather than accumulating in search results](https://github.com/nedsnodes/nedsnodes/issues/50). Its working papers —
-`walk-ledgers/2026-08-17-git-worktree-rules-inventory.md` and
-`walk-ledgers/2026-08-16-agent-worktree-git-coalesce-shape.md` — were
-kept on one machine and gitignored, deleted once this document was verified on
-main; everything they decided is restated here. This document depends,
-deliberately, on three documents, each canonical for its own subject —
-the gatekeeper design, the agent-seat model, and the AI-native development architecture
-(`docs/nedsnodes-wiki/nedsnodes-ai-native-software-development-objective.md`).
-
-Streamlined 2026-08-20 on the user's ruling, after the document's
-mechanism prose was three times found stale against the code it
-described: mechanism now lives in the cited scripts, and every cut
-sentence remains in this file's git history. The rulings, dates, evidence
-pointers, and open items above are complete — nothing ruled was dropped
-in the cut.
+| # | Rule | Rung |
+|---|---|---|
+| R1 | Guards resolve roots correctly | — (foundation) |
+| R2 | Session states its git context | — (composition of R3/R5/R6) |
+| R3 | Detached/reference agent-seat refuses writes | block |
+| R4 | Stale base | — |
+| R5 | Status line shows branch | default |
+| R6+R7 | No writes into the reference | block |
+| R8 | One live session per directory | — |
+| R9 | One name = one agent-seat | default + block |
+| R10 | The approval page sets which agent-instructions changes need approval | block |
+| R11 | Backups read-only to agents | block (no lane) |
+| R12 | Agents never push to main | impossible (account tier) + text (agent tier) |
+| R13 | PR process + deputization | text (process) |
+| R14 | One branch, one writer | default |
+| R15 | Landed changes reach running agent-seats | default + block (attention) |
+| R16 | Binary updates at launch only | default |
+| R17 | Machinery self-updates at safe points | text (principle) |
+| R18 | Hosts survive disconnects | default |
+| R19 | Snapshot cadence | default |
+| R20 | Handoff preserves structure | default |
+| R21 | Worktrees reaped when safe | detect + remind |
+| R22 | Junk ignored by pattern | default |
+| R23 | Scratch lives in the scratchpad | default |
+| R24 | Surveys fetch before concluding | default + text |
+| R25 | Dead registrations surfaced | remind (report) |
+| R26 | New MDs land in canonical locations | remind |
+| R27 | On-machine records stay uncommitted | default |
+| R28 | Rules delivered at trigger | principle |
