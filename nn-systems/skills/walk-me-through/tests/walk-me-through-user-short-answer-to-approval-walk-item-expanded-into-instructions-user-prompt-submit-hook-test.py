@@ -139,6 +139,19 @@ class OutputLines(list):
         return super().__getitem__(index)
 
 
+
+def is_at_most_the_own_words_message(result):
+    """Whether the hook exited 0 with no stderr, and printed nothing or only its message for a reply in the user's
+    own words, so that a crash, or a reply read as an answer, fails."""
+    if result.returncode != 0 or result.stderr:
+        return False
+    if not result.stdout.strip():
+        return True
+    context = json.loads(result.stdout)["hookSpecificOutput"]["additionalContext"]
+    return context.startswith("[rule walk-me-through-hook-instruction-to-agent-rewrite-approval-walk-item-when-discussion-"
+                              "settled-on-non-recommended-option] ")
+
+
 class Case:
     """One case's own checkout and walk files."""
 
@@ -440,8 +453,8 @@ def test_m_shows_the_responses_the_closing_line_leaves_out_and_records_nothing()
               and "check step" not in result.stdout, f"stdout {result.stdout!r}")
     for prompt in ("more responses 4", "more responses item 4", "More responses 4."):
         result = case.run(prompt)
-        check(f"{prompt!r} is not read as a numbered answer, so the hook exits 0 and prints nothing",
-              result.returncode == 0 and not result.stdout and not result.stderr,
+        check(f"{prompt!r} is not read as a numbered answer, so the hook exits 0 with at most its own-words message",
+              is_at_most_the_own_words_message(result),
               f"exit {result.returncode}, stdout {result.stdout!r}, stderr {result.stderr!r}")
     several = Case(next_to_present="items 5 and 6 of 9")
     several.minutes("#item_page item 5 of 9 https://claude.ai/artifact/PageOfItem5\n\n"
