@@ -189,7 +189,7 @@ _session_handoff_field_names_spec.loader.exec_module(session_handoff_field_names
 
 _remote_control_name_common_spec = importlib.util.spec_from_file_location(
     "handoff_remote_control_name_common",
-    Path(__file__).with_name("handoff-remote-control-name-carried-from-claude-ai-rename-common.py"))
+    Path(__file__).with_name("handoff-agent-seat-remote-control-name-stored-after-claude-ai-session-rename-common.py"))
 remote_control_name_common = importlib.util.module_from_spec(_remote_control_name_common_spec)
 _remote_control_name_common_spec.loader.exec_module(remote_control_name_common)
 
@@ -2482,17 +2482,17 @@ def handoff_supervisor_not_restarted_on_main_code_notice(
             f"{RESTART_PROGRAM_PATH_FROM_HOME} {seat}", on_the_mac))
 
 
-def remote_control_name_for_launch(agent_seat: str, handoff_directory: Path) -> str:
+def handoff_supervisor_remote_control_name_choose_for_agent_session_launch(agent_seat: str, handoff_directory: Path) -> str:
     """Return the stored Remote Control name; an unreadable name file must not stop a launch."""
     try:
-        return remote_control_name_common.stored_remote_control_name(handoff_directory, agent_seat)
+        return remote_control_name_common.handoff_remote_control_name_read_stored_or_default_to_agent_seat_name(handoff_directory, agent_seat)
     except OSError as error:
         print(f"handoff-supervisor: launching under the agent-seat name {agent_seat}, because its "
               f"stored Remote Control name could not be read: {error}", file=sys.stderr)
         return agent_seat
 
 
-def successor_notice_with_remote_control_rename(settings: SupervisorSettings, successor_notice: str,
+def handoff_supervisor_claude_ai_rename_save_as_remote_control_name_and_add_instruction_to_successor_notice(settings: SupervisorSettings, successor_notice: str,
                                                 retiring_session_id: Optional[str]) -> str:
     """Store a rename the retiring agent-session's last turn end did not, and add its instruction."""
     if not retiring_session_id:
@@ -2500,7 +2500,7 @@ def successor_notice_with_remote_control_rename(settings: SupervisorSettings, su
     transcript_path = (project_directory_for_working_directory(settings.working_directory)
                        / f"{retiring_session_id}.jsonl")
     try:
-        rename = remote_control_name_common.store_remote_control_name_when_transcript_title_changed(
+        rename = remote_control_name_common.handoff_remote_control_name_save_when_transcript_custom_title_changed_and_return_rename(
             settings.handoff_directory, settings.agent, transcript_path)
     except OSError as error:
         print(f"handoff-supervisor: a claude.ai rename of agent-seat {settings.agent}, if there was "
@@ -2508,7 +2508,7 @@ def successor_notice_with_remote_control_rename(settings: SupervisorSettings, su
         return successor_notice
     if rename is None:
         return successor_notice
-    instruction = remote_control_name_common.remote_control_rename_instruction(rename)
+    instruction = remote_control_name_common.handoff_remote_control_rename_message_other_agent_seats_instruction_build(rename)
     return f"{successor_notice} {instruction}" if successor_notice else instruction
 
 
@@ -2695,7 +2695,7 @@ def supervise_sessions(settings: SupervisorSettings) -> int:
             retiring_session_id = (
                 retiring_session_id_from_handoff_writer_or_tracked_launch(tracked_session_id, boot_fields)
                 if tracked_session_id else None)
-            successor_notice = successor_notice_with_remote_control_rename(
+            successor_notice = handoff_supervisor_claude_ai_rename_save_as_remote_control_name_and_add_instruction_to_successor_notice(
                 settings, successor_notice, retiring_session_id)
             successor_session_id, ignition_plan = (
                 carry_over_to_successor(settings, retiring_session_id, boot_fields, generation)
@@ -2810,7 +2810,7 @@ def supervise_sessions(settings: SupervisorSettings) -> int:
         process = launch_agent_session(
             settings.agent_command, session_id, settings.working_directory, launch_prompt,
             resume=next_launch_resumes_the_session,
-            remote_control_name=remote_control_name_for_launch(settings.agent, settings.handoff_directory),
+            remote_control_name=handoff_supervisor_remote_control_name_choose_for_agent_session_launch(settings.agent, settings.handoff_directory),
             appended_system_prompt_file=appended_system_prompt_file,
             handoff_supervisor_agent_name=settings.agent,
             update_timeout_seconds=settings.agent_update_timeout_seconds,
@@ -2901,7 +2901,7 @@ def supervise_sessions(settings: SupervisorSettings) -> int:
 
         retiring_session_id = retiring_session_id_from_handoff_writer_or_tracked_launch(
             session_id, handoff_fields)
-        successor_notice = successor_notice_with_remote_control_rename(
+        successor_notice = handoff_supervisor_claude_ai_rename_save_as_remote_control_name_and_add_instruction_to_successor_notice(
             settings, successor_notice, retiring_session_id)
         successor_session_id, ignition_plan = carry_over_to_successor(
             settings, retiring_session_id, handoff_fields, generation

@@ -39,7 +39,7 @@ THRESHOLD_HOOK_PATH = (pathlib.Path(__file__).resolve().parents[2]
                        / "scripts" / "handoff-context-threshold-hook.py")
 HANDOFF_SUPERVISOR_PATH = pathlib.Path(__file__).resolve().with_name("handoff-supervisor.py")
 REMOTE_CONTROL_NAME_COMMON_PATH = pathlib.Path(__file__).resolve().with_name(
-    "handoff-remote-control-name-carried-from-claude-ai-rename-common.py")
+    "handoff-agent-seat-remote-control-name-stored-after-claude-ai-session-rename-common.py")
 
 SHOWN_RECORD_SUFFIX = "-user-notice-shown"
 
@@ -80,7 +80,7 @@ def new_session_name(transcript_path_text) -> str:
     if isinstance(transcript_path_text, str) and transcript_path_text:
         try:
             title = module_from_path("handoff_remote_control_name_common",
-                                     REMOTE_CONTROL_NAME_COMMON_PATH).latest_custom_title_in_transcript(transcript_path_text)
+                                     REMOTE_CONTROL_NAME_COMMON_PATH).session_title_from_transcript(transcript_path_text)
         except OSError:
             title = ""
         if title:

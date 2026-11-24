@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Cases for the Stop hook that stores a claude.ai rename and its shared name file.
 
-Run: python3 nn-systems/handoff/tests/handoff-remote-control-name-changed-in-claude-ai-store-and-tell-agent-seats-stop-hook-test.py
+Run: python3 nn-systems/handoff/tests/handoff-claude-ai-rename-saved-as-remote-control-name-and-agent-told-to-message-other-agent-seats-stop-hook-test.py
 
 Every case runs the hook under this suite's own HOME, never the real ~/.claude/handoffs.
 """
@@ -14,7 +14,7 @@ import tempfile
 from pathlib import Path
 
 HOOK = (Path(__file__).resolve().parent.parent
-        / "handoff-remote-control-name-changed-in-claude-ai-store-and-tell-agent-seats-stop-hook.py")
+        / "handoff-claude-ai-rename-saved-as-remote-control-name-and-agent-told-to-message-other-agent-seats-stop-hook.py")
 SEAT_VARIABLE = "NEDSNODES_HANDOFF_SUPERVISOR_AGENT_NAME"
 failures = 0
 
@@ -58,7 +58,9 @@ with tempfile.TemporaryDirectory() as directory:
     context = json.loads(result.stdout)["hookSpecificOutput"]["additionalContext"]
     check("a changed title is stored", stored.read_text(encoding="utf-8") == "----new name\n")
     check("the agent is given the exact line to send every other agent-seat",
-          "seat-a is now ----new name in Remote Control; message it there." in context, context)
+          "seat-a is now ----new name in Remote Control; message it there." in context
+          and "to each other session ListAgents lists that is not offline" in context
+          and "send to each, addressed as `<name> [<ref>]`" in context, context)
 
     result = run_hook(home, json.dumps({"transcript_path": transcript}))
     check("the same title at the next turn's end says nothing", result.stdout == "", result.stdout)
@@ -89,7 +91,8 @@ with tempfile.TemporaryDirectory() as directory:
 
     result = run_hook(home, json.dumps({"transcript_path": str(home)}))
     check("a transcript that cannot be read exits 1 and reports it",
-          result.returncode == 1 and "was not stored" in result.stderr, result)
+          result.returncode == 1 and "was not stored" in result.stderr
+          and "tries again at the next turn's end" in result.stderr, result)
 
     stored.mkdir()
     transcript = transcript_with_titles(directory, "renamed")

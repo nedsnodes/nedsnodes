@@ -114,6 +114,7 @@ CONSTANTS_THAT_OPEN_NO_RULE_MESSAGE = {
     ("nn-systems/general-tools/python-edit-changed-tool-message-to-agent-strings-check-reminder-hook.py", "MORE_NOT_LISTED_LINE_TEMPLATE"): LATER_PART,
     ("nn-systems/general-tools/python-edit-changed-tool-message-to-agent-strings-check-reminder-hook.py", "NOT_INSPECTED_MESSAGE_TEMPLATE"): HOOK_FAILED,
     ("nn-systems/handoff/handoff-asked-stop-typing-user-notice-user-prompt-submit-hook.py", "HOOK_FAILED_MESSAGE"): HOOK_FAILED,
+    ("nn-systems/handoff/handoff-claude-ai-rename-saved-as-remote-control-name-and-agent-told-to-message-other-agent-seats-stop-hook.py", "HOOK_FAILED_MESSAGE"): HOOK_FAILED,
     ("nn-systems/handoff/handoff-asked-stop-typing-user-notice-user-prompt-submit-hook.py", "HANDOFF_ASKED_STOP_TYPING_WITH_NEW_SESSION_NAME_USER_NOTICE_TEMPLATE"): USER_ONLY_NOTICE,
     ("nn-systems/handoff/handoff-asked-stop-typing-user-notice-user-prompt-submit-hook.py", "HANDOFF_ASKED_STOP_TYPING_WITHOUT_NEW_SESSION_NAME_USER_NOTICE"): USER_ONLY_NOTICE,
     ("nn-systems/skills/emergency-stop/emergency-stop-file-shown-and-push-and-merge-refusal-hook.py", "UNREADABLE_LINE"): LATER_PART,

@@ -22,7 +22,8 @@ REMOTE_CONTROL_RENAME_INSTRUCTION_TEMPLATE = (
     "With SendMessage, send this line, word for word, to each other session ListAgents lists "
     "that is not offline:\n"
     "{line}\n"
-    "When several rows share a name, address the live row as `<name> [<ref>]`."
+    "When several live rows share a name, send to each, addressed as `<name> [<ref>]` with the "
+    "ref that row shows."
 )
 
 
@@ -35,7 +36,7 @@ def remote_control_name_file_path(handoff_directory: Path, agent_seat: str) -> P
     return handoff_directory / f"{agent_seat}{REMOTE_CONTROL_NAME_FILE_SUFFIX}"
 
 
-def stored_remote_control_name(handoff_directory: Path, agent_seat: str) -> str:
+def handoff_remote_control_name_read_stored_or_default_to_agent_seat_name(handoff_directory: Path, agent_seat: str) -> str:
     """Return the stored name, or the agent-seat name when none is stored; raise OSError if unreadable."""
     try:
         stored = remote_control_name_file_path(handoff_directory, agent_seat).read_text(
@@ -45,7 +46,7 @@ def stored_remote_control_name(handoff_directory: Path, agent_seat: str) -> str:
     return stored or agent_seat
 
 
-def latest_custom_title_in_transcript(transcript_path) -> str:
+def session_title_from_transcript(transcript_path) -> str:
     """Return the customTitle of the transcript's last custom-title record, or ""."""
     title = ""
     with open(transcript_path, encoding="utf-8", errors="replace") as transcript:
@@ -64,18 +65,18 @@ def latest_custom_title_in_transcript(transcript_path) -> str:
     return title
 
 
-def store_remote_control_name_when_transcript_title_changed(
+def handoff_remote_control_name_save_when_transcript_custom_title_changed_and_return_rename(
         handoff_directory: Path, agent_seat: str, transcript_path) -> Optional[RemoteControlRename]:
     """Store a title that differs from the stored name and return the rename, else return None.
 
     Raise OSError when the transcript exists but cannot be read, or the name cannot be stored."""
     try:
-        title = latest_custom_title_in_transcript(transcript_path)
+        title = session_title_from_transcript(transcript_path)
     except FileNotFoundError:
         return None
     if not title:
         return None
-    old_name = stored_remote_control_name(handoff_directory, agent_seat)
+    old_name = handoff_remote_control_name_read_stored_or_default_to_agent_seat_name(handoff_directory, agent_seat)
     if title == old_name:
         return None
     path = remote_control_name_file_path(handoff_directory, agent_seat)
@@ -86,7 +87,7 @@ def store_remote_control_name_when_transcript_title_changed(
     return RemoteControlRename(old_name, title)
 
 
-def remote_control_rename_instruction(rename: RemoteControlRename) -> str:
+def handoff_remote_control_rename_message_other_agent_seats_instruction_build(rename: RemoteControlRename) -> str:
     return REMOTE_CONTROL_RENAME_INSTRUCTION_TEMPLATE.format(
         old_name=rename.old_name, new_name=rename.new_name,
         line=REMOTE_CONTROL_RENAME_LINE_TEMPLATE.format(

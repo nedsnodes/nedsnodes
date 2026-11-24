@@ -1381,28 +1381,28 @@ with tempfile.TemporaryDirectory() as rename_directory:
         (projects / "retiring.jsonl").write_text(
             '{"type":"custom-title","customTitle":"seat-a"}\n', encoding="utf-8")
         check("an unchanged title leaves the successor's notice as it is",
-              supervisor.successor_notice_with_remote_control_rename(
+              supervisor.handoff_supervisor_claude_ai_rename_save_as_remote_control_name_and_add_instruction_to_successor_notice(
                   rename_settings, "earlier notice", "retiring") == "earlier notice")
         check("a launch with no stored name uses the agent-seat name",
-              supervisor.remote_control_name_for_launch("seat-a", handoffs) == "seat-a")
+              supervisor.handoff_supervisor_remote_control_name_choose_for_agent_session_launch("seat-a", handoffs) == "seat-a")
         (projects / "retiring.jsonl").write_text(
             '{"type":"custom-title","customTitle":"--renamed"}\n', encoding="utf-8")
-        notice = supervisor.successor_notice_with_remote_control_rename(
+        notice = supervisor.handoff_supervisor_claude_ai_rename_save_as_remote_control_name_and_add_instruction_to_successor_notice(
             rename_settings, "earlier notice", "retiring")
         check("a rename found at stop keeps the earlier notice and has the successor send the line",
               notice.startswith("earlier notice ")
               and "seat-a is now --renamed in Remote Control; message it there." in notice, notice)
         check("the successor launches under the stored name",
-              supervisor.remote_control_name_for_launch("seat-a", handoffs) == "--renamed")
+              supervisor.handoff_supervisor_remote_control_name_choose_for_agent_session_launch("seat-a", handoffs) == "--renamed")
         check("a second read of the same title sends nothing again",
-              supervisor.successor_notice_with_remote_control_rename(
+              supervisor.handoff_supervisor_claude_ai_rename_save_as_remote_control_name_and_add_instruction_to_successor_notice(
                   rename_settings, "", "retiring") == "")
         (handoffs / "seat-a-remote-control-name").unlink()
         (handoffs / "seat-a-remote-control-name").mkdir()
         errors = io.StringIO()
         with contextlib.redirect_stderr(errors):
-            name = supervisor.remote_control_name_for_launch("seat-a", handoffs)
-            kept = supervisor.successor_notice_with_remote_control_rename(
+            name = supervisor.handoff_supervisor_remote_control_name_choose_for_agent_session_launch("seat-a", handoffs)
+            kept = supervisor.handoff_supervisor_claude_ai_rename_save_as_remote_control_name_and_add_instruction_to_successor_notice(
                 rename_settings, "earlier notice", "retiring")
         check("an unreadable stored name launches under the agent-seat name and reports it",
               name == "seat-a" and "could not be read" in errors.getvalue(), errors.getvalue())

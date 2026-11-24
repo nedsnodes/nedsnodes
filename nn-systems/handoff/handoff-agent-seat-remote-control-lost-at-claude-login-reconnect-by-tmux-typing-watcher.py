@@ -118,7 +118,7 @@ MAC_PROCESS_LISTING_COMMAND = ["ps", "-axww", "-o", "pid=,ppid=,etime=,args="]
 PROCESS_LISTING_TIMEOUT_SECONDS = 30
 _remote_control_name_common_specification = importlib.util.spec_from_file_location(
     "handoff_remote_control_name_common",
-    Path(__file__).with_name("handoff-remote-control-name-carried-from-claude-ai-rename-common.py"))
+    Path(__file__).with_name("handoff-agent-seat-remote-control-name-stored-after-claude-ai-session-rename-common.py"))
 remote_control_name_common = importlib.util.module_from_spec(_remote_control_name_common_specification)
 _remote_control_name_common_specification.loader.exec_module(remote_control_name_common)
 
@@ -244,7 +244,7 @@ class Run:
 
 
 def remote_control_name_of_agent_seat(seat) -> str:
-    return remote_control_name_common.stored_remote_control_name(Path.home() / ".claude" / "handoffs", seat)
+    return remote_control_name_common.handoff_remote_control_name_read_stored_or_default_to_agent_seat_name(Path.home() / ".claude" / "handoffs", seat)
 
 
 def notice_show(log_directory: Path, seat, kind, template, **fields) -> bool:

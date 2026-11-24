@@ -15,12 +15,12 @@ import os
 import sys
 from pathlib import Path
 
-PROGRAM = "handoff-remote-control-name-changed-in-claude-ai-store-and-tell-agent-seats-stop-hook"
+PROGRAM = "handoff-claude-ai-rename-saved-as-remote-control-name-and-agent-told-to-message-other-agent-seats-stop-hook"
 HANDOFF_SUPERVISOR_AGENT_NAME_ENVIRONMENT_VARIABLE = "NEDSNODES_HANDOFF_SUPERVISOR_AGENT_NAME"
 
 _common_specification = importlib.util.spec_from_file_location(
     "handoff_remote_control_name_common",
-    Path(__file__).with_name("handoff-remote-control-name-carried-from-claude-ai-rename-common.py"))
+    Path(__file__).with_name("handoff-agent-seat-remote-control-name-stored-after-claude-ai-session-rename-common.py"))
 remote_control_name_common = importlib.util.module_from_spec(_common_specification)
 _common_specification.loader.exec_module(remote_control_name_common)
 
@@ -42,7 +42,7 @@ def main() -> int:
         transcript_path = payload.get("transcript_path")
         if not agent_seat or not isinstance(transcript_path, str) or not transcript_path:
             return 0
-        rename = remote_control_name_common.store_remote_control_name_when_transcript_title_changed(
+        rename = remote_control_name_common.handoff_remote_control_name_save_when_transcript_custom_title_changed_and_return_rename(
             Path.home() / ".claude" / "handoffs", agent_seat, transcript_path)
     except (OSError, ValueError) as error:
         print(HOOK_FAILED_MESSAGE.format(error=error), file=sys.stderr)
@@ -51,7 +51,7 @@ def main() -> int:
         print(json.dumps({"hookSpecificOutput": {
             "hookEventName": "Stop",
             "additionalContext": REMOTE_CONTROL_RENAMED_REMINDER_MESSAGE.format(
-                instruction=remote_control_name_common.remote_control_rename_instruction(rename)),
+                instruction=remote_control_name_common.handoff_remote_control_rename_message_other_agent_seats_instruction_build(rename)),
         }}))
     return 0
 
