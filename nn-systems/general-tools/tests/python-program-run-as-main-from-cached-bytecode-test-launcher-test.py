@@ -60,10 +60,19 @@ with tempfile.TemporaryDirectory() as scratch:
         check(f"a program that ends with {how!r} sees itself and ends the same way through the launcher",
               launched.stdout == direct.stdout != "" and launched.returncode == direct.returncode == expected_code,
               (direct.returncode, direct.stdout, launched.returncode, launched.stdout, launched.stderr))
-    raised = run(LAUNCHER, "link/probe.py", "raise", cwd=root)
-    check("an uncaught exception prints the program's own frame and exception through the launcher",
-          f'File "{root / "link" / "probe.py"}", line 7, in <module>' in raised.stderr
-          and raised.stderr.rstrip().endswith("ValueError: the probe raised"), raised.stderr)
+    # From a working directory reached through a link, as under a TMPDIR that is one: a direct run names the
+    # program by the working directory with its links resolved, so the launcher must too.
+    (root / "linked-root").symlink_to(root)
+    direct_frame = next((line for line in run("link/probe.py", "raise", cwd=root / "linked-root").stderr.splitlines()
+                         if 'probe.py", line' in line), "no frame")
+    raised = run(LAUNCHER, "link/probe.py", "raise", cwd=root / "linked-root")
+    check("an uncaught exception prints the program's own frame, as a direct run names it, and its exception",
+          direct_frame.startswith('  File "') and direct_frame in raised.stderr.splitlines()
+          and raised.stderr.rstrip().endswith("ValueError: the probe raised"), (direct_frame, raised.stderr))
+
+    safe = run("-P", LAUNCHER, "link/probe.py", cwd=root)
+    check("under -P the launcher leaves sys.path[0] as Python set it, as a direct run with -P does",
+          safe.stdout == run("-P", "link/probe.py", cwd=root).stdout != "", (safe.stdout, safe.stderr))
 
     cached = list((root / "real" / "__pycache__").glob("probe.*.pyc"))
     check("a run through the launcher leaves the program's bytecode in its __pycache__", len(cached) == 1, cached)

@@ -45,9 +45,15 @@ PROGRAM = (Path(__file__).resolve().parents[1]
            / "walk-me-through-answer-added-texts-cold-read-fast-read-check-and-close.py")
 # Most cases start the program several times; through this launcher its 4,000 lines are compiled once, not at
 # every start.
-PROGRAM_START = [sys.executable, str(Path(__file__).resolve().parents[3] / "general-tools"
-                                     / "python-program-run-as-main-from-cached-bytecode-test-launcher.py"),
-                 str(PROGRAM)]
+LAUNCHER = (Path(__file__).resolve().parents[3] / "general-tools"
+            / "python-program-run-as-main-from-cached-bytecode-test-launcher.py")
+
+
+def program_start():
+    # Built at each start, since a case may point PROGRAM at a copy.
+    return [sys.executable, str(LAUNCHER), str(PROGRAM)]
+
+
 _cold_read_scratch_fixture_spec = importlib.util.spec_from_file_location(
     "cold_read_scratch_repository_test_fixture",
     Path(__file__).resolve().parents[3] / "cold-read" / "tests"
@@ -310,7 +316,7 @@ class Case:
                 signal.signal(number, signal.SIG_IGN if number == ignored_signal else signal.SIG_DFL)
 
         return subprocess.run(
-            [*PROGRAM_START, step, *flags, "--cwd", str(self.checkout),
+            [*program_start(), step, *flags, "--cwd", str(self.checkout),
              "--cold-read-records", str(self.records),
              "--fast-read-program", str(fast_read_program or self.stand_in),
              "--counts-log", str(counts_log or self.counts_log), "--gh-program", str(self.gh)],
@@ -4399,7 +4405,7 @@ def check_and_its_printed_retry_run_outside_the_checkout(case, flags, environmen
                        STAND_IN_ARGUMENTS=str(case.fast_read_arguments), STAND_IN_RECORDS=str(case.records),
                        TMPDIR=str(case.temporary_directory))
     paths_but_cwd = case_paths(case)[2:]
-    result = subprocess.run([*PROGRAM_START, "check", *flags, "--cwd", str(case.checkout),
+    result = subprocess.run([*program_start(), "check", *flags, "--cwd", str(case.checkout),
                              *paths_but_cwd], capture_output=True, text=True, env=environment, cwd=elsewhere)
     printed = re.search("`(" + re.escape(shlex.join(["python3", str(PROGRAM)])) + " check [^`]*)`", result.stderr)
     if printed is None:
@@ -6931,6 +6937,8 @@ def check_every_printed_command_from_a_path_holding_a_space():
     checked = case.run("check")
     check("from a path holding a space, check prints a close command naming the program",
           each_printed_command_names_a_file(checked), described(checked))
+    check("from a path holding a space, the program started is the copy under that path",
+          " " in shlex.split(printed_command_with(checked, " close "))[1], described(checked))
     closed = run_printed_command(case, printed_command_with(checked, " close "))
     case.wait_for_reads_ahead()
     check("from a path holding a space, the printed close command runs and prints a read-step command",
