@@ -23,7 +23,7 @@ The user's overview of NedsNodes describes "many modular building blocks that fi
 
 ### 1.2 Work already planned that this page must fit
 
-- **[GHI 2505, Pull requests, their reviews and approval-walks held as one state machine over one schema and one store, so code tracks their state and agents are handed only the steps that need judgment](https://github.com/nedsnodes/nedsnodes/issues/2505).** The user asked for it on 2026-11-03 and said "it's going to affect almost everything. Well, it's going to affect a lot". It holds these records in one store, moves them with one machine in code, and makes the Markdown walk-minutes generated views. It is a large part of this plan already written down, with real failures as evidence: a review decision kept in prose that the fix-round program could not see, and ten programs parsing `#next_to_present`. This page supplies what GHI 2505 leaves generic, namely the tool contract, the machine format and the runner. GHI 2505 supplies the records for its domain. Two points need the user: whether it is the first slice, and how its one store fits the record this page keeps for each state-machine-run (open questions 6 and 18).
+- **[GHI 2505, Pull requests, their reviews and approval-walks held as one state machine over one schema and one store, so code tracks their state and agents are handed only the steps that need judgment](https://github.com/nedsnodes/nedsnodes/issues/2505).** The user asked for it on 2026-11-03 and said "it's going to affect almost everything. Well, it's going to affect a lot". It holds these records in one store, moves them with one machine in code, and makes the Markdown walk-minutes generated views. It is a large part of this plan already written down, with real failures as evidence: a review decision kept in prose that the fix-round program could not see, and ten programs parsing `#next_to_present`. This page supplies what GHI 2505 leaves generic, namely the tool contract, the machine format and the runner. GHI 2505 supplies the records for its domain. Two points need the user: whether it is the first slice, and how its one store fits the record this page keeps for each state-machine-run (open questions 5 and 17).
 - **[GHI 972, A small HTTP service with SQLite on ned-box keeps one record of every agent-seat on both machines](https://github.com/nedsnodes/nedsnodes/issues/972).** Its nn-shared-database is GHI 2505's first candidate for that store.
 - **[GHI 282, Build the design-to-main state machine: the Python machine, its per-state agent-instructions, and the nine items the design defers to the build](https://github.com/nedsnodes/nedsnodes/issues/282).** Deferred (section 12).
 
@@ -140,7 +140,7 @@ The runner validates each node's output against the input schema of the node tha
 
 **Many machines at once.** Each agent can run one or more machines, so every state-machine-run keeps its own record and shares no in-memory state with another.
 
-**Parallel work.** The user described this as "Lua-like cooperative multi-threading". A `parallel` node starts its branches as child processes. No runner process waits at the join: `next` records the branches and returns, and a later `next` collects those that finished. A timeout on each branch catches a process that dies or never returns. The node ends in `all-succeeded`, `some-failed` or `timed-out`. For example, a cold-read-full-run starts its cold-read-cells this way. What calls that later `next` is open question 4. How a machine treats a failed or late branch of its parallel node, such as whether five of seven cold-read reports are enough, is decided when that machine is designed, not by one rule for every parallel node.
+**Parallel work.** The user described this as "Lua-like cooperative multi-threading". A `parallel` node starts its branches as child processes. No runner process waits at the join: `next` records the branches and returns, and a later `next` collects those that finished. A timeout on each branch catches a process that dies or never returns. The node ends in `all-succeeded`, `some-failed` or `timed-out`. For example, a cold-read-full-run starts its cold-read-cells this way. A state-machine-run that waits is resumed by the work it waits on: each process the runner starts runs inside a wrapper that stops it at its time limit, records its result and calls `next`, `next` sends the agent-seat's interactive agent one message when the next node needs it, a `user` node is resumed when the agent hands the runner the user's reply, and no scheduled job polls state-machine-runs (user-ruling of 2026-11-24). How a machine treats a failed or late branch of its parallel node, such as whether five of seven cold-read reports are enough, is decided when that machine is designed, not by one rule for every parallel node.
 
 **Handoff.** The handoff-system lists an agent-seat's unfinished state-machine-runs for its successor, which continues each one with `next` (item 4).
 
@@ -174,7 +174,7 @@ A state-machine-user-answer-node names who holds the conversation, in its `conve
 
 **How the user reaches that agent.** The user works through Remote Control and expects that a `claude -p` agent-session will not appear there. The proposed mechanism starts the agent as `claude -p` with a known agent-session id. When it reaches a state-machine-user-answer-node, the runner opens the same conversation with `claude --resume <id>` in a tmux window, as the agent-seats run, so that it shows in Remote Control. When the user is done, the agent calls the runner's `answer` with the output state, and the runner closes the window. A window closed without an `answer` is the node's `interrupted` output state.
 
-This mechanism is untested. The first build step for state-machine-user-answer-nodes is a test on ned-box of three things: the resumed agent keeps the whole conversation, it appears in Remote Control, and the runner receives its output state when it exits. If the test fails, the design comes back to the user (open question 5).
+This mechanism is untested. The first build step for state-machine-user-answer-nodes is a test on ned-box of three things: the resumed agent keeps the whole conversation, it appears in Remote Control, and the runner receives its output state when it exits. If the test fails, the design comes back to the user (open question 4).
 
 ## 7. Who does each step
 
@@ -212,7 +212,7 @@ Every program that starts `claude -p` passes `--strict-mcp-config` through the s
 
 The user asked to log "the beginning and end of each state", what is passed in and out, and time and tokens, modelled on agent-session JSONL files. Item 4 asks for an append-only record of each state-machine-run. This design makes them one file, a JSONL file per state-machine-run, which is both the state the runner resumes from and the log for analysis.
 
-Each line is one event: `state-machine-run-started`, `state-machine-node-started`, `state-machine-node-ended`, `state-machine-user-question-asked`, `state-machine-user-question-answered` or `state-machine-run-ended`. A `state-machine-node-ended` line carries the node, output state, exit code, duration, tokens, a hash and path of the input and output, and for an agent node its agent-session id and JSONL path. Where the file is kept, and whether it feeds or gives way to GHI 2505's one store, is open question 6.
+Each line is one event: `state-machine-run-started`, `state-machine-node-started`, `state-machine-node-ended`, `state-machine-user-question-asked`, `state-machine-user-question-answered` or `state-machine-run-ended`. A `state-machine-node-ended` line carries the node, output state, exit code, duration, tokens, a hash and path of the input and output, and for an agent node its agent-session id and JSONL path. Where the file is kept, and whether it feeds or gives way to GHI 2505's one store, is open question 5.
 
 ## 10. First use: background work across a session-handoff
 
@@ -229,7 +229,7 @@ Proposed transitions for `background-task-check`:
 | `finished` | End: the successor reads the output |
 | `failed` | Rerun the task once, then bring it to the agent |
 | `running-under-wait-limit` | The runner holds the state; a later `next` runs the node again |
-| `past-wait-limit` | Open question 7 |
+| `past-wait-limit` | Open question 6 |
 | `could-not-run` | Report to the agent |
 
 Item 67 also promised a report of how long session-handoffs were held at high context, from past records. That report is not yet written (section 12, step 5).
@@ -266,7 +266,7 @@ The user has no "strong opinions" on order beyond easy parts first. Each step is
 4. Build the runner and lint, extracted from the two step programs, with the JSONL record.
 5. Build the first use, background work, and write the report on session-handoffs held at high context.
 6. Test the state-machine-user-answer-node mechanism of section 6.
-7. Move approval-walks onto the runner, with GHI 2505's records if the user makes it this slice, then cold reads and reviews (open questions 2 and 18).
+7. Move approval-walks onto the runner, with GHI 2505's records if the user makes it this slice, then cold reads and reviews (open questions 2 and 17).
 8. Review the remaining programs a few at a time, as section 11 says.
 
 **Deferred: design-to-main.** The user decided on 2026-11-23 to defer all continued work on design-to-main until other parts have stabilized, and to keep what this design raised about it in [GHI 282, Build the design-to-main state machine: the Python machine, its per-state agent-instructions, and the nine items the design defers to the build](https://github.com/nedsnodes/nedsnodes/issues/282). No step above changes or depends on it. Its code and design stay as they are.
@@ -278,19 +278,18 @@ The user has no "strong opinions" on order beyond easy parts first. Each step is
 1. Each node's JSON object names how it ended in the field `output_state`.
 2. Which comes first after the runner: background work, as item 67 approved, or approval-walks, which the user said on 2026-11-23 "we could do" first?
 3. The project's one JSON Schema library is python-jsonschema 4.26.0, pinned, with `types-jsonschema` for mypy.
-4. After a state-machine-run exits to wait, what calls the later `next`: the agent that owns the state-machine-run, a hook, or a scheduled job?
-5. If a resumed `claude -p` agent does not show in Remote Control, how does the user reach an agent inside a node?
-6. Each state-machine-run's record is one JSONL file in the log-store on ned-box; a state-machine-run on the Mac waits while ned-box cannot be reached.
-7. When a detached task passes its wait-limit, does the machine keep waiting, stop and rerun the task, or ask the user?
-8. A transition has no general guard; a loop limit is the only condition on it, and a node that must choose from data reports a different output state.
-9. The runner's schema check rests on the user's approval of item 4; no node adds its own validation, and `CLAUDE.md`'s two conditions for a guard stay as they are.
-10. Should the code-prompt-code bullet of `CLAUDE.md` name its two kinds, cpc-tool and cpc-node?
-11. Should create-GHI and edit-GHI write their own rerun task, reversing the user-ruling of 2026-10-10?
-12. Did the user's remark "The code prompt code, it seems like it's just adding some formalism" point at the term? Items 10.1 and 10.2 have since kept and extended the term.
-13. Should one shared function print a test file's verdict line and exit with its code?
-14. Should the shared skip function take the cause from a fixed set and write the reason's opening itself?
-15. Should the approval-walk's check program hand out its bookkeeping one step at a time, each step validated before the next?
-16. Should a Stop hook refuse to end a turn until a discussion that changes a waiting approval-walk item is in the walk-minutes, with the session-handoff deferred until then?
-17. Should each approval-walk item carry a lasting `#approval_walk_item_id` line?
-18. GHI 2505 is not the first slice: the tool contract and runner are built first, then background work, then GHI 2505's approval-walk half as the first large machine, and its pull-request half follows.
-19. Does the user's approval of this page's direction cover later edits made from a general instruction, or does each wiki edit still need his review? He said on 2026-11-23: "we may have to change the rule".
+4. If a resumed `claude -p` agent does not show in Remote Control, how does the user reach an agent inside a node?
+5. Each state-machine-run's record is one JSONL file in the log-store on ned-box; a state-machine-run on the Mac waits while ned-box cannot be reached.
+6. When a detached task passes its wait-limit, does the machine keep waiting, stop and rerun the task, or ask the user?
+7. A transition has no general guard; a loop limit is the only condition on it, and a node that must choose from data reports a different output state.
+8. The runner's schema check rests on the user's approval of item 4; no node adds its own validation, and `CLAUDE.md`'s two conditions for a guard stay as they are.
+9. Should the code-prompt-code bullet of `CLAUDE.md` name its two kinds, cpc-tool and cpc-node?
+10. Should create-GHI and edit-GHI write their own rerun task, reversing the user-ruling of 2026-10-10?
+11. Did the user's remark "The code prompt code, it seems like it's just adding some formalism" point at the term? Items 10.1 and 10.2 have since kept and extended the term.
+12. Should one shared function print a test file's verdict line and exit with its code?
+13. Should the shared skip function take the cause from a fixed set and write the reason's opening itself?
+14. Should the approval-walk's check program hand out its bookkeeping one step at a time, each step validated before the next?
+15. Should a Stop hook refuse to end a turn until a discussion that changes a waiting approval-walk item is in the walk-minutes, with the session-handoff deferred until then?
+16. Should each approval-walk item carry a lasting `#approval_walk_item_id` line?
+17. GHI 2505 is not the first slice: the tool contract and runner are built first, then background work, then GHI 2505's approval-walk half as the first large machine, and its pull-request half follows.
+18. Does the user's approval of this page's direction cover later edits made from a general instruction, or does each wiki edit still need his review? He said on 2026-11-23: "we may have to change the rule".
