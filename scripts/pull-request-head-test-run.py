@@ -306,9 +306,9 @@ def main(argv=None, now=None, monotonic=time.monotonic) -> int:
                         f"line, because it may be hung; a subagent tells the agent that "
                         f"dispatched it.\n"
                         f"When it lists none for that pull request, run scripts/merge-lane-pull-"
-                        f"request-head-test-run-on-merged-worktree.py with that number and the "
-                        f"options the last run had, even if you started this program directly, "
-                        f"because only that program rebuilds this checkout before it tests.")
+                        f"request-head-test-run-on-merged-worktree.py again with that pull request "
+                        f"number and the options you gave it, because it rebuilds this checkout "
+                        f"before it tests.")
         return EXIT_CHECKOUT_REFUSED
     differing, why_status_failed = first_tracked_file_that_differs(checkout)
     if why_status_failed is not None:
