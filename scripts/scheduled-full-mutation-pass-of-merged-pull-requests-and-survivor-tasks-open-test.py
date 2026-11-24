@@ -153,6 +153,10 @@ class Fixture:
         self.program.write_text(FAKE_MUTATION_TESTING_PROGRAM)
         self.plan_file = self.root / "plan.json"
         self.plan_file.write_text("{}")
+        # The real table no longer schedules this program; a case's own flag overrides this one.
+        self.schedule_file = self.root / "default-scheduled-jobs.json"
+        self.schedule_file.write_text(json.dumps({"jobs": [
+            {"name": job.PROGRAM, "on": {"ned-box": {"schedule": "30 0 * * *"}}}]}))
 
     def commit(self, path, text, author="tester"):
         (self.work / path).parent.mkdir(parents=True, exist_ok=True)
@@ -175,7 +179,8 @@ class Fixture:
                 "--task-lists-directory", str(self.tasks),
                 "--agent-seats-directory", str(self.agents),
                 "--cosmic-ray-venv", str(self.venv),
-                "--mutation-testing-program", str(self.program)]
+                "--mutation-testing-program", str(self.program),
+                "--scheduled-jobs-on-each-machine-json-file", str(self.schedule_file)]
 
     def run(self, plan=None, *flags, timeout_seconds=None, output=None):
         if plan is not None:

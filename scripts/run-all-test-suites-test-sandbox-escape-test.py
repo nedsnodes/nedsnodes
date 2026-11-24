@@ -26,6 +26,7 @@ Run: python3 scripts/run-all-test-suites-test-sandbox-escape-test.py   (exit 0 =
 """
 
 import contextlib
+import errno
 import importlib.util
 import json
 import os
@@ -371,13 +372,32 @@ DEV_SHM_TARGET_NAME_PATTERN = re.compile(PROBE_FILE_NAME)
 RUNTIME_TARGET_NAME_PATTERN = re.compile(rf"{RUN_NAME}\.sock|{PROBE_FILE_NAME}")
 
 
-def has_the_file_type_run_probe_makes(path, target_name_pattern):
-    mode = os.lstat(path).st_mode
+def file_type_test_for_what_run_probe_makes(path, target_name_pattern):
+    """The stat module's test for the file type run_probe makes under this name."""
     if target_name_pattern is TMUX_TARGET_NAME_PATTERN or path.name.endswith(".sock"):
-        return stat.S_ISSOCK(mode)
+        return stat.S_ISSOCK
     if path.name.endswith("-probe"):
-        return stat.S_ISREG(mode)
-    return stat.S_ISDIR(mode)
+        return stat.S_ISREG
+    return stat.S_ISDIR
+
+
+def target_name_pattern_by_directory_run_probe_sweeps(writable_directories, home, runtime):
+    """The directories run_probe sweeps for what killed runs left, each once, keyed by its
+    path as a string, with the name pattern of what run_probe makes there."""
+    fixed = {
+        home: HOME_TARGET_NAME_PATTERN,
+        home / ".cache": CACHE_TARGET_NAME_PATTERN,
+        "/tmp": TMP_TARGET_NAME_PATTERN,
+        pathlib.Path("/tmp") / f"tmux-{os.getuid()}": TMUX_TARGET_NAME_PATTERN,
+        "/var/tmp": VAR_TMP_TARGET_NAME_PATTERN,
+        "/dev/shm": DEV_SHM_TARGET_NAME_PATTERN,
+        runtime: RUNTIME_TARGET_NAME_PATTERN,
+    }
+    return {
+        **{str(pathlib.Path(directory)): re.compile(PROBE_FILE_NAME)
+           for directory in writable_directories},
+        **{str(pathlib.Path(directory)): pattern for directory, pattern in fixed.items()},
+    }
 
 
 def remove_targets_left_by_ended_runs(target_name_pattern_by_directory):
@@ -407,15 +427,18 @@ def remove_targets_left_by_ended_runs(target_name_pattern_by_directory):
                     pass
                 except PermissionError:
                     continue
-            # Another run starting at the same time may remove the same path first.
+            is_the_type_run_probe_makes = file_type_test_for_what_run_probe_makes(
+                path, target_name_pattern)
+            # Another run starting at the same time may remove the same path first, or put a
+            # directory where this run found a socket or file, which unlink then refuses.
             try:
-                if not has_the_file_type_run_probe_makes(path, target_name_pattern):
+                if not is_the_type_run_probe_makes(os.lstat(path).st_mode):
                     continue
-                if stat.S_ISDIR(os.lstat(path).st_mode):
+                if is_the_type_run_probe_makes is stat.S_ISDIR:
                     shutil.rmtree(path)
                 else:
                     path.unlink()
-            except FileNotFoundError:
+            except (FileNotFoundError, IsADirectoryError):
                 continue
             removed.append(str(path))
     return removed
@@ -466,16 +489,8 @@ def run_probe(scratch):
     name = f"{TARGET_NAME_PREFIX}{os.getpid()}"
     writable_directories = [*runner.directories_this_account_can_create_files_in_hidden_in_test_sandbox(),
                             str(home)]
-    left = remove_targets_left_by_ended_runs({
-        **{directory: re.compile(PROBE_FILE_NAME) for directory in writable_directories},
-        home: HOME_TARGET_NAME_PATTERN,
-        home / ".cache": CACHE_TARGET_NAME_PATTERN,
-        "/tmp": TMP_TARGET_NAME_PATTERN,
-        pathlib.Path("/tmp") / f"tmux-{os.getuid()}": TMUX_TARGET_NAME_PATTERN,
-        "/var/tmp": VAR_TMP_TARGET_NAME_PATTERN,
-        "/dev/shm": DEV_SHM_TARGET_NAME_PATTERN,
-        runtime: RUNTIME_TARGET_NAME_PATTERN,
-    })
+    left = remove_targets_left_by_ended_runs(
+        target_name_pattern_by_directory_run_probe_sweeps(writable_directories, home, runtime))
     if left:
         print(f"removed {len(left)} target(s) runs killed before their cleanup left: "
               + ", ".join(left))
@@ -1113,6 +1128,83 @@ def check_targets_of_a_killed_run_removed_by_the_next(scratch):
         check("the next run passes over a target another run removed first",
               raised is None and not raced.exists() and str(raced) not in raced_removed,
               (raised, raced_removed))
+
+        # Another run puts a directory where this run's lstat found a probe file.
+        replaced = scratch / "probe-replaced-by-a-directory" / f"{killed}-probe"
+        replaced.mkdir(parents=True)
+        (replaced / "kept.txt").write_text("kept\n")
+        regular_file_status = os.lstat(__file__)
+        real_lstat = os.lstat
+
+        real_unlink = pathlib.Path.unlink
+
+        def lstat_seeing_a_file_where_a_directory_now_is(path, *arguments, **keywords):
+            if pathlib.Path(path) == replaced:
+                return regular_file_status
+            return real_lstat(path, *arguments, **keywords)
+
+        # Linux's error, injected, since macOS refuses with EPERM, which the sweep must not
+        # swallow.
+        def unlink_refusing_a_directory_as_linux_does(self, *arguments, **keywords):
+            if self == replaced:
+                raise IsADirectoryError(errno.EISDIR, os.strerror(errno.EISDIR), str(self))
+            return real_unlink(self, *arguments, **keywords)
+
+        os.lstat = lstat_seeing_a_file_where_a_directory_now_is
+        pathlib.Path.unlink = unlink_refusing_a_directory_as_linux_does
+        try:
+            replaced_removed = remove_targets_left_by_ended_runs(
+                {replaced.parent: re.compile(PROBE_FILE_NAME)})
+            raised = None
+        except OSError as error:
+            replaced_removed, raised = [], error
+        finally:
+            os.lstat = real_lstat
+            pathlib.Path.unlink = real_unlink
+        check("the next run never removes recursively a directory put where it found a probe "
+              "file",
+              raised is None and (replaced / "kept.txt").exists()
+              and str(replaced) not in replaced_removed, (raised, replaced_removed))
+
+        # The sweep cannot remove a stale directory a killed run left.
+        unremovable = cache / f"{killed}-log"
+        unremovable.mkdir()
+
+        def rmtree_refused(path, *arguments, **keywords):
+            raise PermissionError(errno.EACCES, os.strerror(errno.EACCES), str(path))
+
+        shutil.rmtree = rmtree_refused
+        try:
+            remove_targets_left_by_ended_runs({cache: CACHE_TARGET_NAME_PATTERN})
+            raised = None
+        except PermissionError as error:
+            raised = error
+        finally:
+            shutil.rmtree = real_rmtree
+        check("the next run fails when it cannot remove a stale directory a killed run left",
+              raised is not None, raised)
+        real_rmtree(unremovable)
+        shutil.rmtree(replaced)
+
+        # The map is built as run_probe builds it, from a simulated writable-directory scan.
+        scan_found = scratch / "scan-found"
+        scan_found.mkdir()
+        stale_probe = scan_found / f"{killed}-probe"
+        stale_probe.write_text("")
+        runtime = scratch / "runtime"
+        swept = target_name_pattern_by_directory_run_probe_sweeps(
+            [str(scan_found), str(home)], home, runtime)
+        check("run_probe's map names each directory once, the home directory with the "
+              "pattern of what run_probe makes there",
+              len({pathlib.Path(directory) for directory in swept}) == len(swept)
+              and swept.get(str(home)) is HOME_TARGET_NAME_PATTERN, sorted(map(str, swept)))
+        scan_found_removed = remove_targets_left_by_ended_runs(
+            {directory: pattern for directory, pattern in swept.items()
+             if pathlib.Path(directory).is_relative_to(scratch)})
+        check("the next run removes a probe file a killed run left in a directory the "
+              "writable-directory scan found",
+              not stale_probe.exists() and str(stale_probe) in scan_found_removed,
+              scan_found_removed)
     finally:
         running.kill()
         running.wait()
