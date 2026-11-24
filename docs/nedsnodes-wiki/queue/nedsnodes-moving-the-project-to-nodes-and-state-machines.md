@@ -140,7 +140,7 @@ The runner validates each node's output against the input schema of the node tha
 
 **Many machines at once.** Each agent can run one or more machines, so every state-machine-run keeps its own record and shares no in-memory state with another.
 
-**Parallel work.** The user described this as "Lua-like cooperative multi-threading". A `parallel` node starts its branches as child processes. No runner process waits at the join: `next` records the branches and returns, and a later `next` collects those that finished. A timeout on each branch catches a process that dies or never returns. The node ends in `all-succeeded`, `some-failed` or `timed-out`. For example, a cold-read-full-run starts its cold-read-cells this way. What calls that later `next` is open question 4.
+**Parallel work.** The user described this as "Lua-like cooperative multi-threading". A `parallel` node starts its branches as child processes. No runner process waits at the join: `next` records the branches and returns, and a later `next` collects those that finished. A timeout on each branch catches a process that dies or never returns. The node ends in `all-succeeded`, `some-failed` or `timed-out`. For example, a cold-read-full-run starts its cold-read-cells this way. What calls that later `next` is open question 4. How a machine treats a failed or late branch of its parallel node, such as whether five of seven cold-read reports are enough, is decided when that machine is designed, not by one rule for every parallel node.
 
 **Handoff.** The handoff-system lists an agent-seat's unfinished state-machine-runs for its successor, which continues each one with `next` (item 4).
 
