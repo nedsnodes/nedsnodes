@@ -2847,6 +2847,17 @@ def test_an_unnumbered_item_is_numbered_when_it_is_shown_and_nothing_else_is_ren
           walk_document(case))
 
 
+def test_an_item_numbered_past_a_number_gone_from_the_walk_document_is_not_numbered_past_m():
+    document = ("# A walk\n\n## Item 1 of 3: one\n\n#case_against none.\n\n## Item 3 of 3: three\n\n#case_against none.\n\n"
+                f"## four\n\n{FIX_NEXT_LINE}\n\n#case_against none.\n")
+    case = Case(next_to_present="item 3 of 3", document=document)
+    case.run("check")
+    closed = case.run("close")
+    check("with item 2's heading gone, close numbers the next unnumbered item 4 of 4, not 4 of 3",
+          closed.returncode == 0 and marker(case) == "#next_to_present item 4 of 4"
+          and "\n## Item 4 of 4: four\n" in walk_document(case), described(closed) + walk_document(case))
+
+
 def test_an_unnumbered_summary_heading_is_the_summary_item():
     case = Case(next_to_present="item 1 of 4", document=UNNUMBERED_ITEMS_DOCUMENT)
     case.run("check")

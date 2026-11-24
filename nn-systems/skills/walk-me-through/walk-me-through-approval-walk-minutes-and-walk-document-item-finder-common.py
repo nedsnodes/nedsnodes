@@ -927,6 +927,15 @@ def approval_walk_next_unnumbered_item_number(units):
     return str(max((int(number.split(".")[0]) for unit in units for number in unit[0]), default=0) + 1)
 
 
+def approval_walk_item_total_once_next_unnumbered_item_is_numbered(units):
+    """M, as a string, for the next unnumbered item: the counted M, raised when a number has left the walk-document,
+    because the next number then runs past the count, so that every item still unnumbered fits under M."""
+    next_number = int(approval_walk_next_unnumbered_item_number(units))
+    unnumbered = sum(map(approval_walk_unit_is_unnumbered_item, units))
+    return str(max(int(approval_walk_item_total_shown_and_waiting_counted_from_walk_document(units)),
+                   next_number + unnumbered - 1))
+
+
 def waiting_item_units(document, value, numbers, total, parser, all_units=None):
     """Return (M to show, the units of item_unit_spans that hold the waiting items) for the item numbers and
     total that parse_items read from the `#next_to_present` value, total None when it gives none. M to show is
