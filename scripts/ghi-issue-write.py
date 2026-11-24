@@ -1477,8 +1477,13 @@ def report_ruling_question(number: int, operation_done: str, recorded,
         "Dispatch a forked subagent now to settle the entry in that file by "
         f"{PROPOSED_IMPROVEMENTS_OR_CHANGES_FILE_ENTRIES_SETTLING_SUBAGENT_INSTRUCTIONS}; do not "
         "wait for the user's answer.",
-        "If the subagent marks the entry as needing the user, bring the "
-        "entry to him in your agent-seat's next approval-walk."]
+        "If the subagent marks the entry as needing the user, the agent-seat "
+        "that owns the GHI-MD brings the entry to him in its next "
+        "approval-walk; when the GHI-MD has no plain owner, such as a closed "
+        "one, that is your agent-seat.",
+        "If the subagent also reports that another agent-seat owns the "
+        "GHI-MD, send that agent-seat the entry's citation above with "
+        "SendMessage."]
     report("\n".join(lines))
 
 

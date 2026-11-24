@@ -1984,8 +1984,13 @@ def run_cases(scratch: Path):
                       "that file by "
                       "docs/agents/queue/proposed-improvements-or-changes-file-reviewer-entries-settling-subagent-instructions.md; do not wait for the user's answer.\n"
                       "If the subagent marks the entry as needing the user, "
-                      "bring the entry to him in your agent-seat's next "
-                      "approval-walk.")
+                      "the agent-seat that owns the GHI-MD brings the entry "
+                      "to him in its next approval-walk; when the GHI-MD has "
+                      "no plain owner, such as a closed one, that is your "
+                      "agent-seat.\n"
+                      "If the subagent also reports that another agent-seat "
+                      "owns the GHI-MD, send that agent-seat the entry's "
+                      "citation above with SendMessage.")
                   and not clean_create.ran("gh issue comment"),
                   (clean_create.commands(), create_lines[-1:]))
         except Exception as other:                    # noqa: BLE001
