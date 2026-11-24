@@ -1915,6 +1915,48 @@ try:
           and (clean_removed_repository / "tracked.md").read_text(encoding="utf-8") == "Committed.\n"
           and clean_removed_git("status", "--porcelain").stdout == "", repr(clean_removed_lines))
 
+    # A clean file renamed and re-created: status lists its name as a rename source and as ??.
+    renamed_repository, renamed_git = repository_with_committed_file("checkout-stopped-cell-renames-a-clean-file")
+    with mock.patch.object(grid_module.cell_common, "REPO_ROOT", renamed_repository):
+        renamed_baseline = grid_module.cell_common.working_tree_state()
+        renamed_git("mv", "tracked.md", "moved.md")
+        (renamed_repository / "tracked.md").write_text("A reviewer's new file.\n", encoding="utf-8")
+        renamed_lines = grid_module.stopped_cells_write_check_lines(
+            [scratch / "claude-hunt-deep.md"], renamed_baseline, None, set())
+    renamed_commands = [command for line in renamed_lines for command in commands_in_line(line)]
+    renamed_removals = [line for line in renamed_lines if "rm -r -- " in line]
+    for command in renamed_commands:
+        subprocess.run(shlex.split(command), capture_output=True, text=True)
+    check("the undo given for a clean file renamed and re-created restores it and removes the rename's new name",
+          len(renamed_lines) == 2 and len(renamed_commands) == 2 and not renamed_removals
+          and (renamed_repository / "tracked.md").read_text(encoding="utf-8") == "Committed.\n"
+          and not (renamed_repository / "moved.md").exists()
+          and renamed_git("status", "--porcelain").stdout == "", repr(renamed_lines))
+
+    # A rename source's restore must read a glob-named path literally, or it discards a neighbor's edits.
+    renamed_glob_repository, renamed_glob_git = repository_with_committed_file(
+        "checkout-stopped-cell-renames-a-glob-named-file")
+    (renamed_glob_repository / "ch[1].md").write_text("Committed bracket chapter.\n", encoding="utf-8")
+    (renamed_glob_repository / "ch1.md").write_text("Committed plain chapter, other words.\n", encoding="utf-8")
+    renamed_glob_git("add", "ch[1].md", "ch1.md")
+    renamed_glob_git("commit", "--quiet", "-m", "chapters")
+    (renamed_glob_repository / "ch1.md").write_text("The agent's uncommitted edit.\n", encoding="utf-8")
+    with mock.patch.object(grid_module.cell_common, "REPO_ROOT", renamed_glob_repository):
+        renamed_glob_baseline = grid_module.cell_common.working_tree_state()
+        renamed_glob_git("mv", "--", "ch[1].md", "moved.md")
+        (renamed_glob_repository / "ch[1].md").write_text("A reviewer's new file.\n", encoding="utf-8")
+        renamed_glob_lines = grid_module.stopped_cells_write_check_lines(
+            [scratch / "claude-hunt-deep.md"], renamed_glob_baseline, None, set())
+    renamed_glob_commands = [command for line in renamed_glob_lines for command in commands_in_line(line)]
+    for command in renamed_glob_commands:
+        subprocess.run(shlex.split(command), capture_output=True, text=True)
+    check("the undo given for a glob-named file renamed and re-created keeps a matching file's uncommitted edits",
+          len(renamed_glob_commands) == 2
+          and all(" restore " in command for command in renamed_glob_commands)
+          and (renamed_glob_repository / "ch[1].md").read_text(encoding="utf-8") == "Committed bracket chapter.\n"
+          and (renamed_glob_repository / "ch1.md").read_text(encoding="utf-8") == "The agent's uncommitted edit.\n"
+          and not (renamed_glob_repository / "moved.md").exists(), repr(renamed_glob_lines))
+
     # A glob character in a path must not widen the undo to a file with uncommitted edits.
     glob_repository, glob_git = repository_with_committed_file("checkout-stopped-cell-unstages-a-glob-named-file")
     (glob_repository / "chapter[1].md").write_text("Committed.\n", encoding="utf-8")
