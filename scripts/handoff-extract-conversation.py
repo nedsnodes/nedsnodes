@@ -384,7 +384,7 @@ CONVERSATION_TAIL_QUEUED_USER_MESSAGES_NEVER_READ_BY_AGENT_INTRODUCTION = (
     "Queued before the handoff and never read by your predecessor, whose turns below were written without it; "
     "treat each message of this turn as a reply to the dialog above it."
 )
-CONVERSATION_TAIL_QUEUED_USER_MESSAGES_TYPED_BEFORE_FIRST_SHOWN_TURN_INTRODUCTION = (
+CONVERSATION_TAIL_UNREAD_QUEUED_USER_MESSAGE_TYPED_BEFORE_FIRST_SHOWN_TURN_INTRODUCTION_LINE_TEXT = (
     "Queued before the handoff and never read by your predecessor, whose turns below were written without it; "
     "it was typed before the first turn shown here, so what it answers is in the complete dialog named at the end."
 )
@@ -743,7 +743,7 @@ def render_extraction(turns, report: ExtractionReport) -> str:
         typed_before_turn = [message for message in unread if message["enqueue_line"] < turn.get("line_index", -1)]
         lines += rendered_unread_queued_messages(
             typed_before_turn,
-            CONVERSATION_TAIL_QUEUED_USER_MESSAGES_TYPED_BEFORE_FIRST_SHOWN_TURN_INTRODUCTION if position == 0
+            CONVERSATION_TAIL_UNREAD_QUEUED_USER_MESSAGE_TYPED_BEFORE_FIRST_SHOWN_TURN_INTRODUCTION_LINE_TEXT if position == 0
             else CONVERSATION_TAIL_QUEUED_USER_MESSAGES_NEVER_READ_BY_AGENT_INTRODUCTION)
         unread = unread[len(typed_before_turn):]
         lines += render_turn(turn)

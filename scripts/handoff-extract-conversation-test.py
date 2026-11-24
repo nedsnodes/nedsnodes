@@ -826,7 +826,7 @@ with tempfile.TemporaryDirectory() as workspace:
     output = Path(workspace) / "seat-dialog-0007.md"
     extractor.main(["--transcript-path", str(path), "--output", str(output)])
     tail = output.read_text(encoding="utf-8")
-    before_tail_introduction = extractor.CONVERSATION_TAIL_QUEUED_USER_MESSAGES_TYPED_BEFORE_FIRST_SHOWN_TURN_INTRODUCTION
+    before_tail_introduction = extractor.CONVERSATION_TAIL_UNREAD_QUEUED_USER_MESSAGE_TYPED_BEFORE_FIRST_SHOWN_TURN_INTRODUCTION_LINE_TEXT
     check("a reply typed before the first shown turn says that what it answers is outside the tail",
           "Approve the early change?" not in tail and f"{before_tail_introduction}\n\nearly reply" in tail
           and INTRODUCTION not in tail, tail)
