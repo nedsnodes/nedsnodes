@@ -8,7 +8,7 @@ An entry's State line says which of three states it is in: `State: open`, `State
 
 ## Change the file only through its program
 
-Change the file only with `scripts/proposed-improvements-or-changes-file-entry-state-try-and-second-agent-verdict-lines-write.py`; never edit it by hand. The program changes only an entry's State line, its Try lines and its "Second agent:" lines, stamps each line with the time, counts the tries, and refuses what rules 4 and 5 forbid. Its docstring lists its subcommands.
+Change the file only with `scripts/proposed-improvements-or-changes-file-entry-state-try-and-second-agent-verdict-lines-write.py`; never edit it by hand. The program changes only an entry's State line, its Try lines, its "Second agent:" lines and its User-ruling lines, stamps each line with the time, counts the tries, and refuses what rules 4 and 5 forbid. Its docstring lists its subcommands.
 
 - Name the file as the agent that dispatched you named it, such as `nedlern@ned-box:/home/nedlern/nedsnodes-logs/ghi-guide-agent-proposed-improvements-or-changes/<name>.md`.
 - When you are not on ned-box, the program refuses and prints an `ssh nedlern@ned-box` command with your arguments already quoted; run that command as printed.
