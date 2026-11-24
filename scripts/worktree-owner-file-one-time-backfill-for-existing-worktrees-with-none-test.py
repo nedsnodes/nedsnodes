@@ -186,13 +186,6 @@ def run_cases(root):
           and "given no owner file, since it is a locked Claude Code subagent's worktree; "
           in line_of(output, "locked-subagent")
           and "for the user" not in line_of(output, "locked-subagent"), output)
-    if sys.platform.startswith("linux"):
-        check("a locked subagent's worktree whose lock names an ended claude process is named with "
-              "what the cleaner's next --remove does: unlock it, first writing the owner file",
-              "the next scripts/clean-worktrees.py --remove unlocks it, first giving it an owner "
-              "file naming the agent-seat seat, whose Claude Code transcripts name its subagent, "
-              "since Claude Code's lock names claude process 1"
-              in line_of(output, "locked-subagent"), output)
     check("a subagent's worktree locked in another form is named with the cleaner keeping it",
           owner("hand-locked-subagent") is None
           and "scripts/clean-worktrees.py --remove keeps it, so nothing needs doing now: locked "

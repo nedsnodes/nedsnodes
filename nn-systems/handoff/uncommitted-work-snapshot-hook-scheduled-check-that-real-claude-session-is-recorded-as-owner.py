@@ -20,12 +20,11 @@ nn-systems/general-tools/scheduled-jobs-on-each-machine.json.
 
 WHAT ONE RUN DOES, in order.
 
-  1. Makes a scratch clone holding the hook and the four modules it needs:
-     nn-systems/handoff/uncommitted-work-snapshots.py and
-     scripts/worktree-owner-file-read-and-write.py, which the hook loads, and
+  1. Makes a scratch clone holding the hook and the three modules it needs:
+     nn-systems/handoff/uncommitted-work-snapshots.py, which the hook loads, and
      nn-systems/general-tools/git-machine-readable-output-runner-and-parser-common.py
      and nn-systems/general-tools/agent-seat-task-list-new-pending-task-write-common.py,
-     which the first of those loads. The clone has one commit and sits in a
+     which that module loads. The clone has one commit and sits in a
      temporary directory.
   2. Runs `claude -p` on Haiku from that clone, with the hook registered for
      Bash calls through --settings, and asks it to run one shell command that
@@ -84,7 +83,6 @@ SYSTEM_DIRECTORY = Path(__file__).resolve().parent
 REPOSITORY_ROOT = SYSTEM_DIRECTORY.parent.parent
 MODULE_RELATIVE = Path("nn-systems/handoff/uncommitted-work-snapshots.py")
 HOOK_RELATIVE = Path("scripts/uncommitted-work-snapshot-hook.py")
-OWNER_FILE_MODULE_RELATIVE = Path("scripts/worktree-owner-file-read-and-write.py")
 GIT_OUTPUT_MODULE_RELATIVE = Path(
     "nn-systems/general-tools/git-machine-readable-output-runner-and-parser-common.py")
 TASK_WRITE_MODULE_RELATIVE = Path(
@@ -139,7 +137,7 @@ def default_claude_program():
 def make_scratch_clone(clone):
     git(clone.parent, "init", "-q", str(clone))
     for relative in (MODULE_RELATIVE, HOOK_RELATIVE, GIT_OUTPUT_MODULE_RELATIVE,
-                     TASK_WRITE_MODULE_RELATIVE, OWNER_FILE_MODULE_RELATIVE):
+                     TASK_WRITE_MODULE_RELATIVE):
         (clone / relative).parent.mkdir(parents=True, exist_ok=True)
         shutil.copy2(REPOSITORY_ROOT / relative, clone / relative)
     (clone / ".gitignore").write_text("__pycache__/\n")
