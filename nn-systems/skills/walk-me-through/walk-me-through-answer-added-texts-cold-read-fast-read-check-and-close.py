@@ -22,6 +22,7 @@ Usage, from the agent-session's checkout:
   walk-me-through-answer-added-texts-cold-read-fast-read-check-and-close.py approval-walk-waiting-item-cold-read-fast-read
       [--after-fixes-reread-only-when-facts-change]
       [--possibly-stale-system-status-claims-rechecked WHAT_YOU_RAN_AND_WHEN]
+      [--no-answer-table-row-outcome 'ROW=declined: REASON' ...]
 
 The answer is an approval, A, unless a flag says otherwise: --obvious for AO,
 --after-advisor for Aa, --disapproved for D, --deferred for Z, --option 2 or 3
@@ -120,7 +121,8 @@ split off as a word of its own; every
 spelling ignores case and matches even inside a longer name, so `poem-list` is
 also found in `poem_list_path`, `POEM_LIST` and `PoemList`, `sha256_of` in
 `sha256_of_file`, and `reader` in `Reader` and `readers`. A
-failed check is refused, writing nothing, with every problem listed; a `git
+failed check is refused, writing nothing to the walk-minutes, with every problem listed, and
+records the row declined, as NO-ANSWER TABLE ROW OUTCOMES below says; a `git
 grep` that fails is a failure too. Otherwise CHECK fast-reads the `#new` texts as
 for A, writes the line `<item>: settled without asking the user, not asked,
 kind KIND #case_against_<rating> (...)`, and tells the agent to ask the advisor
@@ -397,7 +399,25 @@ For a waiting item that asks a decision and is rated none or weak, the step
 first prints the rows of the no-answer table the item could settle by: each row
 whose evidence passes, with its command, and each row that fails only because an
 evidence line is missing, naming the line to add and the command to run after
-adding it. A row whose check cannot run is reported and not offered.
+adding it. A row whose check cannot run is reported and not offered. Each row
+printed ends with its row id, its `--not-asked` value, or `handoff-internals`.
+
+NO-ANSWER TABLE ROW OUTCOMES. The step hands the item over, as FINDING
+OUTCOMES below says, only when every row it printed has a recorded outcome for
+the item's text as it stands: the agent either runs the row's command, whose
+settling of the item moves `#next_to_present` on so that the step never hands
+this item over, or records the row declined. Otherwise it prints the read step
+command with one `--no-answer-table-row-outcome '<row id>=declined: <reason>'`
+for each row without an outcome, and exits 1. Given that flag, the step first
+records the outcomes, refusing, with nothing recorded, a list that leaves out a
+printed row with no outcome, names a row not printed or already recorded, names
+a row twice or gives a value not written that way. A `check --not-asked`
+refusal listing the item's problems records that row declined, citing the
+refusal; when that record cannot be written, check says so and the agent
+records the row itself. Outcomes are kept in
+`<key>-no-answer-table-row-outcomes.json` beside the read's outcome, `<key>`
+being the sha256 of the item's text, so a changed item's rows are answered
+again.
 
 The step, in both forms, reads no item and does not say to present it when
 the waiting item is one item that asks a decision, a line holding
@@ -429,7 +449,8 @@ is always with the latest text read, wording fixes each let pass cannot add up
 to a changed fact unread.
 
 FINDING OUTCOMES. The step hands the item over, printing the line that tells
-the agent to present it, only when the report of the read it uses, the item's
+the agent to present it, only when every no-answer table row it printed has its
+outcome, as above, and the report of the read it uses, the item's
 latest read of its current text, has no finding without a recorded outcome,
 as nn-systems/cold-read/cold-read-fast-read-report-findings-parse-and-finding-outcomes-check-common.py finds
 findings and reads the outcomes file in the report's cold-read-record. A read
@@ -1186,10 +1207,11 @@ UNREADABLE_COMMENT_CUT = ("- line {line}: the line of `{mark}` holds `<!--`, so 
                           "HTML comment, even inside a code span, and would not read the line as written.")
 UNREADABLE_JOINED = " The mark's line with its text joined onto it: {mark} {text}"
 NOT_ASKED_REFUSED = (
-    "nothing written: {item} cannot be settled without asking the user as {label}, because:\n{problems}\n"
-    "If the item does not fit {label}, or the case against names anything besides {grounds}, present {item} to the "
-    "user as "
-    "usual, then run check with the flag for his answer, as `--help` lists it.\n"
+    "nothing written to the walk-minutes: {item} cannot be settled without asking the user as {label}, because:\n"
+    "{problems}\n"
+    "If the item does not fit {label}, or the case against names anything besides {grounds}, run the read step "
+    "again and do what it prints before you present {item} to the user, then run check with the flag for his "
+    "answer, as `--help` lists it.\n"
     "If the item fits and only its evidence lines are missing or wrong, fix them in {document} and run "
     "`{command}` again.")
 NOT_ASKED_WEAK_GROUND_NOT_NAMED = (
@@ -2408,14 +2430,17 @@ def check(arguments):
                 command=check_command_with_cwd(top, "--not-asked", NOT_ASKED_RATED_NONE)))
         problems = not_asked_problems(arguments.not_asked, rating, lines, marks, top, item)
         if problems:
-            raise Failure(NOT_ASKED_REFUSED.format(item=item, kind=arguments.not_asked,
+            raise Failure("\n".join([NOT_ASKED_REFUSED.format(item=item, kind=arguments.not_asked,
                                                    label=not_asked_label(arguments.not_asked),
                                                    grounds=NOT_ASKED_GROUNDS.get(arguments.not_asked,
                                                                                  NOT_ASKED_EITHER_GROUND),
                                                    problems="\n".join(problems),
                                                    document=document,
                                                    command=check_command_with_cwd(top, "--not-asked",
-                                                                                  str(arguments.not_asked))))
+                                                                                  str(arguments.not_asked))),
+                                     no_answer_table_row_refusal_recorded_line(
+                                         walk_finder, minutes, value, numbers, total, parser, item,
+                                         str(arguments.not_asked))]))
     texts = proposed_texts(marks, marks_the_answer_adds(arguments))
     log_store_records, tried = (None, []) if arguments.cold_read_records and arguments.counts_log \
         else reachable_log_store_records()
@@ -2860,45 +2885,148 @@ def settling_left_unclosed(walk_finder, minutes, parser, named):
 
 
 NO_ANSWER_ROWS_HEADING = ("Rows of the no-answer table {item} could settle by; if a row's meaning fits {item}, do "
-                          "what its line says instead of presenting it; if none fits, present it:")
-NO_ANSWER_ROW_PASSES = "- {label}: {meaning}. Its evidence passes: run `{command}` and do what it prints."
+                          "what its line says instead of presenting it:")
+NO_ANSWER_ROW_PASSES = ("- {label}: {meaning}. Its evidence passes: run `{command}` and do what it prints. Row id: "
+                        "`{row}`.")
 NO_ANSWER_ROW_LINE_MISSING = ("- {label}: {meaning}. Only evidence is missing: {missing} Add it to {document}, then "
-                              "run `{command}` and do what it prints.")
-NO_ANSWER_ROW_NOT_CHECKED = ("- {label}: its evidence could not be checked, so it is not offered; present {item} "
-                             "unless another row fits: {error}")
+                              "run `{command}` and do what it prints. Row id: `{row}`.")
+NO_ANSWER_ROW_NOT_CHECKED = ("- {label}: its evidence could not be checked, so it is not offered; decline it unless "
+                             "you fix what stopped the check: {error} Row id: `{row}`.")
+NO_ANSWER_TABLE_ROW_OUTCOME_FLAG = "--no-answer-table-row-outcome"
+NO_ANSWER_TABLE_ROW_OUTCOMES_FILE_SUFFIX = "-no-answer-table-row-outcomes.json"
+NO_ANSWER_TABLE_ROW_DECLINED = re.compile(r"^\s*([^=\s]+)\s*=\s*declined\s*:\s*(\S.*)$", re.DOTALL)
+NO_ANSWER_TABLE_ROWS_WITHOUT_OUTCOMES = (
+    "{item} is not handed over to be presented yet: {missing} of the {count} no-answer table rows printed above "
+    "have no recorded outcome. The user is shown an item only once each row printed for it is either run, which "
+    "settles the item without him, or declined with a reason.")
+NO_ANSWER_TABLE_ROW_OUTCOMES_COMMAND_LINES = (
+    "For each row whose meaning fits {item}, run its command instead; a command that settles {item} ends this step's "
+    "work on it, and a refusal of `check --not-asked` is recorded as that row declined by check itself.",
+    "For the rows that do not fit, run the command below, with your reason in place of each `<reason>`, keeping the "
+    "single quotes; it refuses a list that leaves out a row with no outcome or names a row not printed above, and "
+    "then hands {item} over once every row has its outcome:",
+    "{outcomes_command}",
+)
+NO_ANSWER_TABLE_ROW_OUTCOMES_REFUSED = (
+    "nothing recorded: the " + NO_ANSWER_TABLE_ROW_OUTCOME_FLAG + " list for {item} is not the list of its printed "
+    "no-answer table rows that have no outcome, {rows}:\n{problems}\n"
+    "Run the step again with one " + NO_ANSWER_TABLE_ROW_OUTCOME_FLAG + " '<row id>=declined: <reason>' for each of "
+    "those rows, and none for any other.")
+NO_ANSWER_TABLE_ROW_REFUSAL_RECORDED = (
+    "This refusal is recorded as {item}'s no-answer table row `{row}` declined, in {path}, so the read step does not "
+    "ask you to decline that row again.")
+NO_ANSWER_TABLE_ROW_REFUSAL_NOT_RECORDED = (
+    "This refusal could not be recorded as {item}'s no-answer table row `{row}` declined ({error}); when the read "
+    "step asks for that row's outcome, record it declined, giving this refusal as the reason.")
 
 
 def no_answer_rows_for_waiting_item_lines(walk_finder, top, minutes, value, numbers, total, parser, named, item):
-    """The no-answer table's rows the waiting item could settle by, as the docstring's read-step paragraph says."""
+    """Return (lines, row ids): the no-answer table's rows the waiting item could settle by, as the docstring's
+    read-step paragraph says, with the id of each row printed."""
     if numbers[1:] or settling_left_unclosed(walk_finder, minutes, parser, named):
-        return []
+        return [], []
     document, lines, marks, _, _ = item_lines(walk_finder, minutes, value, numbers, total, parser)
     ratings = [CASE_AGAINST_RATING.match(match[1]) for match in map(CASE_AGAINST_LINE.match, lines) if match]
     if not (ratings and ratings[0] and any(FACT_LABELS[0] in line for line in lines)):
-        return []
+        return [], []
     rating = ratings[0][1].lower()
-    rows = []
+    rows, ids = [], []
     for case in NO_ANSWER_CASES:
         if rating not in case.ratings:
             continue
+        row = str(case.value)
         command = check_command_with_cwd(top, *no_answer_case_words(case))
         if case.flag == ALREADY_DECIDED_FLAG:
             if any(HANDOFF_INTERNALS_NAMED.search(line) for line in lines):
-                rows.append(NO_ANSWER_ROW_PASSES.format(label=case.label, meaning=case.meaning, command=command))
+                rows.append(NO_ANSWER_ROW_PASSES.format(label=case.label, meaning=case.meaning, command=command,
+                                                        row=row))
+                ids.append(row)
             continue
         try:
             problems = not_asked_problems(case.value, rating, lines, marks, top, named)
         except Failure as failure:
             rows.append(NO_ANSWER_ROW_NOT_CHECKED.format(label=case.label, item=item,
-                                                         error=getattr(failure, "reason", failure)))
+                                                         error=getattr(failure, "reason", failure), row=row))
+            ids.append(row)
             continue
         if not problems:
-            rows.append(NO_ANSWER_ROW_PASSES.format(label=case.label, meaning=case.meaning, command=command))
+            rows.append(NO_ANSWER_ROW_PASSES.format(label=case.label, meaning=case.meaning, command=command, row=row))
+            ids.append(row)
         elif all(isinstance(problem, MissingEvidenceLine) for problem in problems):
             missing = " ".join(problem.removeprefix("- ") for problem in problems)
             rows.append(NO_ANSWER_ROW_LINE_MISSING.format(label=case.label, meaning=case.meaning, missing=missing,
-                                                          document=document, command=command))
-    return [NO_ANSWER_ROWS_HEADING.format(item=item), *rows] if rows else []
+                                                          document=document, command=command, row=row))
+            ids.append(row)
+    return ([NO_ANSWER_ROWS_HEADING.format(item=item), *rows], ids) if rows else ([], [])
+
+
+def no_answer_table_row_outcomes_path(reads, text):
+    return reads / (text_key(text) + NO_ANSWER_TABLE_ROW_OUTCOMES_FILE_SUFFIX)
+
+
+def no_answer_table_row_outcomes_read(reads, text):
+    """The recorded outcome of each no-answer table row printed for the item's text, by row id."""
+    path = no_answer_table_row_outcomes_path(reads, text)
+    return json.loads(path.read_text(encoding="utf-8")) if path.is_file() else {}
+
+
+def no_answer_table_row_outcomes_record(reads, text, outcomes):
+    """Add outcomes, {row id: reason declined}, to those recorded for the item's text, and return the file."""
+    reads.mkdir(exist_ok=True)
+    path = no_answer_table_row_outcomes_path(reads, text)
+    write_json(path, {**no_answer_table_row_outcomes_read(reads, text), **outcomes})
+    return path
+
+
+def no_answer_table_row_outcomes_given(values, ids, recorded, item):
+    """Return {row id: reason} from the --no-answer-table-row-outcome values; raise Failure naming every problem
+    unless they name each printed row without an outcome once, and no other row."""
+    open_rows = [row for row in ids if row not in recorded]
+    given, problems = {}, []
+    for value in values:
+        parsed = NO_ANSWER_TABLE_ROW_DECLINED.match(value)
+        if parsed is None:
+            problems.append(f"- `{value}` is not written <row id>=declined: <reason>, with a reason after the colon.")
+        elif parsed[1] not in open_rows:
+            problems.append(f"- `{value}` names row `{parsed[1]}`, which is "
+                            + ("already recorded." if parsed[1] in recorded else "not a row printed for " + item + "."))
+        elif parsed[1] in given:
+            problems.append(f"- `{value}` gives row `{parsed[1]}` an outcome a second time.")
+        else:
+            given[parsed[1]] = parsed[2]
+    left_out = [row for row in open_rows if row not in given]
+    if left_out:
+        problems.append("- No outcome is given for row " + ", ".join(f"`{row}`" for row in left_out) + ".")
+    if problems:
+        raise Failure(NO_ANSWER_TABLE_ROW_OUTCOMES_REFUSED.format(
+            item=item, rows=", ".join(f"`{row}`" for row in open_rows) or "none", problems="\n".join(problems)))
+    return given
+
+
+def no_answer_table_row_refusal_recorded_line(walk_finder, minutes, value, numbers, total, parser, item, row):
+    """Record row as declined for the waiting item's text, since `check --not-asked` refused to settle the item by
+    it, and return the line saying so, or saying that it could not be recorded."""
+    _, text = item_text(walk_finder, minutes, value, numbers, total, parser)
+    try:
+        path = no_answer_table_row_outcomes_record(item_reads_directory(walk_finder, minutes), text,
+                                                   {row: f"`check --not-asked {row}` refused it"})
+    except OSError as error:
+        return NO_ANSWER_TABLE_ROW_REFUSAL_NOT_RECORDED.format(item=item, row=row, error=error)
+    return NO_ANSWER_TABLE_ROW_REFUSAL_RECORDED.format(item=item, row=row, path=path)
+
+
+def no_answer_table_rows_without_outcomes_lines(reads, text, ids, item, command):
+    """The lines that withhold item from being presented while a no-answer table row printed for it has no recorded
+    outcome; empty when every row has one."""
+    recorded = no_answer_table_row_outcomes_read(reads, text)
+    missing = [row for row in ids if row not in recorded]
+    if not missing:
+        return []
+    outcomes_command = " \\\n".join(
+        [command] + [f"  {NO_ANSWER_TABLE_ROW_OUTCOME_FLAG} '{row}=declined: <reason>'" for row in missing])
+    return ([NO_ANSWER_TABLE_ROWS_WITHOUT_OUTCOMES.format(item=item, missing=len(missing), count=len(ids))]
+            + [line.format(item=item, outcomes_command=outcomes_command)
+               for line in NO_ANSWER_TABLE_ROW_OUTCOMES_COMMAND_LINES])
 
 
 def unclosed_last_answer(walk_finder, minutes, parser):
@@ -3000,6 +3128,12 @@ def waiting_item_read(arguments, sub_step_of=None):
     if rated_none_item_not_to_be_shown(walk_finder, top, minutes, value, numbers, total, parser, named) is None:
         recheck_line = approval_walk_item_system_status_claims_not_rechecked_refused(
             text, item, document, rerun, rechecked)
+    # Printed after the step's first line, which names the report, and before the closing lines the agent acts on.
+    no_answer_rows, row_ids = no_answer_rows_for_waiting_item_lines(walk_finder, top, minutes, value, numbers, total,
+                                                                    parser, named, item)
+    if arguments.no_answer_table_row_outcome:
+        no_answer_table_row_outcomes_record(reads, text, no_answer_table_row_outcomes_given(
+            arguments.no_answer_table_row_outcome, row_ids, no_answer_table_row_outcomes_read(reads, text), item))
     if sub_step_of:
         # An item read before it was split keeps that text, as an item revised after its read does.
         for above in sub_step_of[2]:
@@ -3014,9 +3148,6 @@ def waiting_item_read(arguments, sub_step_of=None):
                                                  arguments.fast_read_program)
     if not_started:
         print(not_started)
-    # Printed after the step's first line, which names the report, and before the closing lines the agent acts on.
-    no_answer_rows = no_answer_rows_for_waiting_item_lines(walk_finder, top, minutes, value, numbers, total, parser,
-                                                           named, item)
     not_shown = rated_none_item_not_to_be_shown(walk_finder, top, minutes, value, numbers, total, parser, named)
     if not_shown is not None:
         settle = check_command_with_cwd(top, "--not-asked", NOT_ASKED_RATED_NONE)
@@ -3046,7 +3177,8 @@ def waiting_item_read(arguments, sub_step_of=None):
                     print(recheck_line)
                 withheld = item_read_findings_without_outcomes_lines(
                     item, latest[1]["report"], reads / f"{latest[0]}-outcome.json", arguments.fast_read_program,
-                    command, command_reading_again)
+                    command, command_reading_again) + no_answer_table_rows_without_outcomes_lines(
+                    reads, text, row_ids, item, command)
                 print("\n".join([ITEM_READ_NOT_RUN.format(item=item, report=latest[1]["report"])] + no_answer_rows
                                  + (withheld or [ITEM_READ_NOT_RUN_NEXT.format(
                                      item=item, now_over_later_command=check_command_with_cwd(top, NOW_OVER_LATER_FLAG))]
@@ -3072,7 +3204,8 @@ def waiting_item_read(arguments, sub_step_of=None):
     notes = "".join(STATUS_FAST_READ_NOTE.format(note=note) for note in outcome["notes"])
     withheld = item_read_findings_without_outcomes_lines(item, outcome["report"], reads / f"{key}-outcome.json",
                                                          arguments.fast_read_program, command,
-                                                         command_reading_again)
+                                                         command_reading_again) + \
+        no_answer_table_rows_without_outcomes_lines(reads, text, row_ids, item, command)
     print("\n".join([ITEM_READ_USED.format(item=item, how=how, report=outcome["report"], notes=notes)] + no_answer_rows
                     + [line.format(item=item, document=document, command=command,
                                    now_over_later_command=check_command_with_cwd(top, NOW_OVER_LATER_FLAG))
@@ -4036,6 +4169,9 @@ def main(argv=None):
     parser.add_argument(SYSTEM_STATUS_CLAIMS_RECHECKED_FLAG, metavar="WHAT_YOU_RAN_AND_WHEN",
                         help=f"{WAITING_ITEM_READ_STEP}: the commands you ran, and when, to recheck each current "
                              "status the waiting item states, such as an agent-seat offline")
+    parser.add_argument(NO_ANSWER_TABLE_ROW_OUTCOME_FLAG, action="append", metavar="ROW=declined: REASON",
+                        help=f"{WAITING_ITEM_READ_STEP}: a no-answer table row the step printed for the waiting item "
+                             "does not fit it, for REASON; give it once for each printed row with no outcome")
     parser.add_argument("--text-file", type=Path, help=argparse.SUPPRESS)
     parser.add_argument("--item", help=argparse.SUPPRESS)
     parser.add_argument("--name", help=argparse.SUPPRESS)
