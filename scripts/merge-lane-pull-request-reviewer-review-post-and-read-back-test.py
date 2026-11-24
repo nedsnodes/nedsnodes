@@ -127,10 +127,11 @@ def running(pid):
 
 
 def run_program(scratch, review_text, token=TOKEN, arguments=("--pull-request", "7", "--head-commit", HEAD),
-                interrupt=None, merge_token=MERGE_TOKEN, codex_runs=None, **fake_gh_environment):
+                interrupt=None, merge_token=MERGE_TOKEN, codex_runs=None, review_plan=None, **fake_gh_environment):
     """Run the program; with interrupt, a signal, send it once the stand-in gh is hanging. For merge-lane-2's
     review, codex_runs lists the (head, exit code, report text or None) Codex run records it finds, by
-    default one clean run on HEAD."""
+    default one clean run on HEAD, and review_plan is the (exit code, stdout, stderr) of a stand-in review
+    plan program, which by default fails, so that a case that should not read the plan shows it."""
     case = Path(tempfile.mkdtemp(dir=scratch))
     home, state, fake_gh_directory = case / "home", case / "state", case / "fake-gh"
     for directory in (home, state, fake_gh_directory):
@@ -147,7 +148,12 @@ def run_program(scratch, review_text, token=TOKEN, arguments=("--pull-request", 
     if review_text is not None:
         review_file.write_text(review_text)
     if "ned-review-merge" in arguments:
-        arguments = (*arguments, "--merge-lane-worktrees-and-outputs-directory", str(case / "helpers"))
+        plan_program = case / "stand-in-review-plan.py"
+        plan_exit, plan_stdout, plan_stderr = review_plan or (9, "", "the stand-in plan was not expected to run")
+        plan_program.write_text(f"import sys\nsys.stdout.write({plan_stdout!r})\nsys.stderr.write({plan_stderr!r})\n"
+                                f"sys.exit({plan_exit})\n")
+        arguments = (*arguments, "--merge-lane-worktrees-and-outputs-directory", str(case / "helpers"),
+                     "--pull-request-review-plan-program", str(plan_program))
         for index, (run_head, exit_code, report) in enumerate(
                 CLEAN_CODEX_RUN if codex_runs is None else codex_runs):
             outputs = case / "helpers" / "cx" / f"pr7-base{index}"
@@ -285,12 +291,12 @@ def codex_finding_grade_cases(scratch):
           result.code == 2 and not result.calls and "2 Codex finding(s)" in result.stderr
           and f"- {first_id}: P2 {first}" in result.stderr and f"- {second_id}: P3 {second}" in result.stderr,
           result.detail)
-    result = run_program(scratch, graded(codex_finding_grades=all_grades[:1]),
+    result = run_program(scratch, graded(merge_lane_codex_review_finding_grades=all_grades[:1]),
                          arguments=MERGE_LANE_ARGUMENTS, codex_runs=runs)
     check("one ungraded finding among graded ones is refused and named",
           result.code == 2 and "1 Codex finding(s)" in result.stderr and second_id in result.stderr
           and f"- {first_id}:" not in result.stderr, result.detail)
-    result = run_program(scratch, graded(codex_finding_grades=all_grades),
+    result = run_program(scratch, graded(merge_lane_codex_review_finding_grades=all_grades),
                          arguments=MERGE_LANE_ARGUMENTS, codex_runs=runs)
     check("every finding graded posts the review, with each grade and reason in the body and no grade key sent",
           result.code == 0 and result.posted["body"] == (
@@ -299,18 +305,18 @@ def codex_finding_grade_cases(scratch):
               f"- {second_id} (P3): does-not-hold, The line is unreachable.: {second}")
           and set(result.posted) == {"commit_id", "event", "body", "comments"}, result.detail)
     blocked =[{"finding": first_id, "grade": "must-fix-now"}, all_grades[1]]
-    result = run_program(scratch, graded(codex_finding_grades=blocked), arguments=MERGE_LANE_ARGUMENTS,
+    result = run_program(scratch, graded(merge_lane_codex_review_finding_grades=blocked), arguments=MERGE_LANE_ARGUMENTS,
                          codex_runs=runs)
     check("a must-fix-now Codex grade with no must-fix-now comment is refused",
           result.code == 2 and not result.calls and "would not block the merge" in result.stderr, result.detail)
     result = run_program(scratch, graded("REQUEST_CHANGES", [finding(2, "must-fix-now")],
-                                         codex_finding_grades=blocked),
+                                         merge_lane_codex_review_finding_grades=blocked),
                          arguments=MERGE_LANE_ARGUMENTS, codex_runs=runs)
     found = fix_round_blocking_findings(load_fix_round_program(), [result.posted]) if result.posted else None
     check("a must-fix-now Codex grade with a must-fix-now comment posts, and the fix-round program reads "
           "only that comment as blocking, not the grades section",
           result.code == 0 and isinstance(found, list) and len(found) == 1, f"{found}\n{result.detail}")
-    result = run_program(scratch, graded(codex_finding_grades=[*all_grades,
+    result = run_program(scratch, graded(merge_lane_codex_review_finding_grades=[*all_grades,
                                                                {"finding": "feedfacefeed", "grade": "fix-next"}]),
                          arguments=MERGE_LANE_ARGUMENTS, codex_runs=runs)
     check("a grade for a finding no report holds is refused",
@@ -323,42 +329,80 @@ def codex_finding_grade_cases(scratch):
             ("a repeated finding", [all_grades[0], all_grades[0]], "more than once"),
             ("an entry that is not an object", ["x"], "no text"),
             ("grades that are not a list", "x", "not a list")):
-        result = run_program(scratch, graded(codex_finding_grades=entries), arguments=MERGE_LANE_ARGUMENTS,
+        result = run_program(scratch, graded(merge_lane_codex_review_finding_grades=entries), arguments=MERGE_LANE_ARGUMENTS,
                              codex_runs=runs)
         check(f"{name} is refused before GitHub",
               result.code == 2 and not result.calls and words in result.stderr, result.detail)
     result = run_program(scratch, graded(), arguments=MERGE_LANE_ARGUMENTS, codex_runs=((HEAD, 1, None),))
-    check("a review whose only Codex run failed posts with no grades, its body unchanged",
+    check("a review whose only Codex run failed posts with no grades and no plan read, its body unchanged",
           result.code == 0 and result.posted["body"] == "APPROVE\n\nThe review body.", result.detail)
     result = run_program(scratch, graded(), arguments=MERGE_LANE_ARGUMENTS,
                          codex_runs=((HEAD, 1, None), (HEAD, 0, report)))
     check("a failed run does not excuse the findings of another run on the same commit",
           result.code == 2 and "2 Codex finding(s)" in result.stderr, result.detail)
-    result = run_program(scratch, graded(), arguments=MERGE_LANE_ARGUMENTS, codex_runs=(("f" * 40, 0, report),))
-    check("a run record of another commit does not count: the program cannot tell, and refuses",
-          result.code == 2 and not result.calls and "cannot tell whether Codex found nothing, failed or did not run"
-          in result.stderr, result.detail)
-    result = run_program(scratch, graded(), arguments=MERGE_LANE_ARGUMENTS, codex_runs=())
-    check("no run record is refused, saying how to run Codex or give the reason",
-          result.code == 2 and "codex_review_not_run_reason" in result.stderr
-          and "merge-lane-code-review-codex-cell-run-on-pull-request-head.py" in result.stderr, result.detail)
-    result = run_program(scratch, graded(codex_review_not_run_reason="no-reviewer-tier"),
-                         arguments=MERGE_LANE_ARGUMENTS, codex_runs=())
-    check("with no run record, a not-run reason posts the review with the reason in its body",
-          result.code == 0 and result.posted["body"]
-          == "APPROVE\n\nThe review body.\n\nCodex review not run: no-reviewer-tier", result.detail)
-    result = run_program(scratch, graded(codex_review_not_run_reason="no-reviewer-tier"),
-                         arguments=MERGE_LANE_ARGUMENTS, codex_runs=runs)
-    check("a not-run reason is refused when a run record names the commit",
-          result.code == 2 and not result.calls and "but a Codex run record names commit" in result.stderr,
+    def plan(tier="claude-and-codex-review-and-head-tests-tier", head=HEAD, delta_only=None, delta_tier=None):
+        return (0, json.dumps({"head": head, "tier": tier, "delta_only_review_applies": delta_only,
+                               "delta_tier": delta_tier}), "")
+
+    result = run_program(scratch, graded(), arguments=MERGE_LANE_ARGUMENTS, codex_runs=(("f" * 40, 0, report),),
+                         review_plan=plan())
+    check("a run record of another commit does not count: at a tier that runs Codex the review is refused",
+          result.code == 2 and not result.calls and "no Codex run record" in result.stderr
+          and "merge-lane-code-review-codex-cell-run-on-pull-request-head.py 7 <base commit>" in result.stderr,
           result.detail)
-    result = run_program(scratch, graded(codex_review_not_run_reason="a\nb"), arguments=MERGE_LANE_ARGUMENTS,
-                         codex_runs=())
-    check("a two-line not-run reason is refused", result.code == 2 and "not one line" in result.stderr, result.detail)
-    result = run_program(scratch, graded(codex_review_not_run_reason="no run", codex_finding_grades=all_grades),
-                         arguments=MERGE_LANE_ARGUMENTS, codex_runs=())
+    result = run_program(scratch, graded(), arguments=MERGE_LANE_ARGUMENTS, codex_runs=(),
+                         review_plan=plan("codex-review-and-head-tests-tier"))
+    check("no run record at the Codex-only tier is refused",
+          result.code == 2 and "codex-review-and-head-tests-tier, which runs Codex" in result.stderr, result.detail)
+    result = run_program(scratch, graded(), arguments=MERGE_LANE_ARGUMENTS, codex_runs=(),
+                         review_plan=plan("no-reviewer-tier"))
+    check("no run record at no-reviewer-tier posts the review, its body unchanged",
+          result.code == 0 and result.posted["body"] == "APPROVE\n\nThe review body.", result.detail)
+    result = run_program(scratch, graded(), arguments=MERGE_LANE_ARGUMENTS, codex_runs=(),
+                         review_plan=(3, plan("no-reviewer-tier")[1], "a message has no fast-read command"))
+    check("a plan that exits 3 has still printed its tier", result.code == 0, result.detail)
+    result = run_program(scratch, graded(), arguments=MERGE_LANE_ARGUMENTS, codex_runs=(),
+                         review_plan=plan(delta_only=True, delta_tier="no-reviewer-tier"))
+    check("a delta-only fix round is judged by the delta tier", result.code == 0, result.detail)
+    result = run_program(scratch, graded(), arguments=MERGE_LANE_ARGUMENTS, codex_runs=(),
+                         review_plan=plan("no-reviewer-tier", delta_only=False,
+                                          delta_tier="claude-and-codex-review-and-head-tests-tier"))
+    check("a fix round reviewed whole is judged by the pull request's tier, not the delta tier",
+          result.code == 0, result.detail)
+    result = run_program(scratch, graded(), arguments=MERGE_LANE_ARGUMENTS, codex_runs=(),
+                         review_plan=plan("no-reviewer-tier", delta_only=True,
+                                          delta_tier="codex-review-and-head-tests-tier"))
+    check("a delta-only round at a tier that runs Codex is refused though the whole tier is no-reviewer-tier",
+          result.code == 2 and "which runs Codex" in result.stderr, result.detail)
+    for name, reply, words in (
+            ("exits with a refusal", (1, "", "pull-request-review-plan: run `git fetch`"), "it exited 1: pull-request-review-plan: run `git fetch`"),
+            ("prints no JSON", (0, "not json", ""), "its output is not a plan"),
+            ("prints JSON with no tier", (0, json.dumps({"head": HEAD, "delta_only_review_applies": None}), ""),
+             "its output is not a plan"),
+            ("prints JSON that is not an object", (0, "[]", ""), "its output is not a plan"),
+            ("gives another head", plan(head="e" * 40), f"the pull request's head is now {'e' * 40}"),
+            ("gives an unknown tier", plan("some-tier"), "the unknown tier 'some-tier'")):
+        result = run_program(scratch, graded(), arguments=MERGE_LANE_ARGUMENTS, codex_runs=(), review_plan=reply)
+        check(f"a review plan that {name} stops the post before GitHub and says why",
+              result.code == 2 and not result.calls and "its review tier could not be read" in result.stderr
+              and words in result.stderr, result.detail)
+    case = Path(tempfile.mkdtemp(dir=scratch))
+    review_file = case / "review.json"
+    review_file.write_text(graded())
+    completed = subprocess.run(
+        [sys.executable, str(PROGRAM), *MERGE_LANE_ARGUMENTS, "--merge-lane-worktrees-and-outputs-directory",
+         str(case), "--pull-request-review-plan-program", str(case / "no-such-plan.py"), str(review_file)],
+        capture_output=True, text=True)
+    check("a review plan program that cannot be run stops the post",
+          completed.returncode == 2 and "its review tier could not be read" in completed.stderr, completed.stderr)
+    result = run_program(scratch, graded(merge_lane_codex_review_finding_grades=all_grades),
+                         arguments=MERGE_LANE_ARGUMENTS, codex_runs=(), review_plan=plan("no-reviewer-tier"))
     check("grades with no run record are refused",
           result.code == 2 and "grades Codex findings, but no Codex run" in result.stderr, result.detail)
+    result = run_program(scratch, graded(codex_review_not_run_reason="no-reviewer-tier"),
+                         arguments=MERGE_LANE_ARGUMENTS, codex_runs=(), review_plan=plan("no-reviewer-tier"))
+    check("the removed not-run declaration is refused like any other extra key",
+          result.code == 2 and "exactly" in result.stderr, result.detail)
     result = run_program(scratch, graded(), arguments=MERGE_LANE_ARGUMENTS, codex_runs=((HEAD, 0, None),))
     check("a run recorded as a success whose report cannot be read is refused",
           result.code == 2 and not result.calls and "its report could not be read" in result.stderr, result.detail)
@@ -377,7 +421,7 @@ def codex_finding_grade_cases(scratch):
           completed.returncode == 2 and "could not be read" in completed.stderr
           and "codex-review-run-record.json" in completed.stderr, completed.stderr)
     result = run_program(scratch, json.dumps({"verdict": "APPROVE", "body": "B", "comments": [],
-                                              "codex_finding_grades": []}))
+                                              "merge_lane_codex_review_finding_grades": []}))
     check("mac-claude's file may not carry the merge-lane Codex keys",
           result.code == 2 and "exactly" in result.stderr, result.detail)
 
