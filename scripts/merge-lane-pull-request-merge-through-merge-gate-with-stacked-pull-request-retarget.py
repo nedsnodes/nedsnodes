@@ -944,11 +944,13 @@ def newest_main_commit_whose_after_merge_test_run_left_no_test_failing_written(m
               f"Until a later merge records its commit there, each after-merge test run selects "
               f"its suites by comparing with an older commit, and so runs more suites than it "
               f"needs. Nothing else waits on this record: the program goes on and exits 3.\n"
-              f"If the error names a cause you can fix, fix it; nothing needs to be run again. "
+              f"If the error names a cause you can fix, such as a permission on a directory, fix "
+              f"that cause only: do not write {path} by hand, and nothing needs to be run again, "
+              f"because the next merge whose test run leaves no test failing writes it. "
               f"Otherwise, tell the user this message as printed, from its STOP line, which "
               f"quotes the error, through this line.")
         return False
-    print(f"recorded {merge_commit[:12]} in {path}, so the next after-merge test run selects the "
+    print(f"recorded the merge commit {merge_commit[:12]} in {path}, so the next after-merge test run selects the "
           f"suites whose recorded inputs changed since it")
     return True
 

@@ -676,7 +676,7 @@ def newest_main_commit_left_no_test_failing_cases(scratch):
               f"the newest main commit whose after-merge test run left no test failing" in output
           and "since the head commit" not in output
           and recorded == merge_commit
-          and f"recorded {merge_commit[:12]} in {path}, so the next after-merge test run selects "
+          and f"recorded the merge commit {merge_commit[:12]} in {path}, so the next after-merge test run selects "
               f"the suites whose recorded inputs changed since it" in output,
           f"exit {exit_code}\n{output}\n{calls}\n{recorded}")
 
