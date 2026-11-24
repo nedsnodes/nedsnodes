@@ -2123,7 +2123,7 @@ def main():
         ("claude", "logged-out",
          cli_answering(1, "Not logged in · Please run /login\n", ""),
          "Not logged in · Please run /login", 2),
-        ("claude", "account-limit",
+        ("claude", "exit-1",
          cli_answering(1, "You've hit your session limit · resets 8:50pm "
                           "(America/Los_Angeles)\n", ""),
          "resets 8:50pm (America/Los_Angeles)", 2),

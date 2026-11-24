@@ -40,7 +40,6 @@ it up with no change here.
 
 import importlib.util
 import pathlib
-import re
 import sys
 
 _common_spec = importlib.util.spec_from_file_location(
@@ -136,9 +135,6 @@ def model_family_name(model: str) -> str:
 def recognised_failure_texts_for_model(model: str) -> list:
     family = model_family_name(model)
     return [
-        common.RecognisedFailureText(
-            "account-limit", "You've hit your ", common.DETAIL_IS_REST_OF_LINE,
-            re.compile(r"(?:\S+ ){0,3}limit\b")),
         common.RecognisedFailureText(
             "model-limit", f"You've reached your {family} limit", family),
         common.RecognisedFailureText(

@@ -143,7 +143,7 @@ Running a sanity-check, and reading its output:
 - An agent that saves no report is launched once more by the runner, with the
   same prompt, in the same copy, unless the cause is one only the user can
   clear or the launch timed out. The cause classes: `logged-out`,
-  `agent-binary-missing`, `account-limit` and `model-limit`, which only the
+  `agent-binary-missing` and `model-limit`, which only the
   user can clear and which are never relaunched; `timeout`, the launch cut off
   after an hour, never relaunched, because the same launch would cost the same
   hour; `exit-<code>`, any other failed launch, whose detail is the last line
@@ -348,7 +348,7 @@ def _cold_read_cell_program(file_name: str):
 
 
 # What each agent-binary prints when a launch fails for a reason it can name
-# (logged out, a usage limit), per agent-binary: a function from the model to the
+# (logged out, a model's limit), per agent-binary: a function from the model to the
 # texts, which common.classify_failed_attempt matches against the start of
 # each line the agent-binary wrote. Each text was captured from a real run and
 # is kept, with its source, beside the cold-read cell that met it; taken from

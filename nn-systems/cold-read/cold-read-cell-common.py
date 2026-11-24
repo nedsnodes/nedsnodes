@@ -337,26 +337,22 @@ class WriteDetectorUnavailable(Exception):
 CAUSE_PHRASE = "cause:"
 CAUSE_SEPARATOR = " — "
 # Match line starts to avoid quoted document text, allowing the Codex tracing timestamp.
-AGENT_BINARY_WIDE_CAUSE_CLASSES = frozenset(
-    {"account-limit", "logged-out", "agent-binary-missing"})
+AGENT_BINARY_WIDE_CAUSE_CLASSES = frozenset({"logged-out", "agent-binary-missing"})
 USER_CLEARABLE_CAUSE_CLASSES = frozenset(
-    {"logged-out", "agent-binary-missing", "account-limit", "model-limit"})
+    {"logged-out", "agent-binary-missing", "model-limit"})
 CAUSE_DETAIL_MAX_CHARACTERS = 120
 # Drop per-attempt timestamps from details that the grid reports for an entire agent-binary.
-DETAIL_IS_REST_OF_LINE = "rest-of-line"
 DETAIL_IS_WHOLE_LINE = "whole-line"
 LEADING_TRACING_LOGGER_TIMESTAMP = re.compile(
     r"\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d+)?Z?\s+")
 
 
 class RecognisedFailureText(typing.NamedTuple):
-    """An agent-binary failure prefix, cause class, rule for extracting the detail, and an
-    optional pattern the rest of the line after the prefix must start with."""
+    """An agent-binary failure prefix, cause class, and rule for extracting the detail."""
 
     cause_class: str
     line_prefix: str
     detail: str
-    rest_of_line_pattern: typing.Optional[re.Pattern] = None
 
 
 def classify_failed_attempt(
@@ -368,15 +364,8 @@ def classify_failed_attempt(
         timestamp = LEADING_TRACING_LOGGER_TIMESTAMP.match(stripped)
         untimestamped = stripped[timestamp.end():] if timestamp else stripped
         for text in recognised_texts or ():
-            if untimestamped.startswith(text.line_prefix) and (
-                    text.rest_of_line_pattern is None
-                    or text.rest_of_line_pattern.match(untimestamped[len(text.line_prefix):])):
-                if text.detail == DETAIL_IS_REST_OF_LINE:
-                    detail = untimestamped[len(text.line_prefix):].lstrip(" \t·")
-                elif text.detail == DETAIL_IS_WHOLE_LINE:
-                    detail = untimestamped
-                else:
-                    detail = text.detail
+            if untimestamped.startswith(text.line_prefix):
+                detail = untimestamped if text.detail == DETAIL_IS_WHOLE_LINE else text.detail
                 return text.cause_class, detail
     if start_error:
         return "agent-binary-missing", start_error
