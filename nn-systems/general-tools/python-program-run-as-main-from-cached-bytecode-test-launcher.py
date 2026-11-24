@@ -2,7 +2,7 @@
 """Run a Python program as `python3 <program> <arguments>` would, but load it through the import system,
 so its compiled bytecode is cached in its __pycache__ and reused by every later run.
 
-usage: python3 python-program-run-as-main-from-cached-bytecode-test-launcher.py <program> [arguments...]
+usage: python3 nn-systems/general-tools/python-program-run-as-main-from-cached-bytecode-test-launcher.py <program> [arguments...]
 
 Python never caches the bytecode of the script it is given, so a suite that starts a program of several
 thousand lines hundreds of times compiles it each time. A suite starts its program through this launcher
@@ -19,7 +19,7 @@ import types
 if len(sys.argv) < 2:
     sys.stderr.write("python-program-run-as-main-from-cached-bytecode-test-launcher.py ran nothing: it was given "
                      "no program.\nGive the program's path first, then the program's own arguments: python3 "
-                     "python-program-run-as-main-from-cached-bytecode-test-launcher.py <program> [arguments...]\n")
+                     "nn-systems/general-tools/python-program-run-as-main-from-cached-bytecode-test-launcher.py <program> [arguments...]\n")
     sys.exit(2)
 program = os.path.abspath(sys.argv[1])
 sys.argv = sys.argv[1:]
