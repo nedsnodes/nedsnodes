@@ -8,17 +8,25 @@ approved it as items 12 and 13 of approval-walk md-skills-2-agent-seat-items-awa
 <case set>/cases/, and every store entry a case lists under <case set>/candidate-entries.jsonl.
 
 Usage:
-  ruling-agent-judge-model-benchmark-run-and-score.py run --case-set DIR --runtime {claude,agy,codex}
+  ruling-agent-user-message-decides-approval-walk-item-judge-model-benchmark-run-and-score.py run --case-set DIR --runtime {claude,agy,codex}
       --model MODEL --effort EFFORT --hits-from RETRIEVER:LIST --first-n N --rows FILE
       [--repeats 3] [--case CASE_ID ...] [--instructions-checkout DIR] [--keep DIR]
-  ruling-agent-judge-model-benchmark-run-and-score.py score --rows FILE [FILE ...]
+  ruling-agent-user-message-decides-approval-walk-item-judge-model-benchmark-run-and-score.py score --rows FILE [FILE ...]
 
 run: for each repeat and each case, one fresh agent gets, in one prompt, CLAUDE.md, the project glossary and the
 system glossaries it lists, the item's text, and the first N messages of the case's list --hits-from names, each
 with the agent message it answered, and answers DECIDES or NO for each. --hits-from names a retriever's ranked
 list inside a case file, such as grep:hits_newest_first, so a search by meaning that writes its own list into the
-cases is run the same way. One JSON row per case and repeat is appended to --rows. A case whose model run passes
-120 seconds drops the whole model and effort: its row says so and the run stops.
+cases is run the same way. One JSON row per case and repeat is appended to --rows; a case and repeat --rows already
+holds for the same model, effort, list and N is skipped, so a rerun goes on where a failed run stopped. A case whose
+model run passes 120 seconds drops the whole model and effort: its row says so and the run stops.
+
+claude runs `claude -p` with no tools in an empty directory. agy and codex run through their cold-read cell
+launchers (nn-systems/cold-read/), which sandbox them; codex in the launcher's "deep" tier, its fast mode. Those
+launchers run the model in the repository with its tools on, so only the prompt keeps it from opening files, and
+they take efforts low to max only.
+
+Messages to agents follow docs/nedsnodes-wiki/nedsnodes-how-to-write-a-tool-message-to-agent-such-as-a-hook-refusal-or-script-error.md.
 
 score: for each model, effort, list and N in the rows, the middle of the repeats' found-out-of-cases and of their
 mean seconds per case, the score (percent of cases whose known ruling was answered DECIDES, divided by that mean
@@ -56,7 +64,10 @@ _prefix_spec.loader.exec_module(command_line_prefix)
 EXIT_OK, EXIT_DROPPED, EXIT_COULD_NOT_RUN = 0, 1, 2
 ANSWER_WORDS = ("DECIDES", "NO")
 DROP_AFTER_SECONDS = 120
+LAUNCHER_STOP_GRACE_SECONDS = 5
 OVER_FLAG_LIMIT = 0.1
+# A cold-read cell launcher opens its report with this one line, before the model's answer.
+CELL_REPORT_PROVENANCE_STAMP = re.compile(r"\A<!-- provenance: [^\n]*-->\n")
 PROJECT_GLOSSARY = "docs/nedsnodes-wiki/nedsnodes-glossary.md"
 SYSTEM_GLOSSARY_IN_PROJECT_GLOSSARY = re.compile(r"`([^`\s]+-glossary\.md)`")
 ANSWER_LINE = re.compile(r"^(m\d+):\s*(\S+)\s*$")
@@ -213,9 +224,16 @@ def model_run_timed(argv, stdin_text, working_directory, limit_seconds):
         stdout, stderr = process.communicate(stdin_text, timeout=limit_seconds)
         return process.returncode, stdout, stderr, round(time.monotonic() - started, 2)
     except subprocess.TimeoutExpired:
-        os.killpg(process.pid, signal.SIGKILL)
-        stdout, stderr = process.communicate()
-        return None, stdout, stderr, round(time.monotonic() - started, 2)
+        seconds = round(time.monotonic() - started, 2)
+        # SIGTERM first: a cold-read cell launcher answers it by killing the model's own process group, which
+        # SIGKILL to the launcher's group would leave running on the same login, slowing the next timed run.
+        os.killpg(process.pid, signal.SIGTERM)
+        try:
+            stdout, stderr = process.communicate(timeout=LAUNCHER_STOP_GRACE_SECONDS)
+        except subprocess.TimeoutExpired:
+            os.killpg(process.pid, signal.SIGKILL)
+            stdout, stderr = process.communicate()
+        return None, stdout, stderr, seconds
 
 
 def known_ruling_ids(case):
@@ -240,10 +258,19 @@ def run_one_case(case, entries, arguments, files, repeat, work):
            "known_rulings_in_messages": sorted(known & set(message_ids)), "exit_code": exit_code}
     if exit_code is None:
         return {**row, "state": STATE_DROPPED}, stdout
-    answer = stdout if answer_place == "stdout" else (report_file.read_text(encoding="utf-8") if report_file.is_file() else "")
+    answer = stdout if answer_place == "stdout" else CELL_REPORT_PROVENANCE_STAMP.sub(
+        "", report_file.read_text(encoding="utf-8") if report_file.is_file() else "")
     if exit_code != 0:
-        raise CouldNotRun(f"the {arguments.runtime} run of {arguments.model} at effort {arguments.effort} on case "
-                          f"{case['case_id']} exited {exit_code}; its stderr ends: {stderr.strip()[-600:]}")
+        raise CouldNotRun(
+            f"the {arguments.runtime} run of {arguments.model} at effort {arguments.effort} on case {case['case_id']} "
+            f"exited {exit_code}, so that case has no row; its stderr ends: {stderr.strip()[-600:]}\n"
+            f"The rows already in {arguments.rows} stand, and a rerun of the same command skips them.\n"
+            f"If the stderr names a cause outside this run, such as a login, a usage limit or a network failure: "
+            f"tell the user that {arguments.runtime} on this machine failed with the stderr line above, and do not "
+            f"rerun until it is fixed.\n"
+            f"Otherwise: rerun the same command once; if it fails the same way, tell the user which model and effort "
+            f"fail, quoting the stderr line, and go on with the next model and effort.\n"
+            f"A subagent passes this to the agent that dispatched it instead of telling the user.")
     if answer_place != "stdout":
         report_file.unlink(missing_ok=True)
     try:
@@ -268,12 +295,17 @@ def run(arguments):
             raise CouldNotRun(f"no case named {unknown[0]} in {arguments.case_set}/cases/")
         cases = {case_id: cases[case_id] for case_id in arguments.case}
     files = instruction_files(arguments.instructions_checkout)
+    combination = (arguments.runtime, arguments.model, arguments.effort, arguments.hits_from, arguments.first_n)
+    done = {(row["case_id"], row["repeat"]) for row in read_rows([arguments.rows], missing_ok=True)
+            if combination_key(row) == combination}
     with tempfile.TemporaryDirectory(prefix="ruling-agent-judge-benchmark-") as scratch:
         work = Path(arguments.keep) if arguments.keep else Path(scratch)
         work.mkdir(parents=True, exist_ok=True)
         with open(arguments.rows, "a", encoding="utf-8") as rows:
             for repeat in range(1, arguments.repeats + 1):
                 for case in cases.values():
+                    if (case["case_id"], repeat) in done:
+                        continue
                     row, answer = run_one_case(case, entries, arguments, files, repeat, work)
                     rows.write(json.dumps(row) + "\n")
                     rows.flush()
@@ -293,17 +325,32 @@ def combination_key(row):
     return (row["runtime"], row["model"], row["effort"], row["hits_from"], row["first_n"])
 
 
-def score(arguments):
-    groups = {}
-    for path in arguments.rows:
+def read_rows(paths, missing_ok=False):
+    rows = []
+    for path in paths:
         try:
             lines = Path(path).read_text(encoding="utf-8").splitlines()
+        except FileNotFoundError:
+            if missing_ok:
+                continue
+            raise CouldNotRun(f"the rows file {path} does not exist; give --rows the file a run appended to") from None
         except OSError as error:
             raise CouldNotRun(f"cannot read the rows file {path}: {error}") from error
-        for line in lines:
-            if line.strip():
-                row = json.loads(line)
-                groups.setdefault(combination_key(row), []).append(row)
+        rows += [json.loads(line) for line in lines if line.strip()]
+    return rows
+
+
+def score(arguments):
+    groups, seen = {}, set()
+    for row in read_rows(arguments.rows):
+        key = (*combination_key(row), row["case_id"], row["repeat"])
+        if key in seen:
+            raise CouldNotRun(f"two rows are for the same case and repeat, {row['case_id']} repeat {row['repeat']} of "
+                              f"{row['model']} at effort {row['effort']}; a rows file given twice, or rows appended "
+                              f"by hand, would count that run twice. Give each rows file once, and remove the extra "
+                              f"row from a file you appended to by hand")
+        seen.add(key)
+        groups.setdefault(combination_key(row), []).append(row)
     if not groups:
         raise CouldNotRun("the rows files hold no rows")
     for key, rows in sorted(groups.items()):

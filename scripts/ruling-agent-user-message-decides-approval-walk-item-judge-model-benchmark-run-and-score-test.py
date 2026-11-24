@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
-"""Cases for ruling-agent-judge-model-benchmark-run-and-score.py, with a stub model in place of a paid one.
+"""Cases for ruling-agent-user-message-decides-approval-walk-item-judge-model-benchmark-run-and-score.py, with a stub model in place of a paid one.
 
-Run: scripts/ruling-agent-judge-model-benchmark-run-and-score-test.py
+Run: scripts/ruling-agent-user-message-decides-approval-walk-item-judge-model-benchmark-run-and-score-test.py
 Exit codes: 0 all passed, 1 any failed.
 """
 
@@ -16,7 +16,7 @@ from pathlib import Path
 
 HERE = Path(__file__).resolve().parent
 SPEC = importlib.util.spec_from_file_location(
-    "ruling_agent_judge_model_benchmark_run_and_score", HERE / "ruling-agent-judge-model-benchmark-run-and-score.py")
+    "ruling_agent_user_message_decides_approval_walk_item_judge_model_benchmark_run_and_score", HERE / "ruling-agent-user-message-decides-approval-walk-item-judge-model-benchmark-run-and-score.py")
 BENCHMARK = importlib.util.module_from_spec(SPEC)
 SPEC.loader.exec_module(BENCHMARK)
 
@@ -141,9 +141,33 @@ class BenchmarkTest(unittest.TestCase):
     def test_a_model_run_that_exits_nonzero_stops_the_run_and_says_why(self):
         code, _, err = self.run_benchmark(StubModel("", exit_code=3))
         self.assertEqual(code, BENCHMARK.EXIT_COULD_NOT_RUN)
-        self.assertIn("FAILED: the claude run of claude-sonnet-5-5 at effort low on case case-a exited 3", err)
+        self.assertIn("FAILED: the claude run of claude-sonnet-5-5 at effort low on case case-a exited 3, so that case "
+                      "has no row", err)
         self.assertIn("stub stderr", err)
+        self.assertIn("a rerun of the same command skips them", err)
+        self.assertIn("Otherwise: rerun the same command once", err)
         self.assertFalse(self.rows.exists() and self.rows.read_text())
+
+    def test_a_rerun_skips_the_cases_and_repeats_the_rows_already_hold(self):
+        write_case_set(self.root / "two-cases", cases=("case-a", "case-b"))
+        stub = StubModel("m1: NO\nm2: NO\nm3: NO\n")
+        self.rows.write_text(json.dumps({"case_id": "case-a", "repeat": 1, "runtime": "claude", "model": "claude-sonnet-5-5",
+                                         "effort": "low", "hits_from": "grep:hits_newest_first", "first_n": 3}) + "\n")
+        BENCHMARK.model_invocation = stub
+        self.main("run", "--case-set", str(self.root / "two-cases"), "--runtime", "claude", "--model", "claude-sonnet-5-5",
+                  "--effort", "low", "--hits-from", "grep:hits_newest_first", "--first-n", "3", "--rows", str(self.rows),
+                  "--repeats", "1", "--instructions-checkout", str(self.root / "checkout"))
+        self.assertEqual([row["case_id"] for row in self.rows_written()], ["case-a", "case-b"])
+        self.assertEqual(len(stub.prompts), 1)
+
+    def test_a_cell_launcher_report_is_read_without_its_provenance_stamp(self):
+        def cell_stub(runtime, model, effort, prompt_file, report_file):
+            code = (f"open({str(report_file)!r}, 'w').write('<!-- provenance: runtime=agy duration_s=3 -->\\n\\n"
+                    f"m1: DECIDES\\nm2: NO\\nm3: NO\\n')")
+            return [sys.executable, "-c", code], None, None, report_file
+        self.run_benchmark(cell_stub)
+        [row] = self.rows_written()
+        self.assertEqual((row["state"], row["found"]), (BENCHMARK.STATE_ANSWERED, True))
 
     def test_bad_arguments_and_case_sets_could_not_run(self):
         stub = StubModel("m1: NO\n")
@@ -194,7 +218,15 @@ class BenchmarkTest(unittest.TestCase):
         self.assertIn("hold no rows", self.score([])[2])
         code, _, err = self.main("score", "--rows", str(self.root / "missing.jsonl"))
         self.assertEqual(code, BENCHMARK.EXIT_COULD_NOT_RUN)
+        self.assertIn("missing.jsonl does not exist", err)
+        code, _, err = self.main("score", "--rows", str(self.root))
+        self.assertEqual(code, BENCHMARK.EXIT_COULD_NOT_RUN)
         self.assertIn("cannot read the rows file", err)
+
+    def test_score_refuses_two_rows_for_one_case_and_repeat(self):
+        code, _, err = self.score([self.row("a", 1, 5, True), self.row("a", 1, 5, True)])
+        self.assertEqual(code, BENCHMARK.EXIT_COULD_NOT_RUN)
+        self.assertIn("two rows are for the same case and repeat, a repeat 1", err)
 
     def test_claude_invocation_uses_the_common_prefix_no_tools_and_an_empty_directory(self):
         prompt_file = self.root / "p.md"
