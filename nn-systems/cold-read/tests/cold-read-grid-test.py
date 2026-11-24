@@ -146,6 +146,7 @@ import hashlib
 import importlib.util
 import inspect
 import io
+import itertools
 import json
 import re
 import os
@@ -549,10 +550,14 @@ def processes_running_programs_under(*directories):
     found = []
     for line in listing.splitlines():
         words = line.split()[1:]
+        # A `#!/usr/bin/env python3` script is listed as `env python3 <script>` until env execs.
+        if words and Path(words[0]).name == "env":
+            words = list(itertools.dropwhile(lambda word: word.startswith("-") or "=" in word, words[1:]))
         if not words:
             continue
-        runs_a_script = "python" in Path(words[0]).name.lower() and len(words) > 1
-        if words[1 if runs_a_script else 0].startswith(prefixes):
+        if "python" in Path(words[0]).name.lower():
+            words = [word for word in words[1:] if not word.startswith("-")] or words
+        if words[0].startswith(prefixes):
             found.append(line.strip())
     return found
 
@@ -582,9 +587,10 @@ def run_grid_stopped_at_deadline(repository, stub_directory, environment_overrid
 def wrote_then_hung_checks(result, left_running, repository, elapsed):
     """The (case name, condition, detail) checks of the wrote-then-hung run. A grid stopped at the
     deadline gets only the first: it may have made no record for the others to read."""
+    stopped_at_deadline = f"; {result.stdout}" if result.returncode == -signal.SIGKILL else ""
     checks = [("the grid returned and left no hung stub or launcher running",
                result.returncode != -signal.SIGKILL and left_running == [],
-               f"exit {result.returncode}; still running: {left_running}")]
+               f"exit {result.returncode}; still running: {left_running}{stopped_at_deadline}")]
     if result.returncode == -signal.SIGKILL:
         return checks
     failed_lines = lines_opening(result, "FAILED")
@@ -1295,14 +1301,35 @@ try:
 
     # --- The deadline passes before the grid has made a record -----------------
     repository = build_scratch_repository(scratch, "checkout-deadline-before-any-record")
+    # The launcher sleeps instead of starting the grid, so no record exists when the deadline passes,
+    # however loaded the machine.
     deadline_stubs = scratch / "stub-bin-deadline-before-any-record"
-    result, left_running = run_grid_stopped_at_deadline(repository, deadline_stubs, {}, 0.001)
-    deadline_checks = wrote_then_hung_checks(result, left_running, repository, 0.001)
+    deadline_stubs.mkdir()
+    holding_launcher = deadline_stubs / "hold-instead-of-starting-the-grid.py"
+    holding_launcher.write_text("import time\ntime.sleep(86400)\n", encoding="utf-8")
+    deadline_seconds = 2
+    result, left_running = run_grid_stopped_at_deadline(
+        repository, deadline_stubs, {}, deadline_seconds,
+        launcher_arguments_before_grid=(holding_launcher, 0, 0))
+    deadline_checks = wrote_then_hung_checks(result, left_running, repository, deadline_seconds)
     check("a grid stopped at the deadline before making a record fails on the deadline alone",
           result.returncode == -signal.SIGKILL and record_directory_of(repository) is None
           and [(name, condition) for name, condition, _ in deadline_checks]
           == [("the grid returned and left no hung stub or launcher running", False)],
           f"exit {result.returncode}; checks: {deadline_checks}")
+    check("the deadline failure's detail says the grid was stopped at the deadline",
+          f"the grid had not returned after {deadline_seconds} s" in deadline_checks[0][2], deadline_checks)
+
+    # --- A script started through `#!/usr/bin/env python3` is found while env is still starting it
+    env_listing_directory = scratch / "stub-bin-started-through-env"
+    env_listing = subprocess.CompletedProcess(["ps"], 0, (
+        f"  4242 /usr/bin/env python3 {env_listing_directory}/claude --print\n"
+        f"  4243 /usr/bin/env -S PYTHONUNBUFFERED=1 python3 -u {env_listing_directory}/codex\n"
+        f"  4244 /usr/bin/env tail -F {env_listing_directory}/watched.log\n"), "")
+    with mock.patch.object(subprocess, "run", return_value=env_listing):
+        listed_through_env = processes_running_programs_under(env_listing_directory)
+    check("a stub that env is still starting is found, and env running tail on a log there is not",
+          [int(line.split()[0]) for line in listed_through_env] == [4242, 4243], listed_through_env)
 
     # --- Which processes a case reports and stops ------------------------------
     long_directory = scratch / ("directory-longer-than-a-terminal-line-" + "x" * 100)
@@ -1311,10 +1338,13 @@ try:
     sleeper_script.write_text("import time\ntime.sleep(60)\n", encoding="utf-8")
     watched_log = long_directory / "watched.log"
     watched_log.write_text("", encoding="utf-8")
-    sleeper = subprocess.Popen([sys.executable, str(sleeper_script)])  # pylint: disable=consider-using-with
-    watcher = subprocess.Popen(  # pylint: disable=consider-using-with
-        ["tail", "-F", str(watched_log)], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+    started_processes = []
     try:
+        sleeper = subprocess.Popen([sys.executable, str(sleeper_script)])  # pylint: disable=consider-using-with
+        started_processes.append(sleeper)
+        watcher = subprocess.Popen(  # pylint: disable=consider-using-with
+            ["tail", "-F", str(watched_log)], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+        started_processes.append(watcher)
         with mock.patch.dict(os.environ, {"COLUMNS": "80"}):
             listed = processes_running_programs_under(long_directory)
             kill_processes_running_programs_under(long_directory)
@@ -1324,7 +1354,7 @@ try:
         check("a process that only names a path there, tail -F on a log, is left running",
               watcher.poll() is None, watcher.returncode)
     finally:
-        for process in (sleeper, watcher):
+        for process in started_processes:
             process.kill()
             process.wait()
 
@@ -3603,6 +3633,11 @@ try:
     check("an unreadable git history is reported as EARLIER COLD-READ-FULL-RUNS NOT COUNTED",
           "EARLIER COLD-READ-FULL-RUNS NOT COUNTED:" in result.stdout and "git log --follow" in result.stdout,
           f"exit {result.returncode}; stdout={result.stdout!r}; stderr={result.stderr!r}")
+
+    left_running_at_end = processes_running_programs_under(scratch)
+    kill_processes_running_programs_under(scratch)
+    check("no stub, launcher or grid the suite started is still running when it ends",
+          left_running_at_end == [], left_running_at_end)
 finally:
     shutil.rmtree(SCRATCH_ROOT, ignore_errors=True)
 
