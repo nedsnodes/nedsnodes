@@ -7300,6 +7300,7 @@ REVISED_ITEM_USER_WORDS = (
     'User (2026-11-24T05:15:57Z), outside an item, on item 3, in his words: "one poem per job, not per agent"',
     'User (2026-11-24T05:20:00Z), outside an item, on the poem page lists one poem per job, in his words: "shorter"',
     'User (2026-11-24T05:25:00Z), outside an item, on item 4, in his words: "a word on another item"',
+    'User (2026-11-24T05:30:00Z), outside an item, on items 4 to 2, in his words: "a range that runs backwards"',
 )
 FRESH_AGENT_REWRITE_FLAG = "--approval-walk-item-fresh-agent-rewrite-file"
 
@@ -7327,8 +7328,7 @@ def revised_item_text_changed(case, old, new):
 
 
 def revised_item_case_revised_three_times_across_a_split():
-    """The item 29 case: a revision, a split that moves the proposed text unchanged into sub-step 3.1, then two
-    more revisions. Return (case, the results of the five read steps, the fast-read calls before the last)."""
+    """A revision, a split that moves the proposed text unchanged into sub-step 3.1, then two more revisions. Return (case, the results of the five read steps, the fast-read calls before the last)."""
     case = revised_item_case()
     results = [case.run(WAITING_ITEM_READ_STEP_NAME)]
     results.append(revised_item_text_changed(case, REVISED_ITEM_TEXTS[0], REVISED_ITEM_TEXTS[1]))
@@ -7351,9 +7351,10 @@ def test_the_waiting_item_read_step_prints_a_fresh_agent_prompt_at_the_third_rev
           and case.calls.read_text() == calls_before and "Then present" not in last.stdout, described(last))
     prompt = last.stdout.split("----- prompt for the fresh-agent: start -----\n")[-1].split(
         "----- prompt for the fresh-agent: end -----")[0]
-    check("the fresh-agent's prompt holds the user's words naming item 3 or its title, not those on item 4",
+    check("the fresh-agent's prompt holds the user's words naming item 3 or its title, not those on item 4, nor "
+          "those on a range of items that runs backwards, which names no item",
           REVISED_ITEM_USER_WORDS[0] in prompt and REVISED_ITEM_USER_WORDS[1] in prompt
-          and REVISED_ITEM_USER_WORDS[2] not in prompt, prompt)
+          and REVISED_ITEM_USER_WORDS[2] not in prompt and REVISED_ITEM_USER_WORDS[3] not in prompt, prompt)
     check("the fresh-agent's prompt names the file the item links, with its path on ned-box",
           "file:///Volumes/nedhome/agents/x/poem-list.md (on ned-box: /home/nedlern/agents/x/poem-list.md)" in prompt,
           prompt)
@@ -7365,8 +7366,16 @@ def test_the_waiting_item_read_step_prints_a_fresh_agent_prompt_at_the_third_rev
           and shlex.join([FRESH_AGENT_REWRITE_FLAG, str(rewrite)]) in last.stdout, last.stdout)
     again = case.run(WAITING_ITEM_READ_STEP_NAME, "--after-fixes-reread-only-when-facts-change")
     check("a rerun with no rewrite prints the prompt again, the count unchanged",
-          again.returncode == 1 and "has been revised three times" in again.stdout and revised_item_revisions(case) == 3,
-          described(again))
+          again.returncode == 1 and "has been revised three times" in again.stdout
+          and revised_item_revisions(case) == 3, described(again))
+    count_file = case.reads() / "item-3-proposed-text-revisions.json"
+    check("the step says which file to delete when the user says to present the item as it stands",
+          f"delete {count_file}, which starts the count again" in last.stdout, last.stdout)
+    count_file.unlink()
+    presented = case.run(WAITING_ITEM_READ_STEP_NAME, "--after-fixes-reread-only-when-facts-change")
+    check("with that file deleted, the step hands the item over as it stands, the count started again at 0",
+          presented.returncode == 0 and "has been revised" not in presented.stdout
+          and revised_item_revisions(case) == 0, described(presented))
 
 
 def test_the_fresh_agent_rewrite_takes_the_place_of_the_item_s_text_and_starts_the_count_again():
@@ -7404,6 +7413,11 @@ def test_a_fresh_agent_rewrite_that_is_missing_or_holds_a_heading_is_refused_wri
           headed.returncode == 1 and "holds the Markdown heading `## Item 3.1 of 9: the rule`" in headed.stderr
           and revised_item_document(case).read_bytes() == before and revised_item_revisions(case) == 3,
           described(headed))
+    rewrite.write_text(f'#approval_walk_item_in_category_fix_next\n\n#new "{REVISED_ITEM_TEXTS[4]}"\n')
+    tagged = case.run(WAITING_ITEM_READ_STEP_NAME, FRESH_AGENT_REWRITE_FLAG, str(rewrite))
+    check("a rewrite holding an `#approval_walk_item_` line is refused, the walk-document left as it was",
+          tagged.returncode == 1 and "holds the line `#approval_walk_item_in_category_fix_next`" in tagged.stderr
+          and revised_item_document(case).read_bytes() == before, described(tagged))
     rewrite.write_text("\n\n")
     empty = case.run(WAITING_ITEM_READ_STEP_NAME, FRESH_AGENT_REWRITE_FLAG, str(rewrite))
     check("an empty rewrite is refused, the walk-document left as it was",
@@ -7448,6 +7462,37 @@ def test_a_fresh_agent_rewrite_keeps_the_item_s_heading_and_approval_walk_item_l
                                    "## Item 4 of 9: four\n\nFour.\n")
           and "Old text." in replaced and replaced.startswith("## Item 3 of 9: three"),
           document.read_text() + "\n---\n" + replaced)
+
+
+def approval_walk_item_and_sub_steps_new_texts_of(name, document_text, waiting_number):
+    """The `#new` texts the program counts for item 3 of 10 of document_text, waiting_number's unit waiting."""
+    program = load_program()
+    walk_finder = program.load_walk_finder()
+    parser = walk_finder.markdown_parser()
+    directory = SUITE_ROOT / f"proposed-texts-{name}"
+    directory.mkdir(parents=True)
+    document = directory / "a-walk.md"
+    document.write_text(document_text)
+    waiting = next(unit for unit in walk_finder.item_unit_spans(document_text, parser) if unit[0] == [waiting_number])
+    return program.approval_walk_item_and_sub_steps_new_texts(walk_finder, parser, document, "3", "10", waiting)
+
+
+def test_the_count_of_proposed_text_revisions_leaves_out_withdrawn_items_and_their_sub_steps():
+    texts = approval_walk_item_and_sub_steps_new_texts_of(
+        "withdrawn", "# A walk\n\n## Withdrawn: Item 3 of 10: the older three\n\n#new \"Old whole.\"\n\n"
+        "### Item 3.1 of 10: the older first half\n\n#new \"Old half.\"\n\n## Item 3 of 10: three\n\nC.\n\n"
+        "### Item 3.1 of 10: the first half\n\n#new \"Live half.\"\n\n#### Withdrawn version 1 of item 3.1\n\n"
+        "#new \"Kept half.\"\n\n### Item 3.2 of 10: the second half\n\n#new \"Live second.\"\n", "3.1")
+    check("only the live item 3's sub-steps' `#new` texts are counted, not those under a Withdrawn heading",
+          texts == ["Live half.", "Live second."], repr(texts))
+
+
+def test_the_count_of_proposed_text_revisions_reads_the_waiting_sub_step_alone_when_the_item_has_no_heading():
+    texts = approval_walk_item_and_sub_steps_new_texts_of(
+        "no-whole-heading", "# A walk\n\n### Item 3.1 of 10: the first half\n\n#new \"First half.\"\n\n"
+        "### Item 3.2 of 10: the second half\n\n#new \"Second half.\"\n", "3.2")
+    check("with no heading for item 3 itself, the waiting sub-step 3.2's `#new` texts are counted alone",
+          texts == ["Second half."], repr(texts))
 
 
 def main():
