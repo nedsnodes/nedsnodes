@@ -6639,6 +6639,12 @@ def test_bump_refuses_an_item_no_heading_has_or_one_already_shown_writing_nothin
           missing.returncode == 1 and "no item heading in the walk-document" in missing.stderr
           and "`four`" in missing.stderr and f"`{check_command_for(case, '--bump', 'two')}`" in missing.stderr,
           described(missing))
+    indented = Case(next_to_present="item 1 of 9", document=bump_walk().replace("\n## two", "\n  ## two"))
+    missing_indented = indented.run("check", "--bump", "four", reply="bump four")
+    check("check --bump's refusal names an unshown item by its title when that item's heading is indented",
+          missing_indented.returncode == 1
+          and f"`{check_command_for(indented, '--bump', 'two')}`" in missing_indented.stderr,
+          described(missing_indented))
     shown = case.run("check", "--bump", "one", reply="bump one")
     check("check --bump refuses the waiting item, which has been shown and is not decided",
           shown.returncode == 1 and "`## Item 1 of 9: one`" in shown.stderr

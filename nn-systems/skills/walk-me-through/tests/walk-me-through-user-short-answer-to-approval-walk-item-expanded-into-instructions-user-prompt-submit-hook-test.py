@@ -3269,18 +3269,15 @@ def test_items_under_a_shared_heading_with_no_openings_and_no_recommendation_lin
 
 def test_bump_on_an_open_walk_runs_check_bump_with_the_title_and_without_a_walk_prints_nothing():
     case = Case(next_to_present="item 4 of 9")
-    result = case.run("Bump the code proposals ")
+    result = case.run("Bump the code proposals ", process_cwd=Case().checkout)
     context = json.loads(result.stdout)["hookSpecificOutput"]["additionalContext"] if result.stdout else ""
-    check("bump and a title tell the agent to run check --bump with that title and the reply as typed",
+    check("bump and a title, with the hook process started in another checkout, find the approval-walk by the "
+          "payload's cwd and tell the agent to run check --bump with that title and the reply as typed",
           result.returncode == 0
           and f"before item 4 of 9 of approval-walk {WALK_NAME}" in context
           and "check --bump 'the code proposals' --user-reply-as-typed 'Bump the code proposals'" in context
           and str(HOOK_SCRIPT.parent / "walk-me-through-answer-added-texts-cold-read-fast-read-check-and-close.py")
           in context,
-          f"exit {result.returncode}, stdout {result.stdout!r}, stderr {result.stderr!r}")
-    result = case.run("Bump the code proposals", process_cwd=Case().checkout)
-    check("bump finds the approval-walk by the payload's cwd, not the directory the hook process starts in",
-          result.returncode == 0 and f"before item 4 of 9 of approval-walk {WALK_NAME}" in result.stdout,
           f"exit {result.returncode}, stdout {result.stdout!r}, stderr {result.stderr!r}")
     result = Case().run("bump the code proposals")
     check("bump with no approval-walk open prints nothing",
