@@ -77,7 +77,7 @@ Several of these rules are already held in code, so a change to the prose may al
 
 ## What is decided
 
-- On 2026-11-22 the user deferred this GHI's 28 defects until he resumes the design-to-main build, and said to coordinate then with the agent-seats Cpc and helper2. His ruling is item 36 of `nedlern@ned-box:/home/nedlern/nedsnodes-logs/walk/ai-native-software-development-objective-page-cleanup-2026-11-17-minutes.md`.
+- On 2026-11-22 the user deferred this GHI's 28 defects until he resumes the design-to-main build, and said to coordinate then with the agent-seats Cpc and helper2. His user-ruling is item 36 of `nedlern@ned-box:/home/nedlern/nedsnodes-logs/walk/ai-native-software-development-objective-page-cleanup-2026-11-17-minutes.md`.
 
 ## Next action
 
