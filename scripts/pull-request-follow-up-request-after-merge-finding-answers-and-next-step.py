@@ -83,21 +83,13 @@ for merge-lane-2, which lists each waiting finding as still open, and which the 
 since a program cannot.
 
 remove-topic-branches-and-worktrees, in the author's checkout once the subagent has ended: remove each
-recorded worktree with git worktree remove, unless the agent harness still
-locks it (a lock reason starting HARNESS_LOCK_REASON_START), something else
-locks it, or it holds changed or untracked files; then delete each recorded
+recorded worktree with git worktree remove, unless it is locked or it holds
+changed or untracked files; then delete each recorded
 topic branch whose commits are all on a remote-tracking branch of origin.
 Every git command after the worktree list runs in the main worktree, the
 first git worktree list names, so the step works from any worktree of the
 checkout, one it removes included. Each worktree or branch left in place is printed with what the author should
 do, and the exit code is 1.
-
-In remove-topic-branches-and-worktrees, a lock in the form Claude Code writes,
-"claude agent agent-<id> (pid N start T)", whose claude process has ended, as
-scripts/worktree-owner-file-read-and-write.py's
-claude_code_subagent_worktree_lock_dispatching_process_running_state() finds it,
-is unlocked first, and the worktree is then judged as an unlocked one; while
-whether that process runs cannot be read, the lock is kept as the harness's.
 
 print-follow-up-request-block-from-merge-lane-2-reviews, run by merge-lane-2 after the merge: read every
 review of the pull request that merge-lane-2's GitHub account posted, with its inline comments, replies left out, and
@@ -160,7 +152,6 @@ def load_script_beside_this_one(file_name):
     return module
 
 
-owner_file = load_script_beside_this_one("worktree-owner-file-read-and-write.py")
 defect_line_reader = load_script_beside_this_one(
     "pull-request-description-defect-line-root-cause-status-and-follow-up-link-reader.py")
 pre_push_conflict_check = load_script_beside_this_one("git-client-side-hooks-pre-push-conflict-check.py")
@@ -182,7 +173,6 @@ SAVED_FINDINGS_FILE_NAME_FORMAT = "pull-request-{number}-non-blocking-findings.m
 TOPIC_BRANCHES_AND_WORKTREES_FILE_NAME_FORMAT = "pull-request-{number}-follow-up-topic-branches-and-worktrees.json"
 FINDING_ANSWERS_FILE_NAME_FORMAT = "pull-request-{number}-follow-up-finding-answers.json"
 FOLLOW_UP_PULL_REQUEST_TITLE_AND_DESCRIPTION_FILE_NAME = "follow-up-pull-request-title-and-description.md"
-HARNESS_LOCK_REASON_START = "claude agent"
 GH_TIMEOUT_SECONDS = 60
 # Short, as the title only adds to a sentence the user gets after a failure, which it must not hold up.
 TITLE_TIMEOUT_SECONDS = 15
@@ -883,23 +873,7 @@ def remove_topic_branches_and_worktrees(number):
         if worktree is None:
             continue
         reason = worktree.locked_reason
-        lock = owner_file.claude_code_subagent_worktree_lock_reason_parse(reason)
-        if lock is not None:
-            state, explanation = owner_file.claude_code_subagent_worktree_lock_dispatching_process_running_state(lock)
-            if state == owner_file.STOPPED:
-                git(path, ["worktree", "unlock", path])
-                print(f"Unlocked worktree {path}, since {explanation}.")
-                reason = None
-        if reason is not None and reason.startswith(HARNESS_LOCK_REASON_START):
-            left.append(f"Worktree {path} is locked by the agent harness (lock reason: {reason}), so "
-                        "remove-topic-branches-and-worktrees left it and the topic branches recorded with it: the subagent may still be running.\n"
-                        "Wait until the subagent has ended.\n"
-                        + pass_on_to_the_user(
-                            f"The agent harness still locks worktree {path} of the follow-up of "
-                            f"{build_followed_up_pull_request_citation_with_title_and_link(number)}, so remove-topic-branches-and-worktrees "
-                            "could not remove it.", "If the worktree is still locked when you end your turn, pass")
-                        + f"\n{SUBAGENT_LINE}")
-        elif reason is not None:
+        if reason is not None:
             locked = f"locked (lock reason: {reason or 'none given'})"
             left.append(f"Worktree {path} is {locked}, so remove-topic-branches-and-worktrees "
                         "left it and the topic branches recorded with it.\n"
@@ -987,11 +961,13 @@ def merge_lane_2_reviews_and_their_comments(number, posting, account):
     return reviews, [{**comment, "pull_request": number} for comment in comments]
 
 
-def replaced_pull_request_numbers(number):
-    """The pull requests this one replaces by its #replaces lines, oldest first."""
+def replaced_pull_request_numbers(number, description):
+    """The pull requests this one, whose description is given, replaces by its #replaces lines, oldest first."""
     replaces_reader = load_script_beside_this_one(REPLACES_READER_FILE_NAME)
 
     def read_description(replaced):
+        if replaced == number:
+            return description
         return gh(["pr", "view", str(replaced), "--repo", REPOSITORY, "--json", "body", "--jq", ".body"])
     try:
         return replaces_reader.replaced_pull_request_chain_numbers_oldest_first(number, REPOSITORY, read_description)
@@ -1004,12 +980,19 @@ def print_follow_up_request_block_from_merge_lane_2_reviews(number):
     posting = load_script_beside_this_one(POSTING_PROGRAM_FILE_NAME)
     account = posting.MERGE_LANE_ACCOUNT
     reviews, comments = merge_lane_2_reviews_and_their_comments(number, posting, account)
-    author = gh(["pr", "view", str(number), "--repo", REPOSITORY, "--json", "author", "--jq", ".author.login"]).strip()
-    try:
-        verdicts = [posting.fix_round.merge_lane_review_verdict_from_review_state_or_comment_review_first_line(
-                        review, author, account) for review in reviews]
-    except posting.fix_round.StepFailed as failure:
-        raise StepFailed(str(failure)) from None
+    # A login holds no newline, so the first line is the author and the rest the description.
+    author, _, description = gh(["pr", "view", str(number), "--repo", REPOSITORY, "--json", "body,author",
+                                 "--jq", '.author.login + "\\n" + .body']).partition("\n")
+    verdicts, unreadable = [], None
+    for review in reviews:
+        try:
+            verdicts.append(posting.fix_round.merge_lane_review_verdict_from_review_state_or_comment_review_first_line(
+                review, author, account))
+        except posting.fix_round.StepFailed as failure:
+            unreadable = unreadable or failure
+    # A review whose verdict cannot be read changes nothing once another review approves.
+    if "APPROVE" not in verdicts and unreadable:
+        raise StepFailed(str(unreadable))
     if "APPROVE" not in verdicts:
         raise Refused(f"{account}, merge-lane-2's GitHub account, has no approving review of pull request {number}: "
                       f"merge-lane-2's review of pull request {number} is still running, or merge-lane-2 requested "
@@ -1018,7 +1001,7 @@ def print_follow_up_request_block_from_merge_lane_2_reviews(number):
                       f"After {account} posts an approving review of pull request {number}, run: "
                       f"{command(number, 'print-follow-up-request-block-from-merge-lane-2-reviews')}")
     replaced_comments = []
-    for replaced in replaced_pull_request_numbers(number):
+    for replaced in replaced_pull_request_numbers(number, description):
         replaced_comments += merge_lane_2_reviews_and_their_comments(replaced, posting, account)[1]
     findings = []
     for comment in replaced_comments + comments:
