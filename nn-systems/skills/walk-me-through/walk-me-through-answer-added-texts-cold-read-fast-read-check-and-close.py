@@ -614,7 +614,9 @@ def code_fix_files_problems(found):
 def removal_problems(found):
     problems = []
     unused = words(found.found[UNUSED])
-    for word in unused:
+    # Without a touches line, which rating_and_needed_lines_problems reports as missing, every file that still
+    # names the removed thing would count against it; the item then lacks only that line.
+    for word in unused if found.touched else ():
         others = sorted(files_naming(found.top, word, found.item, found.value) - set(found.touched))
         if others:
             problems.append(NOT_ASKED_STILL_USED_PROBLEM.format(word=word, marker=UNUSED, files=", ".join(others),
@@ -636,7 +638,8 @@ def rename_problems(found):
         old, new = names
         if not glossary_entry_files(found.top, new, found.item, found.value):
             problems.append(NOT_ASKED_NOT_IN_GLOSSARY_PROBLEM.format(new=new, pattern=GLOSSARY_FILES))
-        others = sorted(files_naming(found.top, old, found.item, found.value) - set(found.touched))
+        others = (sorted(files_naming(found.top, old, found.item, found.value) - set(found.touched))
+                  if found.touched else [])
         if others:
             problems.append(NOT_ASKED_STILL_USED_PROBLEM.format(word=old, marker=RENAME, files=", ".join(others),
                                                                touches=TOUCHES))
@@ -1183,16 +1186,14 @@ NOT_ASKED_REFUSED = (
     "`{command}` again.")
 NOT_ASKED_WEAK_GROUND_NOT_NAMED = (
     "nothing written: {item}'s `#case_against` line rates the case against weak, and `--not-asked none` is only for "
-    "an item of no kind rated none; for one rated weak, the `--not-asked` value says which of the two weak cases "
+    "an item of no kind rated none; for one rated weak, the `--not-asked` value says which of the weak cases "
     "against that settle an item it is, so that the minutes record why the item settled.\n"
     "This is not a refusal of {item}; run check again with the value that fits:\n"
-    "If the case against names only cost, such as code to write or time spent: "
-    "`{cost_only_command}`\n"
-    "If the case against names only that the change alters text the user approved word for word on an earlier "
-    "date: `{earlier_approved_command}`\n"
+    "{weak_ground_choices}\n"
     "If the case against names anything else, present {item} to the user as usual, then run check with the flag "
     "for his answer, as `--help` lists it.\n"
-    "From now on, give one of these two values, not `none`, for an item of no kind rated weak.")
+    "From now on, give one of these values, not `none`, for an item of no kind rated weak.")
+NOT_ASKED_WEAK_GROUND_CHOICE = "If the case against names only {ground}: `{command}`"
 NOT_ASKED_WEAK_GROUND_FOR_RATED_NONE = (
     "nothing written: {item}'s `#case_against` line rates the case against none, and `--not-asked {kind}` is only "
     "for an item of no kind rated weak.\n"
@@ -1260,11 +1261,14 @@ NOT_ASKED_JUDGEMENT_LINES = (
 NOT_ASKED_WEAK_JUDGEMENT_LINE = (
     "{item} is of " + NOT_ASKED_KINDS_NAMED + " and its case against is rated weak: if its change "
     "widens an agent's permissions, as a settings change can, or turns off a guard, do not run close: present {item} to the user.")
+GIT_LS_FILES_GLOSSARIES_FAILED_REASON = (
+    "{error}\nThe system glossaries git tracks could not be listed while checking {item}'s evidence.")
 GIT_LS_FILES_GLOSSARIES_FAILED = (
-    "{error}\nThe system glossaries git tracks could not be listed while checking {item}'s evidence.\n"
+    GIT_LS_FILES_GLOSSARIES_FAILED_REASON + "\n"
     "Run `{command}` again once; if it fails the same way, present {item} to the user "
     "and run check with the flag for his answer, as `--help` lists it.")
-GIT_GREP_FAILED = ("`git grep` failed with exit {code} in {top} while checking {item}'s evidence: {error}\n"
+GIT_GREP_FAILED_REASON = "`git grep` failed with exit {code} in {top} while checking {item}'s evidence: {error}"
+GIT_GREP_FAILED = (GIT_GREP_FAILED_REASON + "\n"
                    "Run `{command}` again once; if it fails the same way, "
                    "present {item} to the user and run check with the flag for his answer, as `--help` lists it.")
 CLOSE_NOT_SHOWN_LINES = (
@@ -1475,6 +1479,15 @@ SYSTEM_STATUS_CLAIMS_RECHECKED_LINE = "{item}: its status claims ({matched}) rec
 
 class Failure(Exception):
     """A step that cannot go on; its argument is the line to print."""
+
+
+class EvidenceCheckFailed(Failure):
+    """An item's evidence could not be checked; reason says why, without the full message's rerun instruction,
+    for a no-answer row that is not offered and so has no command to rerun."""
+
+    def __init__(self, message, reason):
+        super().__init__(message)
+        self.reason = reason
 
 
 class FastReadFailed(Exception):
@@ -2163,8 +2176,10 @@ def files_matching(top, options, pattern, item, kind, pathspec=None):
         command += ["--", pathspec]
     result = subprocess.run(command, capture_output=True, text=True)
     if result.returncode not in (0, 1):
-        raise Failure(GIT_GREP_FAILED.format(code=result.returncode, top=top, item=item, error=result.stderr.strip(),
-                                             command=check_command_with_cwd(top, "--not-asked", str(kind))))
+        facts = dict(code=result.returncode, top=top, item=item, error=result.stderr.strip())
+        raise EvidenceCheckFailed(
+            GIT_GREP_FAILED.format(**facts, command=check_command_with_cwd(top, "--not-asked", str(kind))),
+            GIT_GREP_FAILED_REASON.format(**facts))
     return {path for path in result.stdout.split("\n") if path and not path.startswith("docs/walk/")}
 
 
@@ -2214,8 +2229,10 @@ def not_system_glossary_problems(touched, top, item):
     try:
         tracked = set(glossaries_listed.glossary_paths_git_tracks(top)) - {project_glossary}
     except glossaries_listed.CouldNotListGlossaries as error:
-        raise Failure(GIT_LS_FILES_GLOSSARIES_FAILED.format(error=error, item=item,
-                                                            command=check_command_with_cwd(top, "--not-asked", "7")))
+        raise EvidenceCheckFailed(
+            GIT_LS_FILES_GLOSSARIES_FAILED.format(error=error, item=item,
+                                                  command=check_command_with_cwd(top, "--not-asked", "7")),
+            GIT_LS_FILES_GLOSSARIES_FAILED_REASON.format(error=error, item=item))
     root = Path(top).resolve()
     problems = []
     for path in touched:
@@ -2348,10 +2365,10 @@ def check(arguments):
                                                   command=check_command_with_cwd(top, *check_words(arguments))))
     if arguments.not_asked is not None:
         if arguments.not_asked == NOT_ASKED_RATED_NONE and rating == NOT_ASKED_RATED_WEAK:  # pragma: no mutate, no rating sorts after "weak" ("very strong" sorts before it), so >= matches only weak
-            raise Failure(NOT_ASKED_WEAK_GROUND_NOT_NAMED.format(
-                item=item, cost_only_command=check_command_with_cwd(top, "--not-asked", "weak-cost-only"),
-                earlier_approved_command=check_command_with_cwd(top, "--not-asked",
-                                                                "weak-alters-earlier-approved-text-only")))
+            raise Failure(NOT_ASKED_WEAK_GROUND_NOT_NAMED.format(item=item, weak_ground_choices="\n".join(
+                NOT_ASKED_WEAK_GROUND_CHOICE.format(ground=ground,
+                                                    command=check_command_with_cwd(top, "--not-asked", value))
+                for value, ground in NOT_ASKED_GROUNDS.items())))
         if arguments.not_asked in NOT_ASKED_WEAK_GROUND_LABELS and rating == NOT_ASKED_RATED_NONE:
             raise Failure(NOT_ASKED_WEAK_GROUND_FOR_RATED_NONE.format(
                 item=item, kind=arguments.not_asked,
@@ -2784,8 +2801,8 @@ def approval_walk_item_first_numbered_sub_step_without_answer(walk_finder, minut
 
 
 def rated_none_item_not_to_be_shown(walk_finder, top, minutes, value, numbers, total, parser, named):
-    """Return the waiting item's walk-document path when the item is one the walk-me-through skill settles
-    without showing it, as the step's docstring says, or None. named is the item as check names it."""
+    """Return the waiting item's walk-document path when the item is one the no-answer table settles without
+    showing it, as the step's docstring says, or None. named is the item as check names it."""
     if numbers[1:]:
         return None
     document, lines, marks, _, _ = item_lines(walk_finder, minutes, value, numbers, total, parser)
@@ -2798,11 +2815,15 @@ def rated_none_item_not_to_be_shown(walk_finder, top, minutes, value, numbers, t
     if TOUCHES in evidence(lines) and not_asked_problems(NOT_ASKED_RATED_NONE, NOT_ASKED_RATED_NONE, lines, marks,
                                                          top, named):
         return None
+    return None if settling_left_unclosed(walk_finder, minutes, parser, named) else document
+
+
+def settling_left_unclosed(walk_finder, minutes, parser, named):
+    """True when the walk-minutes' last answer settles the named item without asking the user and no close follows
+    it, as when the advisor objected: the item is then shown, and rerunning the settling would record it twice."""
     match = unclosed_last_answer(walk_finder, minutes, parser)
     settled = {f"not asked, {not_asked_label(kind)}" for kind in NOT_ASKED_KINDS + NOT_ASKED_NO_KIND_VALUES}
-    if match and match["item"].lower() == named.lower() and match["answered"] in settled:
-        return None
-    return document
+    return bool(match and match["item"].lower() == named.lower() and match["answered"] in settled)
 
 
 NO_ANSWER_ROWS_HEADING = ("Rows of the no-answer table {item} could settle by; if a row's meaning fits {item}, do "
@@ -2816,7 +2837,7 @@ NO_ANSWER_ROW_NOT_CHECKED = ("- {label}: its evidence could not be checked, so i
 
 def no_answer_rows_for_waiting_item_lines(walk_finder, top, minutes, value, numbers, total, parser, named, item):
     """The no-answer table's rows the waiting item could settle by, as the docstring's read-step paragraph says."""
-    if numbers[1:]:
+    if numbers[1:] or settling_left_unclosed(walk_finder, minutes, parser, named):
         return []
     document, lines, marks, _, _ = item_lines(walk_finder, minutes, value, numbers, total, parser)
     ratings = [CASE_AGAINST_RATING.match(match[1]) for match in map(CASE_AGAINST_LINE.match, lines) if match]
@@ -2835,7 +2856,8 @@ def no_answer_rows_for_waiting_item_lines(walk_finder, top, minutes, value, numb
         try:
             problems = not_asked_problems(case.value, rating, lines, marks, top, named)
         except Failure as failure:
-            rows.append(NO_ANSWER_ROW_NOT_CHECKED.format(label=case.label, item=item, error=failure))
+            rows.append(NO_ANSWER_ROW_NOT_CHECKED.format(label=case.label, item=item,
+                                                         error=getattr(failure, "reason", failure)))
             continue
         if not problems:
             rows.append(NO_ANSWER_ROW_PASSES.format(label=case.label, meaning=case.meaning, command=command))
