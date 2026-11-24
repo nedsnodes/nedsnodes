@@ -799,6 +799,45 @@ check("rule 5: a stopped subagent whose own running command was asked about is n
       machine.events("judge_answer")[0]["running_work_asked_about"] == ["b3c4"]
       and machine.claude_calls() == [], machine.events())
 
+machine = Machine()
+transcript = machine.seat("alpha", [
+    user("go"),
+    dict(user("", when=at(-60)), toolUseResult={"status": "async_launched", "agentId": "a1b2"}),
+    user("<task-notification>\n<task-id>a1b2</task-id>\n<status>completed</status>\n<note>the "
+         "result below may be interim.</note>\n<result>Started the check.</result>\n"
+         "</task-notification>", when=at(-40)),
+    dict(user("", when=at(-30)), toolUseResult={"status": "async_launched", "agentId": "a5c6"}),
+    assistant("Waiting on the subagents."), turn_end()])
+(transcript.with_suffix("") / "subagents").mkdir(parents=True)
+(transcript.with_suffix("") / "subagents" / "agent-a1b2.jsonl").write_text("".join(
+    json.dumps(record) + "\n" for record in [
+        *background_bash_launch("b3c4", "timeout 2h python3 scripts/surviving-mutants-check.py",
+                                at(-50), "tb1"),
+        assistant("Started the check.", when=at(-41))]))
+machine.script(judged(False, reason="a subagent is running"))
+machine.run(0)
+calls, judge_facts = rule_five_judge_facts(machine)
+check("rule 5: a stopped subagent left with no command to ask about does not hide the subagent "
+      "started after it", ids_handed_to_judge(judge_facts) == ["a5c6"], calls)
+
+machine = Machine()
+machine.seat("alpha", [
+    user("go"),
+    dict(user("", when=at(-30)), toolUseResult={"status": "async_launched", "agentId": "a1b2"}),
+    assistant("Waiting."), turn_end()])
+machine.script(judged(True, "Your subagent a1b2 started 30 minutes ago. Is it still needed?"),
+               sent_ok())
+machine.run(0)
+answered_with_a_tool_call_and_idle_again(machine, 1)
+machine.append("alpha", dict(user("", when=at(2)), toolUseResult={
+    "status": "async_launched", "agentId": "a5c6"}),
+               assistant("Waiting.", when=at(2)), turn_end(at(2)))
+machine.script(judged(False, reason="a subagent is running"))
+machine.run(9)
+calls, judge_facts = rule_five_judge_facts(machine)
+check("rule 5: a subagent already asked about does not hide the subagent started after it",
+      ids_handed_to_judge(judge_facts) == ["a5c6"], calls)
+
 # --- rule 2: promises and announced actions -------------------------------------------------------
 PROMISE = "I'll report when PR 927 merges."
 machine = Machine()
