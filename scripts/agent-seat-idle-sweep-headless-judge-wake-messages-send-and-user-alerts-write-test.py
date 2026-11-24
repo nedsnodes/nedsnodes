@@ -1,7 +1,9 @@
 #!/usr/bin/env python3
 """Cases for scripts/agent-seat-idle-sweep-headless-judge-wake-messages-send-and-user-alerts-write.py.
 
-Every case runs the program as a subprocess against folders this suite made, never the real ones:
+The cases of `reminded_subjects`, at the end, are log-only: they import the program and run it in
+this process on a log file this suite wrote, with the real HOME, which that method never reads.
+Every other case runs the program as a subprocess against folders this suite made, never the real ones:
 a handoff directory, agents, projects and tasks roots, a ~/.claude.json, a log file, a state
 directory and HOME, under which user-alerts are written. `claude` is a fake placed first on PATH:
 it answers each call with the next scripted answer, as stream-json, and records the call's
@@ -2830,6 +2832,9 @@ check("a hold made while the sender ran, before the reminder arrived, has not an
       reminded([REMINDER, ARRIVED], held={"open task: 1": at(0.3)}) == {"open task: 1"})
 check("a hold made after the reminder arrived frees the task to be raised again",
       reminded([REMINDER, ARRIVED], held={"open task: 1": at(0.7)}) == set())
+check("a hold logged at the very time the reminder arrived has not answered it, as typing at that time has not",
+      reminded([REMINDER, ARRIVED], held={"open task: 1": at(0.5)}) == {"open task: 1"}
+      and reminded([REMINDER, ARRIVED], typed=at(0.5)) == {"open task: 1"})
 check("before the delivery check, typing before the send was logged has not answered the reminder",
       reminded([REMINDER], typed=at(0.05)) == {"open task: 1"})
 check("before the delivery check, typing after the send was logged answers the reminder",
