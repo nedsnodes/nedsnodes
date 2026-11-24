@@ -11,6 +11,7 @@ case's code. The program runs with GIT_DIR set.
 Run: python3 scripts/merge-lane-code-review-codex-cell-run-on-pull-request-head-test.py
 """
 
+import importlib.util
 import json
 import os
 import shutil
@@ -18,6 +19,13 @@ import subprocess
 import sys
 import tempfile
 from pathlib import Path
+
+_git_environment_fixture_spec = importlib.util.spec_from_file_location(
+    "git_redirecting_environment_removal_test_fixture",
+    Path(__file__).resolve().with_name("git-redirecting-environment-removal-test-fixture.py"))
+_git_environment_fixture = importlib.util.module_from_spec(_git_environment_fixture_spec)
+_git_environment_fixture_spec.loader.exec_module(_git_environment_fixture)
+_git_environment_fixture.remove_git_redirecting_environment_variables_from_this_process()
 
 PROGRAM = Path(__file__).with_name(
     "merge-lane-code-review-codex-cell-run-on-pull-request-head.py")
@@ -103,9 +111,21 @@ def main():
         (token_directory / "ned-review-merge.token").write_text(TOKEN + "\n")
         helpers = scratch / "merge-helpers"
         outputs = helpers / "cx" / "pr7-01234567"
+        record = outputs / "codex-review-run-record.json"
+        head_worktree = review_worktrees_directory(helpers) / "pr7-head"
+        head_worktree.mkdir(parents=True)
+        for command in (["init", "-q"], ["-c", "user.name=t", "-c", "user.email=t@example.invalid", "commit",
+                                         "-q", "--allow-empty", "-m", "head"]):
+            subprocess.run(["git", "-C", str(head_worktree), *command], check=True)
+        head = subprocess.run(["git", "-C", str(head_worktree), "rev-parse", "HEAD"], check=True,
+                              capture_output=True, text=True).stdout.strip()
 
         completed, gh_calls, cell_calls = run_program(scratch, helpers)
         detail = f"exit {completed.returncode}\n{completed.stdout}{completed.stderr}"
+        check("a finished run records the pull request, head, base, exit code and report",
+              record.exists() and json.loads(record.read_text()) == {
+                  "pull_request": 7, "head_commit": head, "base_commit": BASE, "exit_code": 0,
+                  "report_file": str(outputs / "codex-code-review-report.md")}, detail)
         check("the description is read from GitHub with the merge account's token",
               gh_calls == [{"argv": ["pr", "view", "7", "--repo", "nedsnodes/nedsnodes",
                                      "--json", "body", "--jq", ".body"], "gh_token": TOKEN}],
@@ -135,12 +155,43 @@ def main():
         check("the review's exit code is the program's",
               completed.returncode == 3 and "exit 3;" in completed.stdout,
               f"exit {completed.returncode}\n{completed.stdout}")
+        check("a failed run's record holds its exit code", json.loads(record.read_text())["exit_code"] == 3,
+              record.read_text())
 
         completed, _, cell_calls = run_program(scratch, helpers,
                                                {"MERGE_LANE_CODEX_TEST_GH_FAILS": "1"})
         check("a description gh cannot read exits 2 before the review runs",
               completed.returncode == 2 and cell_calls == []
               and "HTTP 404" in completed.stdout,
+              f"exit {completed.returncode}\n{completed.stdout}{completed.stderr}")
+        check("a run that stopped before the review records exit 2, replacing the earlier record",
+              json.loads(record.read_text())["exit_code"] == 2, record.read_text())
+
+        head_worktree.rename(head_worktree.with_name("pr7-head-away"))
+        completed, gh_calls, cell_calls = run_program(scratch, helpers)
+        head_worktree.with_name("pr7-head-away").rename(head_worktree)
+        check("an unreadable head commit exits 2 before the review runs, and leaves no earlier record behind",
+              completed.returncode == 2 and gh_calls == [] and cell_calls == [] and not record.exists()
+              and "could not read the head commit" in completed.stdout,
+              f"exit {completed.returncode}\n{completed.stdout}{completed.stderr}")
+
+        record.mkdir()
+        (record / "keeps-the-directory-from-being-replaced").write_text("")
+        completed, _, cell_calls = run_program(scratch, helpers)
+        check("a record path that cannot be removed exits 2 before the review runs",
+              completed.returncode == 2 and cell_calls == []
+              and "could not remove the earlier run record" in completed.stdout,
+              f"exit {completed.returncode}\n{completed.stdout}{completed.stderr}")
+        shutil.rmtree(record)
+
+        fake_cell = scratch / "main-checkout" / "scripts" / "code-review-codex-cell.py"
+        fake_cell.write_text(FAKE_CODEX_CELL.replace(
+            'sys.exit(int(', 'os.chmod(os.path.dirname(argv[argv.index("--output") + 1]), 0o555)\nsys.exit(int('))
+        completed, _, _ = run_program(scratch, helpers)
+        outputs.chmod(0o755)
+        fake_cell.write_text(FAKE_CODEX_CELL)
+        check("a run record that cannot be written exits 2 and says why, even after a passing review",
+              completed.returncode == 2 and "could not be written" in completed.stdout and not record.exists(),
               f"exit {completed.returncode}\n{completed.stdout}{completed.stderr}")
 
         completed, gh_calls, cell_calls = run_program(scratch, helpers,
