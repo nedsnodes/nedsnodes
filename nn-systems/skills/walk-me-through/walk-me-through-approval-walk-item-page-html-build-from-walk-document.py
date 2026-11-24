@@ -16,9 +16,9 @@ walk-me-through-approval-walk-minutes-and-walk-document-item-finder-common.py: i
 names it to the next item, a sub-step such as `### Item 4.1 of 9` being an item of its own. An item that shares a
 heading with others keeps only its own lines, from its opening, such as `**Item 12:**`, to the next opening; with
 no opening of its own, it keeps the heading's lines. A `Withdrawn` heading ends the item it falls in, and a
-heading below it in its section starts no item, so the versions under it are on no page, with one exception: on
-item 4's page, a heading that names several of its sub-steps, as in `### Items 4.1 and 4.2 of 9`, is carried
-whole, its Withdrawn versions included.
+heading below it in its section starts no item, so the versions under it are on no page, with one exception: an
+item's page carries whole, its Withdrawn versions included, a heading that names several of its sub-steps, such as
+`### Items 4.1 and 4.2 of 9` on item 4's page.
 
 The skill links a sub-step's closing line to the page of the item the sub-step belongs to, such as item 4's page
 for sub-step 4.1, so item 4's page carries, after its own lines, each of its sub-steps under the sub-step's own
@@ -37,22 +37,25 @@ CommonMark parser, each line break kept, as the walk-document shows it. A paragr
 `Recommendation:` gets the class `rec`, and one that opens with `#approval_walk` gets the class `tag`.
 
 LINKS BETWEEN PAGES. The walk-minutes, the walk-document's sibling `<walk name>-minutes.md`, record each page's link
-on an `#item_page` line, read through the walk finder's approval_walk_item_page_link_lines_oldest_first_from_walk_minutes. Every page gets,
-above its heading, a "Previous" link to the page of the item before, the whole item with the highest number below
-this item's whole number whose newest `#item_page` line with a link gives that link, and a "Next" link to the page of
-the item after, found the same way above it; sub-steps share their item's page, so their lines are not read here, and
-a failed publish's line gives no link. When there is no Previous link, such as when the walk-minutes are missing, the
-program says why.
+on an `#item_page` line, read through the walk finder's approval_walk_item_page_link_lines_oldest_first_from_walk_minutes. Above its heading,
+a page gets a "Previous" link to the page of the item before, when there is one: the whole item with the highest
+number below this item's whole number whose newest `#item_page` line with a link gives that link. It gets a "Next"
+link to the page of the item after, the lowest such number above it, when there is one. Both lead to whole items' pages only, so a sub-step's page, such as
+4.1's, links the pages of items 3 and 5 when both have such a line, and neither a sub-step's `#item_page` line nor a failed publish's line becomes
+a Previous or Next link. When there is no Previous link, such as when the walk-minutes are missing, the
+program prints why.
 
 The item after has no link yet when this item's first page is built, so that page cannot be given its Next link in the
-same invocation of the program; on a whole item's first page, built without --version, the program prints the command that builds
-the item before's page again, with --version set to that item's next version, to run once this item's page is
-published and its `#item_page` line recorded; that page then gets its Next link to this one. An item's next version is
-one more than the highest version its `#item_page` lines with a link reach, read in order: a line that states its version
-has that version, and a line that states none has one more than the line before it. A stated version can skip ahead,
-because an agent may republish a page without recording a line for it, as when `#item_page item 2 of 19 <link>
-(version 4)` follows a single earlier line for item 2; a bare line after it is then version 5. A page built with --version names the link it is to be published to, its
-item's newest `#item_page` link.
+same invocation of the program. On a whole item's first page, built without --version, when that page has a Previous
+link, the program prints the command that rebuilds the earlier item's page, the one the Previous link opens, with --version
+set to that item's next version, to run once this item's page is published and its `#item_page` line recorded; the earlier
+item's page then gets its Next link to this one. An item's `#item_page`
+lines with a link, read oldest first, count versions from 1, each one more than the line before or the version it
+states when that is higher, so the last line's version is the highest; the item's next version is one more.
+A stated version can skip ahead, because an agent may republish a page without recording a line for it, as when
+`#item_page item 2 of 19 <link> (version 4)` follows a single earlier line for item 2; a bare line after it is then
+version 5, and the item's next version 6. Building a page with --version prints the link it is to be published to, its
+item's newest `#item_page` link, if any.
 
 It does not copy the files an item links into the page: each link stays as the walk-document writes it, so a
 `file:///Volumes/nedhome/...` link opens only on the user's Mac. Of the lines the paragraphs above put on the page,
@@ -158,12 +161,11 @@ def whole_item_links(item_page_lines, walk_finder):
 
 def next_version(item_page_lines, walk_finder, number):
     """Return the version the next republish of whole item number's page gets, as the module docstring says."""
-    version = highest = 0
+    version = 0
     for each, link, stated in item_page_lines:
         if each == str(number) and link != walk_finder.ITEM_PAGE_PUBLISH_FAILED:
-            version = stated or version + 1
-            highest = max(highest, version)
-    return highest + 1
+            version = max(stated or 0, version + 1)
+    return version + 1
 
 
 def neighbour_links(links, number):

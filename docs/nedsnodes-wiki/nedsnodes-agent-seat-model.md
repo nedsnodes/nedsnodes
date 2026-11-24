@@ -4,7 +4,7 @@ How work is divided among named agents, and why. Every agent reads its own brief
 
 ## The words this model uses
 
-The project glossary, `docs/nedsnodes-wiki/nedsnodes-glossary.md`, defines the words this page uses. The handoff-system's nc-architecture-overview, `docs/nedsnodes-wiki/nedsnodes-handoff-architecture-overview.md`, describes the machinery that retires a spent session and starts its successor.
+The project glossary, `docs/nedsnodes-wiki/nedsnodes-glossary.md`, defines the words this page uses. The handoff-system's nn-architecture-overview, `docs/nedsnodes-wiki/nedsnodes-handoff-architecture-overview.md`, describes the machinery that retires a spent session and starts its successor.
 
 ## The grouping rule
 
@@ -36,7 +36,7 @@ They are different, and confusing them loses work.
 1. **Stop the handoff-supervisor first.** A running agent-seat writes a fresh handoff each time reincarnate-seat replaces its session, so archiving while its handoff-supervisor is alive only clears the file until the next one. Exit the session and confirm no handoff-supervisor process remains for the agent-seat.
 2. **Archive the handoff.** Move it to `~/.claude/handoffs/retired/<seat>-handoff-YYYY-MM-DD.md`, creating the directory if needed; if that name exists, append `-2`, `-3` before `.md`; never move onto an existing archive.
 3. **Archive the seat-brief.** Copy `~/agents/<seat>/CLAUDE.local.md` to `~/.claude/handoffs/retired/<seat>-seat-brief-YYYY-MM-DD.md`, under the same naming rule as the handoff. Git does not track the seat-brief, so the next step deletes it from the agent-home; the log-store keeps the transcript mirror's last copy.
-4. **Release the worktree and the branch.** On the agent-seat's machine, `git -C ~/Projects/nedsnodes worktree remove ~/agents/<seat>` (not `rm` — the worktree stays registered otherwise, and `git worktree prune` is then needed), and then delete the branch, `git -C ~/Projects/nedsnodes branch -d <seat>`, since removing a worktree leaves its branch behind. An agent-seat launched but never used may have an empty directory and no worktree at all; `rmdir` is correct there.
+4. **Release the worktree.** On the agent-seat's machine, `git -C ~/Projects/nedsnodes worktree remove ~/agents/<seat>` (not `rm` — the worktree stays registered otherwise, and `git worktree prune` is then needed). The agent-home rests on a detached HEAD, as the section What separate branches do and do not protect says, so removing its worktree leaves no branch behind. An agent-seat launched but never used may have an empty directory and no worktree at all; `rmdir` is correct there.
 
 ## Launching an agent-seat
 
@@ -68,7 +68,7 @@ The launcher creates the agent-seat's worktree, detached at `origin/main`, **bef
 
 ## What separate branches do and do not protect
 
-An agent-seat's agent-home holds no branch: it rests on a detached HEAD at `origin/main`, and git refuses commits in it. Its work is on nc-topic-branches, each in a worktree of its own, and git refuses to check one branch out in two worktrees. That keeps two agent-seats off one branch and nothing more: it is a check rather than a guarantee, since `git worktree add --force` overrides it and a separate clone is invisible to it, and two agent-seats editing the same file on different branches meet at the merge.
+An agent-seat's agent-home holds no branch: it rests on a detached HEAD at `origin/main`, and git refuses commits in it. Its work is on nn-topic-branches, each in a worktree of its own, and git refuses to check one branch out in two worktrees. That keeps two agent-seats off one branch and nothing more: it is a check rather than a guarantee, since `git worktree add --force` overrides it and a separate clone is invisible to it, and two agent-seats editing the same file on different branches meet at the merge.
 
 It protects nothing outside git. `~/.claude/handoffs/` and the tmux socket (`tmux -L <seat>`, one server per agent-seat since 2026-08-21, so one server crash takes down one agent-seat) are per-machine state keyed by the agent-seat's name. Two agent-seats using the same name would collide in that directory and in cross-session addressing, which is why one name means one agent-seat across both machines.
 

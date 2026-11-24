@@ -22,7 +22,11 @@ def _renamed_part(part, directory_names, name_prefixes):
 
 
 def convert_file_path_before_project_rename_to_path_after(path):
-    """The path a path written before the project rename has now; a path the rename did not move comes back as it is."""
+    """The path a path written before the project rename has now, by the rename list alone.
+
+    A file the rename kept under its old name, such as one under scripts/merge-gate-test-captured-github-responses/,
+    is converted too, to a path that does not exist; a caller that can see the checkout keeps a path the checkout
+    holds as written."""
     return "/".join(_renamed_part(part, DIRECTORY_NAMES_BY_NAME_BEFORE_PROJECT_RENAME,
                                   FILE_AND_DIRECTORY_NAME_PREFIXES_BY_PREFIX_BEFORE_PROJECT_RENAME) for part in path.split("/"))
 

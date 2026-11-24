@@ -9,9 +9,9 @@ but a rider, then read, ignoring case, as the first of these forms it matches,
 in every form allowing a hyphen, with or without spaces around it, between the
 letters of AO, O2 and O3 (`A-O`, `a - o`, `O-2`):
 
-  SINGLE      one answer: A, AO, Aa, D, Z, R, E, O, O2 or O3, or a word approve,
-              approved, approve as obvious, disapprove, disapproved, defer,
-              later or repeat.
+  SINGLE      one answer: A, AO, Aa, D, Z, R, E, O, O2, O3 or M, or a word
+              approve, approved, approve as obvious, disapprove, disapproved,
+              defer, later, repeat or more responses.
   ALL         `all a`, `a to all`, `all ao`, `ao to all`.
   NUMBERED    one or more pairs of a number and A, AO, D, Z or R:
               `8a`, `6 - a`, `1 a 2 d`, `5 d, 6 z`, `item 3 ao`, `37.4 r`; or a
@@ -30,8 +30,28 @@ letters of AO, O2 and O3 (`A-O`, `a - o`, `O-2`):
               tells the agent to run CHECK_PROGRAM's `check --bump` with that
               title, which shows that item next and the waiting item after it;
               with no walk open, the hook prints nothing.
-Every other prompt prints nothing and exits 0 without reading any file: Y and
-C are not answers, and N, like next, is a navigation word the agent reads.
+Every other prompt is a reply in the user's own words: Y and C are not answers,
+and N, like next, is a navigation word the agent reads.
+
+A REPLY THAT MAY FOLLOW A SETTLED DISCUSSION. While an item waits, the text
+carries WALK_ME_THROUGH_HOOK_INSTRUCTION_TO_AGENT_REWRITE_APPROVAL_WALK_ITEM_WHEN_DISCUSSION_SETTLED_ON_NON_RECOMMENDED_OPTION_LINE, which holds the
+walk-me-through skill's sentence on a discussion that settles on another
+option, word for word, for an answer that gives A, AO or Aa, in any form above,
+since the user may type A right after such a discussion. The line comes right
+after the opening line, a refused answer's included, because it can override
+the lines after it. A numbered answer naming a number no item has, which
+the hook does not expand, counts as a reply in his own words. A reply in his own
+words gets WALK_ME_THROUGH_HOOK_AGENT_CONTEXT_OPENING_WHEN_APPROVAL_WALK_ITEM_WAITING_AND_USER_REPLY_NOT_SHORT_ANSWER_LINE and that line, and nothing else.
+Both get the line only when he typed the prompt in an agent-session he attends,
+as the pending-user-alerts hook's typed_by_user and
+agent-session-unattended-by-user-check-common.py decide. With no item waiting,
+an empty prompt, or a prompt he did not type, a reply in his own words prints
+nothing. When reading the approval-walk state fails, the reply gets
+WALK_ME_THROUGH_HOOK_AGENT_CONTEXT_OPENING_WHEN_APPROVAL_WALK_STATE_READ_FAILED_AND_USER_REPLY_NOT_SHORT_ANSWER_LINE and that line, and exit 0.
+When reading the transcript fails and the prompt does not open as a program's
+or another agent-seat's message, the reply gets
+WALK_ME_THROUGH_HOOK_AGENT_CONTEXT_WHEN_TRANSCRIPT_READ_FAILED_AND_PROMPT_AUTHOR_UNKNOWN_LINE
+before that line, and its opening does not say the user wrote it.
 
 A, AO, Aa and D answer the item's recommendation: A, AO and Aa approve it,
 Aa only after an advisor check, which the agent makes as AA_SKILL_TEXT, the
@@ -40,7 +60,10 @@ alternative is done. An answer that makes a change sends the agent to
 CHECK_PROGRAM's check step, with --obvious for AO and --after-advisor for Aa.
 O asks the agent to show the item again with an "Option 2" and an "Option 3"
 paragraph; O2 and O3 approve one of them, through the check step with
---option.
+--option. M asks the agent to show MORE_RESPONSES_TEXT, the responses the
+closing line leaves out, or, with no approval-walk open, every response but
+M; it records nothing, so it takes no item number and gets no
+--user-reply-as-typed line.
 
 THE OPEN APPROVAL-WALK is found with WALK_FINDER_FILE, the module the
 walk-me-through Stop hook uses too, loaded by path: the one
@@ -74,8 +97,9 @@ or on a part of the waiting item, does the same for the item it names, and an
 answer whose every letter is R, such as `37.4 r`, gets none of the lines for
 recording answers, since R records nothing. When no approval-walk is
 open, or its walk-document has no item with a number an R names, or with one
-of the numbers after a word, as in `approve 5 and 6`, the hook prints
-nothing, so the prompt reaches the agent as typed; when the walk-document or
+of the numbers after a word, as in `approve 5 and 6`, the hook does not expand
+the answer, so the prompt reaches the agent as typed, with only what a reply in
+his own words gets; when the walk-document or
 the `#next_to_present` line cannot be read, the hook still gives the text, and
 the agent looks for the item itself.
 
@@ -117,30 +141,110 @@ terminal the session runs in. The text opens with one line naming the answer
 and the approval-walk item it answers, or saying no approval-walk is open;
 then the answer's lines; while an approval-walk is open, or the walk state
 cannot be read, a last line gives the check step's --user-reply-as-typed flag
-with the prompt, its whitespace runs squeezed, quoted for the shell.
+with the prompt, its whitespace runs squeezed, quoted for the shell, except
+after M, which runs no check.
 
 AN ANSWER TO A VERSION THE USER MAY NOT HAVE SEEN. When an answer gives A,
 AO, Aa or D to a waiting item, in any form above, parts included, the hook
-counts it only when the agent's last message that showed the item holds the
-item's current text, as the walk finder's
-approval_walk_item_text_as_shown_to_user gives it, word for word. A message
-showed the item when one text block of an assistant record of the transcript
-the payload's transcript_path names, outside any subagent's, has a line that
-opens with the item's heading; a closing line, which holds the skill's answer
-letters, never counts as that line. Both texts are compared as the Markdown
-parser renders them, link targets and other markup left out, reference links
-resolved by the definitions of their own text, whitespace squeezed, each
-running count's `of M` and each deferred note dropped; the item's other text
-must appear in one run after the heading's line, its words compared without
-their punctuation or letter case, so that `rule; a` and `rule. A` match.
-When the message does not hold the text, or
-no message showed the item, the answer is not counted, and the text hands the
-agent the item's text to show unchanged before the user answers again. When
-the transcript or the item's text cannot be read, the answer is not counted
-either, and the text says why; it does not ask the agent to show the item
-again for an unreadable transcript, because that cannot make it readable. A
-refused answer gets none of the answer's lines and no --user-reply-as-typed
-line.
+counts it only when the agent's last message that showed the item showed what
+the item now decides. A message showed the item when one text block of an
+assistant record of the transcript the payload's transcript_path names,
+outside any subagent's, has a line that opens with the item's heading, as the
+walk finder's approval_walk_item_text_as_shown_to_user gives it; a closing
+line, which holds the skill's answer letters, never counts as that line. Both
+texts are read as the Markdown parser renders them, link targets and other
+markup left out, reference links resolved by the definitions of their own
+text, whitespace squeezed, each running count's `of M` and each deferred note
+dropped. What the item decides is its decision-bearing lines, read line by
+line from the paragraphs of the item's text after its heading, and from the
+lines of its visible HTML blocks, such as a `<div>`, with their tags and
+comments taken out: the text after a `#new` or
+`#new_if_d` mark opening a line, or, for such a mark with nothing after it,
+the rest of its paragraph or else the block below it, such as a `>` quote;
+the text after a `#case_against` mark, its
+rating included, the text after each `The alternative:` and `Recommendation:`
+up to the next of those labels or the line's end, and, in an item that holds
+parts, the text after each `Part N.` opening a line; the message's copy is
+read as holding parts when it numbers parts of its own, so a part the item
+has since dropped is still read. The message's copy of the item is its text
+after the heading's line and before any top-level heading or closing line
+that opens another item, cut as the walk finder cuts the walk-document, so
+that under a heading several items share it holds only this item's own text.
+A mark is the same kind of line whatever its letter case. Each current line
+passes when its words, compared without punctuation, letter case or the
+marks `#new`, `#new_if_d`, `#case_against` and `[advisor]`, are those of an
+unused line of the same kind in the message's copy, read by the same rules;
+or, when the message holds no line of that kind and the line is no
+`Recommendation:` or `The alternative:` line, are the words of a unit of the
+message, alone or after the lead-in its kind may carry, "If you approve, the
+new text:", "If you disapprove, the new text:" or "Case against", as when the
+message dropped a `#new` mark or put "If you approve, the new text:" before
+the text; any other words before them, such as "Do not", send the line to
+the model. A unit is a paragraph, a visible
+HTML block, or a whole list or quotation, since a bare `#new` can introduce
+one. A paragraph or heading ending in a colon is a lead-in, since a lead-in
+on its own line, such as "If you disapprove, the new text:", says what the
+text it introduces means: a heading introduces its section, a list item's
+last paragraph the items after it in its list, and any other paragraph the
+block right below it, past any HTML comment. A unit, and each
+decision-bearing line of both texts, has the words of each lead-in
+introducing it before its own, so `> #new X` shown below "If you
+disapprove, the new text:" is not the item's `#new X`. A `The new text:`,
+bold or not, just after a `#new` or `#new_if_d` mark is not part of the
+line's text, so the line passes shown as the question Stop hook shows it. Lines passing that second way must be units in the item's order, each
+unit below the last, so that a `#new` and a `#new_if_d` text swapped in a
+message that dropped both marks do not pass. Words found elsewhere in the
+message do not count, because a recommendation and an alternative swapped
+would each still be found. A change anywhere else in the item, such as
+its explanation or an example, never refuses. Lines keep their places: each
+line that does not pass is paired with the first unused message line of its
+kind between the places its neighbours above and below took, and else with
+the message unit most like it by its words, preferring one that names the
+same kind of line. The check also runs the other way: a decision-bearing
+line of the message's copy that no current line took is a line the item
+dropped, such as a third part removed after the item was shown, and is
+paired with the item's unit most like it; a line below the place the item's
+last line took is not, since the item's copy has ended there and the
+agent's own words begin. Every
+pair of the answer goes to the
+model MODEL in one headless `claude -p` call, run with every hook disabled, no
+tools and no session file, which judges whether the line's meaning changed, or
+for a dropped line whether the item still says it; a
+change made only for clarity does not. The answer is not counted when the
+model judges a meaning changed, when the message holds no paragraph after the
+heading to pair a line with, or when no message showed the item; and when the
+call fails, runs past MODEL_TIMEOUT_SECONDS or answers without one entry per
+pair, since the hook then cannot tell. The text then names each such line, the
+model's reason or the failure, and hands the agent the item's text to show
+unchanged before the user answers again. When the transcript or the item's
+text cannot be read, the answer is not counted either, and the text says why;
+it does not ask the agent to show the item again for an unreadable transcript,
+because that cannot make it readable. A refused answer gets none of the
+answer's lines and no --user-reply-as-typed line.
+
+Not handled: lines of the same kind are matched against one
+pool for the whole item, so the recommendations of sub-steps 4.1 and 4.2
+swapped pass with no model call too. A `#new` and a `#new_if_d` text both
+shown without their marks and then swapped in the walk-document go to the
+model, but each is paired with the message unit most like it, which is the
+same sentence from the other place, so the model sees identical texts and
+the answer counts. The message's copy of the item ends at the item's
+closing line, so a decision-bearing line the agent wrote of its own
+between the item's text and its closing line is read as one the item
+dropped, and goes to the model.
+
+Not handled either, in how lead_ins reads a colon lead-in: a heading inside a
+quotation or list ends a top-level heading's section as a peer heading does,
+and a quoted colon heading reaches past its quotation; an HTML comment
+inside a list item, below that item's lead-in and above the next item, or at
+the end of the lead-in's own line, hides the lead-in; and the text after
+`The new text:` loses emphasis characters that open it, as `_reset` read as
+`reset`. Each can pass a reversed line with no model call, which counts the
+answer for text the user was not shown as proposed, or send a line to the
+model, which either judges it unchanged, and the answer counts, or has the
+user answer again. Both texts under one colon heading,
+one as `#new Keep rows.` and one as `If you approve, the new text: Keep
+rows.`, go to the model, since the heading's words come before the label.
 
 WHEN READING THE WALK STATE FAILS, such as a minutes file that is not UTF-8,
 the first line says so and why, and the text gives the answer's lines both for
@@ -152,12 +256,17 @@ which Claude Code records as a non-blocking error.
 Tool-messages-to-agent follow
 docs/nedsnodes-wiki/nedsnodes-how-to-write-a-tool-message-to-agent-such-as-a-hook-refusal-or-script-error.md.
 """
+import collections
+import difflib
+import functools
 import importlib.util
 import json
 import os
 import re
 import shlex
+import subprocess
 import sys
+import tempfile
 from pathlib import Path
 
 HERE = Path(__file__).resolve().parent
@@ -169,11 +278,11 @@ EXPLAIN_SKILL = CHECKOUT / ".claude" / "skills" / "explain" / "SKILL.md"
 
 # Longer forms first, so `ao` is not read as `a` and `approve as obvious` not as `approve`.
 WORDS = {"approve as obvious": "AO", "approved": "A", "approve": "A", "disapproved": "D",
-         "disapprove": "D", "defer": "Z", "later": "Z", "repeat": "R"}
+         "disapprove": "D", "defer": "Z", "later": "Z", "repeat": "R", "more responses": "M"}
 NUMBER = r"\d+(?:\.\d+)*"
 JOINER = r"(?:\s*-\s*)?"
 AO = rf"a{JOINER}o"
-LETTER = rf"aa|{AO}|o{JOINER}[23]|[adzreo]"
+LETTER = rf"aa|{AO}|o{JOINER}[23]|[adzreom]"
 SINGLE_LETTER = re.compile(rf"^(?:{LETTER})$", re.I)
 WORD = "|".join(word.replace(" ", r"\s+") for word in WORDS)
 ANSWER = rf"(?P<answer>{WORD}|{LETTER})"
@@ -181,8 +290,10 @@ ALL = re.compile(rf"^(?:all\s+(?P<first>{AO}|a)|(?P<last>{AO}|a)\s+to\s+all)$", 
 PAIR = rf"(?:items?\s*)?({NUMBER})\s*(?:[-:=)]\s*)?({AO}|[adzr])(?![a-z])"
 NUMBERED = re.compile(rf"^(?:{PAIR}(?:[\s,;]+|$))+$", re.I)
 PAIRS = re.compile(PAIR, re.I)
+# M records nothing, and a check run with no flag records an A, so M never takes item numbers.
+NUMBERED_WORD = "|".join(word.replace(" ", r"\s+") for word, code in WORDS.items() if code != "M")
 WORD_NUMBERS = re.compile(
-    rf"^(?P<word>{WORD})\s+(?:items?\s+)?(?P<numbers>{NUMBER}(?:(?:\s*,\s*|\s+and\s+|\s+){NUMBER})*)$", re.I)
+    rf"^(?P<word>{NUMBERED_WORD})\s+(?:items?\s+)?(?P<numbers>{NUMBER}(?:(?:\s*,\s*|\s+and\s+|\s+){NUMBER})*)$", re.I)
 NOT_AN_ITEM_NUMBER = r"(?!(?:items?\s*)?\d)"
 CONDITION = re.compile(rf"^{ANSWER}\s*[,;:\-]?\s+(?P<condition>(?:if|after)\b.+)$", re.I | re.S)
 LETTER_RIDER = re.compile(
@@ -192,9 +303,17 @@ WORD_RIDER = re.compile(rf"^(?P<answer>{WORD})\b[\s,;:.\-]+{NOT_AN_ITEM_NUMBER}(
 PART_START = re.compile(r"^Part (\d+)\.(?=\s|$)")
 MOST_PARTS = 5
 HEADING_POINT = re.compile(r"^[#\s*]*items?\s[^:]*:\s*(.*?)[\s*]*$", re.I)
+# Each response the user can give an item, with its label, in the order the walk shows them.
+RESPONSE_LABELS = (("A", "approve"), ("AO", "approve as obvious"), ("Aa", "approve after an advisor check"),
+                   ("D", "disapprove"), ("Z", "defer"), ("E", "explain"), ("O", "other options"),
+                   ("M", "more responses"))
+CLOSING_LINE_RESPONSES = ("A", "D", "M")
 # The walk-me-through skill's closing line after its link, word for word; the hook's test checks SKILL.md holds it.
-ANSWER_LETTERS_TEXT = ("A approve · AO approve as obvious · Aa approve after an advisor check · D disapprove · "
-                       "Z defer · E explain · O other options")
+ANSWER_LETTERS_TEXT = " · ".join(f"{code} {label}" for code, label in RESPONSE_LABELS
+                                 if code in CLOSING_LINE_RESPONSES)
+# What M shows: every response the closing line leaves out.
+MORE_RESPONSES_TEXT = " · ".join(f"{code} {label}" for code, label in RESPONSE_LABELS
+                                 if code not in CLOSING_LINE_RESPONSES)
 NO_RECOMMENDATION_PROBLEM = "no line starting \"Recommendation:\""
 PARTS_NOT_TOLD_APART_PROBLEM = (
     "it is one of the items under the walk-document's heading `{heading}`, which holds more than one line "
@@ -216,6 +335,17 @@ WALK_UNKNOWN_FIND = (
     "Find out yourself: the last `#next_to_present` line in each of the checkout's docs/walk/*-minutes.md names its "
     "waiting item, and a value other than `none` or `closed` marks the approval-walk open.")
 ITEM_NOT_SHOWN_OPENING_LINE = "[rule walk-me-through-short-answer-to-item-not-shown-discarded] The user answered \"{answer}\" to {item} of approval-walk {walk}."
+APPROVAL_WALK_SUB_STEP_ASKING_FOR_NO_DECISION_ANSWER_NOT_RECORDED_LINES = (
+    "[rule walk-me-through-short-answer-not-recorded-because-sub-step-asks-for-no-decision-hook-message-rule] The user answered \"{answer}\" while {item} of approval-walk {walk} waits. That sub-step asks "
+    "for no decision, so his answer approves, disapproves and records nothing.",
+    "Do not run the walk's check or close step for this answer, because check would record it as his decision.",
+    "Tell him in one sentence that his only choice here is N or next, then end your message with the closing line "
+    "below, word for word, and wait for his answer.\n{closing_lines}",
+)
+APPROVAL_WALK_SUB_STEP_ASKING_FOR_NO_DECISION_ANSWER_USER_ADDED_WORDS_LINE = "He also wrote: \"{added}\". Act on those words first."
+APPROVAL_WALK_SUB_STEP_ASKING_FOR_NO_DECISION_AGENT_INSTRUCTION_TO_PUBLISH_PAGE_MISSING_FROM_WALK_MINUTES_LINE = (
+    "If a line above shows `<page link>`, the walk-minutes record no `#item_page` line for that item: publish its "
+    "page as the walk-me-through skill says, add the line, and put the page's link in place of `<page link>`.")
 IF_WALK_OPEN = "If an approval-walk is open:"
 IF_NO_WALK = "If no approval-walk is open:"
 USER_REPLY_LINE = (
@@ -232,6 +362,34 @@ AA_SKILL_TEXT = (
     "outside the item becomes a new item in the walk or a loose end. If the call fails, say so and show "
     "the item again, unapproved; the user may then answer A to approve it without the check."
 )
+# The walk-me-through skill's sentence, word for word; the hook's test checks SKILL.md still holds it.
+DISCUSSION_SETTLED_SKILL_TEXT = (
+    "When the discussion of an item settles on any option but its recommendation, even its alternative, rewrite the "
+    "item's recommendation as that option and its alternative as the old recommendation, show the revised item, and "
+    "record only an answer given to the revised item."
+)
+WALK_ME_THROUGH_HOOK_INSTRUCTION_TO_AGENT_REWRITE_APPROVAL_WALK_ITEM_WHEN_DISCUSSION_SETTLED_ON_NON_RECOMMENDED_OPTION_LINE = (
+    "Act on this line only if the discussion of the waiting approval-walk item settled on an option other than its "
+    "recommendation: " + DISCUSSION_SETTLED_SKILL_TEXT)
+WALK_ME_THROUGH_HOOK_AGENT_CONTEXT_OPENING_WHEN_APPROVAL_WALK_ITEM_WAITING_AND_USER_REPLY_NOT_SHORT_ANSWER_LINE = (
+    "[rule walk-me-through-hook-instruction-to-agent-rewrite-approval-walk-item-when-discussion-settled-on-non-recommended-option] "
+    "{item} of approval-walk {walk} is waiting for the user's answer, and his reply is in his own words.")
+WALK_ME_THROUGH_HOOK_AGENT_CONTEXT_OPENING_WHEN_APPROVAL_WALK_STATE_READ_FAILED_AND_USER_REPLY_NOT_SHORT_ANSWER_LINE = (
+    "[rule walk-me-through-hook-instruction-to-agent-rewrite-approval-walk-item-when-discussion-settled-on-non-recommended-option] "
+    "The hook could not tell whether an approval-walk item is waiting for the user's answer, because reading the "
+    "approval-walk state failed: {error}. Find out yourself: the last `#next_to_present` line in each of the "
+    "checkout's docs/walk/*-minutes.md names its waiting item, and a value other than `none` or `closed` marks the "
+    "approval-walk open, unless an `#approval_walk_paused` line follows that line, which means no item is waiting. "
+    "If an item is waiting, the last line applies; if none is, it does not.")
+WALK_ME_THROUGH_HOOK_AGENT_CONTEXT_OPENING_WHEN_APPROVAL_WALK_ITEM_WAITING_AND_PROMPT_AUTHOR_UNKNOWN_LINE = (
+    "[rule walk-me-through-hook-instruction-to-agent-rewrite-approval-walk-item-when-discussion-settled-on-non-recommended-option] "
+    "{item} of approval-walk {walk} is waiting for the user's answer.")
+WALK_ME_THROUGH_HOOK_AGENT_CONTEXT_WHEN_TRANSCRIPT_READ_FAILED_AND_PROMPT_AUTHOR_UNKNOWN_LINE = (
+    "The hook could not read the transcript {path}, so it could not tell who wrote this prompt: {error}. "
+    "If the user did not type this prompt, the last line does not apply.")
+ANSWERS_THAT_APPROVE = ("A", "AO", "AA")
+PENDING_USER_ALERTS_HOOK_FILE = HERE / "walk-me-through-pending-user-alerts-claim-and-insert-as-approval-walk-items-user-prompt-submit-hook.py"
+ATTENDANCE_CHECK_FILE = CHECKOUT / "nn-systems" / "general-tools" / "agent-session-unattended-by-user-check-common.py"
 # Each answer's lines: (lines while an approval-walk is open, lines while none is).
 MEANINGS = {
     "A": (("{word} means approve: the user agrees with the recommendation of {item}{recommended}. "
@@ -311,6 +469,14 @@ MEANINGS = {
            "and wait for his answer.",)),
     "E": (("E means explain: run the explain skill, {explain_skill}, on {item}.",),
           ("E means explain: run the explain skill, {explain_skill}, on your last message.",)),
+    "M": (("{word} asks for more responses: the user is not answering {item} yet, and wants to see the responses "
+           "its closing line leaves out.",
+           "Reply with only this line, word for word, then, on a line of its own, {item}'s closing line, and wait "
+           "for his answer; record nothing in the minutes: " + MORE_RESPONSES_TEXT),
+          ("{word} asks for more responses: the user wants to see every response he can give your last question "
+           "or proposal.",
+           "Reply with only this line, word for word, and wait for his answer: "
+           + " · ".join(f"{code} {label}" for code, label in RESPONSE_LABELS if code != "M"))),
 }
 # O2 and O3 approve an option the agent showed after an O, instead of the recommendation.
 OPTION_TAKEN_LINES = (
@@ -379,7 +545,7 @@ NUMBERED_LINES = (
 )
 BUMP = re.compile(r"^bump\s+(?P<title>\S.*?)\s*$", re.I | re.S)
 BUMP_LINES = (
-    "[rule walk-me-through-bump-shows-named-item-next] The user said bump: he wants the item titled \"{title}\" shown next, before {item} of approval-walk {walk}, "
+    "[rule walk-me-through-user-bump-request-moves-named-approval-walk-item-to-next-shown] The user said bump: he wants the item titled \"{title}\" shown next, before {item} of approval-walk {walk}, "
     "which waits for his answer and is shown again after it.",
     "Run `python3 {program} check --bump {quoted_title} --user-reply-as-typed {reply}` and do what it prints; "
     "it numbers that item, moves it and writes the minutes' `#next_to_present` line, so write nothing in the "
@@ -468,15 +634,96 @@ NEVER_SHOWN_REASON = (
     "not read an earlier "
     "agent-session's transcript, so an item shown only before the last session-handoff must be shown again in this "
     "agent-session.")
-SHOWN_DIFFERENT_REASON = (
-    "The words after the heading of {item} in your last message that showed it, written at {timestamp}, do not "
-    "hold the item's current walk-document text after its heading as one unbroken run of words. Other words before "
-    "or after that run are allowed and are not the fault. Either that message misquoted the item, or the "
-    "walk-document changed after that message. Only words, runs of letters, digits and underscores, count, wherever "
-    "they stand: in the text the user reads rendered, in code, in an image's alt text, in HTML, tags included, and in `<!-- -->` comments. Punctuation, "
-    "code's operators and HTML's angle brackets included, letter case, whitespace, line breaks, Markdown markup, a "
-    "link's target (its text counts), `#approval_walk_item_` lines and the `of M` in a running count do not count, "
-    "so a word changed, added or dropped is a fault, but a comma made a full stop is not.")
+DECISION_LINES_CHANGED_REASON = (
+    "Your last message that showed {item}, written at {timestamp}, did not show the user what the item now decides. "
+    "{findings} The hook compares only decision-bearing lines, the item's and those of the message's copy of it: "
+    "the text after a `#new` or `#new_if_d` mark, the `#case_against` line, the text after `The alternative:` and "
+    "after `Recommendation:`, and, in an item with parts, the text after each `Part N.`. A line passes when a line of "
+    "the same kind in the message holds the same words, ignoring punctuation, letter case and the marks `#new`, "
+    "`#new_if_d`, `#case_against` and `[advisor]`, or, for a line other than a recommendation or an alternative that "
+    "the message shows without its mark, when a paragraph, list or quotation of the message holds those words and no "
+    "others, alone or after the words its kind may carry, \"If you approve, the new text:\", \"If you disapprove, the "
+    "new text:\" or \"Case against\", on its first line or as a paragraph of their own above it, each such "
+    "paragraph, list or quotation below the one before. In either text, any other words ending in a colon above a "
+    "line, as a "
+    "paragraph right above its block or a heading over its section, count as part of the line, since such a lead-in, "
+    "as \"Do not adopt the following:\", can reverse what follows it; such a line passes with no model call only under the same "
+    "lead-in. "
+    "For any other line a model judges whether the message's line of the same kind in the same place, or else its "
+    "closest paragraph, means the same, and for a line the message showed that the item no longer has, whether the "
+    "item's closest paragraph still says it, so a change made only for clarity passes, and so does any change outside "
+    "those lines, such as in the explanation or an example.")
+DECISION_LINE_MEANING_CHANGED_REASON = (
+    "Its {line} now reads \"{current}\", and the model judged that this means something other than what the message "
+    "showed, \"{shown}\": {why}")
+DECISION_LINE_NOT_IN_MESSAGE_REASON = (
+    "Its {line} now reads \"{current}\", and the message holds no paragraph after the item's heading to compare it with.")
+DECISION_LINE_SHOWN_TO_USER_THEN_REMOVED_FROM_APPROVAL_WALK_ITEM_NOT_RESTATED_REASON = (
+    "The message showed a {line}, \"{shown}\", which the item no longer has, and the model judged that the item's "
+    "closest text, \"{current}\", does not say the same: {why}")
+DECISION_LINE_SHOWN_TO_USER_THEN_REMOVED_FROM_APPROVAL_WALK_ITEM_LEFT_WITH_NO_TEXT_TO_COMPARE_REASON = (
+    "The message showed a {line}, \"{shown}\", which the item no longer has, and the item has no paragraph left to "
+    "compare it with.")
+DECISION_LINE_SHOWN_TO_USER_THEN_REMOVED_FROM_APPROVAL_WALK_ITEM_COMPARISON_MODEL_CALL_FAILED_REASON = (
+    "The message showed a {line}, \"{shown}\", which the item no longer has in those words, and the hook's "
+    "`claude -p` call failed; that call asks a model whether the item's closest text, \"{current}\", still says it, "
+    "so the hook cannot tell whether the user saw what he answered: {why}. Showing the item's current text unchanged "
+    "lets his next answer pass with no model call.")
+DECISION_LINE_CHECK_FAILED_REASON = (
+    "Its {line} now reads \"{current}\", in other words than the message's \"{shown}\", and the hook's `claude -p` "
+    "call that has a model judge whether that changes the meaning failed, so the hook cannot tell whether the user saw "
+    "what he answered: {why}. Showing the item's current text unchanged lets his next answer pass with no model call.")
+# The longest a message paragraph is quoted in a refusal; the whole item is handed over below it anyway.
+SHOWN_QUOTE_LIMIT = 300
+MODEL = "claude-haiku-5-5"
+# .claude/settings.json gives this hook 10 seconds, and a real call takes about 3; the transcript read needs the rest.
+MODEL_TIMEOUT_SECONDS = 7
+COMMAND_LINE_PREFIX_FILE = (CHECKOUT / "nn-systems" / "general-tools"
+                            / "claude-code-headless-run-command-line-prefix-with-no-connectors-and-explicit-permission-mode-common.py")
+MODEL_SCHEMA = {"type": "object",
+                "properties": {"pairs": {"type": "array", "items": {
+                    "type": "object",
+                    "properties": {"pair_number": {"type": "integer"},
+                                   "meaning_changed": {"type": "boolean"},
+                                   "reason": {"type": "string", "description": "One sentence saying why."}},
+                    "required": ["pair_number", "meaning_changed", "reason"], "additionalProperties": False}}},
+                "required": ["pairs"], "additionalProperties": False}
+MODEL_SYSTEM_PROMPT = "You compare texts. Answer only through the structured output."
+MODEL_PROMPT_TEMPLATE = """An agent takes the user through an approval-walk: numbered items, each proposing a decision that he answers, for example with A to approve its recommendation or D to do its alternative instead. The agent showed him an item, and the item's text in the walk-document may have been edited since. The user has just answered. His answer stands only if what he was shown decides the same as the current text.
+
+Each numbered pair below gives one decision-bearing line of an item: its recommendation, its alternative, its proposed new text, its case against (a strength rating and the argument), or one part of a fix. "Shown" is the paragraph of the agent's message most like the line; it may carry a label or extra words around the line, such as "Recommendation:" or "If you approve, the new text:". "Current" is the line as the walk-document now has it.
+
+For each pair, answer meaning_changed: true when the current line means something the shown text does not: a different action, a different scope, object, number, name, file or condition, different proposed text in substance, a different case-against rating or argument, or a line the shown text does not contain at all. Answer false when the change is made only for clarity: rewording, reordering, splitting or joining sentences, fixing grammar or punctuation, or adding words that make the same meaning plainer. Give a one-sentence reason.
+
+A pair marked "shown, then dropped" is the other way round: "Shown" is a decision-bearing line the agent's message held and the current text no longer has in those words, and "Current" is the current text's paragraph most like it. Answer meaning_changed true unless "Current" still says what "Shown" said.
+
+{pairs}"""
+# Follows a pair's line name in the model's prompt when the line is one the message showed and the item dropped.
+DROPPED_PAIR_NOTE = ", shown, then dropped"
+# A decision-bearing line opens with one of these marks; `#new_if_d` is tried before `#new`.
+DECISION_MARK = re.compile(r"^(#new_if_d|#new|#case_against)(?!\w)[\s:]*(.*)$", re.I)
+DECISION_PART = re.compile(r"^(Part \d+)\.(?:\s+|$)(.*)$")
+DECISION_LABEL = re.compile(r"(Recommendation|The alternative):", re.I)
+BARE_MARKS_INTRODUCING_A_BLOCK = ("#new", "#new_if_d")
+DECISION_LABEL_NAMES = {"recommendation": "Recommendation", "the alternative": "The alternative"}
+# Marks that tag a line, not words of its meaning, dropped from both texts before they are compared.
+MARK_WORDS = re.compile(r"\[advisor\]|#(?:new_if_d|new|case_against)(?!\w)", re.I)
+# A line of these kinds that the message shows without its label could sit inside another line, so only the model
+# decides it.
+UNMARKED_LINE_NAMES_NEEDING_THE_MODEL = ("`Recommendation:` line", "`The alternative:` line")
+# The only words a message may put before a line it shows without its mark and still pass with no model call; any
+# other words, such as "Do not", could reverse the line's meaning.
+LEAD_INS_BEFORE_A_LINE_SHOWN_WITHOUT_ITS_MARK = {"`#new` line": "If you approve, the new text:",
+                                                 "`#new_if_d` line": "If you disapprove, the new text:",
+                                                 "`#case_against` line": "Case against"}
+# A `The new text:` just after a `#new` or `#new_if_d` mark labels the text that follows; it is not part of it. In a
+# source line the label may be bold or italic, as `**The new text:**`.
+NEW_TEXT_LABEL = re.compile(r"^[*_]*the\s+new\s+text[*_]*:[*_]*\s*", re.I)
+# The list and quotation marks that can open a Markdown source line.
+LINE_MARKS = re.compile(r"^\s*(?:(?:[-+*>]|\d+[.)])\s+)+")
+# Words in a message paragraph that show it carries the same kind of line, for pairing a line the message changed.
+PAIRING_HINTS = {"`Recommendation:` line": r"recommend", "`The alternative:` line": r"alternative",
+                 "`#case_against` line": r"case\W+against"}
 TRANSCRIPT_UNREADABLE_LINES = (
     ANSWER_DISCARDED + ": it could not read this agent-session's transcript, {path}, which it reads to check that "
     "the user was last shown {item} as the walk-document now has it. The error: {error}.",
@@ -509,6 +756,7 @@ RECOMMENDATION_UNKNOWN_LINE = (
     "what he wants done before acting on {answer_letter}.")
 
 
+@functools.cache
 def load_walk_finder():
     spec = importlib.util.spec_from_file_location(
         "walk_me_through_approval_walk_minutes_and_walk_document_item_finder_common", WALK_FINDER_FILE)
@@ -518,7 +766,7 @@ def load_walk_finder():
 
 
 def answer_code(answer):
-    """The answer's code, A, AO, AA for Aa, D, Z, R, E, O, O2 or O3, from a letter or a word in any case and
+    """The answer's code, A, AO, AA for Aa, D, Z, R, E, O, O2, O3 or M, from a letter or a word in any case and
     spacing, with any hyphen between the letters dropped."""
     lowered = " ".join(answer.lower().split())
     return WORDS.get(lowered) or re.sub(r"[\s-]", "", lowered).upper()
@@ -559,8 +807,10 @@ class WalkState:
 
     def __init__(self, name, item, numbers, total, recommendations, problem, recommendation_problems=None,
                  parts=None, pages=None, points=None, minutes=None, shown_texts=None, shown_text_problem=None,
-                 document=None, references=None):
+                 document=None, references=None, no_decision_numbers=None):
         self.name, self.item, self.numbers, self.total = name, item, numbers, total
+        # the waiting sub-steps that ask for no decision, whose closing line offers only N or next
+        self.no_decision_numbers = no_decision_numbers or set()
         # item number -> the item's text as approval_walk_item_text_as_shown_to_user gives it, for each waiting item
         self.shown_texts = shown_texts or {}
         self.shown_text_problem = shown_text_problem  # why shown_texts lacks a waiting item, or None
@@ -613,19 +863,21 @@ def read_walk(cwd):
     recommendations, problems, parts = recommendations_in(
         walk_finder.prose_lines(text, parser, tokens), walk_finder.item_opening_lines(text, parser, tokens),
         spans, walk_finder, part_starts(tokens))
-    shown_texts, shown_text_problem = {}, None
+    shown_texts, shown_text_problem, no_decision_numbers = {}, None, set()
     try:
         _, units = walk_finder.waiting_item_units(document, value, numbers, total, parser, spans)
         for number in numbers:
             unit = next(unit for unit in units if number in unit[0])
             shown_texts[number] = walk_finder.approval_walk_item_text_as_shown_to_user(text, parser, spans, unit, number)
+        no_decision_numbers = walk_finder.approval_walk_waiting_sub_step_numbers_whose_text_ends_with_no_decision_closing_line(
+            text, parser, units, numbers, spans)
     except walk_finder.UnusableRange as problem:
         shown_text_problem = f"the `#next_to_present` line, `{value}`, {problem}"
     if total is None:
         total = walk_finder.approval_walk_item_total_shown_and_waiting_counted_from_walk_document(spans)
     return WalkState(name, count[0], numbers, total, recommendations, None, problems, parts, pages,
                      heading_points(text.split("\n"), spans, parser), minutes, shown_texts, shown_text_problem,
-                     document, references)
+                     document, references, no_decision_numbers)
 
 
 def heading_points(lines, spans, parser):
@@ -666,13 +918,17 @@ def without_links(markdown, parser):
 def closing_line(number, walk, link=None):
     """The walk-me-through skill's closing line for the item, with link in place of its page's, or None when the
     minutes record no page for it and no link is given; without its link when the minutes record a failed
-    publish."""
+    publish. A sub-step that asks for no decision gets the no-decision line, which offers only N or next."""
     link = link or walk.pages.get(number)
     if link is None:
         return None
+    failed = link == load_walk_finder().ITEM_PAGE_PUBLISH_FAILED
+    if number in walk.no_decision_numbers:
+        words = load_walk_finder().APPROVAL_WALK_SUB_STEP_ASKING_FOR_NO_DECISION_CLOSING_LINE_WORDS_WITHOUT_LINK
+        return words if failed else f"[{words}]({link})"
     point = walk.points.get(number)
     label = "Item " + item_count(number, walk)[len("item "):] + (f", {point}" if point else "")
-    if link == load_walk_finder().ITEM_PAGE_PUBLISH_FAILED:
+    if failed:
         return f"{label} · {ANSWER_LETTERS_TEXT}"
     return f"[{label}]({link}) · {ANSWER_LETTERS_TEXT}"
 
@@ -897,23 +1153,271 @@ def checked_item_numbers(answer, walk):
     return [number for number in walk.numbers if set(letters[number]) & set(CHANGE_MAKING_ANSWERS)]
 
 
+RENDERED_CHILD_TYPES = ("text", "code_inline", "html_inline", "image")
+CONTAINER_BLOCK_TYPES = ("blockquote_open", "bullet_list_open", "ordered_list_open")
+# lines: the block's rendered lines, as text_as_shown_squeezed gives each; following: the words of the block that
+# follows a paragraph at its own level, such as a `>` quote, a list or the next paragraph, as shown_words gives them,
+# or "" when none follows or the block is HTML; span: its first line and the line after its last.
+RenderedBlock = collections.namedtuple("RenderedBlock", "lines following span")
+# first, last: the first line a lead-in ending in a colon introduces and the line after the last; words: its words.
+LeadIn = collections.namedtuple("LeadIn", "first last words")
+
+
+def text_as_shown_squeezed(text):
+    """text with its whitespace squeezed, each running count without its `of M`, and no deferred note, which
+    approval_walk_item_text_as_shown_to_user leaves out of the item's heading."""
+    walk_finder = load_walk_finder()
+    words = walk_finder.approval_walk_text_with_running_count_totals_removed(" ".join(text.split()))
+    return re.sub(r"\s*" + re.escape(walk_finder.APPROVAL_WALK_DEFERRED_ITEM_HEADING_NOTE_AFTER_RUNNING_COUNT), "", words)
+
+
 def shown_words(markdown, parser, env=None):
     """The words of markdown as the user reads it rendered, as one string: no `#approval_walk_item_` line, no link
-    target or other markup, whitespace squeezed, each running count without its `of M`, and no deferred note, which
-    approval_walk_item_text_as_shown_to_user leaves out of the item's heading. env holds the reference definitions
-    of the whole text markdown was cut from, so a reference link in one line renders as it does in the whole."""
-    walk_finder = load_walk_finder()
+    target or other markup, as text_as_shown_squeezed gives it. env holds the reference definitions of the whole text
+    markdown was cut from, so a reference link in one line renders as it does in the whole. The parse gets a copy,
+    since a line that is ordinary text in the whole, as in a nested list, can read as a definition when cut out."""
     pieces = []
-    text = walk_finder.approval_walk_text_with_approval_walk_item_hashtag_lines_removed(markdown)
-    for token in parser.parse(text, {} if env is None else env):
+    text = load_walk_finder().approval_walk_text_with_approval_walk_item_hashtag_lines_removed(markdown)
+    for token in parser.parse(text, {"references": dict((env or {}).get("references", {}))}):
         if token.type == "inline":
             pieces += [" " if child.type in ("softbreak", "hardbreak") else child.content for child in token.children
-                       if child.type in ("text", "code_inline", "html_inline", "image", "softbreak", "hardbreak")]
+                       if child.type in (*RENDERED_CHILD_TYPES, "softbreak", "hardbreak")]
         elif token.type in ("fence", "code_block", "html_block"):
             pieces.append(token.content)
         pieces.append(" ")
-    words = walk_finder.approval_walk_text_with_running_count_totals_removed(" ".join("".join(pieces).split()))
-    return re.sub(r"\s*" + re.escape(walk_finder.APPROVAL_WALK_DEFERRED_ITEM_HEADING_NOTE_AFTER_RUNNING_COUNT), "", words)
+    return text_as_shown_squeezed("".join(pieces))
+
+
+def html_block_lines_as_shown(token):
+    """An html_block token's non-blank lines with its comments and tags taken out, as text_as_shown_squeezed gives
+    each, as the check-and-close program's new_marks() reads a `#new` line inside a `<div>`."""
+    visible = re.sub(r"<[^>]*>", " ", re.sub(r"<!--.*?(?:-->|$)", " ", token.content, flags=re.S))
+    return [text_as_shown_squeezed(line) for line in visible.split("\n") if line.strip()]
+
+
+def next_shown_block(tokens, index):
+    """The index of the token opening the block that starts at tokens[index], past any HTML block that shows
+    nothing, such as a comment; None when a container closes first or the text ends."""
+    for place in range(index, len(tokens)):
+        if tokens[place].type == "html_block" and not html_block_lines_as_shown(tokens[place]):
+            continue
+        return place if tokens[place].nesting >= 0 and tokens[place].map else None
+    return None
+
+
+def lead_ins(markdown, parser, env):
+    """[LeadIn] for each paragraph or heading of markdown whose words end in a colon, in order, so outermost first,
+    since such a lead-in, as "If you disapprove, the new text:" or "Do not adopt any of the following:", can reverse
+    what it introduces. A heading introduces its section, up to the next heading of its level or above; a list
+    item's last paragraph introduces the items after it in its list; any other paragraph introduces the block right
+    below it."""
+    text = load_walk_finder().approval_walk_text_with_approval_walk_item_hashtag_lines_removed(markdown)
+    tokens = parser.parse(text, env)
+    found = []
+    for index, token in enumerate(tokens):
+        if token.type != "inline" or tokens[index - 1].type not in ("paragraph_open", "heading_open"):
+            continue
+        opener = tokens[index - 1]
+        words = text_as_shown_squeezed("".join(" " if child.type in ("softbreak", "hardbreak") else child.content
+                                               for child in token.children
+                                               if child.type in (*RENDERED_CHILD_TYPES, "softbreak", "hardbreak")))
+        if not words.endswith(":"):
+            continue
+        if opener.type == "heading_open":
+            last = next((later.map[0] for later in tokens[index:] if later.type == "heading_open"
+                         and later.map and later.tag <= opener.tag), len(text.split("\n")))
+            found.append(LeadIn(opener.map[1], last, words))
+            continue
+        after = index + 2  # past the inline token and its paragraph_close
+        if after + 1 < len(tokens) and tokens[after].type == "list_item_close" \
+                and tokens[after + 1].type == "list_item_open":
+            parent = next(earlier for earlier in reversed(tokens[:index]) if earlier.level == tokens[after].level - 1
+                          and earlier.type in ("bullet_list_open", "ordered_list_open"))
+            found.append(LeadIn(tokens[after + 1].map[0], parent.map[1], words))
+            continue
+        block_start = next_shown_block(tokens, after)
+        if block_start is not None:
+            found.append(LeadIn(*tokens[block_start].map, words))
+    return found
+
+
+def with_lead_ins(first, last, found, text):
+    """text with the words of each of found's lead-ins introducing the lines first to last before it, outermost
+    first; text alone when it has no words."""
+    words = [lead_in.words for lead_in in found if lead_in.first <= first and last <= lead_in.last]
+    return " ".join([*words, text]) if comparable_words(text) else text
+
+
+def rendered_blocks(markdown, parser, env):
+    """[RenderedBlock] for each paragraph and visible HTML block of markdown, list items' and quotations' included,
+    in order; headings and code are neither. An HTML block's lines are read with its comments and tags taken out,
+    as the check-and-close program's new_marks() reads a `#new` line inside a `<div>`."""
+    text = load_walk_finder().approval_walk_text_with_approval_walk_item_hashtag_lines_removed(markdown)
+    source_lines = text.split("\n")
+    tokens = parser.parse(text, env)
+    blocks = []
+    for index, token in enumerate(tokens):
+        if token.type == "html_block":
+            lines = html_block_lines_as_shown(token)
+            if lines:
+                blocks.append(RenderedBlock(lines, "", token.map))
+            continue
+        if token.type != "inline" or tokens[index - 1].type != "paragraph_open":
+            continue
+        lines = [[]]
+        for child in token.children:
+            if child.type in ("softbreak", "hardbreak"):
+                lines.append([])
+            elif child.type in RENDERED_CHILD_TYPES:
+                lines[-1].append(child.content)
+        following = ""
+        block_start = next_shown_block(tokens, index + 2)  # past the inline token and its paragraph_close
+        if block_start is not None:
+            following = shown_words("\n".join(source_lines[slice(*tokens[block_start].map)]), parser, env)
+        blocks.append(RenderedBlock([text_as_shown_squeezed("".join(line)) for line in lines], following,
+                                    tokens[index - 1].map))
+    return blocks
+
+
+def shown_units(markdown, parser, env, blocks, found):
+    """[(first line, line after the last, words)] for each unit of markdown a decision-bearing line can be compared
+    with, in order of first line: each of blocks, rendered_blocks' blocks of markdown, its lines joined, and each list
+    and quotation whole, as shown_words gives it, since a bare `#new` mark's text can be a whole list or quotation. A
+    unit has the words of each of found, lead_ins' lead-ins of markdown, introducing it first, and keeps its own first
+    line, so that each unit below one lead-in is below the one before it. A unit holding ANSWER_LETTERS_TEXT, a closing
+    line, or no words is left out."""
+    text = load_walk_finder().approval_walk_text_with_approval_walk_item_hashtag_lines_removed(markdown)
+    source_lines = text.split("\n")
+    units = [(*block.span, " ".join(block.lines)) for block in blocks]
+    units += [(*token.map, shown_words("\n".join(source_lines[slice(*token.map)]), parser, env))
+              for token in parser.parse(text, env) if token.map and token.type in CONTAINER_BLOCK_TYPES]
+    units = [(first, last, with_lead_ins(first, last, found, words)) for first, last, words in units]
+    return sorted(unit for unit in units if ANSWER_LETTERS_TEXT not in unit[2] and comparable_words(unit[2]))
+
+
+def marked_text(mark):
+    """The text of a line DECISION_MARK matched as mark, without a `The new text:` just after a `#new` or `#new_if_d`
+    mark."""
+    return NEW_TEXT_LABEL.sub("", mark[2]) if mark[1].lower() in BARE_MARKS_INTRODUCING_A_BLOCK else mark[2]
+
+
+def new_text_as_shown(line):
+    """A `#new` or `#new_if_d` source line, after any LINE_MARKS, as an agent shows it to the user: its mark replaced
+    by the lead-in LEAD_INS_BEFORE_A_LINE_SHOWN_WITHOUT_ITS_MARK gives its kind, and its text as marked_text gives
+    it; None for any other line."""
+    mark = DECISION_MARK.match(LINE_MARKS.sub("", line.strip()))
+    if not mark or mark[1].lower() not in BARE_MARKS_INTRODUCING_A_BLOCK:
+        return None
+    return f"{LEAD_INS_BEFORE_A_LINE_SHOWN_WITHOUT_ITS_MARK[f'`{mark[1].lower()}` line']} {marked_text(mark)}"
+
+
+def decision_bearing_lines(blocks, blocks_lead_ins, has_parts):
+    """[(the line's name, as a refusal names it; its decision-bearing text; the words of the unit, of shown_units'
+    units, that holds it, which a refusal quotes as the user saw it)] for an item body's Markdown, given as blocks,
+    its rendered_blocks, and blocks_lead_ins, its lead_ins, as the module docstring's AN ANSWER TO A VERSION THE USER
+    MAY NOT HAVE SEEN says, read line by line as rendered. A text and its unit have the words of each lead-in
+    introducing the line's block first, so that `> #new X` shown below "If you disapprove, the new text:" is not the
+    same line as the item's `#new X`."""
+    found = []
+    for block in blocks:
+        def led_in(text, block=block):
+            return with_lead_ins(*block.span, blocks_lead_ins, text)
+        unit = led_in(" ".join(block.lines))
+        for index, line in enumerate(block.lines):
+            line = re.sub(r"\[advisor\]", " ", line, flags=re.I).strip()
+            mark = DECISION_MARK.match(line)
+            mark_text = marked_text(mark) if mark else None
+            part = DECISION_PART.match(line) if has_parts else None
+            if mark and not comparable_words(mark_text) and mark[1].lower() in BARE_MARKS_INTRODUCING_A_BLOCK:
+                # A bare mark's text is what it introduces: the rest of its paragraph, or else the block below it.
+                rest = " ".join(block.lines[index + 1:])
+                text = led_in(rest if comparable_words(rest) else block.following)
+                found.append((f"`{mark[1].lower()}` line", text, text))
+                break
+            if mark:
+                # A mark typed `#NEW` is the same kind of line as `#new`.
+                found.append((f"`{mark[1].lower()}` line", led_in(mark_text), unit))
+            elif part:
+                found.append((f"`{part[1]}.` line", led_in(part[2]), unit))
+            else:
+                labels = list(DECISION_LABEL.finditer(line))
+                for label, next_label in zip(labels, [*labels[1:], None]):
+                    name = DECISION_LABEL_NAMES[label[1].lower()]
+                    found.append((f"`{name}:` line",
+                                  led_in(line[label.end():next_label.start() if next_label else None]), unit))
+    return [(name, text.strip(), unit) for name, text, unit in found if comparable_words(text)]
+
+
+def decision_line_checks(current_lines, shown_lines, units, current_units):
+    """[(line name, the message's text, the walk-document's text, whether the line is one the message showed and the
+    item dropped)] for each pair the model must judge, from current_lines, the item's decision-bearing lines, and
+    shown_lines, the message's copy's, each in its own order, as decision_bearing_lines gives them; units and
+    current_units are the two texts' units.
+
+    Each line keeps its place, so a pair is made from the lines' positions, not from which text looks most alike.
+    A current line passes when an unused shown line of its kind has its words, the first such at or after the last
+    shown line taken; or, when the message has no line of its kind and it is no `Recommendation:` or `The
+    alternative:` line, when a unit of the message has its words, alone or after its kind's lead-in in
+    LEAD_INS_BEFORE_A_LINE_SHOWN_WITHOUT_ITS_MARK, each such unit below the last one taken, as for a message that
+    dropped the mark or put `If you approve, the new text:` before it. Each line that does not pass
+    is paired with the unit holding the first unused shown line of its kind between the shown lines its neighbours
+    above and below took, and else with the message unit most like it; a shown line left unused is one the item
+    dropped, paired with the item's unit most like it. The copy ends where message_copy_of_item ends it, so every
+    shown line is the item's own."""
+    taken = {}  # index in current_lines -> index in shown_lines
+    passed, unit_end = set(), 0
+    for index, (name, current, _) in enumerate(current_lines):
+        words = comparable_words(current)
+        after = max(taken.values(), default=-1)
+        same = [place for place, (kind, text, _) in enumerate(shown_lines)
+                if kind == name and place not in taken.values() and comparable_words(text) == words]
+        if same:
+            taken[index] = next((place for place in same if place > after), same[0])
+        elif name not in UNMARKED_LINE_NAMES_NEEDING_THE_MODEL and not any(kind == name for kind, _, _ in shown_lines):
+            lead_in = comparable_words(LEAD_INS_BEFORE_A_LINE_SHOWN_WITHOUT_ITS_MARK.get(name, ""))
+            unit = next((unit for unit in units if unit[0] >= unit_end
+                         and comparable_words(unit[2]) in (words, f"{lead_in} {words}")), None)
+            if unit is not None:
+                passed.add(index)
+                unit_end = unit[1]
+    checks = []
+    for index, (name, current, _) in enumerate(current_lines):
+        if index in taken or index in passed:
+            continue
+        above = max((place for line, place in taken.items() if line < index), default=-1)
+        below = min((place for line, place in taken.items() if line > index), default=len(shown_lines))
+        place = next((place for place in range(above + 1, below) if shown_lines[place][0] == name
+                      and place not in taken.values()), None)
+        if place is None:
+            checks.append((name, closest_unit(name, current, units), current, False))
+        else:
+            taken[index] = place
+            # The shown line's own unit, not the first unit holding its words, which can be an earlier paragraph.
+            checks.append((name, shown_lines[place][2], current, False))
+    checks += [(name, text, closest_unit(name, text, current_units), True)
+               for place, (name, text, _) in enumerate(shown_lines) if place not in taken.values()]
+    return checks
+
+
+def likeness(text, other):
+    """How alike text and other are by their words, from 0 to 1."""
+    return difflib.SequenceMatcher(None, comparable_words(text).split(), comparable_words(other).split(),
+                                   autojunk=False).ratio()
+
+
+def comparable_words(text):
+    """text's words as words_without_punctuation_or_case gives them, without the marks MARK_WORDS names."""
+    return words_without_punctuation_or_case(MARK_WORDS.sub(" ", text))
+
+
+def closest_unit(line_name, text, units):
+    """The words of the unit, of shown_units' units, most like text by its words, preferring one that PAIRING_HINTS
+    says carries the same kind of line; None when there is no unit."""
+    hint = PAIRING_HINTS.get(line_name) or (rf"\bpart\W+{line_name.split()[1][:-2]}\b"
+                                            if line_name.startswith("`Part ") else None)
+    words = [unit[2] for unit in units]
+    hinted = [unit for unit in words if hint and re.search(hint, unit, re.I)]
+    return max(hinted or words, key=lambda unit: likeness(text, unit), default=None)
 
 
 def words_without_punctuation_or_case(words):
@@ -938,10 +1442,12 @@ def with_walk_document_references(env, references):
 
 
 def last_showing_message(transcript_path, heading, parser, references):
-    """Return (the shown_words of the newest assistant text block outside a subagent that has a line opening with
-    heading, from the line after that one to the block's end; the block's timestamp), or None when no block does.
-    references is the walk-document's env, so that a reference link a block shows without its definition renders as
-    the walk-document's does. Raise OSError or ValueError when the transcript cannot be read."""
+    """Return (the line opening with heading in the newest assistant text block outside a subagent that has one; the
+    block's Markdown from the line after that one to the line that opens another item, or the block's end; the
+    block's env, holding its reference definitions and
+    the walk-document's references it does not define, so that a reference link a block shows without its definition
+    renders as the walk-document's does; the block's timestamp), or None when no block does. Raise OSError or
+    ValueError when the transcript cannot be read."""
     reader = load_walk_finder().load_module("claude_code_session_transcript_records_read_backward_common",
                                             TRANSCRIPT_READER_FILE)
     # A cheap test before the parser runs, since a transcript holds thousands of text blocks. It looks for the
@@ -958,7 +1464,7 @@ def last_showing_message(transcript_path, heading, parser, references):
             if not isinstance(text, str) or not mentions_number.search(text):
                 continue
             env = {}
-            parser.parse(text, env)
+            tokens = parser.parse(text, env)
             with_walk_document_references(env, references)
             lines = text.split("\n")
             for index, line in enumerate(lines):
@@ -966,19 +1472,163 @@ def last_showing_message(transcript_path, heading, parser, references):
                 if not mentions_number.search(line) or ANSWER_LETTERS_TEXT in line:
                     continue
                 if f"{shown_words(line, parser, env)} ".startswith(f"{heading} "):
-                    return (shown_words("\n".join(lines[index + 1:]), parser, env),
+                    end = next((start for start, words in item_openings_as_shown(tokens, parser, env)
+                                if start > index and opens_another_item(words, heading)), len(lines))
+                    return (line, "\n".join(lines[index + 1:end]), env,
                             record.get("timestamp", "an unknown time"))
     return None
 
 
+def message_copy_of_item(heading_line, message_heading_line, after_heading, number):
+    """The part of after_heading, a message's text below message_heading_line, its line that opens with the item's
+    heading, that shows item number, up to the item's closing line: the walk finder reads heading_line, the item's
+    heading in the walk-document, in message_heading_line's form, an ATX or setext heading of its level, or a `#` heading
+    when message_heading_line is no heading, and after_heading below it as it reads a
+    walk-document, so that under a heading several items share, only this item's own text is compared; the text of
+    every unit that names the item, as when the message puts a heading for item 11 inside the range `Items 10 to 12`;
+    after_heading whole when the finder reads no item number there. The message's heading level counts, not the
+    walk-document's, since a `### Explanation` ends a `###` item but not a `##` one.
+
+    Not handled: when one message shows two items under plain `Item N of M` titles with one closing line after both,
+    the second item's lines, a `## Explanation` heading among them, stay in the first item's copy, so a `#new` line
+    the message left out of the first item can be matched by a line of the second, and its answer counts with no
+    model call."""
+    walk_finder = load_walk_finder()
+    parser = walk_finder.markdown_parser()
+    opening = parser.parse(f"{message_heading_line}\n{after_heading}", {})
+    words = re.sub(r"^ {0,3}#{1,6}(?:[ \t]+|$)", "", heading_line)
+    if not (opening and opening[0].type == "heading_open" and opening[0].map[0] == 0):
+        # Below a plain or bold title, the finder would read a `## Explanation` heading as an unnumbered item of its
+        # own; under a `#` heading it is the item's sub-heading. last_showing_message already ends after_heading at
+        # the next item's opening.
+        heading_line = f"# {words}"
+    elif opening[0].markup in ("=", "-"):
+        # The message's own setext heading stays whole, its further lines and underline included, so that the finder
+        # reads it as it reads one in a walk-document.
+        heading_line = words
+    else:
+        heading_line = f"{'#' * int(opening[0].tag[1])} {words}"
+    text = f"{heading_line}\n{after_heading}"
+    units = walk_finder.item_unit_spans(text, parser)
+    pieces = [walk_finder.approval_walk_item_text_as_shown_to_user(text, parser, units, unit, number)
+              for unit in units if number in unit[0]]
+    # The first piece opens with heading_line, which is the walk-document's, not the message's.
+    copy = "\n\n".join([pieces[0].partition("\n")[2], *pieces[1:]]) if pieces else after_heading
+    env = {}
+    lines = copy.split("\n")
+    closing = next((start for start, words in item_openings_as_shown(parser.parse(copy, env), parser, env)
+                    if ANSWER_LETTERS_TEXT in words), None)
+    if closing is None:
+        return copy
+    # With no blank line before it, the closing line shares a paragraph with the item's last line, so the cut is at
+    # the closing line's own line, not the paragraph's first.
+    closing = next((index for index in range(closing, len(lines))
+                    if ANSWER_LETTERS_TEXT in shown_words(lines[index], parser, env)), closing)
+    # Below the item's closing line come the agent's own words, which are no line of the item's.
+    return "\n".join(lines[:closing])
+
+
+def item_openings_as_shown(tokens, parser, env):
+    """Yield (first line, words as shown_words gives them) for each block of tokens that can open an item in a message:
+    a top-level heading, or a top-level paragraph holding ANSWER_LETTERS_TEXT, the closing line. A line of an item's
+    own body, a list item, a quotation or a code block among them, opens nothing, whatever its words say."""
+    for position, token in enumerate(tokens):
+        if not token.map or token.type not in ("heading_open", "paragraph_open") or token.level != 0:
+            continue
+        words = shown_words(tokens[position + 1].content, parser, env)
+        if token.type == "heading_open" or ANSWER_LETTERS_TEXT in words:
+            yield token.map[0], words
+
+
+def item_numbers_an_opening_names(words):
+    """The item numbers of a message's heading or closing line, as shown_words gives it, with every range expanded:
+    the numbers of the walk finder's ITEM_LABEL_WITHOUT_COUNT, as in `Item 5: ...`, `Items 3.1, 3.2 & 4.1 - ...`,
+    `Item 5, more` or `Item 5` alone. None when words open no item, as `Item 5 fixes a path`, a mention, does; [] for a
+    list the walk finder calls an unusable range.
+
+    Not handled: `Item 5, 2 things changed`, `Item 5:foo` and `Item 5,foo` name no item, so last_showing_message does
+    not end another item's shown text at them, though message_copy_of_item can still cut its copy at such a heading;
+    and a deeper heading that only mentions items, as `### Items 2 and 3 are prerequisites`, names them, so it ends the
+    shown text of the item that holds it when this function reads a number from the holder's heading, as from `Item 4:
+    x` but not `Item 4 of 9: x`, and the deeper heading names neither that number nor one of its sub-steps."""
+    walk_finder = load_walk_finder()
+    opening = walk_finder.ITEM_LABEL_WITHOUT_COUNT.match(words)
+    if not opening:
+        return None
+    try:
+        return walk_finder.expand_numbers(opening["numbers"] or opening["plural_numbers"])
+    except walk_finder.UnusableRange:
+        return []
+
+
+def opens_another_item(words, heading):
+    """Whether a message's heading or closing line, as item_openings_as_shown gives it, opens an item other than the
+    one heading names: such a line ends the text shown for heading's item, so that another item's lines in the same
+    message are not taken for its own. A sub-step of heading's item, an item inside heading's range, and a heading
+    that names one of those among other items, as `Items 3.1 and 4.1` does for item 4, are its own. An unusable range
+    names nothing, so it ends the text: a line cut off goes to the model, while a line let in could count unchecked."""
+    numbers = item_numbers_an_opening_names(words)
+    own_numbers = item_numbers_an_opening_names(heading)
+    if numbers is None or own_numbers is None:
+        return False
+    return not any(number == mine or number.startswith(f"{mine}.") for number in numbers for mine in own_numbers)
+
+
+def model_judgement(pairs, timeout_seconds=MODEL_TIMEOUT_SECONDS):
+    """Return ([(meaning changed, the model's one-sentence reason)] for each (line name, shown, current, whether the
+    line is one the message showed and the item dropped) of pairs, in order; None) or (None, why the `claude -p` call
+    failed)."""
+    prefix = load_walk_finder().load_module(
+        "claude_code_headless_run_command_line_prefix_with_no_connectors_and_explicit_permission_mode_common",
+        COMMAND_LINE_PREFIX_FILE)
+    prompt = MODEL_PROMPT_TEMPLATE.format(pairs="\n\n".join(
+        f"Pair {number}, the item's {name}{DROPPED_PAIR_NOTE if dropped else ''}.\nShown: {shown}\nCurrent: {current}"
+        for number, (name, shown, current, dropped) in enumerate(pairs, 1)))
+    command = [*prefix.claude_code_headless_run_command_line_prefix_build(
+                   "dontAsk", caller_claude_code_session_settings={"disableAllHooks": True}),
+               "--model", MODEL, "--output-format", "json",
+               "--json-schema", json.dumps(MODEL_SCHEMA), "--system-prompt", MODEL_SYSTEM_PROMPT,
+               "--tools", "",
+               # Without this every check would leave a session file behind.
+               "--no-session-persistence"]
+    try:
+        completed = subprocess.run(command, input=prompt, capture_output=True, text=True,
+                                   timeout=timeout_seconds, cwd=tempfile.gettempdir(), check=False)
+    except subprocess.TimeoutExpired:
+        return None, f"claude gave no answer within {timeout_seconds} seconds"
+    except OSError as error:
+        return None, f"claude could not be run: {error}"
+    try:
+        result = json.loads(completed.stdout)
+        entries = result["structured_output"]["pairs"]
+    except (ValueError, TypeError, KeyError) as error:
+        detail = (completed.stderr or completed.stdout or "no output").strip()[:300]
+        return None, f"claude exited {completed.returncode} without a verdict ({error!r}): {detail}"
+    if completed.returncode != 0 or result.get("is_error"):
+        return None, f"claude exited {completed.returncode} reporting an error: {str(result.get('result'))[:300]}"
+    verdicts = {}
+    for entry in entries if isinstance(entries, list) else [None]:
+        number = entry.get("pair_number") if isinstance(entry, dict) else None
+        if (type(number) is not int or number in verdicts or type(entry.get("meaning_changed")) is not bool
+                or not isinstance(entry.get("reason"), str) or not entry["reason"].strip()):
+            verdicts = None
+            break
+        verdicts[number] = (entry["meaning_changed"], entry["reason"].strip())
+    if verdicts is None or sorted(verdicts) != list(range(1, len(pairs) + 1)):
+        return None, (f"claude's verdict does not give each of the {len(pairs)} numbered pairs exactly one entry with "
+                      f"a true or false meaning_changed and a reason: {json.dumps(result.get('structured_output'))[:300]}")
+    return [verdicts[number] for number in range(1, len(pairs) + 1)], None
+
+
 def unseen_item_lines(answer, walk, transcript_path):
-    """The lines that refuse the answer when it gives A, AO, Aa or D to a waiting item that the agent's last message
-    showing it does not show as the walk-document now has it, or when that cannot be checked; [] otherwise."""
+    """The lines that refuse the answer when it gives A, AO, Aa or D to a waiting item that no message showed, or
+    whose decision-bearing lines the agent's last message showing it does not show as the walk-document now has them,
+    or when that cannot be checked; [] otherwise."""
     numbers = checked_item_numbers(answer, walk)
     if not numbers:
         return []
     parser = shown_text_parser(load_walk_finder())
-    lines = []
+    reasons, misses = {}, {}
     for number in numbers:
         item = item_name(number, walk)
         text = walk.shown_texts.get(number)
@@ -995,7 +1645,7 @@ def unseen_item_lines(answer, walk, transcript_path):
         env = {}
         parser.parse(text, env)
         with_walk_document_references(env, walk.references)
-        heading, body = shown_words(heading_line, parser, env), shown_words(body, parser, env)
+        heading = shown_words(heading_line, parser, env)
         if not transcript_path:
             return [line.format(path=NO_TRANSCRIPT_PATH, item=item, error="no transcript_path",
                                 remedy=NO_TRANSCRIPT_PATH_REMEDY) for line in TRANSCRIPT_UNREADABLE_LINES]
@@ -1006,15 +1656,77 @@ def unseen_item_lines(answer, walk, transcript_path):
             return [line.format(path=transcript_path, item=item, error=repr(error),
                                 remedy=remedy.format(path=transcript_path)) for line in TRANSCRIPT_UNREADABLE_LINES]
         if shown is None:
-            reason = NEVER_SHOWN_REASON.format(item=item)
-        else:
-            after_heading, timestamp = shown
-            body = words_without_punctuation_or_case(body)
-            if not body or f" {body} " in f" {words_without_punctuation_or_case(after_heading)} ":
-                continue
-            reason = SHOWN_DIFFERENT_REASON.format(item=item, timestamp=timestamp)
-        lines += [line.format(item=item, reason=reason, text=text) for line in ITEM_NOT_SHOWN_LINES]
+            reasons[number] = NEVER_SHOWN_REASON.format(item=item)
+            continue
+        message_heading_line, after_heading, message_env, timestamp = shown
+        copy = message_copy_of_item(heading_line, message_heading_line, after_heading, number)
+        # The message's copy is read as holding parts on its own count, so a part the item dropped is still read.
+        has_parts = number in walk.parts or bool(part_numbers(part_starts(parser.parse(copy, {})), 0,
+                                                              copy.count("\n") + 1))
+        # Each text is parsed for its blocks and lead-ins once, as this runs on every prompt.
+        body_reading = (rendered_blocks(body, parser, env), lead_ins(body, parser, env))
+        copy_reading = (rendered_blocks(copy, parser, message_env), lead_ins(copy, parser, message_env))
+        checks = decision_line_checks(decision_bearing_lines(*body_reading, has_parts),
+                                      decision_bearing_lines(*copy_reading, has_parts),
+                                      shown_units(copy, parser, message_env, *copy_reading),
+                                      shown_units(body, parser, env, *body_reading))
+        if checks:
+            misses[number] = (timestamp, checks)
+    pairs = [check for _, checks in misses.values() for check in checks if None not in check]
+    verdicts, failure = model_judgement(pairs) if pairs else ([], None)
+    verdicts = iter(verdicts or [])
+    for number in [number for number in numbers if number in misses]:
+        timestamp, checks = misses[number]
+        findings = []
+        for name, shown, current, dropped in checks:
+            values = {"line": name, "current": text_quoted_shortened(current or "") if dropped else current,
+                      "shown": shown if dropped else text_quoted_shortened(shown or "")}
+            if None in (shown, current):
+                findings.append((
+                    DECISION_LINE_SHOWN_TO_USER_THEN_REMOVED_FROM_APPROVAL_WALK_ITEM_LEFT_WITH_NO_TEXT_TO_COMPARE_REASON
+                    if dropped else DECISION_LINE_NOT_IN_MESSAGE_REASON).format(**values))
+            elif failure:
+                findings.append((
+                    DECISION_LINE_SHOWN_TO_USER_THEN_REMOVED_FROM_APPROVAL_WALK_ITEM_COMPARISON_MODEL_CALL_FAILED_REASON
+                    if dropped else DECISION_LINE_CHECK_FAILED_REASON).format(**values, why=failure))
+            else:
+                changed, why = next(verdicts)
+                if changed:
+                    findings.append((
+                        DECISION_LINE_SHOWN_TO_USER_THEN_REMOVED_FROM_APPROVAL_WALK_ITEM_NOT_RESTATED_REASON
+                        if dropped else DECISION_LINE_MEANING_CHANGED_REASON).format(**values, why=why))
+        if findings:
+            reasons[number] = DECISION_LINES_CHANGED_REASON.format(
+                item=item_name(number, walk), timestamp=timestamp, findings=" ".join(findings))
+    lines = []
+    for number in numbers:
+        if number in reasons:
+            lines += [line.format(item=item_name(number, walk), reason=reasons[number], text=walk.shown_texts[number])
+                      for line in ITEM_NOT_SHOWN_LINES]
     return lines
+
+
+def no_decision_sub_step_answer_context(answer, walk):
+    """The context refusing an A, AO, Aa, D or M given to a waiting sub-step that asks for no decision, or None."""
+    if walk is None or not walk.no_decision_numbers:
+        return None
+    reached = walk.numbers if answer.get("code") == "M" else checked_item_numbers(answer, walk)
+    if not set(reached) & set(walk.no_decision_numbers):
+        return None
+    closing = [closing_line(number, walk) or closing_line(number, walk, "<page link>") for number in walk.numbers]
+    lines = [line.format(answer=answer["answer"], item=walk.item, walk=walk.name, closing_lines="\n".join(closing))
+             for line in APPROVAL_WALK_SUB_STEP_ASKING_FOR_NO_DECISION_ANSWER_NOT_RECORDED_LINES]
+    added = answer.get("rest") or answer.get("condition")
+    if added:
+        lines.insert(2, APPROVAL_WALK_SUB_STEP_ASKING_FOR_NO_DECISION_ANSWER_USER_ADDED_WORDS_LINE.format(added=added))
+    if any("<page link>" in line for line in closing):
+        lines.append(APPROVAL_WALK_SUB_STEP_ASKING_FOR_NO_DECISION_AGENT_INSTRUCTION_TO_PUBLISH_PAGE_MISSING_FROM_WALK_MINUTES_LINE)
+    return "\n".join(lines)
+
+
+def text_quoted_shortened(text):
+    """text, cut to SHOWN_QUOTE_LIMIT characters with ` ...` after the cut."""
+    return text if len(text) <= SHOWN_QUOTE_LIMIT else text[:SHOWN_QUOTE_LIMIT].rstrip() + " ..."
 
 
 def bump_output(payload, bump):
@@ -1036,21 +1748,111 @@ def output_for(payload):
         return bump_output(payload, bump)
     answer = parsed_answer(payload.get("prompt") or "")
     if answer is None:
-        return None
+        return own_words_output(payload)
     try:
         walk, walk_error = read_walk(payload.get("cwd") or os.getcwd()), None
     except Exception as error:
         walk, walk_error = None, error
     if named_item_missing(answer, walk, walk_error):
-        return None
+        return own_words_output(payload, walk)
+    no_decision_context = no_decision_sub_step_answer_context(answer, walk)
+    if no_decision_context:
+        return {"hookSpecificOutput": {"hookEventName": "UserPromptSubmit", "additionalContext": no_decision_context}}
+    # Right after the opening line, because it can override what the answer's own lines tell the agent to do.
+    settled_line = [WALK_ME_THROUGH_HOOK_INSTRUCTION_TO_AGENT_REWRITE_APPROVAL_WALK_ITEM_WHEN_DISCUSSION_SETTLED_ON_NON_RECOMMENDED_OPTION_LINE] if (
+        (walk is not None or walk_error is not None) and answer_approves(answer)
+        and not agent_session_unattended() and prompt_typed_by_user_and_transcript_read_error(payload)[0]) else []
     refusal = unseen_item_lines(answer, walk, payload.get("transcript_path"))
     if refusal:
         context = "\n".join([ITEM_NOT_SHOWN_OPENING_LINE.format(answer=answer["answer"], item=walk.item, walk=walk.name),
-                             *refusal])
+                             *settled_line, *refusal])
         return {"hookSpecificOutput": {"hookEventName": "UserPromptSubmit", "additionalContext": context}}
-    context = context_for(answer, walk, walk_error)
-    if walk is not None or walk_error is not None:
+    opening, *answer_lines = context_lines_for(answer, walk, walk_error)
+    context = "\n".join([opening, *settled_line, *answer_lines])
+    if (walk is not None or walk_error is not None) and answer.get("code") != "M":
         context += "\n" + USER_REPLY_LINE.format(reply=shlex.quote(" ".join(payload["prompt"].split())))
+    return {"hookSpecificOutput": {"hookEventName": "UserPromptSubmit", "additionalContext": context}}
+
+
+def answer_approves(answer):
+    """Whether the answer gives A, AO or Aa, to any item or part when it is numbered."""
+    if answer["form"] == "numbered":
+        return any(letter in ANSWERS_THAT_APPROVE for _, letter in answer["pairs"])
+    return answer["code"] in ANSWERS_THAT_APPROVE
+
+
+def load_module_by_path(name, path):
+    specification = importlib.util.spec_from_file_location(name, path)
+    module = importlib.util.module_from_spec(specification)
+    specification.loader.exec_module(module)
+    return module
+
+
+def agent_session_unattended():
+    attendance = load_module_by_path("agent_session_unattended_by_user_check_common", ATTENDANCE_CHECK_FILE)
+    return attendance.agent_session_unattended_by_user(os.environ)
+
+
+def prompt_typed_by_user_and_transcript_read_error(payload):
+    """(whether the user typed the prompt, the error reading the transcript or None). After a failed read, a prompt
+    that opens as a program's or another agent-seat's message is not his, and any other counts as typed."""
+    alerts_hook = load_module_by_path("walk_me_through_pending_user_alerts_hook", PENDING_USER_ALERTS_HOOK_FILE)
+    try:
+        return alerts_hook.typed_by_user(payload), None
+    # AttributeError: a record whose message is not an object, which counts as a failed read.
+    except (OSError, ValueError, AttributeError) as error:
+        return not payload["prompt"].lstrip().startswith(alerts_hook.NOT_TYPED_PROMPT_OPENINGS), error
+
+
+WALK_NOT_READ = object()
+
+
+def own_words_output(payload, walk=WALK_NOT_READ):
+    """The output for a prompt that is no short answer: the settled-discussion line while an item waits, else None.
+    Reads only the walk-minutes, not the walk-document, whose faults concern the answer forms. walk, when given,
+    is what read_walk returned, so the approval-walk state is not read a second time."""
+    if not (payload.get("prompt") or "").strip():
+        return None
+    if agent_session_unattended():
+        return None
+    if walk is not WALK_NOT_READ:
+        if walk is None:
+            return None
+        waiting = {"item": walk.item, "walk": walk.name}
+        return own_words_context(
+            payload,
+            WALK_ME_THROUGH_HOOK_AGENT_CONTEXT_OPENING_WHEN_APPROVAL_WALK_ITEM_WAITING_AND_USER_REPLY_NOT_SHORT_ANSWER_LINE.format(**waiting),
+            WALK_ME_THROUGH_HOOK_AGENT_CONTEXT_OPENING_WHEN_APPROVAL_WALK_ITEM_WAITING_AND_PROMPT_AUTHOR_UNKNOWN_LINE.format(**waiting))
+    try:
+        walk_finder = load_walk_finder()
+        top = walk_finder.checkout_top(Path(payload.get("cwd") or os.getcwd()))
+        if top is None or not (top / walk_finder.WALK_DIRECTORY).is_dir():
+            return None
+        walk = walk_finder.open_walk(top / walk_finder.WALK_DIRECTORY, walk_finder.markdown_parser())
+        if walk is None:
+            return None
+        minutes, value, _ = walk
+        count = walk_finder.VALUE_COUNT.match(value)
+        waiting = {"item": count[0] if count else f"The item `{value}`",
+                   "walk": minutes.name[:-len(walk_finder.MINUTES_SUFFIX)]}
+        opening = WALK_ME_THROUGH_HOOK_AGENT_CONTEXT_OPENING_WHEN_APPROVAL_WALK_ITEM_WAITING_AND_USER_REPLY_NOT_SHORT_ANSWER_LINE.format(**waiting)
+        opening_author_unknown = WALK_ME_THROUGH_HOOK_AGENT_CONTEXT_OPENING_WHEN_APPROVAL_WALK_ITEM_WAITING_AND_PROMPT_AUTHOR_UNKNOWN_LINE.format(**waiting)
+    except Exception as error:
+        opening = opening_author_unknown = WALK_ME_THROUGH_HOOK_AGENT_CONTEXT_OPENING_WHEN_APPROVAL_WALK_STATE_READ_FAILED_AND_USER_REPLY_NOT_SHORT_ANSWER_LINE.format(error=repr(error))
+    return own_words_context(payload, opening, opening_author_unknown)
+
+
+def own_words_context(payload, opening, opening_author_unknown):
+    """own_words_output's output once the opening for the waiting item, or for a failed read, is known."""
+    typed, transcript_error = prompt_typed_by_user_and_transcript_read_error(payload)
+    if not typed:
+        return None
+    lines = [opening]
+    if transcript_error is not None:
+        lines = [opening_author_unknown,
+                 WALK_ME_THROUGH_HOOK_AGENT_CONTEXT_WHEN_TRANSCRIPT_READ_FAILED_AND_PROMPT_AUTHOR_UNKNOWN_LINE.format(
+                     path=payload.get("transcript_path"), error=repr(transcript_error))]
+    context = "\n".join([*lines, WALK_ME_THROUGH_HOOK_INSTRUCTION_TO_AGENT_REWRITE_APPROVAL_WALK_ITEM_WHEN_DISCUSSION_SETTLED_ON_NON_RECOMMENDED_OPTION_LINE])
     return {"hookSpecificOutput": {"hookEventName": "UserPromptSubmit", "additionalContext": context}}
 
 
@@ -1065,9 +1867,9 @@ def named_item_missing(answer, walk, walk_error):
     return walk is None or any(number not in walk.recommendations for number in numbers)
 
 
-def context_for(answer, walk, walk_error):
-    """Return the additionalContext text for the answer, given the open approval-walk as read_walk read it, or
-    the error reading it raised."""
+def context_lines_for(answer, walk, walk_error):
+    """Return the additionalContext lines for the answer, opening line first, given the open approval-walk as
+    read_walk read it, or the error reading it raised. An answer the user typed on several lines stays in one entry."""
     prefix = []
     if answer["form"] == "condition":
         prefix = [line.format(condition=answer["condition"]) for line in CONDITION_LINES]
@@ -1084,7 +1886,7 @@ def context_for(answer, walk, walk_error):
         else:
             lines = ([OPEN_WALK_OPENING_LINE.format(answer=answer["answer"], item=walk.item, walk=walk.name)]
                      + prefix + meaning_lines(answer, walk, True))
-    return "\n".join(lines)
+    return lines
 
 
 def main():

@@ -33,7 +33,10 @@ case writes, or passes when the case writes none. A case may add suite files to
 origin's commit and, before the program runs, write recordings under the outputs
 directory or under the runner's default recorded-inputs directory, which each case
 points into its scratch home, or put a plain file or a read-only directory where
-hr/store goes so no recording can be saved.
+hr/store goes so no recording can be saved. The program's
+SURVIVING_MUTANT_TEST_PRS_GO_AHEAD_PROGRAM is a fake that logs the GH_TOKEN it
+saw and answers from the output and exit code the case gives, so no case reads
+GitHub or the log-store through the real one.
 
 Run: python3 scripts/merge-lane-pull-request-merge-through-merge-gate-with-stacked-pull-request-retarget-test.py
 """
@@ -165,7 +168,20 @@ while True:
 child.stdin.close()
 sys.exit(child.wait())
 '''
-RUNNER_PASSED_SUMMARY = "SUMMARY: 1 passed, 0 failed, 1 total; fake runner"
+FAKE_GO_AHEAD = r'''#!/usr/bin/env python3
+import json, os, sys
+directory = os.environ["MERGE_LANE_MERGE_TEST_DIRECTORY"]
+with open(os.path.join(directory, "go-ahead-calls.log"), "a") as log:
+    log.write(json.dumps({"argv": sys.argv[1:], "gh_token": os.environ.get("GH_TOKEN")}) + "\n")
+answer = json.load(open(os.path.join(directory, "go-ahead-answer.json")))
+sys.stdout.write(answer[0])
+sys.exit(answer[1])
+'''
+GO_AHEAD_COUNT_ONLY = ("12 open pull requests that are not drafts wait for merge-lane-2 to review "
+                       "or merge them. ... The count is over 10, the most at which merge-lane-2's "
+                       "queue is quiet, so no agent-seat holding mutant-test tasks is released; "
+                       "fake go-ahead\n", 3)
+RUNNER_PASSED_SUMMARY ="SUMMARY: 1 passed, 0 failed, 1 total; fake runner"
 RUNNER_FAILED = ("PASS scripts/some-test.py (1s)\n"
                  "FAIL scripts/broken-test.py exit 1 (2s)\n"
                  "\n1 failed:\n"
@@ -256,7 +272,8 @@ def run_case(scratch, name, gate_answers, routes, token=TOKEN, review_tools_stat
              runner_answer=None, head_test_run_test_logs=(),
              origin_files=None, before_the_program_runs=None,
              merge_commit_new_to_the_clone=False,
-             another_fetch_races_the_after_merge_fetch=False):
+             another_fetch_races_the_after_merge_fetch=False,
+             go_ahead_answer=GO_AHEAD_COUNT_ONLY):
     """Run main() once; return (exit code, output, gh calls, gate calls, waits).
 
     Each "MERGE_COMMIT" in routes becomes origin's commit, and each "ORIGIN"
@@ -282,6 +299,7 @@ def run_case(scratch, name, gate_answers, routes, token=TOKEN, review_tools_stat
     a "pr merge" route with origin_main_to can make origin's main.
     another_fetch_races_the_after_merge_fetch: as merge_commit_new_to_the_clone, and the
     clone's upload-pack is COMPETING_FETCH_UPLOAD_PACK.
+    go_ahead_answer: (output, exit code) of the fake go-ahead program.
 
     review_tools_state: "at-main", "behind-main" (origin/main moved on after the
     clone, by a commit that adds new-on-main.txt), "no-origin" (the clone's
@@ -297,6 +315,8 @@ def run_case(scratch, name, gate_answers, routes, token=TOKEN, review_tools_stat
     bin_directory.mkdir()
     (bin_directory / "gh").write_text(FAKE_GH)
     (bin_directory / "gh").chmod(0o755)
+    (bin_directory / "go-ahead.py").write_text(FAKE_GO_AHEAD)
+    (directory / "go-ahead-answer.json").write_text(json.dumps(list(go_ahead_answer)))
     if git_killed_on_worktree_remove is not None:
         (bin_directory / "git").write_text(
             '#!/bin/bash\ncase " $* " in *" worktree remove "*'
@@ -398,6 +418,8 @@ def run_case(scratch, name, gate_answers, routes, token=TOKEN, review_tools_stat
     # The runner fixed this path from the real HOME when it was imported.
     runner = program.common.run_all_test_suites
     saved_default = runner.DEFAULT_RECORDED_INPUTS_DIRECTORY
+    saved_go_ahead = program.SURVIVING_MUTANT_TEST_PRS_GO_AHEAD_PROGRAM
+    program.SURVIVING_MUTANT_TEST_PRS_GO_AHEAD_PROGRAM = bin_directory / "go-ahead.py"
     runner.DEFAULT_RECORDED_INPUTS_DIRECTORY = default_recorded_inputs_directory(directory)
     os.environ["MERGE_LANE_MERGE_TEST_DIRECTORY"] = str(directory)
     output = io.StringIO()
@@ -412,6 +434,7 @@ def run_case(scratch, name, gate_answers, routes, token=TOKEN, review_tools_stat
                                       str(directory / "outputs")], wait=waits.append)
     finally:
         runner.DEFAULT_RECORDED_INPUTS_DIRECTORY = saved_default
+        program.SURVIVING_MUTANT_TEST_PRS_GO_AHEAD_PROGRAM = saved_go_ahead
         os.environ["PATH"] = saved_path
         if saved_home is None:
             del os.environ["HOME"]
@@ -480,6 +503,11 @@ def index_of(calls, prefix):
     return None
 
 
+def go_ahead_calls_of(scratch, name):
+    log = scratch / name / "go-ahead-calls.log"
+    return [json.loads(line) for line in log.read_text().splitlines()] if log.exists() else []
+
+
 def runner_calls(scratch, name):
     log = scratch / name / "runner-calls.log"
     return [json.loads(line) for line in log.read_text().splitlines()] if log.exists() else []
@@ -520,6 +548,10 @@ def blob_of(directory, suite):
 
 
 def main():
+    # Every other case runs a fake go-ahead program in its place.
+    check("the go-ahead program the merge script runs after a merge is a file",
+          program.SURVIVING_MUTANT_TEST_PRS_GO_AHEAD_PROGRAM.is_file(),
+          str(program.SURVIVING_MUTANT_TEST_PRS_GO_AHEAD_PROGRAM))
     # Resolved, because macOS's mkdtemp path is a symlink and the program resolves its paths.
     scratch = Path(tempfile.mkdtemp(prefix="merge-lane-merge-test-")).resolve()
     try:
@@ -560,8 +592,42 @@ def main():
               and f"removed the review worktree {review_worktrees / 'pr10-merged'}" in output,
               f"{left}\n{output}")
 
+        go_ahead_calls = go_ahead_calls_of(scratch, "stacked")
+        check("after a merge the go-ahead program runs once, with the merge account's token, "
+              "and its output is printed after main's test run",
+              go_ahead_calls == [{"argv": [], "gh_token": TOKEN}]
+              and printed_in_order(output, RUNNER_PASSED_SUMMARY, GO_AHEAD_COUNT_ONLY[0])
+              and "go-ahead.py exited" not in output,
+              f"{go_ahead_calls}\n{output}")
+
+        release = ("RELEASED reboot-test\n10 open pull requests ... reboot-test was sent this "
+                   "message, and is recorded as released\n")
         exit_code, output, _, _, _ = run_case(
-            scratch, "merged-only", [(GATE_PASSED, 0)], default_routes(STACKED_AND_NOT),
+            scratch, "go-ahead-names-an-agent-seat", [(GATE_PASSED, 0)],
+            default_routes(STACKED_AND_NOT), go_ahead_answer=(release, 0))
+        check("a RELEASED the go-ahead program prints is printed whole, and the merge exits 0",
+              exit_code == 0 and release in output, f"exit {exit_code}\n{output}")
+
+        killed = (lambda directory: (directory / "bin" / "go-ahead.py").write_text(
+            "import os\nos.kill(os.getpid(), 9)\n"))
+        for name, answer, before, code in (
+                ("go-ahead-could-not-tell", ("could not tell: gh failed\n", 2), None, 2),
+                ("go-ahead-crashed", ("Traceback (most recent call last):\n", 1), None, 1),
+                ("go-ahead-killed", ("", 0), killed, -9)):
+            exit_code, output, _, _, _ = run_case(
+                scratch, name, [(GATE_PASSED, 0)], default_routes(STACKED_AND_NOT),
+                go_ahead_answer=answer, before_the_program_runs=before)
+            check(f"a go-ahead program that exits {code} is reported with what to do, and the "
+                  f"merge still exits 0",
+                  exit_code == 0 and answer[0] in output
+                  and f"go-ahead.py exited {code}, so whether an agent-seat holding mutant-test "
+                      f"tasks may open its pull requests was not decided; the merge is done all "
+                      f"the same.\nFollow the instructions it printed above; when it printed "
+                      f"none, run it once: python3 scripts/go-ahead.py" in output,
+                  f"exit {exit_code}\n{output}")
+
+        exit_code, output, _, _, _ = run_case(
+            scratch, "merged-only",[(GATE_PASSED, 0)], default_routes(STACKED_AND_NOT),
             review_worktrees_state="merged-only")
         review_worktrees = scratch / "merged-only" / "review-worktrees"
         check("a review worktree that is not there is skipped, and the other is still removed",
@@ -627,6 +693,8 @@ def main():
         check("a refused gate retargets nothing and merges nothing",
               exit_code == 1 and gh_calls == [] and GATE_REFUSED.strip() in output,
               f"exit {exit_code}\n{output}\n{json.dumps(gh_calls)}")
+        check("without a merge the go-ahead program does not run",
+              go_ahead_calls_of(scratch, "refused") == [], output)
 
         exit_code, output, gh_calls, _, _ = run_case(
             scratch, "could-not-run", [("GATE COULD NOT RUN: jq is not on PATH.\n", 2)],
@@ -914,7 +982,7 @@ def main():
         check("with no head test run record, after the merge the runner in a worktree at the "
               "merge commit runs the suites whose recorded inputs changed since the reviewed "
               "head, its logs in the outputs directory, and says it fell back to the head",
-              f"selecting the nc-test-suites whose recorded inputs changed since the head "
+              f"selecting the nn-test-suites whose recorded inputs changed since the head "
               f"commit {HEAD[:12]}, which selects more suites than the merge changed: no "
               f"readable head test run record under" in output
               and len(calls) == 1 and calls[0]["cwd"] == str(merge_commit_worktree)
@@ -1186,7 +1254,7 @@ def main():
                   "--only-suites-whose-recorded-inputs-changed-since", merged]
               and tree_of(scratch, name, merged)
               == tree_of(scratch, name, origin_commit(scratch, name))
-              and f"selecting the nc-test-suites whose recorded inputs changed since "
+              and f"selecting the nn-test-suites whose recorded inputs changed since "
                   f"{merged[:12]}, the commit the head test run passed on: "
                   f"pull request 10's head merged with main as main was when that run started"
                   in output
@@ -1329,6 +1397,47 @@ def main():
 
         routes = default_routes(STACKED_AND_NOT)
         routes["pr merge"] = merge_502
+        routes["api-read-branch"] = [{"stdout": json.dumps({"name": BRANCH})},
+                                     {"exit": 1, "stderr": "gh: Branch not found (HTTP 404)\n"}]
+        routes["api-delete-branch"] = {"exit": 1,
+                                       "stderr": "gh: Reference does not exist (HTTP 422)\n"}
+        exit_code, output, gh_calls, _, _ = run_case(
+            scratch, "merged-branch-gone-before-its-delete", [(GATE_PASSED, 0)], routes)
+        branch_calls = [argv for argv in argvs(gh_calls) if argv[:1] == ["api"]]
+        branch_path = f"repos/nedsnodes/nedsnodes/branches/{BRANCH}"
+        check("a branch that GitHub deletes between the program's read and its delete is "
+              "found gone by a second read after the delete, and the program exits 0 "
+              "without a STOP",
+              exit_code == 0 and f"the branch {BRANCH} is gone from GitHub" in output
+              and "STOP" not in output
+              and branch_calls == [["api", branch_path],
+                                   ["api", ref_path, "-X", "DELETE"],
+                                   ["api", branch_path]]
+              and len(runner_calls(scratch, "merged-branch-gone-before-its-delete")) == 1,
+              f"exit {exit_code}\n{output}\n{json.dumps(branch_calls)}")
+
+        routes = default_routes(STACKED_AND_NOT)
+        routes["pr merge"] = merge_502
+        routes["api-read-branch"] = [{"stdout": json.dumps({"name": BRANCH})},
+                                     {"exit": 1, "stderr": "gh: Bad Gateway (HTTP 502)\n"}]
+        routes["api-delete-branch"] = {"exit": 1,
+                                       "stderr": "gh: Reference does not exist (HTTP 422)\n"}
+        exit_code, output, _, _, _ = run_case(
+            scratch, "merged-branch-reread-fails", [(GATE_PASSED, 0)], routes)
+        check("a failed delete whose second read fails other than with HTTP 404 exits 3, "
+              "says whether the branch is gone could not be read, and quotes both errors",
+              exit_code == 3
+              and f"STOP: merged, but the branch {BRANCH} could not be deleted, and whether "
+                  "it is gone from GitHub could not be read." in output
+              and "The deletion's error: gh: Reference does not exist (HTTP 422)" in output
+              and "The read's error: gh: Bad Gateway (HTTP 502)" in output
+              and "is still on GitHub" not in output
+              and f"If it is still there, delete it: gh api -X DELETE {ref_path}\n" in output
+              and len(runner_calls(scratch, "merged-branch-reread-fails")) == 1,
+              f"exit {exit_code}\n{output}")
+
+        routes = default_routes(STACKED_AND_NOT)
+        routes["pr merge"] = merge_502
         routes["api-read-branch"] = {"exit": 1, "stderr": "HTTP 502\n"}
         exit_code, output, _, _, _ = run_case(
             scratch, "merged-branch-unread", [(GATE_PASSED, 0)], routes)
@@ -1456,7 +1565,8 @@ def main():
               exit_code == 3 and runner_calls(scratch, "fetch-fails-after-merge") == []
               and "could not fetch origin in " in output
               and "could not make the worktree" not in output
-              and output.rstrip().endswith(f"Otherwise, {TELL_THE_USER_WITH_THE_GIT_ERROR}"),
+              and output.endswith(f"Otherwise, {TELL_THE_USER_WITH_THE_GIT_ERROR}\n"
+                                  f"{GO_AHEAD_COUNT_ONLY[0]}"),
               f"exit {exit_code}\n{output}")
 
         exit_code, output, _, _, _ = run_case(
@@ -1494,7 +1604,8 @@ def main():
                   f"worktree {scratch / 'worktree-add-killed' / 'review-worktrees'}"
                   "/pr10-merge-commit-on-main-worktree at the merge commit " in output
               and ": git printed no error\n" in output
-              and output.rstrip().endswith(f"Otherwise, {TELL_THE_USER_WITH_THE_GIT_ERROR}"),
+              and output.endswith(f"Otherwise, {TELL_THE_USER_WITH_THE_GIT_ERROR}\n"
+                                  f"{GO_AHEAD_COUNT_ONLY[0]}"),
               f"exit {exit_code}\n{output}")
 
         exit_code, output, _, _, _ = run_case(

@@ -53,6 +53,7 @@ LATER_PART = "a later part of a message, after the opening that carries its rule
 HOOK_FAILED = "says the hook failed or could not check, and lets the act through"
 NOT_A_RULE = "no message for a rule: text the hook hands on as data"
 COMMAND_MODE = "printed when an agent runs the file as a command, not when it runs as a hook"
+USER_ONLY_NOTICE = "a systemMessage Claude Code shows the user and not the agent"
 
 # (hook path, constant name): why the constant opens no message for a rule.
 CONSTANTS_THAT_OPEN_NO_RULE_MESSAGE = {
@@ -85,6 +86,7 @@ CONSTANTS_THAT_OPEN_NO_RULE_MESSAGE = {
     (".claude/guard-hooks/git-worktree-remove-cold-read-record-and-sanity-check-record-ship-to-log-store-first-guard-hook.py", "UNSHIPPED_RECORD_LINE_TEMPLATE"): LATER_PART,
     (".claude/guard-hooks/git-worktree-remove-cold-read-record-and-sanity-check-record-ship-to-log-store-first-guard-hook.py", "WORKTREE_LISTING_FAILED_NOTICE"): HOOK_FAILED,
     (".claude/guard-hooks/guarded-file-unapproved-change-afterward-backup-and-ask-hook.py", "ASK_INSTRUCTIONS"): LATER_PART,
+    (".claude/guard-hooks/guarded-file-unapproved-change-afterward-backup-and-ask-hook.py", "GUARDED_FILE_WITH_NO_APPROVED_VERSION_DELETE_WITHOUT_ASKING_INSTRUCTIONS"): LATER_PART,
     (".claude/guard-hooks/hand-typed-codex-exec-command-refusal-hook.py", "PARSER_UNAVAILABLE_NEXT_STEP_LINES"): HOOK_FAILED,
     (".claude/guard-hooks/hand-typed-codex-exec-command-refusal-hook.py", "USAGE_LINE"): LATER_PART,
     (".claude/guard-hooks/handoff-deferral-cold-read-full-run-launch-refusal-hook.py", "PARSER_UNAVAILABLE_NEXT_STEP_TEMPLATE"): HOOK_FAILED,
@@ -111,6 +113,9 @@ CONSTANTS_THAT_OPEN_NO_RULE_MESSAGE = {
     ("nn-systems/general-tools/python-edit-changed-tool-message-to-agent-strings-check-reminder-hook.py", "LISTING_LINE_TEMPLATE"): LATER_PART,
     ("nn-systems/general-tools/python-edit-changed-tool-message-to-agent-strings-check-reminder-hook.py", "MORE_NOT_LISTED_LINE_TEMPLATE"): LATER_PART,
     ("nn-systems/general-tools/python-edit-changed-tool-message-to-agent-strings-check-reminder-hook.py", "NOT_INSPECTED_MESSAGE_TEMPLATE"): HOOK_FAILED,
+    ("nn-systems/handoff/handoff-asked-stop-typing-user-notice-user-prompt-submit-hook.py", "HOOK_FAILED_MESSAGE"): HOOK_FAILED,
+    ("nn-systems/handoff/handoff-asked-stop-typing-user-notice-user-prompt-submit-hook.py", "HANDOFF_ASKED_STOP_TYPING_WITH_NEW_SESSION_NAME_USER_NOTICE_TEMPLATE"): USER_ONLY_NOTICE,
+    ("nn-systems/handoff/handoff-asked-stop-typing-user-notice-user-prompt-submit-hook.py", "HANDOFF_ASKED_STOP_TYPING_WITHOUT_NEW_SESSION_NAME_USER_NOTICE"): USER_ONLY_NOTICE,
     ("nn-systems/skills/emergency-stop/emergency-stop-file-shown-and-push-and-merge-refusal-hook.py", "UNREADABLE_LINE"): LATER_PART,
     ("nn-systems/skills/emergency-stop/emergency-stop-file-shown-and-push-and-merge-refusal-hook.py", "UNREAD_COMMAND_LINE"): LATER_PART,
     ("nn-systems/skills/walk-me-through/walk-me-through-agent-question-to-user-outside-approval-walk-items-refusal-stop-hook.py", "DECIDED_BY_MODEL_NOTICE"): LATER_PART,
@@ -134,6 +139,18 @@ CONSTANTS_THAT_OPEN_NO_RULE_MESSAGE = {
     ("nn-systems/skills/walk-me-through/walk-me-through-pending-user-alerts-claim-and-insert-as-approval-walk-items-user-prompt-submit-hook.py", "WALK_OPEN_LINES"): LATER_PART,
     ("nn-systems/skills/walk-me-through/walk-me-through-pending-user-alerts-claim-and-insert-as-approval-walk-items-user-prompt-submit-hook.py", "WALK_UNKNOWN_LINE"): LATER_PART,
     ("nn-systems/skills/walk-me-through/walk-me-through-user-short-answer-to-approval-walk-item-expanded-into-instructions-user-prompt-submit-hook.py", "CONDITION_LINES"): LATER_PART,
+    ("nn-systems/skills/walk-me-through/walk-me-through-user-short-answer-to-approval-walk-item-expanded-into-instructions-user-prompt-submit-hook.py", "APPROVAL_WALK_SUB_STEP_ASKING_FOR_NO_DECISION_ANSWER_USER_ADDED_WORDS_LINE"): LATER_PART,
+    ("nn-systems/skills/walk-me-through/walk-me-through-user-short-answer-to-approval-walk-item-expanded-into-instructions-user-prompt-submit-hook.py", "APPROVAL_WALK_SUB_STEP_ASKING_FOR_NO_DECISION_AGENT_INSTRUCTION_TO_PUBLISH_PAGE_MISSING_FROM_WALK_MINUTES_LINE"): LATER_PART,
+    ("nn-systems/skills/walk-me-through/walk-me-through-user-short-answer-to-approval-walk-item-expanded-into-instructions-user-prompt-submit-hook.py", "DECISION_LINES_CHANGED_REASON"): LATER_PART,
+    ("nn-systems/skills/walk-me-through/walk-me-through-user-short-answer-to-approval-walk-item-expanded-into-instructions-user-prompt-submit-hook.py", "WALK_ME_THROUGH_HOOK_INSTRUCTION_TO_AGENT_REWRITE_APPROVAL_WALK_ITEM_WHEN_DISCUSSION_SETTLED_ON_NON_RECOMMENDED_OPTION_LINE"): LATER_PART,
+    ("nn-systems/skills/walk-me-through/walk-me-through-user-short-answer-to-approval-walk-item-expanded-into-instructions-user-prompt-submit-hook.py", "WALK_ME_THROUGH_HOOK_AGENT_CONTEXT_WHEN_TRANSCRIPT_READ_FAILED_AND_PROMPT_AUTHOR_UNKNOWN_LINE"): LATER_PART,
+    ("nn-systems/skills/walk-me-through/walk-me-through-user-short-answer-to-approval-walk-item-expanded-into-instructions-user-prompt-submit-hook.py", "DECISION_LINE_CHECK_FAILED_REASON"): LATER_PART,
+    ("nn-systems/skills/walk-me-through/walk-me-through-user-short-answer-to-approval-walk-item-expanded-into-instructions-user-prompt-submit-hook.py", "DECISION_LINE_SHOWN_TO_USER_THEN_REMOVED_FROM_APPROVAL_WALK_ITEM_COMPARISON_MODEL_CALL_FAILED_REASON"): LATER_PART,
+    ("nn-systems/skills/walk-me-through/walk-me-through-user-short-answer-to-approval-walk-item-expanded-into-instructions-user-prompt-submit-hook.py", "DECISION_LINE_SHOWN_TO_USER_THEN_REMOVED_FROM_APPROVAL_WALK_ITEM_LEFT_WITH_NO_TEXT_TO_COMPARE_REASON"): LATER_PART,
+    ("nn-systems/skills/walk-me-through/walk-me-through-user-short-answer-to-approval-walk-item-expanded-into-instructions-user-prompt-submit-hook.py", "DECISION_LINE_SHOWN_TO_USER_THEN_REMOVED_FROM_APPROVAL_WALK_ITEM_NOT_RESTATED_REASON"): LATER_PART,
+    ("nn-systems/skills/walk-me-through/walk-me-through-user-short-answer-to-approval-walk-item-expanded-into-instructions-user-prompt-submit-hook.py", "DECISION_LINE_MEANING_CHANGED_REASON"): LATER_PART,
+    ("nn-systems/skills/walk-me-through/walk-me-through-user-short-answer-to-approval-walk-item-expanded-into-instructions-user-prompt-submit-hook.py", "DECISION_LINE_NOT_IN_MESSAGE_REASON"): LATER_PART,
+    ("nn-systems/skills/walk-me-through/walk-me-through-user-short-answer-to-approval-walk-item-expanded-into-instructions-user-prompt-submit-hook.py", "MODEL_PROMPT_TEMPLATE"): NOT_A_RULE,
     ("nn-systems/skills/walk-me-through/walk-me-through-user-short-answer-to-approval-walk-item-expanded-into-instructions-user-prompt-submit-hook.py", "ITEM_NOT_SHOWN_LINES"): LATER_PART,
     ("nn-systems/skills/walk-me-through/walk-me-through-user-short-answer-to-approval-walk-item-expanded-into-instructions-user-prompt-submit-hook.py", "ITEM_TEXT_UNREADABLE_LINES"): LATER_PART,
     ("nn-systems/skills/walk-me-through/walk-me-through-user-short-answer-to-approval-walk-item-expanded-into-instructions-user-prompt-submit-hook.py", "NEVER_SHOWN_REASON"): LATER_PART,
@@ -152,11 +169,13 @@ CONSTANTS_THAT_OPEN_NO_RULE_MESSAGE = {
     ("nn-systems/skills/walk-me-through/walk-me-through-user-short-answer-to-approval-walk-item-expanded-into-instructions-user-prompt-submit-hook.py", "REPEAT_PAGE_LINE"): LATER_PART,
     ("nn-systems/skills/walk-me-through/walk-me-through-user-short-answer-to-approval-walk-item-expanded-into-instructions-user-prompt-submit-hook.py", "REPEAT_UNPUBLISHED_LINES"): LATER_PART,
     ("nn-systems/skills/walk-me-through/walk-me-through-user-short-answer-to-approval-walk-item-expanded-into-instructions-user-prompt-submit-hook.py", "RIDER_LINES"): LATER_PART,
-    ("nn-systems/skills/walk-me-through/walk-me-through-user-short-answer-to-approval-walk-item-expanded-into-instructions-user-prompt-submit-hook.py", "SHOWN_DIFFERENT_REASON"): LATER_PART,
     ("nn-systems/skills/walk-me-through/walk-me-through-user-short-answer-to-approval-walk-item-expanded-into-instructions-user-prompt-submit-hook.py", "TRANSCRIPT_UNREADABLE_LINES"): LATER_PART,
     ("nn-systems/skills/walk-me-through/walk-me-through-user-short-answer-to-approval-walk-item-expanded-into-instructions-user-prompt-submit-hook.py", "USER_REPLY_LINE"): LATER_PART,
     ("scripts/agent-seat-due-task-prerequisites-recording-reminder-after-task-create-hook.py", "FAULT_LINE_TEMPLATE"): HOOK_FAILED,
     ("scripts/agent-seat-due-task-prerequisites-recording-reminder-after-task-create-hook.py", "TASK_ID_CLAUSE_TEMPLATE"): LATER_PART,
+    ("scripts/agent-seat-due-task-raise-hook.py", "BUDGET_SKIPPED_INSTRUCTIONS"): LATER_PART,
+    ("scripts/agent-seat-due-task-raise-hook.py", "BUDGET_SKIPPED_TASK_LINE_TEMPLATE"): HOOK_FAILED,
+    ("scripts/agent-seat-due-task-raise-hook.py", "CLOSED_WITHOUT_MERGING_INSTRUCTIONS"): LATER_PART,
     ("scripts/agent-seat-due-task-raise-hook.py", "DEFER_INSTRUCTION"): LATER_PART,
     ("scripts/agent-seat-due-task-raise-hook.py", "NEXT_ACTION_HELD_TASKS_LINE"): LATER_PART,
     ("scripts/agent-seat-due-task-raise-hook.py", "NEXT_ACTION_MORE_LINE"): LATER_PART,
@@ -263,6 +282,7 @@ CONSTANTS_THAT_OPEN_NO_RULE_MESSAGE = {
 # Hook path: why the hook prints no message for a rule.
 HOOKS_THAT_PRINT_NO_RULE_MESSAGE = {
     "nn-systems/general-tools/agent-seat-worktree-create-with-owner-file-claude-code-worktree-create-hook.py": "prints only the worktree path Claude Code reads, or its own failure",
+    "nn-systems/handoff/handoff-asked-stop-typing-user-notice-user-prompt-submit-hook.py": "it shows the user a systemMessage, which the agent does not see, and otherwise reports only its own failure",
     "scripts/uncommitted-work-snapshot-hook.py": "it speaks only when it could not keep a work-snapshot or write a worktree's owner file, which reports its own failure",
 }
 
@@ -286,6 +306,7 @@ MESSAGE_VARIANTS_OF_ONE_RULE = {
     ("nn-systems/skills/emergency-stop/emergency-stop-file-shown-and-push-and-merge-refusal-hook.py", "emergency-stop-state-shown-to-every-agent-session"): {"IN_FORCE_RULES_NOTICE", "LIFTED_NOTICE"},
     ("nn-systems/skills/walk-me-through/walk-me-through-agent-reply-to-user-not-ending-with-waiting-item-closing-line-refusal-stop-hook.py", "walk-me-through-reply-ends-with-waiting-item-closing-line"): {"REPLY_LACKS_CLOSING_LINE_OPENING_TEMPLATE", "UNPUBLISHED_OPENING_TEMPLATE", "UNUSABLE_OPENING_TEMPLATE"},
     ("nn-systems/skills/walk-me-through/walk-me-through-user-short-answer-to-approval-walk-item-expanded-into-instructions-user-prompt-submit-hook.py", "walk-me-through-short-answer-expanded-into-instructions"): {"NO_WALK_OPENING_LINE", "OPEN_WALK_OPENING_LINE", "WALK_UNKNOWN_OPENING_LINE"},
+    ("nn-systems/skills/walk-me-through/walk-me-through-user-short-answer-to-approval-walk-item-expanded-into-instructions-user-prompt-submit-hook.py", "walk-me-through-hook-instruction-to-agent-rewrite-approval-walk-item-when-discussion-settled-on-non-recommended-option"): {"WALK_ME_THROUGH_HOOK_AGENT_CONTEXT_OPENING_WHEN_APPROVAL_WALK_ITEM_WAITING_AND_PROMPT_AUTHOR_UNKNOWN_LINE", "WALK_ME_THROUGH_HOOK_AGENT_CONTEXT_OPENING_WHEN_APPROVAL_WALK_ITEM_WAITING_AND_USER_REPLY_NOT_SHORT_ANSWER_LINE", "WALK_ME_THROUGH_HOOK_AGENT_CONTEXT_OPENING_WHEN_APPROVAL_WALK_STATE_READ_FAILED_AND_USER_REPLY_NOT_SHORT_ANSWER_LINE"},
     ("scripts/absence-claim-locator-reminder-hook.py", "absence-claim-run-locator-before-saying-missing"): {"REMINDER_TEMPLATE", "SUBAGENT_REMINDER_TEMPLATE"},
     ("scripts/bare-number-citation-in-markdown-and-agent-reply-warning-hook.py", "bare-number-pull-request-ghi-or-task-citation-in-markdown-and-reply-warning"): {"MARKDOWN_OPENING_LINES", "PREVIOUS_REPLY_OPENING_LINES", "PREVIOUS_REPLY_SHORT_OPENING_LINES"},
     ("scripts/bare-number-citation-in-markdown-and-agent-reply-warning-hook.py", "github-link-text-not-matching-item-title-warning"): {"MARKDOWN_TITLE_OPENING_LINES", "PREVIOUS_REPLY_TITLE_OPENING_LINES"},

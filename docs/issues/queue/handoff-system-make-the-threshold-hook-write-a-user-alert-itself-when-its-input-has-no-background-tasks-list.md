@@ -1,0 +1,5 @@
+# Handoff-system: make the threshold-hook write a user-alert itself when its input has no `background_tasks` list
+
+This proposal, not yet decided, is item 4 of Question 4, "What should be code", of the cold-read-full-run of `nn-systems/handoff/handoff.system.design.md` on 2026-11-20: `nedlern@ned-box:/home/nedlern/nedsnodes-logs/cold-read-records/handoff.system.design-2026-11-20-6/question-4-what-should-be-code-answer.md`. The queue-drain decides it: if promoted, it becomes a GHI of its own; if declined, this file is removed with the reason in the commit message.
+
+Today, when the threshold-hook's input carries no `background_tasks` list, it hands off at the threshold and tells the agent to tell the user, and to tell him once on the second sighting. The hook could count the sightings in its own state file and write a user-alert itself, and stop telling the agent to tell the user. Nearest: GHI [Hooks that tell the agent something on stderr with exit 1 are read only by the user, because Claude Code never gives that stderr to the model](https://github.com/nedsnodes/nedsnodes/issues/1796).
