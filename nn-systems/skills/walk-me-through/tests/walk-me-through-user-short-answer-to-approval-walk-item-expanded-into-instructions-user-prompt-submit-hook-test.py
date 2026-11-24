@@ -2830,6 +2830,19 @@ def test_a_list_line_that_reads_as_a_reference_definition_only_alone_defines_not
           "definition only if parsed alone", counted(lines) and not case.model_calls(), f"lines {lines!r}")
 
 
+def test_shown_words_reads_the_whole_texts_references_and_adds_none_to_them():
+    hook = load_short_answer_hook_for_test()
+    parser = hook.load_walk_finder().markdown_parser()
+    env = {}
+    parser.parse("[r]: /docs\n", env)
+    before = dict(env["references"])
+    words = hook.shown_words("a [filter][r]", parser, env)
+    check("a reference link cut out of the text renders with the whole text's definition", words == "a filter", words)
+    hook.shown_words("[edits 4]: /docs", parser, env)
+    check("a line that is a definition only when parsed alone adds nothing to the whole text's references",
+          env["references"] == before, env["references"])
+
+
 def test_an_item_whose_heading_holds_a_reference_link_counts_when_shown_word_for_word():
     case = Case(next_to_present="item 4 of 9", document=REFERENCE_LINK_HEADING_DOCUMENT)
     lines = case.lines("a", case.transcript(REFERENCE_LINK_HEADING_DOCUMENT, ITEM_4_CLOSING_LINE))
