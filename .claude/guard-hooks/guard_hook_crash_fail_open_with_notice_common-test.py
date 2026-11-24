@@ -29,11 +29,11 @@ crash_notice = importlib.util.module_from_spec(_spec)
 _spec.loader.exec_module(crash_notice)
 
 SETTINGS_PATH = GUARD_HOOKS_DIRECTORY.parent / "settings.json"
-COMMON_MODULE_NAME_PATTERN = re.compile(r'"([A-Za-z0-9_-]+-common\.py)"')
+COMMON_MODULE_NAME_PATTERN = re.compile(r'"([A-Za-z0-9_-]+_common\.py)"')
 
 
 def registered_guards():
-    """Return (guard file name, whether it loads a -common.py module a copy run elsewhere cannot
+    """Return (guard file name, whether it loads a _common.py module a copy run elsewhere cannot
     find) for each PreToolUse guard under .claude/guard-hooks that .claude/settings.json
     registers, so that a guard added there is crash-tested without being listed here."""
     guards = {}

@@ -25,7 +25,7 @@ The agent-seat reboot-test ran the same command with `--mutant-timeout-seconds 2
 
 ## Why it matters
 
-CLAUDE.md requires code that handles a failure to carry a test checked by mutation testing. For a module that many suites depend on, especially the shared `-common.py` modules, the script stops before any mutant under the default timeout, and its message sends the author looking for a failing suite that does not exist. An author who does not guess that the timeout is the cause falls back to hand-made mutants, as on pull request [git_failure_next_step_lines takes program only with the misspelt-name line](https://github.com/nedschorus/nedschorus/pull/1937). The script does exit 2 and say it did not run, so nothing passes silently; the cost is the missing mutation testing and the misleading message.
+CLAUDE.md requires code that handles a failure to carry a test checked by mutation testing. For a module that many suites depend on, especially the shared `_common.py` modules, the script stops before any mutant under the default timeout, and its message sends the author looking for a failing suite that does not exist. An author who does not guess that the timeout is the cause falls back to hand-made mutants, as on pull request [git_failure_next_step_lines takes program only with the misspelt-name line](https://github.com/nedschorus/nedschorus/pull/1937). The script does exit 2 and say it did not run, so nothing passes silently; the cost is the missing mutation testing and the misleading message.
 
 ## Next action
 

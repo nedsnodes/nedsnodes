@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Find the test files that keep their own copy of a shared module's wording.
 
-A `*-common.py` module that holds the master copy of wording programs print is
+A `*_common.py` module that holds the master copy of wording programs print is
 pinned word for word by its own tests alone. Every other test gets the wording
 by calling the module, so a change to it fails one suite, not every suite of a
 program that prints it. A guard suite calls

@@ -22,7 +22,7 @@ The per-suite sandbox prefix came with pull request [run-all-test-suites: each s
 
 ## Why it matters
 
-CLAUDE.md requires code that handles a failure to carry a test checked by mutation testing. For a widely shared module, the shared `-common.py` files above all, the script cannot run, so the author falls back to hand-made mutants, as MD-skills did on pull request 1937 (7 mutants by hand), and the reviewer has no survivor list to check. The script does report the failure and exits 2, so nothing passes silently; the cost is the missing check.
+CLAUDE.md requires code that handles a failure to carry a test checked by mutation testing. For a widely shared module, the shared `_common.py` files above all, the script cannot run, so the author falls back to hand-made mutants, as MD-skills did on pull request 1937 (7 mutants by hand), and the reviewer has no survivor list to check. The script does report the failure and exits 2, so nothing passes silently; the cost is the missing check.
 
 ## Next action
 

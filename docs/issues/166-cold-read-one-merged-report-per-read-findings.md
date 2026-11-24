@@ -30,7 +30,7 @@ What the commissioning agent is told to do with the merged file — the prompt o
 ## What it builds on
 
 - The grid script (`scripts/cold-read-grid.py` on branch `MD-skills`; on main it is still `scripts/md-review-grid.py` until the 2026-08-25 rename lands) already knows when all eight cells are done and where the reports are; the merge is a final step there.
-- The report contract in `scripts/cold_read_cell_common.py` (branch `MD-skills`; created by the report-to-file fix that closes GHI [md-review-grid reports eight reviews saved when eight cells produced nothing](https://github.com/nedsnodes/nedsnodes/issues/164), not yet on main) fixes the shape the merge can rely on: numbered findings, quoted passages, a closing "clean sections:" line, one provenance stamp per report.
+- The report contract in `nn-systems/cold-read/cold_read_cell_common.py` (branch `MD-skills`; created by the report-to-file fix that closes GHI [md-review-grid reports eight reviews saved when eight cells produced nothing](https://github.com/nedsnodes/nedsnodes/issues/164), not yet on main) fixes the shape the merge can rely on: numbered findings, quoted passages, a closing "clean sections:" line, one provenance stamp per report.
 - Three record sets from 2026-08-24 with their hand-made comparisons, and twelve older sets with the user's dispositions, are test material: a merge script can be checked against what a comparer produced by hand.
 
 ## Next action
