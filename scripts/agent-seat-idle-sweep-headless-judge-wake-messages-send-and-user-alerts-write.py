@@ -1543,13 +1543,18 @@ def sweep(arguments, now):
         since = parse_time(check["transcript_read_at"]) if check else None
         read_times[seat] = run.current()
         verdict = verdicts_print.verdict_for_seat(seat, paths, now, since, checker, parser, skipped)
+        budget_skips = list(verdict.get(fields.GITHUB_CONDITIONS_SKIPPED_FOR_BUDGET, []))
         if since and verdict.get(fields.SESSION_ID) not in (None, check["session_id"]):
             verdict = verdicts_print.verdict_for_seat(seat, paths, now, None, checker, parser,
                                                       skipped)
+            # The reread decides the wake, but the first read's skips happened too.
+            budget_skips += [condition for condition
+                             in verdict.get(fields.GITHUB_CONDITIONS_SKIPPED_FOR_BUDGET, [])
+                             if condition not in budget_skips]
         verdicts[seat] = verdict
-        if verdict.get(fields.GITHUB_CONDITIONS_SKIPPED_FOR_BUDGET):
+        if budget_skips:
             run.record({"event": fields.GITHUB_CONDITIONS_SKIPPED_FOR_BUDGET, "agent_seat": seat,
-                        "conditions": verdict[fields.GITHUB_CONDITIONS_SKIPPED_FOR_BUDGET]})
+                        "conditions": budget_skips})
     run.account_change(verdicts)
     run.delivery_checks(verdicts)
     for seat, verdict in verdicts.items():
