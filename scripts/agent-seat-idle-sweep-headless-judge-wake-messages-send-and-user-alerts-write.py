@@ -473,10 +473,15 @@ class SweepLog:
         last_held_at, {subject: time}, shows was held after the message."""
         not_found = {event["message_id"] for event in self.of_seat(seat, "delivery_checked")
                      if not event["found"]}
+        # The user typing while the sender runs, before the message arrives, has not answered it:
+        # until the delivery check gives the time it arrived, the time the send was logged stands in.
+        received_at = {event["message_id"]: event["received_at"]
+                       for event in self.of_seat(seat, "delivery_checked") if event.get("received_at")}
         typed = parse_time(last_user_typed_at) if last_user_typed_at else None
         return {subject for event in self.of_seat(seat, REMINDER_SENT)
                 if event["session_id"] == session_id and event["message_id"] not in not_found
-                and (typed is None or parse_time(event["send_started_at"]) >= typed)
+                and (typed is None
+                     or parse_time(received_at.get(event["message_id"], event["at"])) >= typed)
                 for subject in event["subjects"]
                 if subject not in last_held_at
                 or last_held_at[subject] < parse_time(event["send_started_at"])}
@@ -1017,10 +1022,11 @@ class Sweep:
                 self.read_failure(seat, str(error))
                 continue
             same_session = verdict.get(fields.SESSION_ID) == sent["session_id"]
-            if not found and same_session and verdict.get(fields.TURN_ENDED) is False:
+            if found is None and same_session and verdict.get(fields.TURN_ENDED) is False:
                 continue  # the turn running at the send has not ended; it may yet read the message
             self.record({"event": "delivery_checked", "agent_seat": seat,
-                         "message_id": sent["message_id"], "found": found})
+                         "message_id": sent["message_id"], "found": found is not None,
+                         **({"received_at": iso(found)} if found else {})})
             if not found:
                 self.failed = True
                 self.owning_agent_seat_task(
@@ -1489,8 +1495,8 @@ def message_received(record):
 
 
 def message_in_transcript(path, text, sent_at):
-    """Whether a record by which the agent-seat received a message, written at or after the send,
-    holds the text, compared with all runs of whitespace made one space."""
+    """The time of the first record by which the agent-seat received a message, written at or after
+    the send, that holds the text, compared with all runs of whitespace made one space; or None."""
     needle = " ".join(text.split())
     for record in verdicts_print.transcript_records(path):
         if not message_received(record):
@@ -1499,8 +1505,8 @@ def message_in_transcript(path, text, sent_at):
         if moment is None or (sent_at - moment).total_seconds() > DELIVERY_CLOCK_SLACK_SECONDS:
             continue
         if any(needle in " ".join(value.split()) for value in strings_in(record)):
-            return True
-    return False
+            return moment
+    return None
 
 
 def strings_in(value):

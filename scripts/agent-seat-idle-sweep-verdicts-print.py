@@ -535,6 +535,9 @@ def read_main_transcript(path):
     awaiting_turn_start = True
     task_tool_calls = []                 # (tool use id, (time, name, input))
     task_id_by_succeeded_tool_use_id = {}
+    # An interrupt notice is a user record the user did not type, and a queued message re-sent
+    # after an interrupt was typed once, when it was queued.
+    turn_reader = user_messages.TurnReader()
     for record in transcript_records(path):
         moment = parse_time(record.get("timestamp"))
         task_id_by_succeeded_tool_use_id.update(succeeded_task_tool_result_task_ids(record))
@@ -543,7 +546,8 @@ def read_main_transcript(path):
             awaiting_turn_start = False
         if spends_tokens(record) and moment:
             facts.last_token_spend = max(filter(None, (facts.last_token_spend, moment)))
-        if moment and (user_messages.typed_by_user(record) or user_messages.queued_by_user(record)):
+        turn = turn_reader.turn(record)
+        if moment and turn and turn[0] == "user":
             facts.last_user_typed = max(filter(None, (facts.last_user_typed, moment)))
         if is_model_turn_record(record):
             facts.last_model_turn_record = record

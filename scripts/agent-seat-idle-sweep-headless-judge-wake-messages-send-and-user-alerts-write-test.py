@@ -2606,6 +2606,28 @@ calls, facts = judge_asked_at(machine, 60)
 check("rule 5: once the user has typed, the same open task is raised again",
       [task["id"] for task in facts.get("open_tasks_nothing_holds", [])] == ["1"], calls)
 
+for notice in (user([{"type": "text", "text": "[Request interrupted by user]"}], at(11)),
+               typed_by_the_user("[Request interrupted by user for tool use]", at(11))):
+    machine = one_reminder_of_task_1()
+    machine.append("alpha", notice, assistant("Stopped.", when=at(11)), turn_end(at(11)))
+    calls, _ = judge_asked_at(machine, 30)
+    check("rule 5: an interrupt notice, which the user did not type, does not raise the task again",
+          not calls, calls)
+
+machine = Machine()
+machine.seat("alpha", DONE_TURN)
+machine.task("alpha", "1")
+machine.script(judged(True, "You have open tasks.", raised=["1"]), sent_ok())
+machine.run(0)
+machine.append("alpha", typed_by_the_user("Something else.", at(2)))
+answered_with_a_tool_call_and_idle_again(machine, 5)
+machine.run(6)
+calls, _ = judge_asked_at(machine, 20)
+check("rule 5: the user typing after the send started, before the message arrived, does not raise "
+      "the task again",
+      [event.get("received_at") for event in machine.events("delivery_checked")] == [at(4.5)]
+      and not calls, (machine.events("delivery_checked"), calls))
+
 machine = one_reminder_of_task_1()
 machine.append("alpha", queued_by_the_user("Also this.", at(11)),
                assistant("On it.", when=at(11)), turn_end(at(11)))
