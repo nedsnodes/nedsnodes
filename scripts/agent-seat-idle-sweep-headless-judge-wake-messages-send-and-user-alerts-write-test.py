@@ -2730,7 +2730,7 @@ machine.append("alpha",
 machine.script()
 machine.run(45)
 check("rule 5: an addBlocks call that failed does not count as a hold, so the reminder stays withheld",
-      not machine.claude_calls()[1:], machine.claude_calls())
+      not machine.claude_calls(), machine.claude_calls())
 
 machine = Machine()
 machine.seat("alpha", DONE_TURN)
