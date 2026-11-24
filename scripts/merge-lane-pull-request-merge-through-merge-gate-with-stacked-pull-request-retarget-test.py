@@ -1401,13 +1401,39 @@ def main():
                                      {"exit": 1, "stderr": "gh: Branch not found (HTTP 404)\n"}]
         routes["api-delete-branch"] = {"exit": 1,
                                        "stderr": "gh: Reference does not exist (HTTP 422)\n"}
-        exit_code, output, _, _, _ = run_case(
+        exit_code, output, gh_calls, _, _ = run_case(
             scratch, "merged-branch-gone-before-its-delete", [(GATE_PASSED, 0)], routes)
+        branch_calls = [argv for argv in argvs(gh_calls) if argv[:1] == ["api"]]
+        branch_path = f"repos/nedsnodes/nedsnodes/branches/{BRANCH}"
         check("a branch that GitHub deletes between the program's read and its delete is "
-              "found gone by a second read, and the program exits 0 without a STOP",
+              "found gone by a second read after the delete, and the program exits 0 "
+              "without a STOP",
               exit_code == 0 and f"the branch {BRANCH} is gone from GitHub" in output
               and "STOP" not in output
+              and branch_calls == [["api", branch_path],
+                                   ["api", ref_path, "-X", "DELETE"],
+                                   ["api", branch_path]]
               and len(runner_calls(scratch, "merged-branch-gone-before-its-delete")) == 1,
+              f"exit {exit_code}\n{output}\n{json.dumps(branch_calls)}")
+
+        routes = default_routes(STACKED_AND_NOT)
+        routes["pr merge"] = merge_502
+        routes["api-read-branch"] = [{"stdout": json.dumps({"name": BRANCH})},
+                                     {"exit": 1, "stderr": "gh: Bad Gateway (HTTP 502)\n"}]
+        routes["api-delete-branch"] = {"exit": 1,
+                                       "stderr": "gh: Reference does not exist (HTTP 422)\n"}
+        exit_code, output, _, _, _ = run_case(
+            scratch, "merged-branch-reread-fails", [(GATE_PASSED, 0)], routes)
+        check("a failed delete whose second read fails other than with HTTP 404 exits 3, "
+              "says whether the branch is gone could not be read, and quotes both errors",
+              exit_code == 3
+              and f"STOP: merged, but the branch {BRANCH} could not be deleted, and whether "
+                  "it is gone from GitHub could not be read." in output
+              and "The deletion's error: gh: Reference does not exist (HTTP 422)" in output
+              and "The read's error: gh: Bad Gateway (HTTP 502)" in output
+              and "is still on GitHub" not in output
+              and f"If it is still there, delete it: gh api -X DELETE {ref_path}\n" in output
+              and len(runner_calls(scratch, "merged-branch-reread-fails")) == 1,
               f"exit {exit_code}\n{output}")
 
         routes = default_routes(STACKED_AND_NOT)
