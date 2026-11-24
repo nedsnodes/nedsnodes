@@ -812,7 +812,7 @@ def rules_three_to_five(verdict, put_off_at, checker, task_directory,
                     task_directory, checker, due_task_raise_state_directory)
             except ReadFailure as error:
                 verdict["open_tasks_nothing_holds"] = None
-                verdict["open_tasks_nothing_holds_read_failure"] = str(error)
+                verdict["open_tasks_nothing_holds_not_read_because"] = str(error)
             return {fields.RULE: 3, fields.DECISION: fields.WAKE_HANDOFF_PUT_OFF,
                     fields.TEXT: HANDOFF_PUT_OFF_TEXT.format(time=iso(put_off_at))}
         verdict["open_tasks_nothing_holds"] = open_tasks_nothing_holds(

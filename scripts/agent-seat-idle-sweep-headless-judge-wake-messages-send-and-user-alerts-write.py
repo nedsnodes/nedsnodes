@@ -1228,8 +1228,8 @@ class Sweep:
         if rule == 3:
             subject = f"handoff put off: {text}"
             if subject in self.reminded_subjects(seat, verdict):
-                if verdict.get(fields.OPEN_TASKS_NOTHING_HOLDS_READ_FAILURE):
-                    self.read_failure(seat, verdict[fields.OPEN_TASKS_NOTHING_HOLDS_READ_FAILURE])
+                if verdict.get(fields.OPEN_TASKS_NOTHING_HOLDS_NOT_READ_BECAUSE):
+                    self.read_failure(seat, verdict[fields.OPEN_TASKS_NOTHING_HOLDS_NOT_READ_BECAUSE])
                 elif verdict.get(fields.OPEN_TASKS_NOTHING_HOLDS):
                     self.judge_idle_seat(seat, {**verdict, fields.HANDOFF_DEFERRED_MARKER: None},
                                          stretch)

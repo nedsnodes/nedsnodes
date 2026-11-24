@@ -66,7 +66,7 @@ USAGE_LIMIT = "usage_limit"
 SENTENCES = "sentences"
 OPEN_TASKS_NOTHING_HOLDS = "open_tasks_nothing_holds"  # [{"id", "subject"}]
 # Set with rule 3 only: why open_tasks_nothing_holds could not be read, which leaves it null
-OPEN_TASKS_NOTHING_HOLDS_READ_FAILURE = "open_tasks_nothing_holds_read_failure"
+OPEN_TASKS_NOTHING_HOLDS_NOT_READ_BECAUSE = "open_tasks_nothing_holds_not_read_because"
 TEXT = "text"                              # code's text to send as written, at rule 3
 IF_EVERY_SENTENCE_BACKED = "if_every_sentence_backed"  # {"rule", "decision", maybe "text"}
 # {"record_uuid", "time", "text"} or null, at rules 2 to 5
@@ -88,7 +88,7 @@ OPTIONAL = (DECISION, NOT_CHECKED, SUPERVISOR_LAST_POLL_AT, LAST_ACTIVITY, LAST_
             TURN_ENDED,
             APPROVAL_WALK_ITEMS_WAITING_ON_THE_USER, IDLE, NOT_IDLE_BECAUSE, RUNNING,
             HANDOFF_DEFERRED_MARKER,
-            USAGE_LIMIT, SENTENCES, OPEN_TASKS_NOTHING_HOLDS, OPEN_TASKS_NOTHING_HOLDS_READ_FAILURE, TEXT,
+            USAGE_LIMIT, SENTENCES, OPEN_TASKS_NOTHING_HOLDS, OPEN_TASKS_NOTHING_HOLDS_NOT_READ_BECAUSE, TEXT,
             IF_EVERY_SENTENCE_BACKED,
             LAST_TURN_ENDING_MESSAGE,
             TOOL_CALLS_SINCE_START_OF_EARLIEST_TURN_WITH_SENTENCE_TO_JUDGE,

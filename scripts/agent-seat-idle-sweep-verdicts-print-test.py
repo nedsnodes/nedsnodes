@@ -588,7 +588,7 @@ try:
           verdicts["alpha"].get("rule") == 3 and not verdicts["alpha"]["errors"]
           and verdicts["alpha"]["open_tasks_nothing_holds"] is None
           and "GitHub could not say whether pr_merged 50"
-          in verdicts["alpha"]["open_tasks_nothing_holds_read_failure"], verdicts["alpha"])
+          in verdicts["alpha"]["open_tasks_nothing_holds_not_read_because"], verdicts["alpha"])
 
     # --- what is running, and rule 5-------------------------------------------------------------
     machine = Machine()
