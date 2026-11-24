@@ -1404,7 +1404,6 @@ def main():
         exit_code, output, gh_calls, _, _ = run_case(
             scratch, "merged-branch-gone-before-its-delete", [(GATE_PASSED, 0)], routes)
         branch_calls = [argv for argv in argvs(gh_calls) if argv[:1] == ["api"]]
-        branch_path = f"repos/nedsnodes/nedsnodes/branches/{BRANCH}"
         check("a branch that GitHub deletes between the program's read and its delete is "
               "found gone by a second read after the delete, and the program exits 0 "
               "without a STOP",
