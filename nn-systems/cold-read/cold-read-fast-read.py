@@ -1357,15 +1357,23 @@ def with_line_after_provenance(report_text: str, line: str) -> str:
     return marker + report_text
 
 
+class ColdReadCellReportHasNoProvenanceStamp(Exception):
+    """The cell's report does not open with a provenance stamp, which
+    `stamp_provenance` in nn-systems/cold-read/cold-read-cell-common.py writes
+    on every report a cell finishes, so the launcher is broken."""
+
+
 def with_text_intended_reader_category_in_provenance_stamp(report_text: str, category: str) -> str:
     """The report with the category as a field of its provenance stamp, put
     before `target_sha256=`, which every stamp the cell launchers write holds,
-    because the stamp keeps `target=` last; a report with no stamp gets a stamp
-    holding only that field."""
+    because the stamp keeps `target=` last. Raises ColdReadCellReportHasNoProvenanceStamp
+    when the report has no stamp."""
     field = f"{TEXT_INTENDED_READER_CATEGORY_STAMP_FIELD}={category}"
     first, newline, rest = report_text.partition("\n")
     if not first.startswith("<!-- provenance:"):
-        return f"<!-- provenance: {field} -->\n\n" + report_text
+        raise ColdReadCellReportHasNoProvenanceStamp(
+            f"the cell's report opens with {first[:80]!r}, not a provenance stamp; "
+            "every report a cell finishes is stamped, so the cell launcher is broken")
     before, found, after = first.partition(" target_sha256=")
     return f"{before} {field}{found}{after}{newline}{rest}"
 

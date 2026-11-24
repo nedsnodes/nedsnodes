@@ -1685,7 +1685,7 @@ with tempfile.TemporaryDirectory() as scratch:
         check(f"with --text-intended-reader-category {category}, the prompt names {category} "
               "as the text's category and no other category",
               result.returncode == 0
-              and f"The text-intended-reader-category of " in received_prompt
+              and "The text-intended-reader-category of " in received_prompt
               and f" is {category}: judge the text for the reader that the project glossary's "
                   f"entry for {category} names" in received_prompt
               and all(f" is {other}:" not in received_prompt
@@ -3338,10 +3338,13 @@ check("the category goes into an existing stamp before target_sha256=, the rest 
       stamped_with_category == "<!-- provenance: runtime=agy cell=fast-clarify "
       "text_intended_reader_category=agent-readable target_sha256=ab target=/a b.md -->\n\nbody\n",
       repr(stamped_with_category))
-unstamped_with_category = _fast_read.with_text_intended_reader_category_in_provenance_stamp(
-    "body\n", "human-readable")
-check("a report with no provenance stamp gets one holding only the category",
-      unstamped_with_category == "<!-- provenance: text_intended_reader_category=human-readable -->\n\nbody\n",
+try:
+    unstamped_with_category = _fast_read.with_text_intended_reader_category_in_provenance_stamp(
+        "body\n", "human-readable")
+except _fast_read.ColdReadCellReportHasNoProvenanceStamp as no_stamp:
+    unstamped_with_category = no_stamp
+check("a report with no provenance stamp is refused, not given a stamp with no model or target hash",
+      isinstance(unstamped_with_category, _fast_read.ColdReadCellReportHasNoProvenanceStamp),
       repr(unstamped_with_category))
 
 with tempfile.TemporaryDirectory() as placeholder_scratch:
