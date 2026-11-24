@@ -55,7 +55,7 @@ Each node follows one contract (item 3), built by one shared contract module fro
 For example, `background-task-check` answers "Did the task finish?":
 
 ```json
-{"output_state": "past-wait-limit", "pid": 4182, "minutes_running": 47}
+{"output_state": "timed-out", "pid": 4182, "minutes_run": 47}
 ```
 
 A model's answer that picks the next step gives one output state from a fixed list, so that a program can read it without interpreting prose. A missing or unlisted output state is a failure (item 6.3). A schema tests only the structure of an answer: a model can fill a required field with an invented value.
@@ -64,7 +64,7 @@ Unix conventions alone leave four things out, which the user asked this design t
 
 - **An output state richer than an exit code.** An exit code answers one yes-or-no question. The typed JSON object on stdout carries the output state and the data, and diagnostics stay on stderr.
 - **Safe re-running after a crash.** A pipe has no record of what finished. Each tool's `--schema` declares `idempotent: true` or `false`, and the contract module defaults to `false`. A node of kind `code` declares `idempotent` in its program's `--schema`; any other node declares it in the machine file; a node that declares nothing is not idempotent; the lint fails when a node of kind `code` declares it in the machine file. The `--schema` test suite runs each tool declaring `true` twice in a sandbox and fails when the second invocation's output or files differ. When a state-machine-run's record shows a node started and never ended, the runner runs it again only if it is idempotent; otherwise the machine goes to that node's `interrupted` transition, which the lint requires for a non-idempotent node.
-- **Waiting without blocking.** A tool that needs the user or a long job does not sit and wait. It exits with an output state such as `running-under-wait-limit`, the runner holds the state in the state-machine-run's record, and a later `next` continues. A waiting state-machine-run therefore survives a session-handoff.
+- **Waiting without blocking.** A tool that needs the user or a long job does not sit and wait. It exits with an output state such as `running`, the runner holds the state in the state-machine-run's record, and a later `next`, called by the wrapper when the job ends or is stopped at its `timeout_seconds`, continues. A waiting state-machine-run therefore survives a session-handoff.
 - **Branching.** A pipe is a straight line. The runner does the branching, from the output state and the machine file.
 
 A program becomes a node by a thin wrapper or by conversion, whether the program is ours, a Unix tool or a third-party tool, and only where a machine needs it (user's direction, 2026-11-22). For example, `scripts/code-review-codex-cell.py` exits 0 even when it reports defects, so a machine needs a wrapper that gives it an output state.
