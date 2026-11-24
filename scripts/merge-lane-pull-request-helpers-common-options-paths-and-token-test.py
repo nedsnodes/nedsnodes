@@ -98,19 +98,19 @@ def main():
     try:
         names_module = (MODULE.resolve().parents[1] / "nn-systems" / "general-tools"
                         / "github_repository_name_and_name_before_project_rename_common.py")
-        check("REPOSITORY comes from the shared module merge-gate.sh reads, not a copy of its own",
+        check("the helper imports the shared module merge-gate.sh reads, and REPOSITORY holds its "
+              "value",
               Path(common._repository_names.__file__).resolve() == names_module.resolve()
-              and common.REPOSITORY == common._repository_names.REPOSITORY
-              and f'"{common.REPOSITORY}"' not in MODULE.read_text(),
+              and common.REPOSITORY == common._repository_names.REPOSITORY,
               common.REPOSITORY)
         # A name main does not hold, so a copy of today's name in the helper cannot pass.
         stand_in = scratch / "stand-in-checkout"
         (stand_in / "scripts").mkdir(parents=True)
         shutil.copy(MODULE, stand_in / "scripts" / MODULE.name)
         (stand_in / "scripts" / "run-all-test-suites.py").write_text("")
-        (stand_in / "nn-systems" / "general-tools").mkdir(parents=True)
-        (stand_in / names_module.relative_to(MODULE.resolve().parents[1])).write_text(
-            'REPOSITORY = "stand-in-owner/stand-in-repository"\n')
+        stand_in_names_module = stand_in / names_module.relative_to(MODULE.resolve().parents[1])
+        stand_in_names_module.parent.mkdir(parents=True, exist_ok=True)
+        stand_in_names_module.write_text('REPOSITORY = "stand-in-owner/stand-in-repository"\n')
         stand_in_spec = importlib.util.spec_from_file_location(
             "merge_lane_helpers_common_in_stand_in_checkout", stand_in / "scripts" / MODULE.name)
         stand_in_common = importlib.util.module_from_spec(stand_in_spec)

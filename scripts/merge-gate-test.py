@@ -142,6 +142,7 @@ GATE = Path(__file__).with_name("merge-gate.sh")
 DESCRIPTION_DEFECT_LINE_READER = Path(__file__).with_name(
     "pull-request-description-defect-line-root-cause-status-and-follow-up-link-reader.py")
 NO_SANDBOX_SUITES_PROGRAM = Path(__file__).with_name("no-sandbox-test-suites-run-on-main-in-a-quiet-gap.py")
+FAILED_SUITES_RECORD_PROGRAM = Path(__file__).with_name("merge-lane-failed-after-merge-test-suites-on-main-record.py")
 VERDICT_REVIEW_POSTING_PROGRAM_MARKS_CHECK_PROGRAM_PATH = Path(__file__).resolve().with_name("merge-gate-approval-or-changes-request-review-has-review-posting-program-marks-check.py")
 GIT_REDIRECTING_ENVIRONMENT_COMMON = Path("nn-systems/general-tools/git_redirecting_environment_variables_removal_common.py")
 GIT_MACHINE_READABLE_OUTPUT_COMMON = Path("nn-systems/general-tools/git_machine_readable_output_runner_and_parser_common.py")
@@ -368,6 +369,7 @@ def gate_copy(text):
     directory.mkdir()
     shutil.copyfile(DESCRIPTION_DEFECT_LINE_READER, directory / DESCRIPTION_DEFECT_LINE_READER.name)
     shutil.copyfile(NO_SANDBOX_SUITES_PROGRAM, directory / NO_SANDBOX_SUITES_PROGRAM.name)
+    shutil.copyfile(FAILED_SUITES_RECORD_PROGRAM, directory / FAILED_SUITES_RECORD_PROGRAM.name)
     (top / GIT_REDIRECTING_ENVIRONMENT_COMMON).parent.mkdir(parents=True)
     for common in (GIT_REDIRECTING_ENVIRONMENT_COMMON, GIT_MACHINE_READABLE_OUTPUT_COMMON, REPOSITORY_NAMES_COMMON):
         shutil.copyfile(Path(__file__).resolve().parent.parent / common, top / common)
@@ -381,13 +383,18 @@ def gate_copy(text):
 def run_gate(gate, pr, expected, since, routes, token=TEST_TOKEN, path_override=None,
              wrapper=None, arguments=None, jq_failing_filter=None, description_reader_fails=False,
              marks_check_fails=False,
-             cwd=None, no_sandbox_suites_state=None):
+             cwd=None, no_sandbox_suites_state=None, failed_suites_record=None):
     case_dir = Path(tempfile.mkdtemp(dir=scratch))
     home = case_dir / "home"
+    if failed_suites_record is not None:
+        record_file = home / ".local" / "state" / "nedsnodes" / "failed-after-merge-test-suites-on-main.json"
+        record_file.parent.mkdir(parents=True)
+        record_file.write_text(failed_suites_record if isinstance(failed_suites_record, str)
+                               else json.dumps(failed_suites_record))
     if no_sandbox_suites_state is not None:
         state_file = (home / ".local" / "state" / "nedsnodes"
                       / "no-sandbox-test-suites-run-on-main-in-a-quiet-gap.json")
-        state_file.parent.mkdir(parents=True)
+        state_file.parent.mkdir(parents=True, exist_ok=True)
         state_file.write_text(no_sandbox_suites_state if isinstance(no_sandbox_suites_state, str)
                               else json.dumps(no_sandbox_suites_state))
     token_dir = home / ".config" / "nedsnodes"
@@ -665,6 +672,36 @@ def case_no_sandbox_notice_program_failing_is_said_and_the_gate_goes_on(gate):
     run = run_gate(copy, BASE_PR, BASE_HEAD, BASE_APPROVAL["submitted_at"], base_routes())
     return (passed_pinned_to(run, BASE_PR, BASE_APPROVAL["commit_id"])
             and "--print-merge-gate-notice-of-last-failed-or-stopped-run failed" in run.stderr), run.summary()
+
+
+FAILED_SUITES_NOTICE_HEADING = "FAILED TEST SUITES ON MAIN"
+FAILED_SUITES_RECORD = {"scripts/broken-test.py": {"failed_tests": {"scripts/broken-test.py": {
+    "commit": "b46d47c2bdbe0000000000000000000000000000",
+    "last_failed_commit": "b46d47c2bdbe0000000000000000000000000000", "pull_request": "3899",
+    "log": "/logs/broken-test.py.log", "failed_at": "2026-11-20T17:18:00Z",
+    "repair_task_agent_seat": "MD-skills", "repair_task_id": 7}}}}
+
+
+def case_failed_suites_notice_and_the_gate_still_passes(gate):
+    run = run_gate(gate, BASE_PR, BASE_HEAD, BASE_APPROVAL["submitted_at"], base_routes(),
+                   failed_suites_record=FAILED_SUITES_RECORD)
+    return (passed_pinned_to(run, BASE_PR, BASE_APPROVAL["commit_id"])
+            and FAILED_SUITES_NOTICE_HEADING in run.stderr
+            and "scripts/broken-test.py: failed at b46d47c2bdbe" in run.stderr
+            and "repair task #7 on MD-skills's task list" in run.stderr), run.summary()
+
+
+def case_failed_suites_notice_absent_without_a_record(gate):
+    run = run_gate(gate, BASE_PR, BASE_HEAD, BASE_APPROVAL["submitted_at"], base_routes())
+    return (passed_pinned_to(run, BASE_PR, BASE_APPROVAL["commit_id"])
+            and FAILED_SUITES_NOTICE_HEADING not in run.stderr), run.summary()
+
+
+def case_failed_suites_record_unreadable_is_said_and_the_gate_goes_on(gate):
+    run = run_gate(gate, BASE_PR, BASE_HEAD, BASE_APPROVAL["submitted_at"], base_routes(),
+                   failed_suites_record="not json")
+    return (passed_pinned_to(run, BASE_PR, BASE_APPROVAL["commit_id"])
+            and "--print-merge-gate-notice failed" in run.stderr), run.summary()
 
 
 def case_live_chain_merge_account_only_approval(gate):
@@ -1916,6 +1953,12 @@ CASES = [
      case_no_sandbox_notice_absent_after_a_passing_run_or_without_a_state_file),
     ("NO-SANDBOX a notice program that fails is said, and the gate goes on",
      case_no_sandbox_notice_program_failing_is_said_and_the_gate_goes_on),
+    ("FAILED SUITES a recorded suite is shown as a notice, and the gate still passes",
+     case_failed_suites_notice_and_the_gate_still_passes),
+    ("FAILED SUITES nothing is printed without a record",
+     case_failed_suites_notice_absent_without_a_record),
+    ("FAILED SUITES an unreadable record is said, and the gate goes on",
+     case_failed_suites_record_unreadable_is_said_and_the_gate_goes_on),
     ("LIVE CHAIN: PR 665 as the chain gates it, approved only by ned-review-merge, passes",
      case_live_chain_merge_account_only_approval),
     ("LIVE CHAIN: PR 667 as the chain gates it, since = ned-review-merge's later approval, passes",
@@ -2300,6 +2343,13 @@ MUTATIONS = [
     ("the no-sandbox notice program's failure not said",
      [("--print-merge-gate-notice-of-last-failed-or-stopped-run failed; its error", "--print-merge-gate-notice-of-last-failed-or-stopped-run x; its error")],
      [case_no_sandbox_notice_program_failing_is_said_and_the_gate_goes_on]),
+    ("without the failed suites notice",
+     [('if ! python3 "$FAILED_SUITES_RECORD_PROGRAM" --print-merge-gate-notice >&2',
+       'if false && python3 "$FAILED_SUITES_RECORD_PROGRAM" --print-merge-gate-notice >&2')],
+     [case_failed_suites_notice_and_the_gate_still_passes]),
+    ("the failed suites notice program's failure not said",
+     [("--print-merge-gate-notice failed; its error", "--print-merge-gate-notice ended; its error")],
+     [case_failed_suites_record_unreadable_is_said_and_the_gate_goes_on]),
     ("without the description parse check",
      [('<<<"$body_read")\n[ $? -eq 0 ] || cannot "$DESCRIPTION_UNPARSABLE"',
        '<<<"$body_read")\n: || cannot "$DESCRIPTION_UNPARSABLE"')],

@@ -4,7 +4,9 @@
 # One exception, which never changes the exit code: before the checks it prints
 # on stderr the notice of scripts/no-sandbox-test-suites-run-on-main-in-a-quiet-gap.py
 # --print-merge-gate-notice-of-last-failed-or-stopped-run, when the no-sandbox test suites last failed or
-# stopped on main. Refusing instead would stop every merge
+# stopped on main, and the notice of
+# scripts/merge-lane-failed-after-merge-test-suites-on-main-record.py --print-merge-gate-notice,
+# while a suite that failed an after-merge test run has not passed since. Refusing instead would stop every merge
 # for one suite's failure on main, which a change being merged did not cause.
 # On a pass it also prints, after the merge command, each #follow_up link to an
 # open issue in this repository, which merge-lane-2 sends the author.
@@ -180,6 +182,10 @@ else
   NO_SANDBOX_SUITES_PROGRAM="$(dirname "${BASH_SOURCE[0]}")/no-sandbox-test-suites-run-on-main-in-a-quiet-gap.py"
   if ! python3 "$NO_SANDBOX_SUITES_PROGRAM" --print-merge-gate-notice-of-last-failed-or-stopped-run --clone "$(dirname "${BASH_SOURCE[0]}")/.." >&2; then
     printf 'NO-SANDBOX TEST SUITES ON MAIN: %s --print-merge-gate-notice-of-last-failed-or-stopped-run failed; its error is just above this line. The gate goes on; tell reboot-test, which owns that program.\n' "$NO_SANDBOX_SUITES_PROGRAM" >&2
+  fi
+  FAILED_SUITES_RECORD_PROGRAM="$(dirname "${BASH_SOURCE[0]}")/merge-lane-failed-after-merge-test-suites-on-main-record.py"
+  if ! python3 "$FAILED_SUITES_RECORD_PROGRAM" --print-merge-gate-notice >&2; then
+    printf 'FAILED TEST SUITES ON MAIN: %s --print-merge-gate-notice failed; its error is just above this line. The gate goes on; tell merge-lane-2, which owns that program.\n' "$FAILED_SUITES_RECORD_PROGRAM" >&2
   fi
 fi
 
