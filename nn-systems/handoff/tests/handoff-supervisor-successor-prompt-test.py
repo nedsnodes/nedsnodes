@@ -15,6 +15,7 @@ Run: python3 nn-systems/handoff/tests/handoff-supervisor-successor-prompt-test.p
 Prints one line per case and exits non-zero if any case fails.
 """
 
+import types
 import contextlib
 import dataclasses
 import functools
@@ -2826,6 +2827,18 @@ def run_session_handoff_writer_warning_cases(recent: str):
     quiet = supervisor.build_ignition_prompt(Path("/tmp/d.md"), {"written-at": recent, "next-step": "go"})
     check("a session-handoff with no writer warning adds no warning sentence",
           "the writer script found" not in quiet, quiet)
+    # A missing transcript is what makes the writer warn about the roster, so the recovery launch must show it too.
+    recovery_fields = dict(fields, **{
+        supervisor.BACKGROUND_TASK_PAST_WAIT_LIMIT_FIELD_PREFIX + "1": "task-a: the long build",
+        supervisor.COLD_READ_FULL_RUN_COMMAND_REFUSED_DURING_HANDOFF_DEFERRAL_FIELD_PREFIX + "1": "cold-read run x",
+    })
+    _, plan = supervisor.successor_session_id_and_ignition_plan_without_conversation_tail(
+        types.SimpleNamespace(working_directory=Path("/tmp")), None, recovery_fields, "supervisor boot")
+    recovered = plan.compose("")
+    check("the recovery launch shows each writer warning, in writer order, before the next step",
+          expected in recovered and recovered.index(expected) < recovered.index("merge the queue"), recovered)
+    check("the recovery launch shows the past-wait-limit tasks and the refused cold-read commands",
+          "task-a: the long build" in recovered and "cold-read run x" in recovered, recovered)
 
 
 def run_spawned_subagent_roster_cases(workspace: Path, recent: str):

@@ -149,7 +149,7 @@ import subprocess
 import sys
 import time
 import uuid
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Optional
@@ -1310,27 +1310,10 @@ def successor_initial_agent_instructions_line_naming_waiting_approval_walk_item(
     return (WAITING_APPROVAL_WALK_ITEM_INSTRUCTION_TEMPLATE.format(link=link, **values) + document_problem,)
 
 
-def build_ignition_prompt(extract_path: Path, handoff_fields: dict,
-                          predecessor_session_directory: Optional[Path] = None,
-                          launch_time_git_sync_report: str = "",
-                          overview_refresh_due: tuple = (),
-                          memory_review_due: tuple = (),
-                          branch_state_instruction: str = "",
-                          waiting_approval_walk_item: tuple = ()) -> str:
-    next_step = next_step_from(handoff_fields)
-    lines = [
-        f"Read {extract_path} — the dialog from the session you are continuing, "
-        + written_at_wariness_sentence(handoff_fields.get(session_handoff_field_names.WRITTEN_AT_FIELD, "")),
-        ITEMS_NEEDING_THE_USER_IN_ONE_APPROVAL_WALK_INSTRUCTION,
-        *waiting_approval_walk_item,
-    ]
-    git_sync_text = (launch_time_git_sync_report_in_prompt(launch_time_git_sync_report,
-                                                           branch_state_instruction)
-                     if launch_time_git_sync_report else "")
-    if git_sync_text:
-        lines.append(git_sync_text)
-    lines.extend(overview_refresh_due)
-    lines.extend(memory_review_due)
+def session_handoff_field_lines_for_successor(handoff_fields: dict,
+                                             predecessor_session_directory: Optional[Path] = None) -> list:
+    """The successor-prompt lines the session-handoff's numbered fields give, for every launch path."""
+    lines = []
     roster = spawned_subagent_roster_from(handoff_fields)
     if roster:
         transcript_directory = (predecessor_session_directory
@@ -1360,6 +1343,31 @@ def build_ignition_prompt(extract_path: Path, handoff_fields: dict,
     if writer_warnings:
         lines.append(SESSION_HANDOFF_WRITER_WARNINGS_SHOWN_TO_SUCCESSOR_SENTENCE_TEMPLATE.format(
             warning_count=len(writer_warnings), joined_warnings=" ".join(writer_warnings)))
+    return lines
+
+
+def build_ignition_prompt(extract_path: Path, handoff_fields: dict,
+                          predecessor_session_directory: Optional[Path] = None,
+                          launch_time_git_sync_report: str = "",
+                          overview_refresh_due: tuple = (),
+                          memory_review_due: tuple = (),
+                          branch_state_instruction: str = "",
+                          waiting_approval_walk_item: tuple = ()) -> str:
+    next_step = next_step_from(handoff_fields)
+    lines = [
+        f"Read {extract_path} — the dialog from the session you are continuing, "
+        + written_at_wariness_sentence(handoff_fields.get(session_handoff_field_names.WRITTEN_AT_FIELD, "")),
+        ITEMS_NEEDING_THE_USER_IN_ONE_APPROVAL_WALK_INSTRUCTION,
+        *waiting_approval_walk_item,
+    ]
+    git_sync_text = (launch_time_git_sync_report_in_prompt(launch_time_git_sync_report,
+                                                           branch_state_instruction)
+                     if launch_time_git_sync_report else "")
+    if git_sync_text:
+        lines.append(git_sync_text)
+    lines.extend(overview_refresh_due)
+    lines.extend(memory_review_due)
+    lines.extend(session_handoff_field_lines_for_successor(handoff_fields, predecessor_session_directory))
     preamble = " ".join(lines)
     if handoff_fields.get(NEXT_STEP_BLOCK_UNTERMINATED_FIELD):
         preamble += UNTERMINATED_NEXT_STEP_BLOCK_NOTE
@@ -1406,6 +1414,7 @@ class IgnitionPlanWithoutConversationTail:
     unextracted_transcript_expected_path: Optional[Path] = None
     # Set instead of the path when two or more project folders hold the transcript.
     unextracted_transcript_paths_in_several_folders: tuple = ()
+    handoff_fields: dict = field(default_factory=dict)
 
     def compose(self, launch_time_git_sync_report: str,
                 overview_refresh_due: tuple = (),
@@ -1450,6 +1459,10 @@ class IgnitionPlanWithoutConversationTail:
         for line in overview_refresh_due:
             prompt += " " + line
         for line in memory_review_due:
+            prompt += " " + line
+        transcript_directory = (self.unextracted_transcript_path.parent
+                                if self.unextracted_transcript_path is not None else None)
+        for line in session_handoff_field_lines_for_successor(self.handoff_fields, transcript_directory):
             prompt += " " + line
         # The next step goes last, after NEXT_STEP_HEADING, as in build_ignition_prompt, so that
         # launch_prompt_with_leftovers_before_the_next_step puts the leftovers before it.
@@ -2588,7 +2601,7 @@ def successor_session_id_and_ignition_plan_without_conversation_tail(
     plan = IgnitionPlanWithoutConversationTail(
         next_step_from(handoff_fields), occasion, retiring_session_id or "",
         transcript_paths[0] if len(transcript_paths) == 1 else None, expected_path,
-        tuple(transcript_paths) if len(transcript_paths) > 1 else ())
+        tuple(transcript_paths) if len(transcript_paths) > 1 else (), handoff_fields)
     why_no_conversation_tail = (
         f"session {retiring_session_id}'s dialog could not be extracted"
         if retiring_session_id else "no earlier session was recorded")
