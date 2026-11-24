@@ -159,7 +159,7 @@ The stub agent-binary the tests use (`STUB_MODEL_RUNTIME` in `nn-systems/cold-re
 - All seven fail both attempts. Expect the none-landed variant and exit 1.
 - One copied cold-read-cell program has its execute permission removed, so the cold-read-grid cannot start it. Expect `RETRYING:` and then `FAILED` naming `program-unstartable`, the other programs' cold-read-cells unaffected, the some-landed variant and exit 1, rather than the run ending.
 - The cold-read-target changes during a run that has an absent report. Expect the target-changed variant, then the absent report, both markers with the target-changed marker first, and exit 3.
-- **A Codex attempt's output holds a line recognised for `claude` at the start of a line, and the attempt fails with exit 1.** Expect the class `exit-1`, since no Codex text matches that phrase (the one Codex text recognised is its own logged-out line). Also expect a run otherwise the same as that failure without the line: the same retry, closing text and exit code.
+- **A Codex attempt's output holds the `claude` logged-out line, "Not logged in · Please run /login", at the start of a line, and the attempt fails with exit 1.** Expect the class `exit-1`, since no Codex text matches that line (the one Codex text recognised is its own logged-out line). Also expect a run otherwise the same as that failure without the line: the same retry, closing text and exit code.
 
 The classifier gets its own cases in `nn-systems/cold-read/tests/cold-read-cell-common-test.py`. The input for `model-limit` is the real line from the log-store. Its fixture records the log file and line, the command that produced it, which is the cold-read-grid's launch of `nn-systems/cold-read/cold-read-claude-cell.py`, and the machine the run was on:
 
