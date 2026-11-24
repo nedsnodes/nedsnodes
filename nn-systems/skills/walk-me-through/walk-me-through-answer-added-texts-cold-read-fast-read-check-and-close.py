@@ -405,7 +405,7 @@ the sha256 of that text unchanged, whitespace included. It first refuses,
 as CHECK does and before it starts any read, an item with a `#new` or
 `#new_if_d` mark whose text would not be read whole; then it refuses, also
 before any read, an item whose text up to its first `###` sub-step, or one of
-whose `###` sub-steps, holds more than 300 words, counting every run of
+whose `###` sub-steps, holds more than 500 words, counting every run of
 characters between spaces that holds a letter or a digit, on every line but
 those opening `#approval_walk_item_`. Then, for an item that is to be shown, it
 refuses, before any read, an item whose text states the
@@ -1256,7 +1256,7 @@ READ_AHEAD_NOT_STARTED = ("No cold-read-fast-read could be started ahead for the
                           "from you now, since when that item waits its read step reads it or reports the problem "
                           "again. The problem: {problem}")
 GIT_LS_FILES_FAILED = "every changed word, since `git ls-files` failed in {top} ({error}) and file names were not known"
-APPROVAL_WALK_ITEM_WORD_LIMIT = 300
+APPROVAL_WALK_ITEM_WORD_LIMIT = 500
 # The user has not decided whether the hashtag marker lines, such as `#new`, `#new_if_d` and `#case_against`, and
 # the texts quoted on `#old` and `#new` lines count toward the limit; until he does, only a line opening with one
 # of these, which the item page shows apart from the item's text, is left out of the count.
@@ -1273,7 +1273,7 @@ APPROVAL_WALK_ITEM_OVER_WORD_LIMIT = (
     "breaks that holds a letter or a digit; every line of the item counts, heading, code and hashtag marker lines "
     "included, except a line opening with {left_out}, and each `###` sub-step, numbered or not, counts on its own.\n"
     "Split that text into `###` sub-steps, each within {limit} words, headed and ended as the walk-me-through skill's "
-    "paragraph opening \"Limit each item to 300 words\" says; do not cut the text down to fit, since the user wants "
+    "paragraph opening \"Limit each item to {limit} words\" says; do not cut the text down to fit, since the user wants "
     "long material broken into steps, not compressed.\n"
     "Then run `{command}` again.\n"
     "From now on, write each item and each sub-step within {limit} words when you write it into the walk-document.")
