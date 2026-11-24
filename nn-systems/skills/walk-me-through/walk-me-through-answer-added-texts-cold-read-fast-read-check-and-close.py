@@ -253,12 +253,10 @@ minutes record the answer, with exit 2; a changed target alone leaves the exit
 code 0, since the report was written.
 
 Each run of CHECK, CLOSE and the waiting-item step first saves the open
-walk's walk-document, as it stands, to `~/.local/share/nedsnodes/walk-document-copies/<walk name>/`
-on ned-box, named by the time in UTC and a random suffix, keeping the newest
-20 of that walk. It saves nothing when the document is byte for byte the newest
-copy, so runs that change nothing do not push older versions out. The folder is
-outside the log-store and every checkout, so that agents' searches do not find
-old versions. A copy that cannot be saved is printed after the step's own output,
+walk's walk-document, as it stands, to `walk-document-copies/<walk name>/` in
+the log-store, named by the time in UTC and a hash of its content, keeping the
+newest 20 of that walk. It saves nothing when the document is byte for byte the newest
+copy, so runs that change nothing do not push older versions out. A copy that cannot be saved is printed after the step's own output,
 with exit 2 if the step would have exited 0; the step itself still runs.
 
 CLOSE reads the last answer line CHECK wrote. When the `#next_to_present` line
@@ -666,7 +664,7 @@ COUNTS_NOT_LOGGED = (
     "The minutes record the answer, but the fast-read counts were not logged to {log}: {error}.",
     "Include this line in your next message to the user, and carry on as the lines above say.",
 )
-WALK_DOCUMENT_COPIES_UNDER_NED_BOX_HOME = Path(".local/share/nedsnodes/walk-document-copies")
+WALK_DOCUMENT_COPIES_DIRECTORY_IN_LOG_STORE = "walk-document-copies"
 WALK_DOCUMENT_COPIES_KEPT = 20
 WALK_DOCUMENT_COPY_NOT_SAVED = (
     "FAILED: no timestamped copy of the walk-document {document} was saved on ned-box: {error}.\n"
@@ -1369,7 +1367,7 @@ def walk_me_through_walk_document_timestamped_copy_save_on_ned_box_and_oldest_co
             log_store_records, tried = reachable_log_store_records()
             if log_store_records is None:
                 raise OSError(LOG_STORE_UNREACHABLE.format(paths=" or ".join(str(path) for path in tried)))
-            copies_root = log_store_records.parent.parent / WALK_DOCUMENT_COPIES_UNDER_NED_BOX_HOME
+            copies_root = log_store_records.parent / WALK_DOCUMENT_COPIES_DIRECTORY_IN_LOG_STORE
         copies = copies_root / walk_name
         copies.mkdir(parents=True, exist_ok=True)
         content = document.read_bytes()
@@ -1377,16 +1375,16 @@ def walk_me_through_walk_document_timestamped_copy_save_on_ned_box_and_oldest_co
         if existing and existing[-1].read_bytes() == content:
             return None
         stamp = datetime.datetime.now(datetime.timezone.utc).strftime("%Y-%m-%dT%H-%M-%S.%fZ")
-        # The random suffix keeps two runs with one stamp from replacing each other's copy; a hard link is not
-        # used because the Mac reaches this folder through its network mount.
-        handle, temporary = tempfile.mkstemp(prefix=f"{stamp}-", suffix=".tmp", dir=copies)
+        # The content hash keeps two versions saved with one stamp from replacing each other.
+        final_name = f"{stamp}-{hashlib.sha256(content).hexdigest()[:16]}.md"
+        handle, temporary = tempfile.mkstemp(suffix=".tmp", dir=copies)
         with os.fdopen(handle, "wb") as file:
             file.write(content)
         os.chmod(temporary, 0o644)  # mkstemp's 0600 would keep the copy from other users of the mount.
-        os.replace(temporary, Path(temporary).with_suffix(".md"))
+        os.replace(temporary, copies / final_name)
         temporary = None
         for old in sorted(copies.glob("*.md"))[:-WALK_DOCUMENT_COPIES_KEPT]:
-            old.unlink()
+            old.unlink(missing_ok=True)
     except OSError as error:
         if temporary is not None:
             with contextlib.suppress(OSError):

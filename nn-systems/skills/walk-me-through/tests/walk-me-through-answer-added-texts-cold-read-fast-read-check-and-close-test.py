@@ -6755,8 +6755,15 @@ def test_two_copies_with_one_stamp_keep_both():
         def now(cls, tz=None):
             return cls(2026, 11, 23, 1, 2, 3, 4, tzinfo=tz)
 
+    real_mkstemp = program.tempfile.mkstemp
+
+    def mkstemp_reusing_one_name(*_, dir, **__):
+        path = Path(dir) / "reused-suffix.tmp"
+        return os.open(path, os.O_CREAT | os.O_WRONLY | os.O_TRUNC, 0o600), str(path)
+
     real_datetime = program.datetime.datetime
     program.datetime.datetime = OneInstant
+    program.tempfile.mkstemp = mkstemp_reusing_one_name
     try:
         document.write_bytes(b"first version\n")
         first = program.walk_me_through_walk_document_timestamped_copy_save_on_ned_box_and_oldest_copies_prune(arguments)
@@ -6764,9 +6771,65 @@ def test_two_copies_with_one_stamp_keep_both():
         second = program.walk_me_through_walk_document_timestamped_copy_save_on_ned_box_and_oldest_copies_prune(arguments)
     finally:
         program.datetime.datetime = real_datetime
+        program.tempfile.mkstemp = real_mkstemp
     check("both saves report success", first is None and second is None, f"{first} {second}")
     check("both versions are kept", sorted(path.read_bytes() for path in walk_copies(root))
           == [b"first version\n", b"second version\n"])
+
+
+def default_location_arguments(case, **overrides):
+    values = dict(cwd=str(case.checkout), walk_document_copies_directory=None, cold_read_records=None, counts_log=None)
+    return argparse.Namespace(**{**values, **overrides})
+
+
+def with_log_store_at(program, log_store, action):
+    records = log_store / "cold-read-records"
+    records.mkdir(parents=True, exist_ok=True)
+    real_lookup = program.reachable_log_store_records
+    program.reachable_log_store_records = lambda: (records, [records])
+    try:
+        return action()
+    finally:
+        program.reachable_log_store_records = real_lookup
+
+
+def test_a_default_run_saves_under_the_log_store_on_ned_box_and_through_the_mac_mount():
+    program = load_program()
+    case = Case()
+    save = program.walk_me_through_walk_document_timestamped_copy_save_on_ned_box_and_oldest_copies_prune
+    for label, log_store in (("ned-box", case.root / "home" / "nedsnodes-logs"),
+                             ("the Mac mount", case.root / "Volumes" / "nedhome" / "nedsnodes-logs")):
+        problem = with_log_store_at(program, log_store, lambda: save(default_location_arguments(case)))
+        check(f"a default save through {label} succeeds", problem is None, str(problem))
+        check(f"a default save through {label} lands in the log-store's copies folder",
+              len(walk_copies(log_store / "walk-document-copies")) == 1)
+
+
+def test_a_run_given_other_records_or_counts_saves_nothing_to_the_default_location():
+    program = load_program()
+    case = Case()
+    save = program.walk_me_through_walk_document_timestamped_copy_save_on_ned_box_and_oldest_copies_prune
+    for label, overrides in (("records", {"cold_read_records": [case.root / "other-records"]}),
+                             ("counts", {"counts_log": case.root / "other-counts.tsv"})):
+        log_store = case.root / f"log-store-for-{label}"
+        problem = with_log_store_at(program, log_store, lambda: save(default_location_arguments(case, **overrides)))
+        check(f"a run given other {label} reports no problem", problem is None, str(problem))
+        check(f"a run given other {label} saves nothing", not (log_store / "walk-document-copies").exists())
+
+
+def test_the_read_ahead_worker_step_saves_no_copy():
+    program = load_program()
+    case = Case()
+    log_store = case.root / "log-store-for-the-worker"
+    real_worker = program.read_ahead_worker
+    program.read_ahead_worker = lambda _arguments: 0
+    try:
+        code = with_log_store_at(program, log_store,
+                                 lambda: program.main([program.READ_AHEAD_WORKER_STEP, "--cwd", str(case.checkout)]))
+    finally:
+        program.read_ahead_worker = real_worker
+    check("the worker step exits 0", code == 0, str(code))
+    check("the worker step saves no copy", not (log_store / "walk-document-copies").exists())
 
 
 def test_a_failed_publish_leaves_no_copy_at_a_final_name():
