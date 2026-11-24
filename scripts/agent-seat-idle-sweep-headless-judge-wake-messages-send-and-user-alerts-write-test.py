@@ -2619,6 +2619,36 @@ check("rule 5: only the ids the judge lists are recorded, whatever the message's
       [event["subjects"] for event in machine.events("reminder_sent")] == [["open task: 12"]],
       machine.events("reminder_sent"))
 
+machine = Machine()
+machine.seat("alpha", DONE_TURN)
+for task_id in ("1", "2", "3"):
+    machine.task("alpha", task_id)
+machine.script(judged(True, "You have open tasks nothing holds, for example #1.",
+                      raised=["1", "2", "3"]), sent_ok())
+machine.run(0)
+sent_text = machine.events("message_sent")[0]["text"]
+check("rule 5: code lists every raised task in the message, whatever examples the judge gave",
+      'Open tasks nothing holds: #1 "task 1"; #2 "task 2"; #3 "task 3".' in sent_text
+      and [event["subjects"] for event in machine.events("reminder_sent")]
+      == [["open task: 1", "open task: 2", "open task: 3"]], sent_text)
+answered_with_a_tool_call_and_idle_again(machine, 10)
+calls, _ = judge_asked_at(machine, 20)
+check("rule 5: one backlog gives one reminder, though the judge's words named one task", not calls,
+      calls)
+
+machine = Machine()
+machine.seat("alpha", DONE_TURN)
+machine.task("alpha", "1")
+machine.task("alpha", "2")
+machine.script(judged(True, "You have open tasks.", raised=["1", "2"]),
+               {"sends": [send_to("alpha", 'You have open tasks. Open tasks nothing holds: #1 '
+                                  f'"task 1".\n\n{DO_NOT_REPLY}')],
+                "answer": {"sent": True, "reason": "sent"}})
+machine.run(0)
+check("rule 5: a task the sender left out of the text sent is not recorded as reminded",
+      [event["subjects"] for event in machine.events("reminder_sent")] == [["open task: 1"]],
+      machine.events("reminder_sent"))
+
 for name, bad_raised in (("an id it was not given", ["9"]), ("no list", None)):
     machine = Machine()
     machine.seat("alpha", DONE_TURN)
