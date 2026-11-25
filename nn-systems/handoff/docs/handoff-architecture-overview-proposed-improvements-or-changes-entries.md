@@ -1107,3 +1107,15 @@ Goes wrong when: a reader takes the assertion as exact.
 The claim check's evidence:
 > `nn-systems/handoff/handoff-asked-stop-typing-user-notice-user-prompt-submit-hook.py:94` `return os.environ.get(supervisor.HANDOFF_SUPERVISOR_AGENT_NAME_ENVIRONMENT_VARIABLE, "").strip()`. This hook also reads the first variable. It takes the name from the supervisor's constant, so a rename would not break it.
 State: open
+
+## E95 — possible problem: an assertion of the overview is contradicted
+
+Claim: `<seat>-supervisor-state.json`, holding the heartbeat, the exit record and the consumed `session-handoff-sequence-number`: written only by `handoff-supervisor.py`; read by the writer script, `resupervise-seat.py`, `recover-crashed-seats.py`, `restart-live-seats-at-login.py`, the agent-crash-watcher, the restart program and `scripts/agent-seat-idle-sweep-verdicts-print.py`.
+Found by: the overview claim check of 2026-11-25 against commit 61eeea3170a3ec729e6e7a0ed472de589dc7de29; its report is /home/nedlern/nedsnodes-logs/overview-write-architecture-overview-claim-check-reports/nedsnodes-handoff-architecture-overview/81ce1286f6b6ffe40c2eee1f98fb6e751ec0d1b2-2026-11-25T00-33-40-332282Z.md.
+Fixed by: regular maintenance, in the overview.
+Goes wrong when: a reader takes the assertion as exact.
+The claim check's evidence:
+> - The reader list is incomplete. scripts/agent-seat-idle-sweep-headless-judge-wake-messages-send-and-user-alerts-write.py:714-716 reads the file directly: `path = verdicts_print.supervisor.supervisor_state_path(Path(handoff_directory).expanduser(), seat)` / `state = json.loads(path.read_text(encoding="utf-8"))`.
+> - scripts/merge-lane-open-prs-not-changes-requested-count-then-next-agent-seat-go-ahead-to-open-surviving-mutant-test-prs.py:271-275 reads it through the idle sweep.
+> - Both readers are outside the system and the main outside reader is listed, so this is ranked fix-later.
+State: open
