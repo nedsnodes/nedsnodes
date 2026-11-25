@@ -1395,8 +1395,9 @@ def conversation_tail_last_lines_display_file_write(
 
     The display is optional, and the caller runs after the handoff's counter is saved, where a
     raise would stop the successor's launch: a read or write failure is reported on stderr and
-    the successor launches without the display. The report gives no instruction: this stderr goes
-    to the agent-seat's tmux pane, where no agent reads it, and a missing display costs no work."""
+    the successor launches without the display. The report gives no instruction: it goes to the
+    supervisor's stderr, normally the agent-seat's tmux pane and that pane's terminal-capture log,
+    which no agent reads and no program parses, and a missing display costs no work."""
     display_path = successor_conversation_tail_display_hook.conversation_tail_last_lines_display_file_path_for_session_id(
         handoff_directory, session_id)
     try:
