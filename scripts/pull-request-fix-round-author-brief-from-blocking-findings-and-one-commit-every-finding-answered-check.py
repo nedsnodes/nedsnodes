@@ -202,8 +202,8 @@ MERGE_LANE_2_REVIEWER_LOGIN = "ned-review-merge"
 # Every merge-lane posts as that one account, so only the body tells them apart: the posting program puts the
 # verdict and **Blocking: N** lines first, and the merge-lane's own text after them starts with its name. A
 # merge-lane named later in the body, such as "merge-lane-2 merges", is not the one that posted it.
-MERGE_LANE_REVIEW_BODY_POSTING_PROGRAM_LINE_PATTERN = re.compile(r"(APPROVE|REQUEST_CHANGES|COMMENT|\*\*Blocking: \d+\*\*)?")
-MERGE_LANE_NAME_AT_START_OF_LINE_PATTERN = re.compile(r"(merge-lane-\d+)(?![\w-])")
+MERGE_LANE_REVIEW_BODY_POSTING_PROGRAM_LINE_PATTERN = re.compile(r"(APPROVE|REQUEST_CHANGES|\*\*Blocking: \d+\*\*)?")
+MERGE_LANE_NAME_AT_START_OF_LINE_PATTERN = re.compile(r"merge-lane-\d+")
 # Reviewers spell the mark several ways, such as "**Blocks.**", "**Blocks:**", "**Blocks**" or "**Blocks** (...)"; no instruction fixes one.
 BLOCKING_MARKER_PATTERN = re.compile(r"\*\*Blocks\b[^*\n]*\*\*")
 BLOCKING_MARKER_DESCRIPTION = "the bold word **Blocks**"
@@ -495,11 +495,10 @@ def round_reviews(number, pull_request_author_login, reviewer_login):
                     round_count([own[index][1] for index in requested], records))
     latest = own[-1][1]
     on_commit = f" on commit {latest.get('commit_id')}" if latest.get("state") == "COMMENTED" else ""
-    poster = merge_lane_named_at_start_of_review_body(latest) or "the merge-lane that posted it"
     raise Refused(f"The latest review of pull request {number} by {reviewer_login} ({latest.get('html_url')}) "
                   f"is {latest.get('state')}{on_commit}, not CHANGES_REQUESTED, so there is no fix-round to brief.\n"
                   "If that review lists follow-ups, answer them in a new pull request or tell "
-                  f"{poster} why not, with SendMessage.")
+                  "merge-lane-2 why not, with SendMessage.")
 
 
 def merge_lane_named_at_start_of_review_body(review):
@@ -509,7 +508,7 @@ def merge_lane_named_at_start_of_review_body(review):
         if MERGE_LANE_REVIEW_BODY_POSTING_PROGRAM_LINE_PATTERN.fullmatch(line.strip()):
             continue
         named = MERGE_LANE_NAME_AT_START_OF_LINE_PATTERN.match(line.strip())
-        return named.group(1) if named else None
+        return named.group() if named else None
     return None
 
 

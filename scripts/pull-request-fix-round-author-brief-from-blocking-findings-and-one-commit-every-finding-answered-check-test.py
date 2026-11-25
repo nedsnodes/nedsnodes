@@ -3223,6 +3223,22 @@ def merge_lane_named_by_review_cases(root, repository, _base, frozen_head):
           code == 0 and "send that message to merge-lane-3 with SendMessage" in out
           and "merge-lane-2 with SendMessage" not in out, err + out)
 
+    lane_1_note = review(state="COMMENTED", commit_id=frozen_head, review_id=13,
+                         body="merge-lane-1's later note on the same review.")
+    code, out, err = run(root, repository, {**routes_for(frozen_head, [unnamed, lane_3_note, lane_1_note]),
+                                            **comments_route(12, []), **comments_route(13, [])})
+    check("merge-lane named by review: of two later reviews naming a merge-lane, the later one names the recipient",
+          code == 0 and "send that message to merge-lane-1 with SendMessage" in out
+          and "merge-lane-3 with SendMessage" not in out, err + out)
+
+    other_account = review(state="COMMENTED", commit_id=frozen_head, review_id=12, login="mac-claude",
+                           body="merge-lane-3 asked for this review.")
+    code, out, err = run(root, repository, {**routes_for(frozen_head, [unnamed, other_account]),
+                                            **comments_route(12, [])})
+    check("merge-lane named by review: a review by another account that opens with a merge-lane's name does not "
+          "name the recipient, so the round refuses with exit 1",
+          code == 1 and out == "" and "names no merge-lane" in err, err + out)
+
     code, out, err = run(root, repository, routes_for(frozen_head, [unnamed]))
     check("merge-lane named by review: a round whose reviews open with no merge-lane's name refuses with exit 1, "
           "naming the review, and prints no brief",
