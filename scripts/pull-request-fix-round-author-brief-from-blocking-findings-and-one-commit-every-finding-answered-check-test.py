@@ -989,6 +989,19 @@ def stopped_round_cases(root, repository, made, frozen_head, dated_routes, submi
     code, out, err = run(root, repository, dated_routes)
     check("answers kept: a copies directory named by a review not on the round's frozen-head is not named",
           code == 0 and str(other_copy) not in out, err + out)
+    write_answers(partial, 60)
+    before = answers.read_bytes()
+    copies_of_round = sorted(kept_directory.iterdir())
+    other_review_directory.chmod(0o300)
+    try:
+        code, out, err = run(root, repository, second_part_routes)
+        unchanged = answers.read_bytes() == before
+    finally:
+        other_review_directory.chmod(0o755)
+    check("answers kept: another review's copies directory that cannot be listed stops the brief with exit 2 before "
+          "the answers file changes, and no new copy is made",
+          code == 2 and unchanged and "could not list the kept copies" in err and str(other_review_directory) in err
+          and sorted(kept_directory.iterdir()) == copies_of_round, err + out)
     shutil.rmtree(other_review_directory)
     copies_before = sorted(kept_directory.iterdir())
     write_answers(partial, 60)
@@ -1128,7 +1141,7 @@ def topic_worktree_cases(root, repository, base, frozen_head):
           and f"git -C {made} clean -d --force --exclude=/{ANSWERS_NAME}" in err
           and f"Then run this command again:\ncd {made} && python3 scripts/{PROGRAM.name} {NUMBER}" in err, err + out)
     clean_line = next((line for line in err.splitlines() if " clean -d --force" in line), "")
-    unstage_line = next((line for line in err.splitlines() if " rm --cached" in line), "")
+    unstage_line = next((line for line in err.splitlines() if " reset --quiet -- " in line), "")
     unignored = root / "branch-whose-gitignore-lacks-the-answers-file"
     git(root, "init", "-q", str(unignored))
     (unignored / ANSWERS_NAME).write_text(GOOD_ANSWERS)
@@ -1158,6 +1171,32 @@ def topic_worktree_cases(root, repository, base, frozen_head):
           and (staged / "hook.py").read_text() == "committed\n"
           and git(staged, "diff", "--cached", "--name-only") == "",
           restore_line + "\n" + unstage_line + "\n" + clean_line)
+    edited = root / "branch-whose-answers-file-was-staged-then-edited"
+    git(root, "init", "-q", str(edited))
+    (edited / "hook.py").write_text("committed\n")
+    git(edited, "add", "hook.py")
+    git(edited, "-c", "user.name=t", "-c", "user.email=t@t", "commit", "-q", "-m", "base")
+    (edited / ANSWERS_NAME).write_text("1. \n2. \n")
+    git(edited, "add", "-A")
+    (edited / ANSWERS_NAME).write_text(GOOD_ANSWERS)
+    for line in (restore_line, unstage_line, clean_line):
+        subprocess.run(line.replace(str(made), str(edited)), shell=True, check=True, capture_output=True)
+    check("topic-worktree: the three printed commands, run where git add -A staged the answers file and it was "
+          "edited after, succeed and leave it unstaged with its edits",
+          (edited / ANSWERS_NAME).read_text() == GOOD_ANSWERS and git(edited, "diff", "--cached", "--name-only") == "",
+          unstage_line)
+    tracked = root / "branch-whose-head-tracks-the-answers-file"
+    git(root, "init", "-q", str(tracked))
+    (tracked / ANSWERS_NAME).write_text("1. \n2. \n")
+    git(tracked, "add", ANSWERS_NAME)
+    git(tracked, "-c", "user.name=t", "-c", "user.email=t@t", "commit", "-q", "-m", "base")
+    (tracked / ANSWERS_NAME).write_text(GOOD_ANSWERS)
+    git(tracked, "add", "-A")
+    subprocess.run(unstage_line.replace(str(made), str(tracked)), shell=True, check=True, capture_output=True)
+    check("topic-worktree: the printed unstage command, where HEAD tracks the answers file, unstages it without "
+          "staging its deletion and keeps its edits",
+          (tracked / ANSWERS_NAME).read_text() == GOOD_ANSWERS and git(tracked, "diff", "--cached", "--name-only") == "",
+          unstage_line)
     (made / "stray.txt").unlink()
     (made / "hook.py").write_text("changed\n")
     code, out, err = run(root, repository, routes)

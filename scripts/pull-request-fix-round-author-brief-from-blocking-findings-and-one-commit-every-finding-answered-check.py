@@ -952,8 +952,9 @@ def topic_worktree_at_frozen_head(number, reviewer_login, branch, frozen_head, f
                       # because HEAD does not hold it.
                       f"git -C {quoted} restore --staged --worktree -- . "
                       f"{shlex.quote(':(exclude)' + answers_name)}\n"
-                      # rm --cached rather than restore --staged, which fails when the answers file is not staged.
-                      f"git -C {quoted} rm --cached --quiet --ignore-unmatch -- {shlex.quote(answers_name)}\n"
+                      # reset, not rm --cached or restore --staged: it alone succeeds whether the file is unstaged,
+                      # staged and then edited, or tracked by HEAD, and it never stages a deletion.
+                      f"git -C {quoted} reset --quiet -- {shlex.quote(answers_name)}\n"
                       # --exclude, because a branch whose .gitignore does not name the answers file would
                       # otherwise lose it to clean, along with a temporary file a killed brief run left beside it.
                       f"git -C {quoted} clean -d --force --exclude={shlex.quote('/' + answers_name)}\n"
@@ -1022,6 +1023,14 @@ def print_brief(number, reviewer_login):
     kept_copies_directory = pull_request_fix_round_answers_kept_copies_directory_path_named_by_changes_requested_review(
         worktree, number, round_review_id
     )
+    # Listed before the answers file is rewritten, so that a directory that cannot be listed stops the brief while
+    # the subagent's answers are still in place.
+    other_reviews_kept_copies = [
+        kept_answers
+        for other_review_id in frozen_head_review_ids if other_review_id != round_review_id
+        for kept_answers in answers_kept_copies_oldest_first(
+            pull_request_fix_round_answers_kept_copies_directory_path_named_by_changes_requested_review(
+                worktree, number, other_review_id))]
     kept_copies = fix_round_answers_file_placeholder_line_per_finding_write_and_earlier_files_kept_copies_list_oldest_first(answers_path, len(findings) + len(nits),
                                                                      kept_copies_directory)
     lines = [
@@ -1035,15 +1044,10 @@ def print_brief(number, reviewer_login):
                      "new file each answer that still answers a finding below, under that finding's number.")
     # A copies directory named by another review on this frozen-head: one an earlier version of this program
     # named by the round's latest changes-requested review, or one named by a first review since dismissed.
-    for other_review_id in frozen_head_review_ids:
-        if other_review_id == round_review_id:
-            continue
-        other_directory = pull_request_fix_round_answers_kept_copies_directory_path_named_by_changes_requested_review(
-            worktree, number, other_review_id)
-        for kept_answers in answers_kept_copies_oldest_first(other_directory):
-            lines.append(f"An earlier brief on this frozen-head kept a copy of the answers file under another review, "
-                         f"at {kept_answers}. Read that copy too, and copy into the new file each answer that still "
-                         "answers a finding below, under that finding's number.")
+    for kept_answers in other_reviews_kept_copies:
+        lines.append(f"An earlier brief on this frozen-head kept a copy of the answers file under another review, "
+                     f"at {kept_answers}. Read that copy too, and copy into the new file each answer that still "
+                     "answers a finding below, under that finding's number.")
     if fix_round_number == ADVISOR_FIX_ROUND_NUMBER:
         lines += ["", ADVISOR_FIX_ROUND_INSTRUCTION]
     lines += [
