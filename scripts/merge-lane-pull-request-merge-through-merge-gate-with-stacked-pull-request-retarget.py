@@ -891,8 +891,10 @@ def failed_tests_main_does_not_fail_named(arguments, base_branch, merge_commit, 
     def branch_holds_mains_first_failing_commit(suite, test, first_failed):
         if first_failed in held_by_commit:
             return held_by_commit[first_failed]
+        # The merge base with first_failed, not with origin/main, which may hold the merge
+        # commit itself by the time a reader acts on the STOP.
         ancestor = subprocess.run(
-            ["git", "-C", str(worktree), "merge-base", "--is-ancestor", first_failed, merge_commit],
+            ["git", "-C", str(worktree), "merge-base", first_failed, merge_commit],
             capture_output=True, text=True, env=environment, stdin=subprocess.DEVNULL)
         if ancestor.returncode not in (0, 1):
             print(f"STOP: pull request {arguments.pull_request} merged into {base_branch!r}, but "
@@ -901,15 +903,16 @@ def failed_tests_main_does_not_fail_named(arguments, base_branch, merge_commit, 
                   f"program counts the failure of every test first failed there as "
                   f"{base_branch!r}'s own, not main's; the STOP this program prints last lists "
                   f"those failures among the ones that are not main's. `git merge-base "
-                  f"--is-ancestor {first_failed} {merge_commit}` said: {git_error(ancestor)}\n"
+                  f"{first_failed} {merge_commit}` said: {git_error(ancestor)}\n"
                   f"{TELL_AUTHOR_AND_USER_THE_STOP_MESSAGE}")
             kept["complete"] = False
-        held_by_commit[first_failed] = ancestor.returncode == 0
-        if ancestor.returncode == 1:
-            branch_lacks.add(first_failed)
+        merge_base = ancestor.stdout.strip() if ancestor.returncode == 0 else None
+        held_by_commit[first_failed] = merge_base == first_failed
+        if merge_base and merge_base != first_failed:
+            left_main_at[first_failed] = merge_base
         return held_by_commit[first_failed]
 
-    branch_lacks = set()
+    left_main_at = {}
 
     kept = {"complete": True, "new_tests": {}, "seat": None, "task_id": None,
             "why_none": (f"pull request {arguments.pull_request} merged into {base_branch!r}, "
@@ -953,9 +956,10 @@ def failed_tests_main_does_not_fail_named(arguments, base_branch, merge_commit, 
                     suite, test, on_record[test]["commit"]):
                 continue
             kept["new_tests"].setdefault(suite, {})[test] = log
-            if test in on_record and on_record[test]["commit"] in branch_lacks:
+            if test in on_record and on_record[test]["commit"] in left_main_at:
+                first_failed = on_record[test]["commit"]
                 kept["recorded_tests_first_failed_at_a_commit_the_branch_lacks"].append(
-                    (suite, test, on_record[test]["commit"]))
+                    (suite, test, first_failed, left_main_at[first_failed]))
     kept["record_path"] = path
     return kept
 
@@ -977,7 +981,7 @@ def after_merge_test_run_closing_message_printed_returning_whether_stop(argument
         # The record names the commit whose run recorded the test first; when two runs on main
         # overlap, an older main commit can fail the test too, so the branch may hold main's
         # failure after all.
-        for suite, test, commit in kept.get(
+        for suite, test, commit, left_main in kept.get(
                 "recorded_tests_first_failed_at_a_commit_the_branch_lacks", []):
             print(f"{test_named(suite, test)} is on the failed suites record, "
                   f"{kept.get('record_path')}, which keeps the main commit whose test run "
@@ -985,14 +989,16 @@ def after_merge_test_run_closing_message_printed_returning_whether_stop(argument
                   f"program counts the failure as {tested}'s own. It may still be main's: when "
                   f"two of main's after-merge test runs overlap, the later commit's run can "
                   f"record the test first, though the earlier commit fails it too.\n"
-                  f"Before the author fixes it, run {suite} in a worktree at the commit where "
-                  f"{tested} left main, which `git merge-base {merge_commit} origin/main` "
-                  f"prints after `git fetch origin`.\n"
+                  f"Before the author fixes it, run {suite} in a worktree at {left_main}, "
+                  f"the commit where {tested} left main's history before {commit[:12]}.\n"
                   f"If {test_named(suite, test)} fails there too, the failure is main's: say "
                   f"so when you tell the author and the user, and nothing on {tested} needs "
                   f"fixing for it.\n"
                   f"If that test passes there, {tested} broke it: the author fixes it on "
-                  f"{tested}.")
+                  f"{tested}.\n"
+                  f"If {suite} is not in that commit, main gained it after {tested} left, so "
+                  f"this check cannot say whose failure it is: say so when you tell the author "
+                  f"and the user.")
         print(TELL_AUTHOR_AND_USER_THE_STOP_MESSAGE)
         return True
     if new_tests:
