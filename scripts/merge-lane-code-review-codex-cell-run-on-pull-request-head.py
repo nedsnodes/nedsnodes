@@ -112,10 +112,7 @@ def main(argv=None):
     if head_after.returncode != 0 or head_after.stdout.strip() != head.stdout.strip():
         now_holds = (f"holds commit {head_after.stdout.strip()}" if head_after.returncode == 0
                      else f"has a head commit that could not be read: {head_after.stderr.strip()}")
-        directory_options = [
-            "--merge-lane-worktrees-and-outputs-directory", str(arguments.merge_lane_worktrees_and_outputs_directory),
-            "--merge-lane-review-worktrees-directory", str(arguments.merge_lane_review_worktrees_directory),
-            "--review-tools-worktree-at-main", str(arguments.review_tools_worktree_at_main)]
+        directory_options = common.directory_options_argv(arguments)
         commit_to_review = arguments.expected_head_commit or head.stdout.strip()
         # The review tools worktree is checked out at the main commit the merged worktree was built on.
         main_commit = subprocess.run(
