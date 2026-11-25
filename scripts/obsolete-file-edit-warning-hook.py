@@ -241,38 +241,56 @@ MAIN_MOVED_FILE_PUSHED_LINE = (
     "to {new_path}. If `python3 scripts/branch-conflict-check.py` reports a conflict, "
     "do what its report says."
 )
+# git checkout -- <path> and git restore <path> would discard the file's other
+# uncommitted changes with the warned edit. Those changes block the git switch or
+# git rebase the next line names, so they are saved before the file is reset.
+UNDO_ONLY_THIS_EDIT_LINES = (
+    "Undo only the change you just made to {path}, by editing the file back to the "
+    "text it had before that change. Do not run `git checkout -- {path}` or `git "
+    "restore {path}` for this: either one throws away every uncommitted change to the "
+    "file, not only the one this warning is about.\n"
+    "If `git diff -- {path}` still prints changes after that, the file holds uncommitted "
+    "work from before your change, which cannot stay at {path} either, and git refuses "
+    "to switch branch or rebase while it is there: save it with `git diff -- {path} > "
+    "<a file outside this checkout>`, and only then run `git checkout -- {path}`. "
+    "Carry the saved changes along with your own in the step below, and tell the user "
+    "about any you did not make."
+)
 MAIN_MOVED_AND_REWRITTEN_FILE_LINE = (
     "main moved {path} to {new_path} and then changed it so much that git no longer "
     "pairs the two paths, so neither a rebase nor a merge carries your edit there: "
-    "both stop on a modify/delete conflict at {path}. Drop the edit with `git "
-    "checkout -- {path}`. After you make the branch, run `git rebase origin/main`, "
-    "then make the same change by hand in {new_path}."
+    "both stop on a modify/delete conflict at {path}.\n"
+    + UNDO_ONLY_THIS_EDIT_LINES + "\n"
+    "Then make the branch, run `git rebase origin/main`, and make the same change by "
+    "hand in {new_path}."
 )
 MAIN_MOVED_AND_REWRITTEN_FILE_PUSHED_LINE = (
     "main moved {path} to {new_path} and then changed it so much that git no longer "
     "pairs the two paths, so when the pull request merges, git does not carry your "
     "edit there: the merge stops on a modify/delete conflict at {path}. Do not commit "
-    "the edit: drop it with `git checkout -- {path}`, start a topic branch with `git "
-    "switch -c <a-branch-name> origin/main`, and make the same change by hand in "
-    "{new_path} there."
+    "the edit.\n"
+    + UNDO_ONLY_THIS_EDIT_LINES + "\n"
+    "Then start a topic branch with `git switch -c <a-branch-name> origin/main`, and "
+    "make the same change by hand in {new_path} there."
 )
 MAIN_DELETED_FILE_LINE = (
-    "main deleted {path}{deleted_in}, so your edit has no file to land in. Read why "
-    "with `git log -1 --stat origin/main -- {path}`. If your fix is still needed, "
-    "drop this edit with `git checkout -- {path}`, start a topic branch with `git "
-    "switch -c <a-branch-name> origin/main`, and make the same fix in the file that "
-    "does that job on main now. If no file on main does that job, drop the edit and "
-    "do not make the fix."
+    "main deleted {path}{deleted_in}, so your edit has nowhere to go. Read why "
+    "with `git log -1 --stat origin/main -- {path}`.\n"
+    + UNDO_ONLY_THIS_EDIT_LINES + "\n"
+    "Then, if your fix is still needed, start a topic branch with `git switch -c "
+    "<a-branch-name> origin/main`, and make the same fix in the file that does that "
+    "job on main now. If no file on main does that job, do not make the fix."
 )
 MAIN_LOST_FILE_UNKNOWN_LINE = (
     "main no longer has a file at {path}, and git could not tell whether main moved or "
     "deleted it ({text}). Run `git log -1 --format=%h origin/main -- {path}` for the "
-    "commit that removed it, then `git show --name-status -M --format= <that commit>`. "
+    "commit that removed it, then `git show --name-status -M --format= <that commit>`.\n"
     "If a line there starts with R and names {path}, main moved the file, and your "
-    "edit belongs at the second path on that line. Otherwise main deleted it: drop "
-    "this edit with `git checkout -- "
-    "{path}`, and if your fix is still needed, make it in the file that does that job "
-    "on main now, on a topic branch from origin/main (`git switch -c <a-branch-name> "
+    "edit belongs at the second path on that line.\n"
+    "Otherwise main deleted it, and your edit has nowhere to go:\n"
+    + UNDO_ONLY_THIS_EDIT_LINES + "\n"
+    "Then, if your fix is still needed, make it in the file that does that job on "
+    "main now, on a topic branch from origin/main (`git switch -c <a-branch-name> "
     "origin/main`)."
 )
 MAIN_COPY_UNREADABLE_LINE = (
