@@ -3950,7 +3950,7 @@ def test_following_the_repeated_heading_refusal_clears_it_when_two_headings_shar
     a, b = "## Item 2 of 9: a", "## Item 2 of 9: b"
     refused = Case(next_to_present="item 2 of 9", document=layout.format(a=a, b=b)).run("check")
     check("the `of M` in the minutes does not pick between two headings that share it, and the refusal says so",
-          refused.returncode == 1 and "if no other of those headings gives the same total as the heading you mean"
+          refused.returncode == 1 and "by the heading you mean and by no other heading for that item"
           in refused.stderr, described(refused))
     for meant, next_to_present, first, second, read in (
             ("the one `of 10` heading, named by its total", "item 2 of 10", a, b, "C.\n"),
