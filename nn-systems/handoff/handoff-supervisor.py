@@ -1320,14 +1320,16 @@ def successor_initial_agent_instructions_line_naming_waiting_approval_walk_item(
         document = minutes.with_name(name + ".md")
         text = document.read_text(encoding="utf-8")
         spans = walk_finder.item_unit_spans(text, parser)
-        # The first-named item goes first, so that the count has its total even when a later item's check raises:
-        # an `#item_page` line without `of M` is not read. Every named item is then checked, against the total the
-        # walk-minutes gave, so that a missing or repeated heading is reported; the point is read from the
-        # first-named item's unit alone, because units come back in walk-document order, and a later waiting
+        # The total is counted before any heading is looked up, so that a missing or repeated heading leaves the
+        # count its `of M`: an `#item_page` line without it is not read. Every named item is checked, against the
+        # total the walk-minutes gave, so that a missing or repeated heading is reported; the point is read from
+        # the first-named item's unit alone, because units come back in walk-document order, and a later waiting
         # item's heading may name the first item too.
         total_in_walk_minutes = total
-        total, units = walk_finder.waiting_item_units(document, value, [number], total_in_walk_minutes, parser, spans)
+        if total is None:
+            total = walk_finder.approval_walk_item_total_shown_and_waiting_counted_from_walk_document(spans)
         walk_finder.waiting_item_units(document, value, numbers, total_in_walk_minutes, parser, spans)
+        _, units = walk_finder.waiting_item_units(document, value, [number], total_in_walk_minutes, parser, spans)
         point = walk_short_answer_hook.heading_points(text.split("\n"), units, parser).get(number)
     except Exception as error:
         print(f"handoff-supervisor: waiting approval-walk item's walk-document unreadable: "

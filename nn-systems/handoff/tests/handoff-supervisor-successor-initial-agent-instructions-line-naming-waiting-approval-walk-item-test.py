@@ -280,6 +280,27 @@ def run_walk_minutes_cases(workspace):
           len(no_total) == 1 and no_total[0].startswith(without_link_line(WALK, "1 of 2", "1 of 2"))
           and "`Item 2`" in no_total[0], repr(no_total))
 
+    root = workspace / "several-items-no-total-first-named-one-without-heading"
+    walk_in(root, "#next_to_present items 1 and 2\n",
+            document="# Fixture\n\n## Item 2 of 3: Named second\n\nRecommendation: two.\n\n"
+                     "## Item 3 of 3: Last\n\nRecommendation: three.\n")
+    with contextlib.redirect_stdout(io.StringIO()):
+        first_missing = lines_for(root)
+    check("several waiting items, no total, the first-named one with no heading: the `#item_page` line still has `of M`",
+          len(first_missing) == 1 and first_missing[0].startswith(without_link_line(WALK, "1 of 2", "1 of 2"))
+          and "`Item 1`" in first_missing[0], repr(first_missing))
+
+    root = workspace / "several-items-no-total-first-named-one-repeated"
+    walk_in(root, "#next_to_present items 1 and 2\n",
+            document="# Fixture\n\n## Item 1 of 3: Named first\n\nRecommendation: one.\n\n"
+                     "## Item 1 of 4: Named first again\n\nRecommendation: one again.\n\n"
+                     "## Item 2 of 3: Named second\n\nRecommendation: two.\n")
+    with contextlib.redirect_stdout(io.StringIO()):
+        first_repeated = lines_for(root)
+    check("several waiting items, no total, the first-named one's heading repeated: the `#item_page` line still has `of M`",
+          len(first_repeated) == 1 and first_repeated[0].startswith(without_link_line(WALK, "1 of 2", "1 of 2")),
+          repr(first_repeated))
+
     root = workspace / "open-and-paused"
     paused = walk_in(root, "#next_to_present item 1 of 3\n#approval_walk_paused away\n", name="fixture-paused-walk")
     walk_in(root, OPEN_MINUTES)
