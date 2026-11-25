@@ -26,18 +26,8 @@ own fix -- including when this machine has no sandbox to run agy in. 64 rather t
 EXIT_BAD_INVOCATION in nn-systems/cold-read/cold-read-cell-common.py, which every
 cold-read-cell shares.
 
-WHAT THIS LEG IS FOR (user-ruled 2026-11-25, item 23 of the approval-walk
-agent-instructions-editor-backlog-decisions-2026-11-22, answer A): the
-cold-read-fast-read runs on gemini-4-neon-low at effort LOW, replacing Gemini
-3.8 Flash at medium. The measurements (nedlern@ned-box:/home/nedlern/
-nedsnodes-logs/seats/agent-instructions-editor/fast-read-timing-2026-11-24/
-findings.md): on 5 earlier fast-read targets, a median of 48 s against Flash's
-161 s, finding 73% of Flash's findings, where a rerun of Flash's own setup
-found 80%. Those neon runs had the target, CLAUDE.md and the glossary given in
-the prompt; the fast read's own prompt, which has the reviewer open them, was
-not measured on neon. Flash had run at medium since 2026-09-07 because, on the
-ghi-write candidate defect list, medium found 42% of the rows against 19% at
-low. It is the one cold-read-tier this launcher pins. The `deep` and
+WHAT THIS LEG IS FOR: the cold-read-fast-read runs on gemini-4-neon-low at
+effort low. It is the one cold-read-tier this launcher pins. The `deep` and
 `second-strongest-model` (the agent-binary's second-strongest model)
 cold-read-tiers stay on the Claude and Codex launchers, and this
 launcher refuses them (exit 64 from argparse) rather than running a Gemini
