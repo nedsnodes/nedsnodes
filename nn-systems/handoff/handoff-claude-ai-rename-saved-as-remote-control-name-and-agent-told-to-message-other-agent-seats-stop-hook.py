@@ -1,7 +1,8 @@
 #!/usr/bin/env python3
 """At each turn's end, store a claude.ai rename and tell the agent to tell the other agent-seats.
 
-A Stop hook. In an agent-session a handoff-supervisor launched, it compares the transcript's latest
+A Stop hook. In the agent-session a handoff-supervisor launched, and not in a child session that
+inherited its variables, it compares the transcript's latest
 custom-title with the agent-seat's stored Remote Control name. On a difference it stores the title
 and prints {"hookSpecificOutput": {"hookEventName": "Stop", "additionalContext": <instruction>}}.
 
@@ -17,6 +18,7 @@ from pathlib import Path
 
 PROGRAM = "handoff-claude-ai-rename-saved-as-remote-control-name-and-agent-told-to-message-other-agent-seats-stop-hook"
 HANDOFF_SUPERVISOR_AGENT_NAME_ENVIRONMENT_VARIABLE = "NEDSNODES_HANDOFF_SUPERVISOR_AGENT_NAME"
+HANDOFF_SUPERVISOR_SESSION_ID_ENVIRONMENT_VARIABLE = "NEDSNODES_HANDOFF_SUPERVISOR_SESSION_ID"
 
 _common_specification = importlib.util.spec_from_file_location(
     "handoff_remote_control_name_common",
@@ -37,7 +39,8 @@ REMOTE_CONTROL_RENAMED_REMINDER_MESSAGE = (
 
 HOOK_FAILED_MESSAGE = (
     PROGRAM + ": a claude.ai rename of this agent-seat, if there was one, was not stored, because "
-    "the hook failed: {error}. The hook tries again at the next turn's end.")
+    "the hook failed: {error}. Nothing needs doing now: the hook tries again at the next turn's end, "
+    "and the handoff-supervisor checks for a rename again at the session-handoff.")
 
 
 def main() -> int:
@@ -51,8 +54,11 @@ def main() -> int:
         transcript_path = payload.get("transcript_path")
         if not agent_seat or not isinstance(transcript_path, str) or not transcript_path:
             return 0
+        # A child claude session inherits the supervisor's variables; its own title is not the agent-seat's name.
+        if payload.get("session_id") != os.environ.get(HANDOFF_SUPERVISOR_SESSION_ID_ENVIRONMENT_VARIABLE):
+            return 0
         rename = remote_control_name_common.handoff_remote_control_name_save_when_transcript_custom_title_changed_and_return_rename(
-            Path.home() / ".claude" / "handoffs", agent_seat, transcript_path)
+            agent_seat, transcript_path)
     except (OSError, ValueError) as error:
         print(HOOK_FAILED_MESSAGE.format(error=error), file=sys.stderr)
         return 1

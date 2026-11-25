@@ -98,7 +98,8 @@ def pull_request_node(number, head_sha, title="a title", draft=False,
     return {"number": number, "title": title, "isDraft": draft,
             "headRefOid": head_sha, "author": {"login": author},
             "createdAt": "2026-11-24T00:00:00Z", "baseRefName": "main",
-            "headRefName": f"branch-{number}", "reviews": {"nodes": []}}
+            "headRefName": f"branch-{number}", "reviews": {"nodes": []},
+            "macClaudeReviews": {"nodes": []}}
 
 
 # Every number the event cases use has a line, so they raise no REVIEW-ASSIGNED line; the default
@@ -554,13 +555,14 @@ def review(state, head_sha, body=""):
 
 
 def assignable(number, created_at="2026-11-24T00:00:00Z", head_sha="a", reviews=(), draft=False,
-               author="nedlern", base_branch="main", head_branch=None, first_commit_author_name=None):
+               author="nedlern", base_branch="main", head_branch=None, first_commit_author_name=None,
+               mac_claude_reviews=()):
     """A pull request as fetch_open_pull_requests returns it."""
     return {"number": number, "head_sha": head_sha * 40, "title": f"title {number}",
             "is_draft": draft, "author": author, "first_commit_author_name": first_commit_author_name,
             "created_at": created_at,
             "base_branch": base_branch, "head_branch": head_branch or f"branch-{number}",
-            "reviews": list(reviews)}
+            "reviews": list(reviews), "mac_claude_reviews": list(mac_claude_reviews)}
 
 
 def dealt_numbers(pull_requests, assignments):
@@ -597,6 +599,23 @@ def run_merge_lane_pull_request_review_assignment_unit_cases():
           "a verdict",
           dealt_numbers([own_approved, waiting_3, assignable(10)],
                         {7: "merge-lane-1", 3: "merge-lane-3"}) == [(10, "merge-lane-1")], "")
+    mac_claude_approved = assignable(9, author=MERGE_LANE_REVIEWER,
+                                     reviews=[review("COMMENTED", "a", "a note")],
+                                     mac_claude_reviews=[review("APPROVED", "a")])
+    check("on a pull request ned-review-merge opened, mac-claude's approval of the newest commit "
+          "is a verdict, as the merge gate takes it",
+          dealt_numbers([mac_claude_approved, waiting_3, assignable(10)],
+                        {9: "merge-lane-1", 3: "merge-lane-3"}) == [(10, "merge-lane-1")], "")
+    check("mac-claude's approval is no verdict on a pull request another account opened",
+          dealt_numbers([assignable(12, mac_claude_reviews=[review("APPROVED", "a")]), waiting_3,
+                         assignable(10)], {12: "merge-lane-3", 3: "merge-lane-1"})
+          == [(10, "merge-lane-1")], "")
+    check("a pull request dealt with its verdict already on its newest commit is not counted as "
+          "waiting, so the next one in the same poll goes by the pull requests waiting",
+          dealt_numbers([assignable(40, created_at="2026-11-24T01:00:00Z",
+                                    reviews=[review("APPROVED", "a")]),
+                         assignable(41, created_at="2026-11-24T02:00:00Z")], {})
+          == [(40, "merge-lane-1"), (41, "merge-lane-1")], "")
     check("a pull request ned-review-merge opened is assigned like any other",
           dealt_numbers([waiting_1, assignable(11, author=MERGE_LANE_REVIEWER)], {1: "merge-lane-1"})
           == [(11, "merge-lane-3")], "")
