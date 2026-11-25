@@ -338,7 +338,6 @@ LOCAL_NAME_FORMS_NOT_RECOGNIZED = (
     ("a local string returned in a tuple", 'def main():\n    text = "tuple text"\n    return text, 1\n'),
     ("a local string returned only when a condition holds, as a name",
      'def main(flag):\n    text = "chosen text"\n    return text if flag else None\n'),
-    ("a string printed by name outside any function", 'text = "module text"\nprint(text)\n'),
     ("a local built with a string method other than join, such as format",
      'def main(n):\n    text = "{} failed".format(n)\n    print(text)\n'),
     ("a local built with a string method other than join, such as strip",
@@ -751,6 +750,61 @@ for case_name, binding in (("a for loop's target", "for NAME in items:\n    pass
     found = texts_as_agent_reads_them(f'NAME = "module"\n{binding}print(f"x {{NAME}}")\n')
     check(f"text as the agent reads it: a module constant also bound by {case_name} stays <filled in: source>",
           found == ["x <filled in: NAME>"], found)
+
+MODULE_CONSTANT_NAMED_AT_A_FORM = (
+    ("by its bare name in a raise",
+     'GONE = "the file is gone"\ndef main():\n    raise Failure(GONE)\n', "the file is gone"),
+    ("with .format in a raise",
+     'MISSING = "{path} is missing"\ndef main(path):\n    raise Failure(MISSING.format(path=path))\n',
+     "{path} is missing"),
+    ("in a print", 'NOTE = "nothing to do"\ndef main():\n    print(NOTE)\n', "nothing to do"),
+    ("as a helper printer's argument",
+     'WARNING = "check the log"\ndef say(text):\n    print(text)\ndef main():\n    say(WARNING)\n', "check the log"),
+    ("in a followed return statement",
+     'REFUSED = "refused: {problem}"\nEMPTY = "is empty"\n'
+     'def main():\n    def refused(problem):\n        return Failure(REFUSED.format(problem=problem))\n'
+     '    raise refused(EMPTY)\n', "refused: {problem}"),
+    ("with .format in a raise of a dotted exception class",
+     'import argparse\nPROBLEM = "{value} is no answer"\ndef parse(value):\n'
+     '    raise argparse.ArgumentTypeError(PROBLEM.format(value=value))\n', "{value} is no answer"),
+    ("with .format among a printed call's arguments",
+     'NOTE = "the hook failed: {error}"\ndef main(event, error):\n'
+     '    print(context_output(event, NOTE.format(error=error)))\n', "the hook failed: {error}"),
+    ("in a print outside any function", 'text = "module text"\nprint(text)\n', "module text"),
+)
+for case_name, source, expected in MODULE_CONSTANT_NAMED_AT_A_FORM:
+    found = texts(source)
+    check(f"recognized: a module string constant named {case_name}", expected in found, found)
+
+found = entries('NOTE = "nothing to do"\nNOTE_LINE = "a line"\n'
+                'def main():\n    print(NOTE)\n    print(NOTE_LINE)\n    raise Failure(NOTE.format())\n')
+check("a module string constant named at several forms is one entry, labelled with its name, at its assignment",
+      [(entry["text"], entry["label"], entry["line"]) for entry in found]
+      == [("nothing to do", "NOTE =", 1), ("a line", "NOTE_LINE =", 2)], found)
+
+for case_name, source in (
+        ("only among .format's arguments", 'FLAG = "--force"\nUSAGE = "run {flag}"\nprint(USAGE.format(flag=FLAG))\n'),
+        ("that the file binds twice", 'TEXT = "first"\nTEXT = "second"\nprint(TEXT)\n'),
+        ("that a parameter of the same name hides", 'TEXT = "module text"\ndef main(TEXT):\n    print(TEXT)\n'),
+        ("bare among a printed call's arguments",
+         'CAUSE = "timed-out"\ndef main(program):\n    print(cause_line(program, CAUSE))\n'),
+        ("bare among a dotted call's arguments in a followed return",
+         'PROGRAM = "stale-check"\ndef lines(rerun):\n    return helpers.next_lines(rerun, PROGRAM)\n'
+         'def main(rerun):\n    print(lines(rerun))\n')):
+    found = texts(source)
+    check(f"not recognized: a module string constant named {case_name}",
+          not ({"--force", "first", "second", "module text", "timed-out", "stale-check"} & set(found)), found)
+
+WALK_ME_THROUGH_CLOSE_PATH = (Path(__file__).resolve().parents[2] / "skills" / "walk-me-through"
+                              / "walk-me-through-answer-added-texts-cold-read-fast-read-check-and-close.py")
+labels = [entry["label"] for entry in collector.tool_message_to_agent_string_nodes_in_source(
+    WALK_ME_THROUGH_CLOSE_PATH.read_text())]
+expected_labels = [f"FRESH_AGENT_REWRITE_{name} =" for name in (
+    "REFUSED", "MISSING", "EMPTY", "SHARED_HEADING", "ITEMS_CHANGED", "WITHDRAWN_HEADING_NOT_READ", "TAG_LINE",
+    "HEADING")]
+check("every refusal constant the walk-me-through close step raises through refused() is found once",
+      all(labels.count(label) == 1 for label in expected_labels),
+      [(label, labels.count(label)) for label in expected_labels])
 
 check("source that does not parse yields no entries", texts('print("unclosed\n') == [])
 check("no source yields no entries", texts(None) == [])

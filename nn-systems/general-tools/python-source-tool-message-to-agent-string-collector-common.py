@@ -19,7 +19,10 @@ call of that function, by its bare name, reaches one of the forms above the way 
 may, below, as print(stopped_line(...)) does, or is carried by the binding of a local name that is
 followed, as in text = f"failed: {detail()}" then print(text); when that function's return
 statement holds a call of another function, that function is followed the same way. The function is matched by its name alone, so every function of
-that name in the file is followed. A dict literal's keys, a subscript's index and a comprehension's
+that name in the file is followed. A module-level string constant whose one assignment is the only binding of its name
+anywhere in the file is a message too, at its assignment, when a print, a helper printer, a raise or a followed return
+statement gives its name as text, as module_constant_names_given_as_text says: bare, as print(NOTE) and
+raise Failure(MISSING) do, or with .format, as raise refused(MISSING.format(error=error)) does. A dict literal's keys, a subscript's index and a comprehension's
 if-conditions are not text, so in raise Answer(400, {"error": text}) only text is a message; nor is
 a name a comprehension binds as its target, so " ".join(note for note in items) carries items, not
 a local note. In a string literal's join, the literal is only the separator, so it is not a
@@ -52,7 +55,7 @@ other call, or inside a list or tuple that is returned, is not followed.
 
 Where a followed name may be bound: in the function that holds the form. A function nested in
 it follows only its own local names, never the outer function's, and names bound at module level
-are not followed. A lambda or a class body nested in a function follows that function's local
+are followed only as module-level string constants, above. A lambda or a class body nested in a function follows that function's local
 names, with two exceptions: a lambda's parameter, or a name it binds with :=, hides the function's
 local of the same name inside the lambda, and a name the class body binds, by assignment, import,
 except ... as or a match capture, hides the function's local of the same name
@@ -90,10 +93,8 @@ among the keys: Claude Code shows that text to the user, not to the agent.
 A test file's strings are not tool-messages-to-agent: a test's copy of an
 expected message is not handed to an agent.
 
-scripts/pull-request-review-plan.py and
-nn-systems/general-tools/python-edit-changed-tool-message-to-agent-strings-check-reminder-hook.py
-load this file with importlib.util.spec_from_file_location, because Python
-cannot import a hyphenated file name by name.
+Its callers load this file with importlib.util.spec_from_file_location, because
+Python cannot import a hyphenated file name by name.
 """
 
 import ast
@@ -398,10 +399,19 @@ class AgentFacingStringNodeCollector(ast.NodeVisitor):
         self.rendered_module_string_values = (self.module_string_values if rendered_module_string_values is None
                                               else rendered_module_string_values)
 
-    def collect_expression_strings(self, expression, label, kind="message"):
+    def collect_module_constants_named(self, expression, kind="message", builds_an_object=False):
+        """Collect, at its assignment and labelled with its name alone, so that a constant named at
+        several forms is one entry, each module string constant that
+        module_constant_names_given_as_text gives in the expression and the file binds only once."""
+        for name in module_constant_names_given_as_text(expression, builds_an_object):
+            if name in self.rendered_module_string_values:
+                self.collect_expression_strings(self.rendered_module_string_values[name], f"{name} =", kind,
+                                                label_names_enclosing_function=False)
+
+    def collect_expression_strings(self, expression, label, kind="message", label_names_enclosing_function=True):
         if expression is None:
             return
-        if self.enclosing_names:
+        if self.enclosing_names and label_names_enclosing_function:
             label += f" in {'.'.join(self.enclosing_names)}()"
         for node in string_nodes_without_f_string_parts(expression):
             identity = (id(node), label)
@@ -527,10 +537,12 @@ class AgentFacingStringNodeCollector(ast.NodeVisitor):
             label = call_name if call_name in PRINTING_CALL_NAMES else call_name + "()"
             for argument in printed_arguments(node, self.helper_printers):
                 self.collect_sink_expression(argument, label)
+                self.collect_module_constants_named(argument)
         self.generic_visit(node)
 
     def visit_Raise(self, node):
         self.collect_sink_expression(node.exc, "raise")
+        self.collect_module_constants_named(node.exc, builds_an_object=True)
         if isinstance(node.exc, ast.Call):
             for argument in node.exc.args:
                 self.collect_local_strings_reaching(argument)
@@ -570,6 +582,7 @@ class AgentFacingStringNodeCollector(ast.NodeVisitor):
         if (node.value is not None and self.enclosing_names
                 and self.enclosing_names[-1] in self.text_returning_function_names):
             self.collect_expression_strings(node.value, "return", "prompt" if is_prompt else "message")
+            self.collect_module_constants_named(node.value, "prompt" if is_prompt else "message", builds_an_object=True)
             self.function_names_called_for_text.update(function_names_called_for_text(node.value))
         # A local returned inside a list, a tuple or a call is data, such as a command's argument.
         if isinstance(node.value, ast.Name) or (node.value is not None and string_building_parts(node.value)):
@@ -628,6 +641,38 @@ def names_carried_as_text(expression):
     elif not isinstance(expression, ast.Call):
         for child in text_carrying_children(expression):
             yield from names_carried_as_text(child)
+
+
+def format_receiver_name(expression):
+    """NAME when the expression is NAME.format(...), else None."""
+    if (isinstance(expression, ast.Call) and isinstance(expression.func, ast.Attribute)
+            and expression.func.attr == "format" and isinstance(expression.func.value, ast.Name)):
+        return expression.func.value.id
+    return None
+
+
+def module_constant_names_given_as_text(expression, builds_an_object=False):
+    """The names the expression gives as text: the expression itself when it is a name, or the
+    name whose .format it calls; the same among a conditional expression's branches; and, when the
+    expression is another call, the name whose .format an argument calls, as in
+    print(context_output(event, NOTE.format(error=error))). When builds_an_object, as for a raise's
+    exception or a followed return statement's value, a call of a bare name also gives a bare name
+    among its arguments, as Failure(MISSING) does. A bare name among the arguments of any other
+    call steers that call, as PROGRAM does in lines(rerun, PROGRAM), and a name among .format's own
+    arguments fills a placeholder, so neither is given."""
+    if isinstance(expression, ast.Name):
+        yield expression.id
+    elif isinstance(expression, ast.IfExp):
+        yield from module_constant_names_given_as_text(expression.body, builds_an_object)
+        yield from module_constant_names_given_as_text(expression.orelse, builds_an_object)
+    elif format_receiver_name(expression) is not None:
+        yield format_receiver_name(expression)
+    elif isinstance(expression, ast.Call) and not (isinstance(expression.func, ast.Attribute)
+                                                   and expression.func.attr == "format"):
+        bare_names_given = builds_an_object and isinstance(expression.func, ast.Name)
+        for argument in [*expression.args, *(keyword.value for keyword in expression.keywords)]:
+            if bare_names_given or format_receiver_name(argument) is not None:
+                yield from module_constant_names_given_as_text(argument)
 
 
 def function_names_called_for_text(expression):
