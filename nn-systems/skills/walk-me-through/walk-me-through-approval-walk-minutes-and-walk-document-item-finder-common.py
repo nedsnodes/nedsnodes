@@ -223,8 +223,10 @@ NUMBER_OR_JOINER = re.compile(rf"{NUMBER}|\bto\b|-|\u2013", re.I)
 # A link is one run of non-space characters, so `publish failed: <reason>` can never be read as a link. Spaces
 # only, never a newline, so a line that ends short is not completed by the line below it. Groups: the item number,
 # the failed publish's text, the version written before the link, the link, the note in parentheses after it.
+# `of M` is optional because only the item number is read, and the handoff-supervisor asks for a line without it
+# when no total is known.
 ITEM_PAGE_LINE_PATTERN = re.compile(
-    rf"^#item_page[ \t]+item[ \t]+({NUMBER})[ \t]+of[ \t]+\d+[ \t]+"
+    rf"^#item_page[ \t]+item[ \t]+({NUMBER})[ \t]+(?:of[ \t]+\d+[ \t]+)?"
     rf"(?:(publish failed:[ \t]*\S.*?)|(?:version[ \t]+(\d+)[ \t]+)?(\S+)(?:[ \t]+\(([^\n]*)\))?)[ \t]*$",
     re.I | re.M)
 ITEM_PAGE_NOTE_VERSION = re.compile(r"\bversion[ \t]+(\d+)", re.I)
@@ -957,7 +959,8 @@ def waiting_item_units(document, value, numbers, total, parser, all_units=None):
     to choose between two headings that name the same item and are not revisions, as in a walk-document
     renumbered before numbers were never reused. Raise UnusableRange, saying what is wrong, when the
     walk-document does not exist, or when a waiting item has no heading, or more than one that total does not
-    narrow to one; one message names every such item, so that fixing one problem does not reveal another. all_units are
+    narrow to one; one message names every such item, so that fixing one problem does not reveal another, except
+    when the walk-document has no heading with a running count at all, whose message names none. all_units are
     item_unit_spans of the walk-document when the caller has them already."""
     if all_units is None:
         if not document.is_file():
@@ -992,9 +995,10 @@ def waiting_item_units(document, value, numbers, total, parser, all_units=None):
         problems.append(
             f"more than one heading for {named}, so the hook cannot tell "
             f"which one the minutes name: if no other of those headings gives the same total as the heading you mean, "
-            f"as `of 10` beside two `of 9` headings, add the line `#next_to_present item N of M` as the new last line of "
-            f"the minutes, below the earlier `#next_to_present` lines, which stay as they are, N and M copied from the "
-            f"heading you mean, as in `#next_to_present item 4 of 10` for `## Item 4 of 10: <the point>`; otherwise, in "
+            f"as `of 10` beside two `of 9` headings, add a `#next_to_present` line naming every item the last one names, "
+            f"with M copied from the heading you mean, as the new last line of the minutes, below the earlier "
+            f"`#next_to_present` lines, which stay as they are, as in `#next_to_present item 4 of 10` for "
+            f"`## Item 4 of 10: <the point>`, or `#next_to_present items 4 and 5 of 10`; otherwise, in "
             f"the walk-document, put `Withdrawn: ` just before `Item` in each heading you do not mean, as in "
             f"`## Withdrawn: Item 4 of 9: <the point>`, or, only when the heading you mean comes after every other "
             f"heading for that item, write `revised` right after its `of M` instead of marking any heading `Withdrawn: `, "

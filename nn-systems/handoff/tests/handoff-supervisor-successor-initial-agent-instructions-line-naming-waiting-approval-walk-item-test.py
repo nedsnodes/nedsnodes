@@ -326,13 +326,9 @@ def run_walk_minutes_cases(workspace):
     walk_in(root, "#next_to_present item 1\n",
             document="# Fixture\n\n## Item 1 of 2: First\n\nRecommendation: one.\n\n"
                      "## Item 2 of 2: Second\n\nRecommendation: two.\n")
-    hook_path = supervisor.WALK_SHORT_ANSWER_HOOK_PATH
-    supervisor.WALK_SHORT_ANSWER_HOOK_PATH = root / "no-such-hook.py"
-    try:
-        with contextlib.redirect_stdout(io.StringIO()):
-            hook_unloadable = lines_for(root)
-    finally:
-        supervisor.WALK_SHORT_ANSWER_HOOK_PATH = hook_path
+    with fixture.supervisor_names_replaced(WALK_SHORT_ANSWER_HOOK_PATH=root / "no-such-hook.py"), \
+            contextlib.redirect_stdout(io.StringIO()):
+        hook_unloadable = lines_for(root)
     check("no total and a short-answer hook that fails to load: the `#item_page` line still has `of M`, then the error",
           len(hook_unloadable) == 1 and hook_unloadable[0].startswith(without_link_line(WALK, "1 of 2", "1 of 2"))
           and "could not read the item's text" in hook_unloadable[0], repr(hook_unloadable))
@@ -413,6 +409,15 @@ def run_walk_minutes_cases(workspace):
           len(failed) == 1 and walk_finder.newest_item_page_link_per_item_from_walk_minutes(
               OPEN_MINUTES + failed[0] + "\n", parser).get("2") == walk_finder.ITEM_PAGE_PUBLISH_FAILED,
           repr(failed))
+
+    no_total = without_link_line(WALK, "1", "1")
+    no_total_filled = [quoted_item_page_lines(no_total)[0].replace("<new link>", "https://claude.ai/artifact/Republished"),
+                       quoted_item_page_lines(no_total)[1].replace("<what the Artifact tool said>", "it timed out")]
+    check("with no total known, each `#item_page` line the no-link line asks for, filled in, is read by the walk finder",
+          [walk_finder.newest_item_page_link_per_item_from_walk_minutes("#next_to_present item 1\n" + line + "\n",
+                                                                        parser).get("1") for line in no_total_filled]
+          == ["https://claude.ai/artifact/Republished", walk_finder.ITEM_PAGE_PUBLISH_FAILED],
+          repr(no_total_filled))
 
     root = workspace / "walk-finder-missing"
     walk_in(root, OPEN_MINUTES)
