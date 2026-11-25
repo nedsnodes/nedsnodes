@@ -236,6 +236,15 @@ handoff_user_review_of_agent_memory_stores_mark = importlib.util.module_from_spe
 _handoff_user_review_of_agent_memory_stores_mark_spec.loader.exec_module(
     handoff_user_review_of_agent_memory_stores_mark)
 
+_successor_conversation_tail_display_hook_spec = importlib.util.spec_from_file_location(
+    "handoff_successor_conversation_tail_last_lines_first_message_display_hook",
+    Path(__file__).resolve().with_name(
+        "handoff-successor-conversation-tail-last-lines-first-message-display-hook.py"))
+successor_conversation_tail_display_hook = importlib.util.module_from_spec(
+    _successor_conversation_tail_display_hook_spec)
+_successor_conversation_tail_display_hook_spec.loader.exec_module(
+    successor_conversation_tail_display_hook)
+
 _checkout_freshness_catch_up_spec = importlib.util.spec_from_file_location(
     "checkout_freshness_catch_up", SCRIPTS_DIRECTORY / "checkout-freshness-catch-up.py")
 checkout_freshness_catch_up = importlib.util.module_from_spec(_checkout_freshness_catch_up_spec)
@@ -1368,6 +1377,27 @@ def build_ignition_prompt(extract_path: Path, handoff_fields: dict,
         return preamble + NO_NEXT_STEP_TAIL_SENTENCE
     # Keep line breaks: the next step is one argv element and may contain Markdown formatting.
     return f"{preamble}{NEXT_STEP_HEADING}{next_step}"
+
+
+CONVERSATION_TAIL_LAST_LINE_COUNT_SHOWN_ABOVE_FIRST_MESSAGE = 100
+CONVERSATION_TAIL_LAST_LINES_HEADING_TEMPLATE = (
+    "The end of the last session: the last {line_count} lines of {conversation_tail_path}, "
+    "shown to you and not to the new session's agent.\n\n")
+CONVERSATION_TAIL_LAST_LINES_END = "\n\nThe new session's first message:\n\n"
+
+
+def conversation_tail_last_lines_display_file_write(
+        handoff_directory: Path, session_id: str, conversation_tail_path: Path) -> None:
+    """Leave the conversation-tail's last lines for the MessageDisplay hook that shows them to
+    the user above the successor's first message."""
+    lines = conversation_tail_path.read_text(encoding="utf-8").splitlines()[
+        -CONVERSATION_TAIL_LAST_LINE_COUNT_SHOWN_ABOVE_FIRST_MESSAGE:]
+    successor_conversation_tail_display_hook.conversation_tail_last_lines_display_file_path(
+        handoff_directory, session_id).write_text(
+            CONVERSATION_TAIL_LAST_LINES_HEADING_TEMPLATE.format(
+                line_count=len(lines), conversation_tail_path=conversation_tail_path)
+            + "\n".join(lines) + CONVERSATION_TAIL_LAST_LINES_END,
+            encoding="utf-8")
 
 
 @dataclass
@@ -2658,6 +2688,8 @@ def supervise_sessions(settings: SupervisorSettings) -> int:
 
     # Compose at launch so the branch-state line reports the sync performed for that launch.
     ignition_plan = None
+    # Set only for the launch an ignition plan with a conversation-tail composes, not for a later resume.
+    conversation_tail_path_for_next_launch = None
     # Reusing a state-file ID for a fresh launch can collide with an existing transcript or live session.
     next_launch_resumes_the_session = bool(settings.resume_session_id)
     # Charge at launch so startup resumes count, and a successor does not inherit a predecessor's spent budget.
@@ -2795,6 +2827,8 @@ def supervise_sessions(settings: SupervisorSettings) -> int:
                 launch_time_git_sync_report, overview_refresh_due, memory_review_due,
                 branch_state_instruction=branch_state_instruction,
                 waiting_approval_walk_item=waiting_approval_walk_item)
+            if isinstance(ignition_plan, DialogIgnitionPlan):
+                conversation_tail_path_for_next_launch = ignition_plan.extract_path
             ignition_plan = None
             if successor_notice:
                 prompt += " " + successor_notice
@@ -2827,6 +2861,10 @@ def supervise_sessions(settings: SupervisorSettings) -> int:
         launch_prompt = launch_prompt_with_leftovers_before_the_next_step(
             prompt, (leftover_work_snapshots, worktrees_and_branches),
             leftover_prompt_listing_counts_path(settings.handoff_directory, settings.agent))
+        if conversation_tail_path_for_next_launch is not None:
+            conversation_tail_last_lines_display_file_write(
+                settings.handoff_directory, session_id, conversation_tail_path_for_next_launch)
+            conversation_tail_path_for_next_launch = None
         process = launch_agent_session(
             settings.agent_command, session_id, settings.working_directory, launch_prompt,
             resume=next_launch_resumes_the_session,

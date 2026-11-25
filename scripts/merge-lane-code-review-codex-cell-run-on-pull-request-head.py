@@ -20,7 +20,10 @@ and stderr go to the same directory.
 The same directory also gets codex-review-run-record.json, holding
 "pull_request", "head_commit", "base_commit", "exit_code" and "report_file".
 It is removed before the run and written after it, so a run that was killed
-leaves none. merge-lane-pull-request-reviewer-review-post-and-read-back.py
+leaves none. A second run for the same pull request and base replaces the
+first run's record and report, so after a rerun that fails the posting
+program no longer sees the first run's findings and asks no grade for them.
+merge-lane-pull-request-reviewer-review-post-and-read-back.py
 reads it to tell a Codex run that found nothing from one that failed.
 gh reads the description with the merge account's token, the one file every
 merge-lane helper and merge-gate.sh read.

@@ -155,8 +155,10 @@ Markdown parser renders them, link targets and other markup left out,
 reference links resolved by the definitions of their own text, whitespace
 squeezed, each running count's `of M` and each deferred note dropped. The hook
 reads nothing of the item below its heading: the agent writing the walk judges
-whether a revision changed what the item would do. When no message showed the
-item, the text hands the agent the item's text to show before the user answers
+whether a revision changed what the item would do. Not handled: when items
+share one heading, as `## Items 5 and 6 of 9`, a message that showed only
+item 5 counts as showing item 6 too, because the heading matches. When no
+message showed the item, the text hands the agent the item's text to show before the user answers
 again. When the transcript or the item's text cannot be read, the answer is
 not counted either, and the text says why; it does not ask the agent to show
 the item again for an unreadable transcript, because that cannot make it
@@ -554,13 +556,11 @@ NEVER_SHOWN_REASON = (
     "not read an earlier "
     "agent-session's transcript, so an item shown only before the last session-handoff must be shown again in this "
     "agent-session.")
-# A decision-bearing line opens with one of these marks; `#new_if_d` is tried before `#new`.
-DECISION_MARK = re.compile(r"^(#new_if_d|#new|#case_against)(?!\w)[\s:]*(.*)$", re.I)
-BARE_MARKS_INTRODUCING_A_BLOCK = ("#new", "#new_if_d")
+# A line holding a text an answer adds opens with one of these marks; `#new_if_d` is tried before `#new`.
+NEW_TEXT_MARK = re.compile(r"^(#new_if_d|#new)(?!\w)[\s:]*(.*)$", re.I)
 # The lead-in an agent puts where it shows a line without its mark.
 LEAD_INS_BEFORE_A_LINE_SHOWN_WITHOUT_ITS_MARK = {"`#new` line": "If you approve, the new text:",
-                                                 "`#new_if_d` line": "If you disapprove, the new text:",
-                                                 "`#case_against` line": "Case against"}
+                                                 "`#new_if_d` line": "If you disapprove, the new text:"}
 # A `The new text:` just after a `#new` or `#new_if_d` mark labels the text that follows; it is not part of it. In a
 # source line the label may be bold or italic, as `**The new text:**`.
 NEW_TEXT_LABEL = re.compile(r"^[*_]*the\s+new\s+text[*_]*:[*_]*\s*", re.I)
@@ -1021,20 +1021,14 @@ def shown_words(markdown, parser, env=None):
     return text_as_shown_squeezed("".join(pieces))
 
 
-def marked_text(mark):
-    """The text of a line DECISION_MARK matched as mark, without a `The new text:` just after a `#new` or `#new_if_d`
-    mark."""
-    return NEW_TEXT_LABEL.sub("", mark[2]) if mark[1].lower() in BARE_MARKS_INTRODUCING_A_BLOCK else mark[2]
-
-
 def new_text_as_shown(line):
     """A `#new` or `#new_if_d` source line, after any LINE_MARKS, as an agent shows it to the user: its mark replaced
-    by the lead-in LEAD_INS_BEFORE_A_LINE_SHOWN_WITHOUT_ITS_MARK gives its kind, and its text as marked_text gives
-    it; None for any other line."""
-    mark = DECISION_MARK.match(LINE_MARKS.sub("", line.strip()))
-    if not mark or mark[1].lower() not in BARE_MARKS_INTRODUCING_A_BLOCK:
+    by the lead-in LEAD_INS_BEFORE_A_LINE_SHOWN_WITHOUT_ITS_MARK gives its kind, and its text without a
+    `The new text:` label; None for any other line."""
+    mark = NEW_TEXT_MARK.match(LINE_MARKS.sub("", line.strip()))
+    if not mark:
         return None
-    return f"{LEAD_INS_BEFORE_A_LINE_SHOWN_WITHOUT_ITS_MARK[f'`{mark[1].lower()}` line']} {marked_text(mark)}"
+    return f"{LEAD_INS_BEFORE_A_LINE_SHOWN_WITHOUT_ITS_MARK[f'`{mark[1].lower()}` line']} {NEW_TEXT_LABEL.sub('', mark[2])}"
 
 
 def shown_text_parser(walk_finder):
