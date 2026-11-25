@@ -11,11 +11,9 @@ Usage:
 
 WHAT IT DOES. Picks the report path from the cold-read-target, runs
 ONE fast-clarify cold-read-cell on the fast cold-read-tier through
-nn-systems/cold-read/cold-read-agy-cell.py (user-ruled 2026-09-07 after measurements,
-superseding the earlier ruling for low: Gemini 3.8 Flash at medium, about
-100-110 s per document in single runs on a 658-word skill and a 1,967-word walk
-draft, recall 42% against 19% at low on the ghi-write candidate defect list,
-replacing gpt-5.6-terra at low), and retries once if that cold-read-cell fails.
+nn-systems/cold-read/cold-read-agy-cell.py, on gemini-4-neon-low at effort low
+(user-ruled 2026-11-25, replacing Gemini 3.8 Flash at medium; the
+measurements are in that launcher's docstring), and retries once if that cold-read-cell fails.
 When the Gemini cell has failed for good -- twice, or once with a launcher
 refusal, Gemini's spending cap or the Ultra sign-in's quota, which get no
 retry -- it runs the same cell once on Claude Sonnet at low effort, the claude

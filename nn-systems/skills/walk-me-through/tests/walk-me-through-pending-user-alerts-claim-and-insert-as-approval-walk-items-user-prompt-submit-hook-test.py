@@ -32,6 +32,9 @@ HERE = Path(__file__).resolve().parents[1]
 HOOK = HERE / "walk-me-through-pending-user-alerts-claim-and-insert-as-approval-walk-items-user-prompt-submit-hook.py"
 INSERT_PROGRAM = HERE / "walk-me-through-user-alert-insert-as-unnumbered-item-after-waiting-item-and-record-in-walk-minutes.py"
 WALK = "alerts-hook-test-walk-2026-10-27"
+AGENT_SEAT_VARIABLE = "NEDSNODES_HANDOFF_SUPERVISOR_AGENT_NAME"
+# The agent-seat whose agent-session claims an alert naming none.
+DEFAULT_SEAT = "merge-lane-1"
 failures = []
 
 
@@ -60,11 +63,12 @@ class Case:
         (walk / f"{WALK}-minutes.md").write_text(f"#next_to_present {marker}\n", encoding="utf-8")
         self.transcript = root / name / "transcript.jsonl"
 
-    def alert(self, alert_id, title="merge-lane-2 is down", directory="pending"):
+    def alert(self, alert_id, title="merge-lane-2 is down", directory="pending", agent_seat=None):
         path = self.alerts / directory / f"{alert_id}.json"
         path.parent.mkdir(parents=True, exist_ok=True)
         path.write_text(json.dumps({"id": alert_id, "written_at": "2026-10-27T12:00:00+00:00", "title": title,
-                                    "alert_text": "text", "action": "act"}), encoding="utf-8")
+                                    "alert_text": "text", "action": "act", "claiming_agent_seat_name": agent_seat}),
+                        encoding="utf-8")
         return path
 
     def turn_record(self, origin, text):
@@ -72,9 +76,10 @@ class Case:
             stream.write(json.dumps({"type": "user", "turnOrigin": origin,
                                      "message": {"role": "user", "content": text}}) + "\n")
 
-    def run(self, prompt, stdin=None, platform="linux", insert_run="", environment_extra=None):
+    def run(self, prompt, stdin=None, platform="linux", insert_run="", environment_extra=None, agent_seat=DEFAULT_SEAT):
         """environment_extra is added to the hook's environment, which holds neither variable that marks an
         agent-session headless, so a case reads the same in a headless reviewer as in an attended agent-session.
+        agent_seat is the agent-session's agent-seat, set whatever agent-seat runs the suite; None leaves it unset.
         insert_run, when given, is a Python expression of the arguments a and k that takes the place of the
         hook's subprocess.run of the insert program, so a case can make that program time out, fail to start or
         die by a signal, which a real run cannot be made to; every other subprocess.run, such as git's, runs."""
@@ -86,6 +91,9 @@ class Case:
                                    "(subprocess.run); " if insert_run else "")
                                 + "runpy.run_path(sys.argv[2], run_name='__main__')")
         environment = attendance_check.environment_without_agent_session_attendance_variables(os.environ)
+        environment.pop(AGENT_SEAT_VARIABLE, None)
+        if agent_seat is not None:
+            environment[AGENT_SEAT_VARIABLE] = agent_seat
         # Python finds the user's site-packages from HOME, and on the Mac markdown-it-py is installed there.
         environment.update({"HOME": str(self.home), "PYTHONUSERBASE": site.getuserbase()},
                            **(environment_extra or {}))
@@ -191,6 +199,31 @@ def run_typed_prompt_cases(root):
     case.run("hello")
     check("when the transcript's newest turn is a previous one, the prompt decides, and a typed one claims",
           case.names("claimed") == ["alert-a"])
+
+
+def run_agent_seat_cases(root):
+    case = Case(root, "for-seat-x")
+    case.alert("alert-x", agent_seat="seat-x")
+    case.alert("alert-none")
+    result, context = case.run("hello", agent_seat="seat-y")
+    check("a typed prompt in seat-y's agent-session claims neither an alert for seat-x nor one naming none",
+          result.returncode == 0 and result.stdout == "" and case.names("pending") == ["alert-none", "alert-x"],
+          result.stdout + result.stderr)
+    result, context = case.run("hello", agent_seat="seat-x")
+    check("a typed prompt in seat-x's agent-session claims the alert for seat-x and not the one naming none",
+          case.names("claimed") == ["alert-x"] and case.names("pending") == ["alert-none"]
+          and "alert alert-x" in context and "alert-none" not in context, context + result.stderr)
+    result, context = case.run("hello", agent_seat=DEFAULT_SEAT)
+    check(f"a typed prompt in {DEFAULT_SEAT}'s agent-session claims the alert naming none",
+          case.names("claimed") == ["alert-none", "alert-x"] and "alert alert-none" in context,
+          context + result.stderr)
+
+    case = Case(root, "no-agent-seat")
+    case.alert("alert-none")
+    result, context = case.run("hello", agent_seat=None)
+    check("a typed prompt in an agent-session no handoff-supervisor named claims nothing",
+          result.returncode == 0 and result.stdout == "" and case.names("pending") == ["alert-none"],
+          result.stdout + result.stderr)
 
 
 def run_not_typed_cases(root):
@@ -340,6 +373,7 @@ def run_failure_cases(root):
 with tempfile.TemporaryDirectory() as temporary_directory:
     scratch = Path(temporary_directory)
     run_typed_prompt_cases(scratch)
+    run_agent_seat_cases(scratch)
     run_not_typed_cases(scratch)
     run_headless_cases(scratch)
     run_mac_cases(scratch)

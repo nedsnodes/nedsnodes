@@ -8,8 +8,7 @@ two suites sharing one copy would see each other's patches.
 Loading it puts in place, for the rest of the process, the sandboxes every
 case relies on: a scratch HOME, so no launch writes the real ~/.claude.json;
 no TMUX or TMUX_PANE, so no supervisor start pipes the calling agent-seat's
-tmux pane, and a scratch terminal captures directory; an ssh first on PATH that never reaches ned-box, an empty
-directory standing in for the overview reminders' marks, and a directory of
+tmux pane, and a scratch terminal captures directory; an ssh first on PATH that never reaches ned-box, and a directory of
 the process's own for the agent-binary update lock.
 
 Not a test file: its name ends `-test-fixture.py` rather than `-test.py`, so

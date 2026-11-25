@@ -323,12 +323,14 @@ def run_missing_launcher_case(workspace: Path):
     supervisor_home = workspace / "nn-systems" / "handoff"
     supervisor_home.mkdir(parents=True)
     for supervisor_file in ("handoff-supervisor.py", "session-handoff-field-names-common.py",
+                            "handoff-agent-seat-remote-control-name-stored-after-claude-ai-session-rename-common.py",
                             "handoff-user-review-of-agent-memory-stores-mark.py",
                             "uncommitted-work-snapshots.py",
                             "handoff-reference-checkout-fetch-and-fast-forward-to-origin-main-check-common.py",
                             "handoff-reference-checkout-back-on-main-after-pushing-leftovers-to-a-branch.py",
                             "agent-seat-terminal-captures-common.py",
-                            "agent-seat-worktrees-and-branches-with-no-pull-request-first-prompt-list.py"):
+                            "agent-seat-worktrees-and-branches-with-no-pull-request-first-prompt-list.py",
+                            "handoff-successor-conversation-tail-last-lines-first-message-display-hook.py"):
         (supervisor_home / supervisor_file).write_text(
             SUPERVISOR_SCRIPT.with_name(supervisor_file).read_text(encoding="utf-8"),
             encoding="utf-8")

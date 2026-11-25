@@ -30,3 +30,7 @@ The agent-seat ned-box-helper, whose commit c30d1736c wrote this code, makes the
 Reading again covers every way the race can end, whatever error text GitHub gives the delete, so the fix does not match on `Reference does not exist`.
 
 In `scripts/merge-lane-pull-request-merge-through-merge-gate-with-stacked-pull-request-retarget-test.py`, add a case whose first read answers with the branch, whose delete answers HTTP 422 `Reference does not exist`, and whose second read answers HTTP 404. It expects exit 0, the `is gone from GitHub` line and no STOP. The existing case `merged-branch-not-deleted` answers every read with the branch, so it still expects exit 3 and stays as it is.
+
+## Outcome
+
+Done. PR [Merge-lane merge program exits 0 when the merged branch is gone before its delete (GHI 4543)](https://github.com/nedsnodes/nedsnodes/pull/4545) merged on 2026-11-24 as `410d1b914`. Its commit `bfd3f6e95` makes `merged_branch_deleted` in `scripts/merge-lane-pull-request-merge-through-merge-gate-with-stacked-pull-request-retarget.py` read the branch again after a failed delete: an HTTP 404 prints `the branch <branch> is gone from GitHub` and exits 0, and a branch still there, or a failed read, prints the STOP and exits 3. The same commit adds the case `merged-branch-gone-before-its-delete` to `scripts/merge-lane-pull-request-merge-through-merge-gate-with-stacked-pull-request-retarget-test.py`, which expects exit 0, the `is gone from GitHub` line and no STOP; the case `merged-branch-not-deleted` still expects exit 3.
