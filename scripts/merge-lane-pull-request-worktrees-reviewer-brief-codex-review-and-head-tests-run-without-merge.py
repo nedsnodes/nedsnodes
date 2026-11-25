@@ -6,7 +6,10 @@ Usage:
       <pull request number> <brief specifications file> [--head-commit-reviewed-before COMMIT]
       [--merge-lane-worktrees-and-outputs-directory DIR] [--merge-lane-review-worktrees-directory DIR] [--review-tools-worktree-at-main DIR]
 
-Before any step runs, git in --review-tools-worktree-at-main fetches main and
+When --review-tools-worktree-at-main does not exist, it is first made as a
+detached worktree of the repository this program is in, so a run need not be
+started again for it. Before any step runs, git in
+--review-tools-worktree-at-main fetches main and
 refs/pull/<n>/head from origin and reads the two commits once. The Codex
 review's base is the merge base of those two commits, or, for a fix-round,
 the commit given as --head-commit-reviewed-before; but a fix-round whose
@@ -76,7 +79,8 @@ Exit codes: 0 every step that ran exited 0; 1 a step exited nonzero, named on
 stdout: when it was step 1 or 2, no later step ran, and when it was one of
 steps 3 to 5, the others ran to their end; also 1 when this program's own
 output could not be written while steps 3 to 5 ran, named on stderr; 2 refused before any step ran: a step script
-is missing, git could not fetch, read or check out a commit, the brief
+is missing, the missing review tools worktree could not be made, git could
+not fetch, read or check out a commit, the brief
 specifications file is unreadable, lacks a field, has a claude_reviewer that
 is not true or false, or disagrees with the
 commits, or the filled-in copy could not be written, named on stdout.
@@ -147,7 +151,8 @@ class OutputCouldNotBeWritten(Exception):
 
 def parse_arguments(argv):
     parser = argparse.ArgumentParser(
-        description="Move the review tools worktree to main, then rebuild a pull request's "
+        description="Make the review tools worktree when it is missing and move it to "
+                    "main, then rebuild a pull request's "
                     "worktrees, compose its reviewer brief, run the Codex review, run the "
                     "head tests and, when the entry asks for one, run the Claude reviewer "
                     "and post its review; the last three run at the same time. Does not "
@@ -357,9 +362,9 @@ def main(argv=None):
         / FILLED_IN_BRIEF_SPECIFICATIONS_FILE_NAME.format(number=number))
     try:
         if not checkout.is_dir():
-            raise RefusedBeforeAnyStep(
-                common.review_tool_missing_message(arguments, Path("scripts") / STEPS[0]),
-                instruction=None)
+            # Any commit will do: the worktree is checked out at origin's main below.
+            git(common.REPOSITORY_ROOT, "worktree", "add", "-q", "--detach", str(checkout),
+                "HEAD")
         main_commit = fetched_commit(checkout, "refs/heads/main")
         head_commit = fetched_commit(checkout, f"refs/pull/{number}/head")
         head_reviewed_before = None

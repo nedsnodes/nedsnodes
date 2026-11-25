@@ -13,7 +13,9 @@ redirect git.
 Run: python3 scripts/merge-lane-pull-request-worktrees-reviewer-brief-codex-review-and-head-tests-run-without-merge-test.py
 """
 
+import contextlib
 import importlib.util
+import io
 import json
 import os
 import shlex
@@ -753,17 +755,6 @@ def main():
               and head_of(checkout) == merge_base,
               f"exit {completed.returncode}\n{completed.stdout}{completed.stderr}\n{calls}")
 
-        completed, calls, _ = run_program(scratch, scratch / "no-such-worktree", helpers,
-                                          [first_round])
-        check("a review tools worktree that does not exist exits 2 before git runs, with the "
-              "missing-tool instructions",
-              completed.returncode == 2 and calls == []
-              and f"{STEPS[0]} is missing" in completed.stdout
-              and "worktree add --detach" in completed.stdout
-              and "Then run this again." in completed.stdout
-              and generic_instruction not in completed.stdout,
-              f"exit {completed.returncode}\n{completed.stdout}{completed.stderr}\n{calls}")
-
         completed = subprocess.run([sys.executable, str(PROGRAM), "--help"],
                                    capture_output=True, text=True, env=GIT_ENVIRONMENT)
         check("--help says runs at the same time need separate review tools worktrees",
@@ -800,6 +791,45 @@ def main():
               instruction == "Tell the user this message."
               and "main has renamed or removed the script" in what_stopped
               and "is not main's" not in what_stopped, f"{what_stopped}\n{instruction}")
+
+        def run_in_process_with_repository_root(repository_root, tools_worktree):
+            # In-process, so the worktree is made from a scratch repository whose origin is
+            # the scratch origin, never from this repository and GitHub.
+            saved_root = program.common.REPOSITORY_ROOT
+            program.common.REPOSITORY_ROOT = repository_root
+            output = io.StringIO()
+            try:
+                with contextlib.redirect_stdout(output):
+                    exit_code = program.main([
+                        "7", str(scratch / "no-such-brief-specifications.json"),
+                        "--merge-lane-worktrees-and-outputs-directory", str(helpers),
+                        "--merge-lane-review-worktrees-directory", str(helpers / "wt"),
+                        "--review-tools-worktree-at-main", str(tools_worktree)])
+            finally:
+                program.common.REPOSITORY_ROOT = saved_root
+            return exit_code, output.getvalue()
+
+        made_worktree = scratch / "review-tools-worktree-made-by-the-run"
+        exit_code, output = run_in_process_with_repository_root(checkout, made_worktree)
+        check("a review tools worktree that does not exist is made, and the run goes on to "
+              "fetch from its origin",
+              exit_code == 2 and (made_worktree / ".git").is_file()
+              and "could not read the brief specifications file" in output
+              and "is missing" not in output,
+              f"exit {exit_code}\n{output}")
+
+        not_a_repository = scratch / "not-a-repository"
+        not_a_repository.mkdir()
+        unmade_worktree = scratch / "review-tools-worktree-that-cannot-be-made"
+        exit_code, output = run_in_process_with_repository_root(not_a_repository,
+                                                                unmade_worktree)
+        check("a review tools worktree that cannot be made exits 2 before any step, naming "
+              "git's failure, with the generic instruction",
+              exit_code == 2 and not unmade_worktree.exists()
+              and f"git worktree add -q --detach {unmade_worktree} HEAD in {not_a_repository} "
+                  f"exited" in output
+              and output.rstrip().endswith(generic_instruction),
+              f"exit {exit_code}\n{output}")
 
         # Last, because it moves origin's main: main gains a step script that the review
         # tools worktree's older commit lacks, so the scripts are looked for only after
