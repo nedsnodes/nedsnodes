@@ -39,8 +39,8 @@ def load(module_name, path):
 program = load("markdown_file_standard_rules_for_the_markdown_file_kind_at_a_path_print",
                GENERAL_TOOLS / "markdown-file-standard-rules-for-the-markdown-file-kind-at-a-path-print.py")
 RULE_FAILURE_LINES = load(
-    "rule_enforcing_nc_test_suite_failure_message_closing_lines_text_common",
-    GENERAL_TOOLS / "rule-enforcing-nc-test-suite-failure-message-closing-lines-text-common.py")
+    "rule_enforcing_nn_test_suite_failure_message_closing_lines_text_common",
+    GENERAL_TOOLS / "rule-enforcing-nn-test-suite-failure-message-closing-lines-text-common.py")
 STANDARD_RELATIVE_PATH = program.MARKDOWN_FILE_STANDARD_PATH.relative_to(REPOSITORY_ROOT).as_posix()
 PROGRAM_RELATIVE_PATH = (
     "nn-systems/general-tools/markdown-file-standard-rules-for-the-markdown-file-kind-at-a-path-print.py")

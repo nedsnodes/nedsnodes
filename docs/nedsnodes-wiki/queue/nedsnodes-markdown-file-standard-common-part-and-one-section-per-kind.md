@@ -35,7 +35,7 @@ It contains, in this order:
 1. A level-1 heading naming the agent-seat.
 2. What the agent-seat owns, in one paragraph.
 3. Its first job, or the standing work it does when no task is open.
-4. Where its work goes: nc-topic-branches and pull requests, the log-store directory, and which agent-seat it reports to, if any.
+4. Where its work goes: nn-topic-branches and pull requests, the log-store directory, and which agent-seat it reports to, if any.
 5. Rules for this agent-seat alone that no `CLAUDE.md`, skill, wiki page or program holds. The user's words go in quotation marks where a paraphrase would lose his meaning, with no date or attribution.
 
 A seat-brief leaves out:
@@ -188,7 +188,7 @@ A GHI-MD that is not a design holds no design, which goes in a GHI-MD of its own
 
 ## wiki page
 
-A wiki page is a page in `docs/nedsnodes-wiki/`, or one in `docs/nedsnodes-wiki/queue/` pending approval, other than a glossary and each proposed-improvements-or-changes-file beside an nc-architecture-overview. An nc-architecture-overview also follows `docs/nedsnodes-wiki/nedsnodes-how-to-write-an-architecture-overview.md`, which wins where the two differ.
+A wiki page is a page in `docs/nedsnodes-wiki/`, or one in `docs/nedsnodes-wiki/queue/` pending approval, other than a glossary and each proposed-improvements-or-changes-file beside an nn-architecture-overview. An nn-architecture-overview also follows `docs/nedsnodes-wiki/nedsnodes-how-to-write-an-architecture-overview.md`, which wins where the two differ.
 
 Each page is a reference page, a how-to page or an explanation page, and keeps to what that one holds: a reference page lists rules or facts a reader looks up, such as `docs/nedsnodes-wiki/nedsnodes-style-guide.md`; a how-to page gives the steps of one job, such as `docs/nedsnodes-wiki/nedsnodes-how-to-choose-a-name-for-files-code-and-glossary-terms.md`; an explanation page says how part of the project works and why, such as `docs/nedsnodes-wiki/nedsnodes-agent-seat-model.md`. When a page grows material that belongs on another of the three, move that material to a page of its own and link to it.
 
