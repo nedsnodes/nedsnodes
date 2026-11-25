@@ -40,7 +40,7 @@ _git_environment_fixture = importlib.util.module_from_spec(_git_environment_fixt
 _git_environment_fixture_spec.loader.exec_module(_git_environment_fixture)
 _git_environment_fixture.remove_git_redirecting_environment_variables_from_this_process()
 
-DIALOG_EXTRACTOR_FILE = Path(__file__).resolve().parents[4] / "scripts" / "handoff-extract-conversation.py"
+EXTRACTOR_PATH = Path(__file__).resolve().parents[4] / "scripts" / "handoff-extract-conversation.py"
 PROGRAM = (Path(__file__).resolve().parents[1]
            / "walk-me-through-answer-added-texts-cold-read-fast-read-check-and-close.py")
 _cold_read_scratch_fixture_spec = importlib.util.spec_from_file_location(
@@ -751,7 +751,7 @@ def session_dialog_with_its_transcript_write(log_store, session_id, texts):
         {"type": "user", "entrypoint": "cli", "message": {"content": text}} if index % 2
         else {"type": "assistant", "message": {"content": [{"type": "text", "text": text}]}})
         for index, text in enumerate(texts)) + "\n")
-    spec = importlib.util.spec_from_file_location("handoff_extract_conversation", DIALOG_EXTRACTOR_FILE)
+    spec = importlib.util.spec_from_file_location("handoff_extract_conversation", EXTRACTOR_PATH)
     extractor = importlib.util.module_from_spec(spec)
     sys.modules[spec.name] = extractor
     spec.loader.exec_module(extractor)
@@ -949,6 +949,16 @@ def test_the_waiting_item_read_step_searches_a_linked_title_in_the_closing_line_
     result = case.run(WAITING_ITEM_READ_STEP_NAME)
     check("a title holding a link is searched as the closing line carries it, the link's text only",
           result.returncode == 0 and "\n  user   " in result.stdout and "  a\n" in result.stdout, described(result))
+
+
+def test_the_waiting_item_read_step_searches_a_revised_linked_title_as_the_closing_line_shows_it():
+    case = Case(document=marks_document("The tests are still running.\n").replace(
+        "## Item 3 of 9: the opening sentence", "## Item 3 of 9 (revised): the [opening](https://example.com/o) sentence"))
+    session_dialog_with_its_transcript_write(case.log_store, "s6", [
+        "[Item 3 of 9, the opening sentence](https://claude.ai/artifact/x) · A approve · D disapprove", "d"])
+    result = case.run(WAITING_ITEM_READ_STEP_NAME)
+    check("a revised heading's linked title is searched as the closing line shows it, without the revised note",
+          result.returncode == 0 and "\n  user   " in result.stdout and "  d\n" in result.stdout, described(result))
 
 
 def test_the_waiting_item_read_step_searches_a_title_that_opens_with_a_dash():

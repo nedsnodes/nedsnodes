@@ -52,7 +52,7 @@ from pathlib import Path
 
 PROGRAM_PATH = Path(__file__).resolve()
 SEARCH_PROGRAM_FILE = PROGRAM_PATH.parents[3] / "scripts" / "log-store-past-discussions-regex-search-newest-first.py"
-DIALOG_EXTRACTOR_FILE = PROGRAM_PATH.parents[3] / "scripts" / "handoff-extract-conversation.py"
+EXTRACTOR_PATH = PROGRAM_PATH.parents[3] / "scripts" / "handoff-extract-conversation.py"
 WALK_FINDER_FILE = PROGRAM_PATH.with_name("walk-me-through-approval-walk-minutes-and-walk-document-item-finder-common.py")
 NED_BOX_PROGRAM_PATH = f"/home/nedlern/Projects/nedsnodes/nn-systems/skills/walk-me-through/{PROGRAM_PATH.name}"
 DEFAULT_AGENT_HOMES_DIRECTORY = Path("/home/nedlern/agents")
@@ -161,7 +161,7 @@ def dialog_lines_by_transcript_line(transcript, dialog_text):
     """{transcript line number: the dialog line where that record's turn text starts}, from the session dialog
     extractor's own turns, or {} when dialog_text is not what the extractor renders from the transcript now, as
     when the transcript grew after the dialog was written; a turn the dialog leaves out has no entry."""
-    extractor = load_module("handoff_extract_conversation", DIALOG_EXTRACTOR_FILE)
+    extractor = load_module("handoff_extract_conversation", EXTRACTOR_PATH)
     turns, report = extractor.complete_dialog_turns_and_report(transcript)
     rendered = extractor.render_companion(turns, report)
     if not dialog_text.startswith(rendered + "\n"):

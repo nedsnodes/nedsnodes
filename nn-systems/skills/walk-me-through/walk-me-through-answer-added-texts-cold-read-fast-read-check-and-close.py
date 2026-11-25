@@ -3480,14 +3480,19 @@ def approval_walk_item_title_search_groups(walk_finder, document, value, numbers
     know."""
     lines = document.read_text(encoding="utf-8").split("\n")
     _, units = walk_finder.waiting_item_units(document, value, numbers, total, parser)
-    without_links = load_module("walk_me_through_user_short_answer_hook", SHORT_ANSWER_HOOK_FILE).without_links
+    hook = load_module("walk_me_through_user_short_answer_hook", SHORT_ANSWER_HOOK_FILE)
     groups = []
     for unit in units:
         headings = [lines[unit[3]]] + ([copied for _, _, copied in earlier] if len(units) == 1 else [])
         titles = []
         for heading in headings:
-            title = item_title(walk_finder, heading.split("\n", 1)[0])
-            for form in ([title, without_links(title, parser)] if title else []):
+            first = heading.split("\n", 1)[0]
+            title = item_title(walk_finder, first)
+            # The closing line's point is read as the hook's heading_points reads it, so that a heading such as
+            # `## Item 4 of 9 (revised): a [filter](url)` is searched as `a filter`, the words the closing line shows.
+            point = hook.HEADING_POINT.match(walk_finder.approval_walk_item_heading_with_deferred_note_removed(first))
+            closing = hook.without_links(point[1] if point and point[1] else title, parser)
+            for form in ([title, closing] if title else []):
                 if form not in titles:
                     titles.append(form)
         if titles:

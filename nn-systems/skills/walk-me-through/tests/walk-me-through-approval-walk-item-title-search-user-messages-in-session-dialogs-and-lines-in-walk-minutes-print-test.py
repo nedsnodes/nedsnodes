@@ -22,7 +22,7 @@ LOG_STORE_PAST_DISCUSSIONS_SEARCH_SSH_OVERRIDE_ENVIRONMENT_VARIABLE = "LOG_STORE
 ITEM_6_TITLE = "How long the successor looks for a speed-up"
 RULING = ("I had a discussion on this topic - check the session dialogs. I thought we agree to split tasks into "
           "those that could and should be backgrounded and others that should not")
-DIALOG_EXTRACTOR_FILE = Path(__file__).resolve().parents[4] / "scripts" / "handoff-extract-conversation.py"
+EXTRACTOR_PATH = Path(__file__).resolve().parents[4] / "scripts" / "handoff-extract-conversation.py"
 PROJECT_KEY = "-home-nedlern-agents-MD-skills"
 PROGRAM_PROJECT_KEY = "-home-nedlern--local-state-nedsnodes-agent-seat-idle-sweep"
 
@@ -49,7 +49,7 @@ def agent_record(text):
 
 def extracted_dialog_text(transcript):
     """The session dialog the log-store's refresher writes for transcript, by the session dialog extractor."""
-    spec = importlib.util.spec_from_file_location("handoff_extract_conversation", DIALOG_EXTRACTOR_FILE)
+    spec = importlib.util.spec_from_file_location("handoff_extract_conversation", EXTRACTOR_PATH)
     extractor = importlib.util.module_from_spec(spec)
     sys.modules[spec.name] = extractor
     spec.loader.exec_module(extractor)
