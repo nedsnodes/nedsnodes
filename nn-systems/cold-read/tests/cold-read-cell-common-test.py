@@ -879,6 +879,22 @@ with tempfile.TemporaryDirectory() as scratch:
           len(skipped_lines) == 1 and "'/x/two  spaces' To add an exception, run:" in skipped_lines[0],
           repr(skipped_lines))
 
+    check("a U+2028 inside a path in a git error stays in that path",
+          common_module.join_error_text_lines_with_one_space(
+              "fatal: dubious ownership at '/x/a\u2028b'\nTo add an exception, run:")
+          == "fatal: dubious ownership at '/x/a\u2028b' To add an exception, run:")
+
+    # A cell whose pre-run snapshot failed passes git's reason, so the line the grid lifts carries it.
+    captured = io.StringIO()
+    with contextlib.redirect_stderr(captured):
+        common_module.report_stray_writes("cell", common_module.ColdReadCellWorkingTreeSnapshotFailedStandInBaselineWithGitReason(
+            "fatal: not a git repository\nhint: run git init"))
+    not_taken_lines = captured.getvalue().splitlines()
+    check("a failed pre-run snapshot's git reason is on the check-skipped line",
+          len(not_taken_lines) == 1 and STRAY_WRITE_CHECK_SKIPPED_PHRASE in not_taken_lines[0]
+          and "git status failed: fatal: not a git repository hint: run git init" in not_taken_lines[0],
+          repr(not_taken_lines))
+
     # A stamp whose reviewed file cannot be read says so instead of failing the report.
     with tempfile.TemporaryDirectory() as stamp_scratch:
         stamped_report = Path(stamp_scratch) / "report.md"
@@ -1167,6 +1183,9 @@ with tempfile.TemporaryDirectory() as scratch:
     )
     check("a cell that could not take a baseline says the check did not run",
           STRAY_WRITE_CHECK_SKIPPED_PHRASE in result.stderr, repr(result.stderr))
+    check("...giving git's reason on that line",
+          any(STRAY_WRITE_CHECK_SKIPPED_PHRASE in line and "git status failed:" in line
+              for line in result.stderr.splitlines()), repr(result.stderr))
     check("...and says a missing check is not a clean result",
           "failure to look, not a clean result" in result.stderr, repr(result.stderr))
 

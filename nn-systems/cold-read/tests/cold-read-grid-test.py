@@ -1939,11 +1939,15 @@ try:
     separator_commands = re.findall(r"`(rm -r -- [^`]*)`", separator_printed[-1]) if separator_printed else []
     check("a path holding U+2028 gives a STRAY WRITE line and an undo line, one line each",
           len(separator_printed) == 2
-          and separator_printed[0].startswith("STRAY WRITE: $'stray\\u2028write.md' changed")
+          and separator_printed[0].startswith("STRAY WRITE: $'stray\\xe2\\x80\\xa8write.md' changed")
           and len(separator_commands) == 1, repr(separator_printed))
-    if separator_commands:
-        subprocess.run(["bash", "-c", separator_commands[0]], check=True)
-    check("the one-line undo command deletes the file whose path holds U+2028",
+    # Under LC_ALL=C, as in bash 3.2, bash leaves $'\u2028' as the literal text, so the command must use bytes.
+    undo_exit = (subprocess.run(["bash", "-c", separator_commands[0]],
+                                env={**os.environ, "LC_ALL": "C"}).returncode
+                 if separator_commands else None)
+    check("the one-line undo command, run with LC_ALL=C, deletes the file whose path holds U+2028",
+          undo_exit == 0, repr(undo_exit))
+    check("...and leaves the other files",
           not (newline_repository / "stray write.md").exists()
           and (newline_repository / "seed.md").exists(), repr(separator_commands))
 
