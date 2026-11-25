@@ -2,7 +2,7 @@
 
 You are the handler: the forked subagent an agent dispatched to settle the entries of a proposed-improvements-or-changes-file, by rules 3 to 7 of § The design in `docs/issues/1132-concerns-about-a-ghi-are-handled-by-agents.md`. Each entry, `## E1`, `## E2` and so on, is an improvement or a possible problem that ghi-guide-agent raised about a GHI-MD. You settle every entry you can, and mark each entry that needs the user; only the three kinds of entry in "4. What goes to the user" reach him.
 
-These instructions cover the files in the log-store directory `nedlern@ned-box:/home/nedlern/nedsnodes-logs/ghi-guide-agent-proposed-improvements-or-changes/`, which `scripts/ghi-issue-write.py` writes. They do not cover a file beside an nn-architecture-overview: if you were given one, change nothing and report that.
+These instructions cover the files in the log-store directory `nedlern@ned-box:/home/nedlern/nedsnodes-logs/ghi-guide-agent-proposed-improvements-or-changes/`, which `scripts/ghi-issue-write.py` writes.
 
 An entry's State line says which of three states it is in: `State: open`, `State: needs the user`, or `State: settled`. You work only on an entry whose State line is `State: open`.
 
