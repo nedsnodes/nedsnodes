@@ -2127,42 +2127,10 @@ def squeezed(text):
     return " ".join(text.split())
 
 
-def squeezed_outside_code_spans(text, walk_finder):
-    """Return a key for text that is equal for two texts only when they differ in nothing but the whitespace outside
-    inline code spans and fenced or indented code blocks, so that `a  b` and `a b` stay different, as do `x` 1 and
-    `x1`. The Markdown parser decides where each code span starts and ends, so an escaped backtick opens none."""
-    parser = walk_finder.markdown_parser()
-    backticks = parser.inline.ruler.__rules__[parser.inline.ruler.__find__("backticks")].fn
-
-    def backticks_recording_each_code_span(state, silent):
-        start, before = state.pos, len(state.tokens)
-        if not backticks(state, silent):
-            return False
-        if not silent and len(state.tokens) > before and state.tokens[-1].type == "code_inline":
-            state.env.setdefault("code_spans", {}).setdefault(state.src, []).append((start, state.pos))
-        return True
-
-    parser.inline.ruler.at("backticks", backticks_recording_each_code_span)
-    env = {}
-    pieces = []
-    for token in parser.parse(text, env):
-        if token.type in ("fence", "code_block", "html_block"):
-            pieces.append(f"{token.type}{token.markup}{token.info}\n{token.content}")
-        elif token.type != "inline":
-            pieces.append(f"{token.type}{token.markup}{token.info}")
-        else:
-            spans = sorted(env.get("code_spans", {}).get(token.content, []))
-            # A code span inside a link's text is parsed from the link text alone, so its place in the paragraph is
-            # not recorded; such a paragraph is compared as it stands rather than squeezed.
-            if len(spans) != sum(child.type == "code_inline" for child in token.children or []):
-                pieces.append(token.content)
-                continue
-            parts, end = [], 0
-            for span_start, span_end in spans:
-                parts += [re.sub(r"\s+", " ", token.content[end:span_start]), token.content[span_start:span_end]]
-                end = span_end
-            pieces.append("".join(parts + [re.sub(r"\s+", " ", token.content[end:])]).strip())
-    return "\x00".join(pieces)
+def as_written_key(text):
+    """Return text as written, with only its line endings and its leading and trailing blank lines made uniform, so
+    that two versions compare equal only when their Markdown source is the same."""
+    return blank_lines_stripped(text.replace("\r\n", "\n").replace("\r", "\n"))
 
 
 def walk_fast_read_name(walk_name, *parts):
@@ -3091,13 +3059,14 @@ def withdrawn_versions_inserted_below_live_version(walk_finder, parser, lines, f
         withdrawn = [found for found in headings if start <= found[0] < below
                      and walk_finder.WITHDRAWN_HEADING.match(found[3])
                      and number in (walk_finder.withdrawn_heading_items(found[3]) or {number})]
-        kept_bodies = {squeezed_outside_code_spans("\n".join(lines[found[1]:end]), walk_finder):
+        kept_bodies = {as_written_key("\n".join(lines[found[1]:end])):
                        lines[found[0]].strip()
                        for found, end in zip(withdrawn, [*(later[0] for later in withdrawn[1:]), below])}
         if squeezed(body) in (squeezed(heading_body(walk_finder, live_text)), ""):
             continue
-        if squeezed_outside_code_spans(body, walk_finder) in kept_bodies:
-            kept.append((key, outcome, kept_bodies[squeezed_outside_code_spans(body, walk_finder)], None))
+        kept_heading = kept_bodies.get(as_written_key(body))
+        if kept_heading is not None:
+            kept.append((key, outcome, kept_heading, None))
             continue
         version = 1 + len(withdrawn)
         while below > 0 and not lines[below - 1].strip():

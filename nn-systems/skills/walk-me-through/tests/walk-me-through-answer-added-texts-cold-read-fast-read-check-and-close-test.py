@@ -5686,9 +5686,10 @@ def test_an_earlier_read_text_already_kept_or_changed_only_in_its_heading_is_not
     text = document.read_text()
     document.write_text(text.replace("Recommendation: leave it.\n\n## Item 4 of 5",
                                      "Recommendation: drop it.\n\n### Withdrawn version 1 of item 3\n\n"
-                                     "#case_against  weak.\n\nRecommendation:\nleave it.\n\n## Item 4 of 5", 1))
+                                     + ITEM_3_BODY.format("leave it.") + "\r\n\n\n## Item 4 of 5", 1))
     by_hand = case.run(WAITING_ITEM_READ)
-    check("an earlier text an agent already kept below the item, whatever its spacing, is not kept again",
+    check("an earlier text an agent already kept below the item as written, line endings and trailing blank lines "
+          "aside, is not kept again",
           by_hand.returncode == 0 and document.read_text().count("Withdrawn version") == 1, described(by_hand))
 
 
@@ -7880,6 +7881,26 @@ def test_an_escaped_backtick_does_not_open_a_code_span_when_an_earlier_text_is_c
     check("an earlier text whose code span after an escaped backtick differs from the kept version's only in its "
           "spacing is kept as version 2", "#### Withdrawn version 2 of item 3\n\nPrint \\` and run `a  b`." in after,
           after)
+
+
+def test_an_earlier_text_differing_from_a_kept_version_only_outside_the_parsed_inline_text_is_kept_too():
+    cases = (("See [the guide].\n\n[the guide]: /old", "See [the guide].\n\n[the guide]: /new"),
+             ("| a | b |\n|:--|--:|\n| 1 | 2 |", "| a | b |\n|--:|:--|\n| 1 | 2 |"),
+             ("![Run `a b`](d.png)", "![Run `a  b`](d.png)"))
+    for kept_text, earlier_text in cases:
+        document = ("# A walk\n\n## Item 3 of 9: three\n\nLive.\n\n#### Withdrawn version 1 of item 3\n\n"
+                    f"{kept_text}\n\n## Item 4 of 9: four\n\nFour.\n")
+        after = withdrawn_versions_inserted(document, "## Item 3 of 9: three", [earlier_text])
+        check(f"an earlier text {earlier_text!r} whose Markdown source differs from the kept {kept_text!r} is kept "
+              "as version 2", f"#### Withdrawn version 2 of item 3\n\n{earlier_text}" in after, after)
+
+
+def test_an_earlier_text_whose_source_matches_a_kept_version_is_not_kept_again():
+    document = ("# A walk\n\n## Item 3 of 9: three\n\nLive.\n\n#### Withdrawn version 1 of item 3\n\n"
+                "Set `x` 1.\n\n## Item 4 of 9: four\n\nFour.\n")
+    after = withdrawn_versions_inserted(document, "## Item 3 of 9: three", ["\nSet `x` 1.\r\n"])
+    check("an earlier text whose source equals the kept version's but for line endings and blank lines is not kept "
+          "again", "Withdrawn version 2" not in after, after)
 
 
 def main():
