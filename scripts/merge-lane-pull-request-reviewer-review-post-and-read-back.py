@@ -190,6 +190,9 @@ CODEX_FINDING_HEADING = re.compile(r"^- \[(?:Codex priority )?(P[0-3])(?: \(P0 h
 # The review worktree's own path differs between runs on the same commit.
 CODEX_FINDING_WORKTREE_PATH = re.compile(r"\S*/pr\d+-head/")
 CODEX_REPORT_PROVENANCE_COMMENT = re.compile(r"\A<!--.*?-->\n?", re.DOTALL)
+# A report with no finding line that holds a non-empty "findings" list of objects is Codex's review
+# object in a wrapper the converter does not take, so it is not posted as a clean review.
+CODEX_REVIEW_OBJECT_NON_EMPTY_FINDINGS_LIST_REGEX = re.compile(r'"findings"\s*:\s*\[\s*\{')
 CODEX_GRADES_BODY_HEADING = "**Codex findings graded:**"
 # docs/agents/pr-reviewer-instructions.md asks a reviewer to end each finding on code with these labelled lines.
 FINDING_FACT_LINE_LABELS = ("Main has it:", "This pull request makes it happen:", "Reports success on failure:",
@@ -504,6 +507,18 @@ def codex_findings_on_commit(outputs_directory, number, head):
             raise CodexRunRecordUnusable(
                 f"the Codex run record {record_file} says the run succeeded, but its report could not "
                 f"be read: {error}")
+        def unusable(what):
+            base = record.get("base_commit") or "<the commit after base= in the report's first line>"
+            return CodexRunRecordUnusable(
+                f"review not posted: the Codex report {report_file} {what}.\n"
+                f"Do not post the review any other way: the review would carry none of this run's findings.\n"
+                f"Run the Codex cell on commit {head} again, from the same base; the new run replaces that "
+                f"report, whose text is at the end of this message:\n"
+                f"  {codex_cell_command(number, base, head, outputs_directory)}\n"
+                f"If that command exits 0, run this posting command again:\n"
+                f"  {review_posting_program_rerun_command_line_with_git_author_name()}\n"
+                f"Otherwise do what that command prints.\n"
+                f"The report's text:\n{report}")
         # A cell older than the conversion wrote Codex's review object as the report.
         review_object_text = codex_cell.codex_review_object_json_text_from_report_or_none_when_prose(
             CODEX_REPORT_PROVENANCE_COMMENT.sub("", report, count=1))
@@ -511,21 +526,26 @@ def codex_findings_on_commit(outputs_directory, number, head):
             try:
                 report = codex_cell.codex_review_object_as_prose_report(review_object_text)
             except codex_cell.CodexReviewObjectNotConvertible as error:
-                base = record.get("base_commit") or "<the commit after base= in the report's first line>"
-                raise CodexRunRecordUnusable(
-                    f"review not posted: the Codex report {report_file} is Codex's review as a JSON object, "
-                    f"which this program cannot turn into finding lines, the \"- [Pn] <title> — <path>:<lines>\" "
-                    f"lines it reads findings from: {error}.\n"
-                    f"Do not post the review any other way: the review would carry none of this run's findings.\n"
-                    f"Run the Codex cell on commit {head} again, from the same base; the new run replaces that "
-                    f"report, whose text is at the end of this message:\n"
-                    f"  {codex_cell_command(number, base, head, outputs_directory)}\n"
-                    f"If that command exits 0, run this posting command again:\n"
-                    f"  {shlex.join(sys.argv)}\n"
-                    f"Otherwise do what that command prints.\n"
-                    f"The report's text:\n{report}")
-        findings.update(codex_findings_in_report(report))
+                raise unusable(
+                    f"is Codex's review as a JSON object, which this program cannot turn into finding lines, "
+                    f"the \"- [Pn] <title> — <path>:<lines>\" lines it reads findings from: {error}")
+        report_findings = codex_findings_in_report(report)
+        if not report_findings and CODEX_REVIEW_OBJECT_NON_EMPTY_FINDINGS_LIST_REGEX.search(report):
+            raise unusable(
+                "has no finding line, the \"- [Pn] <title> — <path>:<lines>\" lines this program reads "
+                "findings from, but holds a JSON \"findings\" list that is not empty: it is likely Codex's "
+                "review as a JSON object, written in a form neither the Codex cell nor this program "
+                "recognizes, such as with text before its ```json fence")
+        findings.update(report_findings)
     return findings if recorded else None
+
+
+def review_posting_program_rerun_command_line_with_git_author_name():
+    """This posting command as it was run, with the GIT_AUTHOR_NAME that names the merge-lane posting
+    the review, which a command line copied from sys.argv alone would leave out."""
+    merge_lane = os.environ.get("GIT_AUTHOR_NAME")
+    prefix = f"GIT_AUTHOR_NAME={shlex.quote(merge_lane)} " if merge_lane else ""
+    return prefix + shlex.join(sys.argv)
 
 
 def review_tier_of_commit(plan_program, number, head):

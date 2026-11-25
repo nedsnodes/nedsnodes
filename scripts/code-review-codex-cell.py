@@ -42,22 +42,20 @@ heading; a label elsewhere, such as in a finding's indented body or
 quoted code, is left as Codex wrote it.
 
 Before that, a report that is a JSON object, bare or inside one ```json
-fence, is Codex's review object itself: codex-cli 0.169.1 writes the text
-the reviewer gave as the report when that text fails Codex's own parse,
-such as when the reviewer leaves out "overall_confidence_score"
-(codex-rs/core/src/tasks/review.rs, lines 187-206 at rust-v0.169.1). The
-cell writes it in the prose form Codex writes from a parsed object, one
-heading per finding, so the review-posting program, which reads only the
-headings, sees each finding and gives it the id it would have had in prose.
-The review-posting program converts such a report the same way, for a
-report an older cell wrote. A report the cell cannot convert ends the run
-with exit 1 and no report, the text Codex wrote on stderr. A finding body
-holding a lone surrogate escape, such as "\ud800", is not handled: the
-report's write raises UnicodeEncodeError and the run ends with a traceback
-and exit 1, so nothing is posted as clean. The conversion was checked
-against codex-cli 0.169.1's fallback and prose render, review.rs lines
-187-206 at rust-v0.169.1; no test can make real Codex take the fallback
-without a live model call, so check them again after a codex update.
+fence, is Codex's review object itself: Codex writes the text the reviewer
+gave as the report when that text fails Codex's own parse, such as when the
+reviewer leaves out "overall_confidence_score". The cell writes it in the
+prose form Codex writes from a parsed object, one heading per finding, so
+the review-posting program, which reads only the headings, sees each
+finding and gives it the id it would have had in prose. The review-posting
+program converts such a report the same way, for a report an older cell
+wrote. A report the cell cannot convert, such as one holding a text that is
+not valid UTF-8, like a lone surrogate escape "\ud800", ends the run with
+exit 1 and no report, the text Codex wrote on stderr. The conversion was
+checked against codex-cli 0.169.1's fallback and prose render
+(codex-rs/core/src/tasks/review.rs, lines 187-206 at rust-v0.169.1); no
+test can make real Codex take the fallback without a live model call, so
+check them again after a codex update.
 
 What this deliberately does not do: replace the built-in review with a
 custom prompt. On codex-cli 0.147.0 a [PROMPT] is mutually exclusive with
@@ -599,6 +597,16 @@ def one_line(value: str) -> bool:
     return "".join(value.splitlines()) == value
 
 
+def text_encodable_as_utf8(value: str) -> bool:
+    """Whether the text can be written as UTF-8; JSON's escapes can give a lone surrogate, which
+    cannot."""
+    try:
+        value.encode("utf-8")
+    except UnicodeEncodeError:
+        return False
+    return True
+
+
 def codex_review_object_as_prose_report(text: str) -> str:
     """The report Codex writes from its review object, given the object's JSON text, as
     codex_review_object_json_text_from_report_or_none_when_prose() returns it.
@@ -616,6 +624,8 @@ def codex_review_object_as_prose_report(text: str) -> str:
         raise CodexReviewObjectNotConvertible("it is not an object with a \"findings\" list")
     if not isinstance(review.get("overall_explanation"), str):
         raise CodexReviewObjectNotConvertible("it has no text \"overall_explanation\"")
+    if not text_encodable_as_utf8(review["overall_explanation"]):
+        raise CodexReviewObjectNotConvertible("its \"overall_explanation\" is not valid UTF-8")
     findings = []
     for number, finding in enumerate(review["findings"], 1):
         try:
@@ -627,7 +637,7 @@ def codex_review_object_as_prose_report(text: str) -> str:
             raise CodexReviewObjectNotConvertible(f"finding {number} has no {error}")
         except TypeError:
             raise CodexReviewObjectNotConvertible(
-                f"finding {number}, its \"code_location\" or its \"line_range\" is not an object")
+                f"finding {number}, or its \"code_location\" or \"line_range\", is not an object")
         # The posting program reads only P0 to P3 from a one-line heading.
         if type(priority) is not int or not 0 <= priority <= 3:
             raise CodexReviewObjectNotConvertible(
@@ -638,9 +648,13 @@ def codex_review_object_as_prose_report(text: str) -> str:
             raise CodexReviewObjectNotConvertible(
                 f"finding {number} has a title, body, path or line range of the wrong type, "
                 "or a title or path of more than one line")
+        if not all(text_encodable_as_utf8(value) for value in (title, body, path)):
+            raise CodexReviewObjectNotConvertible(
+                f"finding {number} has a title, body or path that is not valid UTF-8")
         indented_body = "\n".join("  " + line if line else line for line in body.splitlines())
-        findings.append(f"- [P{priority}] {CODEX_TITLE_PRIORITY_LABEL.sub('', title)} — "
-                        f"{path}:{start}-{end}\n{indented_body}")
+        # Codex's prose render keeps a title's own tag and adds one only to a title without one.
+        heading = title if CODEX_TITLE_PRIORITY_LABEL.match(title) else f"[P{priority}] {title}"
+        findings.append(f"- {heading} — {path}:{start}-{end}\n{indented_body}")
     if not findings:
         return review["overall_explanation"]
     return (review["overall_explanation"] + "\n\nFull review comments:\n\n"

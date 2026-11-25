@@ -543,8 +543,24 @@ def codex_finding_grade_cases(scratch):
           result.code == 2 and not result.calls and "codex-code-review-report.md" in result.stderr
           and "cannot turn into finding lines" in result.stderr and '"findings": ["x"]' in result.stderr
           and "merge-lane-code-review-codex-cell-run-on-pull-request-head.py 7 base0 "
-              f"--expected-head-commit {HEAD} --merge-lane-worktrees-and-outputs-directory " in result.stderr,
+              f"--expected-head-commit {HEAD} --merge-lane-worktrees-and-outputs-directory " in result.stderr
+          and "\n  GIT_AUTHOR_NAME=merge-lane-2 " in result.stderr,
           result.detail)
+    for wrapper, report_text in (("text before its ```json fence",
+                                  "Here is the review:\n```json\n" + json.dumps(review_object) + "\n```\n"),
+                                 ("a fence written ``` json", "``` json\n" + json.dumps(review_object) + "\n```\n")):
+        result = run_program(scratch, graded(), arguments=MERGE_LANE_ARGUMENTS,
+                             codex_runs=((HEAD, 0, "<!-- provenance: runtime=codex-exec-review -->\n" + report_text),))
+        check(f"a successful run whose report is Codex's review object with {wrapper}, which neither "
+              "converter takes, is refused before GitHub, not posted as a review with no Codex finding",
+              result.code == 2 and not result.calls and "holds a JSON \"findings\" list" in result.stderr
+              and "Keep the error" in result.stderr, result.detail)
+    surrogate_title = "<!-- provenance: runtime=codex-exec-review -->\n" + json.dumps(review_object).replace(
+        "Keep the error", "Keep \\ud800 the error")
+    result = run_program(scratch, graded(), arguments=MERGE_LANE_ARGUMENTS, codex_runs=((HEAD, 0, surrogate_title),))
+    check("a successful run whose review object's title holds a lone surrogate escape is refused, not a traceback",
+          result.code == 2 and not result.calls and "not valid UTF-8" in result.stderr
+          and "Traceback" not in result.stderr, result.detail)
     case = Path(tempfile.mkdtemp(dir=scratch))
     (case / "cx" / "pr7-base").mkdir(parents=True)
     (case / "cx" / "pr7-base" / "codex-review-run-record.json").write_text("{not json")
