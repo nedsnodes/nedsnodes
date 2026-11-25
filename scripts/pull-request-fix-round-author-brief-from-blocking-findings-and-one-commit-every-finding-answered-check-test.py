@@ -314,6 +314,13 @@ def run(root, repository, routes, *arguments, path_has_gh=True, environment_extr
     return completed.returncode, completed.stdout, completed.stderr
 
 
+def printed_commands_exit_codes(command_lines, printed_for, run_in):
+    """Each command line's exit code, run in order by the shell with the directory printed_for replaced by run_in;
+    recorded, not raised, so that a failing command fails its case and the other cases still run."""
+    return [subprocess.run(line.replace(str(printed_for), str(run_in)), shell=True, capture_output=True).returncode
+            for line in command_lines]
+
+
 def run_printed_command(root, routes, text, line_start, directory=None):
     """Run the command a refusal or brief printed on the line of text that starts with line_start, its arguments
     taken from that line as an agent copying it would take them, in the directory its cd names, or else in
@@ -323,7 +330,8 @@ def run_printed_command(root, routes, text, line_start, directory=None):
         return None
     change_directory, _, command = line.rpartition(" && ")
     words = shlex.split(command)
-    if words[:3] != ["python3", f"scripts/{PROGRAM.name}", str(NUMBER)]:
+    if words[:3] not in (["python3", f"scripts/{PROGRAM.name}", str(NUMBER)],
+                         ["python3", str(PROGRAM.resolve()), str(NUMBER)]):
         return None
     where = Path(change_directory.removeprefix("cd ")) if change_directory else directory
     return (*run(root, where, routes, *words[3:]), line)
@@ -924,7 +932,7 @@ def stopped_round_cases(root, repository, made, frozen_head, dated_routes, submi
           "If that subagent is still working there, wait for it to finish.\n"
           "If the answers describe fixes, which means the fix-round commit was reset away, or if you mean to start the "
           f"round again: delete {answers}, then run this command:\n"
-          f"cd {made} && python3 scripts/{PROGRAM.name} {NUMBER}\n"
+          f"cd {made} && python3 {PROGRAM.resolve()} {NUMBER}\n"
           + finish in err
           and answers.read_text() == GOOD_ANSWERS, err + out)
     refusal = err
@@ -934,10 +942,10 @@ def stopped_round_cases(root, repository, made, frozen_head, dated_routes, submi
           code == 0 and "Send merge-lane-2 this message with SendMessage" in check_out, check_out + check_err)
     answers.unlink()
     code, out, err, line = run_printed_command(
-        root, dated_routes, refusal, f"cd {made} && python3 scripts/{PROGRAM.name} {NUMBER}") or (1, "", "", "")
+        root, dated_routes, refusal, f"cd {made} && python3 {PROGRAM.resolve()} {NUMBER}") or (1, "", "", "")
     check("stopped round: with no fix-round commit, deleting the answers file and running the command that refusal "
           "names, its arguments copied from its line, where its cd goes, prints the brief",
-          line == f"cd {made} && python3 scripts/{PROGRAM.name} {NUMBER}" and code == 0
+          line == f"cd {made} && python3 {PROGRAM.resolve()} {NUMBER}" and code == 0
           and answers.read_text() == "1. \n2. \n", line + err + out)
     kept_directory = (Path(git(made, "rev-parse", "--path-format=absolute", "--git-common-dir"))
                       / "fix-round-answers-kept-copies" / f"pr-{NUMBER}-review-11")
@@ -986,9 +994,19 @@ def stopped_round_cases(root, repository, made, frozen_head, dated_routes, submi
           "of this program named it by the round's second changes-requested review, is named in the brief",
           code == 0 and f"An earlier brief on this frozen-head kept a copy of the answers file under another review, "
                         f"at {other_copy}." in out, err + out)
-    code, out, err = run(root, repository, dated_routes)
-    check("answers kept: a copies directory named by a review not on the round's frozen-head is not named",
+    off_head_routes = dict(dated_routes, **{REVIEWS: {"stdout": lines([
+        dict(first_review, id=12, commit_id="e" * 40, html_url=f"{URL}#pullrequestreview-12"), first_review])}})
+    code, out, err = run(root, repository, off_head_routes)
+    check("answers kept: a copies directory named by a review GitHub lists on another commit is not named",
           code == 0 and str(other_copy) not in out, err + out)
+    second_round_routes = dict(second_part_routes,
+                               **{ISSUE_COMMENTS: {"stdout": lines([round_record(frozen_head, [11])])}})
+    write_answers("1. \n2. \n", 60)
+    code, out, err = run(root, repository, second_round_routes)
+    check("answers kept: a second round on the same frozen-head, after a round record names round 1's review, does "
+          "not name the copies kept under round 1's review",
+          code == 0 and copies_of_round and not any(str(path) in out for path in copies_of_round)
+          and f"at {other_copy}." not in out, err + out)
     write_answers(partial, 60)
     before = answers.read_bytes()
     copies_of_round = sorted(kept_directory.iterdir())
@@ -1068,7 +1086,7 @@ def other_reviewer_cases(root, repository, made, frozen_head):
           and f"run python3 scripts/{PROGRAM.name} {NUMBER} --reviewer-login {other} again" in out, err + out)
     (made / ANSWERS_NAME).write_text(GOOD_ANSWERS)
     code, out, err = run(root, repository, routes, "--reviewer-login", other)
-    rerun = f"cd {made} && python3 scripts/{PROGRAM.name} {NUMBER} --reviewer-login {other}"
+    rerun = f"cd {made} && python3 {PROGRAM.resolve()} {NUMBER} --reviewer-login {other}"
     check("other reviewer: the refusal for a stopped round names both commands with --reviewer-login",
           code == 1 and f"\n{rerun}\n" in err and f"\n{check_line}" in err, err + out)
     (made / ANSWERS_NAME).unlink()
@@ -1134,12 +1152,19 @@ def topic_worktree_cases(root, repository, base, frozen_head):
 
     code, out, err = run(root, repository, routes)
     check("topic-worktree: an ignored answers file an earlier round left does not stop the brief", code == 0, err)
+    git(made, "add", "--force", ANSWERS_NAME)
+    code, out, err = run(root, repository, routes)
+    check("topic-worktree: a staged answers file, the only change, refuses the brief with exit 1, naming it and the "
+          "command that unstages it",
+          code == 1 and out == "" and ANSWERS_NAME in err and "uncommitted changes or untracked files" in err
+          and f"git -C {made} reset --quiet -- {ANSWERS_NAME}" in err, err + out)
+    git(made, "reset", "--quiet", "--", ANSWERS_NAME)
     (made / "stray.txt").write_text("stray\n")
     code, out, err = run(root, repository, routes)
     check("topic-worktree: an untracked file refuses the brief with exit 1, naming it and how to remove it",
           code == 1 and out == "" and "stray.txt" in err and "uncommitted changes or untracked files" in err
           and f"git -C {made} clean -d --force --exclude=/{ANSWERS_NAME}" in err
-          and f"Then run this command again:\ncd {made} && python3 scripts/{PROGRAM.name} {NUMBER}" in err, err + out)
+          and f"Then run this command again:\ncd {made} && python3 {PROGRAM.resolve()} {NUMBER}" in err, err + out)
     clean_line = next((line for line in err.splitlines() if " clean -d --force" in line), "")
     unstage_line = next((line for line in err.splitlines() if " reset --quiet -- " in line), "")
     unignored = root / "branch-whose-gitignore-lacks-the-answers-file"
@@ -1147,12 +1172,11 @@ def topic_worktree_cases(root, repository, base, frozen_head):
     (unignored / ANSWERS_NAME).write_text(GOOD_ANSWERS)
     leftover = unignored / f"{Path(ANSWERS_NAME).stem}-killed.md"
     leftover.write_text("1. \n")
-    for line in (unstage_line, clean_line):
-        subprocess.run(line.replace(str(made), str(unignored)), shell=True, check=True, capture_output=True)
+    codes = printed_commands_exit_codes((unstage_line, clean_line), made, unignored)
     check("topic-worktree: the printed unstage and clean commands, on a branch whose .gitignore does not name the "
           "answers file and where it is not staged, succeed, keep the answers file and remove a temporary file a "
           "killed brief run left",
-          (unignored / ANSWERS_NAME).read_text() == GOOD_ANSWERS and not leftover.exists(),
+          codes == [0, 0] and (unignored / ANSWERS_NAME).read_text() == GOOD_ANSWERS and not leftover.exists(),
           unstage_line + "\n" + clean_line)
     restore_line = next((line for line in err.splitlines() if " restore --staged --worktree" in line), "")
     staged = root / "branch-whose-answers-file-git-add-staged"
@@ -1163,11 +1187,10 @@ def topic_worktree_cases(root, repository, base, frozen_head):
     (staged / ANSWERS_NAME).write_text(GOOD_ANSWERS)
     (staged / "hook.py").write_text("changed\n")
     git(staged, "add", "-A")
-    for line in (restore_line, unstage_line, clean_line):
-        subprocess.run(line.replace(str(made), str(staged)), shell=True, check=True, capture_output=True)
+    codes = printed_commands_exit_codes((restore_line, unstage_line, clean_line), made, staged)
     check("topic-worktree: the three printed commands, run in order where git add -A staged the answers file beside "
           "another change, keep the answers file unstaged and undo the other change",
-          (staged / ANSWERS_NAME).exists() and (staged / ANSWERS_NAME).read_text() == GOOD_ANSWERS
+          codes == [0, 0, 0] and (staged / ANSWERS_NAME).exists() and (staged / ANSWERS_NAME).read_text() == GOOD_ANSWERS
           and (staged / "hook.py").read_text() == "committed\n"
           and git(staged, "diff", "--cached", "--name-only") == "",
           restore_line + "\n" + unstage_line + "\n" + clean_line)
@@ -1179,11 +1202,10 @@ def topic_worktree_cases(root, repository, base, frozen_head):
     (edited / ANSWERS_NAME).write_text("1. \n2. \n")
     git(edited, "add", "-A")
     (edited / ANSWERS_NAME).write_text(GOOD_ANSWERS)
-    for line in (restore_line, unstage_line, clean_line):
-        subprocess.run(line.replace(str(made), str(edited)), shell=True, check=True, capture_output=True)
+    codes = printed_commands_exit_codes((restore_line, unstage_line, clean_line), made, edited)
     check("topic-worktree: the three printed commands, run where git add -A staged the answers file and it was "
           "edited after, succeed and leave it unstaged with its edits",
-          (edited / ANSWERS_NAME).read_text() == GOOD_ANSWERS and git(edited, "diff", "--cached", "--name-only") == "",
+          codes == [0, 0, 0] and (edited / ANSWERS_NAME).read_text() == GOOD_ANSWERS and git(edited, "diff", "--cached", "--name-only") == "",
           unstage_line)
     tracked = root / "branch-whose-head-tracks-the-answers-file"
     git(root, "init", "-q", str(tracked))
@@ -1192,10 +1214,10 @@ def topic_worktree_cases(root, repository, base, frozen_head):
     git(tracked, "-c", "user.name=t", "-c", "user.email=t@t", "commit", "-q", "-m", "base")
     (tracked / ANSWERS_NAME).write_text(GOOD_ANSWERS)
     git(tracked, "add", "-A")
-    subprocess.run(unstage_line.replace(str(made), str(tracked)), shell=True, check=True, capture_output=True)
+    codes = printed_commands_exit_codes((unstage_line,), made, tracked)
     check("topic-worktree: the printed unstage command, where HEAD tracks the answers file, unstages it without "
           "staging its deletion and keeps its edits",
-          (tracked / ANSWERS_NAME).read_text() == GOOD_ANSWERS and git(tracked, "diff", "--cached", "--name-only") == "",
+          codes == [0] and (tracked / ANSWERS_NAME).read_text() == GOOD_ANSWERS and git(tracked, "diff", "--cached", "--name-only") == "",
           unstage_line)
     (made / "stray.txt").unlink()
     (made / "hook.py").write_text("changed\n")
