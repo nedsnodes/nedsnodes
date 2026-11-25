@@ -2049,6 +2049,55 @@ def run_poll_once_cases(scratch_root, token_file):
           and "could not record" in machine.tasks_read()[0]["subject"] + machine.errors,
           f"{code} {machine.errors}")
 
+    machine = machine_for("append-fails-two-runs-after-assigning")
+    machine.assignments.write_text("", encoding="utf-8")
+    machine.poll = []
+    machine.run("--poll-once-write-baseline")
+    machine.events_path.mkdir()
+    machine.poll = [poll_once_pull_request(1)]
+    first = machine.run()
+    machine.poll = [poll_once_pull_request(1), poll_once_pull_request(2)]
+    second = machine.run()
+    kept_while_failing = machine.assignments.read_text(encoding="utf-8")
+    machine.events_path.rmdir()
+    third = machine.run()
+    assigned = [line for line in machine.event_lines() if " REVIEW-ASSIGNED " in line]
+    check("when two runs in a row cannot append after dealing reviews, the assignment file is put "
+          "back each time, and the first run that can append records each pull request's "
+          "REVIEW-ASSIGNED line once",
+          (first, second, third) == (1, 1, 0) and kept_while_failing == ""
+          and [line.split()[2] for line in assigned] == ["#1", "#2"]
+          and [line.split()[0] for line in
+               machine.assignments.read_text(encoding="utf-8").splitlines()] == ["1", "2"],
+          f"{(first, second, third)} {kept_while_failing!r} {assigned} {machine.errors}")
+
+    machine = machine_for("append-and-put-back-fail")
+    machine.assignments.write_text("", encoding="utf-8")
+    machine.poll = []
+    machine.run("--poll-once-write-baseline")
+    machine.events_path.mkdir()
+    machine.poll = [poll_once_pull_request(1)]
+    real_write = watcher_module.merge_lane_pull_request_review_assignments_file_write
+    writes = []
+
+    def write_then_fail(path, text):
+        writes.append(text)
+        if len(writes) > 1:
+            raise OSError("injected: the put-back write failed")
+        real_write(path, text)
+
+    watcher_module.merge_lane_pull_request_review_assignments_file_write = write_then_fail
+    try:
+        code = machine.run()
+    finally:
+        watcher_module.merge_lane_pull_request_review_assignments_file_write = real_write
+    description = machine.tasks_read()[0]["description"] if machine.tasks_read() else ""
+    check("when the append fails and the assignment file cannot be put back, the failure task "
+          "names the pull request the file keeps with no REVIEW-ASSIGNED line recorded",
+          code == 1 and "could not be put back" in description
+          and "PR #1 REVIEW-ASSIGNED" in description,
+          f"{code} {description} {machine.errors}")
+
     machine = machine_for("another-repository-default-directory")
     # Should these cases regress into a poll, it must not touch merge-lane-2's real state or tasks.
     saved_default = watcher_module.OPEN_PRS_WATCH_POLL_ONCE_STATE_EVENTS_AND_LOCK_DEFAULT_DIRECTORY

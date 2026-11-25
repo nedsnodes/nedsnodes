@@ -115,10 +115,14 @@ task saying how to repair it, and never becomes a new baseline, which would
 drop the events since the last run; --poll-once-write-baseline makes the first
 state file. Each successful poll also assigns reviews as above; its
 REVIEW-ASSIGNED lines, and a WATCH line saying assignment stopped, go to the
-event file, the WATCH line once per case as the state file records. A failed
+event file, the WATCH line once per case as the state file records. A run that
+cannot append them puts the assignment file back as it was, so the next run
+that can append deals those pull requests again. A failed
 poll keeps the state, assigns nothing, and only
 WATCH_OPEN_PULL_REQUESTS_FAILED_GITHUB_POLLS_IN_A_ROW_BEFORE_FAILURE_TASK failed polls in a row open a task.
-Not detected: an event file emptied and then refilled by later polls to at least
+Not detected: a run killed between writing the assignment file and appending
+its REVIEW-ASSIGNED lines, whose pull requests stay assigned with no line;
+an event file emptied and then refilled by later polls to at least
 as many lines as were delivered, whose lost lines no task names; when
 writing the task fails at that failed poll, the rest of the same outage, which
 opens no task; and a task list directory that does not exist, so that each
@@ -693,10 +697,14 @@ def merge_lane_pull_request_review_assignments_file_lock(path):
 
 
 def merge_lane_pull_request_review_assignment_lines(path, pull_requests, state, options_in_use=(),
-                                                    report_stop=emit):
+                                                    report_stop=emit, record_assigned_lines=None):
     """Deal the pull requests with no assignment, write them to the assignment file, and return
     a REVIEW-ASSIGNED event line for each one the file holds afterwards. A failure passes a WATCH
-    line to report_stop each time its case differs from the last poll's, as state records."""
+    line to report_stop each time its case differs from the last poll's, as state records.
+    record_assigned_lines, when given, is called with those lines while the lock is held; when it
+    raises OSError, the assignment file is put back as it was and the error raised again, so the
+    next poll deals those pull requests again. When putting it back fails too, the raised OSError
+    names the pull requests the file keeps with no REVIEW-ASSIGNED line recorded."""
 
     def stop(case, message):
         if state.get("stopped") != case:
@@ -745,7 +753,23 @@ def merge_lane_pull_request_review_assignment_lines(path, pull_requests, state, 
                  f"poll that can write them to the file prints their REVIEW-ASSIGNED lines.")
             return []
         state["stopped"] = None
-        return [event_line(pull_request, f"REVIEW-ASSIGNED {lane}") for pull_request, lane in dealt]
+        assigned_lines = [event_line(pull_request, f"REVIEW-ASSIGNED {lane}")
+                          for pull_request, lane in dealt]
+        if record_assigned_lines is not None:
+            try:
+                record_assigned_lines(assigned_lines)
+            except OSError as error:
+                try:
+                    merge_lane_pull_request_review_assignments_file_write(path, text)
+                except OSError as put_back_error:
+                    raise OSError(
+                        f"{error}; and the assignment file {path} could not be put back as it was "
+                        f"({put_back_error}), so it assigns these pull requests although no "
+                        f"REVIEW-ASSIGNED line for them was recorded: "
+                        + "; ".join(assigned_lines)
+                        + ". Send each to its merge-lane agent-seat yourself") from error
+                raise
+        return assigned_lines
 
 
 def merge_lane_pull_request_review_assignments_seed(path, seed_path, repo, token, options_in_use=()):
@@ -1061,20 +1085,26 @@ def poll_once(arguments, assignments_file, options_in_use):
             lines = needs_a_look_events(arguments.needs_a_look_directory, state["notices"],
                                         state_survives_restarts=True)
             pull_requests, reason = fetch_open_pull_requests(arguments.repo, token)
+            now = time.time()
             if reason is None:
                 state["failed_polls"] = 0
                 lines += events_for_poll(state["pull_requests"], pull_requests)
                 if assignments_file is not None:
+
+                    def record_with_this_polls_events(assigned_lines):
+                        event_lines_append(events_path, lines + assigned_lines, now)
+                        lines.clear()
+
                     # Cron's output goes to a log nobody reads, so a stop goes to the event file.
-                    lines += merge_lane_pull_request_review_assignment_lines(
+                    merge_lane_pull_request_review_assignment_lines(
                         assignments_file, pull_requests, state.setdefault("review_assignment", {}),
-                        options_in_use, report_stop=lines.append)
+                        options_in_use, report_stop=lines.append,
+                        record_assigned_lines=record_with_this_polls_events)
                 state["pull_requests"] = {
                     number: {"head_sha": seen["head_sha"], "is_draft": seen["is_draft"]}
                     for number, seen in pull_requests_by_number(pull_requests).items()}
             else:
                 state["failed_polls"] += 1
-            now = time.time()
             # The event is on disk before the state forgets it, so a crash repeats an event at worst.
             event_lines_append(events_path, lines, now)
             poll_state_write(state_path, state)
@@ -1083,8 +1113,10 @@ def poll_once(arguments, assignments_file, options_in_use):
             return failure_reported(task_list_directory, "its state cannot be used", str(error))
         except OSError as error:
             return failure_reported(task_list_directory, "it could not record or deliver events",
-                                    f"{error}. Undelivered events stay in {events_path} for the "
-                                    f"next run once this is repaired.")
+                                    f"{error}. The state file still holds the last run that "
+                                    f"recorded its events, so the first run after this is repaired "
+                                    f"finds this run's events again; lines already in "
+                                    f"{events_path} reach a later events task.")
         if reason is None:
             return 0
         snippet = one_line_snippet(reason, FAILURE_REASON_SNIPPET_CHARS)
