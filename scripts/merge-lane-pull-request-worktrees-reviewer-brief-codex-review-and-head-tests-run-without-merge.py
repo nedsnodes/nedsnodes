@@ -9,7 +9,11 @@ Usage:
 Before any step runs, git in --review-tools-worktree-at-main fetches main and
 refs/pull/<n>/head from origin and reads the two commits once. The Codex
 review's base is the merge base of those two commits, or, for a fix-round,
-the commit given as --head-commit-reviewed-before.
+the commit given as --head-commit-reviewed-before; but a fix-round whose
+first-parent commits since that commit hold a merge commit, as when the author
+merged main, or whose head does not descend from it, is reviewed from the
+merge base, whole, as pull-request-review-plan.py reviews such a round, so
+Codex does not review main's changes as the pull request's.
 
 The brief specifications file holds merge-lane-2's judgments in exactly one
 entry, for this pull request: tag, number, title, author, tests, hazards and
@@ -158,7 +162,8 @@ def parse_arguments(argv):
                              "must be origin's commit for that field")
     parser.add_argument("--head-commit-reviewed-before",
                         help="for a fix-round, the nn-head-commit reviewed before; the Codex "
-                             "review runs from it instead of from the merge base")
+                             "review runs from it instead of from the merge base, unless a "
+                             "merge commit follows it or the head does not descend from it")
     common.add_directory_options(parser, "briefs/, cx/, hr/, claude-reviews/ and tripwire-bin/")
     return common.resolve_path_options(parser.parse_args(argv))
 
@@ -203,6 +208,25 @@ def review_tools_worktree_at_main_step_script_missing_refusal_message(step, chec
             (f"Run this again as {mains_copy}, main's copy of this program, with the same "
              f"arguments.\n"
              f"If main's copy refuses the same way, tell the user this message."))
+
+
+def fix_round_reviewed_whole_because(checkout, head_reviewed_before, head):
+    """Return why a fix-round's Codex review must run from the merge base, or None.
+
+    The same two checks as pull-request-review-plan.py's for reviewing a fix-round
+    whole: a diff from the earlier head across a merge of main holds main's
+    changes, and one from a commit the head does not descend from holds the rewrite.
+    """
+    merges = git(checkout, "rev-list", "--merges", "--first-parent",
+                 f"{head_reviewed_before}..{head}").split()
+    if merges:
+        return (f"the commits since the nn-head-commit reviewed before hold merge commit(s) "
+                f"{', '.join(merge[:12] for merge in merges)}")
+    # merge-base exits 1 when the two commits share no history.
+    if git(checkout, "merge-base", head_reviewed_before, head,
+           accepted_exit_codes=(0, 1)) != head_reviewed_before:
+        return "the head does not descend from the nn-head-commit reviewed before"
+    return None
 
 
 def brief_specification_disagreement(checkout, specifications, number, head, main,
@@ -350,6 +374,11 @@ def main(argv=None):
                                 f"--head-commit-reviewed-before set to the nn-head-commit that "
                                 f"was reviewed before.")
             base, base_kind = head_reviewed_before, "nn-head-commit reviewed before"
+            reviewed_whole_because = fix_round_reviewed_whole_because(
+                checkout, head_reviewed_before, head_commit)
+            if reviewed_whole_because:
+                base = git(checkout, "merge-base", main_commit, head_commit)
+                base_kind = f"merge base, because {reviewed_whole_because}"
         else:
             base, base_kind = git(checkout, "merge-base", main_commit, head_commit), "merge base"
         try:
