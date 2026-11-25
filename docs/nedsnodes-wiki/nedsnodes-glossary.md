@@ -144,7 +144,7 @@ The kind of a GHI is the kind of work it asks for. Try the kinds below in order 
 
 ## Kinds of Markdown file
 
-The kind of a Markdown file is who reads it and what it is for. Try the kinds below in order and take the first whose definition fits the file, so no file has two kinds. A file in `docs/issues/queue/`, `docs/agents/queue/` or `docs/nedsnodes-wiki/queue/`, or a `-draft` file, takes the kind it will become. Kinds 5 to 9 are the five kinds of agent-instructions, told apart by who puts the text in front of the model: Claude Code or Codex at the start of every agent-session (5 and 6), Claude Code for a named subagent (7), a program of this project (8), and Claude Code when a skill is invoked (9).
+The kind of a Markdown file is who reads it and what it is for. Try the kinds below in order and take the first whose definition fits the file, so no file has two kinds. A file in `docs/issues/queue/`, `docs/agents/queue/` or `docs/nedsnodes-wiki/queue/`, or a `-draft` file, takes the kind it will become. Kinds 5 to 9 and 20 are the six kinds of agent-instructions, told apart by who puts the text in front of the model: Claude Code or Codex at the start of every agent-session (5 and 6), Claude Code for a named subagent (7), a program of this project (8 and 20), and Claude Code when a skill is invoked (9).
 
 1. **test fixture** — a file that a test reads as input or as expected output.
 2. **record** — a file outside `docs/issues/` that records what happened or what was found, written once and not kept up to date, such as a review report, a triage list, a frozen-copy, a conversation-tail or a status file a program writes.
@@ -153,7 +153,7 @@ The kind of a Markdown file is who reads it and what it is for. Try the kinds be
 5. **project instructions** — the file that Claude Code or Codex loads into every agent-session started in a checkout, `CLAUDE.md` or `AGENTS.md`.
 6. **seat-brief** — as its entry above defines it.
 7. **agent definition** — the file `.claude/agents/<name>.md` that Claude Code uses as the instructions of the subagent of that name.
-8. **prompt template** — a file whose text a program of this project puts into a model's prompt, such as `.claude/skills/cold-read/prompts/defect-hunt-prompt.md`.
+8. **prompt** — a file that a program of this project pastes into a model's prompt word for word, whose name ends `.prompt.md`, such as `docs/agents/seat-first-prompt.md`.
 9. **skill** — the `SKILL.md` that Claude Code loads when its skill is invoked, or a file that the `SKILL.md` tells the agent to read, such as `nn-systems/skills/explain/explain-how-to-write-an-identifier-instructions.md`.
 10. **session-handoff or next step file** — a file written for the next agent-session of an agent-seat to start from: a session-handoff, or the next step file that `/handoff` writes in `~/.claude/handoffs/` for the session-handoff to copy.
 11. **glossary** — a file that lists terms and gives each one definition, such as this page or `nn-systems/handoff/handoff-system-glossary.md`.
@@ -165,3 +165,4 @@ The kind of a Markdown file is who reads it and what it is for. Try the kinds be
 17. **wiki page** — a page in `docs/nedsnodes-wiki/` that gives rules or facts to look up, the steps of one job, or how part of the project works.
 18. **intake note** — a note in `nn-queue/` kept at the user's request until its first approval-walk sends its parts to their places.
 19. **README** — a file that tells a reader what a directory or the project holds, such as `README.md`.
+20. **prompt template** — a file with slots that a program of this project fills before it puts the text into a model's prompt, whose name ends `.prompt-template.md`, such as `.claude/skills/cold-read/prompts/defect-hunt-prompt.md`, whose `{TARGET_PATH}` the program fills.

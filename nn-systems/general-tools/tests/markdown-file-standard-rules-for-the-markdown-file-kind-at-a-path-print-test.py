@@ -56,9 +56,11 @@ expected_kinds = {
     "/home/nedlern/agents/merge-lane-2/CLAUDE.local.md": "seat-brief",
     "CLAUDE.local.md": "seat-brief",
     ".claude/agents/new-name-propose-and-check-fresh-agent.md": "agent definition",
-    "docs/agents/sanity-checker-cut-adversarial-prompt.md": "prompt template",
-    ".claude/skills/cold-read/prompts/defect-hunt-prompt.md": "prompt template",
-    "docs/agents/queue/design-to-main-design-writing-agent-instructions.md": "prompt template",
+    "docs/agents/sanity-checker-cut-adversarial-prompt.md": "prompt",
+    ".claude/skills/cold-read/prompts/defect-hunt-prompt.md": "prompt",
+    "docs/agents/queue/design-to-main-design-writing-agent-instructions.md": "prompt",
+    "docs/agents/pr-reviewer.prompt.md": "prompt",
+    ".claude/skills/cold-read/prompts/defect-hunt.prompt-template.md": "prompt",
     ".claude/skills/ghi-write/SKILL.md": "skill",
     "nn-systems/skills/explain/explain-how-to-write-an-identifier-instructions.md": "skill",
     "/home/nedlern/.claude/handoffs/merge-lane-2-next-step-20261117-133829.md": "session-handoff or next step file",
@@ -83,7 +85,7 @@ for path, kind in expected_kinds.items():
     check(f"{path} is covered by {kind}", got == kind, got)
 
 # Paths of a record or walk-minutes, which get the common part's exemption rule instead of a section,
-# including ones a section's pattern would also match, such as a frozen-copy of a prompt template.
+# including ones a section's pattern would also match, such as a frozen-copy of a prompt.
 expected_record_kinds = {
     "docs/walk/1058-daily-maintenance-in-one-daily-step-starting-with-2026-10-13-2-minutes.md": "walk-minutes",
     "/home/nedlern/nedsnodes-logs/walk/1206-the-daily-full-test-runs-tell-the-user-2026-10-12-minutes.md":
@@ -134,7 +136,7 @@ tracked = subprocess.run(["git", "-C", str(REPOSITORY_ROOT), "ls-files", "*.md"]
 check("the project glossary exists where its pattern looks",
       (REPOSITORY_ROOT / "docs/nedsnodes-wiki/nedsnodes-glossary.md").is_file())
 covered_kinds = {program.kind_section_heading_for_path(str(REPOSITORY_ROOT / name)) for name in tracked}
-for kind in ["project instructions", "agent definition", "prompt template", "skill", "glossary", "design",
+for kind in ["project instructions", "agent definition", "prompt", "skill", "glossary", "design",
              "wiki page", "GHI-MD"]:
     check(f"a tracked file is covered by {kind}", kind in covered_kinds, sorted(map(str, covered_kinds)))
 check("the standard's own path is covered by wiki page",

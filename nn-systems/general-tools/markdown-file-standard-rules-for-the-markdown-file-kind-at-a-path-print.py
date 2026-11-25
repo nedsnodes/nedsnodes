@@ -30,7 +30,7 @@ COMMON_PART_EXEMPTIONS_AND_PRECEDENCE_BULLET_PREFIX = "- **Exemptions and preced
 # Each kind's name is spelled as the project glossary's "Kinds of Markdown file" spells it. The
 # standard has no section for these kinds, only the common part's exemption rule. They are asked
 # before any section's kind, as the glossary's list orders them, because a record can be a
-# frozen-copy of a file another pattern matches, such as a prompt template's. A frozen-copy has no
+# frozen-copy of a file another pattern matches, such as a prompt's. A frozen-copy has no
 # name of its own in a cold-read-record, so the exemption rule printed names both cases.
 RECORD_AND_WALK_MINUTES_MARKDOWN_FILE_KIND_AND_PATH_PATTERNS = [
     ("record", r"(^|/)(cold-read-records|sanity-check-records)/.+\.md$"),
@@ -45,15 +45,17 @@ UNCOVERED_PATH_PATTERNS = [r"\.test-design\.md$", r"\.contract\.md$"]
 # Each heading is a kind's name as the project glossary's "Kinds of Markdown file" spells it.
 # The first pattern that matches the path picks the section, so the patterns keep that list's
 # order, in which a kind is asked before any later kind that also matches its paths, such as
-# a prompt template in a skill's directory before the skill. Each pattern is anchored at a path
+# a prompt in a skill's directory before the skill. Each pattern is anchored at a path
 # component, so it matches the same file in any checkout.
 KIND_SECTION_HEADING_AND_PATH_PATTERNS = [
     ("project instructions", r"(^|/)(CLAUDE|AGENTS)\.md$"),
     ("seat-brief", r"(^|/)CLAUDE\.local\.md$"),
     ("agent definition", r"(^|/)\.claude/agents/[^/]+\.md$"),
-    # Only a program reads design-to-main's -agent-instructions.md files; an agent reads other
-    # -instructions.md files, so their path does not say their kind.
-    ("prompt template", r"(^|/)[^/]+(-prompt|-agent-instructions)\.md$"),
+    # A prompt and a prompt template share the prompt section until a rule fits only one.
+    # -prompt.md names either kind until the dot rule renames those files. Only a program reads
+    # design-to-main's -agent-instructions.md files; an agent reads other -instructions.md
+    # files, so their path does not say their kind.
+    ("prompt", r"(^|/)[^/]+(\.prompt|\.prompt-template|-prompt|-agent-instructions)\.md$"),
     ("skill", r"(^|/)(\.claude|nn-systems)/skills/[^/]+/[^/]+\.md$"),
     ("session-handoff or next step file", r"(^|/)\.claude/handoffs/[^/]+-next-step-[^/]*\.md$"),
     ("glossary", r"(^|/)([^/]+-glossary|nedsnodes-sdlc-terms)\.md$"),

@@ -63,9 +63,9 @@ An agent definition leaves out:
 
 An agent definition holds no step that needs no judgment; such a step belongs in a program.
 
-## prompt template
+## prompt
 
-A prompt template is a file whose text a program of this project puts into a model's prompt, such as the cold-read prompts in `.claude/skills/cold-read/prompts/`. Its reader is the model the program runs, which has the prompt and what the prompt names, and none of the conversation that led to the run.
+A prompt is a file a program of this project pastes into a model's prompt word for word, such as `docs/agents/seat-first-prompt.md`, and a prompt template is one with slots the program fills first, such as the cold-read prompts in `.claude/skills/cold-read/prompts/`; this section covers both. Its reader is the model the program runs, which has the prompt and what the prompt names, and none of the conversation that led to the run.
 
 It contains, in this order:
 
@@ -73,17 +73,17 @@ It contains, in this order:
 2. The steps that need judgment, each with what the model judges by.
 3. The output: its form, exactly as the program reads it, or the path of the JSON Schema the program checks it against.
 
-A prompt template leaves out:
+A prompt or prompt template leaves out:
 
 - Steps the program does, such as reading and writing files, putting steps in order, retrying and checking the output's form, as the code-prompt-code rule in `CLAUDE.md` says.
 - The text the program puts in place of a placeholder.
 - History and citations, which `CLAUDE.md` keeps out of standing instructions.
 
-A prompt template holds no step that needs no judgment; such a step belongs in its program.
+A prompt or prompt template holds no step that needs no judgment; such a step belongs in its program.
 
 ## skill
 
-A skill is a skill's `SKILL.md` in `.claude/skills/<name>/`, which Claude Code loads when the skill is invoked, or a Markdown file beside it or in `nn-systems/skills/<name>/` that the `SKILL.md` tells the agent to read; a prompt template among them follows the prompt template section. The `description` in a `SKILL.md`'s front matter is in context in every agent-session, which reads it to decide when to invoke the skill, so each of its words costs every agent-session.
+A skill is a skill's `SKILL.md` in `.claude/skills/<name>/`, which Claude Code loads when the skill is invoked, or a Markdown file beside it or in `nn-systems/skills/<name>/` that the `SKILL.md` tells the agent to read; a prompt or prompt template among them follows the prompt section. The `description` in a `SKILL.md`'s front matter is in context in every agent-session, which reads it to decide when to invoke the skill, so each of its words costs every agent-session.
 
 It contains, in this order:
 
