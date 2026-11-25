@@ -116,7 +116,7 @@ names each glossary term the change puts in, in backquotes when it holds a space
 `#not_asked_hashtag_marker` names each hashtag marker the change adds;
 `#not_asked_search` gives the first and last day of the search for the problem a
 dropped proposal guarded against, the count of cases found and the places
-searched, as in `#not_asked_search 2026-10-26 to 2026-11-25, 0 cases, in the
+searched, as in `#not_asked_search YYYY-MM-DD to YYYY-MM-DD, 0 cases, in the
 log-store's session dialogs and user messages and the commits on main`. An unused or old name is searched for as written and,
 when it has two or more words, with its words joined by hyphens, by underscores
 and by nothing, a run of digits both kept with the letters before it and
@@ -661,18 +661,21 @@ def system_glossary_problems(found):
 
 def dropped_proposal_search_problems(found):
     """Return why an item that drops a proposed check cannot settle on its `#not_asked_search` line: the line must
-    give a window of at least SEARCH_WINDOW_DAYS ending no earlier than yesterday, 0 cases, and the places searched;
+    give a window of at least SEARCH_WINDOW_DAYS ending yesterday or today, one count, of 0 cases, and after it `in`
+    and the places searched;
     and a dropped proposal adds no `#new` text."""
     problems = [NOT_ASKED_DROPPED_PROPOSAL_NEW_TEXT_PROBLEM] if proposed_texts(found.marks, {NEW_MARK}) else []
     values = found.found[SEARCH]
     if not values:
         return problems + [MissingEvidenceLine(NOT_ASKED_NO_LINE_PROBLEM.format(marker=SEARCH, why=NOT_ASKED_WHY[SEARCH]))]
-    yesterday = datetime.datetime.now(datetime.timezone.utc).date() - datetime.timedelta(days=1)
+    today = datetime.datetime.now(datetime.timezone.utc).date()
+    yesterday = today - datetime.timedelta(days=1)
     for value in values:
         days = SEARCH_DAY.findall(value)
-        count = SEARCH_COUNT.search(value)
-        places = SEARCH_DAY.sub(" ", SEARCH_COUNT.sub(" ", value))
-        if len(days) != 2 or count is None or not SEARCH_PLACE_WORD.search(places):
+        counts = list(SEARCH_COUNT.finditer(value))
+        count = counts[0] if len(counts) == 1 else None
+        places = SEARCH_PLACES.match(value[count.end():]) if count else None
+        if len(days) != 2 or count is None or not places or not SEARCH_PLACE_WORD.search(places[1]):
             problems.append(MissingEvidenceLine(NOT_ASKED_SEARCH_SHAPE_PROBLEM.format(marker=SEARCH, value=value)))
             continue
         try:
@@ -685,6 +688,8 @@ def dropped_proposal_search_problems(found):
                                                                          days=SEARCH_WINDOW_DAYS))
         if last < yesterday:
             problems.append(NOT_ASKED_SEARCH_WINDOW_OLD_PROBLEM.format(marker=SEARCH, last=last))
+        if last > today:
+            problems.append(NOT_ASKED_SEARCH_WINDOW_FUTURE_PROBLEM.format(marker=SEARCH, last=last))
         if int(count[1]):
             problems.append(NOT_ASKED_SEARCH_FOUND_CASES_PROBLEM.format(marker=SEARCH, count=count[1]))
     return problems
@@ -1047,9 +1052,7 @@ _PART_VALUE = r"part \d+ " + _one_of(f"{word} {outcome}" for word, outcome in OU
 # The values close fills each placeholder with; {ruling} and {reason} carry the agent's own words, so any text.
 PLACEHOLDER_VALUES = {
     "answered": _one_of([APPROVED, DISAPPROVED] + [f"{APPROVED} option {number}" for number in OPTION_NUMBERS]
-                        + [f"not asked, kind {kind}" for kind in NOT_ASKED_KINDS]
-                        + [f"not asked, case against {NOT_ASKED_RATED_NONE}"]
-                        + [f"not asked, {label}" for label in NOT_ASKED_WEAK_GROUND_LABELS.values()]),
+                        + [f"not asked, {case.label}" for case in NO_ANSWER_CASES if case.flag == NOT_ASKED_FLAG]),
     "outcome": _one_of(OUTCOMES.values()),
     "parts": rf"{_PART_VALUE}(?:, {_PART_VALUE})*",
     "ruling": ".+",
@@ -1314,13 +1317,16 @@ NOT_ASKED_SEARCH_WINDOW_SHORT_PROBLEM = ("- its `{marker}` line searched {first}
                                          "days the guard rule in CLAUDE.md asks for.")
 NOT_ASKED_SEARCH_WINDOW_OLD_PROBLEM = ("- its `{marker}` line's search ended on {last}, before yesterday; search again "
                                        "up to today, since a case may have come since.")
+NOT_ASKED_SEARCH_WINDOW_FUTURE_PROBLEM = ("- its `{marker}` line's search ends on {last}, after today (UTC); give "
+                                          "the last day actually searched.")
 NOT_ASKED_SEARCH_FOUND_CASES_PROBLEM = ("- its `{marker}` line found {count} cases; a case found is the failure that "
                                         "has happened, so the proposal is shown to the user with those cases cited.")
 NOT_ASKED_DROPPED_PROPOSAL_NEW_TEXT_PROBLEM = ("- it has a `#new` line, which A would add; an item that drops a "
                                                "proposal adds no text, so it recommends something else and is shown.")
 SEARCH_DAY = re.compile(r"\b\d{4}-\d{2}-\d{2}\b")
 SEARCH_COUNT = re.compile(r"\b(\d+)\s+cases?\b", re.I)
-# The places are what is left once the days and the count are taken out, less joining words and punctuation.
+# The places are the text after the single count's `in`.
+SEARCH_PLACES = re.compile(r"\W*in\b(.*)", re.I | re.S)
 SEARCH_PLACE_WORD = re.compile(r"\b(?!(?:to|in|and|of|the|from|through)\b)[A-Za-z][\w'.-]*")
 SEARCH_WINDOW_DAYS = 30
 NOT_ASKED_WHY = {
@@ -1345,8 +1351,9 @@ NOT_ASKED_JUDGEMENT_LINES = (
 # Code cannot tell from the item what was proposed, or where the problem would leave its trace.
 NOT_ASKED_DROPPED_PROPOSAL_JUDGEMENT_LINE = (
     "Judge also whether {item} proposes a check, test, guard, refusal or hook and recommends dropping it, and whether "
-    "the problem would have left a trace in the places its search line names; if it would leave none there, as for "
-    "code too new to have run, do not run close: present {item} to the user.")
+    "the problem that check guards against would have left a trace in the places its `#not_asked_search` line names. "
+    "If {item} drops no such proposal, or the problem would leave no trace there, as for code too new to have run, do "
+    "not run close: present {item} to the user.")
 NOT_ASKED_WEAK_JUDGEMENT_LINE = (
     "{item} is of " + NOT_ASKED_KINDS_NAMED + " and its case against is rated weak: if its change "
     "widens an agent's permissions, as a settings change can, or turns off a guard, do not run close: present {item} to the user.")

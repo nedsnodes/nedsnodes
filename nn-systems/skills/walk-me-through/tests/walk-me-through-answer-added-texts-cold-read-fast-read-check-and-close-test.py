@@ -3998,10 +3998,11 @@ def test_an_item_dropping_a_proposed_check_settles_at_any_rating_when_its_search
               and "Judge also whether item 1 of 3 proposes a check, test, guard, refusal or hook and recommends "
                   "dropping it" in result.stdout, described(result) + minutes)
     closed = case.run("close")
-    check("close records the dropped proposal as accepted",
+    check("close records the dropped proposal as accepted, and moves `#next_to_present` past it",
           closed.returncode == 0
           and "\nitem 1 of 3: not asked, proposed check dropped, search found no case; every text the change adds "
-              "has had a fast read. <accepted>\n" in case.minutes.read_text(), described(closed))
+              "has had a fast read. <accepted>\n" in case.minutes.read_text()
+          and marker(case).startswith("#next_to_present item 2 of "), described(closed) + case.minutes.read_text())
 
 
 def test_an_item_dropping_a_proposed_check_is_refused_without_a_full_recent_search_that_found_no_case():
@@ -4020,6 +4021,14 @@ def test_an_item_dropping_a_proposed_check_is_refused_without_a_full_recent_sear
     check("a search that ended before yesterday is refused",
           *refused_as_dropped(dropped_proposal_case(search=search_line(first_days_ago=40, last_days_ago=5)),
                               "before yesterday; search again up to today"))
+    check("a search that ends after today is refused",
+          *refused_as_dropped(dropped_proposal_case(search=search_line(first_days_ago=5, last_days_ago=-25)),
+                              "after today (UTC)"))
+    check("a search line with two counts is refused",
+          *refused_as_dropped(dropped_proposal_case(search=search_line(places="in the session dialogs but 2 cases on "
+                                                                              "main")), "the count of cases found"))
+    check("a search line whose only text after the count is not `in` and the places is refused",
+          *refused_as_dropped(dropped_proposal_case(search=search_line(places="found")), "and the places searched."))
     check("a search that found cases is refused, since a case is the failure that has happened",
           *refused_as_dropped(dropped_proposal_case(search=search_line(count=2)), "found 2 cases; a case found is "
                               "the failure that has happened"))
