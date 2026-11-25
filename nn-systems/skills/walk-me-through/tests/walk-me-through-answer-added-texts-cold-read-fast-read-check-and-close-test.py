@@ -4185,6 +4185,10 @@ def test_an_item_dropping_a_proposed_check_settles_at_any_rating_when_its_search
     result = found_in.run("check", "--not-asked", DROPPED)
     check("a search line with a word between the count and `in`, as in `0 cases found in ...`, settles",
           result.returncode == 0, described(result))
+    later_clause = dropped_proposal_case(search=search_line(places="found so far; will look in the session "
+                                                                   "dialogs tomorrow"))
+    check("a search line whose `in` comes in a later clause, as in `0 cases found so far; will look in ...`, is "
+          "refused", *refused_as_dropped(later_clause, "and the places searched."))
     closed = case.run("close")
     check("close records the dropped proposal as accepted, and moves `#next_to_present` past it",
           closed.returncode == 0
@@ -4232,6 +4236,13 @@ def test_read_step_tells_the_agent_to_correct_a_malformed_search_line_not_to_add
     check("an item whose search line has two counts is told to correct that line, not to add an evidence line",
           len(dropped) == 1 and "needs correcting" in dropped[0] and "rather than adding another" in dropped[0]
           and "Only evidence is missing" not in dropped[0], described(result))
+    program = load_program()
+    case = program.NO_ANSWER_CASES[0]
+    mixed = [program.MissingEvidenceLine("- it has no `#not_asked_touches` line."),
+             program.MalformedEvidenceLine("- its `#not_asked_search` line is malformed.")]
+    check("a row whose problems mix a missing evidence line and a malformed one is not offered, since neither "
+          "adding nor correcting alone settles it",
+          program.no_answer_row_for_problems(case, mixed, "the walk-document", "check") is None)
     absent = dropped_proposal_case(search="")
     rows = no_answer_rows_printed(result := absent.run(WAITING_ITEM_READ))
     dropped = [row for row in rows if row.startswith("- proposed check dropped, search found no case:")]
