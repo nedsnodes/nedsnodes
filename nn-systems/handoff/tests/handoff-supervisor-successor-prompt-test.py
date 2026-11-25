@@ -943,7 +943,7 @@ def run_launch_time_git_sync_cases(workspace: Path):
           and (home / "kept-unstaged.txt").read_text(encoding="utf-8") == "changed, not staged\n"
           and git_in(["diff", "--cached", "--name-only"], home).stdout.split()
           == ["kept-staged.txt"]
-          and getattr(report, "uncommitted_tracked_changes", None) == 2, report)
+          and getattr(report, "uncommitted_tracked_change_count", None) == 2, report)
     git_in(["reset", "--quiet", "--hard", "HEAD"], home)
 
     # An operation in progress leaves the checkout as it is, and is named.
@@ -965,7 +965,7 @@ def run_launch_time_git_sync_cases(workspace: Path):
     check("a checkout at main with an unreadable git status reports that its uncommitted "
           "changes could not be counted",
           "current with main" in report
-          and getattr(report, "uncommitted_tracked_changes", 0) is None, report)
+          and getattr(report, "uncommitted_tracked_change_count", 0) is None, report)
     home_index.write_bytes(saved_index)
 
     # A git directory git cannot read is reported, never raised: the supervisor

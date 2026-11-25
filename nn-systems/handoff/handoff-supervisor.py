@@ -1562,16 +1562,16 @@ class LaunchTimeGitSyncReport(str):
     """A launch-time-git-sync report's text, with the sync's outcome beside it: whether the fetch
     of origin succeeded and the checkout then held all of main, and whether the checkout's commit
     is now origin/main's. A plain str report has no such outcome, so it counts as neither.
-    uncommitted_tracked_changes counts the uncommitted changes to tracked files the checkout
+    uncommitted_tracked_change_count counts the uncommitted changes to tracked files the checkout
     holds at main's commit, which the fast-forward keeps, or is None when git status could not
     be read."""
 
     def __new__(cls, text: str, checkout_has_main_after_a_fetch: bool,
-                checkout_is_at_main_commit: bool = False, uncommitted_tracked_changes=0):
+                checkout_is_at_main_commit: bool = False, uncommitted_tracked_change_count=0):
         report = super().__new__(cls, text)
         report.checkout_has_main_after_a_fetch = checkout_has_main_after_a_fetch
         report.checkout_is_at_main_commit = checkout_is_at_main_commit
-        report.uncommitted_tracked_changes = uncommitted_tracked_changes
+        report.uncommitted_tracked_change_count = uncommitted_tracked_change_count
         return report
 
 
@@ -1641,7 +1641,7 @@ def launch_time_git_sync(working_directory: Path) -> str:
     def at_main(text, checkout_has_main_after_a_fetch=fetched_main):
         return LaunchTimeGitSyncReport(
             text, checkout_has_main_after_a_fetch, checkout_is_at_main_commit=True,
-            uncommitted_tracked_changes=checkout_freshness_catch_up.uncommitted_tracked_change_count(
+            uncommitted_tracked_change_count=checkout_freshness_catch_up.uncommitted_tracked_change_count(
                 working_directory))
 
     if outcome.kind == "current" and not outcome.ahead:
@@ -2640,7 +2640,7 @@ def launch_time_git_sync_of_own_checkout_first_line_if_not_on_main() -> str:
     if not getattr(report, "checkout_is_at_main_commit", False):
         return report.splitlines()[0]
     # The fast-forward keeps uncommitted changes, and changed code is not main's.
-    changes = report.uncommitted_tracked_changes
+    changes = report.uncommitted_tracked_change_count
     if changes == 0:
         return ""
     held = "git status unreadable" if changes is None else f"{changes} uncommitted tracked change(s)"

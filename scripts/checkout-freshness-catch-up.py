@@ -306,7 +306,7 @@ DETACHED_FAST_FORWARD_REFUSED_LINES = (
     "If git names anything else, leave the checkout as it is: the refusal has been "
     "reported to the user."
 )
-DETACHED_UNCOMMITTED_CHANGES_BLOCK_LINES = (
+DETACHED_FAST_FORWARD_BLOCKED_BY_UNCOMMITTED_CHANGES_MAIN_ALSO_CHANGES_MESSAGE_LINES = (
     "Main changes these files too, so git cannot keep your uncommitted changes to them "
     "across the move: {files}\n"
     "This checkout is an agent-home, so git refuses commits in it: carry those changes to "
@@ -1694,7 +1694,7 @@ def catch_up_session_checkout(checkout: Path, interval_seconds: int) -> None:
         if outcome.kind == "refused" and outcome.files_blocking_the_move:
             # The agent's own changes block the move: the agent clears it, not the user.
             reasons.append("main changes files that hold uncommitted changes here")
-            lines.append(DETACHED_UNCOMMITTED_CHANGES_BLOCK_LINES.format(
+            lines.append(DETACHED_FAST_FORWARD_BLOCKED_BY_UNCOMMITTED_CHANGES_MAIN_ALSO_CHANGES_MESSAGE_LINES.format(
                 files=", ".join(outcome.files_blocking_the_move)))
             stamp["last_action"] = f"detached fast-forward refused: {error}"
         elif outcome.kind == "refused":
