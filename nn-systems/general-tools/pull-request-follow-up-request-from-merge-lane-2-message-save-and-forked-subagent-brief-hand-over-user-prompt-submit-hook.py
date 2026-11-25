@@ -26,6 +26,8 @@ HOOK = Path(__file__).stem
 REQUEST_LINE_START = "#follow_up_request"
 MERGE_LANE_2_MESSAGE_PATTERN = re.compile(
     r"<cross-session-message\b(?P<attributes>[^>]*)>(?P<body>.*?)</cross-session-message>", re.DOTALL)
+# A claude.ai rename of merge-lane-2 changes the from-name its messages carry, and this hook then saves
+# nothing; it cannot read the stored name instead, because it also runs on the Mac and the name is stored on ned-box.
 MERGE_LANE_2_SENDER_PATTERN = re.compile(r"\bfrom-name=\"merge-lane-2\"")
 FOLLOW_UP_PROGRAM_PATH = (Path(__file__).resolve().parents[2] / "scripts"
                          / "pull-request-follow-up-request-after-merge-finding-answers-and-next-step.py")

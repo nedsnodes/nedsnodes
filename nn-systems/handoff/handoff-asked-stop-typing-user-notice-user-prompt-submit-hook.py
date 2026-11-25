@@ -77,15 +77,23 @@ def launched_agent_seat_name() -> str:
 
 def new_session_name(transcript_path_text) -> str:
     """Return the name the line gives the new agent-session, or "" when none is found."""
+    remote_control_name_common = module_from_path("handoff_remote_control_name_common",
+                                                  REMOTE_CONTROL_NAME_COMMON_PATH)
     if isinstance(transcript_path_text, str) and transcript_path_text:
         try:
-            title = module_from_path("handoff_remote_control_name_common",
-                                     REMOTE_CONTROL_NAME_COMMON_PATH).session_title_from_transcript(transcript_path_text)
+            title = remote_control_name_common.session_title_from_transcript(transcript_path_text)
         except OSError:
             title = ""
         if title:
             return title
-    return launched_agent_seat_name()
+    agent_seat = launched_agent_seat_name()
+    if not agent_seat:
+        return ""
+    # The handoff-supervisor launches the successor under the stored name, as it does here when the file is unreadable.
+    try:
+        return remote_control_name_common.handoff_remote_control_name_read_stored_or_default_to_agent_seat_name(agent_seat)
+    except OSError:
+        return agent_seat
 
 
 def user_notice(name: str) -> str:

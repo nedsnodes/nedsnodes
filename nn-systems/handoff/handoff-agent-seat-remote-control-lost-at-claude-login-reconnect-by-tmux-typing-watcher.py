@@ -244,7 +244,16 @@ class Run:
 
 
 def remote_control_name_of_agent_seat(seat) -> str:
-    return remote_control_name_common.handoff_remote_control_name_read_stored_or_default_to_agent_seat_name(Path.home() / ".claude" / "handoffs", seat)
+    """Return the stored name; raise OSError when the name file cannot be read."""
+    return remote_control_name_common.handoff_remote_control_name_read_stored_or_default_to_agent_seat_name(seat)
+
+
+def remote_control_name_for_notice(seat) -> str:
+    # A notice that reports an unreadable name file must still be written; the supervisor launches under the agent-seat name then too.
+    try:
+        return remote_control_name_of_agent_seat(seat)
+    except OSError:
+        return seat
 
 
 def notice_show(log_directory: Path, seat, kind, template, **fields) -> bool:
@@ -255,7 +264,7 @@ def notice_show(log_directory: Path, seat, kind, template, **fields) -> bool:
         path.parent.mkdir(parents=True, exist_ok=True)
         path.write_text(template.format(seat=seat, record=log_directory / REMOTE_CONTROL_RECONNECT_WATCHER_DECISIONS_FILE_NAME,
                                         machine=this_machine_name(),
-                                        remote_control_name=remote_control_name_of_agent_seat(seat),
+                                        remote_control_name=remote_control_name_for_notice(seat),
                                         **fields), encoding="utf-8")
     except OSError as error:
         print(f"{PROGRAM}: the notice to the user about {seat} was not written ({error}). If the failure "
@@ -526,6 +535,13 @@ def check_seat(run: Run, seat, pid, age, session_records_directory: Path, projec
     if disconnect is None:
         return
     event = {"session_id": session_id, "disconnect": disconnect.get("uuid")}
+    try:
+        remote_control_name = remote_control_name_of_agent_seat(seat)
+    except OSError as error:
+        report_typing_failure(run, seat, event, disconnect,
+                              f"its stored Remote Control name could not be read: {error}",
+                              kind="remote-control-name-unreadable")
+        return
     typings = [entry for entry in run.entries
                if entry.get("seat") == seat and entry.get("decision") == "typed"
                and all(entry.get(key) == value for key, value in event.items())]
@@ -535,7 +551,7 @@ def check_seat(run: Run, seat, pid, age, session_records_directory: Path, projec
             return
         if len(typings) >= REMOTE_CONTROL_RECONNECT_COMMAND_TMUX_TYPINGS_PER_DISCONNECT_AT_MOST:
             report_typing_failure(run, seat, event, disconnect,
-                                  f"it typed /remote-control {remote_control_name_of_agent_seat(seat)} into its tmux pane {len(typings)} times, the "
+                                  f"it typed /remote-control {remote_control_name} into its tmux pane {len(typings)} times, the "
                                   f"last at {typings[-1]['at']}, and Claude Code has logged no line saying "
                                   "Remote Control is active since", kind="reconnect-typing-limit-reached-remote-control-still-off")
             return
@@ -567,7 +583,6 @@ def check_seat(run: Run, seat, pid, age, session_records_directory: Path, projec
     # Remote Control may have come back on by itself while this run read the pane.
     if latest_unanswered_disconnect(transcript, run.transcript_read_positions) is None:
         return
-    remote_control_name = remote_control_name_of_agent_seat(seat)
     for number, arguments in enumerate((("-l", f"/remote-control {remote_control_name}"), ("Enter",))):
         if number:
             time.sleep(SECONDS_BETWEEN_TEXT_AND_ENTER)
