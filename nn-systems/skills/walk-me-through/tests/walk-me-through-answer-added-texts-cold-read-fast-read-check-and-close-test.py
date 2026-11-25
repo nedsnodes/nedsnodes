@@ -4242,7 +4242,8 @@ def test_read_step_tells_the_agent_to_correct_a_malformed_search_line_not_to_add
              program.MalformedEvidenceLine("- its `#not_asked_search` line is malformed.")]
     check("a row whose problems mix a missing evidence line and a malformed one is not offered, since neither "
           "adding nor correcting alone settles it",
-          program.no_answer_row_for_problems(case, mixed, "the walk-document", "check") is None)
+          program.no_answer_table_row_text_or_none_from_evidence_check_problems(case, mixed, "the walk-document",
+                                                                                "check") is None)
     absent = dropped_proposal_case(search="")
     rows = no_answer_rows_printed(result := absent.run(WAITING_ITEM_READ))
     dropped = [row for row in rows if row.startswith("- proposed check dropped, search found no case:")]

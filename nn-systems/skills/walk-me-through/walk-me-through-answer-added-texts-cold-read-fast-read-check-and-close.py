@@ -3406,13 +3406,13 @@ def no_answer_rows_for_waiting_item_lines(walk_finder, top, minutes, value, numb
             rows.append(NO_ANSWER_ROW_NOT_CHECKED.format(label=case.label, item=item,
                                                          error=getattr(failure, "reason", failure)))
             continue
-        row = no_answer_row_for_problems(case, problems, document, command)
+        row = no_answer_table_row_text_or_none_from_evidence_check_problems(case, problems, document, command)
         if row:
             rows.append(row)
     return [NO_ANSWER_ROWS_HEADING.format(item=item), *rows] if rows else []
 
 
-def no_answer_row_for_problems(case, problems, document, command):
+def no_answer_table_row_text_or_none_from_evidence_check_problems(case, problems, document, command):
     """The no-answer row offering `case` given its check's problems, or None when the row is not offered."""
     joined = " ".join(problem.removeprefix("- ") for problem in problems)
     if not problems:
