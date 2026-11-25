@@ -76,12 +76,11 @@ is Codex's review object, which a Codex cell older than its conversion wrote, is
 read through scripts/code-review-codex-cell.py's conversion first, so its
 findings get the ids they would have had in prose; one the conversion refuses is
 refused here, with the command that runs the cell again. A report with no finding
-heading is refused the same way when some JSON value in it decodes to an object
-with a non-empty "findings" list, whatever text wraps it, or when it holds text
-such as '"findings": [{' after a "{" that does not decode, as a review object
-Codex could not parse itself does. Not handled: a clean report that quotes such
-a whole object, or a "{" and later such text, is refused too; the agent then
-asks merge-lane-2. Then:
+heading is refused the same way when it holds text such as '"findings": [{', as
+Codex's review object does whether or not it is valid JSON, or when some JSON
+value in it decodes to an object with a non-empty "findings" list, as one with
+escaped keys does. Not handled: a clean report that quotes such text or such an
+object is refused too; the agent then asks merge-lane-2. Then:
 - the file's optional "merge_lane_codex_review_finding_grades" lists one
   {"finding": <the id the refusal prints>, "grade": <grade>} per finding, the grade one
   of FINDING_CATEGORIES or "does-not-hold", which alone also takes a one-line "reason".
@@ -486,24 +485,21 @@ def codex_cell_command(number, base, head, outputs_directory):
 
 
 def report_holds_json_object_with_non_empty_findings_list(report):
-    """Whether a JSON value in the report that starts at a "{" decodes to an object whose "findings" is a
-    non-empty list: Codex's review object in a wrapper the converter does not take, whatever text surrounds
-    it and however its keys are escaped; or whether text such as '"findings": [{' follows a "{" that does not
-    decode, as in a review object Codex itself failed to parse, which Codex then keeps as its report. A clean
-    report that quotes only such text, with no "{" before it, or a whole object whose findings list is empty,
-    is let through."""
+    """Whether the report holds text such as '"findings": [{', as Codex's review object does whether or not
+    it is valid JSON and whatever text wraps it, or a JSON value starting at a "{" that decodes to an object
+    whose "findings" is a non-empty list, which also catches a review object whose keys are escaped. A clean
+    report that quotes such text is refused too."""
+    if CODEX_REVIEW_OBJECT_NON_EMPTY_FINDINGS_LIST_REGEX.search(report):
+        return True
     decoder = json.JSONDecoder()
-    undecodable_starts = []
     for start in (index for index, character in enumerate(report) if character == "{"):
         try:
             value, _ = decoder.raw_decode(report, start)
         except ValueError:
-            undecodable_starts.append(start)
             continue
         if isinstance(value, dict) and isinstance(value.get("findings"), list) and value["findings"]:
             return True
-    return any(undecodable_starts and undecodable_starts[0] < match.start()
-               for match in CODEX_REVIEW_OBJECT_NON_EMPTY_FINDINGS_LIST_REGEX.finditer(report))
+    return False
 
 
 def codex_findings_on_commit(outputs_directory, number, head):
