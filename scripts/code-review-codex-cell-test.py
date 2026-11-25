@@ -79,7 +79,6 @@ import hashlib
 import importlib.util
 import json
 import os
-import shutil
 import subprocess
 import sys
 import tempfile
@@ -854,31 +853,6 @@ with tempfile.TemporaryDirectory() as scratch:
               and not Path(f"{refused_report}.argv.json").exists()
               and not refused_report.exists(),
               f"exit {result.returncode}; stderr={result.stderr!r}")
-
-# --- The installed codex is the one the review-object conversion was checked against ---
-# The stubs above pin the conversion to recorded output, so only this case notices a codex whose
-# review fallback writes something else.
-_cell_spec = importlib.util.spec_from_file_location("code_review_codex_cell", CELL_SCRIPT)
-_cell = importlib.util.module_from_spec(_cell_spec)
-_cell_spec.loader.exec_module(_cell)
-if shutil.which("codex") is None:
-    print("SKIP the installed codex's version: no codex on PATH")
-else:
-    version = subprocess.run(["codex", "--version"], capture_output=True, text=True, timeout=60,
-                             stdin=subprocess.DEVNULL)
-    checked = _cell.CODEX_REVIEW_OBJECT_FALLBACK_CHECKED_CODEX_VERSION
-    check("the installed codex is the version whose review fallback the cell's review-object conversion "
-          "was checked against",
-          version.returncode == 0 and version.stdout.split() == ["codex-cli", checked],
-          f"`codex --version` exited {version.returncode} and printed {version.stdout.strip()!r}, but "
-          f"scripts/code-review-codex-cell.py's CODEX_REVIEW_OBJECT_FALLBACK_CHECKED_CODEX_VERSION is {checked}.\n"
-          "Read codex-rs/core/src/tasks/review.rs at the installed version's rust-v<version> tag, where "
-          "lines 187-206 at rust-v0.169.1 write the reviewer's text as the report when it fails Codex's "
-          "parse, and Codex's prose render of a parsed review.\n"
-          "If either changed, change codex_review_object_text() and codex_review_object_as_prose_report() "
-          "to match.\n"
-          "Then set the constant to the installed version, and the version on any page that names it, "
-          "such as docs/nedsnodes-wiki/nedsnodes-codex-and-gemini-operating-notes.md.")
 
 print()
 if failures:

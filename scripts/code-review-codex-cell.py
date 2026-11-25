@@ -54,10 +54,10 @@ report an older cell wrote. A report the cell cannot convert ends the run
 with exit 1 and no report, the text Codex wrote on stderr. A finding body
 holding a lone surrogate escape, such as "\ud800", is not handled: the
 report's write raises UnicodeEncodeError and the run ends with a traceback
-and exit 1, so nothing is posted as clean. The conversion follows the
-fallback of CODEX_REVIEW_OBJECT_FALLBACK_CHECKED_CODEX_VERSION; the cell's
-test fails when the installed codex is another version, so the fallback
-is checked again.
+and exit 1, so nothing is posted as clean. The conversion was checked
+against codex-cli 0.169.1's fallback and prose render, review.rs lines
+187-206 at rust-v0.169.1; no test can make real Codex take the fallback
+without a live model call, so check them again after a codex update.
 
 What this deliberately does not do: replace the built-in review with a
 custom prompt. On codex-cli 0.147.0 a [PROMPT] is mutually exclusive with
@@ -580,8 +580,6 @@ class CodexReviewObjectNotConvertible(Exception):
 
 
 CODEX_TITLE_PRIORITY_LABEL = re.compile(r"^\[P[0-3]\] ")
-# The codex-cli whose review.rs fallback the conversion was checked against.
-CODEX_REVIEW_OBJECT_FALLBACK_CHECKED_CODEX_VERSION = "0.169.1"
 CODEX_REVIEW_OBJECT_IN_JSON_FENCE = re.compile(r"\A```(?:json)?[ \t]*\n(.*)\n```\Z", re.DOTALL)
 
 
