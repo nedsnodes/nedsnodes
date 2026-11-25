@@ -486,7 +486,9 @@ count reaches 3 and the waiting item, or sub-step, holds a `#new` text, the step
 reads nothing and hands nothing over: it prints that the item's proposed text
 has been revised three times and a brief for a fresh-agent, built from the
 walk-minutes lines that hold the user's words and name the item, one of its
-sub-steps or its title, and from the link targets of the item's live versions,
+sub-steps, its title, or an item whose held answer raised it, as a
+held-answer line from close records, and from the link targets of the item's
+live versions,
 a link into the Mac's mount of ned-box's home given with its path on ned-box
 too, and holding no version of the item's text. The brief tells the
 fresh-agent to write the item's text, with no heading line, to
@@ -1583,10 +1585,11 @@ FRESH_AGENT_REWRITE_BRIEF_LINES = (
     "Write afresh the text of one item of an approval-walk, the item {title}. Its earlier texts are left out of "
     "this brief on purpose: write it from the user's words and the files below, not from any earlier text.",
     "Read {skill} for how an item is written, and keep the item within the word limit it gives.",
-    "The user's words on this item, in the lines of the walk-minutes {minutes} that hold them:",
+    "The user's words on this item, and on the item whose held answer raised it, in the lines of the walk-minutes "
+    "{minutes} that hold them:",
 )
 FRESH_AGENT_REWRITE_NO_USER_WORDS = ("- none: no line of the walk-minutes holds his words and names item {whole_number}, one of "
-                                     "its sub-steps or its title.")
+                                     "its sub-steps, its title or an item whose held answer raised it.")
 FRESH_AGENT_REWRITE_FILES_HEADER = "The files and pages the item links:"
 FRESH_AGENT_REWRITE_NO_FILES = "- none."
 FRESH_AGENT_REWRITE_ON_NED_BOX = "{link} (on ned-box: {path})"
@@ -3169,9 +3172,18 @@ def approval_walk_item_linked_files(text, ned_box_home, mac_mount):
     return lines
 
 
-def approval_walk_item_user_words_in_minutes(walk_finder, minutes_text, whole_number, titles):
+def approval_walk_item_user_words_in_minutes(walk_finder, parser, minutes_text, whole_number, titles):
     """Return each line of the walk-minutes that holds the user's words and names item whole_number, one of its
-    sub-steps, or one of titles."""
+    sub-steps, one of titles, or an item whose held answer raised item whole_number, or raised an item that did,
+    with its sub-steps: the user's reply on that item is what the raised item is about."""
+    wholes = {whole_number}
+    holds = [({number.split(".")[0] for number in held}, {number.split(".")[0] for number in raised})
+             for _, held, _, raised in held_answers(walk_finder, minutes_text, parser)]
+    while True:
+        raising = {number for held, raised in holds if raised & wholes for number in held} - wholes
+        if not raising:
+            break
+        wholes |= raising
     found = []
     for line in minutes_text.split("\n"):
         if USER_WORDS_IN_MINUTES_PHRASE not in line:
@@ -3180,7 +3192,7 @@ def approval_walk_item_user_words_in_minutes(walk_finder, minutes_text, whole_nu
         for numbers in walk_finder.WITHDRAWN_HEADING_ITEMS.finditer(line):
             with contextlib.suppress(walk_finder.UnusableRange):
                 named.update(number.split(".")[0] for number in walk_finder.expand_numbers(numbers[1]))
-        if whole_number in named or any(title and title.lower() in line.lower() for title in titles):
+        if named & wholes or any(title and title.lower() in line.lower() for title in titles):
             found.append(line)
     return found
 
@@ -3198,8 +3210,8 @@ def approval_walk_item_fresh_agent_rewrite_brief_lines(walk_finder, parser, minu
     constants = load_module("ned_box_home_directory_and_its_mac_mount_point_path_constants_common", PATH_CONSTANTS_FILE)
     links = approval_walk_item_linked_files("\n".join(text for _, text in texts),
                                             constants.NED_BOX_HOME, constants.MAC_MOUNT_OF_NED_BOX_HOME)
-    words = approval_walk_item_user_words_in_minutes(walk_finder, minutes.read_text(encoding="utf-8"), whole_number,
-                                                     {title, whole_title})
+    words = approval_walk_item_user_words_in_minutes(walk_finder, parser, minutes.read_text(encoding="utf-8"),
+                                                     whole_number, {title, whole_title})
     values = dict(title=named, skill=WALK_ME_THROUGH_SKILL_FILE, minutes=minutes, whole_number=whole_number,
                   document=document, reads=reads, rewrite_file=rewrite_file)
     return ([line.format(**values) for line in FRESH_AGENT_REWRITE_BRIEF_LINES]

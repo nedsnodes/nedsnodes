@@ -7472,6 +7472,47 @@ def test_the_waiting_item_read_step_prints_a_fresh_agent_brief_at_the_third_revi
           and revised_item_revisions(case) == 0, described(presented))
 
 
+SHORT_ANSWER_HOOK_FILE = (Path(__file__).resolve().parents[1]
+                          / "walk-me-through-user-short-answer-to-approval-walk-item-expanded-into-instructions-user-prompt-submit-hook.py")
+
+
+def test_the_fresh_agent_brief_holds_the_raising_item_s_answer_words_and_the_hook_s_own_words_reply_lines():
+    """Item 3 was raised by a fast-read finding on item 2's answer, and the user replied to sub-step 3.1 in his own
+    words, which the short-answer hook records in the walk-minutes."""
+    spec = importlib.util.spec_from_file_location("walk_short_answer_hook_for_brief_test", SHORT_ANSWER_HOOK_FILE)
+    hook = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(hook)
+    own_words = hook.APPROVAL_WALK_WAITING_ITEM_USER_OWN_WORDS_REPLY_WALK_MINUTES_LINE.format(
+        date_and_time="2026-11-25 09:20Z", item="item 3.1 of 9", words="`all our hashtags can have a trailing #`")
+    raising = ('item 2 of 9: the user answered approved (2026-11-25 06:22Z) in his words "`A I think we should have '
+               'a wiki page with all the hashtags`", which makes its change. Fast reads:')
+    unrelated = 'item 5 of 9: the user answered approved (2026-11-25 06:30Z) in his words "`a word on item 5`", which makes its change. Fast reads:'
+    original = revised_item_case
+
+    def raised_item_case():
+        case = original()
+        case.minutes.write_text(case.minutes.read_text().replace("#next_to_present item 3 of 9\n", "\n".join((
+            raising, "item 2 of 9: answer held: item 3 of 9, raised by a fast-read finding, waits for the user's "
+            "answer. <open>", unrelated, "item 5 of 9: answer held: item 6 of 9, raised by a fast-read finding, "
+            "waits for the user's answer. <open>", "#next_to_present item 3 of 9", own_words, ""))))
+        return case
+    globals()["revised_item_case"] = raised_item_case
+    try:
+        case, results, _ = revised_item_case_revised_three_times_across_a_split()
+    finally:
+        globals()["revised_item_case"] = original
+    last = results[4]
+    brief = last.stdout.split("----- brief for the fresh-agent: start -----\n")[-1].split(
+        "----- brief for the fresh-agent: end -----")[0]
+    check("at the third revision the read step prints the brief", last.returncode == 1 and "has been revised three "
+          "times" in last.stdout, "".join(described(result) for result in results))
+    check("the brief holds the answer words on item 2, whose held answer raised item 3", f"- {raising}" in brief, brief)
+    check("the brief holds the hook's line recording the user's own-words reply to sub-step 3.1",
+          f"- {own_words}" in brief, brief)
+    check("the brief leaves out the words on item 5, whose held answer raised another item",
+          "a word on item 5" not in brief, brief)
+
+
 def test_the_fresh_agent_rewrite_takes_the_place_of_the_item_s_text_and_starts_the_count_again():
     case, _, _ = revised_item_case_revised_three_times_across_a_split()
     rewrite = case.reads() / "item-3.1-fresh-agent-rewrite.md"

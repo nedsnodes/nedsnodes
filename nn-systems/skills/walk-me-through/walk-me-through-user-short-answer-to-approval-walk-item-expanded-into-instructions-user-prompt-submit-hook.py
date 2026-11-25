@@ -41,7 +41,8 @@ since the user may type A right after such a discussion. The line comes right
 after the opening line, a refused answer's included, because it can override
 the lines after it. A numbered answer naming a number no item has, which
 the hook does not expand, counts as a reply in his own words. A reply in his own
-words gets WALK_ME_THROUGH_HOOK_AGENT_CONTEXT_OPENING_WHEN_APPROVAL_WALK_ITEM_WAITING_AND_USER_REPLY_NOT_SHORT_ANSWER_LINE and that line, and nothing else.
+words gets WALK_ME_THROUGH_HOOK_AGENT_CONTEXT_OPENING_WHEN_APPROVAL_WALK_ITEM_WAITING_AND_USER_REPLY_NOT_SHORT_ANSWER_LINE and that line, and nothing else
+but the lines A REPLY IN HIS OWN WORDS IS RECORDED, below, adds when recording it fails.
 Both get the line only when he typed the prompt in an agent-session he attends,
 as the pending-user-alerts hook's typed_by_user and
 agent-session-unattended-by-user-check-common.py decide. With no item waiting,
@@ -52,6 +53,15 @@ When reading the transcript fails and the prompt does not open as a program's
 or another agent-seat's message, the reply gets
 WALK_ME_THROUGH_HOOK_AGENT_CONTEXT_WHEN_TRANSCRIPT_READ_FAILED_AND_PROMPT_AUTHOR_UNKNOWN_LINE
 before that line, and its opening does not say the user wrote it.
+
+A REPLY IN HIS OWN WORDS IS RECORDED. When the user typed a reply in his own
+words while an item waits, and the transcript was read, the hook appends
+APPROVAL_WALK_WAITING_ITEM_USER_OWN_WORDS_REPLY_WALK_MINUTES_LINE, naming the
+waiting item, to the walk-minutes, his words squeezed into one code span, so
+that the check program's fresh-agent brief for rewriting the item finds his
+words on it, which the check step records only for a reply that answers the
+item. When the append fails, the text says why and gives the line for the
+agent to add.
 
 A, AO, Aa and D answer the item's recommendation: A, AO and Aa approve it,
 Aa only after an advisor check, which the agent makes as AA_SKILL_TEXT, the
@@ -175,6 +185,7 @@ which Claude Code records as a non-blocking error.
 Tool-messages-to-agent follow
 docs/nedsnodes-wiki/nedsnodes-how-to-write-a-tool-message-to-agent-such-as-a-hook-refusal-or-script-error.md.
 """
+import datetime
 import functools
 import importlib.util
 import json
@@ -302,6 +313,13 @@ WALK_ME_THROUGH_HOOK_AGENT_CONTEXT_OPENING_WHEN_APPROVAL_WALK_ITEM_WAITING_AND_P
 WALK_ME_THROUGH_HOOK_AGENT_CONTEXT_WHEN_TRANSCRIPT_READ_FAILED_AND_PROMPT_AUTHOR_UNKNOWN_LINE = (
     "The hook could not read the transcript {path}, so it could not tell who wrote this prompt: {error}. "
     "If the user did not type this prompt, the last line does not apply.")
+# Opens with `User`, not with the item, because the check program reads a line opening with an item as one it wrote.
+APPROVAL_WALK_WAITING_ITEM_USER_OWN_WORDS_REPLY_WALK_MINUTES_LINE = (
+    "User ({date_and_time}), on {item} while it waited, a reply in his words that is not a short answer: \"{words}\"")
+APPROVAL_WALK_WAITING_ITEM_USER_OWN_WORDS_REPLY_NOT_RECORDED_LINES = (
+    "The hook could not record the user's reply in the walk-minutes {minutes}: {error}.",
+    "Add this line as the last line of those walk-minutes yourself, word for word, because a fresh-agent rewriting "
+    "the item reads his words on it only from there:\n{line}")
 ANSWERS_THAT_APPROVE = ("A", "AO", "AA")
 PENDING_USER_ALERTS_HOOK_FILE = HERE / "walk-me-through-pending-user-alerts-claim-and-insert-as-approval-walk-items-user-prompt-submit-hook.py"
 ATTENDANCE_CHECK_FILE = CHECKOUT / "nn-systems" / "general-tools" / "agent-session-unattended-by-user-check-common.py"
@@ -1226,7 +1244,9 @@ def own_words_output(payload, walk=WALK_NOT_READ):
         return own_words_context(
             payload,
             WALK_ME_THROUGH_HOOK_AGENT_CONTEXT_OPENING_WHEN_APPROVAL_WALK_ITEM_WAITING_AND_USER_REPLY_NOT_SHORT_ANSWER_LINE.format(**waiting),
-            WALK_ME_THROUGH_HOOK_AGENT_CONTEXT_OPENING_WHEN_APPROVAL_WALK_ITEM_WAITING_AND_PROMPT_AUTHOR_UNKNOWN_LINE.format(**waiting))
+            WALK_ME_THROUGH_HOOK_AGENT_CONTEXT_OPENING_WHEN_APPROVAL_WALK_ITEM_WAITING_AND_PROMPT_AUTHOR_UNKNOWN_LINE.format(**waiting),
+            (walk.minutes, walk.item) if walk.numbers and walk.minutes else None)
+    recorded_item = None
     try:
         walk_finder = load_walk_finder()
         top = walk_finder.checkout_top(Path(payload.get("cwd") or os.getcwd()))
@@ -1241,13 +1261,15 @@ def own_words_output(payload, walk=WALK_NOT_READ):
                    "walk": minutes.name[:-len(walk_finder.MINUTES_SUFFIX)]}
         opening = WALK_ME_THROUGH_HOOK_AGENT_CONTEXT_OPENING_WHEN_APPROVAL_WALK_ITEM_WAITING_AND_USER_REPLY_NOT_SHORT_ANSWER_LINE.format(**waiting)
         opening_author_unknown = WALK_ME_THROUGH_HOOK_AGENT_CONTEXT_OPENING_WHEN_APPROVAL_WALK_ITEM_WAITING_AND_PROMPT_AUTHOR_UNKNOWN_LINE.format(**waiting)
+        recorded_item = (minutes, count[0]) if count else None
     except Exception as error:
         opening = opening_author_unknown = WALK_ME_THROUGH_HOOK_AGENT_CONTEXT_OPENING_WHEN_APPROVAL_WALK_STATE_READ_FAILED_AND_USER_REPLY_NOT_SHORT_ANSWER_LINE.format(error=repr(error))
-    return own_words_context(payload, opening, opening_author_unknown)
+    return own_words_context(payload, opening, opening_author_unknown, recorded_item)
 
 
-def own_words_context(payload, opening, opening_author_unknown):
-    """own_words_output's output once the opening for the waiting item, or for a failed read, is known."""
+def own_words_context(payload, opening, opening_author_unknown, recorded_item=None):
+    """own_words_output's output once the opening for the waiting item, or for a failed read, is known.
+    recorded_item, (walk-minutes path, the waiting item's running count) or None, names where his reply is recorded."""
     typed, transcript_error = prompt_typed_by_user_and_transcript_read_error(payload)
     if not typed:
         return None
@@ -1256,8 +1278,27 @@ def own_words_context(payload, opening, opening_author_unknown):
         lines = [opening_author_unknown,
                  WALK_ME_THROUGH_HOOK_AGENT_CONTEXT_WHEN_TRANSCRIPT_READ_FAILED_AND_PROMPT_AUTHOR_UNKNOWN_LINE.format(
                      path=payload.get("transcript_path"), error=repr(transcript_error))]
+    elif recorded_item is not None:
+        lines += approval_walk_waiting_item_user_own_words_reply_appended_to_walk_minutes(*recorded_item,
+                                                                                          payload["prompt"])
     context = "\n".join([*lines, WALK_ME_THROUGH_HOOK_INSTRUCTION_TO_AGENT_REWRITE_APPROVAL_WALK_ITEM_WHEN_DISCUSSION_SETTLED_ON_NON_RECOMMENDED_OPTION_LINE])
     return {"hookSpecificOutput": {"hookEventName": "UserPromptSubmit", "additionalContext": context}}
+
+
+def approval_walk_waiting_item_user_own_words_reply_appended_to_walk_minutes(minutes, item, prompt):
+    """Append the line recording prompt as the user's reply in his own words to item; return no lines, or, when the
+    append fails, the lines telling the agent to add it."""
+    line = APPROVAL_WALK_WAITING_ITEM_USER_OWN_WORDS_REPLY_WALK_MINUTES_LINE.format(
+        date_and_time=datetime.datetime.now(datetime.timezone.utc).strftime("%Y-%m-%d %H:%MZ"), item=item,
+        words=load_walk_finder().text_wrapped_as_markdown_code_span(prompt))
+    try:
+        separator = "" if minutes.read_text(encoding="utf-8").endswith("\n") else "\n"
+        with open(minutes, "a", encoding="utf-8") as file:
+            file.write(separator + line + "\n")
+    except OSError as error:
+        return [text.format(minutes=minutes, error=repr(error), line=line)
+                for text in APPROVAL_WALK_WAITING_ITEM_USER_OWN_WORDS_REPLY_NOT_RECORDED_LINES]
+    return []
 
 
 def named_item_missing(answer, walk, walk_error):
