@@ -26,7 +26,7 @@ CONVERSATION_TAIL_LAST_LINES_DISPLAY_FILE_SUFFIX = (
     "-conversation-tail-last-lines-for-first-message-display.md")
 
 
-def conversation_tail_last_lines_display_file_path(handoff_directory: Path, session_id: str) -> Path:
+def conversation_tail_last_lines_display_file_path_for_session_id(handoff_directory: Path, session_id: str) -> Path:
     return handoff_directory / f"{session_id}{CONVERSATION_TAIL_LAST_LINES_DISPLAY_FILE_SUFFIX}"
 
 
@@ -34,7 +34,7 @@ def main() -> int:
     batch = json.load(sys.stdin)
     if batch["index"] != 0:
         return 0
-    path = conversation_tail_last_lines_display_file_path(HANDOFF_DIRECTORY, batch["session_id"])
+    path = conversation_tail_last_lines_display_file_path_for_session_id(HANDOFF_DIRECTORY, batch["session_id"])
     try:
         text = path.read_text(encoding="utf-8")
     except FileNotFoundError:
