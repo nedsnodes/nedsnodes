@@ -2892,6 +2892,38 @@ def run_conversation_tail_last_lines_cases(workspace: Path):
           len(untailed) == 1 and not display_file(handoff_directory, untailed[0][0]).exists(),
           repr(sorted(path.name for path in handoff_directory.iterdir())))
 
+    separator_directory = workspace / "separator-tail"
+    separator_directory.mkdir()
+    separator_tail = separator_directory / "separator-dialog.md"
+    separator_tail.write_text("first still first\nsecond\n", encoding="utf-8")
+    supervisor.conversation_tail_last_lines_display_file_write(
+        separator_directory, "separatorsession", separator_tail)
+    separator_display = display_file(separator_directory, "separatorsession").read_text(encoding="utf-8")
+    check("CONVERSATION-TAIL LAST LINES: a line holding U+2028 counts as one file line",
+          separator_display.startswith(supervisor.CONVERSATION_TAIL_LAST_LINES_HEADING_TEMPLATE.format(
+              line_count=2, conversation_tail_path=separator_tail))
+          and "first still first\nsecond" in separator_display,
+          repr(separator_display[:300]))
+
+    unwritable_directory = workspace / "unwritable-display"
+    unwritable_directory.mkdir()
+    display_file(unwritable_directory, "unwritablesession").mkdir()
+    unwritable_tail = unwritable_directory / "unwritable-dialog.md"
+    unwritable_tail.write_text("turn 1\n", encoding="utf-8")
+    reported = io.StringIO()
+    raised = None
+    with contextlib.redirect_stderr(reported):
+        try:
+            supervisor.conversation_tail_last_lines_display_file_write(
+                unwritable_directory, "unwritablesession", unwritable_tail)
+        except OSError as error:
+            raised = error
+    check("CONVERSATION-TAIL LAST LINES: a display file that cannot be written is reported, "
+          "not raised, so the successor still launches",
+          raised is None and "nothing needs doing" in reported.getvalue()
+          and str(display_file(unwritable_directory, "unwritablesession")) in reported.getvalue(),
+          repr((raised, reported.getvalue())))
+
 
 def run_spawned_subagent_roster_cases(workspace: Path, recent: str):
     """The successor is told which subagents were still working when the

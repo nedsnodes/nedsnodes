@@ -1389,15 +1389,28 @@ CONVERSATION_TAIL_LAST_LINES_END = "\n\nThe new session's first message:\n\n"
 def conversation_tail_last_lines_display_file_write(
         handoff_directory: Path, session_id: str, conversation_tail_path: Path) -> None:
     """Leave the conversation-tail's last lines for the MessageDisplay hook that shows them to
-    the user above the successor's first message."""
-    lines = conversation_tail_path.read_text(encoding="utf-8").splitlines()[
-        -CONVERSATION_TAIL_LAST_LINE_COUNT_SHOWN_ABOVE_FIRST_MESSAGE:]
-    successor_conversation_tail_display_hook.conversation_tail_last_lines_display_file_path(
-        handoff_directory, session_id).write_text(
+    the user above the successor's first message.
+
+    The display is optional, and the caller runs after the handoff's counter is saved, where a
+    raise would stop the successor's launch: a read or write failure is reported on stderr and
+    the successor launches without the display."""
+    display_path = successor_conversation_tail_display_hook.conversation_tail_last_lines_display_file_path(
+        handoff_directory, session_id)
+    try:
+        # split("\n"), not splitlines(), which also splits at characters such as U+2028.
+        lines = conversation_tail_path.read_text(encoding="utf-8").removesuffix("\n").split("\n")[
+            -CONVERSATION_TAIL_LAST_LINE_COUNT_SHOWN_ABOVE_FIRST_MESSAGE:]
+        display_path.write_text(
             CONVERSATION_TAIL_LAST_LINES_HEADING_TEMPLATE.format(
                 line_count=len(lines), conversation_tail_path=conversation_tail_path)
             + "\n".join(lines) + CONVERSATION_TAIL_LAST_LINES_END,
             encoding="utf-8")
+    except OSError as error:
+        print(f"handoff-supervisor: the user is not shown the conversation-tail's last lines "
+              f"above the successor's first message, because writing the display file "
+              f"{display_path} failed: {error}. The successor launches as usual; the "
+              f"conversation-tail stays whole at {conversation_tail_path}, and nothing needs "
+              f"doing.", file=sys.stderr)
 
 
 @dataclass
