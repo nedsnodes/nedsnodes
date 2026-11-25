@@ -455,7 +455,16 @@ names the read's report: each message the user typed
 in an agent-session whose saved dialog names a title, after the agent message
 it answers, and each walk-minutes line naming one, each with its file and line.
 When the search fails, the step refuses, before any read, printing what the
-search said, and exits 1.
+search said, and exits 1. The step saves what the search prints, a search with
+no hits too, in
+`docs/walk/title-search-cache/<walk name>-item-<N>-<agent-session id>.md`, the
+titles searched for as a JSON list on its first line, the agent-session id
+being $CLAUDE_CODE_SESSION_ID. A later run for the item in the same
+agent-session prints only a line naming that file, unless the file is missing
+or the item's titles differ from the saved ones; then it searches, prints and
+saves again. When the file cannot be written, or the agent-session id is not
+set, the step prints the search in full with a line saying why it was not
+saved. walk-files-ship.py does not ship this directory.
 
 Before it reads, the step keeps each earlier version of the item: each text of
 the item that a read wrote its report for, oldest first, goes below the item's
@@ -1444,6 +1453,15 @@ APPROVAL_WALK_ITEM_TITLE_SEARCH_FAILED = (
     "{item} until the command below runs without this refusal, since until then nobody has read his earlier words "
     "on it; a subagent tells the agent that dispatched it instead.\n"
     "Once the user says the cause is fixed, run `{command}` again.")
+TITLE_SEARCH_CACHE_DIRECTORY_NAME = "title-search-cache"
+TITLE_SEARCH_CACHE_FILE_NAME = "{walk}-item-{numbers}-{session}.md"
+TITLE_SEARCH_CACHE_PRINTED_BEFORE = (
+    "The user's words where {item}'s title was named before were printed in full by an earlier run of this step in "
+    "this agent-session, and are saved in {path}; read that file when they are no longer in your context.")
+TITLE_SEARCH_CACHE_NOT_SAVED = (
+    "The search for the user's words above was not saved in {path}, so the next run of this step prints it in full "
+    "again: {why}")
+TITLE_SEARCH_CACHE_NO_AGENT_SESSION = "{variable} is not set, so the agent-session that ran the step is not known."
 ITEM_READ_FAILED_LINES = (
     "{item} has had no cold-read-fast-read of its text as it stands, so do not present it yet: the user is shown an "
     "item only after its cold-read-fast-read.",
@@ -2976,11 +2994,14 @@ def approval_walk_item_system_status_claims_not_rechecked_refused(text, item, do
     return SYSTEM_STATUS_CLAIMS_RECHECKED_LINE.format(item=item, matched=matched, rechecked=rechecked)
 
 
-def approval_walk_item_title_user_messages_in_earlier_agent_sessions_lines(walk_finder, text, earlier, numbers, item,
-                                                                         command):
+def approval_walk_item_title_user_messages_in_earlier_agent_sessions_lines(walk_finder, minutes, text, earlier,
+                                                                         numbers, item, command):
     """Return the lines TITLE_SEARCH_PROGRAM prints for the item's title and the title of each earlier read text of
     it, as earlier_read_texts_of_item returns them; raise Failure when the search failed. A Withdrawn version
-    heading carries no title, so those read texts are the item's only earlier titles the program can know."""
+    heading carries no title, so those read texts are the item's only earlier titles the program can know.
+
+    The lines are saved in the title search cache file for the item and this agent-session; a later call for the
+    same titles in the same agent-session returns only a line naming that file, since fix rounds rerun the step."""
     titles = []
     for heading in [text] + [copied for _, _, copied in earlier]:
         title = item_title(walk_finder, heading.split("\n", 1)[0])
@@ -2988,6 +3009,13 @@ def approval_walk_item_title_user_messages_in_earlier_agent_sessions_lines(walk_
             titles.append(title)
     if not titles:
         return []
+    variable = load_module("cold_read_record_names", RECORD_NAMES_FILE).AGENT_SESSION_ID_ENVIRONMENT_VARIABLE
+    session_id = os.environ.get(variable)
+    cache = (minutes.parent / TITLE_SEARCH_CACHE_DIRECTORY_NAME
+             / TITLE_SEARCH_CACHE_FILE_NAME.format(walk=minutes.name[:-len(walk_finder.MINUTES_SUFFIX)],
+                                                   numbers="-and-".join(numbers), session=session_id))
+    if session_id and title_search_cache_titles(cache) == titles:
+        return [TITLE_SEARCH_CACHE_PRINTED_BEFORE.format(item=item, path=cache)]
     words = [word for title in titles for word in ("--title", title)]
     words += [word for number in numbers for word in ("--item-number", number)]
     result = subprocess.run([sys.executable, str(TITLE_SEARCH_PROGRAM), *words], capture_output=True, text=True,
@@ -2995,7 +3023,29 @@ def approval_walk_item_title_user_messages_in_earlier_agent_sessions_lines(walk_
     if result.returncode not in (0, 1):
         raise Failure(APPROVAL_WALK_ITEM_TITLE_SEARCH_FAILED.format(
             item=item, exit=result.returncode, said=result.stderr.strip() or "nothing", command=command))
-    return result.stdout.rstrip("\n").split("\n") if result.stdout.strip() else []
+    lines = result.stdout.rstrip("\n").split("\n") if result.stdout.strip() else []
+    if not session_id:
+        return lines + [TITLE_SEARCH_CACHE_NOT_SAVED.format(
+            path=minutes.parent / TITLE_SEARCH_CACHE_DIRECTORY_NAME,
+            why=TITLE_SEARCH_CACHE_NO_AGENT_SESSION.format(variable=variable))]
+    try:
+        cache.parent.mkdir(parents=True, exist_ok=True)
+        temporary = cache.with_name(cache.name + ".writing")
+        temporary.write_text("\n".join([json.dumps(titles)] + lines) + "\n", encoding="utf-8")
+        os.replace(temporary, cache)
+    except OSError as error:
+        return lines + [TITLE_SEARCH_CACHE_NOT_SAVED.format(path=cache, why=error)]
+    return lines
+
+
+def title_search_cache_titles(cache):
+    """Return the titles on the first line of the title search cache file cache, or None when it is missing or
+    cannot be read, so that the search runs again."""
+    try:
+        first = cache.read_text(encoding="utf-8").split("\n", 1)[0]
+        return json.loads(first)
+    except (OSError, ValueError):
+        return None
 
 
 def waiting_item_read(arguments, sub_step_of=None):
@@ -3044,7 +3094,7 @@ def waiting_item_read(arguments, sub_step_of=None):
         recheck_line = approval_walk_item_system_status_claims_not_rechecked_refused(
             text, item, document, rerun, rechecked)
         past_words = approval_walk_item_title_user_messages_in_earlier_agent_sessions_lines(
-            walk_finder, text, earlier, numbers, item, rerun)
+            walk_finder, minutes, text, earlier, numbers, item, rerun)
     if sub_step_of:
         # An item read before it was split keeps that text, as an item revised after its read does.
         for above in sub_step_of[2]:

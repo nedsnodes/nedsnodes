@@ -60,6 +60,8 @@ WALK_NAME = "poem-page-2026-10-12"
 FAILURE_PREFIX = "walk-me-through-answer-added-texts-cold-read-fast-read-check-and-close "
 LOG_STORE_PAST_DISCUSSIONS_SEARCH_ROOT_OVERRIDE_ENVIRONMENT_VARIABLE = "LOG_STORE_PAST_DISCUSSIONS_SEARCH_LOG_STORE_ROOT_OVERRIDE"
 AGENT_HOMES_DIRECTORY_OVERRIDE_ENVIRONMENT_VARIABLE = "WALK_ME_THROUGH_AGENT_HOMES_DIRECTORY_OVERRIDE"
+AGENT_SESSION_ID_ENVIRONMENT_VARIABLE = "CLAUDE_CODE_SESSION_ID"
+CASE_AGENT_SESSION_ID = "case-agent-session"
 failures = []
 
 # Behaves as cold-read-fast-read.py does on the records route: writes a
@@ -289,16 +291,19 @@ class Case:
         return record
 
     def run(self, step, *flags, mode="", counts_log=None, fast_read_program=None, environment=None,
-            ignored_signal=None, reply="a", wait_for_reads_ahead=True):
+            ignored_signal=None, reply="a", wait_for_reads_ahead=True, agent_session_id=CASE_AGENT_SESSION_ID):
         """Run the program; a check gets `--user-reply-as-typed reply` unless reply is None or the flags
-        hold --not-asked or a reply of their own. Unless told not to, wait for the reads ahead it started."""
+        hold --not-asked or a reply of their own. Unless told not to, wait for the reads ahead it started.
+        The program runs as agent-session agent_session_id, or with none set when it is None."""
         result = self.run_only(step, *flags, mode=mode, counts_log=counts_log, fast_read_program=fast_read_program,
-                               environment=environment, ignored_signal=ignored_signal, reply=reply)
+                               environment=environment, ignored_signal=ignored_signal, reply=reply,
+                               agent_session_id=agent_session_id)
         if wait_for_reads_ahead:
             self.wait_for_reads_ahead()
         return result
 
-    def run_only(self, step, *flags, mode, counts_log, fast_read_program, environment, ignored_signal, reply):
+    def run_only(self, step, *flags, mode, counts_log, fast_read_program, environment, ignored_signal, reply,
+                 agent_session_id=CASE_AGENT_SESSION_ID):
         if step == "check" and reply is not None and not {"--not-asked", "--already-decided", "--now-over-later-already-decided", "--moved-on",
                                                        "--user-reply-as-typed"} & set(flags):
             flags = (*flags, "--user-reply-as-typed", reply)
@@ -308,6 +313,10 @@ class Case:
                            GH_STAND_IN_CALLS=str(self.gh_calls))
         environment.setdefault(LOG_STORE_PAST_DISCUSSIONS_SEARCH_ROOT_OVERRIDE_ENVIRONMENT_VARIABLE, str(self.log_store))
         environment.setdefault(AGENT_HOMES_DIRECTORY_OVERRIDE_ENVIRONMENT_VARIABLE, str(self.agent_homes))
+        # Set, never inherited: the agent-session running this suite would otherwise name the title search cache files.
+        environment.pop(AGENT_SESSION_ID_ENVIRONMENT_VARIABLE, None)
+        if agent_session_id is not None:
+            environment[AGENT_SESSION_ID_ENVIRONMENT_VARIABLE] = agent_session_id
 
         def stop_signal_dispositions():
             # Set explicitly: a child left to inherit would get SIG_IGN when this suite runs under nohup.
@@ -720,7 +729,8 @@ def test_the_waiting_item_read_step_reads_an_item_of_progress_talk_without_askin
           described(result))
 
 
-def test_the_waiting_item_read_step_prints_the_user_messages_of_an_agent_session_that_named_the_item_title():
+def case_with_a_session_dialog_naming_the_item_title():
+    """A Case whose log-store holds one agent-session that named item 3's title; return it and the dialog's path."""
     case = Case(document=marks_document("The tests are still running.\n"))
     key = "-home-nedlern-agents-MD-skills-2"
     dialog = case.log_store / "session-dialogs" / "ned-box" / key / "s1-dialog-complete.md"
@@ -734,6 +744,25 @@ def test_the_waiting_item_read_step_prints_the_user_messages_of_an_agent_session
         {"type": "user", "entrypoint": "cli", "message": {"content": "Keep one poem per job, as we agreed."}},
         {"type": "assistant", "message": {"content": [{"type": "text",
                                                        "text": "## Item 3 of 9: the opening sentence"}]}}]) + "\n")
+    return case, dialog
+
+
+def title_search_cache_file(case, agent_session_id=CASE_AGENT_SESSION_ID):
+    return case.checkout / "docs" / "walk" / "title-search-cache" / f"{WALK_NAME}-item-3-{agent_session_id}.md"
+
+
+def title_search_lines_printed(result):
+    """The lines the read step printed between its first line, which names the report, and its next-step lines."""
+    lines = result.stdout.split("\n")
+    end = next(index for index, line in enumerate(lines) if line.startswith("Walk-minutes lines naming the title:"))
+    return lines[1:end + 1]
+
+
+TITLE_SEARCH_SAVED_TITLES_LINE = json.dumps(["the opening sentence"])
+
+
+def test_the_waiting_item_read_step_prints_the_user_messages_of_an_agent_session_that_named_the_item_title():
+    case, dialog = case_with_a_session_dialog_naming_the_item_title()
     result = case.run(WAITING_ITEM_READ_STEP_NAME)
     lines = result.stdout.split("\n")
     check("the read step prints, right after its first line, each message the user typed in an agent-session whose "
@@ -744,6 +773,79 @@ def test_the_waiting_item_read_step_prints_the_user_messages_of_an_agent_session
           and lines[3:6] == [f"  agent  {dialog}:7  Shall I split the page?",
                              f"  user   {dialog}:11  Keep one poem per job, as we agreed.",
                              "Walk-minutes lines naming the title: 0."],
+          described(result))
+    cache = title_search_cache_file(case)
+    check("the read step saves what the title search printed, the titles searched for as JSON on the first line",
+          cache.is_file() and cache.read_text().split("\n")
+          == [TITLE_SEARCH_SAVED_TITLES_LINE, *title_search_lines_printed(result), ""],
+          cache.read_text() if cache.is_file() else f"no {cache}")
+
+
+def test_the_waiting_item_read_step_run_again_in_the_same_agent_session_prints_only_the_saved_title_search_path():
+    case, dialog = case_with_a_session_dialog_naming_the_item_title()
+    case.run(WAITING_ITEM_READ_STEP_NAME)
+    result = case.run(WAITING_ITEM_READ_STEP_NAME)
+    lines = result.stdout.split("\n")
+    check("a second run in the same agent-session prints only a line naming the saved file, not the search",
+          result.returncode == 0 and str(dialog) not in result.stdout
+          and lines[1] == (f"The user's words where item 3 of 9's title was named before were printed in full by an "
+                           f"earlier run of this step in this agent-session, and are saved in "
+                           f"{title_search_cache_file(case)}; read that file when they are no longer in your "
+                           f"context."),
+          described(result))
+
+
+def test_the_waiting_item_read_step_searches_again_when_the_saved_titles_differ_the_agent_session_differs_or_the_file_is_gone():
+    case, dialog = case_with_a_session_dialog_naming_the_item_title()
+    full = title_search_lines_printed(case.run(WAITING_ITEM_READ_STEP_NAME))
+    cache = title_search_cache_file(case)
+    cache.write_text(cache.read_text().replace(TITLE_SEARCH_SAVED_TITLES_LINE, json.dumps(["an older title"]), 1))
+    result = case.run(WAITING_ITEM_READ_STEP_NAME)
+    check("titles that differ from the saved ones search, print and save again",
+          title_search_lines_printed(result) == full
+          and cache.read_text().split("\n")[0] == TITLE_SEARCH_SAVED_TITLES_LINE, described(result))
+    result = case.run(WAITING_ITEM_READ_STEP_NAME, agent_session_id="another-agent-session")
+    other = title_search_cache_file(case, "another-agent-session")
+    check("another agent-session searches afresh and saves its own file",
+          title_search_lines_printed(result) == full and other.is_file(), described(result))
+    cache.unlink()
+    result = case.run(WAITING_ITEM_READ_STEP_NAME)
+    check("a missing file searches, prints and saves again",
+          title_search_lines_printed(result) == full and cache.is_file(), described(result))
+
+
+def test_the_waiting_item_read_step_saves_a_title_search_with_no_hits():
+    case = Case(document=marks_document("The tests are still running.\n"))
+    result = case.run(WAITING_ITEM_READ_STEP_NAME)
+    cache = title_search_cache_file(case)
+    printed = title_search_lines_printed(result)
+    check("a search with no hits is printed and saved",
+          result.returncode == 0 and "0 agent-session(s)" in printed[0] and cache.is_file()
+          and cache.read_text().split("\n") == [TITLE_SEARCH_SAVED_TITLES_LINE, *printed, ""],
+          described(result))
+
+
+def test_the_waiting_item_read_step_prints_the_title_search_in_full_and_why_when_it_cannot_save_it():
+    case, dialog = case_with_a_session_dialog_naming_the_item_title()
+    (case.checkout / "docs" / "walk" / "title-search-cache").write_text("a file where the cache folder would go\n")
+    result = case.run(WAITING_ITEM_READ_STEP_NAME)
+    lines = result.stdout.split("\n")
+    printed = title_search_lines_printed(result)
+    check("a cache file that cannot be written leaves the search printed in full, with why it was not saved",
+          result.returncode == 0 and f"  user   {dialog}:11  Keep one poem per job, as we agreed." in printed
+          and lines[len(printed) + 1].startswith(
+              f"The search for the user's words above was not saved in {title_search_cache_file(case)}, so the next "
+              f"run of this step prints it in full again: [Errno ")
+          and "File exists" in lines[len(printed) + 1],
+          described(result))
+    result = case.run(WAITING_ITEM_READ_STEP_NAME, agent_session_id=None)
+    lines = result.stdout.split("\n")
+    printed = title_search_lines_printed(result)
+    check("without an agent-session id the search is printed in full, with why it was not saved",
+          result.returncode == 0 and f"  user   {dialog}:11  Keep one poem per job, as we agreed." in printed
+          and lines[len(printed) + 1].endswith(
+              "prints it in full again: CLAUDE_CODE_SESSION_ID is not set, so the agent-session that ran the step is "
+              "not known."),
           described(result))
 
 
