@@ -5922,9 +5922,10 @@ def test_an_earlier_read_text_already_kept_or_changed_only_in_its_heading_is_not
     text = document.read_text()
     document.write_text(text.replace("Recommendation: leave it.\n\n## Item 4 of 5",
                                      "Recommendation: drop it.\n\n### Withdrawn version 1 of item 3\n\n"
-                                     "#case_against  weak.\n\nRecommendation:\nleave it.\n\n## Item 4 of 5", 1))
+                                     + ITEM_3_BODY.format("leave it.") + "\r\n\n\n## Item 4 of 5", 1))
     by_hand = case.run(WAITING_ITEM_READ)
-    check("an earlier text an agent already kept below the item, whatever its spacing, is not kept again",
+    check("an earlier text an agent already kept below the item as written, line endings and trailing blank lines "
+          "aside, is not kept again",
           by_hand.returncode == 0 and document.read_text().count("Withdrawn version") == 1, described(by_hand))
 
 
@@ -6109,7 +6110,7 @@ def test_two_earlier_texts_kept_in_one_run_both_land_below_the_item_and_the_next
     program = load_program()
     for path in case.reads().glob("*-outcome.json"):
         outcome = json.loads(path.read_text())
-        outcome.pop(program.KEPT_AS_WITHDRAWN_VERSION, None)
+        outcome.pop(program.WALK_ITEM_READ_OUTCOME_WITHDRAWN_VERSION_HEADING_TEXT_KEPT_UNDER_KEY, None)
         program.write_json(path, outcome)
     rewritten_item_3(case, "keep it.")
     result = case.run(WAITING_ITEM_READ)
@@ -8006,6 +8007,10 @@ def test_an_earlier_read_text_recorded_as_kept_is_not_kept_again_after_a_note_is
                 "Note: the user asked for green.\n\n## Item 4 of 9: four\n\nFour.\n")
     after = withdrawn_versions_inserted(document, "## Item 3 of 9: three", ["Blue."],
                                         outcomes=[{"kept_as_withdrawn_version": "#### Withdrawn version 1 of item 3"}])
+    check("an earlier text whose read's outcome records it as kept under the key's spelling before its rename is not "
+          "kept again, though a note now follows it", after == document, after)
+    after = withdrawn_versions_inserted(document, "## Item 3 of 9: three", ["Blue."], outcomes=[
+        {"walk_item_read_outcome_withdrawn_version_heading_text_kept_under": "#### Withdrawn version 1 of item 3"}])
     check("an earlier text whose read's outcome records it as kept is not kept again, though a note now follows it",
           after == document, after)
     case = item_read_case()
@@ -8036,7 +8041,7 @@ def test_a_kept_version_that_cannot_be_recorded_is_reported_naming_the_command_t
           result.returncode == 1 and "could not be written to record that" in result.stderr
           and walk.read_text().count("#### Withdrawn version 1 of item 3") == 1, described(result))
     rerun = case.run(WAITING_ITEM_READ)
-    recorded = [json.loads(path.read_text()).get("kept_as_withdrawn_version")
+    recorded = [json.loads(path.read_text()).get("walk_item_read_outcome_withdrawn_version_heading_text_kept_under")
                 for path in sorted(reads.glob("*-outcome.json"))]
     check("the rerun the failure names, with the reads writable, records the text found already kept under its heading",
           rerun.returncode == 0 and "#### Withdrawn version 1 of item 3" in recorded, described(rerun) + repr(recorded))
@@ -8099,10 +8104,82 @@ def test_a_fresh_agent_rewrite_read_from_the_whole_item_is_refused_when_another_
     rewrite = case.reads() / "item-3.1-fresh-agent-rewrite.md"
     rewrite.write_text(f'The page lists each job once.\n\n#new "{REVISED_ITEM_TEXTS[4]}"\n\n'
                        "#case_against weak: the page grows.\n\nThe alternative: leave it.\n\nRecommendation: do it.\n")
+    before = document.read_text()
     result = case.run(WAITING_ITEM_READ_STEP_NAME, FRESH_AGENT_REWRITE_FLAG, str(rewrite))
     check("a rewrite read from the whole item 3 is refused when its sibling sub-step 3.2 is over the word limit, as "
           "the read without a rewrite is", result.returncode == 1 and "over the limit" in result.stderr
           and "the long half" in result.stderr, described(result))
+    check("that refusal comes before the rewrite is written, so the walk-document is left as it was",
+          document.read_text() == before, document.read_text())
+
+
+def test_the_count_of_proposed_text_revisions_passes_over_an_unnumbered_item_between_sub_steps():
+    document = ("# A walk\n\n## Item 3: the plan\n\n### Item 3.1 of 10: first\n\n#new \"First.\"\n\n"
+                "## A point the user raised\n\n#approval_walk_item_in_category_fix_next\n\nWhy.\n\n"
+                "### Item 3.2 of 10: second\n\n#new \"Second.\"\n")
+    texts = [approval_walk_item_and_sub_steps_new_texts_of(f"unnumbered-between-{number}", document, number)
+             for number in ("3.1", "3.2")]
+    check("with an unnumbered item between sub-steps 3.1 and 3.2 of an item with no counted heading, the same "
+          "`#new` texts are counted whichever sub-step waits", texts[0] == texts[1] == ["First.", "Second."],
+          repr(texts))
+
+
+def test_a_fresh_agent_rewrite_holding_a_bold_count_paragraph_of_the_same_total_is_refused_writing_nothing():
+    after, refusal, before = fresh_agent_rewrite_put_in_place(
+        "bold-count-same-total", "# A walk\n\n**Item 3 of 9: three**\n\nOld text.\n\n## Item 4 of 9: four\n\nFour.\n",
+        "3", '**Item 3 of 9 revised:** New text.\n\n#new "New rule."\n')
+    check("a rewrite holding a bold count paragraph with the item's own number and total, under an item that opens "
+          "with a bold running count, is refused with the program's message and the walk-document left as it was",
+          after == before and "bold running count" in refusal, after + "\n---\n" + repr(refusal))
+
+
+def test_an_earlier_text_differing_from_a_kept_version_only_inside_a_code_span_is_kept_too():
+    document = ("# A walk\n\n## Item 3 of 9: three\n\nLive.\n\n#### Withdrawn version 1 of item 3\n\n"
+                "Run `a  b` now.\n\n## Item 4 of 9: four\n\nFour.\n")
+    after = withdrawn_versions_inserted(document, "## Item 3 of 9: three", ["Run `a b` now."])
+    check("an earlier text that differs from a kept version only in the spacing inside a code span is kept as "
+          "version 2, not taken for the kept one", "#### Withdrawn version 2 of item 3\n\nRun `a b` now." in after,
+          after)
+
+
+
+def test_an_earlier_text_differing_from_a_kept_version_by_a_backtick_moved_across_a_word_boundary_is_kept_too():
+    for kept_text, earlier_text in (("Set `x` 1.", "Set `x1`."), ("Use `x` ray.", "Use `x`ray.")):
+        document = ("# A walk\n\n## Item 3 of 9: three\n\nLive.\n\n#### Withdrawn version 1 of item 3\n\n"
+                    f"{kept_text}\n\n## Item 4 of 9: four\n\nFour.\n")
+        after = withdrawn_versions_inserted(document, "## Item 3 of 9: three", [earlier_text])
+        check(f"an earlier text {earlier_text!r} that differs from the kept {kept_text!r} only by a space or a "
+              "backtick next to a code span is kept as version 2",
+              f"#### Withdrawn version 2 of item 3\n\n{earlier_text}" in after, after)
+
+
+def test_an_escaped_backtick_does_not_open_a_code_span_when_an_earlier_text_is_compared_with_a_kept_version():
+    document = ("# A walk\n\n## Item 3 of 9: three\n\nLive.\n\n#### Withdrawn version 1 of item 3\n\n"
+                "Print \\` and run `a b`.\n\n## Item 4 of 9: four\n\nFour.\n")
+    after = withdrawn_versions_inserted(document, "## Item 3 of 9: three", ["Print \\` and run `a  b`."])
+    check("an earlier text whose code span after an escaped backtick differs from the kept version's only in its "
+          "spacing is kept as version 2", "#### Withdrawn version 2 of item 3\n\nPrint \\` and run `a  b`." in after,
+          after)
+
+
+def test_an_earlier_text_differing_from_a_kept_version_only_outside_the_parsed_inline_text_is_kept_too():
+    cases = (("See [the guide].\n\n[the guide]: /old", "See [the guide].\n\n[the guide]: /new"),
+             ("| a | b |\n|:--|--:|\n| 1 | 2 |", "| a | b |\n|--:|:--|\n| 1 | 2 |"),
+             ("![Run `a b`](d.png)", "![Run `a  b`](d.png)"))
+    for kept_text, earlier_text in cases:
+        document = ("# A walk\n\n## Item 3 of 9: three\n\nLive.\n\n#### Withdrawn version 1 of item 3\n\n"
+                    f"{kept_text}\n\n## Item 4 of 9: four\n\nFour.\n")
+        after = withdrawn_versions_inserted(document, "## Item 3 of 9: three", [earlier_text])
+        check(f"an earlier text {earlier_text!r} whose Markdown source differs from the kept {kept_text!r} is kept "
+              "as version 2", f"#### Withdrawn version 2 of item 3\n\n{earlier_text}" in after, after)
+
+
+def test_an_earlier_text_whose_source_matches_a_kept_version_is_not_kept_again():
+    document = ("# A walk\n\n## Item 3 of 9: three\n\nLive.\n\n#### Withdrawn version 1 of item 3\n\n"
+                "Set `x` 1.\n\n## Item 4 of 9: four\n\nFour.\n")
+    after = withdrawn_versions_inserted(document, "## Item 3 of 9: three", ["\nSet `x` 1.\r\n"])
+    check("an earlier text whose source equals the kept version's but for line endings and blank lines is not kept "
+          "again", "Withdrawn version 2" not in after, after)
 
 
 def main():
