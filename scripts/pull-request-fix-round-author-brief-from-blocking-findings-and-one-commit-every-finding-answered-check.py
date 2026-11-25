@@ -465,7 +465,8 @@ def does_merge_lane_review_ask_for_fix_round(review, pull_request_author_login, 
 
 def round_reviews(number, pull_request_author_login, reviewer_login):
     """merge-lane-2's latest changes-requested review; the round's reviews, in the order GitHub
-    returns them; whether a round record already names that review; and the round's number."""
+    returns them; whether a round record already names that review; the round's number; and the id of every
+    review on the frozen-head, dismissed ones and earlier rounds' included."""
     reviews = gh_json_lines(["api", "--paginate", f"repos/{{owner}}/{{repo}}/pulls/{number}/reviews",
                              "--jq", ".[]"])
     records = round_records(number)
@@ -494,7 +495,8 @@ def round_reviews(number, pull_request_author_login, reviewer_login):
                           if review.get("commit_id") == frozen_head and review.get("id") not in earlier_rounds
                           and review.get("state") not in ("PENDING", "DISMISSED")]
             return (anchor, round_list, recorded,
-                    round_count([own[index][1] for index in requested], records))
+                    round_count([own[index][1] for index in requested], records),
+                    [review.get("id") for review in reviews if review.get("commit_id") == frozen_head])
     latest = own[-1][1]
     on_commit = f" on commit {latest.get('commit_id')}" if latest.get("state") == "COMMENTED" else ""
     raise Refused(f"The latest review of pull request {number} by {reviewer_login} ({latest.get('html_url')}) "
@@ -547,7 +549,8 @@ def unanswered_round_findings_of_replaced_pull_requests(replaced, reviewer_login
     open_rounds, answered_first_round = {}, []
     for replaced_number, replaced_head, _replaces, replaced_author in replaced:
         try:
-            anchor, reviews, recorded, round_number = round_reviews(replaced_number, replaced_author, reviewer_login)
+            anchor, reviews, recorded, round_number, _frozen_head_review_ids = round_reviews(
+                replaced_number, replaced_author, reviewer_login)
         except Refused:
             # No open round: any changes-requested round it had was answered.
             if changes_requested_round_count(replaced_number, replaced_author, reviewer_login):
@@ -711,7 +714,8 @@ def finding_place(comment):
 
 def round_facts(number, reviewer_login):
     url, head, branch, description, author = pull_request(number)
-    anchor, reviews, recorded, own_round_number = round_reviews(number, author, reviewer_login)
+    anchor, reviews, recorded, own_round_number, frozen_head_review_ids = round_reviews(number, author,
+                                                                                         reviewer_login)
     frozen_head = anchor.get("commit_id")
     if not frozen_head:
         raise StepFailed(f"The changes-requested review {anchor.get('html_url')} carries no commit_id")
@@ -736,7 +740,7 @@ def round_facts(number, reviewer_login):
     return (url, head, branch, review_links(latest_first(anchor, reviews)), frozen_head,
             findings, nits, fix_round_number,
             None if recorded else [review.get("id") for review in reviews], anchor.get("submitted_at"),
-            first_requesting.get("id"), merge_lane)
+            first_requesting.get("id"), frozen_head_review_ids, merge_lane)
 
 
 def conflict_check_report(number):
@@ -963,18 +967,21 @@ def topic_worktree_at_frozen_head(number, reviewer_login, branch, frozen_head, f
                       "files, so the fix-round's commit would carry them: "
                       + ", ".join(entry[3:] for entry in changed) + ".\n"
                       "If a fix-round subagent is still working there, wait for it to finish.\n"
-                      "If they are your own work, finish it elsewhere or set it aside first; the fix-round waits.\n"
+                      "If they are your own work, finish them elsewhere or set them aside first.\n"
                       "If an earlier fix-round subagent left them, read them, keep what the next subagent "
-                      "should know, then remove them with these two commands, which leave the answers file "
-                      f"{answers_name} in place:\n"
+                      "should know, then remove them with these three commands, which leave the answers file "
+                      f"{answers_name} in place and unstaged:\n"
                       # The exclude keeps an answers file git add -A staged, which restoring "." would delete,
                       # because HEAD does not hold it.
                       f"git -C {quoted} restore --staged --worktree -- . "
                       f"{shlex.quote(':(exclude)' + answers_name)}\n"
+                      # reset, not rm --cached or restore --staged: it alone succeeds whether the file is unstaged,
+                      # staged and then edited, or tracked by HEAD, and it never stages a deletion.
+                      f"git -C {quoted} reset --quiet -- {shlex.quote(answers_name)}\n"
                       # --exclude, because a branch whose .gitignore does not name the answers file would
                       # otherwise lose it to clean, along with a temporary file a killed brief run left beside it.
                       f"git -C {quoted} clean -d --force --exclude={shlex.quote('/' + answers_name)}\n"
-                      "Then run this again.")
+                      f"Then run this command again:\n{rerun}")
     head = git([*in_worktree, "rev-parse", "HEAD"]).strip()
     answers = worktree / answers_name
     if head == frozen_head:
@@ -1014,8 +1021,8 @@ def topic_worktree_at_frozen_head(number, reviewer_login, branch, frozen_head, f
 
 def print_brief(number, reviewer_login):
     (url, head, branch, review_link, frozen_head, findings, nits,
-     fix_round_number, _unrecorded_review_ids, review_submitted_at, round_review_id, merge_lane) = round_facts(number,
-                                                                                                   reviewer_login)
+     fix_round_number, _unrecorded_review_ids, review_submitted_at, round_review_id,
+     frozen_head_review_ids, merge_lane) = round_facts(number, reviewer_login)
     if head != frozen_head:
         pushed_from = topic_worktree_of_branch(branch)
         wait = (f"Wait for {merge_lane}'s review of the new head, and run this again if it "
@@ -1039,6 +1046,14 @@ def print_brief(number, reviewer_login):
     kept_copies_directory = pull_request_fix_round_answers_kept_copies_directory_path_named_by_changes_requested_review(
         worktree, number, round_review_id
     )
+    # Listed before the answers file is rewritten, so that a directory that cannot be listed stops the brief while
+    # the subagent's answers are still in place.
+    other_reviews_kept_copies = [
+        kept_answers
+        for other_review_id in frozen_head_review_ids if other_review_id != round_review_id
+        for kept_answers in answers_kept_copies_oldest_first(
+            pull_request_fix_round_answers_kept_copies_directory_path_named_by_changes_requested_review(
+                worktree, number, other_review_id))]
     kept_copies = fix_round_answers_file_placeholder_line_per_finding_write_and_earlier_files_kept_copies_list_oldest_first(answers_path, len(findings) + len(nits),
                                                                      kept_copies_directory)
     lines = [
@@ -1050,6 +1065,12 @@ def print_brief(number, reviewer_login):
         lines.append(f"The answers file held text, which may be numbered for another round, so this program copied it "
                      f"unchanged to {kept_answers} and wrote a new answers file. Read that copy, and copy into the "
                      "new file each answer that still answers a finding below, under that finding's number.")
+    # A copies directory named by another review on this frozen-head: one an earlier version of this program
+    # named by the round's latest changes-requested review, or one named by a first review since dismissed.
+    for kept_answers in other_reviews_kept_copies:
+        lines.append(f"An earlier brief on this frozen-head kept a copy of the answers file under another review, "
+                     f"at {kept_answers}. Read that copy too, and copy into the new file each answer that still "
+                     "answers a finding below, under that finding's number.")
     if fix_round_number == ADVISOR_FIX_ROUND_NUMBER:
         lines += ["", ADVISOR_FIX_ROUND_INSTRUCTION]
     lines += [
@@ -1520,8 +1541,8 @@ def check_round(number, reviewer_login, answers_path, commit_name,
                 confirm_dispatching_agent_checked_new_shared_names,
                 overview_claim_check_report_directory):
     (url, _github_head, branch, review_link, frozen_head, blocking, nits,
-     _fix_round_number, unrecorded_review_ids, review_submitted_at, _round_review_id, merge_lane) = round_facts(number,
-                                                                                                     reviewer_login)
+     _fix_round_number, unrecorded_review_ids, review_submitted_at, _round_review_id,
+     _frozen_head_review_ids, merge_lane) = round_facts(number, reviewer_login)
     findings = blocking + nits
     answers_path = answers_path or default_answers_path(number)
     refuse_outside_topic_worktree(number, reviewer_login, branch)
@@ -1631,8 +1652,8 @@ def local_branch_exists(branch):
 
 def move_start(number, reviewer_login, new_branch, whole_file_paths):
     (_url, _head, pull_request_branch, _review_link, frozen_head, _findings, _nits,
-     _fix_round_number, _unrecorded_review_ids, _review_submitted_at, _round_review_id, _merge_lane) = round_facts(
-        number, reviewer_login)
+     _fix_round_number, _unrecorded_review_ids, _review_submitted_at, _round_review_id,
+     _frozen_head_review_ids, _merge_lane) = round_facts(number, reviewer_login)
     state_path = move_state_path()
     if state_path.exists():
         state = json.loads(state_path.read_text())
