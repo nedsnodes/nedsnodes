@@ -79,6 +79,7 @@ Polling needs no public webhook endpoint. GraphQL selects only needed fields
 and avoids gh versions’ differing --json field lists."""
 
 import argparse
+import getpass
 import json
 import os
 import stat
@@ -128,8 +129,13 @@ MERGE_LANE_PULL_REQUEST_REVIEW_ASSIGNMENTS_DEFAULT_FILE = Path(
 # In tie order. merge-lane-2 only merges, but keeps the pull requests the seed gives it.
 MERGE_LANE_PULL_REQUEST_REVIEW_ASSIGNEE_AGENT_SEATS_IN_TIE_ORDER = ("merge-lane-1", "merge-lane-3")
 MERGE_LANES_IN_ASSIGNMENTS_FILE = ("merge-lane-1", "merge-lane-2", "merge-lane-3")
+ASSIGNMENT_LINE_FORMAT = (f"<pull request number> <one of {', '.join(MERGE_LANES_IN_ASSIGNMENTS_FILE)}>, "
+                          f"with one space between")
 # The seed's lane for a pull request reviewed before assignment by backlog, by its number mod 3.
 MERGE_LANE_BY_PULL_REQUEST_NUMBER_REMAINDER = {1: "merge-lane-1", 0: "merge-lane-3", 2: "merge-lane-2"}
+MERGE_LANE_BY_PULL_REQUEST_NUMBER_REMAINDER_TEXT = (
+    "the remainder of its number divided by 3: "
+    + ", ".join(f"{remainder} {lane}" for remainder, lane in MERGE_LANE_BY_PULL_REQUEST_NUMBER_REMAINDER.items()))
 STACK_BOTTOM_BASE_BRANCH = "main"
 # A pull request's reviews on its head commit are its newest, so the last few suffice.
 REVIEWS_READ_PER_PULL_REQUEST = 20
@@ -382,30 +388,66 @@ def pull_requests_by_number(pull_requests):
 
 
 class MergeLanePullRequestReviewAssignmentsFileUnusable(Exception):
-    """The assignment file is missing, unreadable or malformed; the text says which, and what to do."""
+    """The assignment file is missing, unreadable or malformed: case is "missing", "unreadable" or
+    "line", and the text says what was found."""
+
+    def __init__(self, case, text):
+        super().__init__(text)
+        self.case = case
 
 
-def merge_lane_pull_request_review_assignments_file_read(path):
-    """Return {pull request number: merge-lane agent-seat} from the assignment file.
-    Raises MergeLanePullRequestReviewAssignmentsFileUnusable."""
+def merge_lane_pull_request_review_assignments_file_repair_steps(path, case):
+    """The instruction lines that repair the assignment file at path, for the case its read failed in."""
+    if case == "unreadable":
+        return f"  Make the file readable by the user {getpass.getuser()}, who runs the watcher.\n"
+    if case == "line":
+        return (f"  Correct that line by hand as '{ASSIGNMENT_LINE_FORMAT}', keeping every other "
+                f"line as it is.\n")
+    seed_files = sorted(path.parent.glob(f"{path.stem}-seed-*{path.suffix}"))
+    if len(seed_files) == 1:
+        seed_file_text = f"{seed_files[0]}"
+        found = ""
+    else:
+        seed_file_text = "<seed file>"
+        found = (f"; <seed file> is one of {', '.join(str(seed) for seed in seed_files)}"
+                 if seed_files else
+                 f"; <seed file> holds those assignments as '{ASSIGNMENT_LINE_FORMAT}' lines")
+    return (f"  If you know the file was never made, make it once, on ned-box, from the file of "
+            f"assignments made by hand before this watcher assigned any{found}: "
+            f"python3 scripts/watch-open-pull-requests-hack.py "
+            f"--merge-lane-pr-review-assignments-file {path} "
+            f"--merge-lane-pr-review-assignments-file-write-from-seed-and-reviewed-prs-then-exit "
+            f"{seed_file_text}\n"
+            f"  If the file existed before, or you cannot tell, do not make it from a seed file, "
+            f"because that would "
+            f"give each reviewed pull request the merge-lane agent-seat of "
+            f"{MERGE_LANE_BY_PULL_REQUEST_NUMBER_REMAINDER_TEXT}, in place of the one it was "
+            f"assigned. Tell the user the file is gone, and that no other copy exists but the "
+            f"REVIEW-ASSIGNED lines in merge-lane-2's agent-session transcripts, and ask whether to "
+            f"rebuild it from them.\n")
+
+
+def merge_lane_pull_request_review_assignments_file_read(path, file_kind="assignment file"):
+    """Return {pull request number: merge-lane agent-seat} from the assignment file, or a seed file
+    in its format, which file_kind names. Raises MergeLanePullRequestReviewAssignmentsFileUnusable."""
     try:
         text = path.read_text(encoding="utf-8")
     except FileNotFoundError as error:
         raise MergeLanePullRequestReviewAssignmentsFileUnusable(
-            f"the assignment file {path} does not exist") from error
+            "missing", f"the {file_kind} {path} does not exist") from error
     except (OSError, UnicodeDecodeError) as error:
         raise MergeLanePullRequestReviewAssignmentsFileUnusable(
-            f"the assignment file {path} cannot be read: {error}") from error
+            "unreadable", f"the {file_kind} {path} cannot be read: {error}") from error
     assignments = {}
     for line_number, line in enumerate(text.splitlines(), 1):
         number, _, lane = line.partition(" ")
         if not (number.isascii() and number.isdigit()) or lane not in MERGE_LANES_IN_ASSIGNMENTS_FILE:
             raise MergeLanePullRequestReviewAssignmentsFileUnusable(
-                f"line {line_number} of the assignment file {path} is {line!r}, not "
-                f"'<pull request number> <one of {', '.join(MERGE_LANES_IN_ASSIGNMENTS_FILE)}>'")
+                "line", f"line {line_number} of the {file_kind} {path} is {line!r}, not "
+                f"'{ASSIGNMENT_LINE_FORMAT}'")
         if int(number) in assignments:
             raise MergeLanePullRequestReviewAssignmentsFileUnusable(
-                f"line {line_number} of the assignment file {path} assigns pull request "
+                "line", f"line {line_number} of the {file_kind} {path} assigns pull request "
                 f"#{number} a second time")
         assignments[int(number)] = lane
     return assignments
@@ -500,23 +542,9 @@ def merge_lane_pull_request_review_assignment_lines(path, pull_requests, state):
                                                for pull_request, lane in dealt))
     except MergeLanePullRequestReviewAssignmentsFileUnusable as error:
         if not state.get("stopped"):
-            what_to_do = (
-                f"  If this watcher has never assigned a review, make the file once, on ned-box: "
-                f"python3 scripts/watch-open-pull-requests-hack.py "
-                f"--merge-lane-pr-review-assignments-file {path} "
-                f"--merge-lane-pr-review-assignments-file-write-from-seed-and-reviewed-prs-then-exit "
-                f"<seed file>, where <seed file> holds the assignments made by hand before, in "
-                f"the same '<pull request number> <merge-lane agent-seat>' lines.\n"
-                f"  If it has assigned reviews before, restore the file from where it went, and do "
-                f"not make it again from a seed file: that would give each reviewed pull request "
-                f"the agent-seat of its number's remainder, not the one it was assigned.\n"
-                if not path.exists() else
-                f"  If the reason above names a line, correct that line by hand, keeping every "
-                f"other line as it is.\n"
-                f"  If the file cannot be read, make it readable by this watcher's user.\n")
             emit(f"WATCH: review assignment stopped: {error}, so no open pull request is given "
                  f"a merge-lane agent-seat to review it; the watch goes on otherwise.\n"
-                 f"{what_to_do}"
+                 f"{merge_lane_pull_request_review_assignments_file_repair_steps(path, error.case)}"
                  f"  The watcher assigns again at the first poll that reads the whole file.")
         state["stopped"] = True
         return []
@@ -525,8 +553,10 @@ def merge_lane_pull_request_review_assignment_lines(path, pull_requests, state):
             emit(f"WATCH: review assignment stopped: the assignment file {path} cannot be "
                  f"appended to ({error}), so no open pull request is given a merge-lane "
                  f"agent-seat to review it; the watch goes on otherwise.\n"
-                 f"  Make the file writable by this watcher's user. Each poll tries the same "
-                 f"pull requests again, and prints REVIEW-ASSIGNED for them once one records them.")
+                 f"  Make the file writable by the user {getpass.getuser()}, who runs the watcher. "
+                 f"Each later poll tries the same "
+                 f"pull requests again, and the first poll that can append them to the file "
+                 f"prints their REVIEW-ASSIGNED lines.")
         state["stopped"] = True
         return []
     state["stopped"] = False
@@ -538,27 +568,41 @@ def merge_lane_pull_request_review_assignments_seed(path, seed_path, repo, token
     with a review by ned-review-merge, given MERGE_LANE_BY_PULL_REQUEST_NUMBER_REMAINDER's agent-seat.
     Return the exit status."""
     if path.exists():
-        warn(f"watch-open-pull-requests-hack: the assignment file {path} already exists, so "
-             f"nothing was seeded: seeding again would give each reviewed pull request the "
-             f"merge-lane agent-seat of its number's remainder in place of the one it was assigned.\n"
-             f"  If the file is whole, do nothing: the watcher reads it at each poll.\n"
-             f"  If it is damaged, repair it by hand, line by line, as "
-             f"'<pull request number> <merge-lane agent-seat>'.")
-        return 1
+        try:
+            merge_lane_pull_request_review_assignments_file_read(path)
+        except MergeLanePullRequestReviewAssignmentsFileUnusable as error:
+            warn(f"watch-open-pull-requests-hack: nothing was seeded, because the assignment file "
+                 f"exists: seeding would replace it, giving each reviewed pull request the seed "
+                 f"file does not name the merge-lane agent-seat of "
+                 f"{MERGE_LANE_BY_PULL_REQUEST_NUMBER_REMAINDER_TEXT}, in place of the one it was "
+                 f"assigned. The file is damaged: {error}.\n"
+                 + merge_lane_pull_request_review_assignments_file_repair_steps(path, error.case)
+                 .rstrip("\n"))
+            return 1
+        emit(f"WATCH: nothing was seeded, because the assignment file {path} exists and every "
+             f"line of it reads correctly: seeding would replace it, giving each reviewed pull "
+             f"request the seed file does not name the merge-lane agent-seat of "
+             f"{MERGE_LANE_BY_PULL_REQUEST_NUMBER_REMAINDER_TEXT}, in place of the one it was "
+             f"assigned.\n"
+             f"  Do nothing more: the watcher reads the file at each poll.")
+        return 0
     try:
-        assignments = merge_lane_pull_request_review_assignments_file_read(seed_path)
+        assignments = merge_lane_pull_request_review_assignments_file_read(seed_path, "seed file")
     except MergeLanePullRequestReviewAssignmentsFileUnusable as error:
         warn(f"watch-open-pull-requests-hack: nothing was seeded, because {error}.\n"
-             f"  Correct the seed file, then run the same command again.")
+             f"  Correct that line as '{ASSIGNMENT_LINE_FORMAT}', asking whoever made the seed "
+             f"file when you cannot tell which agent-seat it meant, then run the same command "
+             f"again.")
         return 1
     pull_requests, reason = fetch_open_pull_requests(repo, token)
     if reason is not None:
         warn(f"watch-open-pull-requests-hack: nothing was seeded, because reading the open pull "
              f"requests from GitHub failed: "
              f"{one_line_snippet(reason, FAILURE_REASON_SNIPPET_CHARS)}\n"
-             f"  Run the same command again once; if it fails the same way, tell the user that "
-             f"gh on ned-box cannot read the open pull requests, quoting the line above, and "
-             f"that merge-lane-2's watcher assigns no review until the assignment file is made.\n"
+             f"  Run the same command again once; if it fails again, tell the user that gh on "
+             f"ned-box cannot read the open pull requests, quoting the first line of the "
+             f"last failure's message, and that merge-lane-2's watcher assigns no review until the assignment "
+             f"file is made.\n"
              f"  If you are a subagent, tell the agent that dispatched you instead of the user.")
         return 1
     from_seed = len(assignments)
@@ -571,8 +615,9 @@ def merge_lane_pull_request_review_assignments_seed(path, seed_path, repo, token
                        encoding="utf-8")
     os.replace(partial, path)
     emit(f"WATCH: wrote {len(assignments)} assignment(s) to {path}: {from_seed} from {seed_path}, "
-         f"and {len(assignments) - from_seed} open pull request(s) with a review given the "
-         f"merge-lane agent-seat of their number's remainder")
+         f"and {len(assignments) - from_seed} open pull request(s) with a review by "
+         f"the GitHub account {fix_round.MERGE_LANE_2_REVIEWER_LOGIN}, each given the merge-lane agent-seat of "
+         f"{MERGE_LANE_BY_PULL_REQUEST_NUMBER_REMAINDER_TEXT}")
     return 0
 
 
@@ -583,17 +628,23 @@ def merge_lane_pull_request_review_assignments_list(path, lane, repo, token):
         assignments = merge_lane_pull_request_review_assignments_file_read(path)
     except MergeLanePullRequestReviewAssignmentsFileUnusable as error:
         warn(f"watch-open-pull-requests-hack: cannot list {lane}'s pull requests, because "
-             f"{error}.\n"
-             f"  Tell merge-lane-2, with SendMessage, this line, since its watcher assigns no "
-             f"review while the file cannot be read.")
+             f"{error}. merge-lane-2's open-pull-request watcher meets the same failure, and "
+             f"assigns no review until the file is repaired.\n"
+             f"  If you are merge-lane-2, repair the file by the step for your case:\n"
+             + merge_lane_pull_request_review_assignments_file_repair_steps(path, error.case)
+             .replace("\n  ", "\n    ").replace("  ", "    ", 1)
+             + f"  Otherwise, review the pull requests merge-lane-2 has forwarded to you as "
+             f"REVIEW-ASSIGNED lines, and run this command again before you start the next one.\n"
+             f"  If you are a subagent, report this message to the agent that dispatched you instead of acting on it.")
         return 1
     pull_requests, reason = fetch_open_pull_requests(repo, token)
     if reason is not None:
         warn(f"watch-open-pull-requests-hack: cannot list {lane}'s pull requests, because "
              f"reading the open pull requests from GitHub failed: "
              f"{one_line_snippet(reason, FAILURE_REASON_SNIPPET_CHARS)}\n"
-             f"  Run the same command again once; if it fails the same way, tell the user that "
-             f"gh on ned-box cannot read the open pull requests, quoting the line above.\n"
+             f"  Run the same command again once; if it fails again, tell the user that gh on "
+             f"ned-box cannot read the open pull requests, quoting the first line of the "
+             f"last failure's message, then carry on with work that does not need the list.\n"
              f"  If you are a subagent, tell the agent that dispatched you instead of the user.")
         return 1
     mine = [pull_request for pull_request in pull_requests

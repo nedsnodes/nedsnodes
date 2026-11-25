@@ -720,13 +720,16 @@ def run_merge_lane_pull_request_review_assignment_watcher_cases():
               "\n".join(lines))
 
         assignments.unlink()
+        seed_beside = scratch / "assignments-seed-2026-11-24.txt"
+        seed_beside.write_text("1 merge-lane-1\n", encoding="utf-8")
         _, lines, _ = watch([open_now, open_now, open_now])
+        seed_beside.unlink()
         stopped = [line for line in lines if "review assignment stopped" in line]
         check("a missing assignment file stops assignment with one WATCH line, saying how to seed "
-              "it, and is not made",
+              "it from the seed file beside it, and is not made",
               len(stopped) == 1 and "does not exist" in stopped[0]
               and any("--merge-lane-pr-review-assignments-file-write-from-seed-and-reviewed-prs-"
-                      "then-exit" in line for line in lines)
+                      "then-exit" in line and str(seed_beside) in line for line in lines)
               and not any(line.startswith("PR #") for line in lines) and not assignments.exists(),
               "\n".join(lines))
 
@@ -736,6 +739,8 @@ def run_merge_lane_pull_request_review_assignment_watcher_cases():
               "and is left as it was",
               sum("review assignment stopped" in line for line in lines) == 1
               and any("line 2 of the assignment file" in line for line in lines)
+              and any("Correct that line by hand" in line for line in lines)
+              and not any("readable" in line for line in lines)
               and not any(line.startswith("PR #") for line in lines)
               and assignments.read_text(encoding="utf-8") == "1 merge-lane-1\nforty merge-lane-3\n",
               "\n".join(lines))
@@ -798,14 +803,23 @@ def run_merge_lane_pull_request_review_assignment_watcher_cases():
               and any("wrote 5 assignment(s)" in line for line in lines),
               f"exit {exit_code!r} {errors}\n" + "\n".join(lines))
         exit_code, lines, errors = seed_with([open_at_seed])
-        check("the seed refuses to replace an assignment file that exists",
-              exit_code == 1 and "already exists" in errors
-              and seeded.read_text(encoding="utf-8").startswith("4028 merge-lane-1\n"), errors)
+        check("the seed leaves an assignment file that exists as it is, exits 0 and says it reads "
+              "correctly",
+              exit_code == 0 and any("every line of it reads correctly" in line for line in lines)
+              and seeded.read_text(encoding="utf-8").startswith("4028 merge-lane-1\n"),
+              f"exit {exit_code!r} {errors}\n" + "\n".join(lines))
+        seeded.write_text("4028 merge-lane-1\n4028 merge-lane-3\n", encoding="utf-8")
+        exit_code, lines, errors = seed_with([open_at_seed])
+        check("the seed refuses to replace a damaged assignment file, naming the damaged line",
+              exit_code == 1 and "The file is damaged: line 2 of the assignment file" in errors
+              and seeded.read_text(encoding="utf-8") == "4028 merge-lane-1\n4028 merge-lane-3\n",
+              errors)
         seeded.unlink()
         seed.write_text("4028 lane-one\n", encoding="utf-8")
         exit_code, lines, errors = seed_with([open_at_seed])
-        check("a malformed seed file exits 1 and writes no assignment file",
-              exit_code == 1 and "line 1 of the assignment file" in errors and not seeded.exists(),
+        check("a malformed seed file exits 1, naming it as the seed file, and writes no assignment "
+              "file",
+              exit_code == 1 and "line 1 of the seed file" in errors and not seeded.exists(),
               errors)
 
         # The lookup.
@@ -833,8 +847,12 @@ def run_merge_lane_pull_request_review_assignment_watcher_cases():
               exit_code == 1 and "HTTP 503" in errors and not lines, errors)
         exit_code, lines, errors = look_up("merge-lane-1", [open_at_lookup],
                                            path=scratch / "absent.txt")
-        check("the lookup exits 1 when the assignment file is missing",
-              exit_code == 1 and "does not exist" in errors, errors)
+        check("the lookup exits 1 when the assignment file is missing, giving merge-lane-2 the "
+              "step that makes it",
+              exit_code == 1 and "does not exist" in errors
+              and "If you are merge-lane-2, repair the file" in errors
+              and "--merge-lane-pr-review-assignments-file-write-from-seed-and-reviewed-prs-then-exit"
+              in errors, errors)
 
 
 class PollsRanOut(Exception):
