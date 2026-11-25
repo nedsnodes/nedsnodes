@@ -34,7 +34,9 @@ at the merge commit GitHub reports, and runs that worktree's own
 scripts/run-all-test-suites.py with --only-suites-whose-recorded-inputs-changed-since
 once for each commit it compares with, so only the suites whose recorded inputs
 changed since a tested tree run: a suite runs only when the comparison with every
-such commit selects it. Two commits are compared with when both are known. One is
+such commit selects it, except that the runner judges a suite the head test run
+leaves out by the first commit given alone, so the program gives the newest main
+commit below first. Two commits are compared with when both are known. One is
 the newest main commit whose own after-merge test run left no test failing,
 which the program reads from
 ~/.local/state/nedsnodes/newest-main-commit-whose-after-merge-test-run-left-no-test-failing.txt

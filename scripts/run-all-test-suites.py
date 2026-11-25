@@ -42,7 +42,11 @@ Usage:
                 run only the suites whose recorded inputs differ between
                 COMMIT and the checkout's files; see SELECTION below.
                 Given more than once, a suite runs only when the
-                comparison with every COMMIT selects it. Without it
+                comparison with every COMMIT selects it, except that
+                one in SUITES_THAT_RUN_THE_REAL_CLAUDE_CLI or
+                SUITES_RUN_WITHOUT_ANY_SANDBOX, which a pull request
+                head test run leaves out, is judged by the first COMMIT
+                alone. Without it
                 every suite runs. Without --only-suites-named,
                 and where suites run in nn-test-sandboxes, it keeps a
                 suite in SUITES_RUN_WITHOUT_ANY_SANDBOX only when the
@@ -4769,7 +4773,9 @@ def suites_selected_since_every_commit(top, suites, recordings, commits, differs
                                        read_only_directory):
     """[(suite, selected, why)] for every suite, in order: suites_selected_since's answer for
     each of commits, with differs[i] for commits[i], and a suite selected only when the
-    comparison with every commit selects it."""
+    comparison with every commit selects it, except that a suite in
+    SUITES_THAT_RUN_THE_REAL_CLAUDE_CLI or SUITES_RUN_WITHOUT_ANY_SANDBOX is judged by the
+    first commit alone."""
     selections = [suites_selected_since(top, suites, recordings, commit, differ,
                                         files_only_strace_saw_by_suite, read_only_recordings,
                                         read_only_directory)
@@ -4778,6 +4784,14 @@ def suites_selected_since_every_commit(top, suites, recordings, commits, differs
         return selections[0]
     combined = []
     for index, suite in enumerate(suites):
+        if suite in SUITES_THAT_RUN_THE_REAL_CLAUDE_CLI or suite in SUITES_RUN_WITHOUT_ANY_SANDBOX:
+            # A pull request head test run, whose commit the after-merge test run gives after
+            # the first, leaves these suites out, so it never passed them on that commit.
+            _, selected, why = selections[0][index]
+            combined.append((suite, selected, f"judged by the comparison with the first commit "
+                                              f"alone, {commits[0][:12]}, since a pull request "
+                                              f"head test run leaves such a suite out: {why}"))
+            continue
         answers = [(commit, selection[index]) for commit, selection in zip(commits, selections)]
         leaving_out = next(((commit, why) for commit, (_, selected, why) in answers
                             if not selected), None)

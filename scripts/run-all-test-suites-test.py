@@ -1042,6 +1042,39 @@ with tempfile.TemporaryDirectory() as scratch:
               and f"SELECTED reads-nothing-else-test.py: {changed} differs, and every suite "
                   f"runs under it" in lines(result.stdout), (ran(root), result.stdout))
 
+    # A pull request head test run leaves out the suites that run the real claude CLI and
+    # most no-sandbox suites, so its commit, the second one given, must not leave them out.
+    head_test_run_leaves_out = {"SUITES_THAT_RUN_THE_REAL_CLAUDE_CLI": "reads-nothing-else-test.py",
+                                "SUITES_RUN_WITHOUT_ANY_SANDBOX": "reads-a-file-test.py"}
+    commit_files(repo, {"scripts/run-all-test-suites.py": "# lists naming fixture suites\n" + "".join(
+        f"{name} = {{{head_test_run_leaves_out[name]!r}: 'the fixture names it'}}\n"
+        if name in head_test_run_leaves_out else f"{name} = {{}}\n"
+        for name in module.SUITE_SANDBOX_LIST_NAMES_READ_FROM_CHECKOUT_UNDER_TEST)},
+        "name fixture suites in the lists a head test run leaves out")
+    selective_run(root, base)
+    main_passed = git(repo, "rev-parse", "HEAD").stdout.strip()
+    head_tested = commit_files(repo, {".claude/guard-hooks/another-guard.py": "# guard\n"},
+                               "change a guard hook")
+    result = selective_run(root, main_passed, head_tested)
+    out = lines(result.stdout)
+    check("given two commits, a suite that runs the real claude CLI, which a head test run "
+          "leaves out, is judged by the first commit alone, so a change under "
+          ".claude/guard-hooks/ since that commit runs it",
+          "reads-nothing-else-test.py" in ran(root)
+          and any(line.startswith("SELECTED reads-nothing-else-test.py: ") and
+                  "the first commit alone" in line for line in out),
+          (ran(root), result.stdout, result.stderr))
+    check("given two commits, a suite in SUITES_RUN_WITHOUT_ANY_SANDBOX is judged by the first "
+          "commit alone too, and a suite in neither list stays left out by the second",
+          any(line.startswith("SELECTED reads-a-file-test.py: ") and "the first commit alone"
+              in line for line in out)
+          and "loads-a-program-by-path-test.py" not in ran(root)
+          and any(line.startswith(f"NOT SELECTED loads-a-program-by-path-test.py: the "
+                                  f"comparison with {head_tested[:12]} leaves it out")
+                  for line in out),
+          (ran(root), result.stdout, result.stderr))
+    base = head_tested
+
     result = run(root, CHANGED_SINCE, "no-such-commit")
     check("a commit git cannot resolve is refused, exit 2, before anything runs",
           result.returncode == 2 and CHANGED_SINCE in result.stderr, (result.returncode,
