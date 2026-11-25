@@ -89,7 +89,7 @@ notice merge-gate.sh prints. It runs each recorded suite the selective run did
 not run, with --only-suites-named, and reads each test's verdict from the
 runs' junit.xml. A recorded test leaves the record when it passes; when its
 suite ran to the end, at a later commit than the one where the test last
-failed, and reported nothing for it, not even a skip; or when git no longer
+failed, failed no test, and reported nothing for it, not even a skip; or when git no longer
 lists its suite at the merge commit. It prints the name of each test that
 leaves. Each failed test not yet recorded joins it, and those tests together
 get one repair task, on the task list of the agent-seat that authored the
@@ -786,10 +786,11 @@ def failed_suites_kept_in_view(arguments, merge_commit, worktree, log_dir, envir
             return None
         if test_skipped(test, verdict) or not verdict["ran_to_the_end"]:
             return None
-        # A suite that failed with no case line, such as by a crash at import, a shell suite's
-        # set -e or a sys.exit(1), ran none of its cases, though the runner counts it as run to
-        # the end so that a suite that only ever reports by its exit code gets no STOP.
-        if set(verdict["failed"]) == {suite} and not verdict["passed"]:
+        # A failed suite may have stopped before this case, by a crash at import, a shell suite's
+        # set -e or a sys.exit(1), and the runner still counts it as run to the end so that a
+        # suite that only ever reports by its exit code gets no STOP. Only a suite that failed
+        # nothing shows it reached every case.
+        if verdict["failed"]:
             return None
         return ("its suite ran to the end and reported nothing for it"
                 if observed_at(suite, test, fields, True) else None)
