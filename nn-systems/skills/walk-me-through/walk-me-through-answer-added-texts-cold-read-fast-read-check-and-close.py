@@ -11,7 +11,7 @@ Usage, from the agent-session's checkout:
       [--obvious | --after-advisor | --disapproved | --deferred | --option N
        | --part-answer N=ANSWER ... | --moved-on-no-decision
        | --not-asked KIND|none|weak-cost-only|weak-alters-earlier-approved-text-only
-       | --already-decided USER_RULING [A|D|N=A|N=D ...] | --now-over-later-already-decided
+       | --already-decided USER_RULING [A|D] | --now-over-later-already-decided
        | --moved-on REASON]
       --user-reply-as-typed REPLY    (every answer but --not-asked, --already-decided,
                                       --now-over-later-already-decided and --moved-on)
@@ -37,11 +37,8 @@ user-ruling decides, USER_RULING citing that ruling, followed by the answer the
 ruling gives: nothing or A when it decides the item as the item recommends,
 which adds the `#new` texts as A does; D when it decides the item against its
 recommendation, for its alternative, which adds the `#new_if_d` texts as D does
-and is recorded as disapproved; or N=A or N=D, once for each part N it decides,
-which adds the texts as --part-answer does and is refused, writing nothing, for
-a part number the item's `Part N.` paragraphs, as the walk-me-through
-UserPromptSubmit hook's part_starts finds them, do not hold; any other value
-after USER_RULING is refused, writing nothing; --now-over-later-already-decided, the
+and is recorded as disapproved; any other value after USER_RULING is refused,
+writing nothing; --now-over-later-already-decided, the
 same with the now-over-later ruling as its citation; and --moved-on for an item the walk
 leaves with no decision, REASON saying why, which changes nothing. When the
 walk-minutes hold an `#item_page` line for the item, a link or a failed
@@ -243,12 +240,7 @@ leaves the walk and stays open, and so does an item deferred for the first
 time when the next item the minutes do not record after it in the walk is the
 summary item and no unshown item is still to come; for --already-decided or --moved-on, that the
 walk does not come back to the item, with the ruling or the reason, an already-decided
-item recorded `<rejected>` when its ruling's answer is D. When --already-decided named parts,
-CLOSE records each part's outcome, as for answers to parts, and, while a part
-of the item is left that neither those parts nor an earlier such close line for
-the same items decide, it records them with the ruling in a line that decides
-nothing, writes the `#next_to_present` line again unchanged, and tells the agent
-to show the user only the parts left. For a
+item recorded `<rejected>` when its ruling's answer is D. For a
 deferral it also puts `(deferred: moved to just before the summary item)` right
 after the running count of the item's walk-document heading, before it writes
 the minutes, so the heading says why the item comes late; in a walk with no
@@ -329,7 +321,7 @@ no other item heading has; a first-entered date not written YYYY-MM-DD; or
 when such items wait on each other in a circle. Only a line CLOSE
 writes records anything: a line for an answer that took effect, for answers to
 parts, for --moved-on-no-decision, for --already-decided or for --moved-on
-decides its items, except the line for parts an earlier ruling decides while a part is left; a line for a
+decides its items; a line for a
 deferral defers its items once, and a line for a deferral that takes an item
 out of the walk because it stood just before the summary item defers its
 items twice. Every other line records nothing, whatever it
@@ -942,20 +934,12 @@ PART_ARGUMENT_PROBLEM = ("`{value}` is not a part's answer: give the part's numb
                          "`1=A`; a part takes no Z, so a deferral is given to the whole item with --deferred")
 PART_REPEATED = ("nothing written: --part-answer gives {parts} more than one answer.\n"
                  "Run check again giving each part's number once, with the letter the user gave that part.")
-ALREADY_DECIDED_PART_ARGUMENT = re.compile(r"^(\d+)=(a|d)$", re.I)
 ALREADY_DECIDED_WHOLE_ANSWERS = ("A", "D")
 ALREADY_DECIDED_ANSWERS_PROBLEM = (
     "nothing written: --already-decided was given {answers} after USER_RULING, which is not an answer a ruling "
-    "gives: after USER_RULING it takes nothing or A, for a ruling that decides the item as it recommends; D, for "
-    "one that decides it against its recommendation, for its alternative; or N=A or N=D, once for each part N the "
-    "ruling decides, as in `1=A 2=D`.\n"
+    "gives: after USER_RULING it takes nothing or A, for a ruling that decides the item as it recommends, or D, "
+    "for one that decides it against its recommendation, for its alternative.\n"
     "Run check again with the answer the ruling gives.")
-ALREADY_DECIDED_PARTS_MISSING = (
-    "nothing written: --already-decided names {parts}, but {item} in {document} has {item_parts}, as the "
-    "walk-me-through UserPromptSubmit hook reads `Part N.` paragraphs.\n"
-    "If a part number was mistyped, run check again with the item's part numbers.\n"
-    "If the ruling decides the whole item, run check again with A or D after USER_RULING in place of the parts.\n"
-    "If the item's parts are not written as `Part N.` paragraphs, rewrite them so, then run check again.")
 
 NO_PROPOSED_TEXT = "no proposed text marked"
 STATUS_ALREADY_DONE = "`{mark}` text {number}, \"{excerpt}\": fast read already done ({record})."
@@ -1061,9 +1045,6 @@ CHECK_MOVED_ON_SHOWN_MINUTES = ("{item}: " + CHECK_MOVED_ON_SHOWN_PREFIX + " {an
                                 "which makes no change.")
 CLOSE_TOOK_EFFECT_MINUTES = "{item}: {answered}; every text the change adds has had a fast read. {outcome}"
 CLOSE_PARTS_TOOK_EFFECT_MINUTES = "{item}: {parts}; every text the change adds has had a fast read."
-# Records nothing, so the item stays waiting for the parts no ruling decides.
-CLOSE_SOME_PARTS_ALREADY_DECIDED_MINUTES = ("{item}: {parts} already decided by {ruling}; the walk shows the user only "
-                                            "its other parts. <open>")
 CLOSE_DEFERRED_MINUTES = "{item}: deferred; it moves to just before the summary item. <open>"
 # No fast-read clause in these two: the one-time conversion of older walk-minutes writes them too, with no fast read.
 CLOSE_ALREADY_DECIDED_MINUTES = "{item}: already decided by {ruling}; the walk does not come back to it. {outcome}"
@@ -1184,7 +1165,6 @@ def after_the_items_pattern(template):
 DECIDING_LINES = tuple(after_the_items_pattern(template) for template in (
     CLOSE_TOOK_EFFECT_MINUTES, CLOSE_PARTS_TOOK_EFFECT_MINUTES, CLOSE_ALREADY_DECIDED_MINUTES, CLOSE_MOVED_ON_MINUTES,
     CLOSE_MOVED_ON_NO_DECISION_MINUTES))
-SOME_PARTS_ALREADY_DECIDED_LINE = after_the_items_pattern(CLOSE_SOME_PARTS_ALREADY_DECIDED_MINUTES)
 # The `#ruling_given` word of each of DECIDING_LINES; None where the line's outcome tag gives it.
 DECIDING_LINE_WORDS = (None, "part_answers", None, "moved_on", "moved_on")
 DEFERRING_LINES = tuple(after_the_items_pattern(template)
@@ -1485,12 +1465,6 @@ CLOSE_NOT_SHOWN_LINES = (
 CLOSE_ALREADY_DECIDED_CHANGE = "Its change may now be made."
 CLOSE_ALREADY_DECIDED_AGAINST_CHANGE = ("It is recorded as disapproved: the change its alternative describes may now "
                                         "be made, and the change its recommendation describes may not.")
-CLOSE_SOME_PARTS_ALREADY_DECIDED_LINES = (
-    "The minutes record {item}'s {parts} as already decided, and {item} stays waiting for the user's answer to "
-    "{rest}.",
-    "Show the user only {rest}, then run check with one --part-answer for each part he answers, as in "
-    "`--part-answer 2=A`.",
-)
 # Both line formats are agreed with merge-lane-2, whose hold command writes the first into its review and whose
 # pull request intake reads the second; change neither without changing those programs.
 HELD_ON_RULING_LINE = "#held_on_ruling {walk} item {number}"
@@ -2454,7 +2428,7 @@ def check_words(arguments):
         words.append("--obvious")
     if arguments.after_advisor:
         words.append("--after-advisor")
-    # --already-decided carries its own D or parts, which it set on these arguments.
+    # --already-decided carries its own D, which it set on these arguments.
     ruled = arguments.already_decided is not None
     if arguments.disapproved and not ruled:
         words.append("--disapproved")
@@ -2472,7 +2446,7 @@ def check_words(arguments):
         words.append(NOW_OVER_LATER_FLAG)
     elif ruled:
         words += ["--already-decided", arguments.already_decided, *arguments.already_decided_answers]
-    for number, letter in [] if ruled else arguments.part_answer or []:
+    for number, letter in arguments.part_answer or []:
         words += ["--part-answer", f"{number}={letter}"]
     if (arguments.user_reply_as_typed or "").strip():
         words += ["--user-reply-as-typed", arguments.user_reply_as_typed]
@@ -2655,30 +2629,12 @@ def now_over_later_problems(walk_finder, minutes, value, numbers, total, parser)
 
 
 def already_decided_answer_set(arguments):
-    """Set the answer --already-decided gives after USER_RULING on the arguments, D as --disapproved does and N=A or
-    N=D as --part-answer does; raise Failure, writing nothing, for any other."""
+    """Set the answer --already-decided gives after USER_RULING on the arguments, D as --disapproved does; raise
+    Failure, writing nothing, for any other than nothing, A or D."""
     answers = arguments.already_decided_answers
-    whole = [answer.upper() for answer in answers if answer.upper() in ALREADY_DECIDED_WHOLE_ANSWERS]
-    parts = [ALREADY_DECIDED_PART_ARGUMENT.match(answer) for answer in answers]
-    numbers = [part[1] for part in parts if part]
-    if ((whole and answers[1:]) or len(set(numbers)) < len(numbers)
-            or not all(answer.upper() in whole or part for answer, part in zip(answers, parts))):
+    if len(answers) > 1 or any(answer.upper() not in ALREADY_DECIDED_WHOLE_ANSWERS for answer in answers):
         raise Failure(ALREADY_DECIDED_ANSWERS_PROBLEM.format(answers=" ".join(f"`{answer}`" for answer in answers)))
-    arguments.disapproved = whole == ["D"]
-    arguments.part_answer = [(int(part[1]), part[2].upper()) for part in parts if part] or None
-
-
-def item_part_numbers(walk_finder, minutes, value, numbers, total, parser):
-    """Return (walk-document path, the part numbers of the items numbered, as the walk-me-through UserPromptSubmit
-    hook finds `Part N.` paragraphs)."""
-    document, _, tokens, ranges, _ = item_line_ranges(walk_finder, minutes, value, numbers, total, parser)
-    hook = load_module("walk_me_through_user_short_answer_hook", SHORT_ANSWER_HOOK_FILE)
-    starts = hook.part_starts(tokens)
-    return document, sorted({number for first, end in ranges for number in hook.part_numbers(starts, first, end)})
-
-
-def parts_named(numbers):
-    return ", ".join(f"part {number}" for number in numbers) if numbers else "no parts"
+    arguments.disapproved = [answer.upper() for answer in answers] == ["D"]
 
 
 def check(arguments):
@@ -2713,12 +2669,6 @@ def check(arguments):
         raise Failure(NAVIGATION_WORD_REFUSED.format(words=words, item=item,
                                                      answered=answered_word(arguments, walk_finder),
                                                      command=moved_on_no_decision_command))
-    if arguments.already_decided is not None and arguments.part_answer:
-        document, item_parts = item_part_numbers(walk_finder, minutes, value, numbers, total, parser)
-        missing = sorted(set(part_numbers) - set(item_parts))
-        if missing:
-            raise Failure(ALREADY_DECIDED_PARTS_MISSING.format(parts=parts_named(missing), item=item,
-                                                               document=document, item_parts=parts_named(item_parts)))
     if arguments.now_over_later_already_decided:
         document, problems = now_over_later_problems(walk_finder, minutes, value, numbers, total, parser)
         if problems:
@@ -4570,23 +4520,6 @@ def held_items_decided_with(walk_finder, minutes, parser, answered_numbers, item
     return lines
 
 
-def parts_already_decided_earlier(walk_finder, minutes, parser, numbers):
-    """Return the part numbers that earlier close lines record as already decided for exactly the items numbers."""
-    found = set()
-    for line in walk_finder.prose_lines(minutes.read_text(encoding="utf-8"), parser):
-        match = PROGRAM_LINE_ITEMS.match(line)
-        if not (match and SOME_PARTS_ALREADY_DECIDED_LINE.match(line[match.end():])):
-            continue
-        try:
-            items, _ = walk_finder.parse_items(match[1])
-        except walk_finder.UnusableRange:
-            continue
-        if set(items) == set(numbers):
-            ruled_answer = line[match.end():].partition(ALREADY_DECIDED_PREFIX)[0]
-            found |= {int(number) for number, _ in PART_IN_ANSWER.findall(ruled_answer)}
-    return found
-
-
 def gh_failure(command, top, gh_program, timeout):
     """Run gh with command in top; return (its stdout, None), or (None, what went wrong) when it cannot be run,
     exits nonzero or outlasts timeout."""
@@ -4762,27 +4695,10 @@ def close(arguments):
     elif answered.startswith(ALREADY_DECIDED_PREFIX) or ", " + ALREADY_DECIDED_PREFIX in answered:
         # The ruling comes last and may hold any words, so the answer is read only from before it.
         ruled_answer, _, ruling = answered.partition(ALREADY_DECIDED_PREFIX)
-        parts = PART_IN_ANSWER.findall(ruled_answer)
-        if parts:
-            named_parts = ", ".join(f"part {number} {word} {OUTCOMES[word]}" for number, word in parts)
-            _, item_parts = item_part_numbers(walk_finder, minutes, value, waiting_numbers, total, parser)
-            rest = sorted(set(item_parts) - {int(number) for number, _ in parts}
-                          - parts_already_decided_earlier(walk_finder, minutes, parser, answered_numbers))
-            if rest:
-                append_to_minutes(minutes, [CLOSE_SOME_PARTS_ALREADY_DECIDED_MINUTES.format(
-                    item=item, parts=named_parts, ruling=ruling), NEXT_MARKER_LINE.format(value=value)])
-                print("\n".join([line.format(item=item, parts=parts_named([number for number, _ in parts]),
-                                             rest=parts_named(rest)) for line in CLOSE_SOME_PARTS_ALREADY_DECIDED_LINES]
-                                + [CLOSE_READ_NEXT_ITEM.format(next_item=item,
-                                                               command=read_step_command_with_cwd(top))]))
-                return 0
-            recorded = CLOSE_PARTS_TOOK_EFFECT_MINUTES.format(item=item, parts=named_parts)
-            word, change = RULING_GIVEN_PART_ANSWERS, CLOSE_ALREADY_DECIDED_CHANGE
-        else:
-            against = ruled_answer.startswith(DISAPPROVED)
-            held_outcome = OUTCOMES[DISAPPROVED if against else APPROVED]
-            recorded = CLOSE_ALREADY_DECIDED_MINUTES.format(item=item, ruling=ruling, outcome=held_outcome)
-            change = CLOSE_ALREADY_DECIDED_AGAINST_CHANGE if against else CLOSE_ALREADY_DECIDED_CHANGE
+        against = ruled_answer.startswith(DISAPPROVED)
+        held_outcome = OUTCOMES[DISAPPROVED if against else APPROVED]
+        recorded = CLOSE_ALREADY_DECIDED_MINUTES.format(item=item, ruling=ruling, outcome=held_outcome)
+        change = CLOSE_ALREADY_DECIDED_AGAINST_CHANGE if against else CLOSE_ALREADY_DECIDED_CHANGE
         output = ([line.format(item=item) for line in CLOSE_NOT_SHOWN_LINES] + [change]
                   + list(CLOSE_TOOK_EFFECT_NEXT))
     else:
@@ -4875,10 +4791,9 @@ def main(argv=None):
     answer.add_argument("--option", type=int, choices=OPTION_NUMBERS,
                         help="check: the answer was O2 or O3, approving the item's \"Option N\" paragraph")
     answer.add_argument("--already-decided", nargs="+", metavar=("USER_RULING", "ANSWER"),
-                        help="check: not shown, since an earlier user-ruling decides the item, or some of its parts; "
-                             "USER_RULING cites it, and ANSWER is the answer the ruling gives: none or A as the item "
-                             "recommends, D against its recommendation, for its alternative, or N=A or N=D for each "
-                             "part N it decides, the item then waiting for the user's answer to its other parts")
+                        help="check: not shown, since an earlier user-ruling decides the item; USER_RULING cites "
+                             "it, and ANSWER is the answer the ruling gives: none or A as the item recommends, or D "
+                             "against its recommendation, for its alternative")
     answer.add_argument(NOW_OVER_LATER_FLAG, action="store_true",
                         help="check: not shown, since its only choice is whether to build something now or later "
                              "and it recommends now; records it as already decided by the user's answer to item 42 "
