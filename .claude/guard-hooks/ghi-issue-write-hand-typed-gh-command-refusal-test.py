@@ -320,16 +320,15 @@ for text in REFUSAL_TEXTS:
               and "ruled" not in line
               and "2026" not in line, line)
 
-# edit-GHI retitles only an issue with one filed GHI-MD, and only when the
-# edit changes its heading, so the title refusal sends the agent to the user
-# in the other cases, and says so before it says what to change.
+# edit-GHI retitles only an issue with one filed GHI-MD, so the title refusal
+# sends the agent to the user in the other cases, and says so before it says
+# what to change.
 check("the title refusal, files unknown: the stop line comes before the change line",
       EDIT_TITLE_FALLBACK.splitlines()[2] ==
       "If the issue has no file or two or more files, counting files named "
-      "docs/issues/<number>-*.md and designs in a system's docs/ directory, or the "
-      "first heading of the issue's GHI-MD already reads the title you want, stop "
+      "docs/issues/<number>-*.md and designs in a system's docs/ directory, stop "
       "and tell the user."
-      and EDIT_TITLE_FALLBACK.splitlines()[3].startswith("Otherwise change the first heading"),
+      and EDIT_TITLE_FALLBACK.splitlines()[3].startswith("Otherwise, if the first heading"),
       EDIT_TITLE_FALLBACK)
 for name, text in (("comment", COMMENT_FALLBACK), ("body", EDIT_BODY_FALLBACK),
                    ("title", EDIT_TITLE_FALLBACK)):
@@ -500,18 +499,17 @@ with tempfile.TemporaryDirectory() as temporary_directory:
         "[rule bash-guard-gh-issue-body-or-title-set-by-hand] "
         "Do not set this project's issue titles with gh issue edit: "
         "scripts/ghi-issue-write.py sets an issue's title from the first heading of the "
-        "issue's GHI-MD, when the issue has one file on main and an edit changes that "
+        "issue's GHI-MD, when the issue has one file on main and its title is not that "
         "heading.",
         "To change only labels, assignees or the milestone, run gh issue edit without "
         "--title, --body, --body-file and --attach; that needs no file."]
     refusal = refusal_in_checkout('gh issue edit 46 --title "New title"')
-    check("title: an issue with one file on main: stop if the heading already reads it, "
-          "otherwise change it, then rerun",
+    check("title: an issue with one file on main: change the heading if it does not "
+          "read the title, then run edit",
           refusal is not None and refusal.split("\n") == TITLE_FIRST_LINES + [
-              f"If the first heading of {ONE_FILE} already reads the title you want, stop "
-              "and tell the user.",
-              "Otherwise change that heading to the title you want, then open the edit's "
-              f"pull request with: python3 scripts/ghi-issue-write.py edit {ONE_FILE}",
+              f"If the first heading of {ONE_FILE} does not read the title you want, "
+              "change it to that title.",
+              f"Then run: python3 scripts/ghi-issue-write.py edit {ONE_FILE}",
               RERUN], refusal)
     refusal = refusal_in_checkout('gh issue edit 47 -t "New title"')
     check("title: an issue with several files on main is told to stop, with no rerun line",
