@@ -71,6 +71,10 @@ the last poll's.
 --merge-lane-pr-review-assignments-file-write-from-seed-and-reviewed-prs-then-exit
 makes the file once, and --merge-lane-pr-review-assignments-list-for lists
 one agent-seat's pull requests.
+The default assignment file numbers the pull requests of DEFAULT_REPO only.
+With another --repo and no --merge-lane-pr-review-assignments-file, the
+watch assigns no review and prints no line saying so, and the seed and the
+listing exit 2.
 
 With --batch-events-for-seconds N, every OPENED, NEW-HEAD, READY, REVIEW-ASSIGNED and NEEDS A
 LOOK line is held in the process instead of printed. The watcher prints them
