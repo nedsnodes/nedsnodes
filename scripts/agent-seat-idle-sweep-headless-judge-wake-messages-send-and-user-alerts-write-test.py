@@ -338,7 +338,7 @@ class Machine:
 
 HANDOFF_TEXT_START = "Your handoff was put off at"
 
-# --- rule 3: the nudge, the delivery check, the escalation and telling the user --------------
+# --- rule 3: the nudge, the delivery check, the escalation and the step after it -----------
 machine = Machine()
 machine.seat("alpha", DONE_TURN)
 machine.handoff_put_off()
@@ -395,23 +395,26 @@ check("the message found in the agent-seat's transcript: no user-alert, no secon
       [event["found"] for event in machine.events("delivery_checked")] == [False, True]
       and not machine.alerts() and len(machine.owner_tasks()) == 1, machine.events("delivery_checked"))
 code, _ = machine.run(31.5)
-check("idle again 15 minutes after the escalation: the user is told, and no message is sent",
-      not machine.claude_calls() and len(machine.alerts()) == 1
-      and "after a nudge and an escalation" in machine.alerts()[0]["title"], machine.alerts())
-check("a text-only reply keeps the wait, and the user-alert counts the minutes from when the "
-      "agent-seat first went idle, not from the reply",
-      len(machine.alerts()) == 1 and machine.alerts()[0]["title"].startswith(
-          "alpha has been idle 41 minutes after"), machine.alerts())
+check("idle again 15 minutes after the escalation, a text-only reply having kept the wait: the "
+      "step is logged, and no message is sent and no user-alert written",
+      not machine.claude_calls() and not machine.alerts()
+      and [event["step"] for event in machine.events("wait_step")]
+      == ["nudge", "escalate", "tell_user"], (machine.events("wait_step"), machine.alerts()))
 code, _ = machine.run(40)
-check("after telling the user, nothing more while the agent-seat spends no tokens",
-      not machine.claude_calls() and len(machine.alerts()) == 1, machine.alerts())
+check("after the step that follows the escalation, nothing more while the agent-seat spends no "
+      "tokens",
+      not machine.claude_calls() and not machine.alerts()
+      and [event["step"] for event in machine.events("wait_step")]
+      == ["nudge", "escalate", "tell_user"], (machine.events("wait_step"), machine.alerts()))
 machine.append("alpha", user("more", at(41)), assistant("Back to it.", at(41.5)), turn_end(at(42)))
 machine.script(sent_ok())
 code, _ = machine.run(48)
-check("spending tokens after the user was told starts the steps over, with a new nudge",
+check("spending tokens after the step that follows the escalation starts the steps over, with a "
+      "new nudge",
       len(machine.claude_calls()) == 1 and [event["step"] for event in machine.events("wait_step")]
       == ["nudge", "escalate", "tell_user", "nudge"]
-      and machine.events("wait_ended")[-1]["why"] == "it spent tokens after the user was told",
+      and machine.events("wait_ended")[-1]["why"]
+      == "it spent tokens after the step that follows the escalation" and not machine.alerts(),
       machine.events("wait_step"))
 
 # --- a tool call after the nudge ends the wait ---------------------------------------------------
@@ -887,9 +890,9 @@ check("rule 2: still idle 15 minutes after the promise message, the re-check fin
       machine.events("wait_step"))
 machine.script()
 machine.run(32)
-check("rule 2: idle 15 minutes after the escalation: the user is told",
+check("rule 2: idle 15 minutes after the escalation: the step is logged, and no user-alert written",
       [event["step"] for event in machine.events("wait_step")] == ["nudge", "escalate", "tell_user"]
-      and any("after a nudge and an escalation" in alert["title"] for alert in machine.alerts()),
+      and not machine.alerts(),
       (machine.events("wait_step"), machine.alerts()))
 
 SECOND_PROMISE = "I'll fix it after lunch."
@@ -959,11 +962,11 @@ for opener in ("rule 5", "rule 3"):
     machine.run(16)
     machine.script()
     machine.run(32)
-    check(f"a promise sent on a {opener} wait: the escalation, then the user is told",
+    check(f"a promise sent on a {opener} wait: the escalation, then the step after it, with no "
+          "user-alert",
           [event["step"] for event in machine.events("wait_step")]
           == ["nudge", "promise", "escalate", "tell_user"]
-          and machine.events("message_sent")[-1]["step"] == "escalate"
-          and any("after a nudge and an escalation" in alert["title"] for alert in machine.alerts()),
+          and machine.events("message_sent")[-1]["step"] == "escalate" and not machine.alerts(),
           (machine.events("wait_step"), machine.alerts()))
 
 def promise_sent_on_rule_five_wait(promise_sender):
@@ -1016,11 +1019,10 @@ check("rule 2: the escalation quotes the promise message whose send on the open 
 machine.script()
 machine.run(32)
 check("rule 2: after a promise message on an open wait failed to send, the wait goes on to the "
-      "escalation and the user-alert, which names the failed message's sentence",
+      "escalation and the step after it, with no user-alert",
       [event["step"] for event in machine.events("wait_step")]
       == ["nudge", "promise", "escalate", "tell_user"]
-      and any("after a nudge and an escalation" in alert["title"] and PROMISE in alert["alert_text"]
-              for alert in machine.alerts()),
+      and not machine.alerts(),
       (machine.events("wait_step"), machine.alerts()))
 
 # A rule 5 wait whose only rule 2 group is a failed message's: a task call after the failure still
@@ -1466,10 +1468,11 @@ check("re-check finds one sentence of two unbacked: the escalation is sent after
       (calls, machine.events("wait_step"), machine.events("wait_ended")))
 machine.script()
 machine.run(31.5)
-check("an escalated wait reaches the user-alert without another re-check",
+check("an escalated wait reaches the step after the escalation without another re-check, and "
+      "writes no user-alert",
       not machine.claude_calls()
       and [event["step"] for event in machine.events("wait_step")] == ["nudge", "escalate", "tell_user"]
-      and any("after a nudge and an escalation" in alert["title"] for alert in machine.alerts()),
+      and not machine.alerts(),
       (machine.claude_calls(), machine.events("wait_step"), machine.alerts()))
 
 for case, answer, subject in (
@@ -2576,10 +2579,11 @@ machine.script(usage_limit_exit_with_transcript(RESET_IN_AN_HOUR))
 machine.run(20)
 machine.script()
 machine.run(32)
-check("a pause holds over a stuck wait: the user is still told, and no headless agent-session starts",
+check("a pause holds over a stuck wait: the step after the escalation is still logged, with no "
+      "user-alert, and no headless agent-session starts",
       len(machine.events("headless_usage_limit_pause")) == 1
       and [event["step"] for event in machine.events("wait_step")] == ["nudge", "escalate", "tell_user"]
-      and any("after a nudge and an escalation" in alert["title"] for alert in machine.alerts())
+      and not machine.alerts()
       and not machine.claude_calls(),
       (machine.events("wait_step"), machine.alerts(), machine.claude_calls()))
 
@@ -2898,25 +2902,28 @@ machine.run(32)
 machine.append("alpha", user("more", at(40)), assistant(PROMISE, at(41)), turn_end(at(41)))
 machine.script(sent_ok())
 machine.run(47)
-check("a promise after the user was told: the old wait ends and the promise message opens a new one",
+check("a promise after the step that follows the escalation: the old wait ends and the promise "
+      "message opens a new one",
       len(machine.claude_calls()) == 1
       and [event["why"] for event in machine.events("wait_ended")][-1:]
-      == ["it spent tokens after the user was told"]
+      == ["it spent tokens after the step that follows the escalation"]
       and [event["step"] for event in machine.events("wait_step")]
       == ["nudge", "escalate", "tell_user", "nudge"], machine.events("wait_step"))
 machine.script(rechecked(False), sent_ok())
 machine.run(63)
 calls = machine.claude_calls()
-check("a promise after the user was told: still idle 15 minutes later, the escalation is sent",
+check("a promise after the step that follows the escalation: still idle 15 minutes later, the "
+      "escalation is sent",
       len(calls) == 2 and "please check" in calls[1]["prompt"]
       and [event["step"] for event in machine.events("wait_step")][-2:] == ["nudge", "escalate"],
       (calls, machine.events("wait_step")))
 machine.script()
 machine.run(79)
-check("a promise after the user was told: 15 minutes after that escalation, the user is told again",
+check("a promise after the step that follows the escalation: 15 minutes after that escalation, "
+      "the step is logged again, with no user-alert",
       [event["step"] for event in machine.events("wait_step")][-3:]
       == ["nudge", "escalate", "tell_user"]
-      and sum("after a nudge and an escalation" in alert["title"] for alert in machine.alerts()) == 2,
+      and not machine.alerts(),
       (machine.events("wait_step"), machine.alerts()))
 
 THIRD_PROMISE = "I'll push once the tests pass."
@@ -2943,9 +2950,10 @@ check("a fresh promise at every run does not put off the escalation 15 minutes a
       (calls, machine.events("wait_step")))
 machine.script()
 machine.run(32)
-check("the user-alert names the sentence the escalation named, which no message of its own named",
-      any(THIRD_PROMISE in alert["alert_text"] and "sent it no message of their own" in alert["alert_text"]
-          for alert in machine.alerts()), machine.alerts())
+check("a wait whose escalation named a sentence no message of its own named: 15 minutes later the "
+      "step after the escalation is logged, with no user-alert",
+      [event["step"] for event in machine.events("wait_step")] == ["nudge", "escalate", "tell_user"]
+      and not machine.alerts(), (machine.events("wait_step"), machine.alerts()))
 
 # The re-check finds every sentence backed, the one found in its own run included: the wait ends,
 # and no message about that sentence opens a wait of its own.
@@ -3631,9 +3639,10 @@ machine.script(sent_ok())
 machine.run(16)
 machine.script()
 machine.run(32)
-check("a reminder already sent still goes on to its escalation and its user-alert",
+check("a reminder already sent still goes on to its escalation and the step after it, with no "
+      "user-alert",
       [event["step"] for event in machine.events("wait_step")] == ["nudge", "escalate", "tell_user"]
-      and len(machine.alerts()) == 1, machine.events("wait_step"))
+      and not machine.alerts(), (machine.events("wait_step"), machine.alerts()))
 
 machine = one_reminder_of_task_1()
 machine.append("alpha", assistant("I'll report when PR 927 merges.", when=at(11)), turn_end(at(11)))
