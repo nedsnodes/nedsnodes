@@ -9,6 +9,9 @@ shows a running subagent, workflow or background shell task younger than its kin
 from BACKGROUND_TASK_WAIT_LIMIT_MINUTES_BY_KIND, or while a
 transcript it reads launch records from cannot be read, since it then cannot tell what runs.
 With no background_tasks list it counts nothing as running.
+The open-pull-request watcher counts as a one-shot run, not a watcher, only when --poll-once or
+--poll-once-write-baseline stands as an argument of its own; quoted, written with "=", or
+abbreviated, it is not handled, and the one-shot run is counted as the watcher.
 
 The post-compaction hook deletes only <session>-handoff-asked, so while <session>-handoff-deferred
 exists the hook still fires below the threshold once the awaited work has finished; it then
