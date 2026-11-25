@@ -238,12 +238,12 @@ PROMISE_MESSAGES = "promise_messages"
 # An event logged when a rule 2 message's send on an open wait failed, carrying its text and the
 # sentences it names, since no message_sent or promise_message event holds them.
 PROMISE_MESSAGE_SEND_FAILED = "promise_message_send_failed"
-# On an open wait: the rule 2 messages whose send on it failed, [{"at", "kinds", "sentences", "text",
-# "earliest_sentence_at"}].
+# On an open wait: the rule 2 messages whose send on it failed, [{"at", "kinds", "sentences", "text"}].
 FAILED_PROMISE_MESSAGES = "failed_promise_messages"
 # An event logged before sentences are logged as checked on an open wait: the wait answers for them
 # whether their message is then sent, its send fails, their judge failed so that no message follows,
-# or the invocation is stopped. A promise_message or failed-send event with its group_id replaces it.
+# or the invocation is stopped. A promise_message event with its group_id replaces it; a failed send
+# leaves it, so the re-check judges a failed message's sentences through it.
 RULE_2_SENTENCES_ON_WAIT = "rule_2_sentences_on_wait"
 # On an open wait: the groups of those sentences no message event has replaced, [{"group_id", "at",
 # "kinds", "sentences", "earliest_sentence_at"}].
@@ -479,13 +479,9 @@ class SweepLog:
                 owed = False
             elif event["event"] == PROMISE_MESSAGE_SEND_FAILED:
                 if wait is not None:
-                    if owed and owed_by != invocation:
-                        wait[PROMISE_MESSAGES] = None
-                    without_message_event_replaced(wait, event)
                     wait[FAILED_PROMISE_MESSAGES].append({
                         "at": event["at"], "kinds": set(event["kinds"]),
-                        "sentences": event["sentences"], "text": event["text"],
-                        "earliest_sentence_at": event.get("earliest_sentence_at")})
+                        "sentences": event["sentences"], "text": event["text"]})
                 owed = False
             elif event["event"] == PROMISE_MESSAGE:
                 if wait is None:
@@ -639,11 +635,10 @@ def without_message_event_replaced(wait, message_event):
 
 
 def sentence_groups_wait_answers_for(wait):
-    """Every group of sentences the wait must answer for, oldest first: its rule 2 messages, those
-    whose send failed, and the sentences no message event holds. Call only when
-    wait[PROMISE_MESSAGES] is not None."""
-    return sorted(wait[PROMISE_MESSAGES] + wait[FAILED_PROMISE_MESSAGES]
-                  + wait[SENTENCES_WITH_NO_MESSAGE_EVENT],
+    """Every group of sentences the wait must answer for, oldest first: its rule 2 messages and the
+    sentences no promise_message event holds, those of a message whose send failed among them.
+    Call only when wait[PROMISE_MESSAGES] is not None."""
+    return sorted(wait[PROMISE_MESSAGES] + wait[SENTENCES_WITH_NO_MESSAGE_EVENT],
                   key=lambda message: parse_time(message["at"]))
 
 
@@ -1267,9 +1262,8 @@ class Sweep:
                                  "earliest_sentence_at": earliest_sentence_at})
                 else:
                     self.record({"event": PROMISE_MESSAGE_SEND_FAILED, "agent_seat": seat,
-                                 "group_id": group_id, "kinds": promise_kinds,
-                                 "sentences": promise_sentences, "text": promise_text,
-                                 "earliest_sentence_at": earliest_sentence_at})
+                                 "kinds": promise_kinds, "sentences": promise_sentences,
+                                 "text": promise_text})
         elif not wait:
             self.nudge(seat, verdict, rule, text, stretch)
 

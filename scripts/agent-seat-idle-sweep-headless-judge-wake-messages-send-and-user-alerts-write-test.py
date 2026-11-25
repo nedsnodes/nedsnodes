@@ -1370,7 +1370,7 @@ EDITOR_DEFERRAL = [
 
 def editor_deferred_machine(message):
     """A machine whose agent-seat was nudged at minute 0 about the sentences of message, and
-    answered by deferring them as task #389 and telling the user so."""
+    answered by deferring them as task 389 and telling the user so."""
     machine = Machine()
     machine.seat("alpha", [user("present item 59.3"), assistant(message), turn_end()])
     sentence_count = len([sentence for sentence in (EDITOR_SENTENCE, EDITOR_SECOND_SENTENCE)
