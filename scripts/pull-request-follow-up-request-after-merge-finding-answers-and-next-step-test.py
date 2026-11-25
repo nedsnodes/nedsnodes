@@ -269,6 +269,15 @@ def test_block_parsing():
             check(f"a request line {label} is refused, quoting the line and the form", False)
     check("a #follow_up_request inside a sentence is not a request line",
           program.parse_follow_up_request_blocks_from_message_text("Use the #follow_up_request line.\n") == [])
+    for name, character in (("U+0085", "\u0085"), ("U+2028", "\u2028"), ("U+2029", "\u2029")):
+        quoting = (f"#follow_up_request pull request {NUMBER}\n"
+                   f"1. fix-next: under LC_ALL=C bash prints `$'{character}'` as literal text.\n"
+                   "2. fix-in-maintenance: a second finding.\n")
+        [request] = program.parse_follow_up_request_blocks_from_message_text(quoting + "thanks\n")
+        check(f"a finding quoting {name} stays one whole finding, and every finding after it is counted",
+              request.text == quoting and request.finding_count == 2, repr(request.text))
+    [crlf] = program.parse_follow_up_request_blocks_from_message_text(BLOCK.replace("\n", "\r\n"))
+    check("a block whose lines end in CRLF is read as with LF", crlf.text == BLOCK, repr(crlf.text))
 
 
 def test_brief_text():

@@ -167,6 +167,7 @@ FOLLOW_UP_REQUEST_BLOCK_SAVE_HOOK_PATH = ("nn-systems/general-tools/pull-request
 MERGE_LANE_2_MERGED_MESSAGE_TO_AUTHOR = "the SendMessage message in which merge-lane-2 tells the pull request's author that the pull request merged"
 FOLLOW_UP_REQUEST_LINE_PATTERN = re.compile(r"^#follow_up_request pull request (\d+)[ \t]*$")
 FINDING_LINE_PATTERN = re.compile(r"^(\d+)\.\s+(\S.*)$")
+ASCII_LINE_END_PATTERN = re.compile(r"\r\n|\r|\n")
 PULL_REQUEST_LINK_PATTERN = re.compile(r"https://github\.com/[^/\s]+/[^/\s]+/pull/\d+")
 PULL_REQUEST_FOLLOW_UP_REQUESTS_DIRECTORY_NAME = "pull-request-follow-up-requests"
 SAVED_FINDINGS_FILE_NAME_FORMAT = "pull-request-{number}-non-blocking-findings.md"
@@ -288,7 +289,8 @@ def parse_follow_up_request_blocks_from_message_text(text):
     on, or that has none; and, quoting the line, for a line that starts with #follow_up_request but is
     not the request line, since merge-lane-2 writes the block by hand and a variant would otherwise be
     skipped without a word."""
-    lines = text.splitlines()
+    # Not str.splitlines(): a finding may quote U+0085, U+2028 or U+2029, which it would treat as line ends.
+    lines = ASCII_LINE_END_PATTERN.split(text)
     requests = []
     for index, line in enumerate(lines):
         request = FOLLOW_UP_REQUEST_LINE_PATTERN.match(line)
