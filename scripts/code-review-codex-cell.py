@@ -790,15 +790,19 @@ def main(argv=None) -> int:
             # The posting program would read the object as a review with no
             # findings, so no report survives; stderr keeps Codex's text.
             output_path.unlink(missing_ok=True)
-            print(f"code-review-codex-cell: codex wrote its review as a JSON object in the report "
-                  f"{output_path}, and the cell cannot turn it into finding lines: {error}.\n"
-                  "The cell removed the report, because the review-posting program would read a "
-                  "JSON report as a review with no findings and ask for no grades.\n"
-                  "Run the command that ran this cell once more; Codex writes JSON only on some "
-                  "runs.\n"
-                  "If it fails the same way, read the findings in the text codex wrote, below, "
-                  "grade and cite each one in your review by hand, and send merge-lane-2, with "
-                  "the SendMessage tool, this message's first line and the report path.\n"
+            print(f"scripts/code-review-codex-cell.py: codex wrote its review as a JSON object, "
+                  f"and the cell cannot turn it into the finding lines of the report "
+                  f"{output_path}: {error}.\n"
+                  "The cell wrote no report and exits 1, because the review-posting program, "
+                  "scripts/merge-lane-pull-request-reviewer-review-post-and-read-back.py, reads "
+                  "findings only from finding lines, so it would read this review as one with no "
+                  "findings.\n"
+                  "Run the command that ran this cell once more: codex writes its review as JSON "
+                  "only on some runs.\n"
+                  "If the second run prints this message again, cite each finding of the text "
+                  "codex wrote, below, in a comment of your review of this commit, with the "
+                  "category you give it; and send merge-lane-2, with the SendMessage tool, this "
+                  "whole message, so that the cell learns to convert this form.\n"
                   "The text codex wrote:\n" + report, file=sys.stderr)
             return 1
     report = codex_priority_labels_spelled_out(report)

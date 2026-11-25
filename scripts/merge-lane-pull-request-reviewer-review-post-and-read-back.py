@@ -441,18 +441,17 @@ def codex_findings_on_commit(outputs_directory, number, head):
             directory_option = (
                 "" if outputs_directory == common.DEFAULT_MERGE_LANE_WORKTREES_AND_OUTPUTS_DIRECTORY
                 else f" --merge-lane-worktrees-and-outputs-directory {shlex.quote(str(outputs_directory))}")
+            base = record.get("base_commit") or "<the commit after base= in the report's first line>"
             raise CodexRunRecordUnusable(
                 f"review not posted: the Codex report {report_file} is a JSON object after its provenance "
                 f"comment. This program reads findings only from finding lines, so it would count the run as "
                 f"one with no findings and ask for no grades.\n"
                 f"Do not post the review any other way.\n"
-                f"Run the Codex cell on commit {head} again, from the same base; the cell now writes a JSON "
-                f"review as finding lines:\n"
+                f"Run the Codex cell on commit {head} again, from the same base. The cell writes a JSON review "
+                f"as finding lines, or exits nonzero and says what to do:\n"
                 f"  scripts/merge-lane-code-review-codex-cell-run-on-pull-request-head.py {number} "
-                f"{record.get('base_commit')}{directory_option}\n"
-                f"Then run this posting command again.\n"
-                f"If the new report is JSON again, send merge-lane-2, with the SendMessage tool, the report's "
-                f"path and this message's first line.")
+                f"{base}{directory_option}\n"
+                f"Then run the posting command that printed this message again.")
         findings.update(codex_findings_in_report(report))
     return findings if recorded else None
 

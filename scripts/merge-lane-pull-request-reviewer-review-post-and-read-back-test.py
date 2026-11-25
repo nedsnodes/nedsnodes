@@ -471,7 +471,7 @@ def codex_finding_grade_cases(scratch):
           and "is a JSON object" in result.stderr
           and "merge-lane-code-review-codex-cell-run-on-pull-request-head.py 7 base0 "
               "--merge-lane-worktrees-and-outputs-directory " in result.stderr
-          and "Then run this posting command again." in result.stderr,
+          and "Then run the posting command that printed this message again." in result.stderr,
           result.detail)
     case = Path(tempfile.mkdtemp(dir=scratch))
     (case / "cx" / "pr7-base").mkdir(parents=True)
