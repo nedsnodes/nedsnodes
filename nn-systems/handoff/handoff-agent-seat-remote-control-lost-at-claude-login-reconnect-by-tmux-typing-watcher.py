@@ -18,7 +18,8 @@ running agent-seat (a live `claude` process whose parent is
 /proc, the Mac's from `ps`, whose argument list is split at spaces, so a
 supervisor or claude path holding a space is not found), reads its session record
 ~/.claude/sessions/<pid>.json and its current transcript, and types
-`/remote-control <seat>` and Enter into the claude's own tmux pane (server
+`/remote-control <name>` and Enter, <name> being the agent-seat's stored Remote Control
+name or else its agent-seat name, into the claude's own tmux pane (server
 `-L <seat>`, the pane id the session record's "tmux" field ends with) when all
 of these hold:
 - the transcript's latest Remote Control line is that disconnect line, with no
@@ -115,6 +116,12 @@ MACHINE_NAMES_BY_PLATFORM = {"linux": "ned-box", "darwin": "the Mac"}
 # macOS cuts ps output at the terminal's width, even through a pipe, unless -ww is given.
 MAC_PROCESS_LISTING_COMMAND = ["ps", "-axww", "-o", "pid=,ppid=,etime=,args="]
 PROCESS_LISTING_TIMEOUT_SECONDS = 30
+_remote_control_name_common_specification = importlib.util.spec_from_file_location(
+    "handoff_remote_control_name_common",
+    Path(__file__).with_name("handoff-agent-seat-remote-control-name-stored-after-claude-ai-session-rename-common.py"))
+remote_control_name_common = importlib.util.module_from_spec(_remote_control_name_common_specification)
+_remote_control_name_common_specification.loader.exec_module(remote_control_name_common)
+
 _claude_code_session_transcript_lookup_and_text_search_common_specification = importlib.util.spec_from_file_location(
     "claude_code_session_transcript_lookup_and_text_search_common",
     REPOSITORY / "scripts" / "claude-code-session-transcript-lookup-and-text-search-common.py")
@@ -181,7 +188,7 @@ RECORD_PROBLEM_NOTICE_TEMPLATE = (
     "If a Claude login on {machine} turns Remote Control off in {seat}, the watcher cannot turn it "
     "back on until this problem is fixed. The watcher sends another notice only if the problem changes.\n"
     "If {seat}'s Remote Control is off, turn it on by typing in {seat}'s window:\n"
-    "  /remote-control {seat}\n"
+    "  /remote-control {remote_control_name}\n"
     "To have the problem fixed, give this notice to an agent on {machine} and ask it to fix the problem.\n"
     "Record: {record}\n"
 )
@@ -191,7 +198,7 @@ TYPING_FAILED_NOTICE_TEMPLATE = (
     "back on: {problem}\n"
     "A Claude login on {machine} turned it off at {disconnected_at}.\n"
     "To turn it on, type in {seat}'s window:\n"
-    "  /remote-control {seat}\n"
+    "  /remote-control {remote_control_name}\n"
     "If the watcher keeps failing, give this notice to an agent on {machine} and ask it to find out why.\n"
     "Record: {record}\n"
 )
@@ -236,6 +243,19 @@ class Run:
             self.log(seat, "user told", key=key)
 
 
+def remote_control_name_of_agent_seat(seat) -> str:
+    """Return the stored name; raise OSError when the name file cannot be read."""
+    return remote_control_name_common.handoff_remote_control_name_read_stored_or_default_to_agent_seat_name(seat)
+
+
+def remote_control_name_for_notice(seat) -> str:
+    # A notice that reports an unreadable name file must still be written; the supervisor launches under the agent-seat name then too.
+    try:
+        return remote_control_name_of_agent_seat(seat)
+    except OSError:
+        return seat
+
+
 def notice_show(log_directory: Path, seat, kind, template, **fields) -> bool:
     """Write a notice and open it in a window on the user's Mac; print to stderr what failed."""
     stamp = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%SZ")
@@ -243,7 +263,9 @@ def notice_show(log_directory: Path, seat, kind, template, **fields) -> bool:
     try:
         path.parent.mkdir(parents=True, exist_ok=True)
         path.write_text(template.format(seat=seat, record=log_directory / REMOTE_CONTROL_RECONNECT_WATCHER_DECISIONS_FILE_NAME,
-                                        machine=this_machine_name(), **fields), encoding="utf-8")
+                                        machine=this_machine_name(),
+                                        remote_control_name=remote_control_name_for_notice(seat),
+                                        **fields), encoding="utf-8")
     except OSError as error:
         print(f"{PROGRAM}: the notice to the user about {seat} was not written ({error}). If the failure "
               "this notice reports happens again, a later run tries the notice again; until then the user "
@@ -513,6 +535,13 @@ def check_seat(run: Run, seat, pid, age, session_records_directory: Path, projec
     if disconnect is None:
         return
     event = {"session_id": session_id, "disconnect": disconnect.get("uuid")}
+    try:
+        remote_control_name = remote_control_name_of_agent_seat(seat)
+    except OSError as error:
+        report_typing_failure(run, seat, event, disconnect,
+                              f"its stored Remote Control name could not be read: {error}",
+                              kind="remote-control-name-unreadable")
+        return
     typings = [entry for entry in run.entries
                if entry.get("seat") == seat and entry.get("decision") == "typed"
                and all(entry.get(key) == value for key, value in event.items())]
@@ -522,7 +551,7 @@ def check_seat(run: Run, seat, pid, age, session_records_directory: Path, projec
             return
         if len(typings) >= REMOTE_CONTROL_RECONNECT_COMMAND_TMUX_TYPINGS_PER_DISCONNECT_AT_MOST:
             report_typing_failure(run, seat, event, disconnect,
-                                  f"it typed /remote-control {seat} into its tmux pane {len(typings)} times, the "
+                                  f"it typed /remote-control {remote_control_name} into its tmux pane {len(typings)} times, the "
                                   f"last at {typings[-1]['at']}, and Claude Code has logged no line saying "
                                   "Remote Control is active since", kind="reconnect-typing-limit-reached-remote-control-still-off")
             return
@@ -554,7 +583,7 @@ def check_seat(run: Run, seat, pid, age, session_records_directory: Path, projec
     # Remote Control may have come back on by itself while this run read the pane.
     if latest_unanswered_disconnect(transcript, run.transcript_read_positions) is None:
         return
-    for number, arguments in enumerate((("-l", f"/remote-control {seat}"), ("Enter",))):
+    for number, arguments in enumerate((("-l", f"/remote-control {remote_control_name}"), ("Enter",))):
         if number:
             time.sleep(SECONDS_BETWEEN_TEXT_AND_ENTER)
         exit_code, output = tmux(seat, "send-keys", "-t", pane, *arguments)
@@ -562,7 +591,7 @@ def check_seat(run: Run, seat, pid, age, session_records_directory: Path, projec
             report_typing_failure(run, seat, event, disconnect,
                                   f"typing into its tmux pane {pane} failed: tmux {outcome(exit_code)}: {output}")
             return
-    run.log(seat, "typed", typed=f"/remote-control {seat}", **event)
+    run.log(seat, "typed", typed=f"/remote-control {remote_control_name}", **event)
 
 
 def skip(run: Run, seat, event, reason):

@@ -319,6 +319,49 @@ def case_types_on_disconnect(namespace):
         fixture.close()
 
 
+def case_types_the_stored_remote_control_name(namespace):
+    fixture = lost_seat("renamed", namespace)
+    real_home = os.environ.get("HOME")
+    try:
+        with tempfile.TemporaryDirectory() as home:
+            handoffs = Path(home) / ".claude" / "handoffs"
+            handoffs.mkdir(parents=True)
+            (handoffs / f"{fixture.seat}-remote-control-name").write_text(
+                "----renamed in claude\n", encoding="utf-8")
+            os.environ["HOME"] = home
+            exit_code, errors = fixture.run()
+            check("an agent-seat renamed in claude.ai: types its stored Remote Control name",
+                  exit_code == 0 and "/remote-control ----renamed in claude" in fixture.typed(),
+                  (exit_code, errors, fixture.typed()))
+    finally:
+        os.environ["HOME"] = real_home
+        fixture.close()
+
+
+def case_unreadable_stored_remote_control_name(namespace):
+    fixture = lost_seat("name-unreadable", namespace)
+    real_home = os.environ.get("HOME")
+    try:
+        with tempfile.TemporaryDirectory() as home:
+            (Path(home) / ".claude" / "handoffs" / f"{fixture.seat}-remote-control-name").mkdir(parents=True)
+            os.environ["HOME"] = home
+            exit_code, errors = fixture.run()
+            notices = fixture.notices()
+            notice = notices[0].read_text(encoding="utf-8") if notices else ""
+            # A raise here would leave check_seat for the whole run, and later agent-seats would go unchecked.
+            check("a stored name that cannot be read: reported for that agent-seat, nothing typed, "
+                  "exit 1, and no notice that the watcher's run failed",
+                  exit_code == 1 and "could not be read" in errors and "/remote-control" not in fixture.pane()
+                  and fixture.decisions() == ["failure", "user told"]
+                  and len(notices) == 1 and "remote-control-name-unreadable" in notices[0].name
+                  and f"/remote-control {fixture.seat}" in notice
+                  and "checking no agent-seat" not in notice,
+                  (exit_code, errors, fixture.entries(), notices))
+    finally:
+        os.environ["HOME"] = real_home
+        fixture.close()
+
+
 def case_typing_that_leaves_remote_control_off(namespace):
     # The fixture pane echoes what is typed and Claude Code logs nothing: a typing accepted with no effect.
     fixture = lost_seat("typing-no-effect", namespace)
@@ -1243,6 +1286,8 @@ def main():
         case_prompt_line_reading()
         case_seat_finding(namespace)
         case_types_on_disconnect(namespace)
+        case_types_the_stored_remote_control_name(namespace)
+        case_unreadable_stored_remote_control_name(namespace)
         case_typing_that_leaves_remote_control_off(namespace)
         case_typing_again_stops_once_reconnected(namespace)
         case_typing_logged_under_decisions_file_name_before_program_prefix(namespace)

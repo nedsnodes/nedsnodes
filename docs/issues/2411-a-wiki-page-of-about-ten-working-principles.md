@@ -60,9 +60,18 @@ The user also said, on line 36, that the principles of 2026-11-03 belong in `CLA
 - GHI [Move mechanical agent chores into programs and hooks](https://github.com/nedsnodes/nedsnodes/issues/1036) lists chores to move into programs, an application of principle 13.
 - GHI [Save each lesson where agents meet it at the moment it applies, and decide whether a store that recalls lessons by subject is worth building](https://github.com/nedsnodes/nedsnodes/issues/1349) is about where single lessons live, not about one collected page.
 
+## What is decided
+
+- The page moves out of the queue only after the user has rewritten it. He said on 2026-11-05, on item 3.2.5 of approval-walk walk-me-through-skill-refactor-approval-walk-2026-11-02: "I think I'm going to have to rewrite this page before we move it out of the queue. So I've deferred it."
+
+## Open questions
+
+- Do the objective page, `docs/nedsnodes-wiki/nedsnodes-ai-native-software-development-objective.md`, and this page become one page? The user settles this at his rewrite of this page, before the page moves, with the founding principles page, `docs/nedsnodes-wiki/nedsnodes-founding-principles-actors-and-repository-layout.md`, in view. He said on 2026-11-05, on item 3.2.2 of the same approval-walk: "I'm gonna rewrite the objective page first. Then probably I should rewrite the philosophy page. And then maybe we can merge them. Or maybe I'll merge them. Or at least get closer." His rewrite of the objective page merged in pull request [Objective wiki page: the user's cut, with the two "???" rows of Project organization fixed](https://github.com/nedsnodes/nedsnodes/pull/4130).
+
 ## Next action
 
-1. Give the wiki page `docs/nedsnodes-wiki/queue/nedsnodes-goals-and-philosophy-founding-statement-and-agent-working-principles.md` its cold-read-full-run with the /cold-read skill; it has had its cold-read-fast-read only.
-2. Put the page to the user in an approval-walk, one principle per item, with the proposed `CLAUDE.md` lines as items of their own. A principle he disapproves is dropped. A principle he revises is rewritten and goes back to him as a new item. The proposed `CLAUDE.md` lines are handled the same way, and do not hold up the page.
-3. In one pull request, move the approved page out of the queue to `docs/nedsnodes-wiki/` with `git mv`, change its relative links from `../` to the same directory, and add the objective page's link from the section "Standing decisions".
-4. After he approves the `CLAUDE.md` lines, add them in their own pull request, and tell each other agent-seat of the principles with SendMessage, naming the page.
+1. The user rewrites the wiki page `docs/nedsnodes-wiki/queue/nedsnodes-goals-and-philosophy-founding-statement-and-agent-working-principles.md` and settles the open question above. No agent starts the steps below before then. The agent-seat that picks up this GHI then revises steps 2 to 5 and the sections above to match: his own rewrite may need no approval-walk, a merged page needs no move, and the objective page no longer has the section "Standing decisions" that those sections describe.
+2. Give the rewritten page its cold-read-full-run with the /cold-read skill.
+3. Put the page to the user in an approval-walk, one principle per item, with the proposed `CLAUDE.md` lines as items of their own. A principle he disapproves is dropped. A principle he revises is rewritten and goes back to him as a new item. The proposed `CLAUDE.md` lines are handled the same way, and do not hold up the page.
+4. In one pull request, move the approved page out of the queue to `docs/nedsnodes-wiki/` with `git mv`, change its relative links from `../` to the same directory, and add a link to the page from the objective page, which no longer has the section "Standing decisions".
+5. After he approves the `CLAUDE.md` lines, add them in their own pull request, and tell each other agent-seat of the principles with SendMessage, naming the page.

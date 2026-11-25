@@ -104,6 +104,11 @@
           },
           {
             "type": "command",
+            "command": "python3 \"$CLAUDE_PROJECT_DIR\"/nn-systems/handoff/handoff-claude-ai-rename-saved-as-remote-control-name-and-agent-told-to-message-other-agent-seats-stop-hook.py",
+            "timeout": 10
+          },
+          {
+            "type": "command",
             "command": "python3 \"$CLAUDE_PROJECT_DIR\"/scripts/absence-claim-locator-reminder-hook.py",
             "timeout": 10
           },

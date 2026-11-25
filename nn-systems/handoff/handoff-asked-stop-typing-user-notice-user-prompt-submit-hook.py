@@ -38,10 +38,10 @@ PROGRAM = "handoff-asked-stop-typing-user-notice-user-prompt-submit-hook"
 THRESHOLD_HOOK_PATH = (pathlib.Path(__file__).resolve().parents[2]
                        / "scripts" / "handoff-context-threshold-hook.py")
 HANDOFF_SUPERVISOR_PATH = pathlib.Path(__file__).resolve().with_name("handoff-supervisor.py")
+REMOTE_CONTROL_NAME_COMMON_PATH = pathlib.Path(__file__).resolve().with_name(
+    "handoff-agent-seat-remote-control-name-stored-after-claude-ai-session-rename-common.py")
 
 SHOWN_RECORD_SUFFIX = "-user-notice-shown"
-
-CUSTOM_TITLE_RECORD_TYPE = "custom-title"
 
 # {name} is the Remote Control name the successor keeps; claude.ai lists the successor under it.
 HANDOFF_ASKED_STOP_TYPING_WITH_NEW_SESSION_NAME_USER_NOTICE_TEMPLATE = (
@@ -70,25 +70,6 @@ def hook_payload_from_stdin() -> dict:
     return payload
 
 
-def session_title_from_transcript(transcript_path_text: str) -> str:
-    """Return the customTitle of the transcript's last custom-title record, or ""."""
-    title = ""
-    with open(transcript_path_text, encoding="utf-8", errors="replace") as transcript:
-        for line in transcript:
-            if CUSTOM_TITLE_RECORD_TYPE not in line:
-                continue
-            try:
-                record = json.loads(line)
-            except json.JSONDecodeError:
-                continue
-            if not isinstance(record, dict) or record.get("type") != CUSTOM_TITLE_RECORD_TYPE:
-                continue
-            custom_title = record.get("customTitle")
-            if isinstance(custom_title, str) and custom_title.strip():
-                title = custom_title.strip()
-    return title
-
-
 def launched_agent_seat_name() -> str:
     supervisor = module_from_path("handoff_supervisor", HANDOFF_SUPERVISOR_PATH)
     return os.environ.get(supervisor.HANDOFF_SUPERVISOR_AGENT_NAME_ENVIRONMENT_VARIABLE, "").strip()
@@ -96,14 +77,23 @@ def launched_agent_seat_name() -> str:
 
 def new_session_name(transcript_path_text) -> str:
     """Return the name the line gives the new agent-session, or "" when none is found."""
+    remote_control_name_common = module_from_path("handoff_remote_control_name_common",
+                                                  REMOTE_CONTROL_NAME_COMMON_PATH)
     if isinstance(transcript_path_text, str) and transcript_path_text:
         try:
-            title = session_title_from_transcript(transcript_path_text)
+            title = remote_control_name_common.session_title_from_transcript(transcript_path_text)
         except OSError:
             title = ""
         if title:
             return title
-    return launched_agent_seat_name()
+    agent_seat = launched_agent_seat_name()
+    if not agent_seat:
+        return ""
+    # The handoff-supervisor launches the successor under the stored name, as it does here when the file is unreadable.
+    try:
+        return remote_control_name_common.handoff_remote_control_name_read_stored_or_default_to_agent_seat_name(agent_seat)
+    except OSError:
+        return agent_seat
 
 
 def user_notice(name: str) -> str:
