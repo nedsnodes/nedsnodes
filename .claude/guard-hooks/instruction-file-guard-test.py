@@ -12,6 +12,16 @@ decoy marker surviving every run is the forked-session regression assertion.
 """
 
 import importlib.util
+import pathlib
+
+_start_and_end_lines_spec = importlib.util.spec_from_file_location(
+    "test_suite_start_and_end_lines_common",
+    pathlib.Path(__file__).resolve().parents[2] / "nn-systems/general-tools/test-suite-start-and-end-lines-common.py")
+_start_and_end_lines = importlib.util.module_from_spec(_start_and_end_lines_spec)
+_start_and_end_lines_spec.loader.exec_module(_start_and_end_lines)
+_start_and_end_lines.test_suite_start_line_print_and_end_line_at_normal_exit_arrange()
+
+import importlib.util
 import json
 import os
 import subprocess
