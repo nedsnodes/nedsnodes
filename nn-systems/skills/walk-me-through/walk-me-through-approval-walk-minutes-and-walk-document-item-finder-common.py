@@ -994,8 +994,8 @@ def waiting_item_units(document, value, numbers, total, parser, all_units=None):
         named = ", ".join(f"`Item {number}`" for number in repeated)
         problems.append(
             f"more than one heading for {named}, so the hook cannot tell "
-            f"which one the minutes name: if no other of those headings gives the same total as the heading you mean, "
-            f"as `of 10` beside two `of 9` headings, add a `#next_to_present` line naming every item the last one names, "
+            f"which one the minutes name: if one total is given, for every item the last `#next_to_present` line names, "
+            f"by the heading you mean and by no other heading for that item, as `of 10` beside two `of 9` headings, add a `#next_to_present` line naming every item the last one names, "
             f"with M copied from the heading you mean, as the new last line of the minutes, below the earlier "
             f"`#next_to_present` lines, which stay as they are, as in `#next_to_present item 4 of 10` for "
             f"`## Item 4 of 10: <the point>`, or `#next_to_present items 4 and 5 of 10`; otherwise, in "

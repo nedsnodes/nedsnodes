@@ -1252,9 +1252,8 @@ def successor_initial_agent_instructions_line_naming_waiting_approval_walk_item(
     the walk-minutes'
     `#next_to_present` line names several items, the line names the first, where the walk resumes. When the
     walk-document cannot be read, the line names the item from the walk-minutes alone, without its point, and
-    says why; its count then lacks `of M` when the `#next_to_present` line gives none, so the `#item_page` line
-    it asks for would not be read until the agent adds M. When the walk-minutes cannot be read, or the walk
-    finder cannot be loaded, the line names the error instead."""
+    says why; its count then lacks `of M` when the `#next_to_present` line gives none. When the walk-minutes
+    cannot be read, or the walk finder cannot be loaded, the line names the error instead."""
     walk_directory = working_directory / APPROVAL_WALK_DIRECTORY
     if not walk_directory.is_dir():
         return ()
@@ -1298,11 +1297,10 @@ def successor_initial_agent_instructions_line_naming_waiting_approval_walk_item(
         text = document.read_text(encoding="utf-8")
         spans = walk_finder.item_unit_spans(text, parser)
         # The total is counted before any heading is looked up or the hook loaded, so that a missing or repeated
-        # heading, or a hook that fails to load, leaves the count its `of M`: an `#item_page` line without it is
-        # not read. A count of 0 means no heading was recognised, and the finder reports that. Every named item is
-        # checked against the total the walk-minutes gave, so that each missing or repeated heading is reported;
-        # the point is read from the first-named item's unit alone, because a later waiting item's heading may
-        # name the first item too.
+        # heading, or a hook that fails to load, leaves the count its `of M`. A count of 0 means no heading was
+        # recognised, and the finder reports that. Every named item is checked against the total the walk-minutes
+        # gave, so that each missing or repeated heading is reported; the point is read from the first-named item's
+        # unit alone, because a later waiting item's heading may name the first item too.
         total_in_walk_minutes = total
         if total is None:
             total = walk_finder.approval_walk_item_total_shown_and_waiting_counted_from_walk_document(spans)
