@@ -1,8 +1,11 @@
 #!/usr/bin/env python3
 """Compute the review tier and facts the merge-lane puts in a pull request's review brief.
 
-Rule 1: tiers follow content. Tests, fenced Markdown code, and Python changes
-limited to docstrings, comments and tool-message-to-agent strings get codex-review-and-head-tests-tier.
+Rule 1: tiers follow content. Tests, Python changes limited to docstrings,
+comments and tool-message-to-agent strings, and fenced code in a Markdown file
+that a `#pull_request_review_plan_markdown_file_code_codex_review_tier_request <path>` line of the description names get
+codex-review-and-head-tests-tier; the rest of a Markdown file is prose, because
+the review scope has reviewers review code inside Markdown only on such a request.
 A tool-message-to-agent string is one that tool_message_to_agent_string_nodes_in_source,
 in nn-systems/general-tools/python-source-tool-message-to-agent-string-collector-common.py, finds;
 any other string, such as a regular expression, a command's argument or a path,
@@ -122,8 +125,9 @@ the head commit. A merged pull request is not refused.
 Merged pull requests use the merge commit's first parent as the diff base:
 the current base branch already contains the head and would hide the change.
 No rename detection is used: moving a program changes behaviour for callers,
-so a rename is a deletion and an addition. Markdown prose anywhere is
-no-reviewer-tier because prose outside code is outside the review scope.
+so a rename is a deletion and an addition. Markdown anywhere is
+no-reviewer-tier, unless the description names it for a review of its code,
+because the review scope leaves it out otherwise.
 
 Reads the pull request, reviews, inline comments and live base tip through
 four read-only gh calls, and each replaced pull request and its reviews through
@@ -226,6 +230,7 @@ GIT_FULL_HASH_PATTERN = re.compile(r"(?:[0-9a-f]{40}|[0-9a-f]{64})\Z")
 DIFF_HUNK_HEADER_PATTERN = re.compile(r"^@@ -(\d+)(?:,(\d+))? \+(\d+)(?:,(\d+))? @@", re.MULTILINE)
 REGISTERED_HOOK_PATH_PATTERN = re.compile(r'\$CLAUDE_PROJECT_DIR"?/([^"\s]+)')
 MARKDOWN_SECTION_HEADING_PATTERN = re.compile(r"^##\s")
+MARKDOWN_CODE_REVIEW_REQUEST_LINE_PATTERN = re.compile(r"^\W*#pull_request_review_plan_markdown_file_code_codex_review_tier_request\b(.*)$", re.MULTILINE)
 COLD_READ_RECORD_PATH_IN_DESCRIPTION_PATTERN = re.compile(
     r"(/[^\s`'\"<>()\[\],;:]*/" + cold_read_record_names.RECORDS_DIRECTORY_NAME + r"/[^\s/`'\"<>()\[\],;:]+)")
 COMPONENTS_SECTION_HEADING_PATTERN = re.compile(r"^##\s+Components\s*$")
@@ -579,8 +584,23 @@ def hook_path_rule_reason(path, registered_paths):
     return None
 
 
+def markdown_paths_whose_code_the_description_asks_to_review(description):
+    """The repository-relative .md paths the description's #pull_request_review_plan_markdown_file_code_codex_review_tier_request lines name."""
+    paths = set()
+    for match in MARKDOWN_CODE_REVIEW_REQUEST_LINE_PATTERN.finditer(description or ""):
+        path = match[1].strip().strip("`").strip()
+        if not path.endswith(".md") or " " in path:
+            raise ReviewPlanRefusal(
+                f"the description's line {match[0].strip()!r} names no Markdown file.\n"
+                "Write it as `#pull_request_review_plan_markdown_file_code_codex_review_tier_request <repository-relative path ending in .md>`, "
+                "one file per line, and run this again.")
+        paths.add(path)
+    return paths
+
+
 def classify_changed_file_into_class_tier_and_reason(repository, old_revision, new_revision,
-                                                      path, status, registered_paths):
+                                                      path, status, registered_paths,
+                                                      code_review_markdown_paths=frozenset()):
     if path == ".claude/settings.json":
         return ("settings", "claude-and-codex-review-and-head-tests-tier", ".claude/settings.json registers the hooks; a change to it always gets claude-and-codex-review-and-head-tests-tier")
     hook_reason = hook_path_rule_reason(path, registered_paths)
@@ -589,6 +609,8 @@ def classify_changed_file_into_class_tier_and_reason(repository, old_revision, n
     if path_is_test_file(path):
         return "test", "codex-review-and-head-tests-tier", f"{path} is a test file"
     if path.endswith(".md"):
+        if path not in code_review_markdown_paths:
+            return "prose", "no-reviewer-tier", f"{path} is Markdown, and the description does not ask for a review of its code"
         old_lines = fenced_code_block_line_numbers_in_markdown(read_revision_blob_or_none(repository, old_revision, path))
         new_lines = fenced_code_block_line_numbers_in_markdown(read_revision_blob_or_none(repository, new_revision, path))
         diff_text = required_git_output(repository, "diff", "-U0", "--no-ext-diff", "--no-textconv",
@@ -598,7 +620,7 @@ def classify_changed_file_into_class_tier_and_reason(repository, old_revision, n
             for old_start, old_count, new_start, new_count in parse_diff_hunk_line_ranges(diff_text)
             for start, count, inside in ((old_start, old_count, old_lines), (new_start, new_count, new_lines)))
         if changes_code:
-            return "code", "codex-review-and-head-tests-tier", f"{path} changes lines inside fenced code blocks"
+            return "code", "codex-review-and-head-tests-tier", f"{path} changes lines inside fenced code blocks, and the description asks for their review"
         return "prose", "no-reviewer-tier", f"{path} changes only prose outside fenced code blocks"
     if (path.startswith(("docs/", "nn-queue/"))
             and Path(path).suffix not in PROSE_DIRECTORY_CODE_EXTENSIONS):
@@ -640,7 +662,8 @@ def changed_file_statuses_and_paths(repository, old_revision, new_revision):
 
 
 def changed_files_with_classes_and_tiers(repository, old_revision, new_revision,
-                                        hook_registration_old_revision=None):
+                                        hook_registration_old_revision=None,
+                                        code_review_markdown_paths=frozenset()):
     statuses_and_paths = changed_file_statuses_and_paths(repository, old_revision, new_revision)
     # Include hooks present when the branch was cut, as well as registrations
     # added on main or the branch since then.
@@ -651,7 +674,8 @@ def changed_files_with_classes_and_tiers(repository, old_revision, new_revision,
     changed_files = []
     for status, path in statuses_and_paths:
         file_class, tier, reason = classify_changed_file_into_class_tier_and_reason(
-            repository, old_revision, new_revision, path, status, registered_paths)
+            repository, old_revision, new_revision, path, status, registered_paths,
+            code_review_markdown_paths)
         changed_files.append({"path": path, "status": status, "class": file_class,
                               "tier": tier, "reason": reason})
     return sorted(changed_files, key=lambda entry: entry["path"])
@@ -1155,8 +1179,10 @@ def compute_pull_request_review_plan(arguments):
     if (not commit_is_in_repository(repository, live_base)
             or not commit_is_ancestor_of(repository, live_base, f"origin/{base_branch}")):
         warning = f"local origin/{base_branch} is behind GitHub's; run `{fetch_command}` and run this again"
+    code_review_markdown_paths = markdown_paths_whose_code_the_description_asks_to_review(pull_request.get("body"))
     changed_files = changed_files_with_classes_and_tiers(
-        repository, merge_base, head, hook_registration_old_revision=diff_base)
+        repository, merge_base, head, hook_registration_old_revision=diff_base,
+        code_review_markdown_paths=code_review_markdown_paths)
     # A merged pull request is past the gate; its plan is read only to see what it changed.
     if pull_request["state"] != "MERGED":
         checked_against_problems = architecture_overview_checked_against_commit_problems(repository, head, changed_files)
@@ -1211,10 +1237,12 @@ def compute_pull_request_review_plan(arguments):
             merge_commits = required_git_output(repository, "rev-list", "--merges", "--first-parent", f"{earlier}..{head}").splitlines()
             rewritten = not commit_is_ancestor_of(repository, earlier, head)
             delta_files = changed_files_with_classes_and_tiers(
-                repository, earlier, head, hook_registration_old_revision=diff_base)
+                repository, earlier, head, hook_registration_old_revision=diff_base,
+                code_review_markdown_paths=code_review_markdown_paths)
             if merge_commits or rewritten:
                 earlier_merge_base = required_git_output(repository, "merge-base", diff_base, earlier)
-                earlier_files = changed_files_with_classes_and_tiers(repository, earlier_merge_base, earlier)
+                earlier_files = changed_files_with_classes_and_tiers(
+                    repository, earlier_merge_base, earlier, code_review_markdown_paths=code_review_markdown_paths)
                 own_paths = {entry["path"] for entry in changed_files + earlier_files}
                 delta_files = [entry for entry in delta_files if entry["path"] in own_paths]
                 plan["delta_files_restricted_to_pull_request_files"] = True

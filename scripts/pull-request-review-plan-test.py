@@ -222,11 +222,11 @@ class ReviewPlanTemporaryRepositoryFixture:
             raise AssertionError(f"review plan exited {result.returncode}: {result.stderr}")
         return json.loads(result.stdout)
 
-    def plan_for_changed_file(self, path, content):
+    def plan_for_changed_file(self, path, content, description="Plain description."):
         self.reset_fixture_to_base()
         self.write_fixture_file(path, content)
         head = self.commit_fixture_changes("change " + path)
-        self.configure_github_answers(head)
+        self.configure_github_answers(head, description=description)
         return self.read_review_plan()
 
 
@@ -366,8 +366,30 @@ def run_classification_cases(fixture):
     check("a changed test gets codex-review-and-head-tests-tier", plan["tier"] == "codex-review-and-head-tests-tier" and plan["changed_files"][0]["class"] == "test", plan)
     plan = fixture.plan_for_changed_file("scripts/example-program.py", BASELINE_FILE_CONTENTS["scripts/example-program.py"].replace("Old", "New").replace('"old"', '"new"'))
     check("Python tool-message-to-agent string, docstring and comment changes get codex-review-and-head-tests-tier", plan["tier"] == "codex-review-and-head-tests-tier" and "tool-message-to-agent strings" in plan["tier_decided_by"], plan)
-    plan = fixture.plan_for_changed_file("docs/review-note.md", BASELINE_FILE_CONTENTS["docs/review-note.md"].replace("print('old')", "print('new')"))
-    check("fenced Markdown code changes get codex-review-and-head-tests-tier", plan["tier"] == "codex-review-and-head-tests-tier" and "fenced code blocks" in plan["tier_decided_by"], plan)
+    fenced_change = BASELINE_FILE_CONTENTS["docs/review-note.md"].replace("print('old')", "print('new')")
+    plan = fixture.plan_for_changed_file("docs/review-note.md", fenced_change)
+    check("fenced Markdown code changes the description does not ask to have reviewed get no-reviewer-tier",
+          plan["tier"] == "no-reviewer-tier" and "does not ask for a review of its code" in plan["tier_decided_by"], plan)
+    plan = fixture.plan_for_changed_file("docs/review-note.md", fenced_change,
+                                         description="Fix the example.\n\n#pull_request_review_plan_markdown_file_code_codex_review_tier_request `docs/review-note.md`\n")
+    check("fenced Markdown code changes the description asks to have reviewed get codex-review-and-head-tests-tier",
+          plan["tier"] == "codex-review-and-head-tests-tier" and "fenced code blocks" in plan["tier_decided_by"], plan)
+    plan = fixture.plan_for_changed_file("docs/review-note.md", BASELINE_FILE_CONTENTS["docs/review-note.md"].replace("Old prose", "New prose"),
+                                         description="#pull_request_review_plan_markdown_file_code_codex_review_tier_request docs/review-note.md")
+    check("a requested Markdown file whose change is only prose gets no-reviewer-tier",
+          plan["tier"] == "no-reviewer-tier" and "only prose outside fenced code blocks" in plan["tier_decided_by"], plan)
+    plan = fixture.plan_for_changed_file("docs/other-note.md", "```\nprint('x')\n```\n",
+                                         description="#pull_request_review_plan_markdown_file_code_codex_review_tier_request docs/review-note.md")
+    check("a request naming another Markdown file leaves this one at no-reviewer-tier", plan["tier"] == "no-reviewer-tier", plan)
+    fixture.reset_fixture_to_base()
+    fixture.write_fixture_file("docs/review-note.md", fenced_change)
+    fixture.configure_github_answers(fixture.commit_fixture_changes("change docs/review-note.md"),
+                                     description="#pull_request_review_plan_markdown_file_code_codex_review_tier_request the example above")
+    refused = fixture.run_review_plan()
+    check("a #pull_request_review_plan_markdown_file_code_codex_review_tier_request line naming no Markdown file is refused with exit 1 and says how to write it",
+          refused.returncode == 1 and "names no Markdown file" in refused.stderr
+          and "#pull_request_review_plan_markdown_file_code_codex_review_tier_request <repository-relative path ending in .md>" in refused.stderr,
+          (refused.returncode, refused.stdout, refused.stderr))
     full_reviewer_cases = [
         ("Python logic changes get claude-and-codex-review-and-head-tests-tier", "scripts/example-program.py", BASELINE_FILE_CONTENTS["scripts/example-program.py"].replace("return 1", "return 2")),
         ("every hook directory file gets claude-and-codex-review-and-head-tests-tier", ".claude/guard-hooks/example-hook.py", 'print("new")\n'),
@@ -1190,7 +1212,8 @@ def run_repository_and_output_cases(fixture):
     fixture.write_fixture_file("scripts/agent-messages.py", BASELINE_FILE_CONTENTS["scripts/agent-messages.py"].replace("Old", "New"))
     fixture.write_fixture_file("docs/review-note.md", BASELINE_FILE_CONTENTS["docs/review-note.md"].replace("print('old')", "print('new')"))
     head = fixture.commit_fixture_changes("changes that path-limited git calls must see")
-    fixture.configure_github_answers(head, live_base=main_with_a_split_suite)
+    fixture.configure_github_answers(head, live_base=main_with_a_split_suite,
+                                     description="#pull_request_review_plan_markdown_file_code_codex_review_tier_request docs/review-note.md")
     top_level_plan = fixture.read_review_plan()
     subdirectory_result = fixture.run_review_plan("--repository", str(fixture.repository / "scripts"))
     check("a run from a subdirectory of the checkout gives the top-level run's plan, tool-message-to-agent text, tiers and split suites included",
@@ -1281,7 +1304,8 @@ def run_git_failure_cases(fixture):
     fixture.write_fixture_file("scripts/example-program.py", BASELINE_FILE_CONTENTS["scripts/example-program.py"] + "VALUE = 2\n")
     fixture.write_fixture_file("scripts/example-program-test.py", "print('test')\n")
     head = fixture.commit_fixture_changes("change prose, a program and its test")
-    fixture.configure_github_answers(head)
+    # The request makes the plan read docs/review-note.md, which the git failures below need.
+    fixture.configure_github_answers(head, description="#pull_request_review_plan_markdown_file_code_codex_review_tier_request docs/review-note.md")
     plan = fixture.read_review_plan()
     check("the git failure cases' control plan runs the changed program's test",
           plan["test_files_to_run"] == ["scripts/example-program-test.py"], plan)
