@@ -388,7 +388,7 @@ class TranscriptFacts:
         self.turn_ending_messages = []   # (record, time, time of the prompt that began its turn)
         self.task_tool_calls = []        # (time, name, input, task id), only calls whose result succeeded
         self.tool_calls = []             # (time, name, input, tool use id), every tool call
-        self.failed_tool_use_ids = set() # each tool use failed_tool_use_ids or a task call's result shows failed
+        self.failed_tool_use_ids = set() # each tool use whose result carries is_error, or a task call whose result is not a success text
         self.assistant_texts = []        # (time, text), every assistant record with text
         self.launch_times = {}           # subagent or background task id -> time
         self.last_task_notification = {} # task id -> (time, whether it is interim)
@@ -829,7 +829,7 @@ def transcript_tool_calls_and_assistant_texts_since(path, since):
     tool_calls, texts, failed, succeeded_task_calls = [], [], set(), set()
     for record in transcript_records(path):
         failed |= failed_tool_use_ids(record)
-        succeeded_task_calls |= succeeded_task_tool_result_task_ids(record).keys()
+        succeeded_task_calls.update(succeeded_task_tool_result_task_ids(record))
         moment = parse_time(record.get("timestamp"))
         if moment is None or moment <= since:
             continue

@@ -1344,7 +1344,7 @@ class Sweep:
             self.read_failure(seat, str(error))
             return False
         facts = dict(
-            self.facts(seat, verdict), step=ESCALATE, nudge_at=wait[NUDGE], since=iso(since),
+            self.facts(seat, verdict, judged_text), step=ESCALATE, nudge_at=wait[NUDGE], since=iso(since),
             sentences=[{"index": index, "raised_at": raised_at,
                         "kind": verdicts_print.sentence_kind(sentence), "sentence": sentence}
                        for index, (raised_at, sentence) in enumerate(raised)],
@@ -1476,7 +1476,10 @@ class Sweep:
                          "message_id": sent["message_id"],
                          "send_started_at": sent["send_started_at"]})
 
-    def facts(self, seat, verdict):
+    def facts(self, seat, verdict, cut_text=lambda text: text[-JUDGED_TEXT_CHARACTERS:]):
+        """The facts a judge is handed. By default the last message is cut to its end, where an
+        agent-seat says what it waits for, as the rule 5 judge is handed it; the rule 2 judges pass
+        judged_text, since an announced thing may be told at the start."""
         running = verdict.get(fields.RUNNING) or {}
         def with_minutes(items):
             own = fields.SUBAGENT_OWN_RUNNING_BACKGROUND_COMMANDS
@@ -1485,7 +1488,7 @@ class Sweep:
                      **({own: with_minutes(item[own])} if own in item else {})} for item in items]
         last_message = dict(verdict.get(fields.LAST_TURN_ENDING_MESSAGE) or {})
         if last_message.get("text"):
-            last_message["text"] = judged_text(last_message["text"])
+            last_message["text"] = cut_text(last_message["text"])
         return {"agent_seat": seat, "tmux_session": seat, "now": iso(self.now),
                 "last_token_spent_at": (verdict.get(fields.LAST_ACTIVITY) or {}).get("time"),
                 "last_turn_ending_message": last_message or None,
@@ -1601,7 +1604,7 @@ class Sweep:
             return "all backed", None, []
         backed = {}
         if judged:
-            facts = dict(self.facts(seat, verdict),
+            facts = dict(self.facts(seat, verdict, judged_text),
                          sentences=[{"index": index, "time": item["time"], "kind": item["kind"],
                                      "sentence": item["sentence"]}
                                     for index, item in enumerate(judged)],
