@@ -168,6 +168,7 @@ class BadInvocationArgumentParser(argparse.ArgumentParser):
 def build_argument_parser(
     description: str, model_help: str, tier_choices=tuple(TIER_CHOICES),
     cold_read_cell_launcher_own_command_line_options_adder=None,
+    tier_to_effort=None,
 ) -> argparse.ArgumentParser:
     parser = BadInvocationArgumentParser(
         description=description, formatter_class=argparse.RawDescriptionHelpFormatter
@@ -205,9 +206,11 @@ def build_argument_parser(
              "with no fallback, the way --model is: a caller who names an "
              "effort is answering the question the tier map exists to answer, "
              "and quietly running the mapped level instead would defeat the "
-             "request. The fast tier's own launcher "
-             "(nn-systems/cold-read/cold-read-agy-cell.py) pins medium; on the Claude and "
-             "Codex launchers a low-effort run goes through this flag.",
+             "request."
+             + (" This launcher's tier mapping: "
+                + ", ".join(f"{tier} runs at {effort}"
+                            for tier, effort in tier_to_effort.items())
+                + "." if tier_to_effort else ""),
     )
     parser.add_argument(
         "--prompt-file", metavar="PATH",
@@ -1037,7 +1040,8 @@ def run_cell(
     cell_started_at = time.time()
     parser = build_argument_parser(
         description, model_help, tier_choices=tuple(tier_to_model_chain),
-        cold_read_cell_launcher_own_command_line_options_adder=cold_read_cell_launcher_own_command_line_options_adder)
+        cold_read_cell_launcher_own_command_line_options_adder=cold_read_cell_launcher_own_command_line_options_adder,
+        tier_to_effort=tier_to_effort)
     args = parser.parse_args()
 
     # Snapshot before execution so pre-existing edits are not reported as changes from this run.
