@@ -490,10 +490,14 @@ fresh-agent to write the item's text, with no heading line, to
 run it again with --approval-walk-item-fresh-agent-rewrite-file naming that
 file, and exits 1. A run with that flag refuses, writing nothing, a file that
 cannot be read, is empty, or holds a Markdown heading or an
-`#approval_walk_item_` line; otherwise it puts the
-file's text in place of the waiting item's text below its heading and the
-`#approval_walk_item_` lines right under it, keeps the replaced text below as a
-withdrawn version, starts the count again from the new texts, and goes on as
+`#approval_walk_item_` line, a waiting item whose heading names other items
+too, and a result in which the walk-document would hold other items, or the
+withdrawn version's heading would not read as a heading, as an unclosed code
+fence in the file makes it; otherwise, in one write, it puts the file's text in
+place of the waiting item's text below its heading, a setext heading's
+underline included, and the `#approval_walk_item_` lines right under it, and
+keeps the replaced text below as a withdrawn version; it then starts the count
+again from the new texts, and goes on as
 the step does for any item; a later refusal of the new text leaves it in
 place, to be fixed and read as any revision. A count file that cannot be read
 stops the step with exit 1, naming the file to delete.
@@ -1444,6 +1448,11 @@ PROPOSED_TEXT_REVISIONS_UNREADABLE = (
     "{item} is not read: {path}, this program's count of the revisions of the `#new` lines of item {whole_number} and its "
     "sub-steps, cannot be read ({error}).\n"
     "Delete {path}, which starts the count again from the text as it stands, then run `{command}` again.")
+PROPOSED_TEXT_REVISIONS_NOT_WRITTEN = (
+    "{item} is not read: {path}, this program's count of the revisions of the `#new` lines of item {whole_number} and "
+    "its sub-steps, could not be written ({error}). Any fresh-agent rewrite this step put in the walk-document is "
+    "there whole, with the text it replaced kept below as a withdrawn version.\n"
+    "Make {reads} writable, then run `{command}` again.")
 FRESH_AGENT_REWRITE_REFUSED = (
     "nothing written and no cold-read-fast-read run: {rewrite_file}, the fresh-agent's text for {item}, {problem}, "
     "so it cannot take the place of {item}'s text in {document}.\n"
@@ -1452,6 +1461,15 @@ FRESH_AGENT_REWRITE_REFUSED = (
     "Otherwise run `{read_command}`, which prints the fresh-agent's brief again, and do what its lines say.")
 FRESH_AGENT_REWRITE_MISSING = "does not exist or cannot be read ({error})"
 FRESH_AGENT_REWRITE_EMPTY = "is empty"
+FRESH_AGENT_REWRITE_SHARED_HEADING = (
+    "would go under the heading `{heading}`, which {item} shares with other items, and this step replaces only an "
+    "item under a heading of its own; give {item} a heading of its own in the walk-document first")
+FRESH_AGENT_REWRITE_ITEMS_CHANGED = (
+    "would change which items the walk-document holds, from {before} to {after}, as an unclosed code fence in the "
+    "rewrite does by turning the headings below it into code; close or remove the fence")
+FRESH_AGENT_REWRITE_WITHDRAWN_HEADING_NOT_READ = (
+    "would leave `{heading}`, under which the replaced text is kept, read as something other than a heading, as an "
+    "unclosed code fence in the rewrite does; close or remove the fence")
 FRESH_AGENT_REWRITE_TAG_LINE = ("holds the line `{line}`; the item keeps its own `#approval_walk_item_` lines, so the "
                                 "rewrite holds none")
 FRESH_AGENT_REWRITE_HEADING = ("holds the Markdown heading `{heading}`, which the walk-document would read as the start "
@@ -2871,17 +2889,29 @@ def earlier_read_texts_kept_as_withdrawn_versions(walk_finder, minutes, value, n
     below it, under a WITHDRAWN_VERSION_HEADING after the item's live version; return kept_line for each."""
     if not earlier:
         return []
-    number = numbers[0]
     document = minutes.with_name(minutes.name[:-len(walk_finder.MINUTES_SUFFIX)] + ".md")
     text = document.read_text(encoding="utf-8")
     unit = walk_finder.waiting_item_units(document, value, numbers, total, parser)[1][0]
-    lines, kept = text.split("\n"), []
+    lines = text.split("\n")
+    kept = withdrawn_versions_inserted_below_live_version(walk_finder, parser, lines, unit[3], numbers[0], earlier,
+                                                          item, live_text, document, kept_line)
+    if kept:
+        document.write_text("\n".join(lines), encoding="utf-8")
+    return kept
+
+
+def withdrawn_versions_inserted_below_live_version(walk_finder, parser, lines, first, number, earlier, item,
+                                                   live_text, document, kept_line):
+    """Insert into lines, a walk-document's, each of earlier that is neither live_text nor already below the live
+    version of the unit whose heading is line first, under a WITHDRAWN_VERSION_HEADING for item number; return
+    kept_line for each, naming its heading."""
+    kept = []
     for _, outcome, copied in earlier:
         body = heading_body(walk_finder, copied)
         spans = walk_finder.item_unit_spans("\n".join(lines), parser)
         # From the live version's end to the next item: the versions already kept there, and any notes.
-        start = next(other[4] for other in spans if other[3] == unit[3])
-        below = min([other[3] for other in spans if other[3] > unit[3]] + [len(lines)])
+        start = next(other[4] for other in spans if other[3] == first)
+        below = min([other[3] for other in spans if other[3] > first] + [len(lines)])
         if squeezed(body) in (squeezed(heading_body(walk_finder, live_text)), "") or squeezed(body) in squeezed(
                 "\n".join(lines[start:below])):
             continue
@@ -2897,8 +2927,6 @@ def earlier_read_texts_kept_as_withdrawn_versions(walk_finder, minutes, value, n
         lines[below:below] = ["", heading, ""] + body.split("\n")
         kept.append(kept_line.format(item=item, report=outcome.get("report"), document=document,
                                      heading=heading))
-    if kept:
-        document.write_text("\n".join(lines), encoding="utf-8")
     return kept
 
 
@@ -2913,14 +2941,19 @@ def approval_walk_item_and_sub_steps_live_units(walk_finder, parser, document, w
     """Return (the walk-document's lines, the units of the live versions of the whole item whole_number and its
     sub-steps, as waiting_item_units and approval_walk_item_sub_step_units_below_item_in_walk_document find them), so
     that a sub-step under a Withdrawn heading, or of an older version, is left out; a unit ends at the first Withdrawn
-    heading below it. When the whole item has no heading of its own, the units are waiting_unit alone."""
+    heading below it. When no heading counts the whole item, the units are those of its sub-steps with
+    waiting_unit's M."""
     text = document.read_text(encoding="utf-8")
     units = walk_finder.item_unit_spans(text, parser)
     try:
         whole = walk_finder.waiting_item_units(document, f"item {whole_number}", [whole_number], total, parser,
                                                units)[1][0]
     except walk_finder.UnusableRange:
-        return text.split("\n"), [waiting_unit]
+        # Under a heading with no running count, such as `## Item 3: the plan`, the family is every live unit of
+        # item 3's sub-steps with the waiting one's M, so reading 3.1 and then 3.2 compares the same texts.
+        family = [unit for unit in units if unit[1] == waiting_unit[1]
+                  and any(number.split(".")[0] == whole_number for number in unit[0])]
+        return text.split("\n"), family if waiting_unit in family else [*family, waiting_unit]
     return text.split("\n"), [whole, *walk_finder.approval_walk_item_sub_step_units_below_item_in_walk_document(
         units, whole, [whole_number])]
 
@@ -2956,8 +2989,12 @@ def approval_walk_item_proposed_text_revisions_counted(reads, whole_number, new_
         seen["revisions"] += 1
     if new_texts:
         seen["new_texts"] = new_texts
-    reads.mkdir(exist_ok=True)
-    write_json(path, seen)
+    try:
+        reads.mkdir(exist_ok=True)
+        write_json(path, seen)
+    except OSError as error:
+        raise Failure(PROPOSED_TEXT_REVISIONS_NOT_WRITTEN.format(
+            item=item, path=path, whole_number=whole_number, error=error, reads=reads, command=command)) from error
     return seen["revisions"]
 
 
@@ -3015,11 +3052,14 @@ def approval_walk_item_fresh_agent_rewrite_brief_lines(walk_finder, parser, minu
 
 
 def approval_walk_item_text_replace_with_fresh_agent_rewrite_file(
-        walk_finder, parser, document, unit, rewrite_file, item, command, read_command):
-    """Put the text of rewrite_file in place of the unit's text below its heading line and the
-    `#approval_walk_item_` lines right under it; return the unit's text as it was, heading included. Raise Failure,
-    writing nothing, when rewrite_file cannot be read, is empty, or holds a Markdown heading or an
-    `#approval_walk_item_` line."""
+        walk_finder, parser, document, unit, number, rewrite_file, item, command, read_command):
+    """Put the text of rewrite_file in place of the text of unit, item number's own, below its heading, a setext
+    heading's underline included, and the `#approval_walk_item_` lines right under it, and keep the replaced text
+    below as a withdrawn version, in one write of the walk-document; return a line naming the withdrawn version's
+    heading, or none when the replaced text is the rewrite. Raise Failure, writing nothing, when rewrite_file cannot
+    be read, is empty, or holds a Markdown heading or an `#approval_walk_item_` line, when unit's heading names other
+    items too, or when the walk-document so written would hold other items, or its withdrawn version's heading would
+    not be read as one."""
     def refused(problem):
         return Failure(FRESH_AGENT_REWRITE_REFUSED.format(rewrite_file=rewrite_file, item=item, problem=problem,
                                                           document=document, command=command,
@@ -3036,18 +3076,38 @@ def approval_walk_item_text_replace_with_fresh_agent_rewrite_file(
     tag_lines = [line for line in rewrite.split("\n") if walk_finder.APPROVAL_WALK_ITEM_TAG_LINE.match(line)]
     if tag_lines:
         raise refused(FRESH_AGENT_REWRITE_TAG_LINE.format(line=tag_lines[0].strip()))
-    lines = document.read_text(encoding="utf-8").split("\n")
-    kept_end = unit[3] + 1
+    text = document.read_text(encoding="utf-8")
+    lines = text.split("\n")
+    if len(unit[0]) > 1:
+        raise refused(FRESH_AGENT_REWRITE_SHARED_HEADING.format(heading=lines[unit[3]].strip(), item=item))
+    heading_end, _ = walk_finder.approval_walk_unit_heading_end_and_item_line_ranges_below_heading_line(
+        text, parser, lines, unit, [])
+    kept_end = heading_end
     while kept_end < unit[4] and (not lines[kept_end].strip()
                                   or walk_finder.APPROVAL_WALK_ITEM_TAG_LINE.match(lines[kept_end])):
         kept_end += 1
-    while kept_end > unit[3] + 1 and not lines[kept_end - 1].strip():
+    while kept_end > heading_end and not lines[kept_end - 1].strip():
         kept_end -= 1
-    replaced = "\n".join(lines[unit[3]:unit[4]])
-    lines[kept_end:unit[4]] = ["", *rewrite.split("\n"), ""]
-    document.write_text("\n".join(lines), encoding="utf-8")
-    return replaced
-
+    replaced = "\n".join([lines[unit[3]], *lines[kept_end:unit[4]]])
+    written = [*lines[:kept_end], "", *rewrite.split("\n"), "", *lines[unit[4]:]]
+    kept = withdrawn_versions_inserted_below_live_version(
+        walk_finder, parser, written, unit[3], number, [(None, {}, replaced)], item,
+        "\n".join([lines[unit[3]], rewrite]), document, FRESH_AGENT_REWRITE_REPLACED_TEXT_KEPT)
+    # The rewrite was checked alone; only the whole document shows a fence it leaves open running on below it.
+    before = [unit_found[:3] for unit_found in walk_finder.item_unit_spans(text, parser)]
+    after = [unit_found[:3] for unit_found in walk_finder.item_unit_spans("\n".join(written), parser)]
+    if before != after:
+        raise refused(FRESH_AGENT_REWRITE_ITEMS_CHANGED.format(before=[found[0] for found in before],
+                                                               after=[found[0] for found in after]))
+    read_headings = {token.map[0] for token in parser.parse("\n".join(written))
+                     if token.type == "heading_open" and token.map}
+    withdrawn = [index for index, line in enumerate(written) if index > unit[3]
+                 and re.fullmatch(re.escape(WITHDRAWN_VERSION_HEADING).replace(r"\{version\}", r"\d+").replace(
+                     r"\{number\}", re.escape(number)), line)]
+    if kept and withdrawn and withdrawn[-1] not in read_headings:
+        raise refused(FRESH_AGENT_REWRITE_WITHDRAWN_HEADING_NOT_READ.format(heading=written[withdrawn[-1]]))
+    document.write_text("\n".join(written), encoding="utf-8")
+    return kept
 
 def approval_walk_item_first_numbered_sub_step_without_answer(walk_finder, minutes, value, numbers, total, parser):
     """Return the sub-step, such as 3.1, of the one item numbers names, such as 3, that holds the sub-step
@@ -3237,20 +3297,18 @@ def waiting_item_read(arguments, sub_step_of=None):
     whole_number = numbers[0].split(".")[0]
     if rewrite_file is not None:
         unit = walk_finder.waiting_item_units(document, value, numbers, total, parser)[1][0]
-        replaced = approval_walk_item_text_replace_with_fresh_agent_rewrite_file(
-            walk_finder, parser, document, unit, rewrite_file, item,
-            read_step_command_with_cwd(top, FRESH_AGENT_REWRITE_FLAG, str(rewrite_file), *rechecked_words),
-            command_reading_again)
+        # Run again, this command finds the rewrite already in place and only counts, so it is the one to repeat.
+        rewrite_command = read_step_command_with_cwd(top, FRESH_AGENT_REWRITE_FLAG, str(rewrite_file),
+                                                     *rechecked_words)
+        for line in approval_walk_item_text_replace_with_fresh_agent_rewrite_file(
+                walk_finder, parser, document, unit, numbers[0], rewrite_file, item, rewrite_command,
+                command_reading_again):
+            print(line)
         approval_walk_item_proposed_text_revisions_counted(
             reads, whole_number, approval_walk_item_and_sub_steps_live_versions_proposed_new_texts_read_sorted(
                 walk_finder, parser, document, whole_number, total,
                 walk_finder.waiting_item_units(document, value, numbers, total, parser)[1][0]), True, item,
-            command_reading_again)
-        _, text = item_text(walk_finder, minutes, value, numbers, total, parser)
-        for line in earlier_read_texts_kept_as_withdrawn_versions(walk_finder, minutes, value, numbers, total, parser,
-                                                                  [(None, {}, replaced)], item, text,
-                                                                  FRESH_AGENT_REWRITE_REPLACED_TEXT_KEPT):
-            print(line)
+            rewrite_command)
         # The rewrite stays in place when it is refused, as an agent's own revision does, and is fixed the same way.
         _, text = item_text(walk_finder, minutes, value, numbers, total, parser,
                             refused_unless_marks_read=(item, command))
