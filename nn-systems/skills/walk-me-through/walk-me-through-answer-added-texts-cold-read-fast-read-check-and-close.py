@@ -3588,7 +3588,7 @@ def approval_walk_item_title_user_messages_in_earlier_agent_sessions_lines(walk_
         except Exception as error:
             raise Failure(APPROVAL_WALK_ITEM_TITLE_SEARCH_FAILED.format(
                 item=item, exit=result.returncode, command=command,
-                said="\n".join(filter(None, [result.stderr.strip(), f"Loading it here raised {error!r}."]))))
+                said="\n".join(filter(None, [result.stderr.strip(), f"FAILED: loading the title search here raised {error!r}."]))))
         if result.returncode not in (exits.EXIT_FOUND, exits.EXIT_NOTHING_FOUND):
             raise Failure(APPROVAL_WALK_ITEM_TITLE_SEARCH_FAILED.format(
                 item=item, exit=result.returncode, said=result.stderr.strip() or "nothing", command=command))

@@ -989,8 +989,8 @@ def test_the_waiting_item_read_step_refuses_when_the_search_program_cannot_be_lo
     check("a search program that cannot be loaded is refused as a failed search, with what loading it raised",
           result.returncode == 1
           and "the search for what the user said in earlier agent-sessions that named its title failed" in result.stderr
-          and "Loading it here raised ImportError('planted base64')." in result.stderr
-          and "Traceback (most recent call last)" not in result.stderr.split("Loading it here raised")[1]
+          and "\nFAILED: loading the title search here raised ImportError('planted base64')." in result.stderr
+          and "Traceback (most recent call last)" not in result.stderr.split("loading the title search here raised")[1]
           and case.calls.read_text() == "", described(result))
 
 
