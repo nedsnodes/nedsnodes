@@ -15,6 +15,14 @@ nothing before checking for the file.
 
 A fault, such as stdin that is not a JSON object: Python's traceback on stderr, nothing on
 stdout, exit 1; Claude Code then draws the original text.
+
+Not handled:
+- a supervisor run with a --handoff-dir other than ~/.claude/handoffs: the hook reads only that
+  directory, so the lines are not shown and their file stays;
+- an agent-seat checkout whose settings predate this hook, while the supervisor runs from a newer
+  checkout: nothing shows the lines and their file stays;
+- a cut that starts inside a fenced code block: the lines and the batch are drawn as one Markdown
+  text, so the closing heading and the first message are drawn as code.
 """
 
 import json
