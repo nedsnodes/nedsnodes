@@ -1581,6 +1581,8 @@ PROPOSED_TEXT_REVISIONS_BEFORE_FRESH_AGENT_REWRITE = 3
 PROPOSED_TEXT_REVISIONS_FILE = "item-{number}-proposed-text-revisions.json"
 FRESH_AGENT_REWRITE_FILE = "item-{number}-fresh-agent-rewrite.md"
 USER_WORDS_IN_MINUTES_PHRASE = "his words"
+# The fixed part of the short-answer hook's APPROVAL_WALK_WAITING_ITEM_USER_OWN_WORDS_REPLY_WALK_MINUTES_LINE.
+APPROVAL_WALK_WAITING_ITEM_USER_OWN_WORDS_REPLY_WALK_MINUTES_FILE_LINE_MARKER_PHRASE = "while it waited, a reply in his words"
 MARKDOWN_LINK_TARGET = re.compile(r"\]\(\s*<?([^)\s>]+)>?(?:\s+\"[^\"]*\")?\s*\)|<([A-Za-z][A-Za-z0-9+.-]*:[^>\s]+)>")
 PROPOSED_TEXT_REVISIONS_UNREADABLE = (
     "{item} is not read: {path}, this program's count of the revisions of the `#new` lines of item {whole_number} and its "
@@ -1636,6 +1638,9 @@ FRESH_AGENT_REWRITE_BRIEF_LINES = (
 )
 FRESH_AGENT_REWRITE_NO_USER_WORDS = ("- none: no line of the walk-minutes holds his words and names item {whole_number}, one of "
                                      "its sub-steps, its title or an item whose held answer raised it.")
+FRESH_AGENT_REWRITE_BRIEF_APPROVAL_WALK_WAITING_ITEM_USER_OWN_WORDS_REPLIES_HEADER = (
+    "What the user typed while this item waited, which may be about the item or about something else; use only "
+    "what is about the item:")
 FRESH_AGENT_REWRITE_FILES_HEADER = "The files and pages the item links:"
 FRESH_AGENT_REWRITE_NO_FILES = "- none."
 FRESH_AGENT_REWRITE_ON_NED_BOX = "{link} (on ned-box: {path})"
@@ -3238,28 +3243,39 @@ def approval_walk_item_linked_files(text, ned_box_home, mac_mount):
 
 
 def approval_walk_item_user_words_in_minutes(walk_finder, parser, minutes_text, whole_number, titles):
-    """Return each line of the walk-minutes that holds the user's words and names item whole_number, one of its
-    sub-steps, one of titles, or an item whose held answer raised item whole_number, or raised an item that did,
-    with its sub-steps: the user's reply on that item is what the raised item is about."""
-    wholes = {whole_number}
-    holds = [({number.split(".")[0] for number in held}, {number.split(".")[0] for number in raised})
+    """Return (answer lines, waiting-reply lines): each line of the walk-minutes that holds the user's words and
+    names item whole_number, one of its sub-steps, one of titles, or an item whose held answer raised item
+    whole_number, or raised an item that did: the user's reply on that item is what the raised item is about. A held
+    answer on a sub-step names that sub-step alone, and one on a whole item names it with its sub-steps. A line names
+    an item only outside its code spans, which quote his words, so an item or a title he mentions is not read as the
+    item the line is about. The waiting-reply lines are the short-answer hook's records of a reply he typed while the
+    item waited, which may be about something else."""
+    targets = {whole_number}
+    holds = [(held, {number.split(".")[0] for number in raised})
              for _, held, _, raised in held_answers(walk_finder, minutes_text, parser)]
     while True:
-        raising = {number for held, raised in holds if raised & wholes for number in held} - wholes
+        wholes = {target.split(".")[0] for target in targets}
+        raising = {number for held, raised in holds if raised & wholes for number in held} - targets
         if not raising:
             break
-        wholes |= raising
-    found = []
+        targets |= raising
+
+    def is_target(number):
+        return any(number == target or ("." not in target and number.split(".")[0] == target) for target in targets)
+
+    answers, waiting_replies = [], []
     for line in minutes_text.split("\n"):
         if USER_WORDS_IN_MINUTES_PHRASE not in line:
             continue
+        outside_quotes = walk_finder.CODE_SPAN.sub("", line)
         named = set()
-        for numbers in walk_finder.WITHDRAWN_HEADING_ITEMS.finditer(line):
+        for numbers in walk_finder.WITHDRAWN_HEADING_ITEMS.finditer(outside_quotes):
             with contextlib.suppress(walk_finder.UnusableRange):
-                named.update(number.split(".")[0] for number in walk_finder.expand_numbers(numbers[1]))
-        if named & wholes or any(title and title.lower() in line.lower() for title in titles):
-            found.append(line)
-    return found
+                named.update(walk_finder.expand_numbers(numbers[1]))
+        if any(is_target(number) for number in named) or any(
+                title and title.lower() in outside_quotes.lower() for title in titles):
+            (waiting_replies if APPROVAL_WALK_WAITING_ITEM_USER_OWN_WORDS_REPLY_WALK_MINUTES_FILE_LINE_MARKER_PHRASE in outside_quotes else answers).append(line)
+    return answers, waiting_replies
 
 
 def approval_walk_item_fresh_agent_rewrite_brief_lines(walk_finder, parser, minutes, document, reads, whole_number,
@@ -3275,12 +3291,14 @@ def approval_walk_item_fresh_agent_rewrite_brief_lines(walk_finder, parser, minu
     constants = load_module("ned_box_home_directory_and_its_mac_mount_point_path_constants_common", PATH_CONSTANTS_FILE)
     links = approval_walk_item_linked_files("\n".join(text for _, text in texts),
                                             constants.NED_BOX_HOME, constants.MAC_MOUNT_OF_NED_BOX_HOME)
-    words = approval_walk_item_user_words_in_minutes(walk_finder, parser, minutes.read_text(encoding="utf-8"),
-                                                     whole_number, {title, whole_title})
+    words, waiting_replies = approval_walk_item_user_words_in_minutes(
+        walk_finder, parser, minutes.read_text(encoding="utf-8"), whole_number, {title, whole_title})
     values = dict(title=named, skill=WALK_ME_THROUGH_SKILL_FILE, minutes=minutes, whole_number=whole_number,
                   document=document, reads=reads, rewrite_file=rewrite_file)
     return ([line.format(**values) for line in FRESH_AGENT_REWRITE_BRIEF_LINES]
             + ([f"- {line}" for line in words] or [FRESH_AGENT_REWRITE_NO_USER_WORDS.format(**values)])
+            + ([FRESH_AGENT_REWRITE_BRIEF_APPROVAL_WALK_WAITING_ITEM_USER_OWN_WORDS_REPLIES_HEADER, *(f"- {line}" for line in waiting_replies)]
+               if waiting_replies else [])
             + [FRESH_AGENT_REWRITE_FILES_HEADER] + (links or [FRESH_AGENT_REWRITE_NO_FILES])
             + [line.format(**values) for line in FRESH_AGENT_REWRITE_BRIEF_CLOSING_LINES])
 

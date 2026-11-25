@@ -55,7 +55,8 @@ WALK_ME_THROUGH_HOOK_AGENT_CONTEXT_WHEN_TRANSCRIPT_READ_FAILED_AND_PROMPT_AUTHOR
 before that line, and its opening does not say the user wrote it.
 
 A REPLY IN HIS OWN WORDS IS RECORDED. When the user typed a reply in his own
-words while an item waits, and the transcript was read, the hook appends
+words while an item waits, as the pending-user-alerts hook's typed_by_user
+decides without failing to read the transcript, the hook appends
 APPROVAL_WALK_WAITING_ITEM_USER_OWN_WORDS_REPLY_WALK_MINUTES_LINE, naming the
 waiting item, to the walk-minutes, his words squeezed into one code span, so
 that the check program's fresh-agent brief for rewriting the item finds his

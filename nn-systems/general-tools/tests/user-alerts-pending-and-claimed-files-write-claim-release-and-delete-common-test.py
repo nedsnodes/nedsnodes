@@ -250,6 +250,17 @@ def run_release_cases(root):
     check("walk-minutes removed while they are read are skipped, and the walk-minutes after them still read",
           raised is None and ids == {"recorded-id"}, repr((raised, ids)))
 
+    (minutes / "b-walk-minutes.md").write_text(
+        "#user_alert recorded-id\n\nUser (2026-11-25 09:20Z), on item 4 of 9 while it waited, a reply in his words "
+        'that is not a short answer: "`what about #user_alert quoted-id`"\n', encoding="utf-8")
+    alerts.walk_minutes_files = lambda home: [minutes / "b-walk-minutes.md"]
+    try:
+        ids = alerts.user_alert_ids_named_in_walk_minutes(home)
+    finally:
+        alerts.walk_minutes_files = real_walk_minutes_files
+    check("an alert id quoted inside a line, as in a reply he typed, is not taken as recorded; a line opening "
+          "`#user_alert` is", ids == {"recorded-id"}, repr(ids))
+
     fresh_home(root, "release-empty")
     check("with no claimed/ directory, releasing does nothing",
           alerts.user_alerts_claimed_delete_if_recorded_in_approval_walk_minutes_else_release_to_pending_after_30_minutes(now=NOW) is None)
