@@ -562,6 +562,18 @@ def codex_finding_grade_cases(scratch):
           "refused before GitHub, not posted as a review with no Codex finding",
           result.code == 2 and not result.calls and "holds a JSON \"findings\" list" in result.stderr,
           result.detail)
+    review_json = json.dumps(review_object)
+    for malformed, report_text in (
+            ("a trailing comma", "Here is the review:\n" + review_json[:-1] + ",}"),
+            ("a raw newline inside a string", "Here is the review:\n" + review_json.replace("Keep the error",
+                                                                                             "Keep\nthe error")),
+            ("its end cut off", "Here is the review:\n" + review_json[:len(review_json) // 2])):
+        result = run_program(scratch, graded(), arguments=MERGE_LANE_ARGUMENTS,
+                             codex_runs=((HEAD, 0, "<!-- provenance: runtime=codex-exec-review -->\n" + report_text),))
+        check(f"a successful run whose wrapped review object is not valid JSON, with {malformed}, is refused "
+              "before GitHub, not posted as a review with no Codex finding",
+              result.code == 2 and not result.calls and "holds a JSON \"findings\" list" in result.stderr,
+              result.detail)
     for quoted, report_text in (
             ("only a fragment of a review object",
              'No issues found. The converter now reads text such as `"findings": [{` before it posts.'),
