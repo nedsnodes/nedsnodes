@@ -4273,6 +4273,92 @@ with tempfile.TemporaryDirectory() as tmp:
           recovery.returncode != 2 and "usage:" not in recovery.stderr,
           "exit %s\n%s" % (recovery.returncode, recovery.stderr))
 
+# --restore copies the chosen copy to the path and searches nothing.
+RESTORE_TOP_LEVEL = ("rev-parse --show-toplevel", top_level_is_the_directory_given)
+
+
+def run_restore(argv, table=(RESTORE_TOP_LEVEL,)):
+    runner = FakeRunner(list(table))
+    out, errors = io.StringIO(), io.StringIO()
+    with contextlib.redirect_stdout(out), contextlib.redirect_stderr(errors):
+        try:
+            code = finder.main(argv, runner=runner)
+        except SystemExit as stop:
+            code = stop.code
+    return code, out.getvalue(), errors.getvalue(), runner.calls
+
+
+with tempfile.TemporaryDirectory() as tmp:
+    tmp = Path(tmp)
+    content = b"\xff\xfe not utf-8 \x00\n"
+    copy = tmp / "found" / "b.md-from-git"
+    copy.parent.mkdir()
+    copy.write_bytes(content)
+    repo = tmp / "repo"
+    repo.mkdir()
+    code, out, errors, calls = run_restore(["deleted/dir/b.md", "--repo", str(repo), "--restore", str(copy)])
+    restored = repo / "deleted" / "dir" / "b.md"
+    check("--restore copies the copy's bytes to the repo-relative path under the repository's top level, "
+          "creating its missing directories, exits 0, says so, and runs no git command but the top-level one",
+          code == 0 and restored.is_file() and restored.read_bytes() == content
+          and "restored %s to %s" % (copy, restored) in out
+          and calls == ["git -C %s rev-parse --show-toplevel" % repo] and errors == "",
+          "exit=%s calls=%s\n%s\n%s" % (code, calls, out, errors))
+
+    existing = tmp / "elsewhere" / "c.md"
+    existing.parent.mkdir()
+    existing.write_bytes(b"what was there before\n")
+    subdirectory = repo / "docs"
+    subdirectory.mkdir()
+    code, out, errors, calls = run_restore(["deleted/f.md", "--repo", str(subdirectory), "--restore", str(copy)],
+                                           table=[("rev-parse --show-toplevel", (0, "%s\n" % repo, ""))])
+    check("--restore places a relative path under the top level of the repository --repo is in, not under --repo",
+          code == 0 and (repo / "deleted" / "f.md").read_bytes() == content
+          and not (subdirectory / "deleted").exists(), "exit=%s\n%s\n%s" % (code, out, errors))
+
+    outside = tmp / "outside"
+    outside.mkdir()
+    code, out, errors, calls = run_restore(["g.md", "--repo", str(outside), "--restore", str(copy)],
+                                           table=[("rev-parse --show-toplevel",
+                                                   (128, "", "fatal: not a git repository"))])
+    check("--restore places a relative path under --repo itself when --repo is in no repository",
+          code == 0 and (outside / "g.md").read_bytes() == content, "exit=%s\n%s\n%s" % (code, out, errors))
+
+    code, out, errors, calls = run_restore(["h.md", "--repo", str(outside), "--restore", str(copy)],
+                                           table=[("rev-parse --show-toplevel", (128, "", "fatal: unable to read index"))])
+    check("--restore of a relative path exits 1 and says on stderr what failed when git cannot give the top level",
+          code == 1 and "could NOT restore %s to h.md" % copy in errors and "unable to read index" in errors
+          and not (outside / "h.md").exists(), "exit=%s\n%s\n%s" % (code, out, errors))
+
+    code, out, errors, calls = run_restore([str(existing), "--repo", str(repo), "--restore", str(copy)])
+    check("--restore given an absolute path copies to that path, replacing the file already there",
+          code == 0 and existing.read_bytes() == content and calls == [],
+          "exit=%s\n%s\n%s" % (code, out, errors))
+
+    missing_copy = tmp / "found" / "never-copied.md"
+    code, out, errors, calls = run_restore(["gone/d.md", "--repo", str(repo), "--restore", str(missing_copy)])
+    check("--restore of a copy that does not exist exits 1, says on stderr what failed, and writes nothing",
+          code == 1 and "could NOT restore %s to %s" % (missing_copy, repo / "gone" / "d.md") in errors
+          and "FileNotFoundError" in errors and not (repo / "gone").exists() and out == "",
+          "exit=%s\n%s\n%s" % (code, out, errors))
+
+    (repo / "a-file").write_bytes(b"not a directory\n")
+    code, out, errors, calls = run_restore(["a-file/e.md", "--repo", str(repo), "--restore", str(copy)])
+    check("--restore to a path whose parent is a file exits 1 and says on stderr what failed",
+          code == 1 and "could NOT restore %s to %s" % (copy, repo / "a-file" / "e.md") in errors
+          and (repo / "a-file").read_bytes() == b"not a directory\n",
+          "exit=%s\n%s\n%s" % (code, out, errors))
+
+    code, out, errors, calls = run_restore([finder.git_blob_id_of(content), "--restore", str(copy)])
+    check("--restore with a git blob id in place of a path is a usage error, exit 2, searching nothing",
+          code == 2 and "--restore needs the path the file was deleted from" in errors and calls == [],
+          "exit=%s calls=%s\n%s" % (code, calls, errors))
+
+    code, out, errors, calls = run_restore(["someone@elsewhere:docs/x.md", "--restore", str(copy)])
+    check("--restore with an unknown host's relative path is a usage error, exit 2, running nothing",
+          code == 2 and "Give the file's absolute path on elsewhere" in errors and calls == [],
+          "exit=%s calls=%s\n%s" % (code, calls, errors))
+
 # A copy of this suite whose finder raises on import, as an unhandled error or a Ctrl-C would, still removes
 # its found-copies scratch folder.
 for raised in ("RuntimeError('a case raised')", "KeyboardInterrupt()"):
