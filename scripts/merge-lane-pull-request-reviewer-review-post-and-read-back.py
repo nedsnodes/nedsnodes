@@ -71,7 +71,11 @@ commit. The program reads each codex-review-run-record.json under
 <--merge-lane-worktrees-and-outputs-directory>/cx/pr<n>-*/ whose "head_commit"
 is --head-commit, as merge-lane-code-review-codex-cell-run-on-pull-request-head.py
 writes it, and each finding heading, "- [Codex priority Pn (P0 highest)] ..." or
-the older "- [Pn] ...", of the report of each run that exited 0:
+the older "- [Pn] ...", of the report of each run that exited 0. A report that
+is Codex's review object, which a Codex cell older than its conversion wrote, is
+read through scripts/code-review-codex-cell.py's conversion first, so its
+findings get the ids they would have had in prose; one the conversion refuses is
+refused here, with the command that runs the cell again:
 - the file's optional "merge_lane_codex_review_finding_grades" lists one
   {"finding": <the id the refusal prints>, "grade": <grade>} per finding, the grade one
   of FINDING_CATEGORIES or "does-not-hold", which alone also takes a one-line "reason".
@@ -146,6 +150,7 @@ def load_program(file_name, module_name):
 
 common = load_program("merge-lane-pull-request-helpers-common-options-paths-and-token.py",
                       "merge_lane_pull_request_helpers_common")
+codex_cell = load_program("code-review-codex-cell.py", "code_review_codex_cell")
 fix_round = load_program(
     "pull-request-fix-round-author-brief-from-blocking-findings-and-one-commit-every-finding-"
     "answered-check.py", "pull_request_fix_round_author_brief")
@@ -248,8 +253,7 @@ NO_CODEX_RUN_RECORD = (
     "review not posted: no Codex run record under {directory} names commit {head}, and "
     "scripts/pull-request-review-plan.py gives this review {tier}, which runs Codex.\n"
     "Run the Codex cell on this commit from {base_reason}, the base the review plan gives:\n"
-    "  scripts/merge-lane-code-review-codex-cell-run-on-pull-request-head.py {number} {base} "
-    "--expected-head-commit {head}{directory_option}\n"
+    "  {codex_cell_command}\n"
     "Then run this posting command again.")
 CODEX_GRADE_WITH_NO_COMMENT = (
     "review not posted: the review file {path} grades {count} Codex finding(s) must-fix-now, fix-next, "
@@ -429,11 +433,21 @@ def codex_findings_in_report(report):
     return findings
 
 
+def codex_cell_command(number, base, head, outputs_directory):
+    """Return the command that runs the Codex cell on this pull request's head, refusing unless
+    pr<number>-head still holds head, so the run reviews the commit being posted for."""
+    directory_option = (
+        "" if outputs_directory == common.DEFAULT_MERGE_LANE_WORKTREES_AND_OUTPUTS_DIRECTORY
+        else f" --merge-lane-worktrees-and-outputs-directory {shlex.quote(str(outputs_directory))}")
+    return (f"scripts/merge-lane-code-review-codex-cell-run-on-pull-request-head.py {number} {base} "
+            f"--expected-head-commit {head}{directory_option}")
+
+
 def codex_findings_on_commit(outputs_directory, number, head):
     """Return the findings of the Codex runs recorded for this commit, {} when they found nothing or
     failed, or None when no run record names it; raise CodexRunRecordUnusable when one cannot be read, or
-    when a successful run's report is a JSON object after its provenance comment, whose findings have no
-    finding lines and would otherwise read as none."""
+    when a successful run's report is Codex's review object that the Codex cell's converter cannot turn
+    into finding lines."""
     findings, recorded = {}, False
     for record_file in sorted((outputs_directory / "cx").glob(
             f"pr{number}-*/{common.CODEX_REVIEW_RUN_RECORD_FILE_NAME}")):
@@ -455,23 +469,26 @@ def codex_findings_on_commit(outputs_directory, number, head):
             raise CodexRunRecordUnusable(
                 f"the Codex run record {record_file} says the run succeeded, but its report could not "
                 f"be read: {error}")
-        # Codex sometimes writes its review as a JSON object, whose findings have no heading line.
-        if CODEX_REPORT_PROVENANCE_COMMENT.sub("", report, count=1).lstrip().startswith("{"):
-            directory_option = (
-                "" if outputs_directory == common.DEFAULT_MERGE_LANE_WORKTREES_AND_OUTPUTS_DIRECTORY
-                else f" --merge-lane-worktrees-and-outputs-directory {shlex.quote(str(outputs_directory))}")
-            base = record.get("base_commit") or "<the commit after base= in the report's first line>"
-            raise CodexRunRecordUnusable(
-                f"review not posted: the Codex report {report_file} is a JSON object after its provenance "
-                f"comment. This program reads findings only from finding lines, so it would count the run as "
-                f"one with no findings and ask for no grades.\n"
-                f"Do not post the review any other way.\n"
-                f"Run the Codex cell on commit {head} again, from the same base. The cell writes a JSON review "
-                f"as finding lines, or exits nonzero and says what to do:\n"
-                f"  scripts/merge-lane-code-review-codex-cell-run-on-pull-request-head.py {number} "
-                f"{base}{directory_option}\n"
-                f"If the cell exits 0, run the posting command that printed this message again; otherwise "
-                f"follow the cell's own message.")
+        # A cell older than the conversion wrote Codex's review object as the report.
+        review_object_text = codex_cell.codex_review_object_text(
+            CODEX_REPORT_PROVENANCE_COMMENT.sub("", report, count=1))
+        if review_object_text is not None:
+            try:
+                report = codex_cell.codex_review_object_as_prose_report(review_object_text)
+            except codex_cell.CodexReviewObjectNotConvertible as error:
+                base = record.get("base_commit") or "<the commit after base= in the report's first line>"
+                raise CodexRunRecordUnusable(
+                    f"review not posted: the Codex report {report_file} is Codex's review as a JSON object, "
+                    f"which this program cannot turn into finding lines, the \"- [Pn] <title> — <path>:<lines>\" "
+                    f"lines it reads findings from: {error}.\n"
+                    f"Do not post the review any other way: the review would carry none of this run's findings.\n"
+                    f"Run the Codex cell on commit {head} again, from the same base; the new run replaces that "
+                    f"report, whose text is at the end of this message:\n"
+                    f"  {codex_cell_command(number, base, head, outputs_directory)}\n"
+                    f"If that command exits 0, run this posting command again:\n"
+                    f"  {shlex.join(sys.argv)}\n"
+                    f"Otherwise do what that command prints.\n"
+                    f"The report's text:\n{report}")
         findings.update(codex_findings_in_report(report))
     return findings if recorded else None
 
@@ -519,12 +536,9 @@ def body_with_codex_answers(body, comments, answers, findings, plan, number, hea
                 f"record names commit {head}, and the review plan gives {tier}, which runs no Codex.\n"
                 f"Remove \"{CODEX_FINDING_GRADES_KEY}\" and run the same command again.")
         if tier != NO_REVIEWER_TIER:
-            directory_option = (
-                "" if outputs_directory == common.DEFAULT_MERGE_LANE_WORKTREES_AND_OUTPUTS_DIRECTORY
-                else f" --merge-lane-worktrees-and-outputs-directory {shlex.quote(str(outputs_directory))}")
             raise CodexRunRecordUnusable(NO_CODEX_RUN_RECORD.format(
-                directory=outputs_directory / "cx", head=head, tier=tier, number=number, base=base,
-                base_reason=base_reason, directory_option=directory_option))
+                directory=outputs_directory / "cx", head=head, tier=tier, base_reason=base_reason,
+                codex_cell_command=codex_cell_command(number, base, head, outputs_directory)))
         return body
     unknown = sorted(set(grades) - set(findings))
     if unknown:
