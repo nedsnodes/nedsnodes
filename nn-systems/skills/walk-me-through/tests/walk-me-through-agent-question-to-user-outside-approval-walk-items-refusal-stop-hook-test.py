@@ -15,9 +15,11 @@ printed. That run makes real model calls and asserts nothing; it exits 1 only
 when `claude` is not on PATH.
 """
 
+import importlib.machinery
 import importlib.util
 import json
 import os
+import re
 import shutil
 import subprocess
 import sys
@@ -807,23 +809,68 @@ def test_a_question_held_in_an_interruption_item_is_not_checked():
                  headed.run(model="yes"))
 
 
-def test_line_marks_and_the_new_text_mark_pattern_take_the_same_line_opening_marks_from_the_walk_finder():
-    finder = hook.walk_finder
-    shared = finder.APPROVAL_WALK_ITEM_NEW_TEXT_MARK_LINE_PATTERN
-    mark_text = getattr(finder, "MARKDOWN_LINE_OPENING_LIST_OR_QUOTATION_MARK_PATTERN_TEXT", None)
-    check("LINE_MARKS and the walk finder's `#new` mark pattern are both built from the finder's one list or "
-          "quotation mark rule",
-          mark_text is not None and mark_text in hook.LINE_MARKS.pattern and mark_text in shared.pattern,
-          f"rule {mark_text!r}, LINE_MARKS {hook.LINE_MARKS.pattern!r}, shared {shared.pattern!r}")
-    # The spellings of the short-answer hook test's agreement loop on what is a `#new` mark.
-    for spelled in ("#newé Show every row.", "#NEW Show every row.", "#New: Show every row.", "- #new Show every row.",
-                    "#new_if_d Show every row.", "#NEW_IF_D Show every row.", "#newer Show every row."):
-        for opening in ("", "- ", "* ", "+ ", "> ", "1. ", "2) ", "> - ", "  - ", "-\t"):
-            line = opening + spelled
-            whole, stripped = shared.match(line), shared.match(hook.LINE_MARKS.sub("", line))
-            check(f"the `#new` mark pattern reads {line!r} alike before and after LINE_MARKS strips its marks",
-                  (whole and whole.groups()) == (stripped and stripped.groups()),
-                  f"whole {whole and whole.groups()}, stripped {stripped and stripped.groups()}")
+def test_line_marks_strips_the_list_and_quotation_marks_and_keeps_a_mark_only_spacing_opens():
+    for line, stripped in (("> - text", "text"), ("- text", "text"), ("1. text", "text"), ("2) text", "text"),
+                           ("+ > text", "text"), ("  * #new x", "#new x"), (" #new x", " #new x"),
+                           ("-text", "-text"), ("text", "text")):
+        check(f"LINE_MARKS turns {line!r} into {stripped!r}", hook.LINE_MARKS.sub("", line) == stripped,
+              repr(hook.LINE_MARKS.sub("", line)))
+    check("an indented `#new` line with no list mark keeps its mark through normalized()",
+          hook.normalized(" #new x") == "new x", repr(hook.normalized(" #new x")))
+
+
+def modules_loaded_with_the_walk_finder_list_or_quotation_mark_rule_replaced(rule):
+    """The walk finder, this hook and the walk check program, each loaded afresh while the walk finder's source
+    holds rule in place of its list or quotation mark rule, so a pattern that spells the rule out by hand, rather
+    than building from the finder's constant, still reads the real marks and not rule."""
+    finder_file = hook.WALK_FINDER_FILE.resolve()
+    source = finder_file.read_text(encoding="utf-8")
+    assignment = re.compile(r"^(MARKDOWN_LINE_OPENING_LIST_OR_QUOTATION_MARK_PATTERN_TEXT = ).*$", re.M)
+    check("the walk finder assigns its list or quotation mark rule on one line this test can replace",
+          len(assignment.findall(source)) == 1, assignment.findall(source))
+    replaced = assignment.sub(lambda match: match.group(1) + repr(rule), source)
+
+    class ReplacedFinderLoader(importlib.machinery.SourceFileLoader):
+        def get_code(self, fullname):
+            return compile(replaced, self.path, "exec")
+
+    real = importlib.util.spec_from_file_location
+
+    def redirected(name, location=None, *arguments, **keywords):
+        if location is not None and Path(location).resolve() == finder_file:
+            return real(name, location, loader=ReplacedFinderLoader(name, str(location)))
+        return real(name, location, *arguments, **keywords)
+
+    def load(name, path):
+        specification = importlib.util.spec_from_file_location(name, path)
+        module = importlib.util.module_from_spec(specification)
+        specification.loader.exec_module(module)
+        return module
+
+    importlib.util.spec_from_file_location = redirected
+    try:
+        return (load("walk_finder_with_replaced_rule", finder_file),
+                load("question_refusal_stop_hook_with_replaced_rule", HOOK_SCRIPT),
+                load("check_and_close_with_replaced_rule", hook.WALK_CHECK_PROGRAM))
+    finally:
+        importlib.util.spec_from_file_location = real
+
+
+def test_every_pattern_reading_list_or_quotation_marks_follows_the_walk_finder_rule():
+    finder, replaced_hook, close = modules_loaded_with_the_walk_finder_list_or_quotation_mark_rule_replaced(
+        r"(?:Q\s+)")
+    patterns = (("the `#new` mark pattern", finder.APPROVAL_WALK_ITEM_NEW_TEXT_MARK_LINE_PATTERN, "#new x"),
+                ("the walk check program's `#case_against` line", close.CASE_AGAINST_LINE, "#case_against weak"),
+                ("the walk check program's evidence line", close.EVIDENCE_LINE, "#not_asked_test x"),
+                ("the walk check program's category line", close.WALK_CATEGORY_LINE,
+                 "#approval_walk_item_in_category_fix_next"))
+    for name, pattern, marker in patterns:
+        check(f"{name} reads the replaced rule's mark", bool(pattern.match("Q " + marker)), pattern.pattern)
+        check(f"{name} no longer reads a mark the replaced rule drops", not pattern.match("- " + marker),
+              pattern.pattern)
+    check("LINE_MARKS strips the replaced rule's mark and no other",
+          (replaced_hook.LINE_MARKS.sub("", "Q text"), replaced_hook.LINE_MARKS.sub("", "- text")) == ("text", "- text"),
+          replaced_hook.LINE_MARKS.pattern)
 
 
 def test_the_final_message_from_the_payload_is_checked():
