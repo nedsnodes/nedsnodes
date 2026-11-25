@@ -535,13 +535,6 @@ def check_seat(run: Run, seat, pid, age, session_records_directory: Path, projec
     if disconnect is None:
         return
     event = {"session_id": session_id, "disconnect": disconnect.get("uuid")}
-    try:
-        remote_control_name = remote_control_name_of_agent_seat(seat)
-    except OSError as error:
-        report_typing_failure(run, seat, event, disconnect,
-                              f"its stored Remote Control name could not be read: {error}",
-                              kind="remote-control-name-unreadable")
-        return
     typings = [entry for entry in run.entries
                if entry.get("seat") == seat and entry.get("decision") == "typed"
                and all(entry.get(key) == value for key, value in event.items())]
@@ -551,7 +544,7 @@ def check_seat(run: Run, seat, pid, age, session_records_directory: Path, projec
             return
         if len(typings) >= REMOTE_CONTROL_RECONNECT_COMMAND_TMUX_TYPINGS_PER_DISCONNECT_AT_MOST:
             report_typing_failure(run, seat, event, disconnect,
-                                  f"it typed /remote-control {remote_control_name} into its tmux pane {len(typings)} times, the "
+                                  f"it typed {typings[-1].get('typed')} into its tmux pane {len(typings)} times, the "
                                   f"last at {typings[-1]['at']}, and Claude Code has logged no line saying "
                                   "Remote Control is active since", kind="reconnect-typing-limit-reached-remote-control-still-off")
             return
@@ -582,6 +575,14 @@ def check_seat(run: Run, seat, pid, age, session_records_directory: Path, projec
         return
     # Remote Control may have come back on by itself while this run read the pane.
     if latest_unanswered_disconnect(transcript, run.transcript_read_positions) is None:
+        return
+    # Read only now: in the wait after a typing, an unreadable name must not report a failure.
+    try:
+        remote_control_name = remote_control_name_of_agent_seat(seat)
+    except OSError as error:
+        report_typing_failure(run, seat, event, disconnect,
+                              f"its stored Remote Control name could not be read: {error}",
+                              kind="remote-control-name-unreadable")
         return
     for number, arguments in enumerate((("-l", f"/remote-control {remote_control_name}"), ("Enter",))):
         if number:
