@@ -21,14 +21,18 @@ The same directory also gets codex-review-run-record.json, holding
 "pull_request", "head_commit", "base_commit", "exit_code" and "report_file".
 It is removed before the run and written after it, so a run that was killed
 leaves none; a run refused because pr<n>-head's commit could not be read or is
-not --expected-head-commit leaves the earlier record as it was. A second run for the same pull request and base always replaces
-the first run's record, so after a rerun that fails the posting program no
-longer sees the first run's findings and asks no grade for them; it replaces
+not --expected-head-commit leaves the earlier record as it was. A second run
+for the same pull request and base that passes those head checks always
+replaces the first run's record, so after a rerun that fails the posting
+program no longer sees the first run's findings and asks no grade for them; it replaces
 the report only when Codex ran, so a rerun stopped before Codex starts, by a
 missing review tool or an unreadable token, leaves the earlier report beside
 a record that names the failed run.
 With --expected-head-commit, the run refuses before the review when pr<n>-head
-holds another commit, since the review would record the wrong one.
+holds another commit, since the review would record the wrong one. When
+pr<n>-head holds another commit after the review than before it, because
+another run rebuilt the worktree meanwhile, the run is recorded with exit
+code 2, since Codex may have reviewed the other commit.
 merge-lane-pull-request-reviewer-review-post-and-read-back.py
 reads it to tell a Codex run that found nothing from one that failed.
 gh reads the description with the merge account's token, the one file every
@@ -38,7 +42,8 @@ Exit codes: the review's exit code; 2 when the token, the description,
 --review-tools-worktree-at-main's scripts/code-review-codex-cell.py or its
 docs/agents/pr-reviewer-instructions.md could not be read, before the review
 runs, or when the pull request's head commit could not be read or is not
---expected-head-commit, or the run record could not be removed or written.
+--expected-head-commit, or the run record could not be removed or written,
+or pr<n>-head's commit could not be read after the review or had changed.
 """
 
 import argparse
@@ -82,10 +87,7 @@ def main(argv=None):
     outputs.mkdir(parents=True, exist_ok=True)
     environment = run_all_test_suites.environment_without_git_redirecting_variables()
     record = outputs / common.CODEX_REVIEW_RUN_RECORD_FILE_NAME
-    head = subprocess.run(
-        ["git", "-C", str(common.pull_request_head_worktree(arguments, number)), "rev-parse",
-         "--verify", "HEAD^{commit}"],
-        capture_output=True, text=True, env=environment, stdin=subprocess.DEVNULL)
+    head = pull_request_head_commit(arguments, environment)
     if head.returncode != 0:
         print(f"PR {number}: Codex review not run: could not read the head commit of "
               f"{common.pull_request_head_worktree(arguments, number)}: {head.stderr.strip()}\n"
@@ -105,6 +107,17 @@ def main(argv=None):
               f"{record}: {error}\nFix the cause, then run this again.")
         return 2
     exit_code = codex_review_exit_code(arguments, outputs, environment)
+    head_after = pull_request_head_commit(arguments, environment)
+    if head_after.returncode != 0 or head_after.stdout.strip() != head.stdout.strip():
+        now_holds = (f"holds commit {head_after.stdout.strip()}" if head_after.returncode == 0
+                     else f"has a head commit that could not be read: {head_after.stderr.strip()}")
+        print(f"PR {number}: the Codex review exited {exit_code}, but "
+              f"{common.pull_request_head_worktree(arguments, number)} held commit {head.stdout.strip()} "
+              f"when the review started and now {now_holds}, so the review may not be of "
+              f"{head.stdout.strip()}. The run is recorded as failed, with exit code 2.\n"
+              f"Another run rebuilt the pull request's worktrees during the review: when it has finished, "
+              f"rebuild them at the commit to review, then run this again.")
+        exit_code = 2
     temporary = record.with_name(f"{record.name}.{os.getpid()}.tmp")
     try:
         temporary.write_text(json.dumps({
@@ -119,6 +132,13 @@ def main(argv=None):
               f"review cannot be posted without the record.")
         return 2
     return exit_code
+
+
+def pull_request_head_commit(arguments, environment):
+    return subprocess.run(
+        ["git", "-C", str(common.pull_request_head_worktree(arguments, arguments.pull_request)), "rev-parse",
+         "--verify", "HEAD^{commit}"],
+        capture_output=True, text=True, env=environment, stdin=subprocess.DEVNULL)
 
 
 def codex_review_exit_code(arguments, outputs, environment):
