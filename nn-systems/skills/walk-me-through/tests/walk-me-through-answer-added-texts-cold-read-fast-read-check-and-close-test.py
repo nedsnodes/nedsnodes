@@ -58,6 +58,10 @@ SUITE_ROOT = _scratch_directory_common.make_test_scratch_directory_after_removin
     "answer-added-texts-fast-read-check-test-")
 WALK_NAME = "poem-page-2026-10-12"
 FAILURE_PREFIX = "walk-me-through-answer-added-texts-cold-read-fast-read-check-and-close "
+LOG_STORE_PAST_DISCUSSIONS_SEARCH_ROOT_OVERRIDE_ENVIRONMENT_VARIABLE = "LOG_STORE_PAST_DISCUSSIONS_SEARCH_LOG_STORE_ROOT_OVERRIDE"
+AGENT_HOMES_DIRECTORY_OVERRIDE_ENVIRONMENT_VARIABLE = "WALK_ME_THROUGH_AGENT_HOMES_DIRECTORY_OVERRIDE"
+AGENT_SESSION_ID_ENVIRONMENT_VARIABLE = "CLAUDE_CODE_SESSION_ID"
+CASE_AGENT_SESSION_ID = "case-agent-session"
 failures = []
 
 # Behaves as cold-read-fast-read.py does on the records route: writes a
@@ -248,6 +252,13 @@ class Case:
         self.gh.chmod(0o755)
         self.gh_calls = self.root / "gh-stand-in-calls.jsonl"
         self.gh_calls.write_text("")
+        # The read step searches the log-store and the agent-homes for the user's words; an empty one each, unless a
+        # case fills them, keeps the real ones out of every case.
+        self.log_store = self.root / "log-store"
+        (self.log_store / "session-dialogs").mkdir(parents=True)
+        (self.log_store / "walk").mkdir()
+        self.agent_homes = self.root / "agent-homes"
+        self.agent_homes.mkdir()
 
     def gh_comments(self):
         """[(pull request number, body)] of each comment the gh stand-in was asked to post, in order."""
@@ -280,16 +291,19 @@ class Case:
         return record
 
     def run(self, step, *flags, mode="", counts_log=None, fast_read_program=None, environment=None,
-            ignored_signal=None, reply="a", wait_for_reads_ahead=True):
+            ignored_signal=None, reply="a", wait_for_reads_ahead=True, agent_session_id=CASE_AGENT_SESSION_ID):
         """Run the program; a check gets `--user-reply-as-typed reply` unless reply is None or the flags
-        hold --not-asked or a reply of their own. Unless told not to, wait for the reads ahead it started."""
+        hold --not-asked or a reply of their own. Unless told not to, wait for the reads ahead it started.
+        The program runs as agent-session agent_session_id, or with none set when it is None."""
         result = self.run_only(step, *flags, mode=mode, counts_log=counts_log, fast_read_program=fast_read_program,
-                               environment=environment, ignored_signal=ignored_signal, reply=reply)
+                               environment=environment, ignored_signal=ignored_signal, reply=reply,
+                               agent_session_id=agent_session_id)
         if wait_for_reads_ahead:
             self.wait_for_reads_ahead()
         return result
 
-    def run_only(self, step, *flags, mode, counts_log, fast_read_program, environment, ignored_signal, reply):
+    def run_only(self, step, *flags, mode, counts_log, fast_read_program, environment, ignored_signal, reply,
+                 agent_session_id=CASE_AGENT_SESSION_ID):
         if step == "check" and reply is not None and not {"--not-asked", "--already-decided", "--now-over-later-already-decided", "--moved-on",
                                                        "--user-reply-as-typed"} & set(flags):
             flags = (*flags, "--user-reply-as-typed", reply)
@@ -297,6 +311,12 @@ class Case:
                            STAND_IN_ARGUMENTS=str(self.fast_read_arguments),
                            STAND_IN_RECORDS=str(self.records), TMPDIR=str(self.temporary_directory),
                            GH_STAND_IN_CALLS=str(self.gh_calls))
+        environment.setdefault(LOG_STORE_PAST_DISCUSSIONS_SEARCH_ROOT_OVERRIDE_ENVIRONMENT_VARIABLE, str(self.log_store))
+        environment.setdefault(AGENT_HOMES_DIRECTORY_OVERRIDE_ENVIRONMENT_VARIABLE, str(self.agent_homes))
+        # Set, never inherited: the agent-session running this suite would otherwise name the title search cache files.
+        environment.pop(AGENT_SESSION_ID_ENVIRONMENT_VARIABLE, None)
+        if agent_session_id is not None:
+            environment[AGENT_SESSION_ID_ENVIRONMENT_VARIABLE] = agent_session_id
 
         def stop_signal_dispositions():
             # Set explicitly: a child left to inherit would get SIG_IGN when this suite runs under nohup.
@@ -707,6 +727,170 @@ def test_the_waiting_item_read_step_reads_an_item_of_progress_talk_without_askin
     check("an item with no status claim is read as before",
           result.returncode == 0 and "had to be run now" in result.stdout and "status claims" not in result.stdout,
           described(result))
+
+
+def case_with_a_session_dialog_naming_the_item_title():
+    """A Case whose log-store holds one agent-session that named item 3's title; return it and the dialog's path."""
+    case = Case(document=marks_document("The tests are still running.\n"))
+    key = "-home-nedlern-agents-MD-skills-2"
+    dialog = case.log_store / "session-dialogs" / "ned-box" / key / "s1-dialog-complete.md"
+    dialog.parent.mkdir(parents=True)
+    dialog.write_text("# Complete session dialog\n\n---\n\n## Agent\n\nShall I split the page?\n\n## User\n\n"
+                      "Keep one poem per job, as we agreed.\n\n## Agent\n\n## Item 3 of 9: the opening sentence\n\n")
+    transcript = case.log_store / "agent-session-files-by-machine" / "ned-box" / "projects" / key / "s1.jsonl"
+    transcript.parent.mkdir(parents=True)
+    transcript.write_text("\n".join(json.dumps(record) for record in [
+        {"type": "assistant", "message": {"content": [{"type": "text", "text": "Shall I split the page?"}]}},
+        {"type": "user", "entrypoint": "cli", "message": {"content": "Keep one poem per job, as we agreed."}},
+        {"type": "assistant", "message": {"content": [{"type": "text",
+                                                       "text": "## Item 3 of 9: the opening sentence"}]}}]) + "\n")
+    return case, dialog
+
+
+def title_search_cache_file(case, agent_session_id=CASE_AGENT_SESSION_ID):
+    return case.checkout / "docs" / "walk" / "title-search-cache" / f"{WALK_NAME}-item-3-{agent_session_id}.md"
+
+
+def title_search_lines_printed(result):
+    """The lines the read step printed between its first line, which names the report, and its next-step lines."""
+    lines = result.stdout.split("\n")
+    end = next(index for index, line in enumerate(lines) if line.startswith("Walk-minutes lines naming the title:"))
+    return lines[1:end + 1]
+
+
+TITLE_SEARCH_SAVED_TITLES_LINE = json.dumps(["the opening sentence"])
+
+
+def test_the_waiting_item_read_step_prints_the_user_messages_of_an_agent_session_that_named_the_item_title():
+    case, dialog = case_with_a_session_dialog_naming_the_item_title()
+    result = case.run(WAITING_ITEM_READ_STEP_NAME)
+    lines = result.stdout.split("\n")
+    check("the read step prints, right after its first line, each message the user typed in an agent-session whose "
+          "dialog named the item's title, after the agent message it answers, with file and line",
+          result.returncode == 0 and "had to be run now" in lines[0]
+          and lines[1].startswith("The user's words where the item's title, \"the opening sentence\", was named "
+                                  "before: 1 agent-session(s)")
+          and lines[3:6] == [f"  agent  {dialog}:7  Shall I split the page?",
+                             f"  user   {dialog}:11  Keep one poem per job, as we agreed.",
+                             "Walk-minutes lines naming the title: 0."],
+          described(result))
+    cache = title_search_cache_file(case)
+    check("the read step saves what the title search printed, the titles searched for as JSON on the first line",
+          cache.is_file() and cache.read_text().split("\n")
+          == [TITLE_SEARCH_SAVED_TITLES_LINE, *title_search_lines_printed(result), ""],
+          cache.read_text() if cache.is_file() else f"no {cache}")
+
+
+def test_the_waiting_item_read_step_run_again_in_the_same_agent_session_prints_only_the_saved_title_search_path():
+    case, dialog = case_with_a_session_dialog_naming_the_item_title()
+    case.run(WAITING_ITEM_READ_STEP_NAME)
+    result = case.run(WAITING_ITEM_READ_STEP_NAME)
+    lines = result.stdout.split("\n")
+    check("a second run in the same agent-session prints only a line naming the saved file, not the search",
+          result.returncode == 0 and str(dialog) not in result.stdout
+          and lines[1] == (f"The user's words where item 3 of 9's title was named before were printed in full by an "
+                           f"earlier run of this step in this agent-session, and are saved in "
+                           f"{title_search_cache_file(case)}; read that file when they are no longer in your "
+                           f"context."),
+          described(result))
+
+
+def test_the_waiting_item_read_step_searches_again_when_the_saved_titles_differ_the_agent_session_differs_or_the_file_is_gone():
+    case, dialog = case_with_a_session_dialog_naming_the_item_title()
+    full = title_search_lines_printed(case.run(WAITING_ITEM_READ_STEP_NAME))
+    cache = title_search_cache_file(case)
+    cache.write_text(cache.read_text().replace(TITLE_SEARCH_SAVED_TITLES_LINE, json.dumps(["an older title"]), 1))
+    result = case.run(WAITING_ITEM_READ_STEP_NAME)
+    check("titles that differ from the saved ones search, print and save again",
+          title_search_lines_printed(result) == full
+          and cache.read_text().split("\n")[0] == TITLE_SEARCH_SAVED_TITLES_LINE, described(result))
+    result = case.run(WAITING_ITEM_READ_STEP_NAME, agent_session_id="another-agent-session")
+    other = title_search_cache_file(case, "another-agent-session")
+    check("another agent-session searches afresh and saves its own file",
+          title_search_lines_printed(result) == full and other.is_file(), described(result))
+    cache.unlink()
+    result = case.run(WAITING_ITEM_READ_STEP_NAME)
+    check("a missing file searches, prints and saves again",
+          title_search_lines_printed(result) == full and cache.is_file(), described(result))
+
+
+def test_the_waiting_item_read_step_saves_a_title_search_with_no_hits():
+    case = Case(document=marks_document("The tests are still running.\n"))
+    result = case.run(WAITING_ITEM_READ_STEP_NAME)
+    cache = title_search_cache_file(case)
+    printed = title_search_lines_printed(result)
+    check("a search with no hits is printed and saved",
+          result.returncode == 0 and "0 agent-session(s)" in printed[0] and cache.is_file()
+          and cache.read_text().split("\n") == [TITLE_SEARCH_SAVED_TITLES_LINE, *printed, ""],
+          described(result))
+
+
+def test_the_waiting_item_read_step_prints_the_title_search_in_full_and_why_when_it_cannot_save_it():
+    case, dialog = case_with_a_session_dialog_naming_the_item_title()
+    (case.checkout / "docs" / "walk" / "title-search-cache").write_text("a file where the cache folder would go\n")
+    result = case.run(WAITING_ITEM_READ_STEP_NAME)
+    lines = result.stdout.split("\n")
+    printed = title_search_lines_printed(result)
+    check("a cache file that cannot be written leaves the search printed in full, with why it was not saved",
+          result.returncode == 0 and f"  user   {dialog}:11  Keep one poem per job, as we agreed." in printed
+          and lines[len(printed) + 1].startswith(
+              f"The search for the user's words above was not saved in {title_search_cache_file(case)}, so the next "
+              f"run of this step prints it in full again: [Errno ")
+          and "File exists" in lines[len(printed) + 1],
+          described(result))
+    result = case.run(WAITING_ITEM_READ_STEP_NAME, agent_session_id=None)
+    lines = result.stdout.split("\n")
+    printed = title_search_lines_printed(result)
+    check("without an agent-session id the search is printed in full, with why it was not saved",
+          result.returncode == 0 and f"  user   {dialog}:11  Keep one poem per job, as we agreed." in printed
+          and lines[len(printed) + 1].endswith(
+              "prints it in full again: CLAUDE_CODE_SESSION_ID is not set, so the agent-session that ran the step is "
+              "not known."),
+          described(result))
+
+
+def test_the_waiting_item_read_step_refuses_when_the_search_for_the_user_earlier_words_fails():
+    case = Case(document=marks_document("The tests are still running.\n"))
+    minutes_before = case.minutes.read_text()
+    result = case.run(WAITING_ITEM_READ_STEP_NAME, environment=dict(
+        os.environ, LOG_STORE_PAST_DISCUSSIONS_SEARCH_RIPGREP_PROGRAM_OVERRIDE=str(case.root / "no-such-rg")))
+    check("a failed search refuses before any read, saying what the search said and how to run the step again",
+          result.returncode == 1
+          and "nothing read: item 3 of 9 was not given its cold-read-fast-read, because the search for what the user "
+              "said in earlier agent-sessions that named its title failed (exit 2)" in result.stderr
+          and "FAILED: ripgrep (" in result.stderr
+          and f"run `python3 {shlex.quote(str(PROGRAM))} {WAITING_ITEM_READ_STEP_NAME} --cwd" in result.stderr
+          and case.calls.read_text() == "" and case.minutes.read_text() == minutes_before,
+          described(result))
+
+
+def test_the_waiting_item_read_step_saves_the_title_search_only_once_it_is_printed():
+    case, dialog = case_with_a_session_dialog_naming_the_item_title()
+    failed = case.run(WAITING_ITEM_READ_STEP_NAME, mode="failed")
+    check("a read that fails after the search ran prints none of the search and saves none of it",
+          failed.returncode == 1 and str(dialog) not in failed.stdout and not title_search_cache_file(case).exists(),
+          described(failed))
+    result = case.run(WAITING_ITEM_READ_STEP_NAME)
+    check("the rerun after a failed read prints the search in full and saves it",
+          result.returncode == 0 and f"  user   {dialog}:11  Keep one poem per job, as we agreed." in result.stdout
+          and title_search_cache_file(case).is_file(), described(result))
+
+
+def test_the_waiting_item_read_step_refuses_when_the_search_for_the_user_earlier_words_crashes():
+    case, _ = case_with_a_session_dialog_naming_the_item_title()
+    crashing_rg = case.root / "crashing-rg"
+    # A match with no "data" makes the search raise KeyError, so Python exits it with 1.
+    crashing_rg.write_text("#!/bin/sh\necho '{\"type\": \"match\"}'\n")
+    crashing_rg.chmod(0o755)
+    minutes_before = case.minutes.read_text()
+    result = case.run(WAITING_ITEM_READ_STEP_NAME, environment=dict(
+        os.environ, LOG_STORE_PAST_DISCUSSIONS_SEARCH_RIPGREP_PROGRAM_OVERRIDE=str(crashing_rg)))
+    check("a search that crashes is refused as a failure, not read as nothing found, and nothing is saved",
+          result.returncode == 1
+          and "the search for what the user said in earlier agent-sessions that named its title failed (exit 1)"
+          in result.stderr and "KeyError" in result.stderr
+          and case.calls.read_text() == "" and case.minutes.read_text() == minutes_before
+          and not title_search_cache_file(case).exists(), described(result))
 
 
 def test_the_waiting_item_read_step_does_not_refuse_a_status_claim_in_an_item_settled_without_being_shown():
@@ -3952,6 +4136,91 @@ def test_an_item_of_no_kind_rated_weak_settles_when_it_touches_guarded_code_but_
           and case.minutes.read_text() == before and case.calls.read_text() == "", described(result))
 
 
+DROPPED = "proposed-check-dropped-search-found-no-case"
+
+
+def search_line(first_days_ago=31, last_days_ago=0, count=0, places="in the log-store's session dialogs and user "
+                "messages and the commits on main"):
+    today = datetime.datetime.now(datetime.timezone.utc).date()
+    first, last = (today - datetime.timedelta(days=days) for days in (first_days_ago, last_days_ago))
+    return f"#not_asked_search {first} to {last}, {count} cases, {places}\n\n"
+
+
+def dropped_proposal_case(search=None, rating="medium: the counter could still print a wrong total some day.",
+                          new_text=""):
+    """Item 1 recommends dropping a proposed check; `search` is its search line, or the item has none."""
+    document = RATED_NONE_DOCUMENT.replace(
+        "## Item 1 of 3: print the poem count after the list\n\n#not_asked_touches tools/counter.py\n\n"
+        "#case_against none.\n\nRecommendation: print it.",
+        "## Item 1 of 3: drop the proposed check on the counter's total\n\n"
+        f"{search_line() if search is None else search}{new_text}#case_against {rating}\n\n"
+        "The alternative: add the check.\n\nRecommendation: drop the check.", 1)
+    return Case(next_to_present="item 1 of 3", document=document)
+
+
+def refused_as_dropped(case, *problems):
+    before = case.minutes.read_text()
+    result = case.run("check", "--not-asked", DROPPED)
+    return (result.returncode == 1
+            and "cannot be settled without asking the user as proposed check dropped, search found no case, because:"
+            in result.stderr and all(problem in result.stderr for problem in problems)
+            and case.minutes.read_text() == before and case.calls.read_text() == "", described(result))
+
+
+def test_an_item_dropping_a_proposed_check_settles_at_any_rating_when_its_search_found_no_case():
+    for rating in ("none.", "medium: the counter could still print a wrong total some day.",
+                   "very strong: the total feeds the bill."):
+        case = dropped_proposal_case(rating=rating)
+        result = case.run("check", "--not-asked", DROPPED)
+        minutes = case.minutes.read_text()
+        check(f"an item rated {rating.split(':')[0].rstrip('.')} that drops a proposed check after a search found "
+              "no case is settled, and the agent is told to judge the proposal and the places searched",
+              result.returncode == 0
+              and re.search(r"\nitem 1 of 3: settled without asking the user, not asked, proposed check dropped, "
+                            r"search found no case #case_against_[a-z_]+ \(\d{4}-\d\d-\d\d \d\d:\d\dZ\), which "
+                            r"makes its change\. Fast reads:\n", minutes) is not None
+              and "Judge also whether item 1 of 3 proposes a check, test, guard, refusal or hook and recommends "
+                  "dropping it" in result.stdout, described(result) + minutes)
+    closed = case.run("close")
+    check("close records the dropped proposal as accepted, and moves `#next_to_present` past it",
+          closed.returncode == 0
+          and "\nitem 1 of 3: not asked, proposed check dropped, search found no case; every text the change adds "
+              "has had a fast read. <accepted>\n" in case.minutes.read_text()
+          and marker(case).startswith("#next_to_present item 2 of "), described(closed) + case.minutes.read_text())
+
+
+def test_an_item_dropping_a_proposed_check_is_refused_without_a_full_recent_search_that_found_no_case():
+    check("an item with no search line is refused, and told what the line gives",
+          *refused_as_dropped(dropped_proposal_case(search=""), "it has no `#not_asked_search` line; give on it the "
+                              "search's first and last day, the count of cases found and the places searched"))
+    check("a search line without a count is refused",
+          *refused_as_dropped(dropped_proposal_case(search="#not_asked_search 2026-10-01 to 2026-11-25 in the "
+                                                    "commits on main\n\n"), "does not give the search's first and "
+                              "last day, as YYYY-MM-DD, the count of cases found"))
+    check("a search line that names no place is refused",
+          *refused_as_dropped(dropped_proposal_case(search=search_line(places="")), "and the places searched."))
+    check("a search shorter than 30 days is refused",
+          *refused_as_dropped(dropped_proposal_case(search=search_line(first_days_ago=10)),
+                              "shorter than the 30 days the guard rule in CLAUDE.md asks for"))
+    check("a search that ended before yesterday is refused",
+          *refused_as_dropped(dropped_proposal_case(search=search_line(first_days_ago=40, last_days_ago=5)),
+                              "before yesterday; search again up to today"))
+    check("a search that ends after today is refused",
+          *refused_as_dropped(dropped_proposal_case(search=search_line(first_days_ago=5, last_days_ago=-25)),
+                              "after today (UTC)"))
+    check("a search line with two counts is refused",
+          *refused_as_dropped(dropped_proposal_case(search=search_line(places="in the session dialogs but 2 cases on "
+                                                                              "main")), "the count of cases found"))
+    check("a search line whose only text after the count is not `in` and the places is refused",
+          *refused_as_dropped(dropped_proposal_case(search=search_line(places="found")), "and the places searched."))
+    check("a search that found cases is refused, since a case is the failure that has happened",
+          *refused_as_dropped(dropped_proposal_case(search=search_line(count=2)), "found 2 cases; a case found is "
+                              "the failure that has happened"))
+    check("an item with a `#new` text is refused, since a dropped proposal adds none",
+          *refused_as_dropped(dropped_proposal_case(new_text="#new The counter checks its total.\n\n"),
+                              "it has a `#new` line, which A would add"))
+
+
 def test_an_item_of_no_kind_with_an_empty_touches_line_settles_as_a_change_that_touches_no_file():
     case = rated_none_case(touches="#not_asked_touches\n\n")
     result = case.run("check", "--not-asked", "none")
@@ -4080,7 +4349,8 @@ def test_a_not_asked_value_other_than_a_kind_or_a_no_kind_value_is_refused_as_us
         check(f"`--not-asked {value}` is refused as usage, writing nothing",
               result.returncode == 2
               and f"`{value}` is not a kind: give 1, 2, 3, 4, 5, 6, 7, or, for an item of no kind, none, "
-                  "weak-cost-only or weak-alters-earlier-approved-text-only" in result.stderr
+                  "weak-cost-only, weak-alters-earlier-approved-text-only or "
+                  "proposed-check-dropped-search-found-no-case" in result.stderr
               and case.minutes.read_text().rstrip().endswith("#next_to_present item 1 of 3"), described(result))
 
 
@@ -4985,7 +5255,8 @@ def no_answer_rows_printed(result):
 
 def test_help_prints_every_row_of_the_no_answer_table():
     usage = subprocess.run([sys.executable, str(PROGRAM), "--help"], capture_output=True, text=True).stdout
-    for value in (1, 2, 3, 4, 5, 6, 7, "none", "weak-cost-only", "weak-alters-earlier-approved-text-only"):
+    for value in (1, 2, 3, 4, 5, 6, 7, "none", "weak-cost-only", "weak-alters-earlier-approved-text-only",
+                  "proposed-check-dropped-search-found-no-case"):
         check(f"--help lists the no-answer table's row --not-asked {value}",
               f"\n  --not-asked {value}: " in usage, usage[-3000:])
     check("--help lists the handoff row with its citation",
@@ -5781,6 +6052,13 @@ def test_two_earlier_texts_kept_in_one_run_both_land_below_the_item_and_the_next
     text = document.read_text()
     document.write_text(text.replace("\n\n#### Withdrawn version 1 of item 3\n\n" + ITEM_3_BODY.format("leave it."), "",
                                      1))
+    # The first read's text is recorded as kept, so a copy removed by hand is not kept again; drop the record too, so
+    # that two earlier texts wait to be kept.
+    program = load_program()
+    for path in case.reads().glob("*-outcome.json"):
+        outcome = json.loads(path.read_text())
+        outcome.pop(program.KEPT_AS_WITHDRAWN_VERSION, None)
+        program.write_json(path, outcome)
     rewritten_item_3(case, "keep it.")
     result = case.run(WAITING_ITEM_READ)
     finder = load_program().load_walk_finder()
@@ -6913,7 +7191,9 @@ def run_printed_command(case, command):
         capture_output=True, text=True, cwd=case.root,
         env=dict(os.environ, STAND_IN_MODE="", STAND_IN_CALLS=str(case.calls),
                  STAND_IN_ARGUMENTS=str(case.fast_read_arguments), STAND_IN_RECORDS=str(case.records),
-                 TMPDIR=str(case.temporary_directory), GH_STAND_IN_CALLS=str(case.gh_calls)))
+                 TMPDIR=str(case.temporary_directory), GH_STAND_IN_CALLS=str(case.gh_calls),
+                 **{LOG_STORE_PAST_DISCUSSIONS_SEARCH_ROOT_OVERRIDE_ENVIRONMENT_VARIABLE: str(case.log_store),
+                    AGENT_HOMES_DIRECTORY_OVERRIDE_ENVIRONMENT_VARIABLE: str(case.agent_homes)}))
 
 
 def printed_command_with(result, words):
@@ -7581,6 +7861,155 @@ def test_the_count_of_proposed_text_revisions_reads_every_sub_step_when_no_headi
     counts = [program.approval_walk_item_proposed_text_revisions_counted(reads, "3", texts, False, "item", "rerun")
               for texts in (first, second)]
     check("reading sub-step 3.1 and then 3.2, unchanged, counts no revision", counts == [0, 0], repr(counts))
+
+
+def withdrawn_versions_inserted(document_text, first_line_text, earlier_bodies, number="3", outcomes=None):
+    """Run the program's withdrawn-version insertion on the item whose heading line is first_line_text, once for each
+    of earlier_bodies in turn, as reruns of the read step would, each outcome recording no keeping unless outcomes
+    gives one; return the document's text after."""
+    program = load_program()
+    walk_finder = program.load_walk_finder()
+    parser = walk_finder.markdown_parser()
+    lines = document_text.split("\n")
+    first = lines.index(first_line_text)
+    for index, body in enumerate(earlier_bodies):
+        outcome = (outcomes or [{}] * len(earlier_bodies))[index]
+        program.withdrawn_versions_inserted_below_live_version(
+            walk_finder, parser, lines, first, number, [(f"key{index}", outcome, f"{first_line_text}\n\n{body}")],
+            f"item {number} of 9", "Live.", Path("a-walk.md"), program.EARLIER_TEXT_KEPT)
+    return "\n".join(lines)
+
+
+def test_a_version_kept_under_a_withdrawn_heading_naming_no_item_is_not_kept_again():
+    document = ("# A walk\n\n## Item 3 of 9: three\n\nLive.\n\n#### Withdrawn version 1 of this item\n\nBlue.\n\n"
+                "## Item 4 of 9: four\n\nFour.\n")
+    after = withdrawn_versions_inserted(document, "## Item 3 of 9: three", ["Blue."])
+    check("an earlier text whose body is already kept under a hand-written `Withdrawn version 1 of this item` heading "
+          "below the item is not kept again", after == document, after)
+
+
+def test_a_withdrawn_heading_nested_in_a_list_in_a_kept_version_neither_splits_it_nor_numbers_versions():
+    body = "- A point.\n\n  #### Withdrawn version 1 of item 3\n\n  An old note."
+    document = "# A walk\n\n## Item 3 of 9: three\n\nLive.\n\n## Item 4 of 9: four\n\nFour.\n"
+    after = withdrawn_versions_inserted(document, "## Item 3 of 9: three", [body, body, "Green."])
+    check("an earlier text holding a Withdrawn heading nested in a list is kept once, however often the step "
+          "reruns, and the next version kept is version 2",
+          after.count("A point.") == 1 and "#### Withdrawn version 2 of item 3\n\nGreen." in after, after)
+
+
+def test_a_withdrawn_version_of_a_part_s_last_item_goes_above_the_next_part_and_is_kept_once():
+    document = ("# A walk\n\n## Part 1\n\n### Item 3 of 9: three\n\nLive.\n\n## Part 2\n\nThis part is about four.\n\n"
+                "### Item 4 of 9: four\n\nFour.\n")
+    after = withdrawn_versions_inserted(document, "### Item 3 of 9: three", ["Blue.", "Blue."])
+    check("an earlier text of the last item of part 1 is kept once, above the `## Part 2` heading, not after part 2's "
+          "introduction",
+          after == ("# A walk\n\n## Part 1\n\n### Item 3 of 9: three\n\nLive.\n\n"
+                    "#### Withdrawn version 1 of item 3\n\nBlue.\n\n## Part 2\n\nThis part is about four.\n\n"
+                    "### Item 4 of 9: four\n\nFour.\n"), after)
+
+
+def test_an_earlier_read_text_recorded_as_kept_is_not_kept_again_after_a_note_is_written_below_it():
+    document = ("# A walk\n\n## Item 3 of 9: three\n\nLive.\n\n#### Withdrawn version 1 of item 3\n\nBlue.\n\n"
+                "Note: the user asked for green.\n\n## Item 4 of 9: four\n\nFour.\n")
+    after = withdrawn_versions_inserted(document, "## Item 3 of 9: three", ["Blue."],
+                                        outcomes=[{"kept_as_withdrawn_version": "#### Withdrawn version 1 of item 3"}])
+    check("an earlier text whose read's outcome records it as kept is not kept again, though a note now follows it",
+          after == document, after)
+    case = item_read_case()
+    answered_and_closed(case)
+    case.run(WAITING_ITEM_READ)
+    walk = rewritten_item_3(case, "drop it.")
+    first = case.run(WAITING_ITEM_READ)
+    walk.write_text(walk.read_text().replace("\n\n## Item 4 of 5", "\n\nNote: kept after the read.\n\n## Item 4 of 5"))
+    again = case.run(WAITING_ITEM_READ)
+    check("through the read step: once an earlier read text is kept, a note written after it keeps no second copy",
+          first.returncode == 0 and again.returncode == 0 and walk.read_text().count("#### Withdrawn") == 1,
+          described(first) + described(again) + walk.read_text())
+
+
+def test_a_kept_version_that_cannot_be_recorded_is_reported_naming_the_command_to_run_again():
+    case = item_read_case()
+    answered_and_closed(case)
+    case.run(WAITING_ITEM_READ)
+    walk = rewritten_item_3(case, "drop it.")
+    reads = case.reads()
+    reads.chmod(0o500)
+    try:
+        result = case.run(WAITING_ITEM_READ)
+    finally:
+        reads.chmod(0o700)
+    check("when the read's outcome cannot record that its text is kept, the step exits 1 saying so, with the text "
+          "kept in the walk-document",
+          result.returncode == 1 and "could not be written to record that" in result.stderr
+          and walk.read_text().count("#### Withdrawn version 1 of item 3") == 1, described(result))
+    rerun = case.run(WAITING_ITEM_READ)
+    recorded = [json.loads(path.read_text()).get("kept_as_withdrawn_version")
+                for path in sorted(reads.glob("*-outcome.json"))]
+    check("the rerun the failure names, with the reads writable, records the text found already kept under its heading",
+          rerun.returncode == 0 and "#### Withdrawn version 1 of item 3" in recorded, described(rerun) + repr(recorded))
+    walk.write_text(walk.read_text().replace("\n\n## Item 4 of 5", "\n\nNote: kept after the read.\n\n## Item 4 of 5"))
+    again = case.run(WAITING_ITEM_READ)
+    check("after that rerun, a note written after the kept text keeps no second copy",
+          again.returncode == 0 and walk.read_text().count("#### Withdrawn") == 1, described(again) + walk.read_text())
+
+
+def test_the_count_of_proposed_text_revisions_takes_only_item_3_s_lines_from_a_heading_shared_with_item_4():
+    document = ("# A walk\n\n## Item 3: the plan\n\n### Items 3.1 and 4.1 of 10: two halves\n\n**Item 3.1.** First.\n\n"
+                "#new \"Three's half.\"\n\n**Item 4.1.** Other.\n\n#new \"Four's half.\"\n\n"
+                "### Item 3.2 of 10: the second half\n\n#new \"Second half.\"\n")
+    texts = approval_walk_item_and_sub_steps_new_texts_of("shared-sub-step-heading", document, "3.2")
+    check("from a sub-step heading item 4.1 shares, only item 3.1's `#new` text is counted for item 3",
+          texts == ["Second half.", "Three's half."], repr(texts))
+
+
+def test_the_count_of_proposed_text_revisions_takes_sub_steps_whose_m_differs_whichever_waits():
+    document = ("# A walk\n\n## Item 3: the plan\n\n### Item 3.1 of 10: first\n\n#new \"First.\"\n\n"
+                "### Item 3.2 of 10: second\n\n#new \"Second.\"\n\n### Item 3.3 of 11: third\n\n#new \"Third.\"\n")
+    texts = [approval_walk_item_and_sub_steps_new_texts_of(f"m-differs-{number}", document, number)
+             for number in ("3.1", "3.2", "3.3")]
+    check("sub-steps 3.1 and 3.2 of 10 and 3.3 of 11 give the same `#new` texts whichever of them waits",
+          texts[0] == texts[1] == texts[2] == ["First.", "Second.", "Third."], repr(texts))
+
+
+def test_a_fresh_agent_rewrite_holding_a_bold_count_paragraph_is_refused_writing_nothing():
+    after, refusal, before = fresh_agent_rewrite_put_in_place(
+        "bold-count-paragraph", "# A walk\n\n## Item 3 of 9: three\n\nOld text.\n\n## Item 4 of 9: four\n\nFour.\n",
+        "3", '**Item 3 of 10 revised:** New text.\n\n#new "New rule."\n')
+    check("a rewrite holding a bold count paragraph, read as a newer version of item 3, is refused with the "
+          "program's message and the walk-document left as it was",
+          after == before and "would change which items" in refusal and "bold running count" in refusal, after + "\n---\n" + repr(refusal))
+
+
+def test_a_rerun_after_an_over_limit_rewrite_whose_count_write_failed_starts_the_count_again():
+    case, _, _ = revised_item_case_revised_three_times_across_a_split()
+    rewrite = case.reads() / "item-3.1-fresh-agent-rewrite.md"
+    rewrite.write_text(f'#new "{REVISED_ITEM_TEXTS[4]}"\n\n' + "word " * 600 + "\n")
+    case.reads().chmod(0o500)
+    try:
+        failed = case.run(WAITING_ITEM_READ_STEP_NAME, FRESH_AGENT_REWRITE_FLAG, str(rewrite))
+    finally:
+        case.reads().chmod(0o700)
+    again = case.run(WAITING_ITEM_READ_STEP_NAME, FRESH_AGENT_REWRITE_FLAG, str(rewrite))
+    check("after an over-limit rewrite whose count could not be written, the command it names, run again, starts "
+          "the count again before refusing the item for its length",
+          failed.returncode == 1 and "could not be written" in failed.stderr
+          and again.returncode == 1 and "over the limit" in again.stderr and revised_item_revisions(case) == 0,
+          described(failed) + described(again))
+
+
+def test_a_fresh_agent_rewrite_read_from_the_whole_item_is_refused_when_another_sub_step_is_over_the_limit():
+    case, _, _ = revised_item_case_revised_three_times_across_a_split()
+    document = revised_item_document(case)
+    document.write_text(document.read_text().rstrip("\n") + "\n\n### Item 3.2 of 9: the long half\n\n"
+                        + "word " * 600 + "\n")
+    case.minutes.write_text(case.minutes.read_text() + "#next_to_present item 3 of 9\n")
+    rewrite = case.reads() / "item-3.1-fresh-agent-rewrite.md"
+    rewrite.write_text(f'The page lists each job once.\n\n#new "{REVISED_ITEM_TEXTS[4]}"\n\n'
+                       "#case_against weak: the page grows.\n\nThe alternative: leave it.\n\nRecommendation: do it.\n")
+    result = case.run(WAITING_ITEM_READ_STEP_NAME, FRESH_AGENT_REWRITE_FLAG, str(rewrite))
+    check("a rewrite read from the whole item 3 is refused when its sibling sub-step 3.2 is over the word limit, as "
+          "the read without a rewrite is", result.returncode == 1 and "over the limit" in result.stderr
+          and "the long half" in result.stderr, described(result))
 
 
 def main():

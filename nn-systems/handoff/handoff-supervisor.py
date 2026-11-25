@@ -1383,7 +1383,7 @@ CONVERSATION_TAIL_LAST_LINE_COUNT_SHOWN_ABOVE_FIRST_MESSAGE = 100
 CONVERSATION_TAIL_LAST_LINES_HEADING_TEMPLATE = (
     "The end of the last session: the last {line_count} lines of {conversation_tail_path}, "
     "shown to you and not to the new session's agent.\n\n")
-CONVERSATION_TAIL_LAST_LINES_END = "\n\nThe new session's first message:\n\n"
+CONVERSATION_TAIL_LAST_LINES_FOOTER = "\n\nThe new session's first message:\n\n"
 
 
 def conversation_tail_last_lines_display_file_write(
@@ -1394,7 +1394,7 @@ def conversation_tail_last_lines_display_file_write(
     The display is optional, and the caller runs after the handoff's counter is saved, where a
     raise would stop the successor's launch: a read or write failure is reported on stderr and
     the successor launches without the display."""
-    display_path = successor_conversation_tail_display_hook.conversation_tail_last_lines_display_file_path(
+    display_path = successor_conversation_tail_display_hook.conversation_tail_last_lines_display_file_path_for_session_id(
         handoff_directory, session_id)
     try:
         # split("\n"), not splitlines(), which also splits at characters such as U+2028.
@@ -1403,7 +1403,7 @@ def conversation_tail_last_lines_display_file_write(
         display_path.write_text(
             CONVERSATION_TAIL_LAST_LINES_HEADING_TEMPLATE.format(
                 line_count=len(lines), conversation_tail_path=conversation_tail_path)
-            + "\n".join(lines) + CONVERSATION_TAIL_LAST_LINES_END,
+            + "\n".join(lines) + CONVERSATION_TAIL_LAST_LINES_FOOTER,
             encoding="utf-8")
     except OSError as error:
         print(f"handoff-supervisor: the user is not shown the conversation-tail's last lines "
@@ -2531,6 +2531,13 @@ def handoff_supervisor_not_restarted_on_main_code_notice(
             f"{RESTART_PROGRAM_PATH_FROM_HOME} {seat}", on_the_mac))
 
 
+HANDOFF_SUPERVISOR_CLAUDE_AI_RENAME_NOT_CHECKED_SUCCESSOR_NOTICE_TEMPLATE = (
+    "The handoff-supervisor could not check whether the user renamed agent-seat {agent_seat} in "
+    "claude.ai during the last agent-session, so a rename, if any, was not passed on: {error}\n"
+    "If ListAgents lists this agent-session under a name other than the one the other agent-seats "
+    "use for it, send each of them that name with SendMessage.")
+
+
 def handoff_supervisor_remote_control_name_choose_for_agent_session_launch(agent_seat: str) -> str:
     """Return the stored Remote Control name; an unreadable name file must not stop a launch."""
     try:
@@ -2544,32 +2551,51 @@ def handoff_supervisor_remote_control_name_choose_for_agent_session_launch(agent
 
 
 def handoff_supervisor_claude_ai_rename_save_as_remote_control_name_and_add_instruction_to_successor_notice(settings: SupervisorSettings, successor_notice: str,
-                                                retiring_session_id: Optional[str],
+                                                launched_session_id: Optional[str],
                                                 launched_remote_control_name: Optional[str]) -> str:
-    """Store a rename the retiring agent-session's last turn end did not, and, when the stored name
-    differs from the name the retiring agent-session was launched under, add the instruction to tell
-    the other agent-seats."""
-    if not retiring_session_id:
+    """Store a rename the launched agent-session's last turn end did not, and, when the name
+    changed during that agent-session, add the instruction to tell the other agent-seats."""
+    # The launched session, not the handoff's writer: a session that took over the worktree
+    # may carry a title of its own, which is not this agent-seat's name.
+    if not launched_session_id:
         return successor_notice
+    rename, failure = None, ""
     try:
         transcript_path = claude_code_session_transcript_lookup_and_text_search_common.claude_code_session_transcript_path_found_by_session_id(
-            retiring_session_id, settings.working_directory, PROJECTS_ROOT)
+            launched_session_id, settings.working_directory, PROJECTS_ROOT)
         rename = (remote_control_name_common.handoff_remote_control_name_save_when_transcript_custom_title_changed_and_return_rename(
             settings.agent, transcript_path) if transcript_path is not None else None)
-        stored_name = remote_control_name_common.handoff_remote_control_name_read_stored_or_default_to_agent_seat_name(settings.agent)
     except (OSError, claude_code_session_transcript_lookup_and_text_search_common.ClaudeCodeSessionTranscriptFoundInSeveralProjectDirectoriesError) as error:
-        print(f"handoff-supervisor: whether the user renamed agent-seat {settings.agent} in claude.ai "
-              f"could not be checked, so the rename, if any, was not carried to the successor: {error}\n"
-              "If the user did rename it, tell the other agent-seats the new name with SendMessage.",
-              file=sys.stderr)
+        failure = HANDOFF_SUPERVISOR_CLAUDE_AI_RENAME_NOT_CHECKED_SUCCESSOR_NOTICE_TEMPLATE.format(
+            agent_seat=settings.agent, error=error)
+    try:
+        stored_name = remote_control_name_common.handoff_remote_control_name_read_stored_or_default_to_agent_seat_name(settings.agent)
+    except OSError as error:
+        failure = HANDOFF_SUPERVISOR_CLAUDE_AI_RENAME_NOT_CHECKED_SUCCESSOR_NOTICE_TEMPLATE.format(
+            agent_seat=settings.agent, error=error)
+        stored_name = None
+    if failure:
+        print(f"handoff-supervisor: {failure}", file=sys.stderr)
+        successor_notice = f"{successor_notice} {failure}" if successor_notice else failure
+    if stored_name is None:
         return successor_notice
-    # The retiring agent-session may have handed off before it sent the line the Stop hook gave it.
-    # A state file written before the launched name was recorded has only the rename found here.
-    old_name = launched_remote_control_name or (rename.old_name if rename else stored_name)
-    if stored_name == old_name:
+    try:
+        recorded_names = remote_control_name_common.handoff_agent_seat_remote_control_names_it_was_announced_under_since_its_launch_read(settings.agent)
+    except OSError as error:
+        # Announcing from the launched name alone still reaches the agent-seats that never heard a rename.
+        print(f"handoff-supervisor: the names agent-seat {settings.agent} was announced under since its "
+              f"launch could not be read, so only its launched name is announced as old: {error}", file=sys.stderr)
+        recorded_names = []
+    # Any name the others may know the agent-seat by, other than the current one, gets a line:
+    # the Stop hook may have stored a name the agent-session handed off before announcing.
+    heard_names = ([launched_remote_control_name] if launched_remote_control_name else []) + recorded_names + (
+        [rename.old_name] if rename is not None else [])
+    old_names = [name for index, name in enumerate(heard_names)
+                 if name != stored_name and name not in heard_names[:index]]
+    if not old_names:
         return successor_notice
-    rename = remote_control_name_common.RemoteControlRename(old_name, stored_name)
-    instruction = remote_control_name_common.handoff_remote_control_rename_message_other_agent_seats_instruction_build(rename)
+    instruction = remote_control_name_common.handoff_agent_seat_remote_control_rename_from_each_old_name_agent_told_to_message_other_agent_seats_instruction_build(
+        old_names, stored_name)
     return f"{successor_notice} {instruction}" if successor_notice else instruction
 
 
@@ -2759,7 +2785,7 @@ def supervise_sessions(settings: SupervisorSettings) -> int:
                 retiring_session_id_from_handoff_writer_or_tracked_launch(tracked_session_id, boot_fields)
                 if tracked_session_id else None)
             successor_notice = handoff_supervisor_claude_ai_rename_save_as_remote_control_name_and_add_instruction_to_successor_notice(
-                settings, successor_notice, retiring_session_id, state.get(LAUNCHED_REMOTE_CONTROL_NAME_STATE_KEY))
+                settings, successor_notice, tracked_session_id, state.get(LAUNCHED_REMOTE_CONTROL_NAME_STATE_KEY))
             successor_session_id, ignition_plan = (
                 carry_over_to_successor(settings, retiring_session_id, boot_fields, generation)
                 if retiring_session_id else (None, None)
@@ -2815,6 +2841,15 @@ def supervise_sessions(settings: SupervisorSettings) -> int:
         state.update({LAUNCHED_SESSION_ID_STATE_KEY: session_id,
                       LAUNCHED_REMOTE_CONTROL_NAME_STATE_KEY: remote_control_name,
                       "generation": generation})
+        # A resume continues the agent-session whose names the others may know, so its record is kept.
+        if not next_launch_resumes_the_session:
+            try:
+                remote_control_name_common.handoff_agent_seat_remote_control_names_it_was_announced_under_since_its_launch_reset_to_launched_name(
+                    settings.agent, remote_control_name)
+            except OSError as error:
+                print(f"handoff-supervisor: the record of the names agent-seat {settings.agent} is announced "
+                      f"under could not be started, so its next handoff may announce a rename from a name "
+                      f"the others no longer use: {error}", file=sys.stderr)
         clear_agent_exit_record_from_supervisor_state(state)
         write_supervisor_state(settings.state_path, state)
 
@@ -2973,7 +3008,7 @@ def supervise_sessions(settings: SupervisorSettings) -> int:
         retiring_session_id = retiring_session_id_from_handoff_writer_or_tracked_launch(
             session_id, handoff_fields)
         successor_notice = handoff_supervisor_claude_ai_rename_save_as_remote_control_name_and_add_instruction_to_successor_notice(
-            settings, successor_notice, retiring_session_id, state.get(LAUNCHED_REMOTE_CONTROL_NAME_STATE_KEY))
+            settings, successor_notice, session_id, state.get(LAUNCHED_REMOTE_CONTROL_NAME_STATE_KEY))
         successor_session_id, ignition_plan = carry_over_to_successor(
             settings, retiring_session_id, handoff_fields, generation
         )

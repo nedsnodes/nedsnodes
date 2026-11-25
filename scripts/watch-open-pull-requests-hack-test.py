@@ -33,6 +33,7 @@ import importlib.util
 import io
 import json
 import os
+import stat
 import subprocess
 import sys
 import tempfile
@@ -398,6 +399,18 @@ def run_unit_cases():
               from_node({**pull_request_node(3, "c" * 12), "reviews": reviews})
               == (None, "pull request #3 came back with no usable list of reviews"),
               str(from_node({**pull_request_node(3, "c" * 12), "reviews": reviews})))
+    check("a null list of mac-claude's reviews is no reason to refuse a pull request another "
+          "account opened, since those reviews decide nothing there",
+          from_node({**pull_request_node(3, "c" * 12), "macClaudeReviews": None})[0] is not None,
+          str(from_node({**pull_request_node(3, "c" * 12), "macClaudeReviews": None})))
+    own_node = {**pull_request_node(3, "c" * 12),
+                "author": {"login": watcher_module.fix_round.MERGE_LANE_2_REVIEWER_LOGIN},
+                "macClaudeReviews": None}
+    check("a null list of mac-claude's reviews is refused on a pull request ned-review-merge "
+          "opened, where mac-claude's approval is the verdict",
+          from_node(own_node)
+          == (None, "pull request #3 came back with no usable list of macClaudeReviews"),
+          str(from_node(own_node)))
 
     # ------------------------------------------------------------------
     # Titles are folded then truncated, so a multi-line title cannot
@@ -598,14 +611,24 @@ def run_merge_lane_pull_request_review_assignment_unit_cases():
     check("on a pull request ned-review-merge opened, a COMMENTED review opening with APPROVE is "
           "a verdict",
           dealt_numbers([own_approved, waiting_3, assignable(10)],
-                        {7: "merge-lane-1", 3: "merge-lane-3"}) == [(10, "merge-lane-1")], "")
+                        {7: "merge-lane-3", 3: "merge-lane-1"}) == [(10, "merge-lane-3")], "")
     mac_claude_approved = assignable(9, author=MERGE_LANE_REVIEWER,
                                      reviews=[review("COMMENTED", "a", "a note")],
                                      mac_claude_reviews=[review("APPROVED", "a")])
     check("on a pull request ned-review-merge opened, mac-claude's approval of the newest commit "
           "is a verdict, as the merge gate takes it",
           dealt_numbers([mac_claude_approved, waiting_3, assignable(10)],
-                        {9: "merge-lane-1", 3: "merge-lane-3"}) == [(10, "merge-lane-1")], "")
+                        {9: "merge-lane-3", 3: "merge-lane-1"}) == [(10, "merge-lane-3")], "")
+    mac_claude_approved_before_lane_review = assignable(
+        8, author=MERGE_LANE_REVIEWER, reviews=[review("COMMENTED", "b", "an older note")],
+        mac_claude_reviews=[review("APPROVED", "a")])
+    check("on a pull request ned-review-merge opened, mac-claude's approval waits for "
+          "ned-review-merge's own review of the same commit, whose grading can still change it",
+          dealt_numbers([mac_claude_approved_before_lane_review, waiting_3, assignable(10)],
+                        {8: "merge-lane-3", 3: "merge-lane-1"}) == [(10, "merge-lane-1")], "")
+    check("a draft does not wait for a verdict, so the count and the assignment agree on it",
+          not watcher_module.pull_request_waits_for_merge_lane_verdict(assignable(13, draft=True)),
+          "")
     check("mac-claude's approval is no verdict on a pull request another account opened",
           dealt_numbers([assignable(12, mac_claude_reviews=[review("APPROVED", "a")]), waiting_3,
                          assignable(10)], {12: "merge-lane-3", 3: "merge-lane-1"})
@@ -843,24 +866,36 @@ def run_merge_lane_pull_request_review_assignment_watcher_cases():
         check("a file made after a missing-file stop, but that cannot be rewritten, prints a "
               "WATCH line of its own for the new case",
               events == [] and "cannot be rewritten" in output.getvalue()
-              and "#40" in output.getvalue(), output.getvalue())
+              and "the pull requests each poll deals are given no" in output.getvalue(),
+              output.getvalue())
 
-        class WriteFailsPartway(type(assignments)):
-            """Writes the first half of the new file, then fails as a full disk does."""
+        real_fdopen = watcher_module.os.fdopen
 
-            def write_text(self, text, *args, **kwargs):
-                super().write_text(text[:len(text) // 2], *args, **kwargs)
+        def fdopen_whose_write_fails_partway(*args, **kwargs):
+            """A file that writes the first half of the new text, then fails as a full disk does."""
+            opened = real_fdopen(*args, **kwargs)
+            real_write = opened.write
+
+            def write(text):
+                real_write(text[:len(text) // 2])
                 raise OSError(28, "No space left on device")
+            opened.write = write
+            return opened
 
         assignments.write_text("1 merge-lane-1\n", encoding="utf-8")
         two_new = [*open_now, assignable(41, created_at="2026-11-24T06:00:00Z")]
         output = io.StringIO()
-        with contextlib.redirect_stdout(output):
-            events = appended(WriteFailsPartway(assignments), two_new, {})
+        watcher_module.os.fdopen = fdopen_whose_write_fails_partway
+        try:
+            with contextlib.redirect_stdout(output):
+                events = appended(assignments, two_new, {})
+        finally:
+            watcher_module.os.fdopen = real_fdopen
         check("a write that fails partway leaves the file as it was, prints no REVIEW-ASSIGNED "
-              "line, and names every pull request it dealt as dealt again",
-              events == [] and "pull requests #40, #41 are given no" in output.getvalue()
-              and assignments.read_text(encoding="utf-8") == "1 merge-lane-1\n",
+              "line, and leaves no temporary file behind",
+              events == [] and "No space left on device" in output.getvalue()
+              and assignments.read_text(encoding="utf-8") == "1 merge-lane-1\n"
+              and not list(scratch.glob("assignments.txt.*.partial")),
               f"{events}\n{output.getvalue()}")
         _, lines, _ = watch([two_new])
         check("the next poll deals every pull request the failed write dealt",
@@ -870,6 +905,42 @@ def run_merge_lane_pull_request_review_assignment_watcher_cases():
               and assignments.read_text(encoding="utf-8")
               == "1 merge-lane-1\n40 merge-lane-3\n41 merge-lane-1\n",
               "\n".join(lines))
+
+        stray_partial = scratch / "assignments.txt.partial"
+        stray_partial.write_text("someone else's file\n", encoding="utf-8")
+        assignments.write_text("1 merge-lane-1\n", encoding="utf-8")
+        assignments.chmod(0o600)
+        with contextlib.redirect_stdout(io.StringIO()):
+            appended(assignments, open_now, {})
+        check("a rewrite leaves a file named <assignment file>.partial alone, and keeps the "
+              "file's mode",
+              stray_partial.read_text(encoding="utf-8") == "someone else's file\n"
+              and assignments.read_text(encoding="utf-8") == "1 merge-lane-1\n40 merge-lane-3\n"
+              and stat.S_IMODE(assignments.stat().st_mode) == 0o600,
+              f"{stray_partial.read_text(encoding='utf-8')!r} {oct(assignments.stat().st_mode)}")
+        stray_partial.unlink()
+
+        linked_target = scratch / "assignments-kept-elsewhere.txt"
+        linked_target.write_text("1 merge-lane-1\n", encoding="utf-8")
+        link = scratch / "assignments-link.txt"
+        link.symlink_to(linked_target)
+        with contextlib.redirect_stdout(io.StringIO()):
+            appended(link, open_now, {})
+        check("a rewrite through a symbolic link keeps the link and writes the file it names",
+              link.is_symlink()
+              and linked_target.read_text(encoding="utf-8") == "1 merge-lane-1\n40 merge-lane-3\n",
+              f"{link.is_symlink()} {linked_target.read_text(encoding='utf-8')!r}")
+
+        # Reading text turns a carriage return into a newline, so only a line separator is left.
+        assignments.write_text("1 merge-lane-1\u2028", encoding="utf-8")
+        output = io.StringIO()
+        with contextlib.redirect_stdout(output):
+            events = appended(assignments, open_now, {})
+        check("a file whose line ends in a line separator, not a newline, is refused as a "
+              "damaged line before anything is written",
+              events == [] and "line 1 of the assignment file" in output.getvalue()
+              and assignments.read_text(encoding="utf-8") == "1 merge-lane-1\u2028",
+              output.getvalue())
 
         # The seed.
         seed = scratch / "seed.txt"
@@ -924,12 +995,65 @@ def run_merge_lane_pull_request_review_assignment_watcher_cases():
               and seeded.read_text(encoding="utf-8") == "4028 merge-lane-1\n4028 merge-lane-3\n",
               errors)
         seeded.unlink()
+
+        class FileMadeWhileGitHubIsRead(list):
+            """One poll, during which another run makes the assignment file."""
+
+            def __getitem__(self, index):
+                seeded.write_text("4028 merge-lane-3\n", encoding="utf-8")
+                return list.__getitem__(self, index)
+
+        exit_code, lines, errors = seed_with(FileMadeWhileGitHubIsRead([open_at_seed]))
+        check("a seed run whose assignment file another run makes while it reads GitHub exits 1 "
+              "and leaves that file as the other run made it",
+              exit_code == 1 and "was made while this run read GitHub" in errors
+              and seeded.read_text(encoding="utf-8") == "4028 merge-lane-3\n",
+              f"exit {exit_code!r} {errors}")
+        seeded.unlink()
+        scratch.chmod(0o500)
+        try:
+            exit_code, lines, errors = seed_with([open_at_seed])
+        finally:
+            scratch.chmod(0o700)
+        check("a seed run that cannot write the assignment file exits 1, says so, and makes none",
+              exit_code == 1 and "could not be written" in errors and not seeded.exists(), errors)
         seed.write_text("4028 lane-one\n", encoding="utf-8")
         exit_code, lines, errors = seed_with([open_at_seed])
         check("a malformed seed file exits 1, naming it as the seed file, and writes no assignment "
               "file",
               exit_code == 1 and "line 1 of the seed file" in errors and not seeded.exists(),
               errors)
+
+        # Another repository.
+        stand_in_default = scratch / "default-assignments.txt"
+        stand_in_default.write_text("1 merge-lane-1\n", encoding="utf-8")
+        saved_default = watcher_module.MERGE_LANE_PULL_REQUEST_REVIEW_ASSIGNMENTS_DEFAULT_FILE
+        watcher_module.MERGE_LANE_PULL_REQUEST_REVIEW_ASSIGNMENTS_DEFAULT_FILE = stand_in_default
+        try:
+            _, lines, _ = run_watcher_in_process(
+                ["--repo", "someone/elsewhere", "--needs-a-look-directory", str(scratch / "no-notices")],
+                [[assignable(1), assignable(70)]], token_file)
+            check("with another --repo and no assignment file named, no review is assigned and the "
+                  "default file is left alone",
+                  not any(" REVIEW-ASSIGNED " in line for line in lines)
+                  and stand_in_default.read_text(encoding="utf-8") == "1 merge-lane-1\n",
+                  "\n".join(lines))
+            exit_code, _, errors = run_watcher_in_process(
+                ["--repo", "someone/elsewhere", "--merge-lane-pr-review-assignments-list-for",
+                 "merge-lane-1"], [[assignable(1)]], token_file)
+            check("the lookup with another --repo and no assignment file named exits 2 and asks "
+                  "for the file",
+                  exit_code == 2 and "--merge-lane-pr-review-assignments-file" in errors, errors)
+        finally:
+            watcher_module.MERGE_LANE_PULL_REQUEST_REVIEW_ASSIGNMENTS_DEFAULT_FILE = saved_default
+
+        spaced = scratch / "an assignment file.txt"
+        steps = watcher_module.merge_lane_pull_request_review_assignments_file_repair_steps(
+            spaced, "missing", ["--repo", "someone/elsewhere", "--token-file", "/tokens/a token"])
+        check("the seed command the repair steps print repeats --repo and --token-file and quotes "
+              "each path",
+              "--repo someone/elsewhere --token-file '/tokens/a token' " in steps
+              and f"--merge-lane-pr-review-assignments-file '{spaced}' " in steps, steps)
 
         # The lookup.
         assignments.write_text("50 merge-lane-1\n51 merge-lane-1\n52 merge-lane-1\n53 merge-lane-3\n",

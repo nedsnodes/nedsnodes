@@ -230,19 +230,25 @@ try:
                assistant(tool=("Bash", {"command": "true"}), at="2026-11-02T11:41:25Z", tool_id="t-ok"),
                user([{"type": "tool_result", "tool_use_id": "t-ok", "content": ""}],
                     at="2026-11-02T11:41:26Z"),
+               assistant(tool=("TaskUpdate", {"taskId": "99", "addBlockedBy": ["1"]}),
+                         at="2026-11-02T11:41:27Z", tool_id="t-missing"),
+               task_result("Task not found", at="2026-11-02T11:41:27.5Z", tool_id="t-missing"),
+               assistant(tool=("TaskUpdate", {"taskId": "3", "addBlockedBy": ["1"]}),
+                         at="2026-11-02T11:41:28Z", tool_id="t-updated"),
+               task_result(UPDATED, at="2026-11-02T11:41:28.5Z", tool_id="t-updated"),
                told, assistant(ANNOUNCED, at="2026-11-02T11:42:00Z"), turn_end(at="2026-11-02T11:43:00Z")]
     machine = Machine()
     _, transcript = machine.seat("alpha", records)
     _, verdicts, _ = machine.run()
     alpha = verdicts["alpha"]
     check("the judge is handed the assistant texts from the judged sentence's turn on, and each tool "
-          "call whose result carried is_error marked failed",
+          "call whose result carried is_error, or task call answered 'Task not found', marked failed",
           [item["text"] for item in alpha.get(
               fields.ASSISTANT_TEXT_MESSAGES_SINCE_START_OF_EARLIEST_TURN_WITH_SENTENCE_TO_JUDGE, [])]
           == ["The test failed.", ANNOUNCED]
           and [call.get("failed") for call in alpha.get(
               fields.TOOL_CALLS_SINCE_START_OF_EARLIEST_TURN_WITH_SENTENCE_TO_JUDGE, [])]
-          == [True, None], alpha)
+          == [True, None, True, None], alpha)
     _program_specification = importlib.util.spec_from_file_location(
         "agent_seat_idle_sweep_verdicts_print", PROGRAM)
     program = importlib.util.module_from_spec(_program_specification)
@@ -250,9 +256,9 @@ try:
     since = program.parse_time("2026-11-02T11:41:00Z")
     done = program.transcript_tool_calls_and_assistant_texts_since(transcript, since)
     check("the re-check is handed each tool call since the sentences, one whose result carried "
-          "is_error marked failed",
+          "is_error, or a task call answered 'Task not found', marked failed",
           [(call["name"], call.get("failed")) for call in done["tool_calls"]]
-          == [("Bash", True), ("Bash", None)]
+          == [("Bash", True), ("Bash", None), ("TaskUpdate", True), ("TaskUpdate", None)]
           and [item["text"] for item in done["assistant_texts"]] == ["The test failed.", ANNOUNCED],
           done)
     # {"command": "<n x>"} is n + 15 characters of JSON.

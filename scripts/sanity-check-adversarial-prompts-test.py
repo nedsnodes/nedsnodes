@@ -954,6 +954,27 @@ def main():
           buffer.getvalue().splitlines()[1:2] == [runner_scan.SANITY_CHECK_CELL_REPORT_QUOTE_FOUND_IN_NO_TRACKED_FILE_WARNING_NEXT_STEP_INSTRUCTION],
           f"output was {buffer.getvalue()!r}")
 
+    class WriteCallsRecorder(io.StringIO):
+        def __init__(self):
+            super().__init__()
+            self.calls = []
+
+        def write(self, text):
+            self.calls.append(text)
+            return super().write(text)
+
+    # Each write is where another cell's thread can cut in; the warning and its
+    # instruction must arrive in one, or a `saved:` line can land between them.
+    recorder = WriteCallsRecorder()
+    with contextlib.redirect_stdout(recorder):
+        runner_scan.quote_scan(corpus, 'It says "words that appear in no file at all" here.', "q3")
+    instruction = runner_scan.SANITY_CHECK_CELL_REPORT_QUOTE_FOUND_IN_NO_TRACKED_FILE_WARNING_NEXT_STEP_INSTRUCTION
+    check("a warning and its instruction line reach stdout in one write, so a parallel "
+          "cell's line cannot land between them",
+          any(call.startswith("WARNING: ") and f"\n{instruction}\n" in call
+              for call in recorder.calls),
+          f"write calls were {recorder.calls!r}")
+
     # The print modes: each surface arrives on stdout, and the requester
     # surface carries both of its sources.
     import subprocess as sp
