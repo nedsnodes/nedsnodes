@@ -801,7 +801,7 @@ def newest_main_commit_left_no_test_failing_cases(scratch):
         os.replace, Path.unlink = real_replace, real_unlink
     path = newest_main_commit_left_no_test_failing_file(scratch / spaced)
     delimiter = "delete the temporary file: "
-    rm_lines = [line[line.index(delimiter) + len(delimiter):] for line in output.splitlines()
+    rm_lines = [line[line.rindex(delimiter) + len(delimiter):] for line in output.splitlines()
                 if delimiter + "rm " in line]
     temporaries = sorted(item.name for item in path.parent.glob(f"{path.name}.*.tmp"))
     check("a record whose rename and cleanup both fail: the STOP names the temporary file left "
@@ -888,12 +888,24 @@ def newest_main_commit_left_no_test_failing_cases(scratch):
              ["main may be broken", "Ask the user: \"Main fails"]),
             ("failed-into-another-branch-cut-before-main-began-failing", RUNNER_FAILED, 3,
              ["STOP: merged, but the test run of 'stacked-topic-branch' at ",
-              "failed tests that are not main's failures", TELL_AUTHOR_AND_USER],
+              "failed tests that are not main's failures", TELL_AUTHOR_AND_USER,
+              "is on the failed suites record, ",
+              ", which keeps the main commit whose test run recorded it first, ",
+              ". 'stacked-topic-branch' does not hold that commit, so this program counts the "
+              "failure as 'stacked-topic-branch''s own. It may still be main's: when two of "
+              "main's after-merge test runs overlap, the later commit's run can record the "
+              "test first, though the earlier commit fails it too.\n"
+              "Before the author fixes it, run scripts/broken-test.py in a worktree at the "
+              "commit where 'stacked-topic-branch' left main, which `git merge-base ",
+              " origin/main` prints after `git fetch origin`.\n",
+              "If that test passes there, 'stacked-topic-branch' broke it: the author fixes it on "
+              "'stacked-topic-branch'."],
              ["main may be broken", "git could not say"]),
             ("failed-into-another-branch-recorded-suite-new-case", RUNNER_FAILED, 3,
              ["STOP: merged, but the test run of 'stacked-topic-branch' at ",
               "failed tests that are not main's failures", TELL_AUTHOR_AND_USER],
-             ["main may be broken", "nothing is needed"]),
+             ["main may be broken", "nothing is needed",
+              "which keeps the main commit whose test run recorded it first"]),
             ("failed-into-another-branch-first-failing-commit-unknown", RUNNER_FAILED, 3,
              ["STOP: pull request 10 merged into 'stacked-topic-branch', but git could not say "
               "whether 'stacked-topic-branch' holds ffffffffffff, the main commit whose test run "
