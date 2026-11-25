@@ -879,15 +879,15 @@ with tempfile.TemporaryDirectory() as scratch:
           len(skipped_lines) == 1 and "'/x/two  spaces' To add an exception, run:" in skipped_lines[0],
           repr(skipped_lines))
 
-    check("a U+2028 inside a path in a git error stays in that path",
+    check("a U+2028 inside a path in a git error is written as its escape, so the line stays one line",
           common_module.join_error_text_lines_with_one_space(
               "fatal: dubious ownership at '/x/a\u2028b'\nTo add an exception, run:")
-          == "fatal: dubious ownership at '/x/a\u2028b' To add an exception, run:")
+          == "fatal: dubious ownership at '/x/a\\u2028b' To add an exception, run:")
 
     # A cell whose pre-run snapshot failed passes git's reason, so the line the grid lifts carries it.
     captured = io.StringIO()
     with contextlib.redirect_stderr(captured):
-        common_module.report_stray_writes("cell", common_module.ColdReadCellWorkingTreeSnapshotFailedStandInBaselineWithGitReason(
+        common_module.report_stray_writes("cell", common_module.WriteDetectorUnavailable(
             "fatal: not a git repository\nhint: run git init"))
     not_taken_lines = captured.getvalue().splitlines()
     check("a failed pre-run snapshot's git reason is on the check-skipped line",
