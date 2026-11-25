@@ -556,9 +556,6 @@ NEVER_SHOWN_REASON = (
     "not read an earlier "
     "agent-session's transcript, so an item shown only before the last session-handoff must be shown again in this "
     "agent-session.")
-# A line holding a text an answer adds opens with one of these marks; `#new_if_d` is tried before `#new`.
-# re.ASCII: under Unicode re.I a dotless or dotted i matches `i`, and the lowered mark would then name no lead-in.
-NEW_TEXT_MARK = re.compile(r"^(#new_if_d|#new)(?!\w)[\s:]*(.*)$", re.I | re.ASCII)
 # The lead-in an agent puts where it shows a line without its mark.
 LEAD_INS_BEFORE_A_LINE_SHOWN_WITHOUT_ITS_MARK = {"`#new` line": "If you approve, the new text:",
                                                  "`#new_if_d` line": "If you disapprove, the new text:"}
@@ -1023,13 +1020,13 @@ def shown_words(markdown, parser, env=None):
 
 
 def new_text_as_shown(line):
-    """A `#new` or `#new_if_d` source line, after any LINE_MARKS, as an agent shows it to the user: its mark replaced
-    by the lead-in LEAD_INS_BEFORE_A_LINE_SHOWN_WITHOUT_ITS_MARK gives its kind, and its text without a
-    `The new text:` label; None for any other line."""
-    mark = NEW_TEXT_MARK.match(LINE_MARKS.sub("", line.strip()))
+    """A `#new` or `#new_if_d` source line, as the walk check program reads its mark, as an agent shows it to the
+    user: its mark replaced by the lead-in LEAD_INS_BEFORE_A_LINE_SHOWN_WITHOUT_ITS_MARK gives its kind, and its text
+    without a `The new text:` label; None for any other line."""
+    mark = load_walk_finder().APPROVAL_WALK_ITEM_NEW_TEXT_MARK_LINE_PATTERN.match(line.strip())
     if not mark:
         return None
-    return f"{LEAD_INS_BEFORE_A_LINE_SHOWN_WITHOUT_ITS_MARK[f'`{mark[1].lower()}` line']} {NEW_TEXT_LABEL.sub('', mark[2])}"
+    return f"{LEAD_INS_BEFORE_A_LINE_SHOWN_WITHOUT_ITS_MARK[f'`{mark[1]}` line']} {NEW_TEXT_LABEL.sub('', mark[2])}"
 
 
 def shown_text_parser(walk_finder):

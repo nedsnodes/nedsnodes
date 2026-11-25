@@ -583,8 +583,20 @@ COUNTS_LOG_FILE_NAME = "walk-me-through-answer-added-texts-cold-read-fast-read-a
 RECORDS_DIRECTORY_NAME = "cold-read-records"
 PROGRAM = "walk-me-through-answer-added-texts-cold-read-fast-read-check-and-close"
 
+def load_module(name, path):
+    spec = importlib.util.spec_from_file_location(name, path)
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return module
+
+
+def load_walk_finder():
+    return load_module("walk_me_through_approval_walk_minutes_and_walk_document_item_finder_common",
+                       WALK_FINDER_FILE)
+
+
 NEW_MARK, NEW_IF_D_MARK = "#new", "#new_if_d"
-NEW_LINE = re.compile(r"^\s*(?:(?:[-*+]|\d+[.)]|>)\s+)*(#new(?:_if_d)?)\b[:\s]*(.*)$")
+NEW_LINE = load_walk_finder().APPROVAL_WALK_ITEM_NEW_TEXT_MARK_LINE_PATTERN
 QUOTE_PAIRS = (('"', '"'), ("“", "”"), ("'", "'"))
 FENCE_DELIMITER = re.compile(r"^\s*(?:>\s?)*\s*(?:`{3,}|~{3,})")
 QUOTATION_LINE = re.compile(r"^\s*>")
@@ -1745,18 +1757,6 @@ class EvidenceCheckFailed(Failure):
 
 class FastReadFailed(Exception):
     """A fast read failed; its argument is the FAILED line, printed as it is."""
-
-
-def load_module(name, path):
-    spec = importlib.util.spec_from_file_location(name, path)
-    module = importlib.util.module_from_spec(spec)
-    spec.loader.exec_module(module)
-    return module
-
-
-def load_walk_finder():
-    return load_module("walk_me_through_approval_walk_minutes_and_walk_document_item_finder_common",
-                       WALK_FINDER_FILE)
 
 
 def reachable_log_store_records(record_shipper=None, ned_box_home=None, mac_mount=None):

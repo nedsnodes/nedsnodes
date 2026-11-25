@@ -1863,6 +1863,22 @@ def test_a_bold_new_text_label_is_read_as_the_label_by_both_hooks():
     for spelled in ("#new_\u0131f_d Show every row.", "#NEW_\u0130F_D Show every row."):
         check(f"a mark spelled with a dotless or dotted i, {spelled!r}, is no mark: shown as None, not a KeyError",
               hook.new_text_as_shown(spelled) is None, hook.new_text_as_shown(spelled))
+    check("a no-break space after `#new` still strips the bold `The new text:` label",
+          hook.new_text_as_shown("#new\xa0**The new text:** Show every row.")
+          == "If you approve, the new text: Show every row.",
+          hook.new_text_as_shown("#new\xa0**The new text:** Show every row."))
+    check_program = load_module_by_path(
+        "walk_check_program_for_mark_test",
+        HOOK_SCRIPT.parent / "walk-me-through-answer-added-texts-cold-read-fast-read-check-and-close.py")
+    for line in ("#newé Show every row.", "#NEW Show every row.", "#New: Show every row.",
+                 "- #new Show every row.", "#new_if_d Show every row.", "#newer Show every row."):
+        hook_reads_a_mark = hook.new_text_as_shown(line) is not None
+        check_reads_a_mark = check_program.NEW_LINE.match(line) is not None
+        check(f"the hook and the walk check program agree whether {line!r} is a mark",
+              hook_reads_a_mark == check_reads_a_mark, f"hook {hook_reads_a_mark}, check {check_reads_a_mark}")
+    check("`#newé`, `#NEW` and `#New:` are no mark to the hook",
+          all(hook.new_text_as_shown(line) is None
+              for line in ("#newé Show every row.", "#NEW Show every row.", "#New: Show every row.")))
     item = DECISION_ITEM.replace("#new_if_d Show every row.", "#new_if_d **The new text:** Show every row.")
     case = Case(next_to_present="item 4 of 9", document="# A walk\n\n" + item + "\n")
     shown = item.replace("#new_if_d **The new text:** Show", "If you disapprove, the new text: Show")
