@@ -107,7 +107,13 @@ still counts in N but carries no inline mark; the fix-round program refuses a
 round whose review's body holds one, instead of missing the finding.
 
 The body starts with a line APPROVE or REQUEST_CHANGES, so the verdict shows
-even when the review is posted as a comment. The posted review is then read
+even when the review is posted as a comment.
+
+For a review with a verdict, the success line also counts the reviewer's findings
+that lack one of the labelled lines docs/agents/pr-reviewer-instructions.md asks
+each finding on code to end with, FINDING_FACT_LINE_LABELS: the comments of the
+Claude reviewer's file, and for merge-lane-2's review, the Codex findings on the
+commit, each finding's text running from its heading to the next one. The posted review is then read
 back by the id GitHub returned, and its state and commit must be the ones
 asked for.
 
@@ -170,6 +176,12 @@ CODEX_FINDING_HEADING = re.compile(r"^- \[(?:Codex priority )?(P[0-3])(?: \(P0 h
 # The review worktree's own path differs between runs on the same commit.
 CODEX_FINDING_WORKTREE_PATH = re.compile(r"\S*/pr\d+-head/")
 CODEX_GRADES_BODY_HEADING = "**Codex findings graded:**"
+# docs/agents/pr-reviewer-instructions.md asks a reviewer to end each finding on code with these labelled lines.
+FINDING_FACT_LINE_LABELS = ("Main has it:", "This pull request makes it happen:", "Reports success on failure:",
+                            "Shown by:")
+FINDING_FACT_LINE = re.compile(
+    r"^\s*(?:[-*]\s+)?[`*_]*(" + "|".join(re.escape(label) for label in FINDING_FACT_LINE_LABELS) + ")",
+    re.MULTILINE)
 OUTSIDE_THE_DIFF_HEADING = fix_round.OUTSIDE_THE_DIFF_HEADING
 OUTSIDE_THE_DIFF_LINE_FORMAT = "- `{path}:{line}`: {body}"
 OUTSIDE_THE_DIFF_LINE_PATTERN = fix_round.OUTSIDE_THE_DIFF_LINE_PATTERN
@@ -397,15 +409,30 @@ def codex_answers_check(answers):
                 f"with a one-line \"reason\" only for {DOES_NOT_HOLD_GRADE}")
 
 
+def finding_lacks_fact_lines(text):
+    """Whether a finding's text lacks any of the labelled lines that end a finding on code."""
+    return set(FINDING_FACT_LINE.findall(text)) != set(FINDING_FACT_LINE_LABELS)
+
+
 def codex_findings_in_report(report):
-    """{finding id: (priority, heading text)} for each finding heading of a Codex report."""
-    findings = {}
+    """{finding id: (priority, heading text, whether it lacks a fact line)} for each finding heading of a Codex
+    report; a finding's text runs from its heading to the next one."""
+    findings, finding_id, finding_lines = {}, None, []
+
+    def close_finding():
+        if finding_id is not None:
+            findings[finding_id] = (*findings[finding_id][:2], finding_lacks_fact_lines("\n".join(finding_lines)))
     for line in report.splitlines():
         heading = CODEX_FINDING_HEADING.match(line)
         if heading:
+            close_finding()
             text = CODEX_FINDING_WORKTREE_PATH.sub("", heading[2])
             identity = f"{heading[1]}\0{text}".encode("utf-8")
-            findings[hashlib.sha256(identity).hexdigest()[:12]] = (heading[1], text)
+            finding_id, finding_lines = hashlib.sha256(identity).hexdigest()[:12], []
+            findings[finding_id] = (heading[1], text, True)
+        elif finding_id is not None:
+            finding_lines.append(line)
+    close_finding()
     return findings
 
 
@@ -711,10 +738,13 @@ def main(argv=None):
               else REVIEW_FILE_UNUSABLE.format(path=arguments.review_file, reason=error),
               file=sys.stderr)
         return EXIT_NOT_POSTED
+    # The reviewer's findings are its comments, or for merge-lane-2's verdict review, Codex's findings.
+    fact_line_lacks = [finding_lacks_fact_lines(comment["body"]) for comment in comments]
     if verdict is not None and account == MERGE_LANE_ACCOUNT:  # pragma: no mutate, --github-account allows only mac-claude and ned-review-merge, and mac-claude sorts before ned-review-merge, so >= gives what == gives
         outputs_directory = arguments.merge_lane_worktrees_and_outputs_directory
         try:
             findings = codex_findings_on_commit(outputs_directory, number, head)
+            fact_line_lacks = [finding[2] for finding in (findings or {}).values()]
             plan = (review_tier_of_commit(arguments.pull_request_review_plan_program, number, head)
                     if findings is None else None)
             body = body_with_codex_answers(body, comments, codex_answers, findings, plan, number, head,
@@ -798,9 +828,12 @@ def main(argv=None):
                   file=sys.stderr)
             return EXIT_NOT_POSTED
         moved = f"; {moved_count} comment(s) moved into the body" if moved_count else ""
+        lacking = (f"; {sum(fact_line_lacks)} of {len(fact_line_lacks)} "
+                   f"{'Codex ' if account == MERGE_LANE_ACCOUNT else ''}finding(s) lack one of the lines "
+                   f"{', '.join(FINDING_FACT_LINE_LABELS)}" if fact_line_lacks and verdict else "")
         print(f"review {review_id} posted on pull request {number} by {account} as {event}, "
               f"{f'verdict {verdict}' if verdict else 'no verdict'}, on commit {head}; GitHub's copy reads back as {EVENT_STATES[event]}"
-              f"{moved}")
+              f"{lacking}{moved}")
         return EXIT_POSTED
     except (KeyboardInterrupt, SystemExit):
         # gh_json's subprocess.run has killed gh before this runs, so nothing more is sent.
