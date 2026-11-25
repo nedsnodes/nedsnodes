@@ -149,13 +149,12 @@ def main() -> int:
         launcher.agy_stream_json_stdout_line_final_result_event_parse_to_exit_code_and_response_or_none,
         (completed.stdout or "").splitlines()) if result is not None]
     if exit_code == 0 and (not results or results[0][0] != 0):
-        print(f"{PROGRAM}: agy exited 0 but "
-              + ("printed no result line" if not results else "its result's status is not SUCCESS")
-              + ", so agy gave no answer and this program printed nothing to stdout. "
-              "agy's own stderr, if it wrote any, is just above this line.\n"
-              f"{PROGRAM}: do not take the empty stdout for agy's answer; give these two "
-              "lines, and agy's stderr above them, to the agent or user that asked you for "
-              "the answer.",
+        print(f"{PROGRAM}: exiting 1: agy exited 0 but "
+              + ("printed no result line, the stream-json line that carries its answer"
+                 if not results else "its result line's status is not SUCCESS")
+              + ", so there is no answer and nothing was printed to stdout.\n"
+              f"{PROGRAM}: report this failure, with these lines and any stderr agy wrote "
+              "above them, to the agent or user that asked you for the answer.",
               file=sys.stderr)
         return 1
     if results:
