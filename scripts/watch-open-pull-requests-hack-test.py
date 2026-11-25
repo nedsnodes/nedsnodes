@@ -33,6 +33,7 @@ import importlib.util
 import io
 import json
 import os
+import stat
 import subprocess
 import sys
 import tempfile
@@ -803,24 +804,36 @@ def run_merge_lane_pull_request_review_assignment_watcher_cases():
         check("a file made after a missing-file stop, but that cannot be rewritten, prints a "
               "WATCH line of its own for the new case",
               events == [] and "cannot be rewritten" in output.getvalue()
-              and "#40" in output.getvalue(), output.getvalue())
+              and "the pull requests each poll deals are given no" in output.getvalue(),
+              output.getvalue())
 
-        class WriteFailsPartway(type(assignments)):
-            """Writes the first half of the new file, then fails as a full disk does."""
+        real_fdopen = watcher_module.os.fdopen
 
-            def write_text(self, text, *args, **kwargs):
-                super().write_text(text[:len(text) // 2], *args, **kwargs)
+        def fdopen_whose_write_fails_partway(*args, **kwargs):
+            """A file that writes the first half of the new text, then fails as a full disk does."""
+            opened = real_fdopen(*args, **kwargs)
+            real_write = opened.write
+
+            def write(text):
+                real_write(text[:len(text) // 2])
                 raise OSError(28, "No space left on device")
+            opened.write = write
+            return opened
 
         assignments.write_text("1 merge-lane-1\n", encoding="utf-8")
         two_new = [*open_now, assignable(41, created_at="2026-11-24T06:00:00Z")]
         output = io.StringIO()
-        with contextlib.redirect_stdout(output):
-            events = appended(WriteFailsPartway(assignments), two_new, {})
+        watcher_module.os.fdopen = fdopen_whose_write_fails_partway
+        try:
+            with contextlib.redirect_stdout(output):
+                events = appended(assignments, two_new, {})
+        finally:
+            watcher_module.os.fdopen = real_fdopen
         check("a write that fails partway leaves the file as it was, prints no REVIEW-ASSIGNED "
-              "line, and names every pull request it dealt as dealt again",
-              events == [] and "pull requests #40, #41 are given no" in output.getvalue()
-              and assignments.read_text(encoding="utf-8") == "1 merge-lane-1\n",
+              "line, and leaves no temporary file behind",
+              events == [] and "No space left on device" in output.getvalue()
+              and assignments.read_text(encoding="utf-8") == "1 merge-lane-1\n"
+              and not list(scratch.glob("assignments.txt.*.partial")),
               f"{events}\n{output.getvalue()}")
         _, lines, _ = watch([two_new])
         check("the next poll deals every pull request the failed write dealt",
@@ -830,6 +843,42 @@ def run_merge_lane_pull_request_review_assignment_watcher_cases():
               and assignments.read_text(encoding="utf-8")
               == "1 merge-lane-1\n40 merge-lane-3\n41 merge-lane-1\n",
               "\n".join(lines))
+
+        stray_partial = scratch / "assignments.txt.partial"
+        stray_partial.write_text("someone else's file\n", encoding="utf-8")
+        assignments.write_text("1 merge-lane-1\n", encoding="utf-8")
+        assignments.chmod(0o600)
+        with contextlib.redirect_stdout(io.StringIO()):
+            appended(assignments, open_now, {})
+        check("a rewrite leaves a file named <assignment file>.partial alone, and keeps the "
+              "file's mode",
+              stray_partial.read_text(encoding="utf-8") == "someone else's file\n"
+              and assignments.read_text(encoding="utf-8") == "1 merge-lane-1\n40 merge-lane-3\n"
+              and stat.S_IMODE(assignments.stat().st_mode) == 0o600,
+              f"{stray_partial.read_text(encoding='utf-8')!r} {oct(assignments.stat().st_mode)}")
+        stray_partial.unlink()
+
+        linked_target = scratch / "assignments-kept-elsewhere.txt"
+        linked_target.write_text("1 merge-lane-1\n", encoding="utf-8")
+        link = scratch / "assignments-link.txt"
+        link.symlink_to(linked_target)
+        with contextlib.redirect_stdout(io.StringIO()):
+            appended(link, open_now, {})
+        check("a rewrite through a symbolic link keeps the link and writes the file it names",
+              link.is_symlink()
+              and linked_target.read_text(encoding="utf-8") == "1 merge-lane-1\n40 merge-lane-3\n",
+              f"{link.is_symlink()} {linked_target.read_text(encoding='utf-8')!r}")
+
+        # Reading text turns a carriage return into a newline, so only a line separator is left.
+        assignments.write_text("1 merge-lane-1\u2028", encoding="utf-8")
+        output = io.StringIO()
+        with contextlib.redirect_stdout(output):
+            events = appended(assignments, open_now, {})
+        check("a file whose line ends in a line separator, not a newline, is refused as a "
+              "damaged line before anything is written",
+              events == [] and "line 1 of the assignment file" in output.getvalue()
+              and assignments.read_text(encoding="utf-8") == "1 merge-lane-1\u2028",
+              output.getvalue())
 
         # The seed.
         seed = scratch / "seed.txt"
@@ -884,6 +933,28 @@ def run_merge_lane_pull_request_review_assignment_watcher_cases():
               and seeded.read_text(encoding="utf-8") == "4028 merge-lane-1\n4028 merge-lane-3\n",
               errors)
         seeded.unlink()
+
+        class FileMadeWhileGitHubIsRead(list):
+            """One poll, during which another run makes the assignment file."""
+
+            def __getitem__(self, index):
+                seeded.write_text("4028 merge-lane-3\n", encoding="utf-8")
+                return list.__getitem__(self, index)
+
+        exit_code, lines, errors = seed_with(FileMadeWhileGitHubIsRead([open_at_seed]))
+        check("a seed run whose assignment file another run makes while it reads GitHub exits 1 "
+              "and leaves that file as the other run made it",
+              exit_code == 1 and "was made while this run read GitHub" in errors
+              and seeded.read_text(encoding="utf-8") == "4028 merge-lane-3\n",
+              f"exit {exit_code!r} {errors}")
+        seeded.unlink()
+        scratch.chmod(0o500)
+        try:
+            exit_code, lines, errors = seed_with([open_at_seed])
+        finally:
+            scratch.chmod(0o700)
+        check("a seed run that cannot write the assignment file exits 1, says so, and makes none",
+              exit_code == 1 and "could not be written" in errors and not seeded.exists(), errors)
         seed.write_text("4028 lane-one\n", encoding="utf-8")
         exit_code, lines, errors = seed_with([open_at_seed])
         check("a malformed seed file exits 1, naming it as the seed file, and writes no assignment "
