@@ -44,9 +44,9 @@ Each invocation, under a lock that keeps two from overlapping:
    succeeded and that sets `metadata.prerequisites` or `addBlockedBy`. A message starts a wait, unless a wait is
    already open: 15 minutes later, if the agent-seat is idle, code sends the escalation, which
    quotes the message that opened the wait and each rule 2 message whose send on the open wait
-   failed, and names the sentences on the wait that no message was sent for, and 15 minutes after
-   that writes the user a user-alert, once, which names the sentences of the failed messages and
-   the sentences no message was sent for too. A rule 2
+   failed, and names the sentences on the wait that no message was sent for; 15 minutes after
+   that, if the agent-seat is still idle, code logs the step that follows the escalation, which
+   sends nothing and writes no user-alert, and sends it nothing more on the wait. A rule 2
    message due on a wait whose escalation is due goes on the wait first, so that the re-check
    judges its sentences and the escalation names them instead of the message. Before the escalation of a wait a rule 2 message was sent on, the
    rule 2 judge re-checks every sentence the wait must answer for, those of a message whose send
@@ -75,7 +75,7 @@ in text alone ends no wait unless the re-check of step 5 finds every sentence ba
 ends when the agent-seat makes a tool call after the nudge that opened the wait or has nothing to do (rule 4), in either
 case only when no rule 2 message was sent on the wait, makes the task call a rule 2 message
 asked for, as step 5 says, stops at a usage limit (rule 1), starts a
-new agent-session, or spends tokens after the user was told. So an agent-seat that answers a
+new agent-session, or spends tokens after the step that follows the escalation. So an agent-seat that answers a
 rule 3 or rule 5 message with a tool call and goes idle again is nudged again only about something
 new, or once the user has typed, and is not escalated; a command that hangs after the one
 question about it reaches nobody until the agent-seat looks. One that answers a rule 2 message
@@ -202,6 +202,9 @@ def judged_text(text):
     return text[:half] + JUDGED_TEXT_CUT_MARK + text[-half:]
 
 
+# TELL_USER is the step that follows the escalation, which sends nothing; its value is the one
+# the log-store's wait_step events already carry, so a renamed value would not end those waits on
+# token spend.
 NUDGE, ESCALATE, TELL_USER = "nudge", "escalate", "tell_user"
 # A wait step recording that the wait carries a rule 2 message, which rule 4 does not settle.
 PROMISE = "promise"
@@ -268,8 +271,8 @@ FAILED_PROMISE_MESSAGES = "failed_promise_messages"
 # An event logged before sentences are logged as checked on an open wait: the wait answers for them
 # whether their message is then sent, its send fails, their judge failed so that no message follows,
 # or the invocation is stopped. A promise_message event naming a sentence's record takes that
-# sentence off it; a failed send leaves it, so the re-check and the user-alert read a failed
-# message's sentences from it, while the escalation quotes the failed message's own text.
+# sentence off it; a failed send leaves it, so the re-check reads a failed message's sentences
+# from it, while the escalation quotes the failed message's own text.
 RULE_2_SENTENCES_ON_WAIT = "rule_2_sentences_on_wait"
 # On an escalation's message_sent event: the records of the sentences on the wait that the text
 # code wrote names, written in the same event as the send so that no stop between two writes loses
@@ -966,9 +969,9 @@ class Sweep:
     def record(self, event):
         return self.log.append(event, self.current(), self.now)
 
-    def alert(self, key, title, text, action, failure=True):
+    def alert(self, key, title, text, action):
         """Write a user-alert once for each key, and log it."""
-        self.failed = self.failed or failure
+        self.failed = True
         if self.log.alerted(key):
             return None
         alert_id = user_alerts.user_alert_write_to_pending(title, text, action, now=self.current())
@@ -1278,7 +1281,7 @@ class Sweep:
                     if wait and wait[PROMISE_MESSAGES] is not None else [])
         if messages:
             # A failed message's sentences must be backed too, so that a call backing an earlier
-            # promise does not end the wait before the escalation and the user-alert report them.
+            # promise does not end the wait before the escalation reports them.
             settling_calls = task_calls_settling_promise_messages(
                 messages,
                 verdict.get(
@@ -1290,7 +1293,7 @@ class Sweep:
                               task_calls=settling_calls)
                 wait = None
         if wait and TELL_USER in wait and stretch and parse_time(stretch) > parse_time(wait[TELL_USER]):
-            self.end_wait(seat, "it spent tokens after the user was told")
+            self.end_wait(seat, "it spent tokens after the step that follows the escalation")
             wait = None
         events_task = open_pull_request_events_task(seat, self.paths.tasks_root)
         if wait and wait[PULL_REQUEST_EVENTS_TASK_ID] and (
@@ -1381,7 +1384,7 @@ class Sweep:
             promise_sentences = [item["sentence"] for item in promise_records]
             earliest_sentence_at = earliest_sentence_time(promise_records)
             # A promise given in answer to a message goes on the open wait, so that repeated
-            # promises cannot put off its escalation and the user-alert.
+            # promises cannot put off its escalation.
             if not wait:
                 # Logged before the send: the escalation quotes the nudge that opened the wait, so
                 # a promise message whose own send failed still reaches the agent-seat.
@@ -1391,9 +1394,9 @@ class Sweep:
                              "earliest_sentence_at": earliest_sentence_at})
                 self.send(seat, verdict, promise_text, NUDGE)
             else:
-                # The sentences are already logged as checked, so only the wait's escalation and
-                # user-alert can still report the promise: the escalation quotes a failed message's
-                # own text, and the re-check and the user-alert read its sentences from the wait.
+                # The sentences are already logged as checked, so only the wait's escalation can
+                # still report the promise: it quotes a failed message's own text, and the re-check
+                # reads its sentences from the wait.
                 records = [[item["record_uuid"], item["sentence"]] for item in promise_records]
                 sent = self.send(seat, verdict, promise_text, NUDGE)
                 if sent:
@@ -1489,13 +1492,14 @@ class Sweep:
 
     def due_step(self, seat, verdict, wait):
         """The step of an open wait that is due: the escalation 15 minutes after the nudge, unless
-        the re-check ends the wait, then the user-alert 15 minutes after the escalation; after
-        that, none. The escalation is a send, so a headless usage-limit pause holds it. Returns
-        WAIT_ENDED_BY_RECHECK when the re-check ended the wait, else None.
+        the re-check ends the wait, then the step that follows it 15 minutes later, which sends
+        nothing and writes no user-alert; after that, none. The escalation is a send, so a headless
+        usage-limit pause holds it. Returns WAIT_ENDED_BY_RECHECK when the re-check ended the
+        wait, else None.
 
         The escalation quotes each message whose send failed and names every other sentence no
-        message event holds, and the user-alert names all of those sentences, so that a sentence
-        still owed is named whether or not a message for it was tried."""
+        message event holds, so that a sentence still owed is named whether or not a message for
+        it was tried."""
         if TELL_USER in wait:
             return None
         minutes = int(seconds_between(wait["first_idle_at"] or wait[NUDGE], self.now) // 60)
@@ -1504,23 +1508,6 @@ class Sweep:
         if ESCALATE in wait:
             if seconds_between(wait[ESCALATE], self.now) >= WAIT_STEP_SECONDS:
                 self.record({"event": "wait_step", "agent_seat": seat, "step": TELL_USER})
-                self.alert(f"tell-user:{seat}:{wait[NUDGE]}",
-                           f"{seat} has been idle {minutes} minutes after a nudge and an escalation",
-                           f"The idle sweep found {seat} idle with something to do, messaged it "
-                           f"at {wait[NUDGE]} and escalated at {wait[ESCALATE]}, and it is idle "
-                           f"again. Its transcript is {verdict[fields.TRANSCRIPT_PATH]}. The idle "
-                           "sweep sends it nothing more until it spends tokens and goes idle again."
-                           + "".join(f" At {entry['at']} the idle sweep "
-                                     + ("failed to send it a message naming"
-                                        if entry.get("failed")
-                                        else "sent it no message of their own about")
-                                     + " these sentences of its own, which only the escalation "
-                                     "named: "
-                                     + " ".join(f'"{sentence}"' for sentence in entry["sentences"])
-                                     for entry in wait[SENTENCES_WITH_NO_MESSAGE_EVENT]),
-                           f"An agent on ned-box can read {seat}'s transcript and its tmux session "
-                           f"{seat} to see why it stopped, and message it with SendMessage; the "
-                           "user may want to look at it himself.", failure=False)
             return None
         if (seconds_between(wait[NUDGE], self.now) >= WAIT_STEP_SECONDS
                 and not self.headless_usage_limit_pause_holds()):
