@@ -11,11 +11,9 @@ Usage:
 
 WHAT IT DOES. Picks the report path from the cold-read-target, runs
 ONE fast-clarify cold-read-cell on the fast cold-read-tier through
-nn-systems/cold-read/cold-read-agy-cell.py (user-ruled 2026-09-07 after measurements,
-superseding the earlier ruling for low: Gemini 3.8 Flash at medium, about
-100-110 s per document in single runs on a 658-word skill and a 1,967-word walk
-draft, recall 42% against 19% at low on the ghi-write candidate defect list,
-replacing gpt-5.6-terra at low), and retries once if that cold-read-cell fails.
+nn-systems/cold-read/cold-read-agy-cell.py, on gemini-4-neon-low at effort low
+(user-ruled 2026-11-25, replacing Gemini 3.8 Flash at medium; the
+measurements are in that launcher's docstring), and retries once if that cold-read-cell fails.
 When the Gemini cell has failed for good -- twice, or once with a launcher
 refusal, Gemini's spending cap or the Ultra sign-in's quota, which get no
 retry -- it runs the same cell once on Claude Sonnet at low effort, the claude
@@ -48,7 +46,7 @@ and the numbers are listed on stderr instead, each with its line
 (user-ruled 2026-09-17, item 5 of nedschorus#418: the walk-me-through skill
 forbids bare numbers, and walk files had carried 33 and 35 of them
 unchecked). Bare file names are deliberately not checked, by the same rulings;
-the walk's 300-word item limit is checked by the walk check program,
+the walk's word limit for an item is checked by the walk check program,
 nn-systems/skills/walk-me-through/walk-me-through-answer-added-texts-cold-read-fast-read-check-and-close.py,
 before it reads an item. Every cold-read-cell's own progress -- the
 launcher's stderr, the agent-binary's stderr, the stray-write and recovery lines --
@@ -461,7 +459,9 @@ WALK_SUGGESTIONS_SUFFIX = "-cold-read-fast-read.md"
 # record. It is a warning, not a refusal -- the fast read is the full run's
 # first step, so running it here is right; merging on it alone is not.
 # CLAUDE.md is named, not placed: Claude Code loads one from any directory.
-FULL_RUN_NAMES = (("CLAUDE.md", "CLAUDE.md"),)
+# A seat-brief is an agent-seat's CLAUDE.local.md, which sits in the seat's own
+# checkout, so it too is known by its name.
+FULL_RUN_NAMES = (("CLAUDE.md", "CLAUDE.md"), ("CLAUDE.local.md", "a seat-brief"))
 FULL_RUN_DIRECTORIES_RELATIVE = (
     (pathlib.Path(".claude") / "skills", "a skill or a skill's prompt"),
     (pathlib.Path("docs") / "agents", "a file under docs/agents/"),
@@ -900,7 +900,7 @@ def record_clock_reading() -> datetime.datetime:
     taken from, so the two cannot disagree across midnight.
 
     COLD_READ_RECORD_CLOCK_OVERRIDE, when set as `YYYY-MM-DDTHH:MM`, is read
-    instead of the clock: it is how the nc-test-suites name a cold-read-record
+    instead of the clock: it is how the nn-test-suites name a cold-read-record
     exactly without depending on the wall clock or flaking across a minute
     boundary.
     The override is a clock value, not a finished name, so the tests still go

@@ -142,9 +142,11 @@ GATE = Path(__file__).with_name("merge-gate.sh")
 DESCRIPTION_DEFECT_LINE_READER = Path(__file__).with_name(
     "pull-request-description-defect-line-root-cause-status-and-follow-up-link-reader.py")
 NO_SANDBOX_SUITES_PROGRAM = Path(__file__).with_name("no-sandbox-test-suites-run-on-main-in-a-quiet-gap.py")
+FAILED_SUITES_RECORD_PROGRAM = Path(__file__).with_name("merge-lane-failed-after-merge-test-suites-on-main-record.py")
 VERDICT_REVIEW_POSTING_PROGRAM_MARKS_CHECK_PROGRAM_PATH = Path(__file__).resolve().with_name("merge-gate-approval-or-changes-request-review-has-review-posting-program-marks-check.py")
 GIT_REDIRECTING_ENVIRONMENT_COMMON = Path("nn-systems/general-tools/git-redirecting-environment-variables-removal-common.py")
 GIT_MACHINE_READABLE_OUTPUT_COMMON = Path("nn-systems/general-tools/git-machine-readable-output-runner-and-parser-common.py")
+REPOSITORY_NAMES_COMMON = Path("nn-systems/general-tools/github-repository-name-and-name-before-project-rename-common.py")
 FIXTURES = Path(__file__).with_name("merge-gate-test-captured-github-responses")
 BASH = shutil.which("bash")
 TEST_TOKEN = "merge-gate-test-token-not-a-credential"
@@ -156,8 +158,12 @@ LINK_LOOKUP = re.compile(r"repos/[^/]+/[^/]+/issues/[0-9]+")
 failures = []
 scratch = Path(tempfile.mkdtemp(prefix="merge-gate-test-"))
 
-GH_STAND_IN = r'''#!/usr/bin/env python3
-import json, os, re, sys
+# Launched about 1300 times a test run: the interpreter's own path, without site or the
+# environment's PYTHON variables, starts about 8 ms faster than /usr/bin/env python3.
+# Not handled: an interpreter whose path holds a space, which a shebang line cannot name.
+# -IS also keeps out the runner's input recorder, so the stand-in must open no fixture:
+# run_gate reads each route's file here, where the recorder sees it, and passes the text.
+GH_STAND_IN = f'#!{sys.executable} -IS\n' + r'''import json, os, re, sys
 argv = sys.argv[1:]
 with open(os.environ["MERGE_GATE_TEST_GH_CALL_LOG"], "a") as log:
     log.write(json.dumps({"argv": argv, "gh_token": os.environ.get("GH_TOKEN")}) + "\n")
@@ -179,7 +185,7 @@ route = routes.get(key)
 if route is None:
     sys.stderr.write("merge-gate-test stand-in: unarranged gh call %r\n" % (argv,))
     sys.exit(97)
-sys.stdout.buffer.write(open(route["stdout_file"], "rb").read())
+sys.stdout.buffer.write(route["stdout"].encode("utf-8", "surrogateescape"))
 sys.stderr.write(route.get("stderr", ""))
 sys.exit(route.get("exit", 0))
 '''
@@ -367,8 +373,9 @@ def gate_copy(text):
     directory.mkdir()
     shutil.copyfile(DESCRIPTION_DEFECT_LINE_READER, directory / DESCRIPTION_DEFECT_LINE_READER.name)
     shutil.copyfile(NO_SANDBOX_SUITES_PROGRAM, directory / NO_SANDBOX_SUITES_PROGRAM.name)
+    shutil.copyfile(FAILED_SUITES_RECORD_PROGRAM, directory / FAILED_SUITES_RECORD_PROGRAM.name)
     (top / GIT_REDIRECTING_ENVIRONMENT_COMMON).parent.mkdir(parents=True)
-    for common in (GIT_REDIRECTING_ENVIRONMENT_COMMON, GIT_MACHINE_READABLE_OUTPUT_COMMON):
+    for common in (GIT_REDIRECTING_ENVIRONMENT_COMMON, GIT_MACHINE_READABLE_OUTPUT_COMMON, REPOSITORY_NAMES_COMMON):
         shutil.copyfile(Path(__file__).resolve().parent.parent / common, top / common)
     # A link, not a copy: the check loads the posting program and its modules from its own resolved directory.
     (directory / VERDICT_REVIEW_POSTING_PROGRAM_MARKS_CHECK_PROGRAM_PATH.name).symlink_to(VERDICT_REVIEW_POSTING_PROGRAM_MARKS_CHECK_PROGRAM_PATH)
@@ -380,13 +387,18 @@ def gate_copy(text):
 def run_gate(gate, pr, expected, since, routes, token=TEST_TOKEN, path_override=None,
              wrapper=None, arguments=None, jq_failing_filter=None, description_reader_fails=False,
              marks_check_fails=False,
-             cwd=None, no_sandbox_suites_state=None):
+             cwd=None, no_sandbox_suites_state=None, failed_suites_record=None):
     case_dir = Path(tempfile.mkdtemp(dir=scratch))
     home = case_dir / "home"
+    if failed_suites_record is not None:
+        record_file = home / ".local" / "state" / "nedsnodes" / "failed-after-merge-test-suites-on-main.json"
+        record_file.parent.mkdir(parents=True)
+        record_file.write_text(failed_suites_record if isinstance(failed_suites_record, str)
+                               else json.dumps(failed_suites_record))
     if no_sandbox_suites_state is not None:
         state_file = (home / ".local" / "state" / "nedsnodes"
                       / "no-sandbox-test-suites-run-on-main-in-a-quiet-gap.json")
-        state_file.parent.mkdir(parents=True)
+        state_file.parent.mkdir(parents=True, exist_ok=True)
         state_file.write_text(no_sandbox_suites_state if isinstance(no_sandbox_suites_state, str)
                               else json.dumps(no_sandbox_suites_state))
     token_dir = home / ".config" / "nedsnodes"
@@ -408,6 +420,9 @@ def run_gate(gate, pr, expected, since, routes, token=TEST_TOKEN, path_override=
         (stand_in_dir / "python3").chmod(0o755)
     routes = dict(routes)
     routes.setdefault("body", {"stdout_file": str(captured(DESCRIPTION_WITH_ROOT_CAUSE))})
+    routes = {key: {**route, "stdout": Path(route["stdout_file"]).read_text(
+                  encoding="utf-8", errors="surrogateescape")}
+              for key, route in routes.items()}
     routes_file = case_dir / "routes.json"
     routes_file.write_text(json.dumps(routes))
     call_log = case_dir / "gh-calls.jsonl"
@@ -482,7 +497,7 @@ TOKEN_LINES = (
 NEW_ACTIVITY_LINES = (
     "the inline comments, the issue comments and the reviews.\n",
     "\nIf any raises a finding, do not merge until the finding is fixed, or answered with a reason "
-    "that shows it does not hold; a fix moves the nc-head-commit, which then needs its own approving review.\n",
+    "that shows it does not hold; a fix moves the nn-head-commit, which then needs its own approving review.\n",
     "\nWhen nothing is left open, post a review as the merge account saying what you read, with a review "
     "file holding only {\"body\": <what you read>} and the command python3 "
     "scripts/merge-lane-pull-request-reviewer-review-post-and-read-back.py --pull-request ",
@@ -492,7 +507,7 @@ NEW_ACTIVITY_LINES = (
 
 
 def full_hash_line(pr):
-    return (f"\nPass the nc-head-commit's full hash in lower case, as gh pr view {pr} --json headRefOid "
+    return (f"\nPass the nn-head-commit's full hash in lower case, as gh pr view {pr} --json headRefOid "
             "--jq .headRefOid prints it, then run the gate again.\n")
 
 
@@ -510,6 +525,31 @@ def case_gate_run_from_another_directory_finds_its_reader(gate):
     elsewhere = Path(tempfile.mkdtemp(dir=scratch))
     run = run_gate(gate, BASE_PR, BASE_HEAD, BASE_APPROVAL["submitted_at"], base_routes(), cwd=elsewhere)
     return run.code == 0 and "gate passed" in run.stdout, run.summary()
+
+
+fixtures_opened_here = None
+
+
+def fixture_open_noted(event, arguments):
+    if event == "open" and fixtures_opened_here is not None and isinstance(arguments[0], str):
+        fixtures_opened_here.add(arguments[0])
+
+
+sys.addaudithook(fixture_open_noted)
+
+
+def case_every_served_fixture_is_opened_by_the_suite_itself(gate):
+    """The runner's input recorder sees only this process: the -IS stand-in loads no recorder."""
+    global fixtures_opened_here
+    routes = base_routes()
+    fixtures_opened_here = set()
+    try:
+        run = run_gate(gate, BASE_PR, BASE_HEAD, BASE_APPROVAL["submitted_at"], routes)
+    finally:
+        opened, fixtures_opened_here = fixtures_opened_here, None
+    unopened = sorted({route["stdout_file"] for route in routes.values()
+                       if route["stdout_file"] not in opened})
+    return run.code == 0 and not unopened, f"not opened by the suite: {unopened}; {run.summary()}"
 
 
 NEW_ACTIVITY_COUNT_OPTION = "--print-new-activity-count-after-reviewed-since-bound"
@@ -603,8 +643,16 @@ def no_sandbox_state(**last_run_fields):
     return state
 
 
+def gate_copy_whose_clone_is_no_repository(gate):
+    """A failed run's notice runs git log on the clone beside the gate. Run on the checkout,
+    that git log makes scripts/run-all-test-suites.py select this suite whenever any file
+    is added; a copy's clone is a scratch directory."""
+    return gate_copy(gate.read_text())
+
+
 def case_no_sandbox_notice_for_a_failed_run_and_the_gate_still_passes(gate):
-    run = run_gate(gate, BASE_PR, BASE_HEAD, BASE_APPROVAL["submitted_at"], base_routes(),
+    run = run_gate(gate_copy_whose_clone_is_no_repository(gate), BASE_PR, BASE_HEAD,
+                   BASE_APPROVAL["submitted_at"], base_routes(),
                    no_sandbox_suites_state=NO_SANDBOX_FAILED_RUN)
     return (passed_pinned_to(run, BASE_PR, BASE_APPROVAL["commit_id"])
             and NO_SANDBOX_NOTICE_HEADING in run.stderr
@@ -614,7 +662,8 @@ def case_no_sandbox_notice_for_a_failed_run_and_the_gate_still_passes(gate):
 
 def case_no_sandbox_notice_leaves_a_refusal_a_refusal(gate):
     other = captured_value("nedschorus-nedschorus-636-pr-view-state.json", "headRefOid")
-    run = run_gate(gate, BASE_PR, other, BASE_APPROVAL["submitted_at"], base_routes(),
+    run = run_gate(gate_copy_whose_clone_is_no_repository(gate), BASE_PR, other,
+                   BASE_APPROVAL["submitted_at"], base_routes(),
                    no_sandbox_suites_state=NO_SANDBOX_FAILED_RUN)
     return (refused_with(run, BASE_PR, "head moved") and NO_SANDBOX_NOTICE_HEADING in run.stderr,
             run.summary())
@@ -664,6 +713,36 @@ def case_no_sandbox_notice_program_failing_is_said_and_the_gate_goes_on(gate):
     run = run_gate(copy, BASE_PR, BASE_HEAD, BASE_APPROVAL["submitted_at"], base_routes())
     return (passed_pinned_to(run, BASE_PR, BASE_APPROVAL["commit_id"])
             and "--print-merge-gate-notice-of-last-failed-or-stopped-run failed" in run.stderr), run.summary()
+
+
+FAILED_SUITES_NOTICE_HEADING = "FAILED TEST SUITES ON MAIN"
+FAILED_SUITES_RECORD = {"scripts/broken-test.py": {"failed_tests": {"scripts/broken-test.py": {
+    "commit": "b46d47c2bdbe0000000000000000000000000000",
+    "last_failed_commit": "b46d47c2bdbe0000000000000000000000000000", "pull_request": "3899",
+    "log": "/logs/broken-test.py.log", "failed_at": "2026-11-20T17:18:00Z",
+    "repair_task_agent_seat": "MD-skills", "repair_task_id": 7}}}}
+
+
+def case_failed_suites_notice_and_the_gate_still_passes(gate):
+    run = run_gate(gate, BASE_PR, BASE_HEAD, BASE_APPROVAL["submitted_at"], base_routes(),
+                   failed_suites_record=FAILED_SUITES_RECORD)
+    return (passed_pinned_to(run, BASE_PR, BASE_APPROVAL["commit_id"])
+            and FAILED_SUITES_NOTICE_HEADING in run.stderr
+            and "scripts/broken-test.py: failed at b46d47c2bdbe" in run.stderr
+            and "repair task #7 on MD-skills's task list" in run.stderr), run.summary()
+
+
+def case_failed_suites_notice_absent_without_a_record(gate):
+    run = run_gate(gate, BASE_PR, BASE_HEAD, BASE_APPROVAL["submitted_at"], base_routes())
+    return (passed_pinned_to(run, BASE_PR, BASE_APPROVAL["commit_id"])
+            and FAILED_SUITES_NOTICE_HEADING not in run.stderr), run.summary()
+
+
+def case_failed_suites_record_unreadable_is_said_and_the_gate_goes_on(gate):
+    run = run_gate(gate, BASE_PR, BASE_HEAD, BASE_APPROVAL["submitted_at"], base_routes(),
+                   failed_suites_record="not json")
+    return (passed_pinned_to(run, BASE_PR, BASE_APPROVAL["commit_id"])
+            and "--print-merge-gate-notice failed" in run.stderr), run.summary()
 
 
 def case_live_chain_merge_account_only_approval(gate):
@@ -1006,7 +1085,7 @@ def case_d0_wrong_argument_count(gate):
                    arguments=[BASE_PR, BASE_HEAD])
     return could_not_run_before_gh(
         run, "GATE COULD NOT RUN: merge-gate.sh takes exactly three arguments and was given 2.\n",
-        "\nCall it as: scripts/merge-gate.sh <pull request number> <the nc-head-commit, all 40 "
+        "\nCall it as: scripts/merge-gate.sh <pull request number> <the nn-head-commit, all 40 "
         "characters> <reviewed-since: the submitted_at of your latest review as the merge account, "
         "or of the pin if that is later>\n"), run.summary()
 
@@ -1033,11 +1112,11 @@ def case_e1_no_approval(gate):
         run, "636",
         "GATE REFUSED (#636): no APPROVED review found; the gate prints a merge command only for a "
         "commit an approving review covers.\n",
-        "\nIf the nc-head-commit has not been reviewed yet, commission its review, and run the gate "
-        "again once the nc-head-commit is approved.\n",
+        "\nIf the nn-head-commit has not been reviewed yet, commission its review, and run the gate "
+        "again once the nn-head-commit is approved.\n",
         "\nIf its review found a defect, do not merge until the defect is fixed and the new "
-        "nc-head-commit is approved.\n",
-        "\nIf its review found no defect, approve the nc-head-commit as an account other than the pull "
+        "nn-head-commit is approved.\n",
+        "\nIf its review found no defect, approve the nn-head-commit as an account other than the pull "
         "request's author: the merge account, or mac-claude when the merge account opened the pull "
         "request. Then run the gate again.\n"), run.summary()
 
@@ -1047,9 +1126,9 @@ def case_e2_head_moved(gate):
     run = run_gate(gate, BASE_PR, other, BASE_APPROVAL["submitted_at"], base_routes())
     return refused_with(
         run, BASE_PR,
-        f"head moved: you passed {other}, and the nc-head-commit is now {BASE_HEAD}.\n",
+        f"head moved: you passed {other}, and the nn-head-commit is now {BASE_HEAD}.\n",
         f"\nIf an approving review covers {BASE_HEAD}, run the gate again with {BASE_HEAD} as the "
-        "expected nc-head-commit and a reviewed-since from after you read that review.\n",
+        "expected nn-head-commit and a reviewed-since from after you read that review.\n",
         f"\nOtherwise, have {BASE_HEAD} reviewed and approved, then run the gate again the same way.\n"
     ), run.summary()
 
@@ -1065,7 +1144,7 @@ def case_e3_approval_covers_another_commit(gate):
     head = captured_value("nedschorus-nedschorus-636-pr-view-state.json", "headRefOid")
     run = run_gate(gate, "636", head, pin["submitted_at"], routes)
     return refused_with(
-        run, "636", f"the approval covers {pin['commit_id']} but the nc-head-commit is now {head}.\n",
+        run, "636", f"the approval covers {pin['commit_id']} but the nn-head-commit is now {head}.\n",
         f"\nHave {head} reviewed, and approved by an account other than the pull request's author, "
         "then run the gate again.\n"), run.summary()
 
@@ -1112,7 +1191,7 @@ MERGE_STATE_LINES = {
                "closed. If the pull request is open, run the gate again in a minute; if it still "
                "reads UNKNOWN five minutes later, tell the user this message.",
     "DIRTY": "DIRTY: the branch conflicts with main. Tell the pull request's author; the author "
-             "clears the conflict as CLAUDE.md says, and the new nc-head-commit then needs its own "
+             "clears the conflict as CLAUDE.md says, and the new nn-head-commit then needs its own "
              "approving review.",
     "BLOCKED": "BLOCKED: a branch rule on main blocks the merge, such as a required check that "
                "failed or is still running. Read the pull request's checks on GitHub: if one is "
@@ -1472,6 +1551,49 @@ def case_follow_up_open_issue_in_another_repository_not_printed(gate):
         link_route("open issue", "repos/cli/cli/issues/1154"))
 
 
+def gate_copy_with_repository_names_module(gate, module_text):
+    copy = gate_copy(gate.read_text())
+    (copy.parent.parent / REPOSITORY_NAMES_COMMON).write_text(module_text)
+    return copy
+
+
+def case_repository_names_come_from_the_shared_module(gate):
+    # Names the gate's own text does not hold, so only a gate that reads the module counts both as this repository.
+    copy = gate_copy_with_repository_names_module(
+        gate, 'REPOSITORY = "renamed-owner/renamed-repository"\nOLD_REPOSITORY = "earlier-owner/earlier-repository"\n')
+    current_link = "https://github.com/renamed-owner/renamed-repository/issues/2078"
+    old_link = "https://github.com/earlier-owner/earlier-repository/issues/1154"
+    current = f"#root_cause_not_fixed a second cause stays. #follow_up {current_link}"
+    old = f"#root_cause_not_fixed the harness drops the variable. #follow_up {old_link}"
+    run = description_with_lines_run(
+        copy, [current, old],
+        [link_route("open issue", "repos/renamed-owner/renamed-repository/issues/2078"),
+         link_route("open issue", "repos/earlier-owner/earlier-repository/issues/1154")])
+    return (passed_pinned_to(run, BASE_PR, BASE_APPROVAL["commit_id"])
+            and "--repo renamed-owner/renamed-repository --merge" in run.stdout
+            and run.stdout.endswith(f"\n  {current_link} from the line `{current}`\n"
+                                    f"  {old_link} from the line `{old}`\n")), run.summary()
+
+
+def case_repository_names_module_failing_stops_the_gate(gate):
+    copy = gate_copy_with_repository_names_module(gate, "raise SystemExit(3)\n")
+    run = run_gate(copy, BASE_PR, BASE_HEAD, BASE_APPROVAL["submitted_at"], base_routes())
+    return could_not_run_before_gh(
+        run, "GATE COULD NOT RUN: could not read the repository's names, REPOSITORY and OLD_REPOSITORY, from ",
+        "github-repository-name-and-name-before-project-rename-common.py; python3's error is just above this line.\n"
+        "Fix the module or restore it from main, then run the gate again.\n"), run.summary()
+
+
+def case_repository_names_module_printing_one_name_stops_the_gate(gate):
+    copy = gate_copy_with_repository_names_module(
+        gate, 'REPOSITORY = "nedsnodes/nedsnodes"\nOLD_REPOSITORY = ""\n')
+    run = run_gate(copy, BASE_PR, BASE_HEAD, BASE_APPROVAL["submitted_at"], base_routes())
+    return could_not_run_before_gh(
+        run, "github-repository-name-and-name-before-project-rename-common.py: it printed "
+        "`nedsnodes/nedsnodes `, not two names separated by a space.\n"
+        "Fix the module or restore it from main, then run the gate again.\n"), run.summary()
+
+
 def case_follow_up_issue_closed_as_not_planned(gate):
     return abandoned_link_refused(
         gate, NOT_FIXED_WITH_FOLLOW_UP, FOLLOW_UP_LINK, link_route("issue closed as not planned"),
@@ -1754,6 +1876,14 @@ def case_marks_hand_typed_approval_refused(gate):
         "non-blocking findings to send the author after the merge.\n",
         "\nPost it with: python3 scripts/merge-lane-pull-request-reviewer-review-post-and-read-back.py "
         f"--pull-request 3881 --head-commit {approval['commit_id']} --github-account ned-review-merge <review file>\n",
+        "\nGive each inline comment the finding_category merge-lane-2 judges it to have, one of must-fix-now, "
+        "fix-next, fix-in-maintenance or file-for-later: must-fix-now only for a finding that blocks the merge, "
+        "since the posting program posts a review with a must-fix-now comment as a request for changes and refuses "
+        "an approval that has one. A comment posted by hand carries no category on GitHub, so decide each one; keep "
+        "the verdict that review gave.\n",
+        "\nLeave the unmarked review at https://github.com/nedsnodes/nedsnodes/pull/3881#pullrequestreview-5950181743 "
+        "on GitHub as it is: the gate reads only ned-review-merge's latest review with a verdict, which the review "
+        "you post becomes.\n",
         f"\nThen run the gate again: scripts/merge-gate.sh 3881 {approval['commit_id']} <submitted_at>, "), run.summary()
 
 
@@ -1767,11 +1897,18 @@ def case_marks_hand_typed_approval_of_older_commit_asks_for_review_of_head(gate)
     passed = refused_with(
         run, "3881",
         "https://github.com/nedsnodes/nedsnodes/pull/3881#pullrequestreview-5950181743 (APPROVED), lacks the marks",
-        f"\nThat review covers {approval['commit_id']}, and the nc-head-commit is now {LATER_HEAD}, so do not post "
+        f"\nThat review covers {approval['commit_id']}, and the nn-head-commit is now {LATER_HEAD}, so do not post "
         f"its verdict again: a review posted now is recorded on {LATER_HEAD}, which no one has reviewed.\n",
-        f"\nHave {LATER_HEAD} reviewed, and post that review with: python3 "
-        "scripts/merge-lane-pull-request-reviewer-review-post-and-read-back.py --pull-request 3881 "
-        f"--head-commit {LATER_HEAD} --github-account ned-review-merge <review file>\n")
+        f"\nmerge-lane-2 commissions a new review of {LATER_HEAD} itself, as its seat-brief says for every pull "
+        "request, starting with: scripts/pull-request-review-plan.py --pull-request 3881\n",
+        "\nWhen that review is done, write merge-lane-2's verdict, body and the reviewers' findings into a review file",
+        "\nLeave the unmarked review on GitHub as it is: the review of " + LATER_HEAD + " that you post becomes the one "
+        "the gate reads.\n",
+        "\nPost it with: python3 scripts/merge-lane-pull-request-reviewer-review-post-and-read-back.py --pull-request 3881 "
+        f"--head-commit {LATER_HEAD} --github-account ned-review-merge <review file>\n",
+        "\nWhen that review requests changes, the author's fix-round comes next, so do not run the gate until a later "
+        "review approves.\n",
+        f"\nWhen it approves, run the gate again: scripts/merge-gate.sh 3881 {LATER_HEAD} <submitted_at>, ")
     return passed and f"--head-commit {approval['commit_id']}" not in run.stdout + run.stderr, run.summary()
 
 
@@ -1857,6 +1994,12 @@ CASES = [
      case_no_sandbox_notice_absent_after_a_passing_run_or_without_a_state_file),
     ("NO-SANDBOX a notice program that fails is said, and the gate goes on",
      case_no_sandbox_notice_program_failing_is_said_and_the_gate_goes_on),
+    ("FAILED SUITES a recorded suite is shown as a notice, and the gate still passes",
+     case_failed_suites_notice_and_the_gate_still_passes),
+    ("FAILED SUITES nothing is printed without a record",
+     case_failed_suites_notice_absent_without_a_record),
+    ("FAILED SUITES an unreadable record is said, and the gate goes on",
+     case_failed_suites_record_unreadable_is_said_and_the_gate_goes_on),
     ("LIVE CHAIN: PR 665 as the chain gates it, approved only by ned-review-merge, passes",
      case_live_chain_merge_account_only_approval),
     ("LIVE CHAIN: PR 667 as the chain gates it, since = ned-review-merge's later approval, passes",
@@ -1960,6 +2103,8 @@ CASES = [
     ("MARKS the marks check failing could not run", case_marks_check_program_fails),
     ("G3 the gate run from a directory other than its own finds the description reader",
      case_gate_run_from_another_directory_finds_its_reader),
+    ("G4 the suite itself opens every fixture the gh stand-in serves, so the runner records it",
+     case_every_served_fixture_is_opened_by_the_suite_itself),
     ("H1 a not-fixed hashtag line whose #follow_up link is a Markdown citation passes",
      case_follow_up_hashtag_with_a_markdown_citation),
     ("H1 a #follow_up link that ends a sentence passes", case_follow_up_bare_link_ending_a_sentence),
@@ -1971,6 +2116,12 @@ CASES = [
      case_follow_up_two_open_issues_printed_in_order_owner_in_capitals),
     ("H8 a #follow_up link to an open issue in another repository passes and is not printed",
      case_follow_up_open_issue_in_another_repository_not_printed),
+    ("NAMES links under both names the repository-names module holds count as this repository, and the merge command names the current one",
+     case_repository_names_come_from_the_shared_module),
+    ("NAMES a repository-names module that fails could not run, exit 2, no gh call",
+     case_repository_names_module_failing_stops_the_gate),
+    ("NAMES a repository-names module that prints one name could not run, exit 2, no gh call",
+     case_repository_names_module_printing_one_name_stops_the_gate),
     ("H2 captured PR 1360's not-fixed line without #follow_up refuses",
      case_follow_up_captured_not_fixed_line_without_it),
     ("H2 captured PR 1298's not-fixed line without #follow_up refuses beside its root-cause line",
@@ -2039,6 +2190,16 @@ TOKEN_BLOCK = (
 SINCE_REAL_TIME_CHECK = """jq -n --arg since "$SINCE" '$since | fromdateiso8601' >/dev/null 2>&1 || cannot"""
 
 MUTATIONS = [
+    ("the repository's names written into the gate instead of read from the module",
+     [('read -r REPO OLD_REPOSITORY extra_name <<<"$repository_names"',
+       'REPO=nedsnodes/nedsnodes OLD_REPOSITORY=nedschorus/nedschorus extra_name=')],
+     [case_repository_names_come_from_the_shared_module]),
+    ("a failing repository-names module not stopping the gate",
+     [('  || cannot "$REPOSITORY_NAMES_UNREADABLE; python3', '  || : "$REPOSITORY_NAMES_UNREADABLE; python3')],
+     [case_repository_names_module_failing_stops_the_gate]),
+    ("one name from the repository-names module accepted",
+     [('[ -n "$OLD_REPOSITORY" ] && [ -z "$extra_name" ]', 'true')],
+     [case_repository_names_module_printing_one_name_stops_the_gate]),
     ("the new-activity count mode counting from the start of the pull request, not the bound",
      [("  SINCE=$bound_at\n", "  SINCE=1970-01-01T00:00:00Z\n")],
      [case_new_activity_count_matches_the_gates_refusal]),
@@ -2225,6 +2386,13 @@ MUTATIONS = [
     ("the no-sandbox notice program's failure not said",
      [("--print-merge-gate-notice-of-last-failed-or-stopped-run failed; its error", "--print-merge-gate-notice-of-last-failed-or-stopped-run x; its error")],
      [case_no_sandbox_notice_program_failing_is_said_and_the_gate_goes_on]),
+    ("without the failed suites notice",
+     [('if ! python3 "$FAILED_SUITES_RECORD_PROGRAM" --print-merge-gate-notice >&2',
+       'if false && python3 "$FAILED_SUITES_RECORD_PROGRAM" --print-merge-gate-notice >&2')],
+     [case_failed_suites_notice_and_the_gate_still_passes]),
+    ("the failed suites notice program's failure not said",
+     [("--print-merge-gate-notice failed; its error", "--print-merge-gate-notice ended; its error")],
+     [case_failed_suites_record_unreadable_is_said_and_the_gate_goes_on]),
     ("without the description parse check",
      [('<<<"$body_read")\n[ $? -eq 0 ] || cannot "$DESCRIPTION_UNPARSABLE"',
        '<<<"$body_read")\n: || cannot "$DESCRIPTION_UNPARSABLE"')],

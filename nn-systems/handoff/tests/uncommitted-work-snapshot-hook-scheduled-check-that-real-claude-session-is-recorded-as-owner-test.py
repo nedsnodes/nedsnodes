@@ -79,6 +79,9 @@ if mode == "breaks-clone":
     shutil.rmtree(clone / ".git")
     print(json.dumps({"is_error": False, "result": "done", "session_id": session}))
     sys.exit(0)
+if mode == "hook-without-owner-file-module-dependency":
+    (clone / "nn-systems" / "general-tools" / "agent-seat-name-regular-expression-constant-same-as-launch-claude-ubuntu-check-common.py").unlink()
+    mode = "hook"
 if mode == "hook":
     (clone / "uncommitted-work-snapshot-hook-scheduled-check-that-real-claude-session-is-recorded-as-owner-marker-file-created-by-real-claude-session.txt").write_text("live\n")
     hook = subprocess.run(
@@ -161,7 +164,7 @@ def test_a_session_that_finds_itself_passes():
     completed, record = run_check("hook")
     check(completed.returncode == 0 and "VERDICT: PASSED" in record
           and "FAIL" not in record
-          and sum(line.startswith("PASS ") for line in record.splitlines()) == 5,
+          and sum(line.startswith("PASS ") for line in record.splitlines()) == 6,
           "a session that runs the scratch clone's hook, and whose hook wrote its own "
           "work-snapshot, passes, and the record says so",
           completed.stdout + completed.stderr)
@@ -370,15 +373,52 @@ def test_a_scratch_clone_that_cannot_be_made_fails():
               name, record or completed.stderr)
 
 
-def test_the_scratch_clone_holds_the_owner_file_module_the_hook_loads():
+def test_the_scratch_clone_holds_every_tracked_file_of_the_code_directories():
     clone = SCRATCH / "scratch-clone-module-check"
     owner_check.make_scratch_clone(clone)
-    hook_text = (REPOSITORY_ROOT / owner_check.HOOK_RELATIVE).read_text()
-    check("worktree-owner-file-read-and-write.py" in hook_text
-          and (clone / "scripts" / "worktree-owner-file-read-and-write.py").is_file(),
-          "the scratch clone holds scripts/worktree-owner-file-read-and-write.py, which the hook "
-          "loads, so the scheduled check does not pass over a FileNotFoundError",
-          str(sorted(path.relative_to(clone).as_posix() for path in clone.rglob("*.py"))))
+    tracked = set(subprocess.run(
+        ["git", "-C", str(REPOSITORY_ROOT), "ls-files", *owner_check.SCRATCH_CLONE_REPOSITORY_DIRECTORIES_TO_COPY],
+        capture_output=True, text=True, check=True).stdout.splitlines())
+    in_clone = set(subprocess.run(
+        ["git", "-C", str(clone), "ls-files"], capture_output=True, text=True,
+        check=True).stdout.splitlines()) - {".gitignore"}
+    check(tracked and in_clone == tracked,
+          "the scratch clone holds every tracked file under scripts/ and nn-systems/, so it "
+          "cannot miss a module the hook loads", sorted(tracked ^ in_clone)[:10])
+
+
+def test_the_scratch_clone_holds_uncommitted_edits_of_tracked_files():
+    # The mutation runner and an agent testing an edit both run this suite on uncommitted code.
+    repository = SCRATCH / "repository-with-uncommitted-edit"
+    for directory in owner_check.SCRATCH_CLONE_REPOSITORY_DIRECTORIES_TO_COPY:
+        (repository / directory).mkdir(parents=True)
+        (repository / directory / "tracked.txt").write_text("tracked\n")
+    module = repository / "scripts" / "module.py"
+    module.write_text("committed = True\n")
+    for arguments in (["init", "-q"], ["add", "-A"], ["commit", "-q", "-m", "module"]):
+        subprocess.run(["git", "-C", str(repository), "-c", "user.name=test",
+                        "-c", "user.email=test@nedschorus.invalid", *arguments],
+                       capture_output=True, check=True)
+    module.write_text("committed = False\n")
+    clone = SCRATCH / "scratch-clone-of-uncommitted-edit"
+    real = owner_check.REPOSITORY_ROOT
+    try:
+        owner_check.REPOSITORY_ROOT = repository
+        owner_check.make_scratch_clone(clone)
+    finally:
+        owner_check.REPOSITORY_ROOT = real
+    copied = (clone / "scripts" / "module.py").read_text() if (clone / "scripts" / "module.py").exists() else None
+    check(copied == "committed = False\n",
+          "the scratch clone holds a tracked file's uncommitted edit, so the suite tests the "
+          "code under test, not the last commit", repr(copied))
+
+
+def test_an_owner_file_module_that_does_not_load_fails_the_check():
+    completed, record = run_check("hook-without-owner-file-module-dependency")
+    check(completed.returncode == 1 and "VERDICT: FAILED" in record
+          and "FAIL the clone's scripts/worktree-owner-file-read-and-write.py does not load" in record,
+          "a clone whose owner-file module cannot load its own dependency fails the check "
+          "instead of passing over the hook's FileNotFoundError", record or completed.stderr)
 
 
 def test_a_check_that_cannot_run_fails():
@@ -433,7 +473,9 @@ def main():
                      test_the_record_goes_to_the_log_store_by_default,
                      test_the_records_directory_is_the_kind_the_log_store_readme_names,
                      test_a_scratch_clone_that_cannot_be_made_fails,
-                     test_the_scratch_clone_holds_the_owner_file_module_the_hook_loads,
+                     test_the_scratch_clone_holds_every_tracked_file_of_the_code_directories,
+                     test_the_scratch_clone_holds_uncommitted_edits_of_tracked_files,
+                     test_an_owner_file_module_that_does_not_load_fails_the_check,
                      test_a_check_that_cannot_run_fails,
                      test_an_error_after_claude_started_is_not_reported_as_a_failed_start,
                      test_a_record_that_cannot_be_written_is_reported):

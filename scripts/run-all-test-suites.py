@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Run every nc-test-suite in a checkout, and report each one by its exit code.
+"""Run every nn-test-suite in a checkout, and report each one by its exit code.
 
 Usage:
   scripts/run-all-test-suites.py [--checkout DIR] [--python INTERPRETER]
@@ -8,6 +8,7 @@ Usage:
                                  [--only-suites-whose-recorded-inputs-changed-since COMMIT]
                                  [--recorded-inputs-directory DIR]
                                  [--save-recorded-inputs-to-directory DIR]
+                                 [--also-leave-out-suites-whose-recorded-inputs-in-read-only-directory-match-checkout DIR]
                                  [--record-inputs-with-strace]
                                  [--suite-files-only-strace-saw-lists-directory DIR]
                                  [--leave-recorded-inputs-and-failure-history-unchanged]
@@ -21,7 +22,7 @@ Usage:
   --python      the interpreter that runs each suite file; default, the one
                 running this program
   -j            how many suites of this run may run at once; default, on Linux
-                in nc-test-sandboxes, every suite to run, up to admission's
+                in nn-test-sandboxes, every suite to run, up to admission's
                 ceiling, and otherwise the machine's core count, or the number
                 of suites to run when that is fewer
   --log-dir     where each suite's output and the report are written;
@@ -29,7 +30,7 @@ Usage:
                 on Linux removed two days after its run ends. Two runs cannot share
                 one --log-dir: the second exits 3
   --lock-file   default ~/.claude/.run-all-test-suites.lock. Where each suite
-                runs in an nc-test-sandbox (Linux with bwrap), no lock is taken: the
+                runs in an nn-test-sandbox (Linux with bwrap), no lock is taken: the
                 run records and the admission directory beside this path are
                 shared by every run that names it. Elsewhere (macOS, or Linux
                 without bwrap), the lock that keeps two runs on one machine apart
@@ -39,9 +40,18 @@ Usage:
                 no wait. Accepted and without effect where no lock is taken
   --only-suites-whose-recorded-inputs-changed-since COMMIT
                 run only the suites whose recorded inputs differ between
-                COMMIT and the checkout's files; see RECORDED INPUTS below.
-                Without it every suite runs. Without --only-suites-named,
-                and where suites run in nc-test-sandboxes, it keeps a
+                COMMIT and the checkout's files; see SELECTION below.
+                Given more than once, a suite runs only when the
+                comparison with every COMMIT selects it, except that
+                every suite runs when this program differs from the
+                first COMMIT, since a head test run runs main's copy,
+                and one in
+                SUITES_THAT_RUN_THE_REAL_CLAUDE_CLI or
+                SUITES_RUN_WITHOUT_ANY_SANDBOX is judged by the first
+                COMMIT alone, since a pull request head test run leaves
+                out the former and most of the latter. Without it
+                every suite runs. Without --only-suites-named,
+                and where suites run in nn-test-sandboxes, it keeps a
                 suite in SUITES_RUN_WITHOUT_ANY_SANDBOX only when the
                 change edits a file that suite reads, and leaves out every
                 other such suite it selects; see SUITES LEFT OUT OF A
@@ -58,6 +68,26 @@ Usage:
                 tree that never reaches main cannot replace the recordings
                 every other head run selects by; see RECORDINGS ADOPTED
                 AFTER A MERGE below
+  --also-leave-out-suites-whose-recorded-inputs-in-read-only-directory-match-checkout DIR
+                with --only-suites-whose-recorded-inputs-changed-since, a
+                second directory of recordings that this run reads and never
+                writes: a suite selected by its recording in
+                --recorded-inputs-directory is left out when its recording
+                in DIR would leave it out by the same rules, unless the
+                first recording shows an input the change differs in. So a
+                recording there that is missing, of an older format, of a
+                run that failed or skipped cases, or of other copies of the
+                files is settled by DIR. DIR never selects a suite. A DIR
+                that is missing or cannot be read holds no recording. The
+                run refuses, exit 2, when DIR is where it saves recordings,
+                or, with --record-inputs-with-strace, where it saves the
+                lists of files only strace saw, unless given
+                --leave-recorded-inputs-and-failure-history-unchanged.
+                merge-lane-2's head
+                test runs give as DIR the default --recorded-inputs-directory,
+                where the after-merge test run saves each suite's recording
+                as the suite passes, before the merge program adopts them
+                into the head test runs' store when the after-merge test run ends
   --record-inputs-with-strace
                 on Linux, record with strace as well as the audit hook; see
                 RECORDED INPUTS below. scripts/scheduled-full-test-run-of-main.py
@@ -124,8 +154,8 @@ HOW EACH SUITE IS JUDGED. By its exit code, and nothing else: 0 is PASS,
 anything else is FAIL, and a suite killed by a signal is FAIL naming the
 signal. Two exceptions are NOT RUN, not FAIL, and each one's recording keeps
 its nonzero exit, so the next selective run selects it again. One is a suite
-whose nc-test-sandbox bwrap could not build: no test ran. The other is a suite
-that exits NC_TEST_SUITE_EXIT_CODE_FOR_NOT_RUN_BECAUSE_A_CAUSE_OUTSIDE_THIS_REPOSITORY_STOPPED_ITS_CASES, 75: a
+whose nn-test-sandbox bwrap could not build: no test ran. The other is a suite
+that exits NN_TEST_SUITE_EXIT_CODE_FOR_NOT_RUN_BECAUSE_A_CAUSE_OUTSIDE_THIS_REPOSITORY_STOPPED_ITS_CASES, 75: a
 cause outside this repository, such as claude's usage limit or claude being
 logged out, kept its cases from running, and its last line of output, which
 the NOT RUN line repeats, names that cause. A suite exits 1, not 75, when any
@@ -142,7 +172,7 @@ PID namespace of their own. The suite runs as the same user, so a signal a
 suite sends can reach only the processes it started, never the agent-seats
 that run as the same account.
 
-THE SIGNAL SANDBOX IS ALSO EACH SUITE'S NC-TEST-SANDBOX, built when the
+THE SIGNAL SANDBOX IS ALSO EACH SUITE'S NN-TEST-SANDBOX, built when the
 suite starts and gone when it ends. It hides by default, because a list of
 files or sockets to cover misses every one not on it and every one made after
 the list. The file system is read-only, except: a private /tmp, which
@@ -153,7 +183,7 @@ symbolic link to a directory beside it, as macOS's /var is a link to
 resolved form fails here as it would on the Mac; a private /dev and System V IPC; the home directory, an empty
 tmpfs the suite may write, into which only the paths in
 TEST_SANDBOX_HOME_PATHS_SHOWN_READ_ONLY are bound, read-only, each with the
-reason suites need it, so no credential in the home directory is there; the
+reason suites need it, so no credential file in the home directory is there; the
 checkout under test, a copy-on-write overlay the suite may write, so nothing
 it writes there survives the suite;
 and the suite's own input record and strace traces, which this program reads
@@ -211,11 +241,14 @@ reason it gets that sandbox: SUITES_RUN_WITHOUT_ANY_SANDBOX,
 SUITES_GIVEN_A_COPY_ON_WRITE_OVERLAY_OF_THE_REPOSITORY_GIT_DIRECTORY (suites
 whose sandbox gets a writable copy-on-write overlay of the repository's git
 directory) and SUITES_WHOSE_TEST_SANDBOX_SHARES_THE_MACHINE_NETWORK (suites
-whose sandbox keeps the machine's network). The three are read from the
-scripts/run-all-test-suites.py of the checkout whose suites the run tests,
-parsed and never run, and from this file only when that checkout has none;
-the report names the file. A run refuses, exit 2, when that file does not
-assign each of the three a literal dict.
+whose sandbox keeps the machine's network). A fourth dict,
+SUITES_THAT_RUN_THE_REAL_CLAUDE_CLI, names the suites
+--leave-out-suites-that-run-the-real-claude-cli leaves out. The four are read
+from the scripts/run-all-test-suites.py of the checkout whose suites the run
+tests, parsed and never run. A list that file lacks, or assigns the set it
+was before it became a dict, as an older checkout does, is taken from this
+file instead; the report names each file that supplied a list. A run refuses, exit 2, when that file binds one of the four any other
+way, such as to a dict not written out literally.
 A suite bwrap reports as exiting 128+N is reported as killed by signal N;
 sandbox-exec replaces itself with the suite, so a suite's exit passes through.
 
@@ -313,14 +346,14 @@ is installed on it, by putting SKIPPED_CASE_THIS_MACHINE_CANNOT_RUN_MARKER,
 `SKIP  [this machine cannot run it] <case>: <reason>`. A marked skip is
 counted and printed like any other; it only changes selection, below.
 
-RUNS THAT OVERLAP, AND ONE RUN AT A TIME WITHOUT NC-TEST-SANDBOXES. Measured
+RUNS THAT OVERLAP, AND ONE RUN AT A TIME WITHOUT NN-TEST-SANDBOXES. Measured
 2026-09-21: two overlapping runs of scripts/resupervise-seat-test.py both exit
 0 and both print "all cases passed" while silently dropping cases to SKIP,
 because the suites share machine state. On Linux with bwrap each suite runs in
-an nc-test-sandbox of its own (see THE SIGNAL SANDBOX IS ALSO EACH SUITE'S NC-TEST-SANDBOX above), which shares no /tmp, tmux
+an nn-test-sandbox of its own (see THE SIGNAL SANDBOX IS ALSO EACH SUITE'S NN-TEST-SANDBOX above), which shares no /tmp, tmux
 directory or home directory writes with any other suite, so runs overlap
 freely and no lock is taken; ADMISSION below decides when each suite starts.
-Where suites do not run in nc-test-sandboxes, a run takes an exclusive lock on
+Where suites do not run in nn-test-sandboxes, a run takes an exclusive lock on
 --lock-file, and a second run on the same machine exits 3 without running
 anything, or, with --wait-for-lock-seconds, waits for the lock first. A wait blocks in the
 kernel's queue: a caller that instead retried every few seconds lost the lock
@@ -345,7 +378,7 @@ directories runs made before records existed are removed once nothing in
 them has changed for two days. macOS has no /proc to read start times
 from, so there a run still cleans up after the lock's last holder.
 
-ADMISSION, on Linux in nc-test-sandboxes.
+ADMISSION, on Linux in nn-test-sandboxes.
 Every run on the machine shares one admission, kept in the directory beside
 --lock-file. A suite starts only while the machine's CPU use averaged over the
 last 5 s is under 90% and its available memory is above 10 GB, read with
@@ -424,11 +457,11 @@ which the floor covers; no pass exceeded this limit measured from the suite's
 fastest pass. 1800 s is six times the longest pass seen. A suite past its limit
 has its process group killed with SIGKILL; each suite starts in a session of
 its own, so the group holds every process it started except one that starts a
-session or process group of its own. In an nc-test-sandbox the group holds the init of the suite's
+session or process group of its own. In an nn-test-sandbox the group holds the init of the suite's
 PID namespace, whose end ends every process inside, so nothing is left. The
 runner also reads the tree of processes below the suite from /proc just before
-the kill and sends SIGKILL to each, so outside an nc-test-sandbox such a process
-is reached too. On Linux a suite outside an nc-test-sandbox is started through
+the kill and sends SIGKILL to each, so outside an nn-test-sandbox such a process
+is reached too. On Linux a suite outside an nn-test-sandbox is started through
 ONE_SUITE_CHILD_SUBREAPER_LAUNCHER_PATH, a child subreaper, so a process
 whose parent ends is reparented to it and stays in the tree. The runner stops
 the group with SIGSTOP and sends SIGKILL to each process it reads in the tree
@@ -439,7 +472,7 @@ the kill is reparented to the subreaper before that last read begins. The runner
 waits up to TEST_SUITE_KILLED_DESCENDANTS_END_WAIT_SECONDS, 10, for each of them
 to end. Elsewhere, as on macOS, there is neither a subreaper nor /proc, so only
 the process group is killed.
-A suite outside an nc-test-sandbox runs with TMPDIR set to a directory of its
+A suite outside an nn-test-sandbox runs with TMPDIR set to a directory of its
 own in the system temp directory, which the runner removes once the suite has
 ended, however it ended, so what a killed suite made through TMPDIR is not
 left behind; when that removal fails, the suite's line is followed by one
@@ -487,126 +520,9 @@ opens `SUMMARY:` and carries the counts. The whole report is also written to
 test-run-report.txt in the log directory, so a run in the background needs no
 pipe to keep it.
 
-RECORDED INPUTS (user-ruled 2026-09-30, walk
-open-questions-concerns-and-recommendations-2026-09-30, item 5, "y both").
-A suite is rerun only when a file it reads has changed: test result caching,
-keyed on inputs recorded while the suite actually ran, the way pytest-testmon
-keys it. merge-lane-2 counted, over 75 code pull requests from 2026-09-24 to
-2026-09-30, what its repeated full runs caught: no defect that the touched
-suites had missed, and two failures caused by directories a Codex run left
-in /tmp. So a full run of every suite is kept for once a day per machine,
-and a pull request's head, and main after a merge, run the suites whose
-inputs changed.
-
-Every run records, for each suite it runs, the tracked files of the checkout
-that the suite and every process it starts read. Searching the test files
-for a changed program's name was measured to be the wrong tool: 57 of the
-79 suites on main load the program they test by file path, not by import,
-and 68 start processes, so neither an import graph nor a name finds what a
-suite depends on. Two recorders, whose findings are added together:
-
-  a Python audit hook, on both machines. The run puts a directory holding a
-  sitecustomize.py first on each suite's PYTHONPATH, so every Python process
-  the suite starts, children included, installs `sys.addaudithook` before
-  its first line runs. It writes down every file opened inside the checkout
-  (`open` covers open(), io.open, os.open and the loader's io.open_code),
-  the script a process runs (`cpython.run_file`), each path passed to a
-  process it starts (`subprocess.Popen`, `os.exec`, `os.posix_spawn`), each
-  directory listed by the suite's own code (`os.listdir`, `os.scandir`; the
-  import system's listings are left out, because every import lists the
-  suite's own directory), and each git command run on the checkout itself —
-  where a clone counts by its source and an init by the directory it names,
-  since both are run from the checkout on repositories that are not it, and
-  an option's value (`-b main`) is not taken for either. For each git call it
-  writes every argument after the program name, unchanged, the absolute
-  normalised starting directory before any -C, and GIT_DIR and GIT_WORK_TREE
-  from the call's environment (the inherited environment when none is
-  given). These facts are JSON, so an argument's newline cannot break the
-  log's line format. The recorder does not classify the calls. Python raises no
-  audit event for a stat, so the recorder also wraps os.path's exists,
-  lexists, isfile, isdir and islink, which pathlib's exists, is_file and
-  is_dir call, and writes down each path inside the checkout they check. An
-  open that fails is written down too: the event comes before the open.
-  Both machines already run a sitecustomize.py of their own (Homebrew's on
-  the Mac sets sys.executable; Debian's on ned-box), so the recorder runs
-  the one it shadows after installing itself. A process started with -I,
-  -E or -S, or with an environment that drops PYTHONPATH, is not recorded.
-
-  strace, on Linux, only in a run given --record-inputs-with-strace, which
-  scripts/scheduled-full-test-run-of-main.py gives, when strace is installed and
-  this program is not itself being traced: `strace -f -ff --seccomp-bpf -z -y -e trace=%file` around
-  each suite, which sees every path any process opens, stats or executes,
-  git and shells included. --seccomp-bpf stops a traced process only at the
-  calls traced, and -z writes only calls that succeeded; the trace is
-  deleted once read, because the heaviest suites write hundreds of
-  megabytes. A run killed before it deletes them leaves the traces of the
-  suites it was running; a later run removes them once nothing of the killed
-  run still runs (see RUN RECORDS below). Inside another strace (a
-  full run that runs this program's own test) a second strace cannot
-  attach, so the audit hook works alone there.
-
-  strace adds to the suites' summed seconds, as measured below, and on
-  ned-box its processes held the machine's CPU at the level where admission
-  stops starting suites, so every other run records with the audit hook
-  alone. A strace run also keeps, apart from the recording, each suite's
-  files only strace saw it read: those a git command or a shell script
-  read. A run that records with the audit hook alone replaces the
-  recording, and a run given its own --recorded-inputs-directory, such as
-  merge-lane-2's head runs, never sees the scheduled run's recordings, so
-  selection reads these lists from
-  --suite-files-only-strace-saw-lists-directory, whose default is where the
-  scheduled full run keeps its recordings: a suite also runs when a file on its
-  list differs. A run with the audit hook alone records the files on the
-  list among the files read, with their blob hashes in its checkout. A
-  strace run in which the suite failed or skipped a case without the mark
-  saw only part of what the suite reads, so it adds the files it saw to the
-  last list, or starts the list when there is none; a strace run that passed
-  and skipped only marked cases replaces the list. Each list records when
-  such a run last added to it. A selective run on Linux names how many
-  suites have no list from a strace run in the last
-  FILES_ONLY_STRACE_SAW_LIST_MAXIMUM_AGE_HOURS_BEFORE_NOTICE hours, which a
-  suite added since the last scheduled run, or a missed scheduled run,
-  causes, and, apart, each suite whose list in that time came only from
-  runs that failed or skipped a case without the mark, with the
-  --only-suites-named command that runs those of them the run did not choose.
-
-A recording keeps, per suite: its exit code and seconds; each file read,
-with its git blob hash; each path it opened or checked for, and whether the
-path was there; each directory it listed, with the entries the directory
-held; the git calls run from the checkout, with their arguments, starting
-directory, GIT_DIR, GIT_WORK_TREE, the names of the other GIT_ variables
-set on it and what each call reads; the command names of only the calls
-that read the checkout, of those whose answer can change when a file is
-added or deleted, and of those whose answer can change when any file is,
-with a fingerprint of the checkout's list of files; the git ls-files calls
-tied to that list only through their pathspecs, each with its directory
-relative to the top, its pathspecs and a fingerprint of the files it
-listed; which recorders made it; and, in a strace run,
-the files only strace saw. A starting directory
-inside the checkout is kept relative to its top directory, with '.' for the
-top itself; one outside is kept absolute. A recording made in an older
-format than this program writes selects its suite once, so the suite is
-recorded afresh. The files are those git tracks
-or would add, untracked and not ignored, as the run found them when it
-started. A `.pyc` read is recorded as the source file beside its
-`__pycache__`, because an import that finds a valid cache never opens the
-source. Recordings live outside every checkout, under
---recorded-inputs-directory and then the repository's root commit, one file
-per suite: worktrees come and go and every one of a clone's worktrees, and
-every clone, shares the same paths, so a recording made in one serves them
-all. Every run not given --leave-recorded-inputs-and-failure-history-unchanged
-replaces the recordings of the suites it ran, a failed or
-killed run's included, so the last recording always says how the suite's
-last run ended; the scheduled full run refreshes them all. Each recording is
-written to a temporary file of its own and renamed into place under a short
-lock held per suite, so runs in two checkouts saving one suite at once never
-mix their contents, and a reader sees one whole recording. A run reads each
-recording once, when it starts, and both selection and starting order use
-what it read. A recording that cannot be saved removes the earlier one,
-unless another run saved a newer one since this run read it; that one
-records its own run's inputs, so it is kept. A run given
---save-recorded-inputs-to-directory saves, and on a failed save removes,
-there instead, and leaves --recorded-inputs-directory as it found it.
+RECORDED INPUTS. What each run records about each suite it runs, by which
+recorders, and where the recordings are kept, is on the page
+docs/nedsnodes-wiki/nedsnodes-how-the-test-runner-selects-which-nn-test-suites-a-test-run-runs.md.
 
 RECORDINGS ADOPTED AFTER A MERGE. One recording per suite means the last run
 to save it wins, whatever tree it ran on: a run on another pull request's
@@ -624,141 +540,9 @@ scripts/merge-lane-pull-request-merge-through-merge-gate-with-stacked-pull-reque
 merge-lane-2's merge program, calls it in its worktree at each merge commit;
 that program's module docstring says from which directories into which.
 
-SELECTION, with --only-suites-whose-recorded-inputs-changed-since COMMIT.
-A call's -C is walked as written when the call has at most one -C, its path
-is made of directory names with no ., .. or empty name, and, where the path
-is in the checkout, no symbolic link is on it. git enters every directory on
-the way, and a recording names only the one a call ends in, by its real
-path, so each rule below that stands for a call by its directory needs its
--C walked as written; a call whose -C is not walked as written is tied to
-the whole list of files. Whatever its kind, every git call records the
-checkout's directories its -C options enter as looked for, and the symbolic
-links they pass as read, so deleting such a directory, or deleting or
-retargeting such a link, selects its suite.
-
-Two explicit allowlists set aside git calls that read no file of the
-checkout. Every call is checked against its full arguments:
-
-  a call sees no file when its only global option is a -C walked as
-  written, or none, and
-  its command is rev-parse followed by at least one argument, all from
-  --show-toplevel, --git-dir, --absolute-git-dir, --git-common-dir,
-  --is-inside-work-tree and --show-prefix; or its command is config followed
-  by exactly one key, exactly --get <key>, or exactly --get-all <key>.
-  A key does not start with '-', contains a '.', contains no '=' and no
-  whitespace; user.* keys are included. The six rev-parse options say where
-  the checkout and its git directory are, from the current directory and
-  the repository's location alone. Config reads answer from configuration
-  in the git directory or the user's home, never from a file of the
-  checkout. Anything else on the call fails this allowlist, including
-  rev-parse --verify <abbreviated hash>, whose answer depends on the object
-  store, which every commit changes: a new object can make the abbreviation
-  ambiguous.
-
-  a call runs on another repository when its only global options are
-  -C <dir>, --git-dir <path>, --git-dir=<path>, --work-tree <path> and
-  --work-tree=<path>; it names a git directory by its last --git-dir value,
-  or otherwise its recorded GIT_DIR; that directory resolves outside both
-  the checkout's top directory and its common git directory; and either
-  its last --work-tree value, or otherwise its recorded GIT_WORK_TREE,
-  resolves outside the top directory, or its command reads no work tree:
-  rev-parse, log, show, cat-file, for-each-ref, config, or worktree whose
-  first argument is list. A -C, when it has one, must be walked as written.
-  Relative paths resolve against the directory the call works in, then
-  through realpath.
-  The common git directory is git rev-parse --git-common-dir, resolved
-  against the top directory when relative, then through realpath; when
-  unknown, only the top directory counts as the checkout. A linked
-  worktree's own git directory is outside its top directory but inside
-  its common git directory, so still belongs to the checkout's repository.
-  The listed commands read the other repository's objects, refs and
-  configuration. Status, diff, add, checkout, ls-files and stash given
-  --git-dir without a work tree use the current directory as their work
-  tree, so still read the checkout.
-
-A call that reads the checkout is still not tied to the checkout's list of
-files when its answer comes from commits, refs, another repository or the
-paths it names, so that adding or deleting any other file cannot change it.
-The command and every option must be on an explicit list, and its only
-global option a -C walked as written naming a directory that exists, or
-none, with no GIT_DIR or GIT_WORK_TREE: rev-parse, log and merge-base given
-revisions with no ':' (a revision with ':' names a path in a tree), none
-starting with '^', holding a glob character or naming a directory, since git
-takes such an operand as a path whose files decide the answer, and none
-that, taken as the path of the file git looks for under its name, holds ..
-or passes a symbolic link, as for -C; ls-remote given an absolute repository
-path outside the checkout's top directory; check-ignore given paths in the
-top directory, since a path below a directory depends on what that directory
-is. The paths git consults in the work tree for such a call are recorded as
-read or looked for: for rev-parse and log, a file named like each revision,
-which makes the argument ambiguous or, for one that does not resolve, gives
-rev-parse its answer; for log, .mailmap; for check-ignore, each path given,
-since a tracked path is never ignored, and the top .gitignore. Every other
-call reading the checkout, such as ls-tree, status, diff, add, stash,
-commit, grep or worktree, stays tied, and so does an option not on the list.
-
-A git ls-files call is tied to the list of files only through its
-pathspecs when what it lists is the files of that list its pathspecs match:
-its only global option a -C walked as written naming a directory inside the
-checkout, or none; no GIT_ variable set on it but those in
-GIT_VARIABLES_CHANGING_NO_FILE_A_LISTING_SEES, only the options in
-GIT_LS_FILES_OPTIONS_LISTING_THE_FILE_LIST, --others only with
---exclude-standard, at least one pathspec, and no pathspec magic but glob,
-literal, icase, exclude and top. Which files a pathspec matches is asked of
-git itself: git ls-files runs with the call's pathspecs from its directory
-on a scratch index holding the files to match. That index holds every path
-as a file, and a directory pathspec matches a submodule but not a file of the
-same name. So when the checkout's index, or the commit given to
---only-suites-whose-recorded-inputs-changed-since, holds any submodule, even
-one the call's pathspecs do not match, a call being recorded is tied to the
-whole list, and a call already recorded as tied only through its pathspecs
-selects its suite. Any other git ls-files
-call, or one git could not match when recorded, stays tied to the whole list.
-
-Anything else stays git on the checkout and follows the rules below,
-including calls with no parseable command, a clone whose source is inside
-the checkout, and an init naming a directory inside it. A call set aside
-does not trigger any of the three git reasons below; the recorded files,
-paths and directory listings are still compared. When every recorded git
-call is set aside and those comparisons pass, the NOT SELECTED line says
-which calls see no file and which commands run on another repository.
-
-The files that differ are `git diff --no-renames COMMIT` against the
-checkout's files, plus untracked files git does not ignore, as added. Every
-suite runs when one of them is this program (it holds the recorder), under
-.claude/guard-hooks/, or .claude/settings.json. Otherwise a suite runs when: it
-has no recording on this machine, or one made by an older version of this
-program; its recorded run did not exit 0, since a run that failed or was
-killed recorded only what it read before it stopped; its recorded run
-skipped a case without the mark `[this machine cannot run it]`, since the
-cases skipped recorded nothing, and a skip can be a run disturbed by
-another (a marked case never runs on this machine, so what it would read
-does not matter here); the suite file itself
-differs; a file it read differs; a path it looked for was added or deleted;
-an entry was added to or deleted from a directory it listed, a new
-subdirectory's name included; a file was added or deleted and it ran a git
-command on the checkout that is tied to the whole list of files, or a git
-ls-files call whose pathspecs match that file, or git could not say which
-files the call lists; or it ran a git
-command on the checkout that reads file contents (anything but the listing
-commands in GIT_COMMANDS_THAT_ONLY_LIST), and any file differs — strace or not, because git reads a committed file's
-content from the object store, where no recorder sees a working file.
-
-Then, because every clone and worktree on a machine shares the store, the
-recording may have been made on another branch, where the suite read other
-files. A suite also runs when its recording does not match the checkout: a
-file it read has another blob hash, a path it looked for is there or absent
-where it was not, a directory it listed holds other entries, or it ran git
-on the checkout tied to the whole list of files, and the checkout's list of
-files has another fingerprint, or a git ls-files call tied to it only
-through its pathspecs, and the files it lists have another fingerprint. A
-recording saved before recordings named the tied commands counts every git
-command it ran on the checkout as tied, and one saved before they named the
-git ls-files calls tied only through their pathspecs ties every git ls-files
-call to the whole list.
-So a suite is NOT SELECTED only when everything its recording saw is the
-same at COMMIT, in the recording, and in the checkout. Each suite gets a
-line saying SELECTED or NOT SELECTED and why, before any runs.
+SELECTION, with --only-suites-whose-recorded-inputs-changed-since COMMIT,
+given once or more. Which suites a run selects, and why, is on the page
+docs/nedsnodes-wiki/nedsnodes-how-the-test-runner-selects-which-nn-test-suites-a-test-run-runs.md.
 
 WHAT IT COSTS AND WHAT IT CHOOSES, measured 2026-09-30 at cd9fb859, full
 runs at -j 4. The Mac, the audit hook alone: 284 s against 278 s without
@@ -783,7 +567,7 @@ Mac 278 s, ned-box 305 s; a store of 79 recordings is about 500 KB.
 
 SUITES LEFT OUT OF A SELECTIVE RUN. A run given
 --only-suites-whose-recorded-inputs-changed-since without --only-suites-named,
-where suites run in nc-test-sandboxes (Linux with bwrap), runs a suite in
+where suites run in nn-test-sandboxes (Linux with bwrap), runs a suite in
 SUITES_RUN_WITHOUT_ANY_SANDBOX only when the change edits a file that suite
 reads: the suite's own file, a file its recording read, or a file only its
 last strace run saw. Such a suite waits for the one machine-wide lock those
@@ -830,6 +614,7 @@ import codecs
 import collections
 import concurrent.futures
 import contextlib
+import copy
 import datetime
 import fcntl
 import fnmatch
@@ -860,6 +645,7 @@ TEST_SUITE_PATHSPEC = "*-test.py"
 # would miss inputs. Leave shell suites unrecorded so selection always runs them.
 SHELL_TEST_SUITE_PATHSPEC = "*-test.sh"
 SKIPPED_CASE_LINE = re.compile(r"^SKIP\s")
+UNCAUGHT_PYTHON_TRACEBACK_LINE = "Traceback (most recent call last):"
 SKIPPED_CASE_THIS_MACHINE_CANNOT_RUN_MARKER = "[this machine cannot run it]"
 SKIPPED_CASE_LINE_THIS_MACHINE_CANNOT_RUN = re.compile(
     r"^SKIP\s+" + re.escape(SKIPPED_CASE_THIS_MACHINE_CANNOT_RUN_MARKER))
@@ -891,6 +677,14 @@ _attendance_check = importlib.util.module_from_spec(_attendance_check_spec)
 _attendance_check_spec.loader.exec_module(_attendance_check)
 AGENT_SESSION_ATTENDANCE_ENVIRONMENT_VARIABLES = _attendance_check.AGENT_SESSION_ATTENDANCE_ENVIRONMENT_VARIABLES
 
+_path_names_spec = importlib.util.spec_from_file_location(
+    "project_rename_path_names_before_and_after_common",
+    Path(__file__).resolve().with_name("project-rename-path-names-before-and-after-common.py"))
+_path_names = importlib.util.module_from_spec(_path_names_spec)
+_path_names_spec.loader.exec_module(_path_names)
+convert_file_path_after_project_rename_to_path_before = (
+    _path_names.convert_file_path_after_project_rename_to_path_before)
+
 # Suites run as the same account as every agent-seat, so a stray kill(-1) or
 # killpg from a suite reaches all of them. In its own PID namespace a suite can
 # signal only the processes it started. Children of bwrap cannot start bwrap
@@ -898,10 +692,10 @@ AGENT_SESSION_ATTENDANCE_ENVIRONMENT_VARIABLES = _attendance_check.AGENT_SESSION
 # the sandbox, such as a suite that tests this program, runs its suites as they
 # are: they are already inside.
 #
-# On Linux, each suite's nc-test-sandbox is these signal-sandbox arguments, shared by every
+# On Linux, each suite's nn-test-sandbox is these signal-sandbox arguments, shared by every
 # suite, plus the per-suite arguments of bwrap_arguments_for_one_suites_test_sandbox();
-# on macOS the signal sandbox is sandbox-exec alone and there is no nc-test-sandbox. The
-# nc-test-sandbox hides by default: the
+# on macOS the signal sandbox is sandbox-exec alone and there is no nn-test-sandbox. The
+# nn-test-sandbox hides by default: the
 # file system read-only, a private /tmp, /dev and System V IPC, the home directory an
 # empty tmpfs into which only the paths in TEST_SANDBOX_HOME_PATHS_SHOWN_READ_ONLY are
 # bound, and /run hidden, since it holds the machine's sockets: Docker's, the system bus,
@@ -921,6 +715,9 @@ TEST_SANDBOX_HOME_PATHS_SHOWN_READ_ONLY = {
     ".local/bin/ruff": "the Ruff binary pip installs for this account, which `python3 -m ruff` "
                        "looks for here",
     ".gitconfig": "git's settings for this account, which suites that run git read",
+    ".claude/projects": "Claude Code's session transcripts, against the five largest of which "
+                        "scripts/claude-code-session-transcript-records-read-backward-common-test.py "
+                        "checks the transcript reader; a transcript can hold a secret the user pasted",
     "nedsnodes-logs/seats/ned-box-helper/absence-claim-trigger-phrases-2026-10-05/out/"
     "precision/labels.csv": "the labelled replies scripts/absence-claim-locator-reminder-"
                             "hook-test.py measures the reminder's precision against",
@@ -935,7 +732,7 @@ TEST_SANDBOX_FIXED_DIRECTORIES_HIDDEN_BY_EMPTY_TMPFS = {
                  "re-creates under a new directory",
 }
 XDG_RUNTIME_DIRECTORY_PATH_HIDDEN_BY_EMPTY_TMPFS_IN_TEST_SANDBOX = f"/run/user/{os.getuid()}"
-# Variables naming a socket or a server outside the nc-test-sandbox.
+# Variables naming a socket or a server outside the nn-test-sandbox.
 TEST_SANDBOX_OUTSIDE_SOCKET_VARIABLES = (
     "TMUX",
     "TMUX_PANE",
@@ -955,8 +752,8 @@ TEST_SUITE_CREDENTIAL_ENVIRONMENT_VARIABLE_PATTERNS = (
 # TMPDIR is reached through a symbolic link, as macOS's /var is a link to /private/var, so a
 # suite that compares a path built from TMPDIR with the resolved path a process reports,
 # such as its cwd, fails on ned-box as it would on the Mac.
-TEST_SANDBOX_TMPDIR_SYMLINK_PATH = "/tmp/nc-test-sandbox-tmpdir-symlink"
-TEST_SANDBOX_TMPDIR_SYMLINK_TARGET_DIRECTORY_PATH = "/tmp/nc-test-sandbox-tmpdir-symlink-target"
+TEST_SANDBOX_TMPDIR_SYMLINK_PATH = "/tmp/nn-test-sandbox-tmpdir-symlink"
+TEST_SANDBOX_TMPDIR_SYMLINK_TARGET_DIRECTORY_PATH = "/tmp/nn-test-sandbox-tmpdir-symlink-target"
 TEST_SANDBOX_BWRAP_ARGUMENTS_SHARED_BY_EVERY_SUITE = (
     "--ro-bind", "/", "/", "--dev", "/dev", "--tmpfs", "/dev/shm", "--proc", "/proc",
     "--tmpfs", "/tmp", "--dir", TEST_SANDBOX_TMPDIR_SYMLINK_TARGET_DIRECTORY_PATH,
@@ -1013,22 +810,26 @@ SUITES_RUN_WITHOUT_ANY_SANDBOX = {
     "scripts/run-all-test-suites-cleanup-after-killed-runs-real-process-test.py":
         "it starts this program, whose suites run in bwrap, which cannot start inside bwrap",
     "scripts/run-all-test-suites-test-sandbox-escape-test.py":
-        "it builds nc-test-sandboxes itself with bwrap, which cannot start inside bwrap",
+        "it builds nn-test-sandboxes itself with bwrap, which cannot start inside bwrap",
     "scripts/run-all-test-suites-overlapping-runs-real-process-test.py":
         "it starts this program, whose suites run in bwrap, which cannot start inside bwrap",
     "scripts/recover-crashed-seats-started-tmux-server-lands-in-user-systemd-manager-cgroup-without-xdg-runtime-dir-real-process-test.py":
         "it starts a tmux server in a scope of the user's systemd, whose session bus "
-        "the nc-test-sandbox's empty /run hides",
+        "the nn-test-sandbox's empty /run hides",
     "scripts/mac-request-from-ned-box-forced-command-test.py":
         "it runs the real ssh, which refuses its root-owned config files because "
         "inside the sandbox's user namespace they show as owned by nobody",
     "nn-systems/general-tools/tests/agent-seat-worktree-create-with-owner-file-claude-code-worktree-create-hook-real-claude-code-test.py":
         "it runs the real claude, which needs the real HOME it is logged in from and an "
         "agent-seat of this machine, and the sandbox's HOME is empty",
+    "scripts/agent-seat-idle-sweep-list-agents-ref-formula-matches-installed-claude-code-test.py":
+        "it compares refs computed from ~/.claude/sessions, which the sandbox's HOME hides because "
+        "those records sit beside the agent-sessions' peer keys, with the refs in their transcripts",
 }
 
 SUITES_THAT_RUN_THE_REAL_CLAUDE_CLI = {
-    "nn-systems/general-tools/tests/agent-seat-worktree-create-with-owner-file-claude-code-worktree-create-hook-real-claude-code-test.py",
+    "nn-systems/general-tools/tests/agent-seat-worktree-create-with-owner-file-claude-code-worktree-create-hook-real-claude-code-test.py":
+        "it runs the installed Claude Code to check the worktree hook end to end",
 }
 
 # Suites that must write the git directory of the repository under test, such as with
@@ -1039,15 +840,17 @@ SUITES_GIVEN_A_COPY_ON_WRITE_OVERLAY_OF_THE_REPOSITORY_GIT_DIRECTORY = {
         "it replays at two refs, each in a worktree it adds to this repository",
 }
 
-# Suites whose nc-test-sandbox keeps the machine's network, each with its reason. Every
-# other suite's nc-test-sandbox has a network of its own with only loopback, so no
+# Suites whose nn-test-sandbox keeps the machine's network, each with its reason. Every
+# other suite's nn-test-sandbox has a network of its own with only loopback, so no
 # suite reaches a port or an abstract Unix socket (such as the X server's) outside it.
 SUITES_WHOSE_TEST_SANDBOX_SHARES_THE_MACHINE_NETWORK = {}
 
 # A run uses the checkout under test's own copies of these lists, not the ones above,
-# whenever the checkout has a scripts/run-all-test-suites.py.
+# whenever the checkout has a scripts/run-all-test-suites.py: each names the checkout's suites
+# by path, so a pull request that renames a listed suite renames its entry too.
 SUITE_SANDBOX_LIST_NAMES_READ_FROM_CHECKOUT_UNDER_TEST = (
     "SUITES_RUN_WITHOUT_ANY_SANDBOX",
+    "SUITES_THAT_RUN_THE_REAL_CLAUDE_CLI",
     "SUITES_GIVEN_A_COPY_ON_WRITE_OVERLAY_OF_THE_REPOSITORY_GIT_DIRECTORY",
     "SUITES_WHOSE_TEST_SANDBOX_SHARES_THE_MACHINE_NETWORK")
 SUITE_SANDBOX_LISTS_SOURCE_LINE_PREFIX = "which sandbox each suite runs in, from the lists in "
@@ -1076,7 +879,7 @@ SUITES_RUN_WITHOUT_ANY_SANDBOX_LOCK_FILE_NAME = "suites-run-outside-the-signal-s
 TEST_SUITE_NICE_INCREMENT = 10
 # Short, because a suite binds AF_UNIX sockets under its TMPDIR and macOS caps a socket path at
 # 104 bytes; mkdtemp adds 8 characters to it.
-SUITE_OUTSIDE_NC_TEST_SANDBOX_TEMPORARY_DIRECTORY_PREFIX = "rts-"
+SUITE_OUTSIDE_NN_TEST_SANDBOX_TEMPORARY_DIRECTORY_PREFIX = "rts-"
 ONE_SUITE_CHILD_SUBREAPER_LAUNCHER_PATH = (
     Path(__file__).resolve().with_name(
         "run-all-test-suites-one-suite-child-subreaper-launcher.py"))
@@ -1091,7 +894,7 @@ ADMISSION_WAITED_LINE_PREFIX = "seconds suites waited for admission: "
 FAILED_SUITE_LINE_PREFIX = "FAIL "
 NOT_RUN_SUITE_LINE_PREFIX = "NOT RUN "
 # EX_TEMPFAIL of sysexits.h: no suite exits 75 for any other reason.
-NC_TEST_SUITE_EXIT_CODE_FOR_NOT_RUN_BECAUSE_A_CAUSE_OUTSIDE_THIS_REPOSITORY_STOPPED_ITS_CASES = 75
+NN_TEST_SUITE_EXIT_CODE_FOR_NOT_RUN_BECAUSE_A_CAUSE_OUTSIDE_THIS_REPOSITORY_STOPPED_ITS_CASES = 75
 SUITE_STOPPED_BY_AN_OUTSIDE_CAUSE_REASON_MAX_CHARACTERS = 300
 NO_SANDBOX_SUITE_LEFT_OUT_OF_SELECTIVE_TEST_RUN_LINE_PREFIX = "NO-SANDBOX SUITE LEFT OUT OF SELECTIVE TEST RUN "
 SUITE_THAT_RUNS_THE_REAL_CLAUDE_CLI_LEFT_OUT_OF_TEST_RUN_LINE_PREFIX = "SUITE THAT RUNS THE REAL CLAUDE CLI LEFT OUT OF TEST RUN "
@@ -1832,13 +1635,14 @@ def checkout_top_directory(given):
 
 
 def suite_sandbox_lists_read_from_checkout_under_test(top):
-    """Return ({list name: {suite: reason}}, the file they came from) for the checkout under test.
+    """Return ({list name: {suite: reason}}, where they came from) for the checkout under test.
 
     The lists name the checkout's suites by path, so they come from the checkout's own copy
     of this program: a pull request head test run runs main's runner on the merged tree, and
     a pull request that renames a listed suite renames its entry too. That copy is parsed,
     never run, so none of the checkout's code runs in this program. A checkout without the
-    file, such as a test's scratch checkout, gets this program's own lists."""
+    file, such as a test's scratch checkout, gets this program's own lists. Where they came
+    from names each file that supplied a list, for the report."""
     source_file = top / "scripts" / "run-all-test-suites.py"
     try:
         source = source_file.read_text(encoding="utf-8")
@@ -1884,13 +1688,36 @@ def suite_sandbox_lists_read_from_checkout_under_test(top):
             f"this run tests, then rerun the command you ran.")
     found = {}
     for node in tree.body:
-        if (isinstance(node, ast.Assign) and len(node.targets) == 1
-                and isinstance(node.targets[0], ast.Name)
-                and node.targets[0].id in SUITE_SANDBOX_LIST_NAMES_READ_FROM_CHECKOUT_UNDER_TEST):
+        if isinstance(node, ast.Assign) and len(node.targets) == 1:
+            target, value = node.targets[0], node.value
+        elif isinstance(node, ast.AnnAssign) and node.value is not None:
+            target, value = node.target, node.value
+        else:
+            target = value = None
+        if (isinstance(target, ast.Name)
+                and target.id in SUITE_SANDBOX_LIST_NAMES_READ_FROM_CHECKOUT_UNDER_TEST):
             try:
-                found[node.targets[0].id] = ast.literal_eval(node.value)
+                found[target.id] = ast.literal_eval(value)
             except (ValueError, TypeError, SyntaxError, RecursionError):
-                found[node.targets[0].id] = None
+                found[target.id] = None
+            continue
+        # A list bound any other way is the checkout's own but cannot be read, so it is
+        # refused below rather than taken for an older checkout's missing list.
+        for bound in ast.walk(node):
+            if (isinstance(bound, ast.Name) and isinstance(bound.ctx, ast.Store)
+                    and bound.id in SUITE_SANDBOX_LIST_NAMES_READ_FROM_CHECKOUT_UNDER_TEST):
+                found.setdefault(bound.id, None)
+    # A checkout committed before a run read a list from it lacks the list, or assigns it the
+    # set it was then, as the nightly mutation pass's checkouts do. It gets this program's own
+    # list, with each suite also under the path it had before the project rename, since such a
+    # checkout may predate the rename.
+    supplied_by_this_program = []
+    for name in SUITE_SANDBOX_LIST_NAMES_READ_FROM_CHECKOUT_UNDER_TEST:
+        if name not in found or isinstance(found[name], set):
+            supplied_by_this_program.append(name)
+            own = SUITE_SANDBOX_LISTS_OF_THIS_PROGRAM[name]
+            found[name] = {**{convert_file_path_after_project_rename_to_path_before(suite): reason
+                              for suite, reason in own.items()}, **own}
     unreadable = [name for name in SUITE_SANDBOX_LIST_NAMES_READ_FROM_CHECKOUT_UNDER_TEST
                   if not isinstance(found.get(name), dict)]
     if unreadable:
@@ -1900,6 +1727,13 @@ def suite_sandbox_lists_read_from_checkout_under_test(top):
             f"level, so which sandbox each suite runs in is unknown.\n"
             f"In {source_file}, assign each of {', '.join(unreadable)} once, at the top level, "
             f"a dict written out literally, then rerun the command you ran.")
+    if len(supplied_by_this_program) == len(SUITE_SANDBOX_LIST_NAMES_READ_FROM_CHECKOUT_UNDER_TEST):
+        return found, (f"{Path(__file__).resolve()}, since {source_file} supplies none of the "
+                       f"lists, lacking each or assigning it a set")
+    if supplied_by_this_program:
+        return found, (f"{source_file}, and in {Path(__file__).resolve()} for "
+                       f"{', '.join(supplied_by_this_program)}, which the checkout lacks or "
+                       f"assigns a set")
     return found, str(source_file)
 
 
@@ -2348,10 +2182,10 @@ def remove_old_suite_temporary_directories_left_by_killed_runners(
     that vanished while it was read, as when another run removed it, is skipped."""
     now = time.time() if now is None else now
     temp_dir = Path(tempfile.gettempdir() if temp_dir is None else temp_dir)
-    shape = re.compile(re.escape(SUITE_OUTSIDE_NC_TEST_SANDBOX_TEMPORARY_DIRECTORY_PREFIX)
+    shape = re.compile(re.escape(SUITE_OUTSIDE_NN_TEST_SANDBOX_TEMPORARY_DIRECTORY_PREFIX)
                        + r"[a-z0-9_]{8}")
     removed, failures = [], []
-    for directory in sorted(temp_dir.glob(f"{SUITE_OUTSIDE_NC_TEST_SANDBOX_TEMPORARY_DIRECTORY_PREFIX}*")):
+    for directory in sorted(temp_dir.glob(f"{SUITE_OUTSIDE_NN_TEST_SANDBOX_TEMPORARY_DIRECTORY_PREFIX}*")):
         try:
             if (not shape.fullmatch(directory.name) or directory.is_symlink()
                     or not directory.is_dir() or directory.stat().st_uid != os.getuid()):
@@ -2858,9 +2692,63 @@ def copy_lines_of_suite_output(stream, log, started, cases):
             name, detail = text.split(": ", 1)
         begun = cases[-1]["ended"] if cases else 0.0
         cases.append({"verdict": "FAIL" if found["verdict"] == "FAIL" else "PASS",
-                      "name": name.strip(), "detail": detail.strip(),
+                      "name": name.strip(), "detail": detail.strip(), "text": text.strip(),
                       "began": begun, "ended": arrived, "seconds": arrived - begun,
                       "unix_time": time.time()})
+
+
+def test_cases_with_failing_case_names_resolved_against_the_suites_other_case_names(cases):
+    """Give each FAIL case the name its suite's other case lines show it has.
+
+    A FAIL line prints a case's name, then ": " and a detail, and a name may itself hold ": ",
+    as in "--failures-only: prints X", so the line alone cannot say where the name ends. The
+    name is the shortest prefix of the line's text, ending just before a ": ", that no PASS case
+    of the suite has as its name or as the start of its name followed by ": ", and that no other
+    FAIL line of the suite starts with followed by ": "; when there is none, the whole text."""
+    passed = [case["name"] for case in cases if case["verdict"] == "PASS"]
+    failing = [case["text"] for case in cases if case["verdict"] == "FAIL"]
+    for case in cases:
+        if case["verdict"] != "FAIL":
+            continue
+        text = case["text"]
+        cuts = [index for index in range(len(text)) if text.startswith(": ", index)]
+        for name in [text[:cut] for cut in cuts] + [text]:
+            start = name + ": "
+            if name == text or not (
+                    name in passed or any(other.startswith(start) for other in passed)
+                    or any(other != text and other.startswith(start) for other in failing)):
+                case["name"], case["detail"] = name, text[len(start):].strip()
+                break
+    return cases
+
+
+def skipped_case_line_text_without_skip_prefix_and_this_machine_cannot_run_marker(line):
+    """A SKIP line's case text, without SKIP or the this-machine-cannot-run-it mark."""
+    text = SKIPPED_CASE_LINE.sub("", line, count=1).strip()
+    if text.startswith(SKIPPED_CASE_THIS_MACHINE_CANNOT_RUN_MARKER):
+        text = text[len(SKIPPED_CASE_THIS_MACHINE_CANNOT_RUN_MARKER):].strip()
+    return text
+
+
+def test_suite_ran_to_the_end(result):
+    """Whether the suite ended on its own, after running every case it would run.
+
+    A suite killed by a signal or its time limit, or one with case lines that exited nonzero
+    with no FAIL line or printed an uncaught Python traceback, stopped partway, as did a suite
+    NOT RUN or stopped by the run, which has no verdict of its own: its JUnit XML says
+    judged="false"."""
+    if (result["exit"] < 0 or result.get("timeout") is not None or suite_not_run(result)
+            or result.get("stopped by")):
+        return False
+    if not result.get("cases") or result["exit"] == 0:
+        return True
+    if not any(case["verdict"] == "FAIL" for case in result["cases"]):
+        return False
+    try:
+        text = read_text_without_following_symlinks(result["log"], errors="replace")
+    except OSError:
+        return False
+    return not any(line.startswith(UNCAUGHT_PYTHON_TRACEBACK_LINE) for line in text.splitlines())
 
 
 def write_case_times_suite_resources_and_junit_xml_of_run(log_dir, results):
@@ -2886,14 +2774,24 @@ def write_case_times_suite_resources_and_junit_xml_of_run(log_dir, results):
     root = xml.etree.ElementTree.Element("testsuites", name=PROGRAM_FILE_NAME_STEM)
     for result in results:
         cases = result.get("cases") or []
-        failed = sum(1 for case in cases if case["verdict"] == "FAIL")
+        # The exit code is the suite's verdict: a FAIL line from a suite that exits 0, such as a
+        # child suite's output it passes through, fails nothing.
+        failed = sum(1 for case in cases if case["verdict"] == "FAIL") if result["exit"] else 0
         # A suite that fails after its last case line gets one more, failing, case below.
         failed_after_last_case = int(bool(cases) and result["exit"] != 0 and not failed)
         suite_element = xml.etree.ElementTree.SubElement(
             root, "testsuite", name=result["suite"],
             tests=str(len(cases) + failed_after_last_case if cases else 1),
             failures=str(failed + failed_after_last_case if cases else int(result["exit"] != 0)),
-            skipped=str(len(result["skips"])), time=f"{result['seconds']:.3f}")
+            skipped=str(len(result["skips"])), time=f"{result['seconds']:.3f}",
+            ran_to_the_end=str(test_suite_ran_to_the_end(result)).lower(),
+            judged=str(not (suite_not_run(result) or result.get("stopped by"))).lower())
+        for line in result["skips"]:
+            skipped_element = xml.etree.ElementTree.SubElement(
+                suite_element, "testcase", classname=result["suite"],
+                name=skipped_case_line_text_without_skip_prefix_and_this_machine_cannot_run_marker(
+                    line), time="0.000")
+            xml.etree.ElementTree.SubElement(skipped_element, "skipped")
         if not cases:
             # A suite that printed no case line is one case, judged by its exit code.
             case_element = xml.etree.ElementTree.SubElement(
@@ -2907,7 +2805,7 @@ def write_case_times_suite_resources_and_junit_xml_of_run(log_dir, results):
             case_element = xml.etree.ElementTree.SubElement(
                 suite_element, "testcase", classname=result["suite"], name=case["name"],
                 time=f"{case['seconds']:.3f}")
-            if case["verdict"] == "FAIL":
+            if case["verdict"] == "FAIL" and result["exit"]:
                 xml.etree.ElementTree.SubElement(case_element, "failure",
                                                  message=case["detail"] or case["name"])
         if failed_after_last_case:
@@ -3029,7 +2927,7 @@ def is_credential_environment_variable(name):
 
 
 def launch_environment_for_a_test_suite_with_git_redirecting_agent_session_attendance_and_credential_variables_removed():
-    """Return the environment every path that launches an nc-test-suite gives the suite.
+    """Return the environment every path that launches an nn-test-suite gives the suite.
 
     It carries XDG_RUNTIME_DIR as environment_with_user_runtime_directory_when_the_user_session_bus_exists
     adds it, so the suite's systemd-run reaches the user manager even when this environment
@@ -3128,7 +3026,7 @@ def signal_sandbox(platform=None, environment=None, which=shutil.which,
     return prefix, None
 
 
-# Directories the nc-test-sandbox already makes private or hides, which the scan for
+# Directories the nn-test-sandbox already makes private or hides, which the scan for
 # writable directories does not walk.
 TEST_SANDBOX_PRIVATE_DIRECTORY_PATHS_NOT_SCANNED_FOR_WRITABLE_DIRECTORIES = ("/proc", "/sys", "/dev", "/tmp", "/run")
 
@@ -3158,7 +3056,7 @@ def directories_this_account_can_create_files_in_hidden_in_test_sandbox():
     if unhidden:
         raise SignalSandboxCouldNotStart(
             f"{', '.join(unhidden)}, which the scan for directories this account can write "
-            f"never walks, would not be hidden whole in the nc-test-sandbox, so what "
+            f"never walks, would not be hidden whole in the nn-test-sandbox, so what "
             f"{'it holds' if len(unhidden) == 1 else 'they hold'} would show inside it")
     pruned = tuple(dict.fromkeys(
         (*pruned, *TEST_SANDBOX_DIRECTORIES_THE_WRITABLE_DIRECTORY_SCAN_NEVER_WALKS)))
@@ -3206,7 +3104,7 @@ INTERPRETER_LOADED_PATHS_TIMEOUT_SECONDS = 60
 
 @functools.lru_cache(maxsize=None)
 def interpreter_directories_shown_read_only_in_test_sandbox(interpreter, hidden=None):
-    """The paths an interpreter loads that an nc-test-sandbox would hide: its executable under
+    """The paths an interpreter loads that an nn-test-sandbox would hide: its executable under
     the name given and its real one, its standard library, its site-packages, a virtual
     environment's pyvenv.cfg and its shared libpython, each as the interpreter reports it;
     none for an interpreter that loads nothing hidden.
@@ -3225,12 +3123,12 @@ def interpreter_directories_shown_read_only_in_test_sandbox(interpreter, hidden=
     except (OSError, subprocess.TimeoutExpired) as error:
         raise SignalSandboxCouldNotStart(
             f"the interpreter {given} could not report the paths it loads, so what it needs "
-            f"inside the nc-test-sandbox is not known: {error}") from error
+            f"inside the nn-test-sandbox is not known: {error}") from error
     loaded = answer.stdout.strip().split("\0")
     if answer.returncode != 0 or len(loaded) < 6 or not all(map(os.path.isabs, loaded)):
         raise SignalSandboxCouldNotStart(
             f"the interpreter {given} could not report the paths it loads, so what it needs "
-            f"inside the nc-test-sandbox is not known: exit {answer.returncode}: "
+            f"inside the nn-test-sandbox is not known: exit {answer.returncode}: "
             f"{(answer.stderr or answer.stdout).strip()}")
     shown = []
     for path in [given, *loaded]:
@@ -3244,7 +3142,7 @@ def interpreter_directories_shown_read_only_in_test_sandbox(interpreter, hidden=
                    for top in hidden):
                 raise SignalSandboxCouldNotStart(
                     f"the interpreter {given} loads {candidate}, which is or holds a "
-                    f"directory the nc-test-sandbox hides whole, so showing it would show that "
+                    f"directory the nn-test-sandbox hides whole, so showing it would show that "
                     f"directory; run the suites with an interpreter installed elsewhere")
             if candidate not in shown:
                 shown.append(candidate)
@@ -3255,7 +3153,7 @@ def interpreter_directories_shown_read_only_in_test_sandbox(interpreter, hidden=
 
 def paths_one_suite_launch_needs_shown_read_only_in_test_sandbox(interpreters, program_files=(),
                                                                 checkout=None):
-    """Every path a suite's launch reads that an nc-test-sandbox would hide: each interpreter's
+    """Every path a suite's launch reads that an nn-test-sandbox would hide: each interpreter's
     directories, and for each program file run inside the sandbox, such as the launcher that
     checks the sandbox from inside it, the git checkout holding it, since the program loads
     repository modules from beside and above its own directory. A program file in the
@@ -3294,7 +3192,7 @@ def git_checkout_holding_directory_or_none(directory):
 
 
 def directories_hidden_whole_in_test_sandbox():
-    """Every directory an nc-test-sandbox shows as private or empty, the scanned ones included."""
+    """Every directory an nn-test-sandbox shows as private or empty, the scanned ones included."""
     return (*TEST_SANDBOX_PRIVATE_DIRECTORY_PATHS_NOT_SCANNED_FOR_WRITABLE_DIRECTORIES,
             REAL_HOME_DIRECTORY_PATH_HIDDEN_BY_EMPTY_TMPFS_IN_TEST_SANDBOX,
             *TEST_SANDBOX_FIXED_DIRECTORIES_HIDDEN_BY_EMPTY_TMPFS,
@@ -3320,7 +3218,7 @@ def empty_file_bound_over_a_listening_socket_in_test_sandbox():
         os.close(descriptor)
     if not stat.S_ISREG(status.st_mode) or status.st_size != 0 or status.st_uid != os.getuid():
         raise SignalSandboxCouldNotStart(
-            f"{path}, the empty file that covers a listening socket inside the nc-test-"
+            f"{path}, the empty file that covers a listening socket inside the nn-test-"
             f"sandbox, is not an empty regular file of this account; delete it, "
             f"then run this again")
     return str(path)
@@ -3374,7 +3272,7 @@ def bwrap_arguments_for_one_suites_test_sandbox(checkout, writable_paths=(), sui
         raise SignalSandboxCouldNotStart(
             f"the git common directory of the checkout {real_checkout} could not be found "
             f"(git rev-parse --git-common-dir named {common!r}), so it could not be kept "
-            f"read-only inside the nc-test-sandbox")
+            f"read-only inside the nn-test-sandbox")
     # A bind made after the checkout's does not show under a second name the checkout was
     # bound at, so each protection is made under every name the checkout has.
     given_checkout = Path(os.path.abspath(checkout))
@@ -3400,7 +3298,7 @@ def bwrap_arguments_for_one_suites_test_sandbox(checkout, writable_paths=(), sui
 
 def broad_covers_of_one_suites_test_sandbox():
     """The bwrap arguments that hide whole directories and listening sockets in an
-    nc-test-sandbox, to come before every bind of a path the suite needs."""
+    nn-test-sandbox, to come before every bind of a path the suite needs."""
     arguments = []
     for directory in directories_this_account_can_create_files_in_hidden_in_test_sandbox():
         arguments += ["--tmpfs", directory]
@@ -3453,7 +3351,7 @@ def listening_unix_sockets_the_test_sandbox_would_show(proc_net_unix="/proc/net/
 
 
 def uncovered_listening_sockets_report_line_or_none(proc_net_unix="/proc/net/unix"):
-    """The report's line naming listening sockets the nc-test-sandbox does not hide, because this program cannot reach them."""
+    """The report's line naming listening sockets the nn-test-sandbox does not hide, because this program cannot reach them."""
     unreachable = []
     listening_unix_sockets_the_test_sandbox_would_show(
         proc_net_unix, unreachable, hidden=directories_hidden_whole_in_test_sandbox())
@@ -3461,15 +3359,15 @@ def uncovered_listening_sockets_report_line_or_none(proc_net_unix="/proc/net/uni
         return None
     names = sorted(set(unreachable))
     if len(names) == 1:
-        start = "a listening socket that the nc-test-sandbox does not hide, because this program cannot reach it"
+        start = "a listening socket that the nn-test-sandbox does not hide, because this program cannot reach it"
     else:
-        start = "listening sockets that the nc-test-sandbox does not hide, because this program cannot reach them"
+        start = "listening sockets that the nn-test-sandbox does not hide, because this program cannot reach them"
     return f"{start} and so neither can a suite: {', '.join(names)}; the run goes on, and nothing needs doing"
 
 
 def command_prefix_starting_one_suite_in_its_test_sandbox(sandbox_prefix, checkout, writable_paths=(),
                                                          suite=None, read_only_paths=()):
-    """The sandbox prefix with one suite's nc-test-sandbox added under bwrap."""
+    """The sandbox prefix with one suite's nn-test-sandbox added under bwrap."""
     if not does_signal_sandbox_report_killed_suite_as_exit_code_128_plus_signal(sandbox_prefix):
         return tuple(sandbox_prefix)
     return (*sandbox_prefix,
@@ -3523,7 +3421,7 @@ def signal_sandbox_refusal(error, program=PROGRAM):
 
 def signal_sandbox_line(prefix, unconfined_because):
     if does_signal_sandbox_report_killed_suite_as_exit_code_128_plus_signal(prefix):
-        return f"each suite runs in its own nc-test-sandbox: {' '.join(prefix)}"
+        return f"each suite runs in its own nn-test-sandbox: {' '.join(prefix)}"
     if prefix:
         return (f"each suite runs in a sandbox that refuses its signals to any process "
                 f"outside it: {' '.join(prefix)}")
@@ -3534,7 +3432,7 @@ def signal_sandbox_line(prefix, unconfined_because):
 
 
 TEST_SANDBOX_DID_NOT_START_NOTE = (
-    f"\n{PROGRAM}: the suite did not start: bwrap could not build its nc-test-sandbox, for the "
+    f"\n{PROGRAM}: the suite did not start: bwrap could not build its nn-test-sandbox, for the "
     f"reason bwrap printed above.\n"
     f"If bwrap says it can't create a file at a path, that path is a socket or credential "
     f"file that disappeared between this program's scan and the sandbox's start: run the "
@@ -3573,7 +3471,7 @@ def run_one_suite(top, interpreter, suite, log_dir, recorder=None, sandbox_prefi
     is killed by kill_test_suite_process_group_and_descendants(), and its result carries
     "timeout". Once run_stops,
     a list naming what stopped the run, is not empty, the suite is killed the same way,
-    and its result carries "stopped by". A suite outside an nc-test-sandbox gets TMPDIR set to
+    and its result carries "stopped by". A suite outside an nn-test-sandbox gets TMPDIR set to
     a directory of its own, removed once the suite has ended; a removal that fails is named,
     with its command, in the result's "output_note", as is a killed process still running,
     for which the directory is kept. On Linux such a suite starts under
@@ -3583,7 +3481,7 @@ def run_one_suite(top, interpreter, suite, log_dir, recorder=None, sandbox_prefi
 
     With in_cgroup_scope, the suite runs in a cgroup scope of its own and its CPU seconds
     and peak memory are read from there; with nice, at low priority. Inside its
-    nc-test-sandbox the suite may write only the checkout and its own recorded-input files: the
+    nn-test-sandbox the suite may write only the checkout and its own recorded-input files: the
     run's log directory, where this program writes, stays out of its reach."""
     platform = sys.platform if platform is None else platform
     log_file = log_path_for(log_dir, suite)
@@ -3614,7 +3512,7 @@ def run_one_suite(top, interpreter, suite, log_dir, recorder=None, sandbox_prefi
                        "-o", str(strace_dir / "trace"), *command]
     if suite in SUITES_RUN_WITHOUT_ANY_SANDBOX:
         sandbox_prefix = ()
-    # The nc-test-sandbox is built from Linux's /proc and bwrap, so nothing of it is built
+    # The nn-test-sandbox is built from Linux's /proc and bwrap, so nothing of it is built
     # on another platform, whatever the prefix.
     if platform.startswith("linux"):
         if does_signal_sandbox_report_killed_suite_as_exit_code_128_plus_signal(sandbox_prefix):
@@ -3624,10 +3522,10 @@ def run_one_suite(top, interpreter, suite, log_dir, recorder=None, sandbox_prefi
             sandbox_prefix, top, writable_paths, suite, read_only_paths)
     suite_temporary_directory = None
     if not does_signal_sandbox_report_killed_suite_as_exit_code_128_plus_signal(sandbox_prefix):
-        # Outside an nc-test-sandbox's private /tmp, a suite killed with SIGKILL leaves what it
+        # Outside an nn-test-sandbox's private /tmp, a suite killed with SIGKILL leaves what it
         # made in the shared temp directory, so it gets a directory this function removes.
         suite_temporary_directory = tempfile.mkdtemp(
-            prefix=SUITE_OUTSIDE_NC_TEST_SANDBOX_TEMPORARY_DIRECTORY_PREFIX)
+            prefix=SUITE_OUTSIDE_NN_TEST_SANDBOX_TEMPORARY_DIRECTORY_PREFIX)
         environment["TMPDIR"] = suite_temporary_directory
         if platform.startswith("linux"):
             # A process whose parent ends is reparented to the launcher, not to PID 1, so it
@@ -3786,7 +3684,8 @@ def run_one_suite(top, interpreter, suite, log_dir, recorder=None, sandbox_prefi
         "seconds": seconds,
         "log": log_file,
         "skips": skipped_case_lines(log_file),
-        "cases": list(cases),
+        "cases": test_cases_with_failing_case_names_resolved_against_the_suites_other_case_names(
+            list(cases)),
         "output_note": output_note,
         "cpu_seconds": None,
         "peak_memory_bytes": None,
@@ -3799,7 +3698,7 @@ def run_one_suite(top, interpreter, suite, log_dir, recorder=None, sandbox_prefi
         result["stopped by"] = stopped_by
     if sandbox_started is False and exit_code != 0:
         result["test sandbox did not start"] = True
-    elif exit_code == NC_TEST_SUITE_EXIT_CODE_FOR_NOT_RUN_BECAUSE_A_CAUSE_OUTSIDE_THIS_REPOSITORY_STOPPED_ITS_CASES:
+    elif exit_code == NN_TEST_SUITE_EXIT_CODE_FOR_NOT_RUN_BECAUSE_A_CAUSE_OUTSIDE_THIS_REPOSITORY_STOPPED_ITS_CASES:
         result["stopped by an outside cause"] = (
             last_output_line(log_file)[:SUITE_STOPPED_BY_AN_OUTSIDE_CAUSE_REASON_MAX_CHARACTERS]
             or "its output names no cause")
@@ -3857,13 +3756,13 @@ def kill_test_suite_process_group_and_descendants(process, proc=Path("/proc"), k
     a process in the group stays stopped until the group is killed. The tree is read again
     and again, and a read counts as the last only when every process sent SIGKILL had ended
     before the read began, the read finds no process not already found, and it meets no
-    ended child that an earlier read had not met; only then is the group killed. Outside an nc-test-sandbox on Linux,
+    ended child that an earlier read had not met; only then is the group killed. Outside an nn-test-sandbox on Linux,
     the suite runs under ONE_SUITE_CHILD_SUBREAPER_LAUNCHER_PATH, a child subreaper in the
     suite's group, either as the suite's process or below it when the suite runs in a cgroup
     scope. Stopped and never sent SIGKILL on its own, it lives until the group is killed, so
     a process whose parent ends, before the kill or during it, is reparented to it, and the
     last read finds it, because a process is reparented as it ends and the last read begins
-    only after every killed process has ended. In an nc-test-sandbox the group also holds the
+    only after every killed process has ended. In an nn-test-sandbox the group also holds the
     init of the suite's PID namespace, since bwrap is not given --new-session, and the
     init's end ends every process in the namespace. The reads stop at
     TEST_SUITE_KILLED_DESCENDANTS_END_WAIT_SECONDS, which also bounds the wait. Where there
@@ -4187,6 +4086,99 @@ def recordings_directory_for(given, top):
     return Path(given).expanduser() / min(roots.stdout.split())[:16]
 
 
+def nearest_existing_directory_and_names_below_it(path):
+    existing = path.resolve()
+    missing_names = []
+    while not os.path.exists(existing) and existing != existing.parent:
+        missing_names.insert(0, existing.name)
+        existing = existing.parent
+    return existing, missing_names
+
+
+def volume_ignores_case(directory):
+    for place in (directory, *directory.parents):
+        swapped_name = place.name.swapcase()
+        if swapped_name != place.name:
+            try:
+                return place.samefile(place.with_name(swapped_name))
+            except OSError:
+                return False
+    return False
+
+
+def same_directory(first, second):
+    """Whether two paths name one directory, as a case-insensitive volume or a symlink may hide.
+
+    Not handled when a path is missing:
+    - The nearest existing directory is a mount point: the parent volume's case rule answers, so
+      a run may write into the read-only directory, or two distinct directories may be refused.
+    - On a case-sensitive volume, a sibling symlink named the swapped-case spelling, such as
+      `foo -> FOO`, reads as a case-insensitive volume, so a valid run is refused.
+    - Another run creates the destination between the two ancestor lookups: two identical paths
+      can compare as different, so a run may write into the read-only directory.
+    - casefold() merges names a volume keeps distinct, such as `straße` and `strasse` on exFAT,
+      so a valid run is refused."""
+    try:
+        return first.samefile(second)
+    except OSError:
+        # resolve() keeps the spelling of a missing path, so a case difference survives it.
+        first_existing, first_missing = nearest_existing_directory_and_names_below_it(first)
+        second_existing, second_missing = nearest_existing_directory_and_names_below_it(second)
+        if not first_existing.samefile(second_existing):
+            return False
+        if first_missing == second_missing:
+            return True
+        return (volume_ignores_case(first_existing)
+                and [name.casefold() for name in first_missing]
+                == [name.casefold() for name in second_missing])
+
+
+def refuse_read_only_recordings_directory_this_run_writes(read_only_dir, saved_recordings_dir,
+                                                         files_only_strace_saw_dir, arguments,
+                                                         strace):
+    """Raise CouldNotRun when the directory this run only reads is one it writes to.
+
+    strace is strace_usable()'s answer for this run: without it no strace list is written."""
+    if read_only_dir is None or arguments.leave_records_unchanged:
+        return
+    save_given = arguments.save_recorded_inputs_to_directory is not None
+    written = [(saved_recordings_dir,
+                "it saves the recordings of the suites it runs there, because "
+                + ("--save-recorded-inputs-to-directory names it" if save_given else
+                   "--recorded-inputs-directory, given or by default, names it and "
+                   "--save-recorded-inputs-to-directory is not given"),
+                "--save-recorded-inputs-to-directory", save_given)]
+    if strace is not None:
+        written.append((files_only_strace_saw_dir,
+                        ("it saves the lists of files only strace saw there, because "
+                         "--suite-files-only-strace-saw-lists-directory names it and "
+                         "--record-inputs-with-strace is given"),
+                        "--suite-files-only-strace-saw-lists-directory", True))
+    overlaps = [(how, flag, given) for directory, how, flag, given in written
+                if same_directory(directory, read_only_dir)]
+    if overlaps:
+        flags = " and ".join(f"{flag} <directory> {'changed' if given else 'added'}"
+                             for _, flag, given in overlaps)
+        raise CouldNotRun(
+            f"{PROGRAM}: not run — this run must only read the recordings in the directory "
+            f"given to --also-leave-out-suites-whose-recorded-inputs-in-read-only-directory-"
+            f"match-checkout, {read_only_dir.parent}, but as given it would also write to "
+            f"that directory: "
+            f"{'; and '.join(how for how, _, _ in overlaps)}. The recordings there must stay "
+            f"as the run that saved them left them, because the runs that select by them "
+            f"rely on that.\n"
+            f"If this run is to record the inputs of the suites it runs: run the same command "
+            f"again with {flags}, where <directory> is one no other run saves to or selects "
+            f"by.\n"
+            f"If this run is to record nothing, and add nothing to the test-case failure "
+            f"history: run the same command again with "
+            f"--leave-recorded-inputs-and-failure-history-unchanged added.\n"
+            f"If {read_only_dir.parent} was given to "
+            f"--also-leave-out-suites-whose-recorded-inputs-in-read-only-directory-match-"
+            f"checkout by mistake: run the same command again with the directory you meant "
+            f"given to that flag, or without that flag.")
+
+
 def recording_file_for(recordings_dir, suite):
     return recordings_dir / (suite.replace("/", "__") + ".json")
 
@@ -4479,12 +4471,22 @@ class CheckoutComparedWithCommit:
         self.entries_then = directory_entries(self.files_then)
         self.entries_now = directory_entries(self.files_now)
         self.fingerprint_now = file_list_fingerprint(self.files_now)
+        self.hashes_now = self.blob_hashes_of_files_read(recordings)
+
+    def blob_hashes_of_files_read(self, recordings):
         read = set()
         for recording in recordings:
             if isinstance(recording, dict) and recording.get("format") == \
                     RECORDED_INPUTS_FORMAT_VERSION:
                 read.update(recording["reads"])
-        self.hashes_now = blob_hashes(top, sorted(read & self.files_now))
+        return blob_hashes(self.top, sorted(read & self.files_now))
+
+    def compared_by_hashes_of(self, recordings):
+        """A copy whose hashes are only those of the files recordings read: git hashes a batch
+        of paths all or none, so a path one set cannot hash leaves the other set's known."""
+        other = copy.copy(self)
+        other.hashes_now = self.blob_hashes_of_files_read(recordings)
+        return other
 
     def files_git_ls_files_lists_then_and_now(self, directory, pathspecs):
         """(files at COMMIT the call lists, files in the checkout it lists, None), or
@@ -4529,10 +4531,88 @@ def git_ls_files_call_as_run(call):
     return command if call["directory"] == "." else f"{command} from {call['directory']}/"
 
 
+def recorded_git_commands_tied_and_ls_files_calls(recording):
+    """(the git commands on the checkout any added or deleted file can change, the git ls-files
+    calls only a file their pathspecs match can change)."""
+    git_commands = recording["git_commands_on_the_checkout"]
+    # A recording saved before this key existed ties every git command it ran on the checkout.
+    tied = recording.get("git_commands_tied_to_the_file_list", git_commands)
+    # A recording saved before these keys existed ties its git ls-files calls to the whole list.
+    through_pathspecs = recording.get(
+        RECORDED_GIT_LS_FILES_CALLS_CHANGED_ONLY_BY_A_FILE_THEIR_PATHSPECS_MATCH_KEY)
+    if isinstance(recording.get(RECORDED_GIT_COMMANDS_CHANGED_BY_ANY_FILE_KEY), list) \
+            and isinstance(through_pathspecs, list) \
+            and all(isinstance(call, dict) and isinstance(call.get("directory"), str)
+                    and isinstance(call.get("pathspecs"), list) and call["pathspecs"]
+                    and all(isinstance(pathspec, str) for pathspec in call["pathspecs"])
+                    and isinstance(call.get("files_fingerprint"), str)
+                    for call in through_pathspecs):
+        tied = recording[RECORDED_GIT_COMMANDS_CHANGED_BY_ANY_FILE_KEY]
+    else:
+        through_pathspecs = []
+    return tied, through_pathspecs
+
+
+def changed_input_reason_or_none(suite, recording, checkout, files_only_strace_saw):
+    """Why the suite's recording, a passing one of this format, shows an input the change
+    differs in; None when it shows none, which leaves it to the rest of selection_reason."""
+    differ = checkout.differ
+    if suite in differ:
+        return "the suite itself differs"
+    reads, looked_for = recording["reads"], recording["looked_for"]
+    lists, git_commands = recording["lists"], recording["git_commands_on_the_checkout"]
+    tied, through_pathspecs = recorded_git_commands_tied_and_ls_files_calls(recording)
+
+    changed_reads = [path for path in reads if path in differ]
+    if changed_reads:
+        return f"it reads {changed_reads[0]}, which differs{and_how_many_more(changed_reads)}"
+    if files_only_strace_saw is not None:
+        changed = [path for path in files_only_strace_saw["files_only_strace_saw"]
+                   if path in differ]
+        if changed:
+            return (f"it reads {changed[0]}, which differs{and_how_many_more(changed)}, "
+                    f"as only the strace run of {files_only_strace_saw['recorded_at']} saw")
+    for path in looked_for:
+        if checkout.there_then(path) != checkout.there_now(path):
+            verb = "added" if checkout.there_now(path) else "deleted"
+            return f"it looks for {path}, which was {verb}"
+    for directory in lists:
+        before = checkout.entries_then.get(directory, set())
+        after = checkout.entries_now.get(directory, set())
+        if before != after:
+            name, verb = added_or_deleted_name(before, after)
+            path = f"{directory}/{name}" if directory else name
+            return f"it lists {directory or '.'}/, where {path} was {verb}"
+    added_or_deleted = sorted(path for path, status in differ.items() if status in "AD")
+    if tied and added_or_deleted:
+        path = added_or_deleted[0]
+        verb = "added" if differ[path] == "A" else "deleted"
+        return (f"it runs git {', '.join(tied)} on the checkout, "
+                f"and {path} was {verb}")
+    for call in through_pathspecs:
+        then, now, why = checkout.files_git_ls_files_lists_then_and_now(
+            call["directory"], call["pathspecs"])
+        named = git_ls_files_call_as_run(call)
+        if why is not None:
+            return (f"it runs {named} on the checkout, and git could not say which "
+                    f"files that lists: {why}")
+        listed = sorted(path for path in added_or_deleted
+                        if path in (now if differ[path] == "A" else then))
+        if listed:
+            verb = "added" if differ[listed[0]] == "A" else "deleted"
+            return (f"it runs {named} on the checkout, which lists {listed[0]}, "
+                    f"and {listed[0]} was {verb}")
+    reading = sorted(set(git_commands) - GIT_COMMANDS_THAT_ONLY_LIST)
+    if reading and differ:
+        return (f"it runs git {', '.join(reading)} on the checkout, which reads "
+                f"files no recorder here saw, and {sorted(differ)[0]} differs")
+    return None
+
+
 def selection_reason(suite, recording, checkout, commit, files_only_strace_saw=None):
     """Return (selected, reason) for one suite."""
     # Recordings are shared across branches; compare both against COMMIT and the recording.
-    short, differ = commit[:12], checkout.differ
+    short = commit[:12]
     if recording is None:
         return True, "no recording of its inputs on this machine yet"
     if not isinstance(recording, dict) \
@@ -4557,69 +4637,12 @@ def selection_reason(suite, recording, checkout, commit, files_only_strace_saw=N
                          f"{SKIPPED_CASE_THIS_MACHINE_CANNOT_RUN_MARKER}" if counted
                          else "an unrecorded number of cases")
                       + ", so it recorded only what the cases that ran read")
-    if suite in differ:
-        return True, "the suite itself differs"
+    changed = changed_input_reason_or_none(suite, recording, checkout, files_only_strace_saw)
+    if changed is not None:
+        return True, changed
     reads, looked_for = recording["reads"], recording["looked_for"]
     lists, git_commands = recording["lists"], recording["git_commands_on_the_checkout"]
-    # A recording saved before this key existed ties every git command it ran on the checkout.
-    tied = recording.get("git_commands_tied_to_the_file_list", git_commands)
-    # A recording saved before these keys existed ties its git ls-files calls to the whole list.
-    through_pathspecs = recording.get(
-        RECORDED_GIT_LS_FILES_CALLS_CHANGED_ONLY_BY_A_FILE_THEIR_PATHSPECS_MATCH_KEY)
-    if isinstance(recording.get(RECORDED_GIT_COMMANDS_CHANGED_BY_ANY_FILE_KEY), list) \
-            and isinstance(through_pathspecs, list) \
-            and all(isinstance(call, dict) and isinstance(call.get("directory"), str)
-                    and isinstance(call.get("pathspecs"), list) and call["pathspecs"]
-                    and all(isinstance(pathspec, str) for pathspec in call["pathspecs"])
-                    and isinstance(call.get("files_fingerprint"), str)
-                    for call in through_pathspecs):
-        tied = recording[RECORDED_GIT_COMMANDS_CHANGED_BY_ANY_FILE_KEY]
-    else:
-        through_pathspecs = []
-
-    changed_reads = [path for path in reads if path in differ]
-    if changed_reads:
-        return True, f"it reads {changed_reads[0]}, which differs{and_how_many_more(changed_reads)}"
-    if files_only_strace_saw is not None:
-        changed = [path for path in files_only_strace_saw["files_only_strace_saw"]
-                   if path in differ]
-        if changed:
-            return True, (f"it reads {changed[0]}, which differs{and_how_many_more(changed)}, "
-                          f"as only the strace run of {files_only_strace_saw['recorded_at']} saw")
-    for path in looked_for:
-        if checkout.there_then(path) != checkout.there_now(path):
-            verb = "added" if checkout.there_now(path) else "deleted"
-            return True, f"it looks for {path}, which was {verb}"
-    for directory in lists:
-        before = checkout.entries_then.get(directory, set())
-        after = checkout.entries_now.get(directory, set())
-        if before != after:
-            name, verb = added_or_deleted_name(before, after)
-            path = f"{directory}/{name}" if directory else name
-            return True, f"it lists {directory or '.'}/, where {path} was {verb}"
-    added_or_deleted = sorted(path for path, status in differ.items() if status in "AD")
-    if tied and added_or_deleted:
-        path = added_or_deleted[0]
-        verb = "added" if differ[path] == "A" else "deleted"
-        return True, (f"it runs git {', '.join(tied)} on the checkout, "
-                      f"and {path} was {verb}")
-    for call in through_pathspecs:
-        then, now, why = checkout.files_git_ls_files_lists_then_and_now(
-            call["directory"], call["pathspecs"])
-        named = git_ls_files_call_as_run(call)
-        if why is not None:
-            return True, (f"it runs {named} on the checkout, and git could not say which "
-                          f"files that lists: {why}")
-        listed = sorted(path for path in added_or_deleted
-                        if path in (now if differ[path] == "A" else then))
-        if listed:
-            verb = "added" if differ[listed[0]] == "A" else "deleted"
-            return True, (f"it runs {named} on the checkout, which lists {listed[0]}, "
-                          f"and {listed[0]} was {verb}")
-    reading = sorted(set(git_commands) - GIT_COMMANDS_THAT_ONLY_LIST)
-    if reading and differ:
-        return True, (f"it runs git {', '.join(reading)} on the checkout, which reads "
-                      f"files no recorder here saw, and {sorted(differ)[0]} differs")
+    tied, through_pathspecs = recorded_git_commands_tied_and_ls_files_calls(recording)
 
     stale = [path for path, blob in reads.items()
              if checkout.hashes_now.get(path, "not in the checkout") != blob]
@@ -4709,19 +4732,90 @@ def adopt_passing_recordings_that_match_the_checkout(top, into_given, from_given
     return adopted
 
 
-def suites_selected_since(top, suites, recordings, commit, differ, files_only_strace_saw_by_suite):
-    """[(suite, selected, why)] for every suite, in order; differ is files_that_differ_since's."""
+def suites_selected_since(top, suites, recordings, commit, differ, files_only_strace_saw_by_suite,
+                          read_only_recordings, read_only_directory):
+    """[(suite, selected, why)] for every suite, in order; differ is files_that_differ_since's.
+
+    A suite its recording in recordings selects is left out when its recording in
+    read_only_recordings, read from read_only_directory, would leave it out, unless its
+    recording in recordings shows an input the change differs in; read_only_recordings never
+    select a suite."""
     everything = [path for path in sorted(differ)
                   if any(path == prefix or (prefix.endswith("/") and path.startswith(prefix))
                          for prefix in EVERY_SUITE_RUNS_WHEN_THESE_CHANGE)]
     if everything:
         return [(suite, True, f"{everything[0]} differs, and every suite runs under it")
                 for suite in suites]
-    recorded = [recordings.get(suite) for suite in suites]
-    checkout = CheckoutComparedWithCommit(top, commit, differ, recorded)
-    return [(suite, *selection_reason(suite, recordings.get(suite), checkout, commit,
-                                      files_only_strace_saw_by_suite.get(suite)))
-            for suite in suites]
+    checkout = CheckoutComparedWithCommit(top, commit, differ,
+                                          [recordings.get(suite) for suite in suites])
+    read_only_checkout = checkout.compared_by_hashes_of(
+        [read_only_recordings.get(suite) for suite in suites]) if read_only_recordings else None
+    selection = []
+    for suite in suites:
+        recording = recordings.get(suite)
+        files_only_strace_saw = files_only_strace_saw_by_suite.get(suite)
+        selected, why = selection_reason(suite, recording, checkout, commit,
+                                         files_only_strace_saw)
+        if selected and read_only_checkout is not None and not (
+                isinstance(recording, dict)
+                and recording.get("format") == RECORDED_INPUTS_FORMAT_VERSION
+                and changed_input_reason_or_none(suite, recording, checkout,
+                                                 files_only_strace_saw) is not None):
+            selected_by_read_only, why_read_only = selection_reason(
+                suite, read_only_recordings.get(suite), read_only_checkout, commit,
+                files_only_strace_saw)
+            if not selected_by_read_only:
+                selected, why = False, (f"its recording in {read_only_directory}, which "
+                                        f"this run only reads, leaves it out: {why_read_only}")
+        selection.append((suite, selected, why))
+    return selection
+
+
+def suites_selected_since_every_commit(top, suites, recordings, commits, differs,
+                                       files_only_strace_saw_by_suite, read_only_recordings,
+                                       read_only_directory):
+    """[(suite, selected, why)] for every suite, in order: suites_selected_since's answer for
+    each of commits, with differs[i] for commits[i], and a suite selected only when the
+    comparison with every commit selects it, except that every suite is selected when this
+    program differs from the first commit, and a suite in
+    SUITES_THAT_RUN_THE_REAL_CLAUDE_CLI or SUITES_RUN_WITHOUT_ANY_SANDBOX is judged by the
+    first commit alone."""
+    selections = [suites_selected_since(top, suites, recordings, commit, differ,
+                                        files_only_strace_saw_by_suite, read_only_recordings,
+                                        read_only_directory)
+                  for commit, differ in zip(commits, differs)]
+    if len(commits) == 1:
+        return selections[0]
+    if "scripts/run-all-test-suites.py" in differs[0]:
+        # A pull request head test run runs main's copy of this program, never the pull
+        # request's, so no suite has run under a changed copy before the after-merge test run.
+        return [(suite, True, f"judged by the comparison with the first commit alone, "
+                              f"{commits[0][:12]}, since a pull request head test run runs "
+                              f"main's test runner, never a changed one: {why}")
+                for suite, _, why in selections[0]]
+    combined = []
+    for index, suite in enumerate(suites):
+        if suite in SUITES_THAT_RUN_THE_REAL_CLAUDE_CLI or suite in SUITES_RUN_WITHOUT_ANY_SANDBOX:
+            # A pull request head test run, whose commit the after-merge test run gives after
+            # the first, leaves out these suites, apart from a no-sandbox suite whose files the
+            # change edits, so judging them all by the first commit is the safe side.
+            _, selected, why = selections[0][index]
+            combined.append((suite, selected, f"judged by the comparison with the first commit "
+                                              f"alone, {commits[0][:12]}, since a pull request "
+                                              f"head test run may leave such a suite out: {why}"))
+            continue
+        answers = [(commit, selection[index]) for commit, selection in zip(commits, selections)]
+        leaving_out = next(((commit, why) for commit, (_, selected, why) in answers
+                            if not selected), None)
+        if leaving_out is not None:
+            commit, why = leaving_out
+            combined.append((suite, False, f"the comparison with {commit[:12]} leaves it out: "
+                                           f"{why}"))
+        else:
+            combined.append((suite, True, "the comparison with each commit selects it: "
+                             + "; ".join(f"{commit[:12]}: {why}"
+                                         for commit, (_, _, why) in answers)))
+    return combined
 
 
 def no_sandbox_suite_file_it_read_that_differs_or_none(suite, recording, files_only_strace_saw,
@@ -4749,13 +4843,14 @@ def selection_without_suites_that_run_the_real_claude(selection):
 
 
 def selective_test_run_selection_without_no_sandbox_suites(
-        selection, applies, differ, recordings, files_only_strace_saw_by_suite):
+        selection, applies, differs, recordings, files_only_strace_saw_by_suite):
     """(the selection with each no-sandbox suite the change does not read taken out,
-    [(suite, why) left out]).
+    [(suite, why) left out]); differs holds files_that_differ_since's answer for each commit
+    the run compares with.
 
-    A selected no-sandbox suite stays when its own file or a file its recording read
-    differs, and then waits for the lock all such suites share; every other selected one
-    is left out. The one place a run for one change leaves those suites out."""
+    A selected no-sandbox suite stays when, in differs[0], its own file or a file its
+    recording read differs, and then waits for the lock all such suites share; every other
+    selected one is left out. The one place a run for one change leaves those suites out."""
     if not applies:
         return selection, []
     kept, left_out = [], []
@@ -4763,14 +4858,17 @@ def selective_test_run_selection_without_no_sandbox_suites(
         if not (selected and suite in SUITES_RUN_WITHOUT_ANY_SANDBOX):
             kept.append((suite, selected, why))
             continue
+        # Judged by the first commit alone, as suites_selected_since_every_commit judges it:
+        # a later commit, a head test run's, never ran the suite, and holds the pull
+        # request's own change, so no file the change edits differs from it.
         edited = no_sandbox_suite_file_it_read_that_differs_or_none(
-            suite, recordings.get(suite), files_only_strace_saw_by_suite.get(suite), differ)
+            suite, recordings.get(suite), files_only_strace_saw_by_suite.get(suite), differs[0])
         if edited is None:
             left_out.append((suite, why))
         else:
-            kept.append((suite, True, f"{why}; it runs without a sandbox and reads {edited}, "
-                                      f"which differs, so it runs once it holds the lock all "
-                                      f"such suites share"))
+            kept.append((suite, True, f"{why}; it runs without a sandbox and reads "
+                                      f"{edited}, which differs, so it "
+                                      f"runs once it holds the lock all such suites share"))
     return kept, left_out
 
 
@@ -4800,7 +4898,7 @@ def why_suite_failed(result):
     if result.get("stopped by"):
         return f"killed when the run was stopped by {result['stopped by']}"
     if result.get("test sandbox did not start"):
-        return (f"did not start: bwrap could not build its nc-test-sandbox "
+        return (f"did not start: bwrap could not build its nn-test-sandbox "
                 f"({describe_exit(result['exit'])})")
     if result.get("stopped by an outside cause"):
         return f"stopped by an outside cause: {result['stopped by an outside cause']}"
@@ -4827,7 +4925,7 @@ SUITE_TIMEOUT_LINE = re.compile(r"^FAIL (?P<suite>.+?) TIMEOUT after \d+s \(limi
 
 
 # A suite's own verdict: the runner's line ends in describe_exit(), not in a timeout, a stop
-# or an nc-test-sandbox that did not start.
+# or an nn-test-sandbox that did not start.
 SUITE_FAILED_LINE = re.compile(
     r"^FAIL (?P<suite>\S.*?) (?:exit \d+|killed by (?:signal \d+|\S+))"
     r"(?:, OUT OF MEMORY: [^(]*?)?(?: \(| — log )")
@@ -4839,6 +4937,10 @@ TEST_RUNNER_WHOLE_RUN_NOT_RUN_TO_THE_END_LINE_PREFIXES_FILE_PATH_AND_BARE_NAME_F
 RUN_STOPPED_AT_RUN_TIME_LIMIT_NOT_COUNTING_ADMISSION_WAITS_LINE_PREFIX = f"{NOT_RUN_TO_THE_END_LINE_PREFIX} — the run passed its run time limit"
 TEST_SUITE_ADMISSION_WAIT_CEILING_PASSED_LINE_PREFIX = (
     f"{NOT_RUN_TO_THE_END_LINE_PREFIX} — a suite could not get a test slot")
+MACHINE_CPU_AND_MEMORY_READINGS_STOPPED_BEFORE_RUN_END_LINE_PREFIX = f"{PROGRAM}: the machine's readings stopped"
+RUN_CASE_TIMES_SUITE_RESOURCES_JUNIT_XML_OR_FAILURE_HISTORY_NOT_WRITTEN_LINE_PREFIX = (
+    f"{PROGRAM}: the run's case times, suite resources, JUnit XML or failure history could not "
+    f"be written")
 
 
 def run_all_test_suites_output_parse_whether_the_run_ended_with_a_suite_failed_by_its_exit_code_or_signal(text):
@@ -4850,6 +4952,22 @@ def run_all_test_suites_output_parse_whether_the_run_ended_with_a_suite_failed_b
     if any(line.startswith(TEST_RUNNER_WHOLE_RUN_NOT_RUN_TO_THE_END_LINE_PREFIXES_FILE_PATH_AND_BARE_NAME_FORMS) for line in lines):
         return False
     return any(SUITE_FAILED_LINE.match(line) for line in lines)
+
+
+def run_all_test_suites_output_parse_whether_failed_suites_were_the_runs_only_problem(exit_code, text):
+    """True when the run reached its SUMMARY and its only reported problem is FAIL suites.
+
+    A new line reporting a whole-run problem must join the prefixes here, or a caller that
+    accepts known failed suites will not see that problem."""
+    lines = text.splitlines()
+    return (exit_code == EXIT_SOME_FAILED
+            and any(line.startswith(SUMMARY_LINE_PREFIX) for line in lines)
+            and any(line.startswith(FAILED_SUITE_LINE_PREFIX) for line in lines)
+            and not any(line.startswith((
+                NOT_RUN_SUITE_LINE_PREFIX,
+                *TEST_RUNNER_WHOLE_RUN_NOT_RUN_TO_THE_END_LINE_PREFIXES_FILE_PATH_AND_BARE_NAME_FORMS,
+                MACHINE_CPU_AND_MEMORY_READINGS_STOPPED_BEFORE_RUN_END_LINE_PREFIX,
+                RUN_CASE_TIMES_SUITE_RESOURCES_JUNIT_XML_OR_FAILURE_HISTORY_NOT_WRITTEN_LINE_PREFIX)) for line in lines))
 
 
 def run_all_test_suites_output_timed_out_suites_and_limits_parse(text):
@@ -4931,10 +5049,12 @@ def parse_arguments(argv):
     parser.add_argument("--lock-file", default=str(DEFAULT_LOCK_FILE))
     parser.add_argument("--wait-for-lock-seconds", type=float, default=0)
     parser.add_argument("--only-suites-whose-recorded-inputs-changed-since",
-                        dest="changed_since", metavar="COMMIT")
+                        dest="changed_since", metavar="COMMIT", action="append")
     parser.add_argument("--recorded-inputs-directory",
                         default=str(DEFAULT_RECORDED_INPUTS_DIRECTORY))
     parser.add_argument("--save-recorded-inputs-to-directory")
+    parser.add_argument("--also-leave-out-suites-whose-recorded-inputs-in-read-only-directory-match-checkout",
+                        dest="read_only_recorded_inputs_directory", metavar="DIR")
     parser.add_argument("--record-inputs-with-strace", action="store_true")
     parser.add_argument("--suite-files-only-strace-saw-lists-directory",
                         default=str(DEFAULT_RECORDED_INPUTS_DIRECTORY))
@@ -4976,7 +5096,8 @@ def main(argv=None, platform=None):
         top = checkout_top_directory(arguments.checkout)
         suites = suites_listed_by_git(top)
         interpreter, version = interpreter_and_version(arguments.python)
-        changed_since = (resolved_commit(top, arguments.changed_since)
+        changed_since = (list(dict.fromkeys(resolved_commit(top, given)
+                                            for given in arguments.changed_since))
                          if arguments.changed_since else None)
     except CouldNotRun as refusal:
         print(refusal, file=sys.stderr)
@@ -4987,7 +5108,7 @@ def main(argv=None, platform=None):
         print(signal_sandbox_refusal(error), file=sys.stderr)
         return EXIT_COULD_NOT_RUN
 
-    # In an nc-test-sandbox of its own each suite shares no machine state with another run's
+    # In an nn-test-sandbox of its own each suite shares no machine state with another run's
     # suites, so runs overlap, and admission decides when each suite starts.
     in_test_sandboxes = platform.startswith("linux") and \
         does_signal_sandbox_report_killed_suite_as_exit_code_128_plus_signal(sandbox_prefix)
@@ -5064,12 +5185,21 @@ def main(argv=None, platform=None):
                 if arguments.save_recorded_inputs_to_directory is not None else recordings_dir)
             files_only_strace_saw_dir = recordings_directory_for(
                 arguments.suite_files_only_strace_saw_lists_directory, top)
+            read_only_recordings_dir = (
+                recordings_directory_for(arguments.read_only_recorded_inputs_directory, top)
+                if arguments.read_only_recorded_inputs_directory is not None else None)
+            strace = (strace_usable() if arguments.record_inputs_with_strace
+                      and not arguments.leave_records_unchanged else None)
+            refuse_read_only_recordings_directory_this_run_writes(
+                read_only_recordings_dir, saved_recordings_dir, files_only_strace_saw_dir,
+                arguments, strace)
         except CouldNotRun as refusal:
             print(refusal, file=sys.stderr)
             return EXIT_COULD_NOT_RUN
         # Each recording is read once, so selection and starting order see the same one
         # even while runs in other checkouts save it.
         recordings, identities_read, files_only_strace_saw_by_suite = {}, {}, {}
+        read_only_recordings = {}
         for suite in suites:
             recordings[suite], identities_read[suite] = load_recording_and_identity(
                 recordings_dir, suite)
@@ -5079,13 +5209,18 @@ def main(argv=None, platform=None):
                     saved_recordings_dir, suite)[1]
             files_only_strace_saw_by_suite[suite] = load_files_only_strace_saw(
                 files_only_strace_saw_dir, suite)
+            if read_only_recordings_dir is not None:
+                # A directory that is missing or cannot be read gives None, as no recording does.
+                read_only_recordings[suite] = load_recording(read_only_recordings_dir, suite)
         try:
             files = checkout_files(top)
-            differ = None
+            differs = None
             if changed_since is not None:
-                differ = files_that_differ_since(top, changed_since)
-                selection = suites_selected_since(top, suites, recordings, changed_since, differ,
-                                                  files_only_strace_saw_by_suite)
+                differs = [files_that_differ_since(top, commit) for commit in changed_since]
+                selection = suites_selected_since_every_commit(
+                    top, suites, recordings, changed_since, differs,
+                    files_only_strace_saw_by_suite, read_only_recordings,
+                    read_only_recordings_dir)
             else:
                 selection = [(suite, True, "every suite runs without "
                               "--only-suites-whose-recorded-inputs-changed-since")
@@ -5100,7 +5235,7 @@ def main(argv=None, platform=None):
         selection, left_out = selective_test_run_selection_without_no_sandbox_suites(
             selection, applies=(changed_since is not None and arguments.only_suites_named is None
                                 and in_test_sandboxes),
-            differ=differ, recordings=recordings,
+            differs=differs, recordings=recordings,
             files_only_strace_saw_by_suite=files_only_strace_saw_by_suite)
         chosen = suites_longest_recorded_first(
             [suite for suite, selected, _ in selection if selected], recordings)
@@ -5109,7 +5244,6 @@ def main(argv=None, platform=None):
         if arguments.leave_records_unchanged:
             strace = recorder = None
         else:
-            strace = strace_usable() if arguments.record_inputs_with_strace else None
             recording_dir = log_dir / "recorded-inputs"
             recording_dir.mkdir(parents=True, exist_ok=True)
             recorder = (install_python_input_recorder(log_dir), recording_dir, strace)
@@ -5117,7 +5251,8 @@ def main(argv=None, platform=None):
         named_note = (f"; {len(suites)} named by --only-suites-named"
                       if arguments.only_suites_named is not None else "")
         selected_note = (f"; {len(chosen)} selected by inputs changed since "
-                         f"{changed_since[:12]}" if changed_since is not None else "")
+                         f"{' and since '.join(commit[:12] for commit in changed_since)}"
+                         if changed_since is not None else "")
         report.line(f"{PROGRAM}: {top} at {commit} ({state}); {len(listed)} suites "
                     f"listed by git{named_note}{selected_note}; {version} ({interpreter}); "
                     f"-j {jobs}{FIRST_REPORT_LINE_LOG_DIRECTORY_MARK}{log_dir}")
@@ -5359,7 +5494,7 @@ def main(argv=None, platform=None):
             else:
                 what = ("admission failed"
                         if isinstance(run_ended_by, MachineWideTestSuiteAdmissionCouldNotDecide)
-                        else "a suite's nc-test-sandbox could not be built"
+                        else "a suite's nn-test-sandbox could not be built"
                         if isinstance(run_ended_by, SignalSandboxCouldNotStart)
                         else "a suite could not be started")
                 report.line(f"{PROGRAM}: not run to the end — {what}: {run_ended_by}")
@@ -5373,7 +5508,7 @@ def main(argv=None, platform=None):
                                  or any(result.get("stopped by") for result in results)):
             report.line(f"{PROGRAM}: not run to the end — stopped by {run_stop_signals[0]}. "
                         f"The process group of every suite still running was killed, and "
-                        f"every process below the suite, which in an nc-test-sandbox ends "
+                        f"every process below the suite, which in an nn-test-sandbox ends "
                         f"every process the suite started; outside one, a process a suite "
                         f"started in a session or process group of its own is not reached, and "
                         f"may still be running, when its parent had ended before the kill or "
@@ -5431,13 +5566,13 @@ def main(argv=None, platform=None):
             stopped_by = readings.failure_or_none()
             if stopped_by is not None:
                 records_failed = True
-                report.line(f"{PROGRAM}: the machine's readings stopped before the run ended: "
+                report.line(f"{MACHINE_CPU_AND_MEMORY_READINGS_STOPPED_BEFORE_RUN_END_LINE_PREFIX} before the run ended: "
                             f"{stopped_by!r}")
                 report.line(f"The suites' verdicts below stand, but "
                             f"{log_dir / MACHINE_CPU_AND_MEMORY_READINGS_FILE_NAME} is cut "
                             f"short, so this run exits 2 if every suite passed, and 1 if any "
                             f"failed. Fix what it names, then run this again.")
-        # The case times, suite resources and failure history come with the nc-test-sandboxes.
+        # The case times, suite resources and failure history come with the nn-test-sandboxes.
         if admission is not None:
             try:
                 write_case_times_suite_resources_and_junit_xml_of_run(log_dir, results)
@@ -5448,8 +5583,7 @@ def main(argv=None, platform=None):
                         top, commit, branch_of_checkout(top), log_dir, results)
             except OSError as error:
                 records_failed = True
-                report.line(f"{PROGRAM}: the run's case times, suite resources, JUnit XML or "
-                            f"failure history could not be written: {error}")
+                report.line(f"{RUN_CASE_TIMES_SUITE_RESOURCES_JUNIT_XML_OR_FAILURE_HISTORY_NOT_WRITTEN_LINE_PREFIX}: {error}")
                 report.line("The suites' verdicts below stand, but their records are "
                             "missing, so this run exits 2 if every suite passed, and 1 if "
                             "any failed. Fix what it names, then run this again.")
@@ -5458,7 +5592,8 @@ def main(argv=None, platform=None):
         skip_count = sum(len(result["skips"]) for result in results)
         left_out_count = len(left_out) + len(left_out_running_the_real_claude)
         not_selected = (f"; {len(suites) - len(chosen) - left_out_count} suites not selected, "
-                        f"their recorded inputs unchanged since {changed_since[:12]}"
+                        f"their recorded inputs unchanged since "
+                        f"{' or since '.join(commit[:12] for commit in changed_since)}"
                         if changed_since is not None else "")
         left_out_note = ((f"; {len(left_out)} no-sandbox suites left out" if left_out else "")
                          + (f"; {len(left_out_running_the_real_claude)} suites that run the real "

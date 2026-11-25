@@ -84,6 +84,9 @@ if "judged_in_kept_session" in step:
     connection.close()
 time.sleep(step.get("sleep", 0))
 if rechecking:
+    # As an agent's session-handoff deletes a task file while the recheck's suites run.
+    for name in step.get("files_deleted_during_recheck", []):
+        pathlib.Path(name).unlink(missing_ok=True)
     diff_files = arguments[arguments.index("--recorded-mutant-killed-check") + 1:
                            arguments.index("--head")]
     if not step.get("no_verdicts"):
@@ -150,6 +153,10 @@ class Fixture:
         self.program.write_text(FAKE_MUTATION_TESTING_PROGRAM)
         self.plan_file = self.root / "plan.json"
         self.plan_file.write_text("{}")
+        # The real table no longer schedules this program; a case's own flag overrides this one.
+        self.schedule_file = self.root / "default-scheduled-jobs.json"
+        self.schedule_file.write_text(json.dumps({"jobs": [
+            {"name": job.PROGRAM, "on": {"ned-box": {"schedule": "30 0 * * *"}}}]}))
 
     def commit(self, path, text, author="tester"):
         (self.work / path).parent.mkdir(parents=True, exist_ok=True)
@@ -172,7 +179,8 @@ class Fixture:
                 "--task-lists-directory", str(self.tasks),
                 "--agent-seats-directory", str(self.agents),
                 "--cosmic-ray-venv", str(self.venv),
-                "--mutation-testing-program", str(self.program)]
+                "--mutation-testing-program", str(self.program),
+                "--scheduled-jobs-on-each-machine-json-file", str(self.schedule_file)]
 
     def run(self, plan=None, *flags, timeout_seconds=None, output=None):
         if plan is not None:
@@ -733,11 +741,12 @@ def run_carry_on_and_job_failure_task_cases():
               "and counted, its skipped mutants left out",
               journal_left and count == 2, (journal_left, count))
 
-    # mutant_worker_count_for_free_cores: the cores less the load, from 1 to the cores.
+    # mutant_worker_count_for_free_cores: the cores less the load, from 1 to the cores and 4.
     counts = [job.mutant_worker_count_for_free_cores(cores, load)
-              for cores, load in ((16, 3.5), (16, 40.0), (16, 0.0), (1, 0.0))]
+              for cores, load in ((16, 13.5), (16, 40.0), (16, 0.0), (16, 3.5), (3, 0.0),
+                                  (1, 0.0))]
     check("the worker count is the cores less the 1-minute load average, at least 1, at most "
-          "the cores", counts == [12, 1, 16, 1], counts)
+          "the cores and at most 4", counts == [2, 1, 4, 4, 3, 1], counts)
 
 
 def errored_mutant(line, operator, reason, diff=""):
@@ -832,7 +841,8 @@ def run_errored_mutants_cases():
               "exit 4, with the merge not recorded as tested",
               completed.returncode == job.EXIT_STEP_FAILED
               and f"merge {merge[:12]} (change scripts/thing.py): 1 of its mutants ended "
-                  f"ERRORED, but their job failure task could not be opened or added to on "
+                  f"ERRORED, but the job failure task that names ERRORED mutants could not be "
+                  f"opened, nor could the open one have them added to its description, on "
                   f"{job.JOB_FAILURE_TASK_AGENT_SEAT}'s task list (FileNotFoundError"
                   in completed.stderr
               and fixture.state_json()["last_tested_main_commit"] == start,
@@ -923,6 +933,8 @@ def option_value(call, option):
 
 AT_MOST_FLAG = "--mutants-run-at-most-shared-evenly-among-changed-files"
 STOP_FLAG = "--no-mutant-started-after-unix-time"
+BACKLOG_SKIPPED_FLAG = \
+    job.mutation_testing.MUTANTS_WITH_NO_RESULT_IN_KEPT_COSMIC_RAY_SESSIONS_MARKED_SKIPPED_WHEN_HEAD_COMMIT_BEFORE_CUTOFF_COMMAND_LINE_FLAG
 NOT_RUN_KEY = job.MERGES_WITH_MUTANTS_NOT_RUN_STATE_KEY
 
 
@@ -960,17 +972,22 @@ def run_first_pass_and_second_pass_cases():
         alpha_tasks = [json.loads(path.read_text()) for path in
                        sorted((fixture.tasks / "nedsnodes-alpha-tasks").glob("*.json"))]
         check("the first pass runs every waiting merge, oldest first, each with at most 12 "
-              "mutants shared among its changed files and no stop time",
+              "mutants shared among its changed files, no stop time, and its kept sessions "
+              "resumed rather than skipped as backlog",
               [(option_value(call, "--head"), option_value(call, AT_MOST_FLAG),
-                option_value(call, STOP_FLAG)) for call in calls[:3]]
-              == [(oldest, "12", None), (middle, "12", None), (newest, "12", None)]
+                option_value(call, STOP_FLAG), BACKLOG_SKIPPED_FLAG in call)
+               for call in calls[:3]]
+              == [(oldest, "12", None, False), (middle, "12", None, False),
+                  (newest, "12", None, False)]
               and job.FIRST_PASS_MUTANTS_RUN_PER_MERGE_AT_MOST == 12,
               f"calls={calls} rc={completed.returncode} err={completed.stderr}")
         check("the second pass follows the whole first pass and runs the merges with mutants "
-              "not run, newest first, with no cap, their own kept sessions, and the stop time "
-              "30 minutes before cron next starts the job",
-              [(option_value(call, "--head"), option_value(call, AT_MOST_FLAG)) for call in calls[3:]]
-              == [(newest, None), (oldest, None)]
+              "not run, newest first, with no cap, their own kept sessions, the waiting mutants "
+              "of a merge before the cutoff skipped as backlog, and the stop time 30 minutes "
+              "before cron next starts the job",
+              [(option_value(call, "--head"), option_value(call, AT_MOST_FLAG),
+                BACKLOG_SKIPPED_FLAG in call) for call in calls[3:]]
+              == [(newest, None, True), (oldest, None, True)]
               and all(float(option_value(call, STOP_FLAG)) == stop_wanted
                       and option_value(call, "--cosmic-ray-sessions-directory-kept-to-resume")
                       == str(fixture.state
@@ -1247,6 +1264,18 @@ def run_first_pass_and_second_pass_cases():
             scheduled_jobs_file_with_schedule(fixture, "5 13 * * *"), local(11, 11, 12, 0))
         check("cron's next start of the job reads the hour and the minute from the schedule",
               due == local(11, 11, 13, 5), (due, local(11, 11, 13, 5)))
+
+    try:
+        job.unix_time_cron_next_starts_this_program_on_ned_box(
+            job.SCHEDULED_JOBS_ON_EACH_MACHINE_JSON_FILE, time.time())
+        message = None
+    except job.StepFailed as error:
+        message = str(error)
+    check("the default scheduled-jobs table gives the job no schedule, and the step failure says "
+          "how to run the second pass by hand without adding the job back",
+          message is not None and "do not add it back" in message
+          and "--scheduled-jobs-on-each-machine-json-file <that file>" in message
+          and "Give the job" not in message, message)
 
     line = job.run_record_line_counting_mutants_not_run_and_naming_oldest_merge_with_one({NOT_RUN_KEY: {
         "b" * 40: {"merged_at_unix_seconds": 86400, "mutants_not_run_count": 3},
@@ -2157,6 +2186,176 @@ def run_cases():
               completed.returncode == 0 and len(fixture.calls()) == calls_before
               and "TASK LOST" not in fixture.records()[-1].read_text(),
               (completed.returncode, completed.stderr))
+
+    # A survivor task file deleted while the recheck runs, after step 4 found it: on the list of
+    # the line's author, and on merge-lane-2's list for a retired author.
+    for author, owner in (("alpha", "alpha"),
+                          ("retired", job.SURVIVOR_TASK_AGENT_SEAT_WHEN_LINE_AUTHOR_IS_RETIRED_OR_UNKNOWN)):
+        with tempfile.TemporaryDirectory() as scratch:
+            fixture = Fixture(scratch)
+            if author == owner:
+                fixture.seat(author)
+            owner_list = fixture.seat(owner)
+            fixture.set_last(git(fixture.work, "rev-parse", "HEAD"))
+            merge = fixture.commit("scripts/thing.py",
+                                   "def double(x):\n    return x + x\nVALUE = 1\n",
+                                   author=author)
+            mutants = [survivor(), survivor(2, "core/ReplaceBinaryOperator_Add_Sub"),
+                       survivor(3, "core/ReplaceBinaryOperator_Add_Div")]
+            keys = [job.mutant_key(mutant) for mutant in mutants]
+            fixture.run({merge: {"json": verdict(survived=mutants)}})
+            state = fixture.state_json()["tasks_opened"]
+            later = fixture.commit("scripts/other.py", "VALUE = 2\n", author=author)
+            completed = fixture.run({
+                "recheck": {"verdicts": {keys[0]: "killed"},
+                            "files_deleted_during_recheck": [str(owner_list / "1.json")]},
+                later: {"json": verdict()}})
+            record = fixture.records()[-1].read_text()
+            check(f"a survivor task on {owner}'s list whose file is deleted during the recheck "
+                  f"is skipped: its killed mutant leaves the state, its surviving one is "
+                  f"reported lost, the next task is rechecked, the merge after is tested, and "
+                  f"the run exits 7",
+                  [state[key]["task_id"] for key in keys] == [1, 1, 2]
+                  and completed.returncode == job.EXIT_OPENED_TASK_NO_LONGER_HOLDS_ITS_SURVIVOR
+                  and "FAILED" not in record and job_failure_tasks(fixture) == []
+                  and f"RECHECKED task #1 on {owner}'s task list: 1 killed, 0 no longer exists, "
+                      f"1 survived, 0 could not be judged; not rewritten: its file is gone"
+                      in record
+                  and record.count("TASK LOST: ") == 1
+                  and f"TASK LOST: task #1 on {owner}'s task list ({owner_list / '1.json'}) no "
+                      f"longer holds the surviving mutant "
+                      f"{job.mutant_diff_file_path(fixture.log_store, keys[1])}: the task file "
+                      f"cannot be read (FileNotFoundError" in record
+                  and f"RECHECKED task #2 on {owner}'s task list: 0 killed" in record
+                  and "merges tested: 1 of 1" in record
+                  and "1 task(s) that an earlier run opened" in completed.stderr
+                  and not (owner_list / "1.json").exists()
+                  and fixture.state_json()["tasks_opened"]
+                  == {keys[2]: {"agent_seat": owner, "task_id": 2}},
+                  (completed.returncode, record, completed.stderr, fixture.state_json()))
+            completed = fixture.run({"recheck": {}})
+            check(f"the survivor task on {owner}'s list deleted during an earlier recheck is "
+                  f"not reported again, and the run exits 0",
+                  completed.returncode == 0
+                  and "TASK LOST" not in fixture.records()[-1].read_text(),
+                  (completed.returncode, completed.stderr))
+
+    # A gone task's surviving mutant moved to a task rechecked later in the same run, as a task
+    # fold leaves it: that task keeps the mutant, though its own mutant is killed.
+    with tempfile.TemporaryDirectory() as scratch:
+        fixture = Fixture(scratch)
+        alpha_list = fixture.seat("alpha")
+        fixture.set_last(git(fixture.work, "rev-parse", "HEAD"))
+        merge = fixture.commit("scripts/thing.py", "def double(x):\n    return x + x\nVALUE = 1\n",
+                               author="alpha")
+        mutants = [survivor(), survivor(2, "core/ReplaceBinaryOperator_Add_Sub"),
+                   survivor(3, "core/ReplaceBinaryOperator_Add_Div")]
+        keys = [job.mutant_key(mutant) for mutant in mutants]
+        fixture.run({merge: {"json": verdict(survived=mutants)}})
+        state = fixture.state_json()["tasks_opened"]
+        second = json.loads((alpha_list / "2.json").read_text())
+        second["description"] += f"\n{job.mutant_diff_file_path(fixture.log_store, keys[1])}"
+        (alpha_list / "2.json").write_text(json.dumps(second))
+        completed = fixture.run({"recheck": {
+            "verdicts": {keys[0]: "killed", keys[2]: "killed"},
+            "files_deleted_during_recheck": [str(alpha_list / "1.json")]}})
+        record = fixture.records()[-1].read_text()
+        second = json.loads((alpha_list / "2.json").read_text())
+        check("a surviving mutant moved from a gone task to a task rechecked later in the run "
+              "is rechecked with that task, which stays open listing it, and the state points "
+              "it there",
+              [state[key]["task_id"] for key in keys] == [1, 1, 2]
+              and "TASK MOVED: the surviving mutant" in record
+              and "TASK LOST" not in record
+              and "RECHECKED task #2 on alpha's task list: 1 killed, 0 no longer exists, "
+                  "1 survived" in record
+              and second["status"] != "completed"
+              and f"{keys[1]}.diff" in second["description"]
+              and fixture.state_json()["tasks_opened"]
+              == {keys[1]: {"agent_seat": "alpha", "task_id": 2}},
+              (completed.returncode, record, second, fixture.state_json()))
+        completed = fixture.run({"recheck": {}})
+        check("the moved mutant is still held on the next run, and nothing is reported lost",
+              "TASK LOST" not in fixture.records()[-1].read_text()
+              and keys[1] in fixture.state_json()["tasks_opened"],
+              (completed.returncode, completed.stderr, fixture.state_json()))
+
+    # Two survivor task files deleted during the first recheck call: the second task's own
+    # turn handles its killed mutant, and only the first task's surviving one is reported lost.
+    with tempfile.TemporaryDirectory() as scratch:
+        fixture = Fixture(scratch)
+        alpha_list = fixture.seat("alpha")
+        fixture.set_last(git(fixture.work, "rev-parse", "HEAD"))
+        merge = fixture.commit("scripts/thing.py", "def double(x):\n    return x + x\nVALUE = 1\n",
+                               author="alpha")
+        mutants = [survivor(), survivor(2, "core/ReplaceBinaryOperator_Add_Sub"),
+                   survivor(3, "core/ReplaceBinaryOperator_Add_Div")]
+        keys = [job.mutant_key(mutant) for mutant in mutants]
+        fixture.run({merge: {"json": verdict(survived=mutants)}})
+        completed = fixture.run({"recheck": {
+            "verdicts": {keys[0]: "killed", keys[2]: "killed"},
+            "files_deleted_during_recheck": [str(alpha_list / "1.json"),
+                                             str(alpha_list / "2.json")]}})
+        record = fixture.records()[-1].read_text()
+        check("with two task files deleted during the first recheck call, only the first "
+              "task's surviving mutant is reported lost, the second task's killed mutant leaves "
+              "the state at its own turn, and the run exits 7",
+              completed.returncode == job.EXIT_OPENED_TASK_NO_LONGER_HOLDS_ITS_SURVIVOR
+              and record.count("TASK LOST: ") == 1
+              and f"{keys[1]}" in record.split("TASK LOST: ")[1].splitlines()[0]
+              and "FAILED" not in record
+              and "RECHECKED task #2 on alpha's task list: 1 killed" in record
+              and fixture.state_json()["tasks_opened"] == {},
+              (completed.returncode, record, completed.stderr, fixture.state_json()))
+
+    # During the recheck, a diff file goes instead of the task file, or the task file goes and
+    # the record cannot be written.
+    for gone in ("diff file", "task file with the record unwritable"):
+        with tempfile.TemporaryDirectory() as scratch:
+            fixture = Fixture(scratch)
+            alpha_list = fixture.seat("alpha")
+            fixture.set_last(git(fixture.work, "rev-parse", "HEAD"))
+            merge = fixture.commit("scripts/thing.py", "def double(x):\n    return x + x\n",
+                                   author="alpha")
+            mutants = [survivor(), survivor(2, "core/ReplaceBinaryOperator_Add_Sub")]
+            keys = [job.mutant_key(mutant) for mutant in mutants]
+            fixture.run({merge: {"json": verdict(survived=mutants)}})
+            task_before = (alpha_list / "1.json").read_text()
+            state_before = fixture.state_json()
+            diff_file = job.mutant_diff_file_path(fixture.log_store, keys[1])
+            deleted = diff_file if gone == "diff file" else alpha_list / "1.json"
+            if gone != "diff file":
+                # A file in the records directory's place, because a run started in the same
+                # second as the last one would overwrite that run's record in a read-only one.
+                records_directory = fixture.log_store / job.RECORDS_DIRECTORY_NAME
+                records_directory.rename(fixture.root / "records-held-aside")
+                records_directory.write_text("not a directory")
+            completed = fixture.run({"recheck": {
+                "verdicts": {keys[0]: "killed"},
+                "files_deleted_during_recheck": [str(deleted)]}})
+            if gone == "diff file":
+                record = fixture.records()[-1].read_text()
+                check("a diff file deleted during the recheck still stops the run, exit 4, "
+                      "naming the diff file, with the task and the state as they were",
+                      completed.returncode == job.EXIT_STEP_FAILED
+                      and f"FAILED: task #1 on alpha's task list ({alpha_list / '1.json'}) was "
+                          f"rechecked on main" in record
+                      and f"(FileNotFoundError: [Errno 2] No such file or directory: "
+                          f"'{diff_file}')" in record
+                      and "TASK LOST" not in record
+                      and (alpha_list / "1.json").read_text() == task_before
+                      and fixture.state_json() == state_before,
+                      (completed.returncode, record, fixture.state_json()))
+            else:
+                check("a task file deleted during the recheck, when the record naming its lost "
+                      "mutant cannot be written, leaves the state naming the mutant for the "
+                      "next run, which exits 5",
+                      completed.returncode == job.EXIT_RECORD_NOT_WRITTEN
+                      and "TASK LOST: task #1 on alpha's task list" in completed.stdout
+                      and keys[1] in fixture.state_json()["tasks_opened"]
+                      and "later runs do not report them again" not in completed.stderr,
+                      (completed.returncode, completed.stdout, completed.stderr,
+                       fixture.state_json()))
 
     # A task an earlier version opened, with its subject and its last line telling the agent to
     # mark it completed, is rewritten by the first recheck, its status kept.

@@ -10,13 +10,13 @@ This page tells an agent-seat how to run Codex and Gemini, and what to expect fr
 
 ## Codex (`codex`, OpenAI)
 
-**Install and update.** Codex is installed through npm, not Homebrew: on ned-box `/usr/local/bin/codex` is a symlink into `/usr/local/lib/node_modules/@openai/codex`, and on the Mac `/opt/homebrew/bin/codex` is a symlink into npm's `node_modules/@openai/codex`, so `brew upgrade codex` fails. Update with `codex update`, which runs `npm install -g @openai/codex`, and check with `codex --version` (codex-cli 0.159.3 on ned-box on 2026-10-17). Every agent-seat on a machine shares the one binary, so before you update, check with `pgrep -af codex` that no Codex run is in progress; if one is, wait for it to finish. Running Codex tasks side by side is fine; only the update must wait.
+**Install and update.** Codex is installed through npm, not Homebrew: on ned-box `/usr/local/bin/codex` is a symlink into `/usr/local/lib/node_modules/@openai/codex`, and on the Mac `/opt/homebrew/bin/codex` is a symlink into npm's `node_modules/@openai/codex`, so `brew upgrade codex` fails. Update with `codex update`, which runs `npm install -g @openai/codex`, and check with `codex --version` (codex-cli 0.169.1 on ned-box on 2026-11-20). Every agent-seat on a machine shares the one binary, so before you update, check with `pgrep -af codex` that no Codex run is in progress; if one is, wait for it to finish. Running Codex tasks side by side is fine; only the update must wait.
 
-**Model ids.** The CLI has no command that lists models. It caches the list it knows in `~/.codex/models_cache.json`, refreshed on each run; the ids are the `slug` fields. A model appears there only once the CLI is new enough for it: the Codex launcher's `gpt-6.1-sol` needs codex-cli 0.159.1 or later. A model id the CLI does not know makes the run hang instead of failing (measured: eight minutes with no output, then killed), so take the id from the cache; `scripts/run-codex-task-from-brief.py` stops such a run at its deadline. The model cannot tell you its own id.
+**Model ids.** `codex debug models` prints the models the CLI knows as JSON, and the CLI caches the same list in `~/.codex/models_cache.json`, refreshed on each run; the ids are the `slug` fields. A model appears there only once the CLI is new enough for it: the Codex launcher's `gpt-6.2-sol` needs codex-cli 0.169.1 or later. A model id the CLI does not know makes the run hang instead of failing (measured: eight minutes with no output, then killed), so take the id from that list; `scripts/run-codex-task-from-brief.py` stops such a run at its deadline. The model cannot tell you its own id.
 
 **Effort.** Effort is set per run, with `--effort`, not in the model id.
 
-**At capacity.** When a run on `gpt-6-astra` prints "Selected model is at capacity. Please try a different model.", which means OpenAI has no room on that model at that moment rather than that the user's plan is used up, run the task again with `-m gpt-6.1-sol --effort xhigh`.
+**At capacity.** When a run on `gpt-6.2-astra` prints "Selected model is at capacity. Please try a different model.", which means OpenAI has no room on that model at that moment rather than that the user's plan is used up, run the task again with `-m gpt-6.2-sol --effort xhigh`.
 
 **Project rules.** Codex reads the repository's `AGENTS.md`, which tells it to read `CLAUDE.md` and follow it. Measured with a canary on 2026-08-22 and 2026-09-04: Codex reads `CLAUDE.md` when it may read files.
 
@@ -24,7 +24,7 @@ This page tells an agent-seat how to run Codex and Gemini, and what to expect fr
 
 **What it is.** Gemini runs through the Antigravity CLI, `agy`, the agent behind the Antigravity IDE; there is no `gemini` command. On ned-box `agy` is `~/.local/bin/agy` and its configuration is under `~/.gemini/antigravity-cli/` (version 1.4.0 on 2026-10-17). `agy update` updates it and `agy --version` reports it.
 
-**Model ids carry the effort.** `agy models` lists them: `gemini-3.8-flash-high`, `gemini-3.8-flash-medium`, `gemini-3.8-flash-low`, `gemini-4-argon-high`, `gemini-4-argon-medium` and `gemini-4-argon-low` (ned-box, 2026-10-17). The cold-read-fast-read runs on `gemini-3.8-flash-medium`, and on `claude-sonnet-5-5` at low effort when Gemini fails.
+**Model ids carry the effort.** `agy models` lists them: `gemini-3.8-flash-high`, `gemini-3.8-flash-medium`, `gemini-3.8-flash-low`, `gemini-4-argon-high`, `gemini-4-argon-medium` and `gemini-4-argon-low` (ned-box, 2026-10-17). The cold-read-fast-read runs on `gemini-4-neon-low`, and on `claude-sonnet-5-5` at low effort when Gemini fails.
 
 **What a new runner must handle.** The launcher handles all of these; they matter only to someone changing it.
 
@@ -42,7 +42,7 @@ These are the cold-read-research agent-seat's results, on the models and CLI ver
 
 - A Codex run at `max` effort on a document of 1,500 to 2,300 words took 13 to 32 minutes (`gpt-6-astra` and `gpt-5.6-sol`).
 - Codex hit no account limit in the campaign; Claude hit its limit three times in one day.
-- `gemini-3.8-flash-low` read a 700 to 1,500-word skill in 21 to 31 seconds, found as many of the known defects as `gpt-5.6-terra` at low effort in a quarter of the time, and found no defect that no other reviewer found. Measured on 2026-09-07, as `nn-systems/cold-read/cold-read-agy-cell.py` records: on one defect list, `gemini-3.8-flash-medium` found 42% and low 19%, which is why the cold-read-fast-read runs on medium.
+- `gemini-3.8-flash-low` read a 700 to 1,500-word skill in 21 to 31 seconds, found as many of the known defects as `gpt-5.6-terra` at low effort in a quarter of the time, and found no defect that no other reviewer found. Measured on 2026-09-07, as `nn-systems/cold-read/cold-read-agy-cell.py` records: on one defect list, `gemini-3.8-flash-medium` found 42% and low 19%, which is why the cold-read-fast-read ran on medium until it moved to `gemini-4-neon-low`.
 
 ## Things that went wrong once and will again
 

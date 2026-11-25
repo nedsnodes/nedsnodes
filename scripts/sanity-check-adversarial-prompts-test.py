@@ -245,6 +245,49 @@ def main():
             return sorted(path for path in set(now) | set(baseline)
                           if now.get(path) != baseline.get(path))
 
+    # Two cells print at once: print() writes a line's text and its newline as two
+    # writes, and another cell's WARNING written between them would join that line,
+    # where a Monitor filter for lines opening WARNING: misses it.
+    with tempfile.TemporaryDirectory() as scratch:
+        stream = io.StringIO()
+        run_log = runner.RunOutputCopiedToRecordLog(stream)
+        log_path = pathlib.Path(scratch) / "run.log"
+        run_log.attach(log_path)
+        text_written, warning_written = threading.Event(), threading.Event()
+
+        def saved_line_cell():
+            run_log.write("saved: cell-a.md")
+            text_written.set()
+            warning_written.wait(5)
+            run_log.write("\n")
+            run_log.flush()
+
+        def warning_cell():
+            text_written.wait(5)
+            real_stdout = sys.stdout
+            sys.stdout = run_log
+            try:
+                runner.print_warning_with_its_next_step("cell-b warned", "Do the next step.")
+            finally:
+                sys.stdout = real_stdout
+            warning_written.set()
+
+        cells = [threading.Thread(target=saved_line_cell), threading.Thread(target=warning_cell)]
+        for cell in cells:
+            cell.start()
+        for cell in cells:
+            cell.join(10)
+        run_log.detach()
+        expected_lines = {"saved: cell-a.md", "WARNING: cell-b warned", "Do the next step."}
+        for where, printed in (("the stream", stream.getvalue()),
+                               ("the run log", log_path.read_text(encoding="utf-8"))):
+            lines = printed.splitlines()
+            check(f"two cells printing at once leave whole lines in {where}, "
+                  "the WARNING line followed by its instruction",
+                  set(lines) == expected_lines and len(lines) == 3
+                  and lines[lines.index("WARNING: cell-b warned") + 1] == "Do the next step.",
+                  repr(printed))
+
     # Case 1: a file already dirty before the run, rewritten by a cell.
     with tempfile.TemporaryDirectory() as scratch:
         repo = new_repo(pathlib.Path(scratch))
@@ -508,7 +551,7 @@ def main():
     runner_gate.run_claude = lambda prompt, checkout=None: (
         0, "the cell's report body\n\n## Questions\n\nNone.\n\n"
            "## Leanness certification\n\n- the whole document\n",
-        "claude-fable-5-1", "")
+        "claude-fable-5-2", "")
     buffer = io.StringIO()
     # A real record directory, in a temporary tree: run_cell makes the cell's
     # scratch directory under the one it is handed, and a relative path here
@@ -529,6 +572,14 @@ def main():
           "same as a codex cell",
           "WARNING: the review copy was modified outside the cells' scratch "
           f"directories, seen when cut-adversarial-prompt-claude finished: {stray_name}" in output,
+          f"output was {output!r}")
+    check("the overwritten-stray-write warning is followed by its instruction line",
+          f"overwrote it: {out_path}\n"
+          f"{runner_gate.SANITY_CHECK_STRAY_FILE_AT_CELL_REPORT_PATH_REPLACED_BY_REPORT_WARNING_NEXT_STEP_INSTRUCTION}\n" in output,
+          f"output was {output!r}")
+    check("the review-copy warning is followed by its instruction line",
+          f"finished: {stray_name}\n"
+          f"{runner_gate.SANITY_CHECK_REVIEW_COPY_MODIFIED_OUTSIDE_CELL_SCRATCH_WARNING_NEXT_STEP_INSTRUCTION}\n" in output,
           f"output was {output!r}")
 
     # Case 19: the per-cell scratch directory the runner makes. The prompts
@@ -942,6 +993,30 @@ def main():
     check("a quote found nowhere warns",
           "quote found in no tracked file" in buffer.getvalue(),
           f"output was {buffer.getvalue()!r}")
+    check("the unfound-quote warning is followed by its instruction line",
+          buffer.getvalue().splitlines()[1:2] == [runner_scan.SANITY_CHECK_CELL_REPORT_QUOTE_FOUND_IN_NO_TRACKED_FILE_WARNING_NEXT_STEP_INSTRUCTION],
+          f"output was {buffer.getvalue()!r}")
+
+    class WriteCallsRecorder(io.StringIO):
+        def __init__(self):
+            super().__init__()
+            self.calls = []
+
+        def write(self, text):
+            self.calls.append(text)
+            return super().write(text)
+
+    # Each write is where another cell's thread can cut in; the warning and its
+    # instruction must arrive in one, or a `saved:` line can land between them.
+    recorder = WriteCallsRecorder()
+    with contextlib.redirect_stdout(recorder):
+        runner_scan.quote_scan(corpus, 'It says "words that appear in no file at all" here.', "q3")
+    instruction = runner_scan.SANITY_CHECK_CELL_REPORT_QUOTE_FOUND_IN_NO_TRACKED_FILE_WARNING_NEXT_STEP_INSTRUCTION
+    check("a warning and its instruction line reach stdout in one write, so a parallel "
+          "cell's line cannot land between them",
+          any(call.startswith("WARNING: ") and f"\n{instruction}\n" in call
+              for call in recorder.calls),
+          f"write calls were {recorder.calls!r}")
 
     # The print modes: each surface arrives on stdout, and the requester
     # surface carries both of its sources.
@@ -1008,28 +1083,34 @@ def main():
 
     # The credential lists are pointed at a scratch home for the call, so the
     # profile's denials name paths in it and the real home is not named in a
-    # failure line. The credential directories are re-rooted
-    # from the real list rather than listed here, so a directory dropped from
-    # CREDENTIAL_DIRECTORIES drops out of the profile.
+    # failure line. The credential directories and ned-box's credential files
+    # are re-rooted from the real lists rather than listed here, so a path
+    # dropped from either list drops out of the profile.
     credential_scratch = tempfile.TemporaryDirectory()
     scratch_home = pathlib.Path(credential_scratch.name)
     (scratch_home / ".config" / "nedsnodes").mkdir(parents=True)
     (scratch_home / ".config" / "gh").mkdir(parents=True)
     login_canary = scratch_home / ".codex" / "auth.json"
+    listed_canary = scratch_home / ".config" / "gh" / "hosts.yml"
     login_canary.parent.mkdir(parents=True)
-    login_canary.write_text("CANARY-NOT-A-SECRET-sanity-check-adversarial-prompts-test\n", encoding="utf-8")
+    for canary in (login_canary, listed_canary):
+        canary.write_text("CANARY-NOT-A-SECRET-sanity-check-adversarial-prompts-test\n", encoding="utf-8")
     shared = runner_memories.common
-    real_lists = (shared.CREDENTIAL_DIRECTORIES, shared.REVIEWER_PROGRAM_LOGIN_FILES)
+    real_lists = (shared.CREDENTIAL_DIRECTORIES, shared.CREDENTIAL_FILES_ON_NED_BOX,
+                  shared.REVIEWER_PROGRAM_LOGIN_FILES)
     try:
         runner_memories.run_agent_binary_unless_run_stopped = capture_command
         shared.CREDENTIAL_DIRECTORIES = tuple(
             scratch_home / directory.relative_to(pathlib.Path.home())
             for directory in real_lists[0])
+        shared.CREDENTIAL_FILES_ON_NED_BOX = tuple(
+            scratch_home / path.relative_to(pathlib.Path.home()) for path in real_lists[1])
         shared.REVIEWER_PROGRAM_LOGIN_FILES = {"codex": (login_canary,)}
         runner_memories.run_codex("a prompt no model ever sees")
     finally:
         runner_memories.run_agent_binary_unless_run_stopped = real_memories_launch
-        shared.CREDENTIAL_DIRECTORIES, shared.REVIEWER_PROGRAM_LOGIN_FILES = real_lists
+        (shared.CREDENTIAL_DIRECTORIES, shared.CREDENTIAL_FILES_ON_NED_BOX,
+         shared.REVIEWER_PROGRAM_LOGIN_FILES) = real_lists
     codex_command = captured.get("command", [])
     check("run_codex launches codex with memories disabled",
           ("--disable", "memories") in list(zip(codex_command, codex_command[1:])),
@@ -1050,9 +1131,10 @@ def main():
           and 'permissions.sanity-check-no-credentials.extends=":workspace"' in codex_overrides
           and "permissions.sanity-check-no-credentials.network.enabled=true" in codex_overrides,
           repr(codex_overrides))
-    check("run_codex's profile denies the credential directories and a reviewer program's login file",
-          f'"{scratch_home}/.config/nedsnodes"="deny"' in denied_table
-          and f'"{scratch_home}/.config/gh"="deny"' in denied_table
+    expected_denials = ([f'"{listed_canary}"="deny"'] if sys.platform.startswith("linux")
+                        else [f'"{scratch_home}/.config/nedsnodes"="deny"', f'"{scratch_home}/.config/gh"="deny"'])
+    check("run_codex's profile denies this machine's credential paths and a reviewer program's login file",
+          all(denial in denied_table for denial in expected_denials)
           and f'"{login_canary}"="deny"' in denied_table, denied_table)
     credential_scratch.cleanup()
 
@@ -1095,14 +1177,14 @@ def main():
     # The claude agent-binary's model chain. Fable 5 is obsolete (user, 2026-09-04)
     # and Fable is sometimes unavailable (user, 2026-09-11: "sometimes fable is
     # not available, so it should fall back to opus in that case"), so the cell
-    # tries Fable 5.1 and falls back to Opus 5. The three ways an attempt can
+    # tries Fable 5.2 and falls back to Opus 5.5. The three ways an attempt can
     # produce no review are the house chain's (run_model_chain in
     # nn-systems/cold-read/cold-read-cell-common.py). No model is called: the
     # launch is replaced for the length of these cases and answers per model.
     runner_chain = load_runner()
     fable, opus = runner_chain.CLAUDE_MODEL_CHAIN
-    check("the chain is Fable 5.1 then Opus 5, and Opus ends it",
-          runner_chain.CLAUDE_MODEL_CHAIN == ("claude-fable-5-1", "claude-opus-5"),
+    check("the chain is Fable 5.2 then Opus 5.5, and Opus ends it",
+          runner_chain.CLAUDE_MODEL_CHAIN == ("claude-fable-5-2", "claude-opus-5-5"),
           runner_chain.CLAUDE_MODEL_CHAIN)
 
     def answering(answers):
@@ -1168,6 +1250,9 @@ def main():
               "Invalid API key" in said, said)
         check("and the stdout it failed with, where a CLI puts its reason instead",
               "Credit balance is too low" in said, said)
+        check("the failed-model warning is followed by its instruction line",
+              f"WARNING: {fable} failed (exit 1)\n"
+              f"{runner_chain.SANITY_CHECK_CELL_MODEL_RUN_FAILED_WARNING_NEXT_STEP_INSTRUCTION}\n" in said, said)
         check("the cell still falls back, and the review is returned, never printed",
               (code, output, model) == (0, "opus's review\n", opus)
               and "opus's review" not in said, (code, output, model, said))
@@ -1193,15 +1278,15 @@ def main():
     runner_chain.subprocess.run = no_cli_launch_here
     try:
         fell_back = runner_chain.provenance_line(
-            "claude", "claude-opus-5", "cut", "docs/x.md", False, "commit=abc1234",
-            "claude-fable-5-1(exit1)")
+            "claude", "claude-opus-5-5", "cut", "docs/x.md", False, "commit=abc1234",
+            "claude-fable-5-2(exit1)")
         straight_through = runner_chain.provenance_line(
             "codex", "gpt-5.6-sol", "cut", "docs/x.md", False, "commit=abc1234")
     finally:
         runner_chain.subprocess.run = real_version_probe_run
     check("the provenance line records the model that answered and the fallback",
-          "model=claude-opus-5 " in fell_back
-          and "fallback_from=claude-fable-5-1(exit1) " in fell_back, fell_back)
+          "model=claude-opus-5-5 " in fell_back
+          and "fallback_from=claude-fable-5-2(exit1) " in fell_back, fell_back)
     check("a cell that did not fall back carries no fallback_from field",
           "fallback_from=" not in straight_through, straight_through)
     check("and neither line launched a CLI: both versions came from the cache",
@@ -1968,7 +2053,7 @@ def main():
     # returns the four values of the older contract, with no cause, is
     # reported by its exit code.
     for runtime in runner_relaunch.RUNTIMES:
-        attempts = "claude-fable-5-1(exit1)+claude-opus-5(exit1)" if runtime == "claude" else ""
+        attempts = "claude-fable-5-2(exit1)+claude-opus-5-5(exit1)" if runtime == "claude" else ""
         launcher = with_launcher(runner_relaunch, answering_in_turn([
             (1, "", "", attempts, ("exit-1", "first launch: overloaded")),
             (1, "", "", attempts, ("exit-1", capacity))]))

@@ -13,7 +13,9 @@ redirect git.
 Run: python3 scripts/merge-lane-pull-request-worktrees-reviewer-brief-codex-review-and-head-tests-run-without-merge-test.py
 """
 
+import contextlib
 import importlib.util
+import io
 import json
 import os
 import shlex
@@ -124,7 +126,7 @@ def commit_file(repository, name):
 
 
 def build_repositories(scratch):
-    """Return (checkout, main commit, nc-head-commit reviewed before, nc-head-commit, merge base)."""
+    """Return (checkout, main commit, nn-head-commit reviewed before, nn-head-commit, merge base)."""
     origin = scratch / "origin.git"
     author = scratch / "author"
     subprocess.run(["git", "init", "-q", "--bare", "-b", "main", str(origin)], check=True,
@@ -138,7 +140,7 @@ def build_repositories(scratch):
     checkout = scratch / "checkout"
     subprocess.run(["git", "clone", "-q", str(origin), str(checkout)], check=True,
                    env=GIT_ENVIRONMENT)
-    # The checkout fetched the earlier nc-head-commit in the earlier round.
+    # The checkout fetched the earlier nn-head-commit in the earlier round.
     git(checkout, "fetch", "-q", "origin", "refs/pull/7/head")
     head_commit = commit_file(author, "topic-round-2.txt")
     git(author, "checkout", "-q", "main")
@@ -271,12 +273,12 @@ def main():
               "to 5, and exits 0",
               completed.returncode == 0 and ran_in_order_then_together(calls, STEPS), detail)
         check("each step gets the one head and main commit, the filled-in copy, the merge "
-              "base as the Codex base, and both directory options",
+              "base as the Codex base, the head as the Codex step's expected head, and both directory options",
               [argv_of(calls, step) for step in STEPS] == [
                   ["7", head_commit, main_commit, *directory_options],
                   [str(filled_in_file), *directory_options],
-                  ["7", merge_base, *directory_options],
-                  ["7", *directory_options],
+                  ["7", merge_base, "--expected-head-commit", head_commit, *directory_options],
+                  ["7", "--head-commit", head_commit, "--main-commit", main_commit, *directory_options],
                   ["7", "7a", head_commit, *directory_options]], detail)
         filled_in = json.loads(filled_in_file.read_text()) if filled_in_file.exists() else None
         check("the filled-in copy is the entry with origin's full head and main added",
@@ -316,11 +318,12 @@ def main():
                                           "reviewed_before": head_reviewed_before[:10]}],
             "--head-commit-reviewed-before", head_reviewed_before[:12])
         detail = f"exit {completed.returncode}\n{completed.stdout}{completed.stderr}\n{calls}"
-        check("a fix-round's Codex base is the full nc-head-commit reviewed before, and "
-              "abbreviated commits in the file and the option are accepted",
+        check("a fix-round's Codex base is the full nn-head-commit reviewed before, its expected head the "
+              "full head commit, and abbreviated commits in the file and the option are accepted",
               completed.returncode == 0 and len(calls) == 5
-              and argv_of(calls, STEPS[2]) == ["7", head_reviewed_before, *directory_options]
-              and "(nc-head-commit reviewed before)" in completed.stdout, detail)
+              and argv_of(calls, STEPS[2]) == ["7", head_reviewed_before, "--expected-head-commit", head_commit,
+                                               *directory_options]
+              and "(nn-head-commit reviewed before)" in completed.stdout, detail)
         filled_in = json.loads(filled_in_file.read_text())
         check("a head named in the file is replaced by its full commit in the filled-in copy",
               filled_in[0]["head"] == head_commit and filled_in[0]["main"] == main_commit,
@@ -382,7 +385,8 @@ def main():
                   and all(other in completed.stdout for other in others)
                   and "never met the other steps" not in completed.stdout
                   and completed.stdout.count("nothing was merged.") == 1, detail)
-            expected_arguments = {3: ["7", merge_base], 4: ["7"], 5: ["7", "7a", head_commit]}
+            expected_arguments = {3: ["7", merge_base, "--expected-head-commit", head_commit], 4: ["7", "--head-commit", head_commit, "--main-commit", main_commit],
+                                  5: ["7", "7a", head_commit]}
             rerun_line = (f"  step {position}: "
                           + shlex.join([sys.executable, str(checkout / "scripts" / step),
                                         *expected_arguments[position], *directory_options]))
@@ -400,6 +404,10 @@ def main():
               and f"PR 7: step 3 exited 0; step 4, {STEPS[3]}, exited 5; step 5 was skipped; "
                   f"nothing was merged." in completed.stdout,
               f"exit {completed.returncode}\n{completed.stdout}{completed.stderr}\n{calls}")
+        check("a failed step 4's rerun command uses the same commits, main included",
+              "the command uses the same commits" in completed.stdout
+              and shlex.join(["--main-commit", main_commit]) in completed.stdout,
+              f"exit {completed.returncode}\n{completed.stdout}{completed.stderr}")
 
         completed, calls, _ = run_program(
             scratch, checkout, helpers, [first_round], environment_changes={
@@ -527,7 +535,7 @@ def main():
                   f"{helpers / 'cx' / ('pr7-' + merge_base[:8])}, and do not run it again\n"
                   in stderr
               and f"  step 4 exited 3: run it alone, with the same commits, to see its "
-                  f"message: {shlex.join([sys.executable, str(checkout / 'scripts' / STEPS[3]), '7', *directory_options])}\n"
+                  f"message: {shlex.join([sys.executable, str(checkout / 'scripts' / STEPS[3]), '7', '--head-commit', head_commit, '--main-commit', main_commit, *directory_options])}\n"
                   in stderr
               and f"  step 5 exited 0: read its records in "
                   f"{helpers / 'claude-reviews' / ('pr7-' + head_commit)}*, and do not run it "
@@ -656,7 +664,7 @@ def main():
               "not the generic one",
               "If the commit is right, fetch it into" in completed.stdout
               and completed.stdout.rstrip().endswith(
-                  "run this again with --head-commit-reviewed-before set to the nc-head-commit "
+                  "run this again with --head-commit-reviewed-before set to the nn-head-commit "
                   "that was reviewed before.")
               and generic_instruction not in completed.stdout, completed.stdout)
         completed, _, _ = run_program(scratch, checkout, helpers, "[{not json")
@@ -747,17 +755,6 @@ def main():
               and head_of(checkout) == merge_base,
               f"exit {completed.returncode}\n{completed.stdout}{completed.stderr}\n{calls}")
 
-        completed, calls, _ = run_program(scratch, scratch / "no-such-worktree", helpers,
-                                          [first_round])
-        check("a review tools worktree that does not exist exits 2 before git runs, with the "
-              "missing-tool instructions",
-              completed.returncode == 2 and calls == []
-              and f"{STEPS[0]} is missing" in completed.stdout
-              and "worktree add --detach" in completed.stdout
-              and "Then run this again." in completed.stdout
-              and generic_instruction not in completed.stdout,
-              f"exit {completed.returncode}\n{completed.stdout}{completed.stderr}\n{calls}")
-
         completed = subprocess.run([sys.executable, str(PROGRAM), "--help"],
                                    capture_output=True, text=True, env=GIT_ENVIRONMENT)
         check("--help says runs at the same time need separate review tools worktrees",
@@ -795,6 +792,54 @@ def main():
               and "main has renamed or removed the script" in what_stopped
               and "is not main's" not in what_stopped, f"{what_stopped}\n{instruction}")
 
+        def run_in_process_with_repository_root(repository_root, tools_worktree):
+            # In-process, so the worktree is made from a scratch repository whose origin is
+            # the scratch origin, never from this repository and GitHub; under the same
+            # isolated git settings as run_program, so the caller's git config cannot refuse it.
+            saved_root = program.common.REPOSITORY_ROOT
+            saved_environment = dict(os.environ)
+            program.common.REPOSITORY_ROOT = repository_root
+            os.environ.clear()
+            os.environ.update(GIT_ENVIRONMENT)
+            output = io.StringIO()
+            try:
+                with contextlib.redirect_stdout(output):
+                    exit_code = program.main([
+                        "7", str(scratch / "no-such-brief-specifications.json"),
+                        "--merge-lane-worktrees-and-outputs-directory", str(helpers),
+                        "--merge-lane-review-worktrees-directory", str(helpers / "wt"),
+                        "--review-tools-worktree-at-main", str(tools_worktree)])
+            finally:
+                program.common.REPOSITORY_ROOT = saved_root
+                os.environ.clear()
+                os.environ.update(saved_environment)
+            return exit_code, output.getvalue()
+
+        made_worktree = scratch / "review-tools-worktree-made-by-the-run"
+        exit_code, output = run_in_process_with_repository_root(checkout, made_worktree)
+        check("a review tools worktree that does not exist is made, and the run goes on to "
+              "fetch from its origin",
+              exit_code == 2 and (made_worktree / ".git").is_file()
+              and "could not read the brief specifications file" in output
+              and "is missing" not in output,
+              f"exit {exit_code}\n{output}")
+
+        # A path under a regular file, which git cannot create from the scratch clone, so
+        # the failure never reaches a checkout that encloses the scratch directory.
+        regular_file = scratch / "a-regular-file"
+        regular_file.write_text("not a directory\n")
+        unmade_worktree = regular_file / "review-tools-worktree-that-cannot-be-made"
+        worktrees_before = git(checkout, "worktree", "list", "--porcelain")
+        exit_code, output = run_in_process_with_repository_root(checkout, unmade_worktree)
+        check("a review tools worktree that cannot be made exits 2 before any step, naming "
+              "git's failure, with the generic instruction, and registers no worktree",
+              exit_code == 2 and not unmade_worktree.exists()
+              and git(checkout, "worktree", "list", "--porcelain") == worktrees_before
+              and f"git worktree add -q --detach {unmade_worktree} HEAD in {checkout} "
+                  f"exited" in output
+              and output.rstrip().endswith(generic_instruction),
+              f"exit {exit_code}\n{output}")
+
         # Last, because it moves origin's main: main gains a step script that the review
         # tools worktree's older commit lacks, so the scripts are looked for only after
         # the worktree is checked out at main.
@@ -812,6 +857,42 @@ def main():
               "and all five steps run",
               completed.returncode == 0 and ran_in_order_then_together(calls, STEPS)
               and head_of(checkout) == main_with_step,
+              f"exit {completed.returncode}\n{completed.stdout}{completed.stderr}\n{calls}")
+
+        # The author merges main into the reviewed head, then commits a fix.
+        git(author, "checkout", "-q", "topic")
+        git(author, "merge", "-q", "--no-ff", "-m", "merge main", "main")
+        merged_main_head = commit_file(author, "topic-round-3-fix.txt")
+        git(author, "push", "-q", str(scratch / "origin.git"), "topic:refs/pull/7/head")
+        completed, calls, _ = run_program(
+            scratch, checkout, helpers, [fix_round | {"reviewed_before": head_commit}],
+            "--head-commit-reviewed-before", head_commit)
+        codex_base = (argv_of(calls, STEPS[2]) or [None, None])[1]
+        codex_files = (git(checkout, "diff", "--name-only", codex_base, merged_main_head).split()
+                       if codex_base else [])
+        check("a fix-round whose head merged main gets the merge base with main as its Codex "
+              "base, so the Codex diff holds none of main's changes",
+              completed.returncode == 0 and codex_base == main_with_step
+              and codex_files == ["topic-round-1.txt", "topic-round-2.txt",
+                                  "topic-round-3-fix.txt"]
+              and "(merge base, because the commits since the nn-head-commit reviewed before "
+                  "hold merge commit(s) " in completed.stdout,
+              f"exit {completed.returncode}\n{completed.stdout}{completed.stderr}\n"
+              f"Codex base {codex_base}, files {codex_files}")
+
+        git(author, "checkout", "-q", "-B", "rewritten", merge_base)
+        commit_file(author, "topic-rewritten.txt")
+        git(author, "push", "-q", "--force", str(scratch / "origin.git"),
+            "rewritten:refs/pull/7/head")
+        completed, calls, _ = run_program(
+            scratch, checkout, helpers, [fix_round | {"reviewed_before": merged_main_head}],
+            "--head-commit-reviewed-before", merged_main_head)
+        check("a fix-round whose head does not descend from the nn-head-commit reviewed before "
+              "gets the merge base with main as its Codex base",
+              completed.returncode == 0
+              and argv_of(calls, STEPS[2])[:2] == ["7", merge_base]
+              and "(merge base, because the head does not descend from the nn-head-commit "
+                  "reviewed before)" in completed.stdout,
               f"exit {completed.returncode}\n{completed.stdout}{completed.stderr}\n{calls}")
     finally:
         shutil.rmtree(scratch, ignore_errors=True)

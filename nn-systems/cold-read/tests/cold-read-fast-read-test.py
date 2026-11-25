@@ -57,7 +57,7 @@ WHAT IS PINNED HERE.
     report, and the launcher's recovery line is on the read's stderr.
 
   - The fast tier pin shows in the stamp of what the read produces:
-    runtime=agy, gemini-3.8-flash-medium, effort medium, tier fast.
+    runtime=agy, gemini-4-neon-low, effort low, tier fast.
 
   - The reviewer's instructions the model receives are the template embedded
     in the script -- not the skill's prompt file -- with both paths and
@@ -95,7 +95,7 @@ that compares the embedded template against the skill's prompt file: both of
 those files live in the real checkout, so it reads them there. A stub `agy`
 first on PATH stands in for the model, beside the fixture's pass-through
 stand-in for the sandbox program, so this suite runs inside the
-nc-test-sandbox, where the real bwrap cannot start. The stand-in confines
+nn-test-sandbox, where the real bwrap cannot start. The stand-in confines
 nothing; nn-systems/cold-read/tests/cold-read-agy-cell-test.py's
 real-sandbox case tests the confinement. The stub `agy` is driven by
 COLD_READ_AGY_CELL_TEST_STUB_PLAN the way nn-systems/cold-read/tests/cold-read-agy-cell-test.py
@@ -609,10 +609,10 @@ with tempfile.TemporaryDirectory() as scratch:
     check("an earlier suggestions file is replaced, not appended to",
           "LEFT BY AN EARLIER READ" not in suggestions_text
           and "of the walk item" in suggestions_text, repr(suggestions_text[:200]))
-    check("the fast tier pin shows in the stamp: runtime agy, gemini-3.8-flash-medium, medium, fast",
+    check("the fast tier pin shows in the stamp: runtime agy, gemini-4-neon-low, low, fast",
           provenance_stamp_of(suggestions).startswith(
-              "<!-- provenance: runtime=agy model=gemini-3.8-flash-medium "
-              "effort=medium cell=fast-clarify tier=fast "),
+              "<!-- provenance: runtime=agy model=gemini-4-neon-low "
+              "effort=low cell=fast-clarify tier=fast "),
           repr(provenance_stamp_of(suggestions)))
     check("the stamp names the embedded prompt file",
           "prompt_file=" in provenance_stamp_of(suggestions)
@@ -2229,8 +2229,37 @@ check("CLAUDE.md is recognised by its name, wherever it sits",
       and class_of(root / "nn-systems/cold-read/CLAUDE.md") == "CLAUDE.md")
 check("step 2's own exception is not in the class: a walk file",
       class_of(root / "docs/walk/an-item-draft.md") is None)
-check("a seat's CLAUDE.local.md at the checkout's root is not in the class",
-      class_of(root / "CLAUDE.local.md") is None)
+check("a seat-brief, a seat's CLAUDE.local.md, is recognised by its name, wherever it sits",
+      class_of(root / "CLAUDE.local.md") == "a seat-brief"
+      and class_of(root / "nn-systems/cold-read/CLAUDE.local.md") == "a seat-brief")
+# The program's class tables are a copy of the list in step 2 of the
+# /cold-read skill; this ties the two, so a class added to either alone fails.
+STEP_2_LIST_PHRASE_TO_PROGRAM_CLASS = {
+    "CLAUDE.md": "CLAUDE.md",
+    "wiki files": "a wiki file",
+    "skills and their prompts": "a skill or a skill's prompt",
+    "seat-briefs": "a seat-brief",
+    "the files under `docs/agents/`": "a file under docs/agents/",
+    "designs": "a design",
+    "including a GHI-MD that is a design": "a design",
+    "test-designs": "a test design",
+    "design-contracts": "a design-contract",
+}
+step_2_list_match = re.search(
+    r"also skip the cold-read-full-run\. (.+?) need a cold-read-full-run",
+    (root / ".claude/skills/cold-read/SKILL.md").read_text(encoding="utf-8"))
+step_2_list_phrases = (
+    {phrase.removeprefix("and ") for phrase in step_2_list_match.group(1).split(", ")}
+    if step_2_list_match else set())
+program_class_names = {class_name for _, class_name in (
+    *warning_module.FULL_RUN_NAMES, *warning_module.FULL_RUN_DIRECTORIES_RELATIVE,
+    *warning_module.FULL_RUN_NAME_SUFFIXES)}
+check("step 2's list of documents that need a cold-read-full-run is the list this test maps",
+      step_2_list_phrases == set(STEP_2_LIST_PHRASE_TO_PROGRAM_CLASS),
+      repr(sorted(step_2_list_phrases ^ set(STEP_2_LIST_PHRASE_TO_PROGRAM_CLASS))))
+check("the program's full-run classes are exactly the classes step 2's list maps to",
+      program_class_names == set(STEP_2_LIST_PHRASE_TO_PROGRAM_CLASS.values()),
+      repr(sorted(program_class_names ^ set(STEP_2_LIST_PHRASE_TO_PROGRAM_CLASS.values()))))
 check("an ordinary document is not in the class",
       class_of(root / "docs/issues/32-preservation-and-placement.md") is None)
 check("a file outside the checkout is not classified",
