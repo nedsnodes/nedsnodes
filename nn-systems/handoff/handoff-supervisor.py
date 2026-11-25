@@ -17,7 +17,8 @@ The cycle, per reincarnation:
      starts it again.
   2a. Unless the handoff carries ask-user-before-restart, fast-forward the checkout this
      program runs from to origin/main, and, when the checkout is then on
-     main's commit, whether it moved or was already there, replace this
+     main's commit, whether it moved or was already there, and holds no
+     uncommitted tracked change, which the fast-forward keeps, replace this
      process with a fresh start of this program from that checkout
      (os.execv, so the process ID stays, and the lock file keeps naming it).
      An ask-user-before-restart handoff skips this step, because the fresh
