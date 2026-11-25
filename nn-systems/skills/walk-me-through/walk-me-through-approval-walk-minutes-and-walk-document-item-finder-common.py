@@ -206,12 +206,12 @@ CLOSING_LINE_LABEL = re.compile(rf"Items?\s+({NUMBER_LIST})\s+of\s+(\d+)(?:,\s.*
 # The `revised` label: `(revised)`, or the word followed by a separator or the line's end, as in `, revised:`; so a
 # title opening with the word, as in `: revised the first`, keeps it. Every reader of the label reads it through
 # these two pieces.
-REVISED_LABEL = r"(?:\(revised\)|revised(?=\s*(?:[:,.;\-\u2013\u2014]|$)))"
+APPROVAL_WALK_ITEM_HEADING_REVISED_LABEL_REGEX = r"(?:\(revised\)|revised(?=\s*(?:[:,.;\-\u2013\u2014]|$)))"
 # Right after the count, the word may also end where the emphasis around the count closes, as in
 # `__Item 3 of 9 revised__: the first`, where `_` is a word character and `\b` finds no end.
-REVISED_LABEL_BEFORE_CLOSING_EMPHASIS = r"\s+revised(?=[*_])"
+APPROVAL_WALK_ITEM_HEADING_REVISED_LABEL_BEFORE_CLOSING_EMPHASIS_REGEX = r"\s+revised(?=[*_])"
 # Only right after the count, so a title that uses the word drops nothing.
-REVISED = re.compile(rf"^(?:[*_\s(,:;.\-\u2013\u2014]*{REVISED_LABEL}|{REVISED_LABEL_BEFORE_CLOSING_EMPHASIS})", re.I)
+REVISED = re.compile(rf"^(?:[*_\s(,:;.\-\u2013\u2014]*{APPROVAL_WALK_ITEM_HEADING_REVISED_LABEL_REGEX}|{APPROVAL_WALK_ITEM_HEADING_REVISED_LABEL_BEFORE_CLOSING_EMPHASIS_REGEX})", re.I)
 WITHDRAWN_HEADING = re.compile(r"^[*_\s(]*withdrawn\b", re.I)
 APPROVAL_WALK_ITEM_TAG_LINE = re.compile(r"^\s*#approval_walk_item_", re.I)
 RUNNING_COUNT_TOTAL = re.compile(rf"\b(items?\s+{NUMBER_LIST})\s+of\s+\d+\b", re.I)
