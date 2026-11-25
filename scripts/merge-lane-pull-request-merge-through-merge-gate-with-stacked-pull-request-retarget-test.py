@@ -42,6 +42,7 @@ Run: python3 scripts/merge-lane-pull-request-merge-through-merge-gate-with-stack
 """
 
 import argparse
+import fcntl
 import contextlib
 import importlib.util
 import io
@@ -52,6 +53,8 @@ import shutil
 import subprocess
 import sys
 import tempfile
+import threading
+import time
 from pathlib import Path
 
 _git_environment_fixture_spec = importlib.util.spec_from_file_location(
@@ -1062,6 +1065,78 @@ def author_seat_made(directory):
     task_list.mkdir(parents=True)
     (directory / "home" / "agents" / "author-seat").mkdir(parents=True)
     return task_list
+
+
+def before_the_merge_queue_stop_line(output):
+    """The output up to the line an exit 3 or 4 prints last, on the merge queue stop file."""
+    return output.split("merge queue stopped: ", 1)[0]
+
+
+def merge_program_lock_and_merge_queue_stop_file_cases(scratch):
+    stop_file_name = program.MERGE_QUEUE_STOP_FILE_NAME
+    exit_code, output, _, _, _ = run_case(
+        scratch, "passes-leaves-no-stop-file", [(GATE_PASSED, 0)], default_routes(STACKED_AND_NOT))
+    outputs = scratch / "passes-leaves-no-stop-file" / "outputs"
+    check("a merge that exits 0 writes no merge queue stop file, and leaves the lock file",
+          exit_code == 0 and not (outputs / stop_file_name).exists()
+          and (outputs / program.MERGE_PROGRAM_RUN_LOCK_FILE_NAME).is_file(),
+          f"exit {exit_code}\n{output}")
+
+    exit_code, output, _, _, _ = run_case(
+        scratch, "exit-3-stops-the-merge-queue", [(GATE_PASSED, 0)],
+        default_routes(STACKED_AND_NOT), review_worktrees_state="head-not-a-worktree")
+    stop_file = scratch / "exit-3-stops-the-merge-queue" / "outputs" / stop_file_name
+    stop_text = stop_file.read_text() if stop_file.is_file() else ""
+    check("a merge that exits 3 writes the merge queue stop file, naming the pull request and "
+          "the exit code, and says so",
+          exit_code == 3 and stop_text.startswith(f"pull request {PULL_REQUEST}'s merge program "
+                                                  f"exited 3, ")
+          and f"merge queue stopped: {stop_file} says: " in output,
+          f"exit {exit_code}\n{stop_text}\n{output}")
+
+    def stop_file_unwritable(directory):
+        (directory / "outputs" / stop_file_name).mkdir(parents=True)
+    exit_code, output, _, _, _ = run_case(
+        scratch, "stop-file-unwritable", [(GATE_PASSED, 0)], default_routes(STACKED_AND_NOT),
+        review_worktrees_state="head-not-a-worktree", before_the_program_runs=stop_file_unwritable)
+    check("a stop file that cannot be written is reported with what to do, and the exit code "
+          "stays 3",
+          exit_code == 3 and "so the merge queue does not stop for this outcome" in output
+          and "if you are merge-lane-2, append a HOLD- line" in output,
+          f"exit {exit_code}\n{output}")
+
+    def outputs_is_a_file(directory):
+        (directory / "outputs").write_text("not a directory\n")
+    exit_code, output, gh_calls, gate_calls, _ = run_case(
+        scratch, "lock-unopenable", [(GATE_PASSED, 0)], default_routes(STACKED_AND_NOT),
+        before_the_program_runs=outputs_is_a_file)
+    check("a lock file that cannot be opened stops the program before the gate, exit 2",
+          exit_code == 2 and output.startswith("STOP: not merged: could not open ")
+          and gate_calls == [] and index_of(argvs(gh_calls), ["pr", "merge"]) is None,
+          f"exit {exit_code}\n{output}")
+
+    released = []
+
+    def lock_held_briefly(directory):
+        outputs = directory / "outputs"
+        outputs.mkdir(parents=True, exist_ok=True)
+        holder = open(outputs / program.MERGE_PROGRAM_RUN_LOCK_FILE_NAME, "a")
+        fcntl.flock(holder, fcntl.LOCK_EX)
+
+        def release():
+            time.sleep(1)
+            released.append(time.monotonic())
+            fcntl.flock(holder, fcntl.LOCK_UN)
+            holder.close()
+        threading.Thread(target=release, daemon=True).start()
+    exit_code, output, gh_calls, gate_calls, _ = run_case(
+        scratch, "lock-held", [(GATE_PASSED, 0)], default_routes(STACKED_AND_NOT),
+        before_the_program_runs=lock_held_briefly)
+    check("while another run holds the lock, the program says it waits, and runs the gate only "
+          "once the lock is released",
+          exit_code == 0 and released and "another run of this program is merging or testing "
+                                           "main" in output and len(gate_calls) == 1,
+          f"exit {exit_code} released {released}\n{output}")
 
 
 def failed_suites_kept_in_view_cases(scratch):
@@ -2435,6 +2510,7 @@ def main():
               in output
               and not merge_commit_worktree.exists(), f"exit {exit_code}\n{output}")
 
+        merge_program_lock_and_merge_queue_stop_file_cases(scratch)
         failed_suites_kept_in_view_cases(scratch)
         newest_main_commit_left_no_test_failing_cases(scratch)
 
@@ -2702,7 +2778,8 @@ def main():
               exit_code == 3 and runner_calls(scratch, "fetch-fails-after-merge") == []
               and "could not fetch origin in " in output
               and "could not make the worktree" not in output
-              and output.endswith(f"Otherwise, {TELL_THE_USER_WITH_THE_GIT_ERROR}\n"
+              and before_the_merge_queue_stop_line(output).endswith(
+                  f"Otherwise, {TELL_THE_USER_WITH_THE_GIT_ERROR}\n"
                                   f"{GO_AHEAD_COUNT_ONLY[0]}"),
               f"exit {exit_code}\n{output}")
 
@@ -2741,7 +2818,8 @@ def main():
                   f"worktree {scratch / 'worktree-add-killed' / 'review-worktrees'}"
                   "/pr10-merge-commit-on-main-worktree at the merge commit " in output
               and ": git printed no error\n" in output
-              and output.endswith(f"Otherwise, {TELL_THE_USER_WITH_THE_GIT_ERROR}\n"
+              and before_the_merge_queue_stop_line(output).endswith(
+                  f"Otherwise, {TELL_THE_USER_WITH_THE_GIT_ERROR}\n"
                                   f"{GO_AHEAD_COUNT_ONLY[0]}"),
               f"exit {exit_code}\n{output}")
 
