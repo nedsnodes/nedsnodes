@@ -391,6 +391,18 @@ def run_unit_cases():
               from_node({**pull_request_node(3, "c" * 12), "reviews": reviews})
               == (None, "pull request #3 came back with no usable list of reviews"),
               str(from_node({**pull_request_node(3, "c" * 12), "reviews": reviews})))
+    check("a null list of mac-claude's reviews is no reason to refuse a pull request another "
+          "account opened, since those reviews decide nothing there",
+          from_node({**pull_request_node(3, "c" * 12), "macClaudeReviews": None})[0] is not None,
+          str(from_node({**pull_request_node(3, "c" * 12), "macClaudeReviews": None})))
+    own_node = {**pull_request_node(3, "c" * 12),
+                "author": {"login": watcher_module.fix_round.MERGE_LANE_2_REVIEWER_LOGIN},
+                "macClaudeReviews": None}
+    check("a null list of mac-claude's reviews is refused on a pull request ned-review-merge "
+          "opened, where mac-claude's approval is the verdict",
+          from_node(own_node)
+          == (None, "pull request #3 came back with no usable list of macClaudeReviews"),
+          str(from_node(own_node)))
 
     # ------------------------------------------------------------------
     # Titles are folded then truncated, so a multi-line title cannot
@@ -589,14 +601,24 @@ def run_merge_lane_pull_request_review_assignment_unit_cases():
     check("on a pull request ned-review-merge opened, a COMMENTED review opening with APPROVE is "
           "a verdict",
           dealt_numbers([own_approved, waiting_3, assignable(10)],
-                        {7: "merge-lane-1", 3: "merge-lane-3"}) == [(10, "merge-lane-1")], "")
+                        {7: "merge-lane-3", 3: "merge-lane-1"}) == [(10, "merge-lane-3")], "")
     mac_claude_approved = assignable(9, author=MERGE_LANE_REVIEWER,
                                      reviews=[review("COMMENTED", "a", "a note")],
                                      mac_claude_reviews=[review("APPROVED", "a")])
     check("on a pull request ned-review-merge opened, mac-claude's approval of the newest commit "
           "is a verdict, as the merge gate takes it",
           dealt_numbers([mac_claude_approved, waiting_3, assignable(10)],
-                        {9: "merge-lane-1", 3: "merge-lane-3"}) == [(10, "merge-lane-1")], "")
+                        {9: "merge-lane-3", 3: "merge-lane-1"}) == [(10, "merge-lane-3")], "")
+    mac_claude_approved_before_lane_review = assignable(
+        8, author=MERGE_LANE_REVIEWER, reviews=[review("COMMENTED", "b", "an older note")],
+        mac_claude_reviews=[review("APPROVED", "a")])
+    check("on a pull request ned-review-merge opened, mac-claude's approval waits for "
+          "ned-review-merge's own review of the same commit, whose grading can still change it",
+          dealt_numbers([mac_claude_approved_before_lane_review, waiting_3, assignable(10)],
+                        {8: "merge-lane-3", 3: "merge-lane-1"}) == [(10, "merge-lane-1")], "")
+    check("a draft does not wait for a verdict, so the count and the assignment agree on it",
+          not watcher_module.pull_request_waits_for_merge_lane_verdict(assignable(13, draft=True)),
+          "")
     check("mac-claude's approval is no verdict on a pull request another account opened",
           dealt_numbers([assignable(12, mac_claude_reviews=[review("APPROVED", "a")]), waiting_3,
                          assignable(10)], {12: "merge-lane-3", 3: "merge-lane-1"})
