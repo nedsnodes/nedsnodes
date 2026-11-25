@@ -2132,9 +2132,10 @@ def new_marks(text, tokens, ranges, shown):
             # A setext heading's lines above its underline read as one paragraph, which the item copy shows them as.
             paragraphs.append([token.map[0], token.map[1] - 1])
     marks = []
+    new_text_mark_line = load_walk_finder().APPROVAL_WALK_ITEM_NEW_TEXT_MARK_LINE_PATTERN
     for first, end in ranges:
         for number in range(first, end):
-            match = load_walk_finder().APPROVAL_WALK_ITEM_NEW_TEXT_MARK_LINE_PATTERN.match(lines[number] if number in code else shown[number])
+            match = new_text_mark_line.match(lines[number] if number in code else shown[number])
             if not match:
                 continue
             if number in code:
