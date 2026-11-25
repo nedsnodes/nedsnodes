@@ -33,7 +33,7 @@ starts with coreutils `timeout <duration>` and runs nothing after the timed comm
 pipe, the time that timeout stops it (a subagent that reported and
 stopped while background commands it launched still run gets the time of its report under
 `stopped_at` and a list of those commands under `own_running_background_commands`), the matched sentences with the code's reading of each, the agent-seat's last message, the tool calls a judge of the sentences
-looks through, the rule that applies and its decision.
+looks through, each marked failed when its result carried is_error, and the assistant texts it reads, the rule that applies and its decision.
 
 What it does not handle: it keeps no record of earlier runs, so it cannot tell which turn-ending
 messages it has already checked; by default it checks only the last one, and

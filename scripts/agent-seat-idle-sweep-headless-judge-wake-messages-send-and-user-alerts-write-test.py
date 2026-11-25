@@ -1718,7 +1718,7 @@ check("the rule 2 judge and the re-check are given one definition of backed, so 
       STANDING_RULE_BACKED in rule_2_prompt and STANDING_RULE_BACKED in recheck_prompt
       and "now follows it" not in recheck_prompt, recheck_prompt[:900])
 
-# The user's ruling of 2026-11-24 on an announced action, word for word.
+# The rule for an announced action that both rule 2 judges must be given word for word.
 ANNOUNCED_ACTION_BACKED = (
     'An announced action, such as "Next I\'m starting the pull request", is backed when a tool call '
     "in the same turn, before or after the sentence, or a later one does the action, or a background "
@@ -1757,6 +1757,9 @@ check("the first rule 2 judge is handed the text messages and tool calls of the 
 for case, answer in (
         ("an index missing beside an integer one",
          {"sentences": [{"index": 0, "backed": True, "reason": "r"}, {"backed": True, "reason": "r"}]}),
+        ("a null index beside an integer one",
+         {"sentences": [{"index": 0, "backed": True, "reason": "r"},
+                        {"index": None, "backed": True, "reason": "r"}]}),
         ("a string index beside an integer one",
          {"sentences": [{"index": 0, "backed": True, "reason": "r"},
                         {"index": "1", "backed": True, "reason": "r"}]}),
