@@ -1048,13 +1048,28 @@ def print_follow_up_request_block_from_merge_lane_2_reviews(number):
         earlier = [found for found in findings if found["review"] != review]
         restates = [None] * len(parsed)
 
-        # A Codex finding id names one finding, so a comment that shares one with a finding in the same category
-        # and path is that finding, however a later review reworded it.
         def same_finding(one, other):
-            return one["finding"] == other["finding"] or (
-                one["compared"][:2] == other["compared"][:2]
-                and bool(one["codex_finding_ids"] & other["codex_finding_ids"]))
+            return one["compared"] == other["compared"] and (
+                one["finding"] == other["finding"] or bool(one["codex_finding_ids"] & other["codex_finding_ids"]))
 
+        # A Codex finding id is a hash of the finding's priority and heading only, so a later comment under an
+        # earlier finding's id but worded differently may be that finding reworded or another defect with the
+        # same heading: refuse rather than guess.
+        for comment in parsed:
+            for found in earlier:
+                if (comment["finding"][0] != posting.BLOCKING_CATEGORY
+                        and comment["compared"][:2] == found["compared"][:2] and comment["compared"] != found["compared"]
+                        and comment["codex_finding_ids"] & found["codex_finding_ids"]):
+                    category, path, _text = comment["compared"]
+                    raise Refused(
+                        f"{account}'s review {review[1]} of pull request {review[0]} holds a {category} finding on "
+                        f"{path}, line {comment['line']}, under the Codex finding id of an earlier finding, in "
+                        f"review {found['review'][1]} of pull request {found['review'][0]} on line {found['line']} "
+                        "of the same file, but worded differently, so whether it is that finding reworded or a new "
+                        f"one cannot be told, and no {FOLLOW_UP_REQUEST_LINE_START} block was printed.\n"
+                        f"This comment's text: {comment['finding'][2]}\nThe earlier finding's text: "
+                        f"{found['finding'][2]}\n"
+                        + write_block_by_hand)
         # A later review restates each earlier finding at most once. A restatement that keeps the earlier
         # text or Codex finding id is paired first, so that the order GitHub numbered the comments in cannot
         # pair a new finding with the earlier one.
@@ -1064,7 +1079,8 @@ def print_follow_up_request_block_from_merge_lane_2_reviews(number):
         # A moved line range gives a restatement a new Codex finding id, and then nothing tells it from a new
         # finding worded alike: pair it only when one earlier finding and one finding of this review are left
         # with that text, and otherwise refuse rather than guess.
-        for compared in {comment["compared"] for index, comment in enumerate(parsed) if restates[index] is None}:
+        for compared in dict.fromkeys(comment["compared"] for index, comment in enumerate(parsed)
+                                      if restates[index] is None):
             free = [found for found in earlier if found["compared"] == compared
                     and not any(paired is found for paired in restates)]
             unpaired = [(index, comment) for index, comment in enumerate(parsed)
