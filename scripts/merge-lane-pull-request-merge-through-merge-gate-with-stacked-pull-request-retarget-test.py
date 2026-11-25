@@ -831,16 +831,18 @@ def newest_main_commit_left_no_test_failing_cases(scratch):
         os.replace, Path.unlink = real_replace, real_unlink
     path = newest_main_commit_left_no_test_failing_file(scratch / spaced)
     temporaries = sorted(item.name for item in path.parent.glob(f"{path.name}.*.tmp"))
+    # Matched whole, since a TMPDIR holding the instruction's words would put them in other lines.
+    rm_instruction = ("delete the temporary file: rm "
+                      + shlex.quote(str(path.parent / temporaries[0])) if temporaries else None)
     rm_lines = [line for line in output.splitlines()
-                if "delete the temporary file: rm " in line]
+                if rm_instruction and line.endswith(rm_instruction)]
     check("a record whose rename and cleanup both fail: the STOP names the temporary file left "
           "behind and the cleanup's error, and the record keeps its commit",
           exit_code == 3 and recorded == parent and len(temporaries) == 1
           and f"The temporary file {path.parent / temporaries[0]} could not be removed either: "
               f"[Errno 16] Device or resource busy." in output
           and f"was not recorded in {path}: [Errno 30] Read-only file system" in output
-          and len(rm_lines) == 1
-          and rm_lines[0].endswith("rm " + shlex.quote(str(path.parent / temporaries[0]))),
+          and len(rm_lines) == 1,
           f"exit {exit_code}\n{output}\n{temporaries}")
 
     into_another_branch = default_routes([])
@@ -903,6 +905,25 @@ def newest_main_commit_left_no_test_failing_cases(scratch):
         left_main[directory.name] = (cut_from, commit)
         return commit
 
+    def commit_the_branch_holds_only_through_its_second_parent(directory):
+        # Main's first-failing commit merged the branch's cut-from commit in as its second
+        # parent, so their merge base is that commit, which main's tip never was; main's own
+        # first-parent history never meets the branch's, so no commit can be named.
+        tools = directory / "review-tools"
+        cut_from = git_output(tools, "rev-parse", "HEAD")
+
+        def commit_tree(*parents, message):
+            arguments = []
+            for parent in parents:
+                arguments += ["-p", parent]
+            return subprocess.run(
+                ["git", *GIT_IDENTITY, "-C", str(tools), "commit-tree", "HEAD^{tree}", *arguments,
+                 "-m", message],
+                capture_output=True, text=True, env=GIT_ENVIRONMENT, check=True).stdout.strip()
+
+        mains_tip = commit_tree(message="main's history, apart from the branch's")
+        return commit_tree(mains_tip, cut_from, message="main merges the branch's base in")
+
     def one_recorded_and_one_new_case(directory):
         failed_suites_record_written(directory, tests=["case recorded"])
         failed_suites_as_written.append(failed_suites_record_of(directory))
@@ -936,6 +957,12 @@ def newest_main_commit_left_no_test_failing_cases(scratch):
               "'stacked-topic-branch' left, so this check cannot say whose failure it is: say so "
               "when you tell the author and the user."],
              ["main may be broken", "git could not say"]),
+            ("failed-into-another-branch-main-took-the-cut-from-commit-in-by-a-merge",
+             RUNNER_FAILED, 3,
+             ["STOP: merged, but the test run of 'stacked-topic-branch' at ",
+              "failed tests that are not main's failures", TELL_AUTHOR_AND_USER],
+             ["main may be broken", "git could not say", "Before the author fixes it, run ",
+              "left main's history"]),
             ("failed-into-another-branch-recorded-suite-new-case", RUNNER_FAILED, 3,
              ["STOP: merged, but the test run of 'stacked-topic-branch' at ",
               "failed tests that are not main's failures", TELL_AUTHOR_AND_USER],
@@ -947,12 +974,15 @@ def newest_main_commit_left_no_test_failing_cases(scratch):
               "first failed scripts/broken-test.py: case a, so this program counts the failure of every "
               "test first failed there as 'stacked-topic-branch''s own, not main's; the STOP this "
               "program prints last lists those failures among the ones that are not main's. "
-              "`git merge-base ffffffffffffffffffffffffffffffffffffffff ",
+              "`git rev-list --first-parent --parents "
+              "ffffffffffffffffffffffffffffffffffffffff ^",
               TELL_AUTHOR_AND_USER],
              ["main may be broken", "nothing is needed"])):
         prepare = {
             "failed-into-another-branch-cut-before-main-began-failing":
                 recorded_at_commit(commit_the_branch_does_not_hold),
+            "failed-into-another-branch-main-took-the-cut-from-commit-in-by-a-merge":
+                recorded_at_commit(commit_the_branch_holds_only_through_its_second_parent),
             "failed-into-another-branch-recorded-suite-new-case": one_recorded_and_one_new_case,
             "failed-into-another-branch-first-failing-commit-unknown":
                 # Two tests first failed at one commit: one git fault, one STOP.

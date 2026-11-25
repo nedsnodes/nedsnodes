@@ -891,25 +891,33 @@ def failed_tests_main_does_not_fail_named(arguments, base_branch, merge_commit, 
     def branch_holds_mains_first_failing_commit(suite, test, first_failed):
         if first_failed in held_by_commit:
             return held_by_commit[first_failed]
-        # The merge base with first_failed, not with origin/main, which may hold the merge
-        # commit itself by the time a reader acts on the STOP.
+        # Walked from first_failed, not from origin/main, which may hold the merge commit itself
+        # by the time a reader acts on the STOP; along first parents only, so the commit named is
+        # one main's tip once was, not a topic commit main took in through a merge.
         ancestor = subprocess.run(
-            ["git", "-C", str(worktree), "merge-base", first_failed, merge_commit],
+            ["git", "-C", str(worktree), "rev-list", "--first-parent", "--parents", first_failed,
+             f"^{merge_commit}"],
             capture_output=True, text=True, env=environment, stdin=subprocess.DEVNULL)
-        if ancestor.returncode not in (0, 1):
+        if ancestor.returncode != 0:
             print(f"STOP: pull request {arguments.pull_request} merged into {base_branch!r}, but "
                   f"git could not say whether {base_branch!r} holds {first_failed[:12]}, the "
                   f"main commit whose test run first failed {test_named(suite, test)}, so this "
                   f"program counts the failure of every test first failed there as "
                   f"{base_branch!r}'s own, not main's; the STOP this program prints last lists "
-                  f"those failures among the ones that are not main's. `git merge-base "
-                  f"{first_failed} {merge_commit}` said: {git_error(ancestor)}\n"
+                  f"those failures among the ones that are not main's. `git rev-list "
+                  f"--first-parent --parents {first_failed} ^{merge_commit}`, where "
+                  f"{merge_commit[:12]} is the merge commit on {base_branch!r}, said: "
+                  f"{git_error(ancestor)}\n"
                   f"{TELL_AUTHOR_AND_USER_THE_STOP_MESSAGE}")
             kept["complete"] = False
-        merge_base = ancestor.stdout.strip() if ancestor.returncode == 0 else None
-        held_by_commit[first_failed] = merge_base == first_failed
-        if merge_base and merge_base != first_failed:
-            left_main_at[first_failed] = merge_base
+            held_by_commit[first_failed] = False
+            return False
+        # Each line is a commit merge_commit lacks, then its first parent; none means it holds
+        # first_failed, and the last line's parent is where the branch left main's history.
+        lacked = ancestor.stdout.split("\n")[-2].split() if ancestor.stdout.strip() else []
+        held_by_commit[first_failed] = not lacked
+        if len(lacked) > 1:
+            left_main_at[first_failed] = lacked[1]
         return held_by_commit[first_failed]
 
     left_main_at = {}
@@ -996,7 +1004,10 @@ def after_merge_test_run_closing_message_printed_returning_whether_stop(argument
                   f"fixing for it.\n"
                   f"If that test passes there, {tested} broke it: the author fixes it on "
                   f"{tested}.\n"
-                  f"If {suite} is not in that commit, main gained it after {tested} left, so "
+                  f"If {suite} is not in that commit"
+                  + (f", or does not run {test_named(suite, test)} there"
+                     if test_named(suite, test) != suite else "")
+                  + f", main gained it after {tested} left, so "
                   f"this check cannot say whose failure it is: say so when you tell the author "
                   f"and the user.")
         print(TELL_AUTHOR_AND_USER_THE_STOP_MESSAGE)
