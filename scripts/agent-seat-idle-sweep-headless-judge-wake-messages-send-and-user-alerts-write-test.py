@@ -3862,6 +3862,25 @@ check("a message for part of the sentences logged on the wait together takes onl
       and on_wait_sentences(machine) == [OTHER_PROMISE],
       (machine.events("promise_message"), on_wait_sentences(machine)))
 
+machine = rule_five_wait_with_promises(assistant(PROMISE, at(1)), turn_end(at(1)), user("go on", at(1.05)),
+                                       assistant(OTHER_PROMISE, at(1.1)), turn_end(at(1.1)))
+machine.script({"sends": [send_to("alpha", f'You promised "{PROMISE}". Record it as a task.')],
+                "answer": {"sent": True, "reason": "r"}})
+machine.run(7)
+check("a promise message on an open wait whose sender drops one sentence: only the sentence it "
+      "sent comes off the wait, and the dropped one stays owed",
+      on_wait_sentences(machine) == [OTHER_PROMISE]
+      and [event["sentences"] for event in machine.events("promise_message")][-1:] == [[PROMISE]],
+      (machine.events("promise_message"), on_wait_sentences(machine)))
+
+LONGER_PROMISE = f"If the logs become available, {PROMISE}"
+check("a sentence found only inside a longer one the sent text quotes does not count as named",
+      idle_sweep_program.records_named_in(
+          f"You said:\n> {LONGER_PROMISE}",
+          [{"record": ("r1", PROMISE), "sentences": [PROMISE]},
+           {"record": ("r2", LONGER_PROMISE), "sentences": [LONGER_PROMISE]}])
+      == [["r2", LONGER_PROMISE]])
+
 machine = promise_named_only_by_escalation(sent_ok())
 machine.log.write_text("".join(
     line for line in machine.log.read_text().splitlines(keepends=True)
