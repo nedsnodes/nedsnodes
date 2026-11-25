@@ -47,6 +47,7 @@ import importlib.util
 import io
 import json
 import os
+import shlex
 import shutil
 import subprocess
 import sys
@@ -787,7 +788,7 @@ def newest_main_commit_left_no_test_failing_cases(scratch):
 
     def unlink_failing_for_the_record(self, *arguments, **options):
         if is_the_programs_temporary_record(self):
-            raise OSError(30, "Read-only file system")
+            raise OSError(16, "Device or resource busy")
         return real_unlink(self, *arguments, **options)
 
     os.replace, Path.unlink = replace_failing_for_the_record, unlink_failing_for_the_record
@@ -803,24 +804,47 @@ def newest_main_commit_left_no_test_failing_cases(scratch):
           "behind and the cleanup's error, and the record keeps its commit",
           exit_code == 3 and recorded == parent and len(temporaries) == 1
           and f"The temporary file {path.parent / temporaries[0]} could not be removed either: "
-              f"[Errno 30] Read-only file system." in output
-          and f"rm {path.parent / temporaries[0]}" in output,
+              f"[Errno 16] Device or resource busy." in output
+          and f"was not recorded in {path}: [Errno 30] Read-only file system" in output
+          and f"rm {shlex.quote(str(path.parent / temporaries[0]))}" in output,
           f"exit {exit_code}\n{output}\n{temporaries}")
 
     into_another_branch = default_routes([])
     into_another_branch["pr merge"] = {"origin_main_to": "MERGE_COMMIT", "origin": "ORIGIN"}
     into_another_branch["view-state"] = {
         "stdout": '{"state":"MERGED","mc":"MERGE_COMMIT","base":"stacked-topic-branch"}\n'}
+    write_the_newest_main_commit = newest_main_commit_left_no_test_failing_written("PARENT\n")
+
+    failed_suites_as_written = []
+
+    def both_records_written(directory):
+        write_the_newest_main_commit(directory)
+        failed_suites_record_written(directory)
+        failed_suites_as_written.append(failed_suites_record_of(directory))
+
     exit_code, output, _, _, _ = run_case(
         scratch, "no-test-failing-merged-into-another-branch", [(GATE_PASSED, 0)],
         into_another_branch, merge_commit_new_to_the_clone=True,
-        before_the_program_runs=newest_main_commit_left_no_test_failing_written("PARENT\n"))
+        before_the_program_runs=both_records_written)
     directory = scratch / "no-test-failing-merged-into-another-branch"
     parent = git_output(directory / "origin-seed", "rev-parse", "HEAD~1")
-    check("a pull request merged into a branch other than main leaves the record naming main's "
-          "commit, and says why",
+    check("a pull request merged into a branch other than main leaves both records main alone "
+          "owns as they were, the newest main commit and main's failed suites, and says why",
           exit_code == 0 and newest_main_commit_left_no_test_failing_of(directory) == parent
-          and "merged into 'stacked-topic-branch', not main" in output,
+          and [failed_suites_record_of(directory)] == failed_suites_as_written
+          and "merged into 'stacked-topic-branch', not main" in output
+          and f"{failed_suites_record_file(directory)}, was left as it was: pull request " in output,
+          f"exit {exit_code}\n{output}\n{failed_suites_record_of(directory)}")
+
+    exit_code, output, calls, parent, merge_commit, recorded = case(
+        "no-test-failing-record-not-usable-and-run-prints-no-summary", "c" * 40 + "\n",
+        runner_answer=("PASS scripts/some-test.py (1s)\n", 0))
+    check("an after-merge test run that cannot use the record and prints no SUMMARY line prints "
+          "the recovery command with the baseline the run used, not a check of the record again",
+          exit_code == 3 and calls
+          and f"run: python3 scripts/run-all-test-suites.py "
+              f"--only-suites-whose-recorded-inputs-changed-since {calls[0]['argv'][1]}\n" in output
+          and "if git merge-base --is-ancestor" not in output,
           f"exit {exit_code}\n{output}")
 
 
