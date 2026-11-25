@@ -2374,12 +2374,12 @@ def check(arguments):
                                                                        parser)
     rating = case_against_rating(lines, item, document, arguments, top)
     rated = CASE_AGAINST_HASHTAG.format(rating=rating.replace(" ", "_")) if rating else ""
-    recommendation = walk_finder.approval_walk_item_last_recommendation_text_from_item_lines(lines)
+    recommendation = walk_finder.approval_walk_item_last_recommendation_or_alternative_text_from_item_lines(lines)
     if arguments.moved_on_no_decision and recommendation is not None:
         raise Failure(MOVED_ON_NO_DECISION_REFUSED.format(
             item=item, recommendation=recommendation,
             commands=answer_check_commands(top)))
-    hidden = (walk_finder.approval_walk_item_last_recommendation_text_from_item_lines(tag_comments_kept)
+    hidden = (walk_finder.approval_walk_item_last_recommendation_or_alternative_text_from_item_lines(tag_comments_kept)
               if arguments.moved_on_no_decision and recommendation is None else None)
     if hidden is not None:
         raise Failure(MOVED_ON_NO_DECISION_HIDDEN_RECOMMENDATION.format(

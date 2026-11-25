@@ -47,6 +47,9 @@ hook = importlib.util.module_from_spec(_hook_spec)
 _hook_spec.loader.exec_module(hook)
 # The walk-me-through skill's closing line after its link; the answer hook's suite checks SKILL.md holds it.
 CLOSING_LINE_ANSWER_LETTERS = "A approve · D disapprove · M more responses"
+# The closing line names the item's recommendation after A, as WALK_DOCUMENT states it for items 2 and 3.
+ITEM_2_LETTERS = "A approve: put it in the wiki · D disapprove · M more responses"
+ITEM_3_LETTERS = "A approve: build the hook · D disapprove · M more responses"
 SUITE_ROOT = Path(tempfile.mkdtemp(prefix="approval-walk-question-refusal-hook-test-")).resolve()
 FAKE_BIN = SUITE_ROOT / "bin"
 failures = []
@@ -412,9 +415,9 @@ def test_the_block_message_says_what_to_do():
              "End the message you write next with the line `I added the question to the walk as a new item.` and "
              "then the waiting item's closing line, as the walk-me-through skill writes it, as the last text of that "
              f"message. {NOT_IN_BACKTICKS}\n[Item 2 of {M_AFTER_THE_ADDED_ITEM}, where the poem page lives](<page link>) · "
-             f"{CLOSING_LINE_ANSWER_LETTERS}\n{NO_QUESTION_SENTENCE}\n"
+             f"{ITEM_2_LETTERS}\n{NO_QUESTION_SENTENCE}\n"
              f"[Item 2 of {M_WITH_NO_ITEM_ADDED}, where the poem page lives](<page link>) · "
-             f"{CLOSING_LINE_ANSWER_LETTERS}\n"
+             f"{ITEM_2_LETTERS}\n"
              "The minutes record no `#item_page` line for item 2. For each such item, publish its page first if it "
              f"has none and add to {case.minutes} the line `#item_page item <N> of <M> <the page's link>`, which this "
              "hook reads back; then put the same link in place of `<page link>` in the item's closing line.\n"),
@@ -1078,21 +1081,21 @@ def test_two_waiting_items():
                   "item 3: past that item's sub-steps", "`I added the question to the walk as a new item.`",
                   "and then each waiting item's closing line, on a line of its own, as the walk-me-through skill "
                   f"writes it, as the last text of that message. {NOT_IN_BACKTICKS}\n[Item 2 of {M_AFTER_THE_ADDED_ITEM}, where the "
-                  f"poem page lives](<page link>) · {CLOSING_LINE_ANSWER_LETTERS}\n[Item 3 of "
+                  f"poem page lives](<page link>) · {ITEM_2_LETTERS}\n[Item 3 of "
                   f"{M_AFTER_THE_ADDED_ITEM}, the hook](<page link>) · "
-                  f"{CLOSING_LINE_ANSWER_LETTERS}\n{NO_QUESTION_SENTENCE}\n[Item 2 of {M_WITH_NO_ITEM_ADDED}, where "
-                  f"the poem page lives](<page link>) · {CLOSING_LINE_ANSWER_LETTERS}\n[Item 3 of "
+                  f"{ITEM_3_LETTERS}\n{NO_QUESTION_SENTENCE}\n[Item 2 of {M_WITH_NO_ITEM_ADDED}, where "
+                  f"the poem page lives](<page link>) · {ITEM_2_LETTERS}\n[Item 3 of "
                   f"{M_WITH_NO_ITEM_ADDED}, the hook](<page link>) · "
-                  f"{CLOSING_LINE_ANSWER_LETTERS}\nThe minutes record no `#item_page` line for items 2 and 3. For each such item")
+                  f"{ITEM_3_LETTERS}\nThe minutes record no `#item_page` line for items 2 and 3. For each such item")
     mixed = Case(minutes="#item_page item 3 of 10 https://claude.ai/artifact/p3\n#next_to_present items 2 and 3 of 10")
     mixed.reply("Should I merge the pull request now?")
     check_blocked("with two items waiting and a page for one, each gets its own form of the closing line",
                   mixed.run(), f"[Item 2 of {M_AFTER_THE_ADDED_ITEM}, where the poem page lives](<page link>) · "
-                  f"{CLOSING_LINE_ANSWER_LETTERS}\n[Item 3 of {M_AFTER_THE_ADDED_ITEM}, the hook]"
-                  f"(https://claude.ai/artifact/p3) · {CLOSING_LINE_ANSWER_LETTERS}\n{NO_QUESTION_SENTENCE}\n"
+                  f"{ITEM_2_LETTERS}\n[Item 3 of {M_AFTER_THE_ADDED_ITEM}, the hook]"
+                  f"(https://claude.ai/artifact/p3) · {ITEM_3_LETTERS}\n{NO_QUESTION_SENTENCE}\n"
                   f"[Item 2 of {M_WITH_NO_ITEM_ADDED}, where the poem page lives](<page link>) · "
-                  f"{CLOSING_LINE_ANSWER_LETTERS}\n[Item 3 of {M_WITH_NO_ITEM_ADDED}, the hook]"
-                  f"(https://claude.ai/artifact/p3) · {CLOSING_LINE_ANSWER_LETTERS}\n"
+                  f"{ITEM_2_LETTERS}\n[Item 3 of {M_WITH_NO_ITEM_ADDED}, the hook]"
+                  f"(https://claude.ai/artifact/p3) · {ITEM_3_LETTERS}\n"
                   "The minutes record no `#item_page` line for item 2. For each such item")
 
 
@@ -1207,8 +1210,7 @@ def test_the_refusal_gives_the_waiting_items_closing_line_and_it_passes_once_the
     case = Case(minutes="#item_page item 2 of 10 https://claude.ai/artifact/p2\n#next_to_present item 2 of 10")
     case.reply("Should I merge the pull request now?")
     reason = blocked_reason(case.run()) or ""
-    expected = (f"[Item 2 of 11, where the poem page lives](https://claude.ai/artifact/p2) · "
-                f"{CLOSING_LINE_ANSWER_LETTERS}")
+    expected = f"[Item 2 of 11, where the poem page lives](https://claude.ai/artifact/p2) · {ITEM_2_LETTERS}"
     unchanged = expected.replace("Item 2 of 11", "Item 2 of 10")
     check("the refusal gives the waiting item's closing line with its page link, the new total for a question and "
           "the walk's own total for text that asks nothing",
@@ -1327,7 +1329,7 @@ def test_the_closing_line_without_its_link_is_skipped_only_for_an_item_whose_pub
                   minutes=PUBLISH_FAILED_LINE.format(number=2, total=10) + "\n#next_to_present item 2 of 10")
     line = hook.answer_hook.closing_line("2", hook.answer_hook.read_walk(failed.checkout))
     check("the answer hook's closing line for an item whose publish failed has no link",
-          line == f"Item 2 of 10, the poem page is recommended for the wiki · {CLOSING_LINE_ANSWER_LETTERS}", line)
+          line == f"Item 2 of 10, the poem page is recommended for the wiki · {ITEM_2_LETTERS}", line)
     failed.reply("Recorded.\n\n" + str(line))
     check_silent("the closing line without its link passes for an item whose newest publish failed",
                  failed.run(model="yes"))

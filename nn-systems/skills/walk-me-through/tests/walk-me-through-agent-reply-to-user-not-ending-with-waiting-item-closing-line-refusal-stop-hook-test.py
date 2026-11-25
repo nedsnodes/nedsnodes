@@ -107,8 +107,12 @@ The poem page goes in the wiki, next to the glossary and the style guide, so tha
 
 **The strongest case for N:** a page in the wiki is one more document agents must be told to read. **Recommendation: Y.**"""
 
-# The closing line's answer letters; the answer hook's suite checks that the walk-me-through skill writes the same.
-LETTERS = "A approve · D disapprove · M more responses"
+# The closing line's answer letters for an item that states no recommendation; the answer hook's suite checks that
+# the walk-me-through skill writes the same.
+PLAIN_LETTERS = "A approve · D disapprove · M more responses"
+# The closing line names each item's recommendation after A; WALK_DOCUMENT's items recommend Y, but item 6 N.
+LETTERS = "A approve: Y · D disapprove · M more responses"
+ITEM_LETTERS = {6: "A approve: N · D disapprove · M more responses"}
 COUNT_IN_DOCUMENT = re.compile(r"Items?\s+(\d+(?:\.\d+)*(?:\s*(?:,|and|to|-)\s*\d+(?:\.\d+)*)*)\s+of\s+(\d+)")
 
 
@@ -119,9 +123,10 @@ def page(number):
 def closing(number, total=9, link="page", point="where the poem page lives"):
     """The walk-me-through skill's closing line for the item: with its page's link by default, or link, or none."""
     label = f"Item {number} of {total}" + (f", {point}" if point else "")
+    letters = ITEM_LETTERS.get(number, LETTERS)
     if link is None:
-        return f"{label} · {LETTERS}"
-    return f"[{label}]({page(number) if link == 'page' else link}) · {LETTERS}"
+        return f"{label} · {letters}"
+    return f"[{label}]({page(number) if link == 'page' else link}) · {letters}"
 
 
 def page_lines_for_every_item(document):
@@ -283,7 +288,8 @@ def test_the_closing_lines_shown_are_the_ones_the_answer_hook_builds():
         case.walk_files(minutes="#next_to_present item 2 of 9.", pages=pages)
         case.reply("Recorded.")
         walk = answer_hook.WalkState(None, None, ["2"], 9, {}, None, points={"2": point},
-                                     pages={"2": link or answer_hook.load_walk_finder().ITEM_PAGE_PUBLISH_FAILED})
+                                     pages={"2": link or answer_hook.load_walk_finder().ITEM_PAGE_PUBLISH_FAILED},
+                                     choices={"2": ("Y", None)})
         expected = answer_hook.closing_line("2", walk)
         reason = blocked_reason(case.run()) or ""
         check(f"for {case_name}, the refusal shows the closing line the answer hook builds",
@@ -351,7 +357,8 @@ def test_items_waiting_together():
     check_reminded("a reply ending with neither of two waiting items' closing lines is sent back with both",
                    case.run(), "`Item 5 of 9` and `Item 6 of 9`", "no closing line for `Item 5 of 9` ends the reply; "
                    "no closing line for `Item 6 of 9` ends the reply",
-                   f"\n[Item 5 of 9, the hook]({page(5)}) · {LETTERS}\n[Item 6 of 9, the reviewer]({page(6)}) · {LETTERS}")
+                   f"\n[Item 5 of 9, the hook]({page(5)}) · {LETTERS}\n[Item 6 of 9, the reviewer]({page(6)}) · "
+                   f"{ITEM_LETTERS[6]}")
     case.reply("Recorded.\n\n" + closing(5))
     result = case.run()
     check_reminded("a reply ending with one of two waiting items' closing lines is sent back with the other",
@@ -1423,7 +1430,7 @@ def test_a_no_decision_sub_step_gets_only_the_next_line():
     case = Case()
     case.walk_files(minutes="#next_to_present item 4.1 of 9.", document=NO_DECISION_SUB_STEP_DOCUMENT,
                     pages=NO_DECISION_PAGES)
-    case.reply("Recorded.\n\n[Item 4.1 of 9, What a filter does](https://claude.ai/artifact/p41) · " + LETTERS)
+    case.reply("Recorded.\n\n[Item 4.1 of 9, What a filter does](https://claude.ai/artifact/p41) · " + PLAIN_LETTERS)
     result = case.run()
     check_reminded("an A, D and M closing line on a no-decision sub-step is sent back", result, NO_DECISION_LINE)
     check("the refusal for a no-decision sub-step offers no A, D or M",
@@ -1451,7 +1458,8 @@ def test_a_sub_step_that_asks_a_decision_keeps_a_d_and_m():
                     pages=NO_DECISION_PAGES)
     case.reply("Recorded.")
     check_reminded("the sub-step with a recommendation keeps its A, D and M line", case.run(),
-                   "[Item 4.2 of 9, The choice](https://claude.ai/artifact/p42) · " + LETTERS)
+                   "[Item 4.2 of 9, The choice](https://claude.ai/artifact/p42) · "
+                   "A approve: leave the filter out · D disapprove · M more responses")
     with_recommendation = NO_DECISION_SUB_STEP_DOCUMENT.replace(
         "A filter hides old rows.", "A filter hides old rows.\n\nRecommendation: keep it.")
     contradictory = Case()
@@ -1460,7 +1468,8 @@ def test_a_sub_step_that_asks_a_decision_keeps_a_d_and_m():
     contradictory.reply("Recorded.")
     check_reminded("a sub-step with both a recommendation and the no-decision line keeps A, D and M, since check "
                    "refuses to move on from it", contradictory.run(),
-                   "[Item 4.1 of 9, What a filter does](https://claude.ai/artifact/p41) · " + LETTERS)
+                   "[Item 4.1 of 9, What a filter does](https://claude.ai/artifact/p41) · "
+                   "A approve: keep it · D disapprove · M more responses")
 
 
 def main():

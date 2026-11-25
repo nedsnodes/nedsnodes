@@ -130,7 +130,9 @@ Stop hooks agree on what is one. The line, without its outer spaces and as the
 Markdown parser reads it, is one link that opens the line, to any target,
 whose text is a running count in plain text, `Item 4 of 9` or `Items 10 and
 11 of 12`, then nothing or `, ` and a point, followed by ` · ` and the answer
-letters and nothing more; or, for an item whose publish failed, the same line
+letters and nothing more, where each response may name what it does after a
+colon, as the answer hook's closing_line names the item's recommendation and
+alternative, `A approve: leave the filter out`; or, for an item whose publish failed, the same line
 with only the link's text, `Item 4 of 9, <the point> · A approve · ...`. A
 count in emphasis or a code span, or one that names no item, such as a range
 that runs backwards, makes no closing line.
@@ -154,6 +156,7 @@ from pathlib import Path
 
 HTML_COMMENT = re.compile(r"<!--.*?(?:-->|\Z)", re.S)
 RECOMMENDATION = re.compile(r"Recommendation:(.*)$", re.I | re.M)
+APPROVAL_WALK_ITEM_ALTERNATIVE_TO_RECOMMENDATION_LINE_PATTERN = re.compile(r"The alternative:(.*)$", re.I | re.M)
 
 REPOSITORY_TOP = Path(__file__).resolve().parents[3]
 SUITE_RUNNER_FILE = REPOSITORY_TOP / "scripts" / "run-all-test-suites.py"
@@ -273,12 +276,21 @@ def markdown_parser():
                        MARKDOWN_PARSER_MODULE_FILE).markdown_parser()
 
 
-def approval_walk_item_last_recommendation_text_from_item_lines(lines):
+def approval_walk_item_last_recommendation_or_alternative_text_from_item_lines(lines, label=RECOMMENDATION):
     """The last recommendation in an item's prose_lines, the text after `Recommendation:` as written, without
-    emphasis or one trailing period; or None when there is none, or the last one has no text after it."""
-    found = [match[1].strip(" *_") for match in RECOMMENDATION.finditer("\n".join(lines))]
+    emphasis or one trailing period; or None when there is none, or the last one has no text after it. With
+    label APPROVAL_WALK_ITEM_ALTERNATIVE_TO_RECOMMENDATION_LINE_PATTERN, the same for the item's last
+    `The alternative:` line."""
+    found = [match[1].strip(" *_") for match in label.finditer("\n".join(lines))]
     found = [text[:-1].rstrip(" *_") if text.endswith(".") else text for text in found]
     return found[-1] if found and found[-1] else None
+
+
+def approval_walk_closing_line_answer_letters_with_named_choices_pattern_source(answer_letters):
+    """The regular expression source for the answer letters after a closing line's link, answer_letters being the
+    answer hook's ANSWER_LETTERS_TEXT, `A approve · D disapprove · M more responses`, where each response may
+    name what it does after a colon, as `A approve: leave the filter out`."""
+    return " · ".join(re.escape(response) + r"(?:: .+?)?" for response in answer_letters.split(" · "))
 
 
 def without_html_comments(lines):
@@ -441,19 +453,26 @@ def approval_walk_closing_line_read(line, parser, answer_letters):
     default and reads as text."""
     line = line.strip()
     tokens = parser.parseInline(line)[0].children
-    after_label = f" · {answer_letters}"
+    choices = approval_walk_closing_line_answer_letters_with_named_choices_pattern_source(answer_letters)
     link = None
     if tokens and tokens[0].type == "link_open":
         close = next((index for index, token in enumerate(tokens) if token.type == "link_close"), None)
-        if close is None or [token.type for token in tokens[close + 1:]] != ["text"] \
-                or tokens[close + 1].content != after_label:
+        if close is None or any(token.type == "link_open" for token in tokens[close + 1:]):
+            return None
+        # A recommendation named after `A approve:` may hold emphasis or a code span, each a token of its own.
+        after = "".join(token.markup + token.content + token.markup if token.type == "code_inline"
+                        else token.content or token.markup for token in tokens[close + 1:])
+        if not re.fullmatch(rf" · {choices}", after):
             return None
         label = "".join(token.content for token in tokens[1:close])
         link = tokens[0].attrs.get("href")
-    elif any(token.type == "link_open" for token in tokens) or not line.endswith(after_label):
+    elif any(token.type == "link_open" for token in tokens):
         return None
     else:
-        label = line[:-len(after_label)]
+        unlinked = re.fullmatch(rf"(.*?) · {choices}", line)
+        if not unlinked:
+            return None
+        label = unlinked[1]
     count = CLOSING_LINE_LABEL.fullmatch(label)
     if not count:
         return None
@@ -491,7 +510,7 @@ def approval_walk_waiting_sub_step_numbers_whose_text_ends_with_no_decision_clos
         shown = approval_walk_item_text_as_shown_to_user(text, parser, all_units, unit, number)
         lines = [line for line in prose_lines(shown, parser) if line.strip()]
         if (approval_walk_sub_step_no_decision_closing_line_page_link_or_none(lines[-1]) is not None
-                and approval_walk_item_last_recommendation_text_from_item_lines(lines) is None):
+                and approval_walk_item_last_recommendation_or_alternative_text_from_item_lines(lines) is None):
             found.add(number)
     return found
 
