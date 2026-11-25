@@ -2,7 +2,7 @@
 """Regenerate the local GHI mirror (nedschorus#46, design doc
 docs/issues/46-ghi-guide-agent.system.design.md § The GHI mirror).
 
-`ghi-guide-agent` — the project's knowledge agent over its GitHub-issue corpus —
+`ghi-guide` — the project's knowledge agent over its GitHub-issue corpus —
 answers only from this mirror, never from GitHub directly (the cold-start
 prompt's own rule). This script is what keeps the mirror true: it writes
 `<mirror-dir>/issues-open.md` (every open issue near-raw: number, title,
@@ -21,7 +21,7 @@ Two modes:
            and merges them in. Cheap and the routine path — run before
            every ask (design § The ask path, step 1). A session reincarnation
            calls --full instead, per the design's "rewritten whole from a
-           full fetch" rule; deciding WHEN to reincarnate is ghi-guide-agent-ask.py's
+           full fetch" rule; deciding WHEN to reincarnate is ghi-guide-ask.py's
            job, not this script's.
 
 Fetches ride `gh api graphql` against GitHub's search connection, not
@@ -54,7 +54,7 @@ Usage:
   ghi-mirror-refresh.py [--full] [--mirror-dir PATH] [--repo OWNER/NAME]
 
 Exit 0 and prints one JSON line to stdout on success — the contract
-ghi-guide-agent-ask.py's resume preamble reads:
+ghi-guide-ask.py's resume preamble reads:
   {"changed": [13, 24], "full_refresh": false, "mirror_dir": "...",
    "open_path": "...", "closed_path": "..."}
 An empty "changed" list means nothing moved since the last refresh. Exit 1
@@ -302,7 +302,7 @@ def refresh(mirror_dir: Path, repo: str, full: bool):
 
 def main(argv=None) -> int:
     parser = argparse.ArgumentParser(
-        description="Regenerate the local GHI mirror ghi-guide-agent reads.",
+        description="Regenerate the local GHI mirror ghi-guide reads.",
         formatter_class=argparse.RawDescriptionHelpFormatter, epilog=__doc__,
     )
     parser.add_argument("--full", action="store_true",

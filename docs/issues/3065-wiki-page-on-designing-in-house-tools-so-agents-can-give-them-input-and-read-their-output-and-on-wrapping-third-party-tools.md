@@ -30,7 +30,7 @@ Two defects of this kind, on main at `c71f9878d`: `nn-systems/skills/explain/exp
   - GHI [Candidate skill: design-change — read-only evidence-grounded design with one recommendation and honest exits](https://github.com/nedsnodes/nedsnodes/issues/17) carries the user's direction of 2026-10-29 to build its design-change skill for designing code: "tool design and module design kind of stuff".
   - GHI [Design the project's Claude Code hooks: requirements drawn from the existing hooks, then keep, fix, merge, rewrite or remove each one](https://github.com/nedsnodes/nedsnodes/issues/1790), deferred, redesigns the hooks.
   - A sibling page on how an agent uses a tool, runs it, reads its exit code and output, and acts on a failure, which the user approved on 2026-10-30 (approval-walk reboot-test-carried-items-2026-10-27, item 34, "A"), waits for the hub page.
-- **Search for an existing GHI.** ghi-guide-agent, asked on 2026-11-11 with `--include-closed` whether any GHI holds a page on designing in-house tools for agents, found none; its search of closed GHIs for "in-house tool", "tool-design", "wrapper script" and "designing programs" was empty.
+- **Search for an existing GHI.** ghi-guide, asked on 2026-11-11 with `--include-closed` whether any GHI holds a page on designing in-house tools for agents, found none; its search of closed GHIs for "in-house tool", "tool-design", "wrapper script" and "designing programs" was empty.
 
 ## What is decided
 

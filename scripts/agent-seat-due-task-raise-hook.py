@@ -206,7 +206,7 @@ that tells an attended agent-session from a headless child.
 
 The project's own headless Claude callers run no project hook at all: the
 cold-read Claude cell, and the restater-judge cell through it, pass
-`--settings` with disableAllHooks; scripts/ghi-guide-agent-ask.py and
+`--settings` with disableAllHooks; scripts/ghi-guide-ask.py and
 scripts/sanity-check-adversarial-prompts.py pass `--setting-sources user`. The attendance
 check covers a child started any other way.
 """
@@ -910,8 +910,8 @@ NEXT_ACTION_INSTRUCTIONS = (
     "user; put first the items that block work, then what makes the user's interaction easier "
     "and what makes agents or the process faster or cheaper, then the rest, the oldest first "
     "among equals.",
-    "If you have none of these at all, ask ghi-guide-agent for 3 to 5 GHIs to work on, with "
-    "`python3 scripts/ghi-guide-agent-ask.py \"Which 3 to 5 open GHIs would most improve how "
+    "If you have none of these at all, ask ghi-guide for 3 to 5 GHIs to work on, with "
+    "`python3 scripts/ghi-guide-ask.py \"Which 3 to 5 open GHIs would most improve how "
     "easy the user's interaction with agents is, or how fast or cheap agents and the "
     "development process are?\"`, choose among them the same way, and make them the walk's "
     "items.",

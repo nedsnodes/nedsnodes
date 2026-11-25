@@ -365,7 +365,7 @@ in the nedschorus repository, which this machine also clones:
   machine's scheduled check that the work-snapshot hook finds a real claude
   session, written by
   `nn-systems/handoff/uncommitted-work-snapshot-hook-scheduled-check-that-real-claude-session-is-recorded-as-owner.py`
-- `ghi-guide-agent-proposed-improvements-or-changes/` -- ghi-guide-agent's ruling questions
+- `ghi-guide-agent-proposed-improvements-or-changes/` -- ghi-guide's ruling questions
   about GHI-MDs, each a proposed-improvements-or-changes-file settled in
   place, written by `scripts/ghi-issue-write.py`
 - `guarded-file-versions-and-approvals/` -- each machine's log of every

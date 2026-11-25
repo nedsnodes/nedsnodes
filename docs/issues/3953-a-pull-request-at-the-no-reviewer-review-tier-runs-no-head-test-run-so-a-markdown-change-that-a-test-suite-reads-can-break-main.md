@@ -35,7 +35,7 @@ No option is chosen here. The options seen so far:
 - Make `test_files_to_run_for_changed_files` list the suites whose recorded inputs include a changed Markdown file, and have a program, not merge-lane-2's memory, run those suites at `no-reviewer-tier` and record that they passed.
 - Have the merge program refuse a merge that has no passing head test run record, whatever its tier. This option needs the first option, or every prose-only pull request would be refused; with it, the rule that a head test run happens moves from the seat-brief into code.
 - Separately from the tier gap: have the merge program refuse the next merge while the latest after-merge test run of main failed, until it passes or the user overrides it, so that a failure such as step 3's cannot stay unnoticed across later merges, as it did until step 4.
-- Fold the fix into the review-tier work of GHI [3889](https://github.com/nedsnodes/nedsnodes/issues/3889), or into GHI [3891](https://github.com/nedsnodes/nedsnodes/issues/3891), which posts every merge-lane-2 review through one program, as ghi-guide-agent suggested. Both concern the same review tiers, but neither covers this gap.
+- Fold the fix into the review-tier work of GHI [3889](https://github.com/nedsnodes/nedsnodes/issues/3889), or into GHI [3891](https://github.com/nedsnodes/nedsnodes/issues/3891), which posts every merge-lane-2 review through one program, as ghi-guide suggested. Both concern the same review tiers, but neither covers this gap.
 
 ## Next action
 

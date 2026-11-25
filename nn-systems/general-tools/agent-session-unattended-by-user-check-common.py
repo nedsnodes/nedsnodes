@@ -4,7 +4,7 @@
 No user attends an agent-session when either holds:
 - NEDSNODES_SESSION_REINCARNATION_OWNED_BY_CALLER is set, to any non-empty
   value: a program of this project started the agent-session and reads its
-  answer itself, as scripts/ghi-guide-agent-ask.py does;
+  answer itself, as scripts/ghi-guide-ask.py does;
 - CLAUDE_CODE_SESSION_ATTENDED is "0": Claude Code sets it so for a headless
   `claude -p` run, and to "1" for an interactive agent-session.
 

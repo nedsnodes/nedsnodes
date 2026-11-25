@@ -182,7 +182,7 @@ Raised on 28 occasions, in 27 files.
 
 Raised on 27 occasions, in 27 files.
 
-- A question on ruling-agent: "I wonder how agents know if I've approved something, because I may approve it in one place and they may execute in a different place. ... we'll call it a ruling agent, a agent that tracks my approvals and can be quickly ..." (`nedlern@ned-box:/home/nedlern/nedsnodes-logs/walk/prime-intellect-open-items-2026-11-01-minutes.md`, line 234)
+- A question on ruling-guide: "I wonder how agents know if I've approved something, because I may approve it in one place and they may execute in a different place. ... we'll call it a ruling agent, a agent that tracks my approvals and can be quickly ..." (`nedlern@ned-box:/home/nedlern/nedsnodes-logs/walk/prime-intellect-open-items-2026-11-01-minutes.md`, line 234)
 - A decision on loose-ends and half-finished tasks: "Walking through all the tasks is too much. There could be 100 tasks ... So we want to try to concentrate our energy to actually get things into production. And defer in a memorable way, which is a task list or GHI things" (`nedlern@ned-box:/home/nedlern/nedsnodes-logs/walk/prime-intellect-open-decisions-for-the-user-2026-10-22-2-minutes.md`, line 85)
 - A question on main-gatekeeper follow-up of requests in review: "when you say close do you mean reject? I'm a bit concerned that we may assign tasks to agents that might not be reincarnated, so I'm thinking the daily maintence cycle could check for problems like this? ... Typically what should ..." (`nedlern@ned-box:/home/nedlern/nedsnodes-logs/walk/ghi-3-main-gatekeeper-specification-cold-read-findings-2026-10-01-minutes.md`, line 33)
 

@@ -25,7 +25,7 @@ Part 3. It follows the rule the user approved on 2026-11-19 at 22:51Z, answering
 
 Until the wiki-agent exists, overall-cleanup fixes wiki pages under the rule of Part 3. Item 4 said so in overall-cleanup's words: "Until the wiki-agent exists, I, overall-cleanup, fix pages under that rule." How overall-cleanup gets a fix under Part 3 past the instruction-file guard is open question 5 below; until it is answered, when the guard refuses such a fix, overall-cleanup does what the refusal says. GHI 1058's daily wiki check is not built yet.
 
-The wiki-agent is not the wiki-guide-agent of GHI [Two more guide-agents: wiki-guide-agent for the wiki, and agent-instructions-and-hooks-guide-agent for how the project instructs and controls its agents](https://github.com/nedsnodes/nedsnodes/issues/2266): wiki-guide-agent is a guide-agent, which answers other agents' questions about the wiki and changes no wiki page.
+The wiki-agent is not the wiki-guide of GHI [Two more domain-guides: wiki-guide for the wiki, and agent-instructions-and-hooks-guide for how the project instructs and controls its agents](https://github.com/nedsnodes/nedsnodes/issues/2266): wiki-guide is a domain-guide, which answers other agents' questions about the wiki and changes no wiki page.
 
 ## Steps that need judgment
 

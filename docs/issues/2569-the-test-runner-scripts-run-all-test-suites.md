@@ -144,7 +144,7 @@ The measurement, its scripts and the totals for each selection reason: nedlern@n
 
 ## Related
 
-On 2026-11-04, `scripts/ghi-guide-agent-ask.py --include-closed`, asked for a GHI on either reason, found none. Two open GHIs are near: [The test runner `scripts/run-all-test-suites.py` records which code each test case covers, using coverage.py's per-test contexts](https://github.com/nedsnodes/nedsnodes/issues/2259), a different mechanism, which this design should check before changing the recording format; and [Each round of a pull request runs its test suites once, and a push reuses a passing test run of the same tree](https://github.com/nedsnodes/nedsnodes/issues/2384), which skips whole test runs rather than single nn-test-suites.
+On 2026-11-04, `scripts/ghi-guide-ask.py --include-closed`, asked for a GHI on either reason, found none. Two open GHIs are near: [The test runner `scripts/run-all-test-suites.py` records which code each test case covers, using coverage.py's per-test contexts](https://github.com/nedsnodes/nedsnodes/issues/2259), a different mechanism, which this design should check before changing the recording format; and [Each round of a pull request runs its test suites once, and a push reuses a passing test run of the same tree](https://github.com/nedsnodes/nedsnodes/issues/2384), which skips whole test runs rather than single nn-test-suites.
 
 ## Next action
 

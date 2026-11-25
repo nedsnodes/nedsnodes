@@ -25,7 +25,7 @@ The test runner now records how long each test run waited and ran, but nothing s
 
 ## Related
 
-On 2026-10-30, `scripts/ghi-guide-agent-ask.py --include-closed`, asked for a GHI on this script, found none. The nearest are on other matters: GHI [#972](https://github.com/nedsnodes/nedsnodes/issues/972), the service that keeps one record of every agent-seat, which a design may use to attribute a transcript to its agent-seat; GHI [#27](https://github.com/nedsnodes/nedsnodes/issues/27), on detecting an agent-session that is stuck or waiting; and GHI [#1203](https://github.com/nedsnodes/nedsnodes/issues/1203), which nudges a pull request's author whose review findings have gone unanswered.
+On 2026-10-30, `scripts/ghi-guide-ask.py --include-closed`, asked for a GHI on this script, found none. The nearest are on other matters: GHI [#972](https://github.com/nedsnodes/nedsnodes/issues/972), the service that keeps one record of every agent-seat, which a design may use to attribute a transcript to its agent-seat; GHI [#27](https://github.com/nedsnodes/nedsnodes/issues/27), on detecting an agent-session that is stuck or waiting; and GHI [#1203](https://github.com/nedsnodes/nedsnodes/issues/1203), which nudges a pull request's author whose review findings have gone unanswered.
 
 ## Next action
 

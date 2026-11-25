@@ -60,4 +60,4 @@ The user approved a change to the rule that closes the task on 2026-11-08, as it
 
 ## Where this came from
 
-Item 2 of Question 4, "What should be code", in the cold-read-fast-read of the handoff-system's nn-architecture-overview draft on 2026-11-03: `nedlern@ned-box:/home/nedlern/nedsnodes-logs/cold-read-records/nedsnodes-handoff-architecture-overview-draft-2026-11-03/cold-read-fast-read.md`. Checked against main at 78716fd58 on 2026-11-03. ghi-guide-agent, asked with `--include-closed`, named no issue, open or closed, that covers it.
+Item 2 of Question 4, "What should be code", in the cold-read-fast-read of the handoff-system's nn-architecture-overview draft on 2026-11-03: `nedlern@ned-box:/home/nedlern/nedsnodes-logs/cold-read-records/nedsnodes-handoff-architecture-overview-draft-2026-11-03/cold-read-fast-read.md`. Checked against main at 78716fd58 on 2026-11-03. ghi-guide, asked with `--include-closed`, named no issue, open or closed, that covers it.

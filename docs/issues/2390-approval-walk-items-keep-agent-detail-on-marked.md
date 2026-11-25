@@ -23,7 +23,7 @@ Item 6.1 then proposed keeping such detail out of items and putting it in the ta
 - The walk check program already reads marked evidence lines inside an item for items the user is not asked about: `#not_asked_touches` and four others of the `#not_asked_` family, validated by its `not_asked_problems` function (paths exist, names unused). The agent view mostly exists already, for one kind of item.
 - GHI [Approval-walk item page publisher copying linked files into the page as timestamped copies, so short repository and log-store paths open on the iPad](https://github.com/nedsnodes/nedsnodes/issues/2168) is the vehicle for a committed program that builds each item page; today agents build pages by hand.
 - GHI [The walk-me-through check program reads untagged walk-minutes lines as decisions by their keywords](https://github.com/nedsnodes/nedsnodes/issues/1930) covers the check program reading tagged lines, the mechanism to extend.
-- GHI [ruling-agent keeps user-rulings, checks approval-walk items against them](https://github.com/nedsnodes/nedsnodes/issues/2118) plans `#rulings_checked` lines in items; those become agent lines too.
+- GHI [ruling-guide keeps user-rulings, checks approval-walk items against them](https://github.com/nedsnodes/nedsnodes/issues/2118) plans `#rulings_checked` lines in items; those become agent lines too.
 
 ## The work
 

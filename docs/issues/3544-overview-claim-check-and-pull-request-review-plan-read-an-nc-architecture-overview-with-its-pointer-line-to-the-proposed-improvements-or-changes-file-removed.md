@@ -37,7 +37,7 @@ GHI 3418 lists the program adding the pointer line itself under "Not in this GHI
 
 ## Search receipt
 
-On 2026-11-13, ghi-guide-agent was asked, with closed issues included, whether any issue covers the claim check or the review plan ignoring the pointer line. It found none, after searching its issue lists for `proposed-improvements-or-changes`, `claim check`, `pull-request-review-plan` and `pointer line`, and named GHIs 2532, 3418 and 168 as related.
+On 2026-11-13, ghi-guide was asked, with closed issues included, whether any issue covers the claim check or the review plan ignoring the pointer line. It found none, after searching its issue lists for `proposed-improvements-or-changes`, `claim check`, `pull-request-review-plan` and `pointer line`, and named GHIs 2532, 3418 and 168 as related.
 
 ## Next action
 

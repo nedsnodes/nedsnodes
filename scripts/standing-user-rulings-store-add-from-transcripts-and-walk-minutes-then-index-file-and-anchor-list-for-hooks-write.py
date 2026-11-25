@@ -11,7 +11,7 @@ Usage:
   --repository-checkout  default the checkout this file is in; its origin/main, as last fetched, resolves the
                          repository paths and GHI-MD paths that become tags and anchors. Nothing is fetched.
 
-This is the index program of the ruling-agent design, docs/issues/2118-ruling-agent-keeps-user-rulings-
+This is the index program of the ruling-guide design, docs/issues/2118-ruling-agent-keeps-user-rulings-
 checks-approval-walk.md, part 1 of its build order. It runs on ned-box and writes three files in
 <log-store>/user-rulings/:
 
@@ -50,7 +50,7 @@ program's prompt goes from standing to the status not-the-user's-words, which th
 leave out, and one marked so whose text the reader no longer tells is a prompt goes back to standing. So a prompt
 stored before the reader knew it drops out once the reader learns it, and fixing a reader that recognized too
 much clears the wrong marks at the next run. Pairs are not
-made: the design links two entries as a pair only when ruling-agent's prompt judges that they conflict, and
+made: the design links two entries as a pair only when ruling-guide's prompt judges that they conflict, and
 that prompt is part 2, so entry_pairs stays empty, ready, with its unreviewed state.
 
 TAGS. From his own words: each GHI, pull request, task, system and repository file he names. From the

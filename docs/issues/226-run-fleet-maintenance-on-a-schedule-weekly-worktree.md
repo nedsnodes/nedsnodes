@@ -44,5 +44,5 @@ Extend the citation check under GHI [Reference-integrity checker: links resolve 
 
 ## Search receipt
 
-`scripts/ghi-guide-agent-ask.py` over both mirrors, 2026-08-31: no issue covers periodic fleet maintenance, scheduling `clean-worktrees.py`, or a pre-deletion citation check. GHI [Queue drain procedure — the review process that empties wiki/queue, the pair queue, and the draft-label issue queue](https://github.com/nedsnodes/nedsnodes/issues/24) (queue drain) is deliberately on-demand and ruled that way; GHI [Build ghi-guide-agent — the GHI knowledge agent](https://github.com/nedsnodes/nedsnodes/issues/46)'s "maintenance sweep" is scoped to the GHI corpus only.
+`scripts/ghi-guide-ask.py` over both mirrors, 2026-08-31: no issue covers periodic fleet maintenance, scheduling `clean-worktrees.py`, or a pre-deletion citation check. GHI [Queue drain procedure — the review process that empties wiki/queue, the pair queue, and the draft-label issue queue](https://github.com/nedsnodes/nedsnodes/issues/24) (queue drain) is deliberately on-demand and ruled that way; GHI [Build ghi-guide — the GHI knowledge agent](https://github.com/nedsnodes/nedsnodes/issues/46)'s "maintenance sweep" is scoped to the GHI corpus only.
 

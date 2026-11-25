@@ -17,11 +17,11 @@ Already covered elsewhere, and so not listed here: the skill's account of one GH
 ### Step 1, asking before filing
 
 1. The skill lists promoting queue material into an issue as one of its uses, in its front matter and under When Used, but no step says how to do it: whether the queue file goes to create-GHI where it lies, and what happens to the queue copy. Reports: claude-deep 1, claude-second 1. GHI [Queue drain procedure](https://github.com/nedsnodes/nedsnodes/issues/24) is the design to point to rather than writing a new procedure; GHI [345](https://github.com/nedsnodes/nedsnodes/issues/345), closed as not planned, raised a nearby gap.
-2. "Ask before filing" does not say whether an agent about to edit, record an outcome on, or close a known issue must also ask ghi-guide-agent. Reports: claude-deep 2, agy 2.
+2. "Ask before filing" does not say whether an agent about to edit, record an outcome on, or close a known issue must also ask ghi-guide. Reports: claude-deep 2, agy 2.
 3. "read the issues it returns and the documents they cite" sets no limit on how far the reading goes. Reports: claude-deep 3, agy 3, codex-deep 1.
 4. "When an existing issue or GHI-MD covers the subject … edit its GHI-MD" does not say whether a closed issue counts, whether the step-1 ask takes `--include-closed`, or what to do when the covering issue has no GHI-MD, as an issue filed before the migration to GHI-MDs may not. Reports: claude-deep 4, agy 4, codex-deep 2, codex-second 1, claude-second 2.
 5. "A failed ask does not block the write: fall down the ladder" conflicts, for an agent on the Mac whose ask failed because ned-box was down, with the root `CLAUDE.md` rule to leave a step that needs ned-box until ned-box is fixed. Reports: claude-deep 6, agy 5, codex-second 2.
-6. "the project's issue-knowledge agent" is a second name for ghi-guide-agent, which the glossary already defines. Reports: claude-deep 5, codex-term 4, claude-term 1.
+6. "the project's issue-knowledge agent" is a second name for ghi-guide, which the glossary already defines. Reports: claude-deep 5, codex-term 4, claude-term 1.
 
 ### Step 2, routing
 
@@ -72,7 +72,7 @@ Already covered elsewhere, and so not listed here: the skill's account of one GH
 
 ### Steps that could be code
 
-39. Report Q4 lists eleven steps that a program could do in place of the agent: run the rerun after the merge, check that a /cold-read happened, check cited paths against main, refuse a close while the body is still a placeholder, delete the source file after filing, run the fallback ladder inside the ask program, a `--queue-drain-candidate` flag on create, flag abbreviations in a title, check the `kind: design` front-matter line, merge a draft with `git merge-file`, and print the Mac link. Each needs judging against the root `CLAUDE.md` rule on code-prompt-code. Two more come from the cold read of this GHI-MD: the hook could refuse `gh issue close --reason duplicate` without `--duplicate-of` (item 34), and `scripts/ghi-guide-agent-ask.py`, which knows why an ask failed, could print whether to fall back or to wait for ned-box (item 5). Where the skill restates what a program does (items 16, 27, 29, 30 and 36), the fix may be to point to what the program prints rather than to restate it again.
+39. Report Q4 lists eleven steps that a program could do in place of the agent: run the rerun after the merge, check that a /cold-read happened, check cited paths against main, refuse a close while the body is still a placeholder, delete the source file after filing, run the fallback ladder inside the ask program, a `--queue-drain-candidate` flag on create, flag abbreviations in a title, check the `kind: design` front-matter line, merge a draft with `git merge-file`, and print the Mac link. Each needs judging against the root `CLAUDE.md` rule on code-prompt-code. Two more come from the cold read of this GHI-MD: the hook could refuse `gh issue close --reason duplicate` without `--duplicate-of` (item 34), and `scripts/ghi-guide-ask.py`, which knows why an ask failed, could print whether to fall back or to wait for ned-box (item 5). Where the skill restates what a program does (items 16, 27, 29, 30 and 36), the fix may be to point to what the program prints rather than to restate it again.
 
 ## What comes next
 
