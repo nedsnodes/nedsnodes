@@ -263,7 +263,7 @@ The state-and-node inventory of 2026-11-22 (`nedlern@ned-box:/home/nedlern/nedsn
 The user has no "strong opinions" on order beyond easy parts first. Each step is its own pull request and leaves the project working:
 
 1. Finish the shared-module rename.
-2. Build the shared contract module and its `--schema` test suite.
+2. Take the shared contract module and its `--schema` test suite from unixify-tools' work on GHI 3065, which builds them; the nodes work starts on them once they are on main.
 3. Build one shared fresh-agent call on the shared command-line prefix. Ten programs now use that prefix, but each reads the agent's answer its own way.
 4. Build the runner and lint, extracted from the two step programs, with the JSONL record.
 5. Build the first use, background work, and write the report on session-handoffs held at high context.
