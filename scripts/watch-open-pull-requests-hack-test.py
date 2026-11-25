@@ -1044,6 +1044,15 @@ def run_merge_lane_pull_request_review_assignment_watcher_cases():
             check("the lookup with another --repo and no assignment file named exits 2 and asks "
                   "for the file",
                   exit_code == 2 and "--merge-lane-pr-review-assignments-file" in errors, errors)
+            _, lines, _ = run_watcher_in_process(
+                ["--repo", "NedsNodes/NedsNodes", "--needs-a-look-directory",
+                 str(scratch / "no-notices")],
+                [[assignable(1), assignable(70)]], token_file)
+            check("--repo spelling the default repository in another case uses the default file "
+                  "and assigns reviews",
+                  any(" REVIEW-ASSIGNED " in line and "#70" in line for line in lines)
+                  and "70 " in stand_in_default.read_text(encoding="utf-8"),
+                  "\n".join(lines))
         finally:
             watcher_module.MERGE_LANE_PULL_REQUEST_REVIEW_ASSIGNMENTS_DEFAULT_FILE = saved_default
 
