@@ -238,7 +238,8 @@ _TO_THE_END = _REDIRECTIONS + r"[ \t]*;?\s*"
 _WATCHER = (r"(?:bash[ \t]+|python3(?:[ \t]+-u)?[ \t]+)?(?:" + _WORD + r"/)?"
             r"(?:watch-and-merge-provisional[\w.-]*|wait-review-runs[\w.-]*"
             r"|wait-for-next-pull-request-event[\w.-]*"
-            r"|merge-lane-open-prs-watch-and-reviewer-assign\.py(?![^\n;&|]*--poll-once))"
+            r"|merge-lane-open-prs-watch-and-reviewer-assign\.py(?!(?:[ \t]+" + _WORD
+            + r")*?[ \t]+--poll-once(?:-write-baseline)?(?![^\s;&|<>])))"
             + _ARGUMENTS + _REDIRECTIONS
             + r"""(?:[ \t]*\|[ \t]*(?:grep[ \t]+-v[ \t]+(?:'[^']*'|"[^"`$\\]*")|tail[ \t]+-n?[ \t]*\d+))*""")
 _LOOP_CONDITION_CHECK = r"(?:![ \t]+)?(?:grep|pgrep|kill[ \t]+-0|test|\[|true|:)" + _ARGUMENTS + _REDIRECTIONS

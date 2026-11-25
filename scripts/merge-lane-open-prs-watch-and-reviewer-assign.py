@@ -119,9 +119,15 @@ event file, the WATCH line once per case as the state file records. A failed
 poll keeps the state, assigns nothing, and only
 WATCH_OPEN_PULL_REQUESTS_FAILED_GITHUB_POLLS_IN_A_ROW_BEFORE_FAILURE_TASK failed polls in a row open a task.
 Not detected: an event file emptied and then refilled by later polls to at least
-as many lines as were delivered, whose lost lines no task names; and, when
+as many lines as were delivered, whose lost lines no task names; when
 writing the task fails at that failed poll, the rest of the same outage, which
-opens no task. A cron run, the loop watcher and the seed each hold a lock file
+opens no task; a task list directory that does not exist, so that each failure
+reaches only the cron log; and a run killed after it rewrote the assignment file
+and before it appended the REVIEW-ASSIGNED lines, whose pull requests then stay
+assigned with no line. A run that fails at the append names those pull requests
+in its failure task. With another --repo, --poll-once needs its own
+--poll-once-directory, so that the default state is never another repository's.
+A cron run, the loop watcher and the seed each hold a lock file
 beside the assignment file from reading it to replacing it.
 
 Polling needs no public webhook endpoint. GraphQL selects only needed fields
@@ -183,6 +189,8 @@ NOTICE_FIRST_LINE_CHARS = 300
 STATUS_UNREADABLE = "status unreadable"
 
 POLL_ONCE_DIRECTORY_NAME = "open-pull-request-watcher-poll-once-state-events-and-lock"
+POLL_ONCE_DEFAULT_DIRECTORY = (ghi_md_edit_job.common.DEFAULT_MERGE_LANE_WORKTREES_AND_OUTPUTS_DIRECTORY
+                               / POLL_ONCE_DIRECTORY_NAME)
 WATCH_OPEN_PULL_REQUESTS_POLL_STATE_BETWEEN_CRON_RUNS_FILE_NAME = "poll-state.json"
 WATCH_OPEN_PULL_REQUESTS_EVENTS_LOG_FILE_NAME = "pull-request-events.log"
 LOCK_FILE_NAME = "poll-once.lock"
@@ -747,7 +755,16 @@ def merge_lane_pull_request_review_assignments_seed(path, seed_path, repo, token
     """Write the assignment file once: the seed file's lines, then each other open pull request
     with a review by ned-review-merge whose number's remainder MERGE_LANE_BY_PULL_REQUEST_NUMBER_REMAINDER
     gives an agent-seat; the watcher deals the rest. Return the exit status."""
-    with merge_lane_pull_request_review_assignments_file_lock(path):
+    try:
+        lock = merge_lane_pull_request_review_assignments_file_lock(path)
+    except OSError as error:
+        warn(f"merge-lane-open-prs-watch-and-reviewer-assign: nothing was seeded, because the lock "
+             f"file beside the assignment file {path} cannot be opened or locked: {error}. No "
+             f"assignment file was made.\n"
+             f"  Make the directory {path.parent} writable by the user {getpass.getuser()}, then run "
+             f"the same command again.")
+        return 1
+    with lock:
         if path.exists():
             try:
                 merge_lane_pull_request_review_assignments_file_read(path)
@@ -792,6 +809,15 @@ def merge_lane_pull_request_review_assignments_seed(path, seed_path, repo, token
             lane = MERGE_LANE_BY_PULL_REQUEST_NUMBER_REMAINDER.get(pull_request["number"] % 3)
             if pull_request["number"] not in assignments and pull_request["reviews"] and lane:
                 assignments[pull_request["number"]] = lane
+        # The lock binds only the programs: a file put back by hand while GitHub was read would
+        # be replaced.
+        if path.exists():
+            warn(f"merge-lane-open-prs-watch-and-reviewer-assign: nothing was seeded, because the "
+                 f"assignment file {path} appeared while the open pull requests were read from "
+                 f"GitHub, and seeding would replace it.\n"
+                 f"  Run the same command again: it keeps the file when every line of it reads "
+                 f"correctly, and says how to repair it otherwise.")
+            return 1
         try:
             merge_lane_pull_request_review_assignments_file_write(
                 path, "".join(f"{number} {lane}\n" for number, lane in assignments.items()))
@@ -885,6 +911,7 @@ def poll_state_read(path):
         pull_requests = {int(number): {"head_sha": seen["head_sha"], "is_draft": seen["is_draft"]}
                          for number, seen in state["pull_requests"].items()}
         usable = (isinstance(state["notices"], dict)
+                  and isinstance(state["notices"].get("reported", {}), dict)
                   and type(state["failed_polls"]) is int
                   and type(state["event_lines_delivered"]) is int
                   and isinstance(state.get("review_assignment", {}), dict)
@@ -993,7 +1020,12 @@ def poll_once_write_baseline(arguments, token, state_path, events_path):
         "notices": {}, "failed_polls": 0,
         "event_lines_delivered": event_file_line_count(events_path),
         "last_events_task_opened_at": None})
-    emit(f"WATCH: wrote the baseline of {len(pull_requests)} open pull request(s) to {state_path}")
+    emit(f"WATCH: wrote the baseline of {len(pull_requests)} open pull request(s) to {state_path}.\n"
+         f"  The baseline raises no event, so list the open pull requests by hand once: a pull "
+         f"request that opened, got a new head or was marked ready since the last good run, or "
+         f"while another watcher held its events, is reported by no one.\n"
+         f"  The baseline also counts every line of {events_path} as delivered: read any line no "
+         f"events task named before this baseline.")
     return 0
 
 
@@ -1047,7 +1079,19 @@ def poll_once(arguments, assignments_file, options_in_use):
                 state["failed_polls"] += 1
             now = time.time()
             # The event is on disk before the state forgets it, so a crash repeats an event at worst.
-            event_lines_append(events_path, lines, now)
+            try:
+                event_lines_append(events_path, lines, now)
+            except OSError as error:
+                # The assignment file already holds these, so no later poll writes their lines.
+                assigned = [line for line in lines if " REVIEW-ASSIGNED " in line]
+                return failure_reported(
+                    task_list_directory, "it could not record or deliver events",
+                    f"{error}. Undelivered events stay in {events_path} for the next run once this "
+                    f"is repaired"
+                    + ("." if not assigned else
+                       ", except these REVIEW-ASSIGNED lines: the assignment file already holds "
+                       "their pull requests, so no later run writes them. Forward each to its "
+                       "merge-lane agent-seat by hand: " + "; ".join(assigned)))
             poll_state_write(state_path, state)
             events_task_opened_when_due(state, state_path, events_path, task_list_directory, now)
         except PollStateUnusable as error:
@@ -1114,10 +1158,9 @@ def parse_arguments(argv):
                                    "pull requests open now, raising no event; refuses when "
                                    "a state file exists")
     parser.add_argument("--poll-once-directory", type=Path,
-                        default=(ghi_md_edit_job.common.DEFAULT_MERGE_LANE_WORKTREES_AND_OUTPUTS_DIRECTORY
-                                 / POLL_ONCE_DIRECTORY_NAME),
                         help="directory of --poll-once's state, event file and lock "
-                             "(default: %(default)s)")
+                             f"(default: {POLL_ONCE_DEFAULT_DIRECTORY} with the default --repo; "
+                             "another --repo must name its own)")
     parser.add_argument("--task-list-directory", type=Path,
                         default=Path.home() / ".claude" / "tasks" / "nedsnodes-merge-lane-2-tasks",
                         help="the task list --poll-once opens tasks on (default: %(default)s)")
@@ -1131,8 +1174,8 @@ def parse_arguments(argv):
                              f"{MERGE_LANE_PULL_REQUEST_REVIEW_ASSIGNMENTS_DEFAULT_FILE} with the "
                              "default --repo; with another --repo, none, and no review is "
                              "assigned)")
-    instead_of_watching = parser.add_mutually_exclusive_group()
-    instead_of_watching.add_argument(
+    # Each of these exits instead of watching, so it shares the group of the ways to watch.
+    when_to_exit.add_argument(
         "--merge-lane-pr-review-assignments-file-write-from-seed-and-reviewed-prs-then-exit",
         type=Path, metavar="SEED_FILE",
         help="make the assignment file, once, from SEED_FILE's lines in the same format, "
@@ -1141,7 +1184,7 @@ def parse_arguments(argv):
              "its number's remainder (1 merge-lane-1, 0 merge-lane-3, 2 none, left for the "
              "watcher to deal); "
              "refuses when the file exists; then exit instead of watching")
-    instead_of_watching.add_argument(
+    when_to_exit.add_argument(
         "--merge-lane-pr-review-assignments-list-for",
         choices=MERGE_LANE_PULL_REQUEST_REVIEW_ASSIGNEE_AGENT_SEATS_IN_TIE_ORDER, metavar="MERGE_LANE",
         help="print the open pull requests that are not drafts the assignment file gives "
@@ -1174,6 +1217,13 @@ def main(argv=None):
                       *(["--token-file", arguments.token_file]
                         if arguments.token_file != DEFAULT_TOKEN_FILE else [])]
     if arguments.poll_once or arguments.poll_once_write_baseline:
+        if arguments.poll_once_directory is None:
+            if not repo_is_default:
+                warn(f"merge-lane-open-prs-watch-and-reviewer-assign: --repo {arguments.repo} is not "
+                     f"the default repository, whose state the default --poll-once-directory "
+                     f"holds, so name a directory for {arguments.repo} with --poll-once-directory.")
+                return 2
+            arguments.poll_once_directory = POLL_ONCE_DEFAULT_DIRECTORY
         return poll_once(arguments, assignments_file, options_in_use)
     token, reason = read_token(Path(arguments.token_file).expanduser())
     if reason is not None:
