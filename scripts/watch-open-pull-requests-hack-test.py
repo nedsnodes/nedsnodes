@@ -638,10 +638,12 @@ def run_merge_lane_pull_request_review_assignment_unit_cases():
     unusable = watcher_module.MergeLanePullRequestReviewAssignmentsFileUnusable
     with tempfile.TemporaryDirectory() as scratch:
         path = Path(scratch) / "assignments.txt"
-        path.write_text("4028 merge-lane-1\n4319 merge-lane-3\n4470 merge-lane-2\n", encoding="utf-8")
-        check("the assignment file is read, merge-lane-2 included",
-              read(path) == {4028: "merge-lane-1", 4319: "merge-lane-3", 4470: "merge-lane-2"}, "")
+        path.write_text("4028 merge-lane-1\n4319 merge-lane-3\n", encoding="utf-8")
+        check("the assignment file is read",
+              read(path) == {4028: "merge-lane-1", 4319: "merge-lane-3"}, "")
         for label, text, fragment in [
+                ("a line naming merge-lane-2, which only merges", "4470 merge-lane-2\n",
+                 "line 1 of the assignment file"),
                 ("a line naming no merge-lane agent-seat", "4028 merge-lane-4\n",
                  "line 1 of the assignment file"),
                 ("a line with no number", "\n", "line 1 of the assignment file"),
@@ -776,6 +778,62 @@ def run_merge_lane_pull_request_review_assignment_watcher_cases():
               exit_code == 0 and any("PR #40 REVIEW-ASSIGNED" in line for line in lines),
               f"exit {exit_code!r}\n" + "\n".join(lines))
 
+        assignments.write_text("1 merge-lane-1", encoding="utf-8")
+        _, lines, _ = watch([open_now])
+        check("an append to a file whose last line has no newline starts on a line of its own",
+              assignments.read_text(encoding="utf-8") == "1 merge-lane-1\n40 merge-lane-3\n"
+              and any("PR #40 REVIEW-ASSIGNED merge-lane-3" in line for line in lines),
+              "\n".join(lines))
+
+        assignments.unlink()
+        state = {}
+        appended = watcher_module.merge_lane_pull_request_review_assignment_lines
+        with contextlib.redirect_stdout(io.StringIO()):
+            appended(assignments, open_now, state)
+        assignments.write_text("1 merge-lane-1\n", encoding="utf-8")
+        assignments.chmod(0o400)
+        output = io.StringIO()
+        try:
+            with contextlib.redirect_stdout(output):
+                events = appended(assignments, open_now, state)
+        finally:
+            assignments.chmod(0o600)
+        check("a file made after a missing-file stop, but that cannot be appended to, prints a "
+              "WATCH line of its own for the new case",
+              events == [] and "cannot be appended to" in output.getvalue()
+              and "#40" in output.getvalue(), output.getvalue())
+
+        class AppendFailsAfterFirstLine(type(assignments)):
+            """Writes the first appended line, then fails as a full disk does."""
+
+            def open(self, *args, **kwargs):
+                real = super().open(*args, **kwargs)
+                real_write = real.write
+
+                def write(text):
+                    real_write(text.splitlines(keepends=True)[0])
+                    raise OSError(28, "No space left on device")
+                real.write = write
+                return real
+
+        assignments.write_text("1 merge-lane-1\n", encoding="utf-8")
+        two_new = [*open_now, assignable(41, created_at="2026-11-24T06:00:00Z")]
+        output = io.StringIO()
+        with contextlib.redirect_stdout(output):
+            events = appended(AppendFailsAfterFirstLine(assignments), two_new, {})
+        check("an append that fails partway prints REVIEW-ASSIGNED for the line it did record, "
+              "and names only the pull request it did not as dealt again",
+              [event.split(" ")[:4] for event in events] == [["PR", "#40", "REVIEW-ASSIGNED",
+                                                              "merge-lane-3"]]
+              and "pull requests #41 are given no" in output.getvalue()
+              and assignments.read_text(encoding="utf-8") == "1 merge-lane-1\n40 merge-lane-3\n",
+              f"{events}\n{output.getvalue()}")
+        _, lines, _ = watch([two_new])
+        check("the next poll deals what the failed append did not record, and only that",
+              [line for line in lines if " REVIEW-ASSIGNED " in line]
+              == [f"PR #41 REVIEW-ASSIGNED merge-lane-1 {'a' * 8} nedlern: title 41"],
+              "\n".join(lines))
+
         # The seed.
         seed = scratch / "seed.txt"
         seed.write_text("4028 merge-lane-1\n4319 merge-lane-3\n", encoding="utf-8")
@@ -796,12 +854,26 @@ def run_merge_lane_pull_request_review_assignment_watcher_cases():
               exit_code == 1 and "HTTP 503" in errors and not seeded.exists(), errors)
         exit_code, lines, errors = seed_with([open_at_seed])
         check("the seed writes the seed file's lines, then each other open pull request with a "
-              "review by its number's remainder, and none without a review",
+              "review by its number's remainder, none for remainder 2, merge-lane-2's, and none "
+              "without a review",
               exit_code == 0
               and seeded.read_text(encoding="utf-8") == "4028 merge-lane-1\n4319 merge-lane-3\n"
-              "4100 merge-lane-2\n4101 merge-lane-3\n4102 merge-lane-1\n"
-              and any("wrote 5 assignment(s)" in line for line in lines),
+              "4101 merge-lane-3\n4102 merge-lane-1\n"
+              and any("wrote 4 assignment(s)" in line for line in lines),
               f"exit {exit_code!r} {errors}\n" + "\n".join(lines))
+        stacked_on_4100 = assignable(4104, base_branch="branch-4100")
+        _, lines, _ = run_watcher_in_process(
+            ["--needs-a-look-directory", str(scratch / "no-notices"),
+             "--merge-lane-pr-review-assignments-file", str(seeded)],
+            [[*open_at_seed, stacked_on_4100]], token_file)
+        dealt_after_seed = [line.split(" ")[1:4] for line in lines if " REVIEW-ASSIGNED " in line]
+        check("after the seed, the watcher deals a reviewed pull request of remainder 2, and one "
+              "stacked on it, to the same agent-seat, never merge-lane-2",
+              [number for number, _, _ in dealt_after_seed] == ["#4100", "#4103", "#4104"]
+              and dict((number, lane) for number, _, lane in dealt_after_seed)["#4100"]
+              == dict((number, lane) for number, _, lane in dealt_after_seed)["#4104"]
+              and all(lane in ("merge-lane-1", "merge-lane-3") for _, _, lane in dealt_after_seed),
+              "\n".join(lines))
         exit_code, lines, errors = seed_with([open_at_seed])
         check("the seed leaves an assignment file that exists as it is, exits 0 and says it reads "
               "correctly",
