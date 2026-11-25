@@ -1483,6 +1483,27 @@ for case, answer, subject in (
     check(f"the re-check judge {case}: the next invocation asks no re-check again",
           not machine.claude_calls(), machine.claude_calls())
 
+# The transcript turns unreadable between the verdict pass and the re-check: here the first judge,
+# a headless agent-session that runs before the due step, breaks it.
+machine = Machine()
+machine.seat("alpha", [user("go"), assistant(OPENING_PULL_REQUEST), turn_end()])
+machine.script(rechecked(False), sent_ok())
+machine.run(0)
+machine.append("alpha", cross_session(machine.events("message_sent")[-1]["text"], at(1)),
+               assistant(ANNOUNCED, at(2)), turn_end(at(2.3)))
+machine.seat("beta", [user("go"), assistant(ANNOUNCED, when=at(2)), turn_end(at(2.3))])
+machine.script(dict(rechecked(True), overwrite=[str(machine.transcripts["alpha"]), "not json\n"]),
+               sent_ok(), rechecked(True))
+code, _ = machine.run(16)
+calls = machine.claude_calls()
+check("re-check: a transcript unreadable at the re-check is a read failure for that agent-seat; "
+      "its escalation is sent, and the next agent-seat is still swept",
+      [event["agent_seat"] for event in machine.events("read_failure")] == ["alpha"]
+      and [event["step"] for event in machine.events("wait_step")] == ["nudge", "escalate"]
+      and len(calls) == 3 and "please check" in calls[1]["prompt"]
+      and '"agent_seat": "beta"' in calls[2]["prompt"],
+      (code, machine.events("read_failure"), machine.events("wait_step"), calls))
+
 # An agent-seat that promised a report and gave it in a text-only reply, after its turn ended and
 # before the nudge.
 REPORT_SENTENCE = "I'll tell you what it finds."
@@ -1854,6 +1875,21 @@ calls = machine.claude_calls()
 check("rule 2 judged unbacked: a second headless agent-session sends the announced-action line",
       len(calls) == 2 and 'You said "I\'m starting the PR 1633 work now." 12 minutes ago and have '
       "not done it. Do it now, or tell the user why not." in calls[1]["prompt"], calls)
+TOLD_AT_START = "I told the user the PR 1633 work is starting."
+LONG_TURN_TEXT = f"{TOLD_AT_START} {LONG_TEXT * 3} {ANNOUNCED}"
+machine = Machine()
+machine.seat("alpha", [user("go"), assistant(LONG_TURN_TEXT), turn_end()])
+machine.script({"answer": {"sentences": [{"index": 0, "backed": True, "reason": "told"}]}})
+machine.run(0)
+calls = machine.claude_calls()
+prompt = calls[0]["prompt"] if calls else "\n{}"
+judge_facts = json.loads(prompt[prompt.rindex("\n{") + 1:])
+handed = [item["text"] for item in judge_facts.get(
+    "assistant_text_messages_since_start_of_earliest_turn_with_sentence_to_judge", [])]
+check("rule 2: a text longer than the judge is handed reaches it with its start and its end",
+      len(handed) == 1 and handed[0].startswith(TOLD_AT_START) and handed[0].endswith(ANNOUNCED)
+      and "\n[...]\n" in handed[0] and len(handed[0]) < len(LONG_TURN_TEXT)
+      and judge_facts["last_turn_ending_message"]["text"] == handed[0], handed)
 machine = Machine()
 machine.seat("alpha", [user("go"), assistant(f"{PROMISE} {ANNOUNCED}"), turn_end()])
 machine.script({"answer": {"sentences": [{"index": 0, "backed": True, "reason": "a test runs"}]}},

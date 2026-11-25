@@ -180,6 +180,17 @@ SESSION_RECORDS_DIRECTORY_UNDER_HOME = Path(".claude") / "sessions"
 # The [ref] at the end of a SendMessage "to", as in "Cpc [9ea9da]".
 TO_REF = re.compile(r"\[(?P<ref>[0-9a-f]+)\]\s*$")
 JUDGED_TEXT_CHARACTERS = 4000
+JUDGED_TEXT_CUT_MARK = "\n[...]\n"
+
+
+def judged_text(text):
+    """A text as a judge is handed it: whole, or its start and its end, since an agent-seat may
+    tell the user the announced thing at either."""
+    if len(text) <= JUDGED_TEXT_CHARACTERS:
+        return text
+    half = JUDGED_TEXT_CHARACTERS // 2
+    return text[:half] + JUDGED_TEXT_CUT_MARK + text[-half:]
+
 
 NUDGE, ESCALATE, TELL_USER = "nudge", "escalate", "tell_user"
 # A wait step recording that the wait carries a rule 2 message, which rule 4 does not settle.
@@ -1325,15 +1336,20 @@ class Sweep:
         # the turn the rule 2 judge looked at.
         since = min(parse_time(message["earliest_sentence_at"] or message["at"])
                     for message in messages)
-        done = verdicts_print.transcript_tool_calls_and_assistant_texts_since(
-            Path(verdict[fields.TRANSCRIPT_PATH]), since)
+        try:
+            done = verdicts_print.transcript_tool_calls_and_assistant_texts_since(
+                Path(verdict[fields.TRANSCRIPT_PATH]), since)
+        except verdicts_print.ReadFailure as error:
+            # As a failed judge: the escalation goes ahead, and later agent-seats are still swept.
+            self.read_failure(seat, str(error))
+            return False
         facts = dict(
             self.facts(seat, verdict), step=ESCALATE, nudge_at=wait[NUDGE], since=iso(since),
             sentences=[{"index": index, "raised_at": raised_at,
                         "kind": verdicts_print.sentence_kind(sentence), "sentence": sentence}
                        for index, (raised_at, sentence) in enumerate(raised)],
             tool_calls_since=done["tool_calls"],
-            text_messages_since=[dict(item, text=item["text"][-JUDGED_TEXT_CHARACTERS:])
+            text_messages_since=[dict(item, text=judged_text(item["text"]))
                                  for item in done["assistant_texts"]],
             successful_task_tool_calls_setting_prerequisites_or_blocked_by_since=[
                 call for call in verdict.get(
@@ -1469,7 +1485,7 @@ class Sweep:
                      **({own: with_minutes(item[own])} if own in item else {})} for item in items]
         last_message = dict(verdict.get(fields.LAST_TURN_ENDING_MESSAGE) or {})
         if last_message.get("text"):
-            last_message["text"] = last_message["text"][-JUDGED_TEXT_CHARACTERS:]
+            last_message["text"] = judged_text(last_message["text"])
         return {"agent_seat": seat, "tmux_session": seat, "now": iso(self.now),
                 "last_token_spent_at": (verdict.get(fields.LAST_ACTIVITY) or {}).get("time"),
                 "last_turn_ending_message": last_message or None,
@@ -1592,7 +1608,7 @@ class Sweep:
                          tool_calls_since_start_of_earliest_turn_with_sentence_to_judge=verdict.get(
                              fields.TOOL_CALLS_SINCE_START_OF_EARLIEST_TURN_WITH_SENTENCE_TO_JUDGE, []),
                          assistant_text_messages_since_start_of_earliest_turn_with_sentence_to_judge=[
-                             dict(item, text=item["text"][-JUDGED_TEXT_CHARACTERS:])
+                             dict(item, text=judged_text(item["text"]))
                              for item in verdict.get(
                                  fields.ASSISTANT_TEXT_MESSAGES_SINCE_START_OF_EARLIEST_TURN_WITH_SENTENCE_TO_JUDGE,
                                  [])],
