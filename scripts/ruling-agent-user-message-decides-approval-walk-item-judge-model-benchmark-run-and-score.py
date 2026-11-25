@@ -64,6 +64,10 @@ _prefix_spec = importlib.util.spec_from_file_location(
     / "claude-code-headless-run-command-line-prefix-with-no-connectors-and-explicit-permission-mode-common.py")
 command_line_prefix = importlib.util.module_from_spec(_prefix_spec)
 _prefix_spec.loader.exec_module(command_line_prefix)
+_cell_common_spec = importlib.util.spec_from_file_location(
+    "cold_read_cell_common", REPOSITORY / "nn-systems" / "cold-read" / "cold-read-cell-common.py")
+cold_read_cell_common = importlib.util.module_from_spec(_cell_common_spec)
+_cell_common_spec.loader.exec_module(cold_read_cell_common)
 
 EXIT_OK, EXIT_MODEL_AND_EFFORT_DROPPED_PAST_TIME_LIMIT, EXIT_COULD_NOT_RUN = 0, 1, 2
 ANSWER_WORDS = ("DECIDES", "NO")
@@ -78,12 +82,11 @@ ANSWER_LINE = re.compile(r"^(m\d+):\s*(\S+)\s*$")
 BENCHMARK_ROW_STATE_MODEL_ANSWERED = "answered"
 BENCHMARK_ROW_STATE_MODEL_ANSWER_UNPARSABLE = "answer-unparsable"
 BENCHMARK_ROW_STATE_MODEL_AND_EFFORT_DROPPED_PAST_TIME_LIMIT = "dropped-past-time-limit"
-BENCHMARK_ROW_STATE_PROMPT_TOO_LARGE_FOR_AGY = "prompt too large for agy"
-# The agy cell launcher refuses, with exit 64 and this token on stderr, a prompt longer than agy reads whole, which
-# agy would otherwise cut and still exit 0. It is AGY_PROMPT_TOO_LONG_FOR_AGY_TO_READ_WHOLE_REFUSAL_MARKER in
+BENCHMARK_ROW_STATE_PROMPT_TOO_LONG_FOR_AGY_TO_READ_WHOLE = "prompt too large for agy"
+# The agy cell launcher refuses, with cold_read_cell_common.EXIT_BAD_INVOCATION and this token on stderr, a prompt
+# longer than agy reads whole, which agy would otherwise cut and still exit 0. The token is the launcher's own constant of this name in
 # nn-systems/cold-read/cold-read-agy-cell.py; a launcher without it never refuses, and every row stands as before.
-AGY_CELL_PROMPT_TOO_LONG_REFUSAL_EXIT_CODE = 64
-AGY_CELL_PROMPT_TOO_LONG_REFUSAL_MARKER = "agy-prompt-too-long-for-agy-to-read-whole-refusal"
+AGY_PROMPT_TOO_LONG_FOR_AGY_TO_READ_WHOLE_REFUSAL_MARKER = "agy-prompt-too-long-for-agy-to-read-whole-refusal"
 
 # The cold-read cell launchers already run agy and codex inside the credential sandbox the project requires, and
 # write the model's answer to the report file. Codex's fast mode is that launcher's "deep" tier, whose
@@ -271,9 +274,9 @@ def run_one_case(case, entries, arguments, files, repeat, work):
            "known_rulings_in_messages": sorted(known & set(message_ids)), "exit_code": exit_code}
     if exit_code is None:
         return {**row, "state": BENCHMARK_ROW_STATE_MODEL_AND_EFFORT_DROPPED_PAST_TIME_LIMIT}, stdout
-    if (arguments.runtime == "agy" and exit_code == AGY_CELL_PROMPT_TOO_LONG_REFUSAL_EXIT_CODE
-            and AGY_CELL_PROMPT_TOO_LONG_REFUSAL_MARKER in stderr):
-        return {**row, "state": BENCHMARK_ROW_STATE_PROMPT_TOO_LARGE_FOR_AGY}, stderr
+    if (arguments.runtime == "agy" and exit_code == cold_read_cell_common.EXIT_BAD_INVOCATION
+            and AGY_PROMPT_TOO_LONG_FOR_AGY_TO_READ_WHOLE_REFUSAL_MARKER in stderr):
+        return {**row, "state": BENCHMARK_ROW_STATE_PROMPT_TOO_LONG_FOR_AGY_TO_READ_WHOLE}, stderr
     answer = stdout if answer_place == "stdout" else CELL_REPORT_PROVENANCE_STAMP.sub(
         "", report_file.read_text(encoding="utf-8") if report_file.is_file() else "")
     if exit_code != 0:
@@ -413,7 +416,7 @@ def score(arguments):
         case_ids = sorted({row["case_id"] for row in rows})
         repeats = sorted({row["repeat"] for row in rows})
         # A case agy could not take is no miss: it stays out of the found count, the seconds and the score.
-        taken = [row for row in rows if row["state"] != BENCHMARK_ROW_STATE_PROMPT_TOO_LARGE_FOR_AGY]
+        taken = [row for row in rows if row["state"] != BENCHMARK_ROW_STATE_PROMPT_TOO_LONG_FOR_AGY_TO_READ_WHOLE]
         taken_case_ids = sorted({row["case_id"] for row in taken})
         too_large_case_ids = sorted({row["case_id"] for row in rows} - set(taken_case_ids))
         answered = [row for row in rows if row["state"] == BENCHMARK_ROW_STATE_MODEL_ANSWERED]

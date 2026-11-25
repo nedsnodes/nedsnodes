@@ -188,7 +188,7 @@ class BenchmarkTest(unittest.TestCase):
         than agy reads whole, and answers the rest; it records the case ids it was run on."""
         stderr = stderr if stderr is not None else (
             f"cold-read-agy-cell: refused before agy started (marker for calling programs: "
-            f"{BENCHMARK.AGY_CELL_PROMPT_TOO_LONG_REFUSAL_MARKER}): "
+            f"{BENCHMARK.AGY_PROMPT_TOO_LONG_FOR_AGY_TO_READ_WHOLE_REFUSAL_MARKER}): "
             f"the prompt is 300,000 bytes of UTF-8, over 191,985\n")
         calls = []
 
@@ -236,9 +236,8 @@ class BenchmarkTest(unittest.TestCase):
         spec.loader.exec_module(cell)
         if not hasattr(cell, "AGY_PROMPT_TOO_LONG_FOR_AGY_TO_READ_WHOLE_REFUSAL_MARKER"):
             self.skipTest("this checkout's agy cell launcher does not refuse a prompt too long for agy yet")
-        self.assertEqual(BENCHMARK.AGY_CELL_PROMPT_TOO_LONG_REFUSAL_MARKER,
+        self.assertEqual(BENCHMARK.AGY_PROMPT_TOO_LONG_FOR_AGY_TO_READ_WHOLE_REFUSAL_MARKER,
                          cell.AGY_PROMPT_TOO_LONG_FOR_AGY_TO_READ_WHOLE_REFUSAL_MARKER)
-        self.assertEqual(BENCHMARK.AGY_CELL_PROMPT_TOO_LONG_REFUSAL_EXIT_CODE, cell.common.EXIT_BAD_INVOCATION)
 
     def test_bad_arguments_and_case_sets_could_not_run(self):
         stub = StubModel("m1: NO\n")
@@ -305,7 +304,7 @@ class BenchmarkTest(unittest.TestCase):
         self.assertEqual(incomplete["out"], ["has 3 rows, fewer than its 2 cases times 2 repeats"])
 
     def test_score_leaves_cases_too_large_for_agy_out_of_found_seconds_and_score(self):
-        too_large = BENCHMARK.BENCHMARK_ROW_STATE_PROMPT_TOO_LARGE_FOR_AGY
+        too_large = BENCHMARK.BENCHMARK_ROW_STATE_PROMPT_TOO_LONG_FOR_AGY_TO_READ_WHOLE
         rows = [row for repeat in (1, 2, 3) for row in (
             self.row("a", repeat, 0.5, None, other=0, state=too_large),
             self.row("b", repeat, 4, True), self.row("c", repeat, 8, repeat != 2))]
@@ -319,7 +318,7 @@ class BenchmarkTest(unittest.TestCase):
         self.assertEqual(result["out"], [])
 
     def test_score_of_a_combination_whose_every_case_was_too_large_for_agy(self):
-        too_large = BENCHMARK.BENCHMARK_ROW_STATE_PROMPT_TOO_LARGE_FOR_AGY
+        too_large = BENCHMARK.BENCHMARK_ROW_STATE_PROMPT_TOO_LONG_FOR_AGY_TO_READ_WHOLE
         code, [result], _ = self.score([self.row("a", 1, 0.5, None, state=too_large),
                                         self.row("b", 1, 0.4, None, state=too_large)])
         self.assertEqual(code, BENCHMARK.EXIT_OK)
