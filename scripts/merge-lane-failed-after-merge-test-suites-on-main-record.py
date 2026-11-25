@@ -115,7 +115,8 @@ def merge_gate_notice(suites):
 
 
 def main(argv=None):
-    if (sys.argv[1:] if argv is None else list(argv)) != ["--print-merge-gate-notice"]:
+    argv = sys.argv[1:] if argv is None else list(argv)
+    if argv != ["--print-merge-gate-notice"]:
         import argparse
 
         parser = argparse.ArgumentParser(
