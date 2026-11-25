@@ -1044,7 +1044,7 @@ def run_cell(
     try:
         baseline = working_tree_state()
     except WriteDetectorUnavailable as error:
-        baseline = None
+        baseline = ColdReadCellWorkingTreeSnapshotFailedStandInBaselineWithGitReason(error)
         print(f"{program}: could not snapshot the working tree ({error}); "
               "stray writes will not be checked for this run.", file=sys.stderr)
 
@@ -1144,7 +1144,8 @@ def shell_quoted_on_one_line(text: str) -> str:
         return shlex.quote(text)
     escaped = "".join(
         "\\\\" if character == "\\" else "\\'" if character == "'"
-        else (f"\\x{ord(character):02x}" if ord(character) < 128 else f"\\u{ord(character):04x}")
+        # \xHH bytes, not \u: bash 3.2 and bash under LC_ALL=C leave $'\u2028' unexpanded.
+        else "".join(f"\\x{byte:02x}" for byte in character.encode("utf-8"))
         if breaks_a_line(character) else character for character in text)
     return f"$'{escaped}'"
 
@@ -1157,16 +1158,26 @@ def path_shown_on_one_line(path: str) -> str:
 
 def join_error_text_lines_with_one_space(text) -> str:
     """`text`'s lines joined by one space, each line's own spaces kept: a path in a git
-    message may hold two spaces in a row."""
-    return " ".join(line.strip() for line in str(text).splitlines() if line.strip())
+    message may hold two spaces in a row. Only a newline or carriage return ends a line
+    here, so a U+2028 or U+0085 inside a path in the message stays in that path."""
+    return " ".join(line.strip() for line in re.split(r"\r\n|\r|\n", str(text)) if line.strip())
+
+
+class ColdReadCellWorkingTreeSnapshotFailedStandInBaselineWithGitReason:
+    """The baseline a cell passes when its pre-run snapshot failed, holding git's reason,
+    so the stray-write line the grid lifts from the cell log carries that reason."""
+
+    def __init__(self, reason) -> None:
+        self.reason = join_error_text_lines_with_one_space(reason)
 
 
 def report_stray_writes(program: str, baseline, own_report_path=None) -> None:
     """Report changes outside the requested report without raising."""
     # Check every agent-binary and every exit path: a failed reviewer may still have edited the target.
-    if baseline is None:
+    if baseline is None or isinstance(baseline, ColdReadCellWorkingTreeSnapshotFailedStandInBaselineWithGitReason):
+        reason = f" (git status failed: {baseline.reason})" if baseline is not None else ""
         print(f"{program}: {STRAY_WRITE_CHECK_SKIPPED_PHRASE} — no pre-run "
-              f"snapshot of the working tree was taken. This is "
+              f"snapshot of the working tree was taken{reason}. This is "
               f"{COLD_READ_CELL_STRAY_WRITE_CHECK_SKIPPED_IS_NOT_A_CLEAN_RESULT_PHRASE}.", file=sys.stderr)
         return
     try:
