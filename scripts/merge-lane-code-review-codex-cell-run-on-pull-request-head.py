@@ -114,11 +114,6 @@ def main(argv=None):
                      else f"has a head commit that could not be read: {head_after.stderr.strip()}")
         directory_options = common.directory_options_argv(arguments)
         commit_to_review = arguments.expected_head_commit or head.stdout.strip()
-        review_program = shlex.join([str(Path(__file__).resolve().with_name(
-            "merge-lane-pull-request-worktrees-reviewer-brief-codex-review-and-head-tests-run-without-merge.py")),
-            str(number)]) + (" <brief specifications file> [--head-commit-reviewed-before <commit>], giving the "
-                             "brief specifications file and, for a fix-round, the --head-commit-reviewed-before "
-                             "commit that this review round was started with")
         main_commit = pull_request_merged_worktree_main_commit(arguments, environment)
         if main_commit.returncode == 0:
             rebuild = shlex.join([str(Path(__file__).resolve().with_name(
@@ -131,9 +126,11 @@ def main(argv=None):
                      f"2. Then review again: {rerun}\n")
         else:
             steps = (f"The main commit {common.pull_request_merged_worktree(arguments, number)} was built on "
-                     f"could not be read, so no rebuild command is printed: {main_commit.stderr.strip()}\n"
-                     f"Review the pull request again with the review program, which rebuilds pr{number}-head and "
-                     f"pr{number}-merged at the head and main it reads from origin: {review_program}\n")
+                     f"could not be read, so no rebuild or rerun command is printed: "
+                     f"{main_commit.stderr.strip()}\n"
+                     f"Do not run the whole review program again for this round: its Claude review step may "
+                     f"already have posted a review of {commit_to_review}. Send merge-lane-2 this message, with "
+                     f"the SendMessage tool.\n")
         print(f"PR {number}: the Codex review exited {exit_code}, but "
               f"{common.pull_request_head_worktree(arguments, number)} held commit {head.stdout.strip()} "
               f"when the review started and now {now_holds}, so the review may not be of "
@@ -175,12 +172,18 @@ def pull_request_head_commit(arguments, environment):
 
 
 def pull_request_merged_worktree_main_commit(arguments, environment):
-    # pr<n>-merged holds the head merged onto main, so its first parent is the main commit it was built on.
+    # pr<n>-merged holds the head merged onto main, so its first parent is the main commit it was built on;
+    # a HEAD with no second parent is a rebuild caught before its merge, or after merge --abort.
     worktree = common.pull_request_merged_worktree(arguments, arguments.pull_request)
-    return subprocess.run(
-        ["git", f"--git-dir={worktree / '.git'}", f"--work-tree={worktree}", "rev-parse",
-         "--verify", "HEAD^1^{commit}"],
-        capture_output=True, text=True, env=environment, stdin=subprocess.DEVNULL)
+    git = ["git", f"--git-dir={worktree / '.git'}", f"--work-tree={worktree}", "rev-parse", "--verify"]
+    second_parent = subprocess.run([*git, "HEAD^2^{commit}"], capture_output=True, text=True, env=environment,
+                                   stdin=subprocess.DEVNULL)
+    if second_parent.returncode != 0:
+        return subprocess.CompletedProcess(
+            second_parent.args, second_parent.returncode, "",
+            f"{worktree} does not hold a merge commit: {second_parent.stderr.strip()}")
+    return subprocess.run([*git, "HEAD^1^{commit}"], capture_output=True, text=True, env=environment,
+                          stdin=subprocess.DEVNULL)
 
 
 def codex_review_exit_code(arguments, outputs, environment):

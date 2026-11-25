@@ -83,6 +83,15 @@ def read_log(path):
     return [json.loads(line) for line in path.read_text().splitlines()] if path.exists() else []
 
 
+def no_command_printed_and_sent_to_merge_lane_2(completed):
+    return (completed.returncode == 2
+            and "rebuild.py 7" not in completed.stdout
+            and "Then review again" not in completed.stdout
+            and "without-merge.py 7" not in completed.stdout
+            and "could not be read, so no rebuild or rerun command is printed" in completed.stdout
+            and "Send merge-lane-2 this message" in completed.stdout)
+
+
 def run_program(scratch, helpers, extra_environment=None, home=None, extra_arguments=()):
     for log in ("gh.log", "cell.log"):
         (scratch / log).unlink(missing_ok=True)
@@ -204,12 +213,15 @@ def main():
         merged_worktree = review_worktrees_directory(helpers) / "pr7-merged"
         merged_worktree.mkdir()
         identity = ["-c", "user.name=t", "-c", "user.email=t@example.invalid"]
-        for command in (["init", "-q", "-b", "main"], [*identity, "commit", "-q", "--allow-empty", "-m", "main"],
+        for command in (["init", "-q", "-b", "main"], [*identity, "commit", "-q", "--allow-empty", "-m", "main's parent"],
+                        [*identity, "commit", "-q", "--allow-empty", "-m", "main"],
                         ["checkout", "-q", "-b", "side"], [*identity, "commit", "-q", "--allow-empty", "-m", "side"],
                         ["checkout", "-q", "main"]):
             subprocess.run(["git", "-C", str(merged_worktree), *command], check=True)
         merged_on_main = subprocess.run(["git", "-C", str(merged_worktree), "rev-parse", "HEAD"], check=True,
                                         capture_output=True, text=True).stdout.strip()
+        main_parent = subprocess.run(["git", "-C", str(merged_worktree), "rev-parse", "HEAD^"], check=True,
+                                     capture_output=True, text=True).stdout.strip()
         subprocess.run(["git", "-C", str(merged_worktree), *identity, "merge", "-q", "--no-ff", "--no-edit", "side"],
                        check=True)
 
@@ -250,12 +262,30 @@ def main():
         merged_worktree.with_name("pr7-merged-away").rename(merged_worktree)
         moved_to = subprocess.run(["git", "-C", str(head_worktree), "rev-parse", "HEAD"], check=True,
                                   capture_output=True, text=True).stdout.strip()
-        check("a run whose pr<n>-head moves while pr<n>-merged's main commit cannot be read prints no rebuild "
-              "command, says why, and sends the pull request to the review program",
-              completed.returncode == 2 and "rebuild.py" not in completed.stdout.replace(
-                  "another run of merge-lane-pull-request-head-and-merged-worktrees-rebuild.py", "")
-              and "could not be read, so no rebuild command is printed" in completed.stdout
-              and "Review the pull request again with the review program" in completed.stdout,
+        check("a run whose pr<n>-head moves while pr<n>-merged's main commit cannot be read prints no command, "
+              "says why, and sends the message to merge-lane-2 instead of running the whole review program again",
+              no_command_printed_and_sent_to_merge_lane_2(completed), completed.stdout)
+        head = moved_to
+
+        merged_before_its_merge = merged_worktree.with_name("pr7-merged-before-its-merge")
+        subprocess.run(["git", "-C", str(merged_worktree), "worktree", "add", "-q", "--detach",
+                        str(merged_before_its_merge), merged_on_main], check=True)
+        merged_worktree.rename(merged_worktree.with_name("pr7-merged-away"))
+        merged_before_its_merge.rename(merged_worktree)
+        subprocess.run(["git", "-C", str(merged_worktree.with_name("pr7-merged-away")), "worktree", "repair",
+                        str(merged_worktree)], check=True, capture_output=True)
+        completed, _, _ = run_program(scratch, helpers, {"MERGE_LANE_CODEX_TEST_CELL_MOVES_HEAD": "1"},
+                                      extra_arguments=("--expected-head-commit", head))
+        shutil.rmtree(merged_worktree)
+        merged_worktree.with_name("pr7-merged-away").rename(merged_worktree)
+        moved_to = subprocess.run(["git", "-C", str(head_worktree), "rev-parse", "HEAD"], check=True,
+                                  capture_output=True, text=True).stdout.strip()
+        check("a run whose pr<n>-head moves while pr<n>-merged holds main's commit with no merge yet, as a "
+              "rebuild leaves it before its merge or after merge --abort, reads no main commit from it: it prints "
+              "no command and names the worktree as not holding a merge commit",
+              no_command_printed_and_sent_to_merge_lane_2(completed)
+              and "does not hold a merge commit" in completed.stdout
+              and main_parent not in completed.stdout,
               completed.stdout)
         head = moved_to
 
