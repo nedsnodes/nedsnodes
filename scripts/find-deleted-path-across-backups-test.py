@@ -4356,12 +4356,12 @@ with tempfile.TemporaryDirectory() as tmp:
           code == 2 and "--restore needs the path the file was deleted from" in errors and calls == [],
           "exit=%s calls=%s\n%s" % (code, calls, errors))
 
-    code, out, errors, calls = run_restore(["someone@elsewhere:docs/x.md", "--restore", str(copy)])
+    code, out, errors, calls = run_restore(["someone@elsewhere:docs/x.md", "--repo", str(repo), "--restore", str(copy)])
     check("--restore with an unknown host's relative path is a usage error, exit 2, running nothing",
           code == 2 and "Give the file's absolute path on elsewhere" in errors and calls == [],
           "exit=%s calls=%s\n%s" % (code, calls, errors))
 
-    code, out, errors, calls = run_restore(["someone@elsewhere:x.md", "--restore", str(copy)])
+    code, out, errors, calls = run_restore(["someone@elsewhere:x.md", "--repo", str(repo), "--restore", str(copy)])
     check("--restore with an unknown host's bare file name is a usage error, exit 2, running nothing, "
           "not a write to the repository's file of that name",
           code == 2 and "Give the file's absolute path on elsewhere" in errors and calls == [],
@@ -4384,6 +4384,32 @@ with tempfile.TemporaryDirectory() as tmp:
                   % (code, calls, out, errors))
     finally:
         os.chdir(directory_before)
+
+    # "<link>/.." is the directory above where the link leads, as the system resolves it, not the link's own
+    # parent, which os.path.abspath would give by collapsing ".." lexically.
+    led_to = tmp / "real" / "inner"
+    led_to.mkdir(parents=True)
+    link = tmp / "link"
+    link.symlink_to(led_to)
+    code, out, errors, calls = run_restore(["s.md", "--repo", str(link) + "/..", "--restore", str(copy)],
+                                           table=[("rev-parse --show-toplevel",
+                                                   (128, "", "fatal: not a git repository"))])
+    check("--restore with a --repo in no repository whose path holds a symlink and then .. places the file in "
+          "the directory the system reaches, not where .. collapsed lexically would",
+          code == 0 and (tmp / "real" / "s.md").is_file() and (tmp / "real" / "s.md").read_bytes() == content
+          and not (tmp / "s.md").exists(),
+          "exit=%s\n%s\n%s" % (code, out, errors))
+
+    real_expanduser = os.path.expanduser
+    os.path.expanduser = lambda given: given
+    try:
+        code, out, errors, calls = run_restore(["~/home-x.md", "--repo", str(repo), "--restore", str(copy)])
+    finally:
+        os.path.expanduser = real_expanduser
+    check("--restore of a ~/ path no home directory expands is a usage error, exit 2, writing nothing and "
+          "running nothing, not a write to <repo>/~/",
+          code == 2 and "could not expand '~/home-x.md'" in errors and not (repo / "~").exists() and calls == [],
+          "exit=%s calls=%s\n%s" % (code, calls, errors))
 
     code, out, errors, calls = run_restore(["~tilde.md", "--repo", str(repo), "--restore", str(copy)])
     check("--restore places a name that starts with ~ but not ~/ under the repository's top level, "

@@ -279,7 +279,7 @@ def default_routes(open_pull_requests, edit_exit=0, merge_exit=0):
         "pr list": {"stdout": json.dumps(open_pull_requests)},
         "pr edit": {"exit": edit_exit, "stderr": "" if edit_exit == 0 else "edit refused\n"},
         "pr merge": {"exit": merge_exit},
-        "view-state": {"stdout": '{"state":"MERGED","mc":"MERGE_COMMIT"}\n'},
+        "view-state": {"stdout": '{"state":"MERGED","mc":"MERGE_COMMIT","base":"main"}\n'},
     }
 
 
@@ -771,6 +771,57 @@ def newest_main_commit_left_no_test_failing_cases(scratch):
                   f"exit {exit_code}\n{output}\n{recorded}\n{left_over}")
     finally:
         Path.write_text = real_write_text
+
+    real_replace, real_unlink = os.replace, Path.unlink
+
+    def is_the_programs_temporary_record(path):
+        name = Path(path).name
+        return (sys._getframe(2).f_globals is vars(program) and name.startswith(
+            "newest-main-commit-whose-after-merge-test-run-left-no-test-failing")
+            and name.endswith(".tmp"))
+
+    def replace_failing_for_the_record(source, destination, *arguments, **options):
+        if is_the_programs_temporary_record(source):
+            raise OSError(30, "Read-only file system")
+        return real_replace(source, destination, *arguments, **options)
+
+    def unlink_failing_for_the_record(self, *arguments, **options):
+        if is_the_programs_temporary_record(self):
+            raise OSError(30, "Read-only file system")
+        return real_unlink(self, *arguments, **options)
+
+    os.replace, Path.unlink = replace_failing_for_the_record, unlink_failing_for_the_record
+    try:
+        exit_code, output, calls, parent, merge_commit, recorded = case(
+            "no-test-failing-replace-and-cleanup-both-fail", "PARENT\n")
+    finally:
+        os.replace, Path.unlink = real_replace, real_unlink
+    path = newest_main_commit_left_no_test_failing_file(
+        scratch / "no-test-failing-replace-and-cleanup-both-fail")
+    temporaries = sorted(item.name for item in path.parent.glob(f"{path.name}.*.tmp"))
+    check("a record whose rename and cleanup both fail: the STOP names the temporary file left "
+          "behind and the cleanup's error, and the record keeps its commit",
+          exit_code == 3 and recorded == parent and len(temporaries) == 1
+          and f"The temporary file {path.parent / temporaries[0]} could not be removed either: "
+              f"[Errno 30] Read-only file system." in output
+          and f"rm {path.parent / temporaries[0]}" in output,
+          f"exit {exit_code}\n{output}\n{temporaries}")
+
+    into_another_branch = default_routes([])
+    into_another_branch["pr merge"] = {"origin_main_to": "MERGE_COMMIT", "origin": "ORIGIN"}
+    into_another_branch["view-state"] = {
+        "stdout": '{"state":"MERGED","mc":"MERGE_COMMIT","base":"stacked-topic-branch"}\n'}
+    exit_code, output, _, _, _ = run_case(
+        scratch, "no-test-failing-merged-into-another-branch", [(GATE_PASSED, 0)],
+        into_another_branch, merge_commit_new_to_the_clone=True,
+        before_the_program_runs=newest_main_commit_left_no_test_failing_written("PARENT\n"))
+    directory = scratch / "no-test-failing-merged-into-another-branch"
+    parent = git_output(directory / "origin-seed", "rev-parse", "HEAD~1")
+    check("a pull request merged into a branch other than main leaves the record naming main's "
+          "commit, and says why",
+          exit_code == 0 and newest_main_commit_left_no_test_failing_of(directory) == parent
+          and "merged into 'stacked-topic-branch', not main" in output,
+          f"exit {exit_code}\n{output}")
 
 
 def author_seat_made(directory):
@@ -2374,6 +2425,26 @@ def main():
         routes["pr merge"] = {"remove_directory": "ORIGIN"}
         exit_code, output, _, _, _ = run_case(
             scratch, "fetch-fails-after-merge", [(GATE_PASSED, 0)], routes)
+        recorded_commit = "c" * 40
+
+        def record_written(directory):
+            path = newest_main_commit_left_no_test_failing_file(directory)
+            path.parent.mkdir(parents=True, exist_ok=True)
+            path.write_text(recorded_commit + "\n")
+
+        exit_code_recorded, output_recorded, _, _, _ = run_case(
+            scratch, "fetch-fails-after-merge-with-a-record", [(GATE_PASSED, 0)], routes,
+            before_the_program_runs=record_written)
+        check("a fetch that fails after the merge, with a recorded commit: the recovery command "
+              "compares with the recorded commit when it is an ancestor of the merge commit, as "
+              "the after-merge test run would, and with the head commit otherwise",
+              exit_code_recorded == 3
+              and f"run: if git merge-base --is-ancestor {recorded_commit} " in output_recorded
+              and f"; then since={recorded_commit}; else since={HEAD}; fi; python3 "
+                  f"scripts/run-all-test-suites.py "
+                  f"--only-suites-whose-recorded-inputs-changed-since \"$since\"\n"
+                  in output_recorded,
+              f"exit {exit_code_recorded}\n{output_recorded}")
         check("a fetch that fails after the merge exits 3 without a test run",
               exit_code == 3 and runner_calls(scratch, "fetch-fails-after-merge") == []
               and "could not fetch origin in " in output

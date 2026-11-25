@@ -451,6 +451,27 @@ step exits 0 only when it hands the
 item over. CHECK's reads of the texts an answer adds need no outcomes, and it
 prints no such command.
 
+USER'S EARLIER WORDS. For an item that is to be shown, the step then runs
+walk-me-through-approval-walk-item-title-search-user-messages-in-session-dialogs-and-lines-in-walk-minutes-print.py
+with the item's title, the title of each earlier text of it read, which the
+next paragraph finds, and the item's numbers; a Withdrawn heading carries no
+title. It prints what that program prints right after its first line, which
+names the read's report: each message the user typed
+in an agent-session whose saved dialog names a title, after the agent message
+it answers, and each walk-minutes line naming one, each with its file and line.
+When the search fails, the step refuses, before any read, printing what the
+search said, and exits 1; any exit of the search but its found and nothing-found
+exits is a failure. The step saves what the search prints, a search with no
+hits too, as it prints it, in
+`docs/walk/title-search-cache/<walk name>-item-<N>-<agent-session id>.md`, the
+titles searched for as a JSON list on its first line, the agent-session id
+being $CLAUDE_CODE_SESSION_ID. A later run for the item in the same
+agent-session prints only a line naming that file, unless the file is missing
+or the item's titles differ from the saved ones; then it searches, prints and
+saves again. When the file cannot be written, or the agent-session id is not
+set, the step prints the search in full with a line saying why it was not
+saved. walk-files-ship.py does not ship this directory.
+
 Before it reads, the step keeps each earlier version of the item: each text of
 the item that a read wrote its report for, oldest first, goes below the item's
 live version, after the versions kept there already and before the next item,
@@ -555,6 +576,7 @@ RECORD_SHIPPER_FILE = REPOSITORY_TOP / "nn-systems" / "cold-read" / "cold-read-r
 RECORD_NAMES_FILE = REPOSITORY_TOP / "nn-systems" / "cold-read" / "cold-read-record-names-common.py"
 FINDING_OUTCOMES_COMMON_FILE = (REPOSITORY_TOP / "nn-systems" / "cold-read"
                                 / "cold-read-fast-read-report-findings-parse-and-finding-outcomes-check-common.py")
+TITLE_SEARCH_PROGRAM = HERE / "walk-me-through-approval-walk-item-title-search-user-messages-in-session-dialogs-and-lines-in-walk-minutes-print.py"
 PATH_CONSTANTS_FILE = (REPOSITORY_TOP / "nn-systems" / "general-tools"
                        / "ned-box-home-directory-and-its-mac-mount-point-path-constants-common.py")
 COUNTS_LOG_FILE_NAME = "walk-me-through-answer-added-texts-cold-read-fast-read-already-done-or-had-to-run-counts-per-check.tsv"
@@ -599,6 +621,11 @@ NoAnswerCase = collections.namedtuple("NoAnswerCase", "value label meaning ratin
 
 class MissingEvidenceLine(str):
     """A problem that adding an evidence line to the item would cure, as against one the item's change has."""
+
+
+class MalformedEvidenceLine(str):
+    """A problem that correcting an evidence line the item already has would cure; adding a second line would not,
+    since `check` still reads the first."""
 
 
 def rating_and_needed_lines_problems(found):
@@ -709,12 +736,12 @@ def dropped_proposal_search_problems(found):
         count = counts[0] if len(counts) == 1 else None
         places = SEARCH_PLACES.match(value[count.end():]) if count else None
         if len(days) != 2 or count is None or not places or not SEARCH_PLACE_WORD.search(places[1]):
-            problems.append(MissingEvidenceLine(NOT_ASKED_SEARCH_SHAPE_PROBLEM.format(marker=SEARCH, value=value)))
+            problems.append(MalformedEvidenceLine(NOT_ASKED_SEARCH_SHAPE_PROBLEM.format(marker=SEARCH, value=value)))
             continue
         try:
             first, last = (datetime.date.fromisoformat(day) for day in days)
         except ValueError:
-            problems.append(MissingEvidenceLine(NOT_ASKED_SEARCH_SHAPE_PROBLEM.format(marker=SEARCH, value=value)))
+            problems.append(MalformedEvidenceLine(NOT_ASKED_SEARCH_SHAPE_PROBLEM.format(marker=SEARCH, value=value)))
             continue
         if (last - first).days < SEARCH_WINDOW_DAYS:
             problems.append(NOT_ASKED_SEARCH_WINDOW_SHORT_PROBLEM.format(marker=SEARCH, first=first, last=last,
@@ -1358,8 +1385,8 @@ NOT_ASKED_DROPPED_PROPOSAL_NEW_TEXT_PROBLEM = ("- it has a `#new` line, which A 
                                                "proposal adds no text, so it recommends something else and is shown.")
 SEARCH_DAY = re.compile(r"\b\d{4}-\d{2}-\d{2}\b")
 SEARCH_COUNT = re.compile(r"\b(\d+)\s+cases?\b", re.I)
-# The places are the text after the single count's `in`.
-SEARCH_PLACES = re.compile(r"\W*in\b(.*)", re.I | re.S)
+# The places are the text after the single count's `in`, which may follow a word or two, as in `0 cases found in`.
+SEARCH_PLACES = re.compile(r"\W*(?:[A-Za-z]+\W+)*?in\b(.*)", re.I | re.S)
 SEARCH_PLACE_WORD = re.compile(r"\b(?!(?:to|in|and|of|the|from|through)\b)[A-Za-z][\w'.-]*")
 SEARCH_WINDOW_DAYS = 30
 NOT_ASKED_WHY = {
@@ -1629,6 +1656,23 @@ RATED_NONE_NOT_SHOWN_LINES = (
     "If the case against is in fact more than none, change the rating on its `#case_against` line, then run "
     "`{read_command}` again.",
 )
+APPROVAL_WALK_ITEM_TITLE_SEARCH_FAILED = (
+    "nothing read: {item} was not given its cold-read-fast-read, because the search for what the user said in earlier "
+    "agent-sessions that named its title failed (exit {exit}), and the user's earlier words may already decide "
+    "the item. The search said:\n{said}\n"
+    "Tell the user what each FAILED line above says, with any remedy the lines after it give, and do not show "
+    "{item} until the command below runs without this refusal, since until then nobody has read his earlier words "
+    "on it; a subagent tells the agent that dispatched it instead.\n"
+    "Once the user says the cause is fixed, run `{command}` again.")
+TITLE_SEARCH_CACHE_DIRECTORY_NAME = "title-search-cache"
+TITLE_SEARCH_CACHE_FILE_NAME = "{walk}-item-{numbers}-{session}.md"
+TITLE_SEARCH_CACHE_PRINTED_BEFORE = (
+    "The user's words where {item}'s title was named before were printed in full by an earlier run of this step in "
+    "this agent-session, and are saved in {path}; read that file when they are no longer in your context.")
+TITLE_SEARCH_CACHE_NOT_SAVED = (
+    "The search for the user's words above was not saved in {path}, so the next run of this step prints it in full "
+    "again: {why}")
+TITLE_SEARCH_CACHE_NO_AGENT_SESSION = "{variable} is not set, so the agent-session that ran the step is not known."
 ITEM_READ_FAILED_LINES = (
     "{item} has had no cold-read-fast-read of its text as it stands, so do not present it yet: the user is shown an "
     "item only after its cold-read-fast-read.",
@@ -3326,6 +3370,9 @@ NO_ANSWER_ROWS_HEADING = ("Rows of the no-answer table {item} could settle by; i
 NO_ANSWER_ROW_PASSES = "- {label}: {meaning}. Its evidence passes: run `{command}` and do what it prints."
 NO_ANSWER_ROW_LINE_MISSING = ("- {label}: {meaning}. Only evidence is missing: {missing} Add it to {document}, then "
                               "run `{command}` and do what it prints.")
+NO_ANSWER_ROW_LINE_MALFORMED = ("- {label}: {meaning}. Its evidence line needs correcting: {malformed} Correct that line "
+                                "in {document}, rather than adding another, then run `{command}` and do what it "
+                                "prints.")
 NO_ANSWER_ROW_NOT_CHECKED = ("- {label}: its evidence could not be checked, so it is not offered; present {item} "
                              "unless another row fits: {error}")
 
@@ -3356,6 +3403,11 @@ def no_answer_rows_for_waiting_item_lines(walk_finder, top, minutes, value, numb
             continue
         if not problems:
             rows.append(NO_ANSWER_ROW_PASSES.format(label=case.label, meaning=case.meaning, command=command))
+        elif all(isinstance(problem, (MissingEvidenceLine, MalformedEvidenceLine)) for problem in problems) and any(
+                isinstance(problem, MalformedEvidenceLine) for problem in problems):
+            malformed = " ".join(problem.removeprefix("- ") for problem in problems)
+            rows.append(NO_ANSWER_ROW_LINE_MALFORMED.format(label=case.label, meaning=case.meaning,
+                                                            malformed=malformed, document=document, command=command))
         elif all(isinstance(problem, MissingEvidenceLine) for problem in problems):
             missing = " ".join(problem.removeprefix("- ") for problem in problems)
             rows.append(NO_ANSWER_ROW_LINE_MISSING.format(label=case.label, meaning=case.meaning, missing=missing,
@@ -3415,6 +3467,66 @@ def approval_walk_item_system_status_claims_not_rechecked_refused(text, item, do
         raise Failure(APPROVAL_WALK_ITEM_SYSTEM_STATUS_CLAIM_NOT_RECHECKED.format(
             item=item, document=document, matched=matched, command=command))
     return SYSTEM_STATUS_CLAIMS_RECHECKED_LINE.format(item=item, matched=matched, rechecked=rechecked)
+
+
+def approval_walk_item_title_user_messages_in_earlier_agent_sessions_lines(walk_finder, minutes, text, earlier,
+                                                                         numbers, item, command):
+    """Return a function that saves and returns the lines TITLE_SEARCH_PROGRAM prints for the item's title and the
+    title of each earlier read text of it, as earlier_read_texts_of_item returns them; raise Failure when the search
+    failed. A Withdrawn version heading carries no title, so those read texts are the item's only earlier titles the
+    program can know.
+
+    Call the function only in the statement that prints its lines: the lines are saved in the title search cache
+    file for the item and this agent-session, and a later run for the same titles in the same agent-session prints
+    only a line naming that file, since fix rounds rerun the step, so lines saved but never printed are never read."""
+    titles = []
+    for heading in [text] + [copied for _, _, copied in earlier]:
+        title = item_title(walk_finder, heading.split("\n", 1)[0])
+        if title and title not in titles:
+            titles.append(title)
+    if not titles:
+        return lambda: []
+    variable = load_module("cold_read_record_names", RECORD_NAMES_FILE).AGENT_SESSION_ID_ENVIRONMENT_VARIABLE
+    session_id = os.environ.get(variable)
+    cache = (minutes.parent / TITLE_SEARCH_CACHE_DIRECTORY_NAME
+             / TITLE_SEARCH_CACHE_FILE_NAME.format(walk=minutes.name[:-len(walk_finder.MINUTES_SUFFIX)],
+                                                   numbers="-and-".join(numbers), session=session_id))
+    if session_id and title_search_cache_titles(cache) == titles:
+        return lambda: [TITLE_SEARCH_CACHE_PRINTED_BEFORE.format(item=item, path=cache)]
+    words = [word for title in titles for word in ("--title", title)]
+    words += [word for number in numbers for word in ("--item-number", number)]
+    result = subprocess.run([sys.executable, str(TITLE_SEARCH_PROGRAM), *words], capture_output=True, text=True,
+                            stdin=subprocess.DEVNULL)
+    exits = load_module("title_search", TITLE_SEARCH_PROGRAM)
+    if result.returncode not in (exits.EXIT_FOUND, exits.EXIT_NOTHING_FOUND):
+        raise Failure(APPROVAL_WALK_ITEM_TITLE_SEARCH_FAILED.format(
+            item=item, exit=result.returncode, said=result.stderr.strip() or "nothing", command=command))
+    lines = result.stdout.rstrip("\n").split("\n") if result.stdout.strip() else []
+    if not session_id:
+        return lambda: lines + [TITLE_SEARCH_CACHE_NOT_SAVED.format(
+            path=minutes.parent / TITLE_SEARCH_CACHE_DIRECTORY_NAME,
+            why=TITLE_SEARCH_CACHE_NO_AGENT_SESSION.format(variable=variable))]
+
+    def saved_lines():
+        try:
+            cache.parent.mkdir(parents=True, exist_ok=True)
+            temporary = cache.with_name(cache.name + ".writing")
+            temporary.write_text("\n".join([json.dumps(titles)] + lines) + "\n", encoding="utf-8")
+            os.replace(temporary, cache)
+        except OSError as error:
+            return lines + [TITLE_SEARCH_CACHE_NOT_SAVED.format(path=cache, why=error)]
+        return lines
+    return saved_lines
+
+
+def title_search_cache_titles(cache):
+    """Return the titles on the first line of the title search cache file cache, or None when it is missing or
+    cannot be read, so that the search runs again."""
+    try:
+        first = cache.read_text(encoding="utf-8").split("\n", 1)[0]
+        return json.loads(first)
+    except (OSError, ValueError):
+        return None
 
 
 def waiting_item_read(arguments, sub_step_of=None):
@@ -3487,10 +3599,12 @@ def waiting_item_read(arguments, sub_step_of=None):
             approval_walk_item_text_over_word_limit_refused(*above[:6], above[7], command)
     # Before anything is written, so a refused item leaves the walk-minutes and the walk-document as they were; an
     # item settled without being shown is not refused, since no status in it reaches the user.
-    recheck_line = None
+    recheck_line, past_words = None, lambda: []
     if rated_none_item_not_to_be_shown(walk_finder, top, minutes, value, numbers, total, parser, named) is None:
         recheck_line = approval_walk_item_system_status_claims_not_rechecked_refused(
             text, item, document, rerun, rechecked)
+        past_words = approval_walk_item_title_user_messages_in_earlier_agent_sessions_lines(
+            walk_finder, minutes, text, earlier, numbers, item, rerun)
     if sub_step_of:
         # An item read before it was split keeps that text, as an item revised after its read does.
         for above in sub_step_of[2]:
@@ -3557,11 +3671,11 @@ def waiting_item_read(arguments, sub_step_of=None):
                 withheld = item_read_findings_without_outcomes_lines(
                     item, latest[1]["report"], reads / f"{latest[0]}-outcome.json", arguments.fast_read_program,
                     command, command_reading_again)
-                print("\n".join([ITEM_READ_NOT_RUN.format(item=item, report=latest[1]["report"])] + no_answer_rows
-                                 + (withheld or [ITEM_READ_NOT_RUN_NEXT.format(
-                                     item=item, now_over_later_command=check_command_with_cwd(top, NOW_OVER_LATER_FLAG))]
-                                    + waiting_on_item_prerequisite_lines(walk_finder, minutes, numbers, total,
-                                                                         parser))))
+                rest = no_answer_rows + (withheld or [ITEM_READ_NOT_RUN_NEXT.format(
+                    item=item, now_over_later_command=check_command_with_cwd(top, NOW_OVER_LATER_FLAG))]
+                    + waiting_on_item_prerequisite_lines(walk_finder, minutes, numbers, total, parser))
+                print("\n".join([ITEM_READ_NOT_RUN.format(item=item, report=latest[1]["report"])] + past_words()
+                                 + rest))
                 return 1 if withheld else 0
             why = ITEM_READ_RUN_FACTS.format(report=latest[1]["report"], facts=", ".join(facts[:FACTS_LISTED]))
         walk_name = minutes.name[:-len(walk_finder.MINUTES_SUFFIX)]
@@ -3583,11 +3697,13 @@ def waiting_item_read(arguments, sub_step_of=None):
     withheld = item_read_findings_without_outcomes_lines(item, outcome["report"], reads / f"{key}-outcome.json",
                                                          arguments.fast_read_program, command,
                                                          command_reading_again)
-    print("\n".join([ITEM_READ_USED.format(item=item, how=how, report=outcome["report"], notes=notes)] + no_answer_rows
-                    + [line.format(item=item, document=document, command=command,
-                                   now_over_later_command=check_command_with_cwd(top, NOW_OVER_LATER_FLAG))
-                       for line in (ITEM_READ_LINES[:1] if withheld else ITEM_READ_LINES)]
-                    + (withheld or waiting_on_item_prerequisite_lines(walk_finder, minutes, numbers, total, parser))))
+    rest = (no_answer_rows
+            + [line.format(item=item, document=document, command=command,
+                           now_over_later_command=check_command_with_cwd(top, NOW_OVER_LATER_FLAG))
+               for line in (ITEM_READ_LINES[:1] if withheld else ITEM_READ_LINES)]
+            + (withheld or waiting_on_item_prerequisite_lines(walk_finder, minutes, numbers, total, parser)))
+    print("\n".join([ITEM_READ_USED.format(item=item, how=how, report=outcome["report"], notes=notes)] + past_words()
+                     + rest))
     return 1 if withheld else 0
 
 

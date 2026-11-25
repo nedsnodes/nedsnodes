@@ -557,7 +557,8 @@ NEVER_SHOWN_REASON = (
     "agent-session's transcript, so an item shown only before the last session-handoff must be shown again in this "
     "agent-session.")
 # A line holding a text an answer adds opens with one of these marks; `#new_if_d` is tried before `#new`.
-NEW_TEXT_MARK = re.compile(r"^(#new_if_d|#new)(?!\w)[\s:]*(.*)$", re.I)
+# re.ASCII: under Unicode re.I a dotless or dotted i matches `i`, and the lowered mark would then name no lead-in.
+NEW_TEXT_MARK = re.compile(r"^(#new_if_d|#new)(?!\w)[\s:]*(.*)$", re.I | re.ASCII)
 # The lead-in an agent puts where it shows a line without its mark.
 LEAD_INS_BEFORE_A_LINE_SHOWN_WITHOUT_ITS_MARK = {"`#new` line": "If you approve, the new text:",
                                                  "`#new_if_d` line": "If you disapprove, the new text:"}
