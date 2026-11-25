@@ -1,6 +1,6 @@
 # Markdown file standard: a common part and one section per kind
 
-This page is the standard for the project's Markdown files: a common part that every Markdown file follows, then one section for each of ten kinds of file, saying what a file of that kind contains, what it leaves out and its length in words. The kinds are those the project glossary, `docs/nedsnodes-wiki/nedsnodes-glossary.md`, lists under "Kinds of Markdown file", and each section's heading is a kind's name as that list spells it; a file of a kind with no section here follows the common part alone. Do not read the whole page before you write or edit a file. Run `nn-systems/general-tools/markdown-file-standard-rules-for-the-markdown-file-kind-at-a-path-print.py <path of the file>`, giving the path the file will have once it is in place, such as `CLAUDE.local.md` for a seat-brief drafted in a scratchpad. It prints the common part and the one section for that file's kind; for a record or walk-minutes at a path it knows, such as `docs/walk/<name>-minutes.md` or a file in `cold-read-records/`, the common part and its rule Exemptions and precedence again; or the common part alone when neither holds. Read another section only where the printed one points to it. The program picks the kind by the path, and, for a GHI-MD that already exists, also by its front matter, as the GHI-MD section says. It reads this page's level-2 headings, and the bold lead of the common part's rule Exemptions and precedence, as data, and holds this page's path: a heading is renamed, or the page moved, only together with the program's constant that holds it. `nn-systems/general-tools/tests/markdown-file-standard-rules-for-the-markdown-file-kind-at-a-path-print-every-kind-named-is-in-project-glossary-test.py` fails when a heading of this page, a kind the program names, or a kind of work the GHI-MD section names is missing from the glossary's lists.
+This page is the standard for the project's Markdown files: a common part that every Markdown file follows, then one section for each of ten kinds of file, saying what a file of that kind contains and what it leaves out. The kinds are those the project glossary, `docs/nedsnodes-wiki/nedsnodes-glossary.md`, lists under "Kinds of Markdown file", and each section's heading is a kind's name as that list spells it; a file of a kind with no section here follows the common part alone. Do not read the whole page before you write or edit a file. Run `nn-systems/general-tools/markdown-file-standard-rules-for-the-markdown-file-kind-at-a-path-print.py <path of the file>`, giving the path the file will have once it is in place, such as `CLAUDE.local.md` for a seat-brief drafted in a scratchpad. It prints the common part and the one section for that file's kind; for a record or walk-minutes at a path it knows, such as `docs/walk/<name>-minutes.md` or a file in `cold-read-records/`, the common part and its rule Exemptions and precedence again; or the common part alone when neither holds. Read another section only where the printed one points to it. The program picks the kind by the path, and, for a GHI-MD that already exists, also by its front matter, as the GHI-MD section says. It reads this page's level-2 headings, and the bold lead of the common part's rule Exemptions and precedence, as data, and holds this page's path: a heading is renamed, or the page moved, only together with the program's constant that holds it. `nn-systems/general-tools/tests/markdown-file-standard-rules-for-the-markdown-file-kind-at-a-path-print-every-kind-named-is-in-project-glossary-test.py` fails when a heading of this page, a kind the program names, or a kind of work the GHI-MD section names is missing from the glossary's lists.
 
 ## Common part
 
@@ -9,7 +9,6 @@ This page is the standard for the project's Markdown files: a common part that e
 - **One canonical location for each fact.** Link to the document or file that holds a fact instead of restating it. Leave to the code what the code states, such as flags, exit codes, message texts and file formats: name the file and stop.
 - **A reason is one clause**, attached to the statement it explains, and only where it helps the reader act. Do not defend a decision or list rejected alternatives, unless the kind's section asks for them.
 - **Headings.** Where a kind's section lists headings, the file has each one that section does not make optional or conditional, and keeps that section's order. A heading or line that a program reads, such as `## Provisional additions (not yet vetted by the user)` or a front matter line, keeps its exact text.
-- **Length.** Where a kind's section gives a length, it is a cap in words as `wc -w` counts them, not a target. A file or entry over its cap usually holds something its section leaves out: cut that first.
 - **Kept true.** When the thing a file describes changes, change the sentence that describes it. Do not append a dated note, an "Update:" paragraph or an "as of" line beside the old sentence.
 - **Exemptions and precedence.** A file whose job is to record what happened, such as a log, walk-minutes, a report, a commit message or a pull request description, is exempt from the rules State what is and Kept true, and a word-for-word copy, such as a frozen-copy, follows none of this standard. Where a kind's section asks for something a common-part rule tells writers to leave out, such as the exact command in a bug's `## Reproduction`, the kind's section wins.
 
@@ -25,7 +24,7 @@ A project instructions file leaves out:
 - Steps that need no judgment, and the order of steps: a program holds them, as the code-prompt-code rule in `CLAUDE.md` says.
 - History and citations, which `CLAUDE.md` keeps out of standing instructions.
 
-Length: at most 1,500 words. A project instructions file over 2,000 words holds rules that belong in a seat-brief, a skill, a wiki page or a program.
+A project instructions file holds no rule that belongs in a seat-brief, a skill, a wiki page or a program; the rule goes in that file.
 
 ## seat-brief
 
@@ -37,7 +36,7 @@ It contains, in this order:
 2. What the agent-seat owns, in one paragraph.
 3. Its first job, or the standing work it does when no task is open.
 4. Where its work goes: nc-topic-branches and pull requests, the log-store directory, and which agent-seat it reports to, if any.
-5. Rules for this agent-seat alone that no `CLAUDE.md`, skill, wiki page or program holds, each in one to three sentences. The user's words go in quotation marks where a paraphrase would lose his meaning, with no date or attribution.
+5. Rules for this agent-seat alone that no `CLAUDE.md`, skill, wiki page or program holds. The user's words go in quotation marks where a paraphrase would lose his meaning, with no date or attribution.
 
 A seat-brief leaves out:
 
@@ -45,7 +44,7 @@ A seat-brief leaves out:
 - How the agent-seat was started, who asked for it, and the incidents behind its rules.
 - Facts about another agent-seat or a machine that change on their own, such as which agent-seat merges pull requests; the seat-brief names the document that holds them.
 
-Length: at most 800 words. A seat-brief over 1,000 words holds procedures that belong in a skill or a program. When a skill or a program takes over a rule, the rule leaves the seat-brief in the same change.
+A seat-brief holds no procedure; a procedure belongs in a skill or a program. When a skill or a program takes over a rule, the rule leaves the seat-brief in the same change.
 
 ## agent definition
 
@@ -62,7 +61,7 @@ An agent definition leaves out:
 - Steps that need no judgment: a program does them, and the body names the program.
 - History and citations, which `CLAUDE.md` keeps out of standing instructions.
 
-Length: the `description` at most 60 words; the whole file at most 800. An agent definition over 1,000 words holds steps that belong in a program.
+An agent definition holds no step that needs no judgment; such a step belongs in a program.
 
 ## prompt template
 
@@ -80,7 +79,7 @@ A prompt template leaves out:
 - The text the program puts in place of a placeholder.
 - History and citations, which `CLAUDE.md` keeps out of standing instructions.
 
-Length: at most 2,000 words. A prompt template over 2,500 words usually holds steps that belong in its program.
+A prompt template holds no step that needs no judgment; such a step belongs in its program.
 
 ## skill
 
@@ -98,11 +97,11 @@ A skill leaves out:
 - Steps that need no judgment, which its program does.
 - History and citations, which `CLAUDE.md` keeps out of standing instructions.
 
-Length: the `description` at most 120 words; the rest of a `SKILL.md` at most 2,000, and each file it tells the agent to read at most 2,000. A skill over 3,000 words usually holds ordered steps that belong in a program.
+A skill holds no fixed order of steps; that order belongs in a program.
 
 ## session-handoff or next step file
 
-This section covers the next step file that `/handoff` step 2 writes in `~/.claude/handoffs/`; `nn-systems/handoff/handoff-write-and-check-supervisor.py` copies its text into the session-handoff, which the successor agent-session, which did not see the work, starts from, and writes the rest of the session-handoff itself, so no section of this page covers the session-handoff file. `.claude/skills/handoff/SKILL.md` step 2 says what goes in a next step file and what stays out; this section adds the order, the form and the length.
+This section covers the next step file that `/handoff` step 2 writes in `~/.claude/handoffs/`; `nn-systems/handoff/handoff-write-and-check-supervisor.py` copies its text into the session-handoff, which the successor agent-session, which did not see the work, starts from, and writes the rest of the session-handoff itself, so no section of this page covers the session-handoff file. `.claude/skills/handoff/SKILL.md` step 2 says what goes in a next step file and what stays out; this section adds the order and the form.
 
 It contains, in this order:
 
@@ -112,7 +111,7 @@ It contains, in this order:
 
 A next step file leaves out what this agent-session did, the text of an approval-walk item or a task, which their files hold, the times and wording of the user's replies unless the successor acts on them, and the reasons behind the first action unless the successor would otherwise act differently.
 
-Length: at most 400 words. A next step file over 500 words holds work that belongs in tasks.
+A next step file holds no list of work to do; that work belongs in tasks.
 
 ## glossary
 
@@ -131,7 +130,7 @@ Every entry follows one template, on one line, in which `[…]` marks an optiona
 
 An entry leaves out history, user-rulings, quotations of the user, the reasons for the term or the thing it names, how-to steps, design detail, a list of the term's cases, and anything the linked document says.
 
-Length: at most 50 words an entry. An entry over 60 words holds detail that belongs in the linked document.
+An entry holds no detail that belongs in the linked document.
 
 ## design
 
@@ -155,7 +154,7 @@ A design leaves out:
 - Detail the design-contract or the test-design holds.
 - Once its code has merged, any detail the code now states. From then on, a change to what the design promises goes through a GHI-MD for a feature, which revises the design before the code.
 
-Length: at most 3,000 words for a system, at most 1,200 for a single program. A design over 4,000 words usually holds two designs, or detail that belongs in the design-contract, the test-design or the code.
+A design holds one design, and no detail that belongs in the design-contract, the test-design or the code; a second design goes in a file of its own.
 
 ## GHI-MD
 
@@ -185,7 +184,7 @@ A GHI-MD leaves out:
 - A record of how a decision was reached. A user-ruling the work rests on is stated as what is decided, in the section it governs, followed by its walk-minutes citation in parentheses, because an agent must verify it before it acts against it.
 - Data, measurements and working notes: they go in supporting-documents that the GHI links, as `/ghi-write` step 2 says.
 
-Length: at most 600 words; Outcome and Provisional additions aside. A GHI-MD over 1,000 words usually holds a design, which goes in a GHI-MD of its own that carries `kind: design`, or material for a supporting-document.
+A GHI-MD that is not a design holds no design, which goes in a GHI-MD of its own that carries `kind: design`, and no material that belongs in a supporting-document.
 
 ## wiki page
 
@@ -201,4 +200,4 @@ A page contains, in this order:
 
 A wiki page leaves out front matter or opening lines that say which approval-walk or user-ruling produced the page, status lines such as "status: ruled" or "streamlined on", the approval-walk or user-ruling behind each rule, and examples taken from past events when a current file or command would serve.
 
-Length: a reference page as long as its content, one line or row for each rule; a how-to or explanation page at most 2,000 words. A page over 3,000 words usually holds two pages.
+A wiki page holds one page's material; material for a second page goes on a page of its own.
