@@ -38,14 +38,40 @@ comments = [
 code, out, err = print_block(reviews, comments)
 ```
 
+The same test also drops a new finding when the later review does not restate the earlier finding at all. When merge-lane-2's reviews of one pull request hold only these two comments:
+
+- review 1, a request for changes: `**fix-next** Rename it (Codex finding aaaaaaaaaaaa).` at `scripts/thing.py:3`;
+- review 2, the approval, a new finding with the same wording under another id: `**fix-next** Rename it (Codex finding bbbbbbbbbbbb).` at line 90;
+
+the comment at line 90 pairs with review 1's finding, because its text without the Codex finding mark matches and review 2 has not yet restated that finding, and is left out. The program exits 0 and prints:
+
+```
+#follow_up_request pull request 1964
+1. fix-next: `scripts/thing.py:3`: Rename it (Codex finding aaaaaaaaaaaa).
+```
+
+This was reproduced on main at ea0d050d9 in the same way as the first case, with the first case's `reviews` and `print_block` call, and these two comments in place of its three:
+
+```python
+comments = [
+    merge_lane_comment(10, 1, "**fix-next** Rename it (Codex finding aaaaaaaaaaaa).", line=3),
+    merge_lane_comment(12, 2, "**fix-next** Rename it (Codex finding bbbbbbbbbbbb).", line=90),
+]
+```
+
+In this case no comment shares a Codex finding id with review 1's finding, and only one earlier finding could pair, so neither the pairing by shared Codex finding id nor the refusal of a comment that could pair with more than one earlier finding, both under Next action, changes what is printed. The pairing across Codex finding ids is on purpose: the code comment above the test says a later review restates an earlier finding with a new Codex finding id when its line range moved. The comments alone cannot tell such a restatement from a new finding that happens to have the same wording: both have the same category, path and text, and a different Codex finding id and line.
+
 ## Source
 
 The Codex review cell found this as finding f86d6ce9600f (P2), "Honor a retained Codex ID even when wording changes", in merge-lane-3's round-1 review of [Follow-up request block: a later review's comments pair with earlier findings in passes, exact match first, then nearest line](https://github.com/nedsnodes/nedsnodes/pull/4770), [review 6060270330](https://github.com/nedsnodes/nedsnodes/pull/4770#pullrequestreview-6060270330). The review graded it fix-next, not blocking, because main drops the finding in the same way and that pull request does not cause it; the review reproduced it on that pull request's head and on main. Pull request 4770 is the follow-up to [Follow-up request block: a later review restates each earlier finding at most once; one Codex finding id in two forms is one finding](https://github.com/nedsnodes/nedsnodes/pull/4751), and rewrites the same pairing into passes, exact match first and then nearest line, so the fix belongs to the code that pull request leaves.
 
+The Codex review cell found the second case as finding 3e981be21ff3 (P2), "Do not treat a lone lookalike as a confirmed restatement", in merge-lane-3's round-2 review of pull request 4770, [review 6062336225](https://github.com/nedsnodes/nedsnodes/pull/4770#pullrequestreview-6062336225), and [comment 4698708164](https://github.com/nedsnodes/nedsnodes/pull/4770#discussion_r4698708164) there. The review graded it fix-next, not blocking, for the same reason as the first case, and said it reproduced it on that pull request's head 27643144a and on main a8ca00d83. It asks for detection rather than better guessing: refuse in this case too, or record why the pairing is accepted.
+
 ## Next action
 
-The finding is on the fix-next list of pull request 4770's author, the agent-seat overall-cleanup; after pull request 4770 merges, merge-lane-2 sends that agent-seat the list, and it fixes the finding in a follow-up pull request or tells merge-lane-2 why not. While pull request 4770 is open, leave this issue as it is, because its fix-round may fix this too. When pull request 4770 merges, or closes without merging, run the reproduction above on main. If the block holds review 1's finding once and the finding at line 9, record that as this issue's outcome and close it as completed. Otherwise fix it in a new pull request, in the pairing code main then has, whether or not pull request 4770 merged:
+Both findings are on the fix-next list of pull request 4770's author, the agent-seat overall-cleanup; after pull request 4770 merges, merge-lane-2 sends that agent-seat the list, and it fixes them in a follow-up pull request or tells merge-lane-2 why not. While pull request 4770 is open, leave this issue as it is, because its fix-round may fix this too. When pull request 4770 merges, or closes without merging, run both reproductions above on main. If the first prints a block holding review 1's finding once and the finding at line 9, and the second prints no block and exits with the refusal the third item below describes, record that as this issue's outcome and close it as completed. Otherwise the agent-seat that acts on this issue, overall-cleanup when merge-lane-2 sends it the list, fixes whichever case still fails in a new pull request, in the pairing code main then has, whether or not pull request 4770 merged, with the items below that the failing case needs and the test case for each case:
 
 - Pair a comment with an earlier finding of the same category and path that shares one of its Codex finding ids, whatever the wording, before any pairing by text, so that a comment whose text matches an earlier finding cannot take a finding that its own Codex finding id does not name. A comment with no Codex finding id pairs by text, as now.
 - When a comment could pair with more than one earlier finding, raise `Refused` and print no block, as the subcommand already does for a comment that opens with no category mark: name the comments, and tell merge-lane-2 to write the block by hand. This is the answer merge-lane-3's [comment 4696967578](https://github.com/nedsnodes/nedsnodes/pull/4770#discussion_r4696967578) on pull request 4770 asks for when that pull request's nearest-line pass has to choose.
-- Add the three comments above as a test case that expects the block to hold review 1's finding once and the finding at line 9.
+- When a comment and an earlier finding both carry Codex finding ids, the comment would pair with the earlier finding only by its text without the Codex finding mark, their Codex finding ids differ, and the comment's review restates that earlier finding under none of the earlier finding's Codex finding ids, raise `Refused` in the same way instead of pairing, because the comment may be a new finding. This also refuses a real restatement whose Codex finding id changed, and merge-lane-2 then writes that block by hand.
+- Add the three comments of the first case as a test case that expects the block to hold review 1's finding once and the finding at line 9, and the two comments of the second case as a test case that expects the refusal.
