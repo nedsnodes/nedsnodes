@@ -680,6 +680,36 @@ def newest_main_commit_left_no_test_failing_cases(scratch):
               f"the suites whose recorded inputs changed since it" in output,
           f"exit {exit_code}\n{output}\n{calls}\n{recorded}")
 
+    exit_code, output, calls, parent, merge_commit, recorded = case(
+        "no-test-failing-at-parent-and-head-test-run-passed", "PARENT\n",
+        head_test_run_test_logs=[("MERGED.txt", head_test_run_record("MERGED", 0))])
+    merged = merged_commit(scratch, "no-test-failing-at-parent-and-head-test-run-passed")
+    check("with both a recorded newest main commit whose after-merge test run left no test "
+          "failing and a passing head test run, the after-merge test run compares with both, so "
+          "a suite runs only when both comparisons select it",
+          exit_code == 0 and len(calls) == 1
+          and calls[0]["argv"][:4] == ["--only-suites-whose-recorded-inputs-changed-since", parent,
+                                       "--only-suites-whose-recorded-inputs-changed-since", merged]
+          and f"changed both since {parent[:12]}, the newest main commit whose after-merge test "
+              f"run left no test failing, and since {merged[:12]}, the commit the head test run "
+              f"passed on, so a suite runs only when both comparisons select it" in output
+          and f"inputs changed since {parent[:12]} and since {merged[:12]}" in output
+          and recorded == merge_commit,
+          f"exit {exit_code}\n{output}\n{calls}\n{recorded}")
+
+    exit_code, output, calls, parent, merge_commit, recorded = case(
+        "no-test-failing-at-parent-and-head-test-run-failed", "PARENT\n",
+        head_test_run_test_logs=[("MERGED.txt", head_test_run_record("MERGED", 1))])
+    check("with a recorded newest main commit whose after-merge test run left no test failing "
+          "but no passing head test run, the after-merge test run compares with that commit "
+          "alone, never with the nn-head-commit, on which no test run passed, and says why",
+          exit_code == 0 and len(calls) == 1
+          and calls[0]["argv"][:2] == ["--only-suites-whose-recorded-inputs-changed-since", parent]
+          and calls[0]["argv"].count("--only-suites-whose-recorded-inputs-changed-since") == 1
+          and "not also since a commit a head test run passed on, because no readable head test "
+              "run record under " in output,
+          f"exit {exit_code}\n{output}\n{calls}")
+
     for name, runner_answer, why in (
             ("no-test-failing-kept-after-a-failed-run", (RUNNER_FAILED, 1), "failed"),
             ("no-test-failing-kept-after-a-run-with-no-summary",

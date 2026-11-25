@@ -881,9 +881,9 @@ def commit_files(repo, files, message):
     return git(repo, "rev-parse", "HEAD").stdout.strip()
 
 
-def selective_run(root, since):
+def selective_run(root, *since):
     (root / "ran.txt").unlink(missing_ok=True)
-    return run(root, CHANGED_SINCE, since)
+    return run(root, *[argument for commit in since for argument in (CHANGED_SINCE, commit)])
 
 
 def recording(root, suite):
@@ -961,6 +961,38 @@ with tempfile.TemporaryDirectory() as scratch:
     check("the SELECTED line names the file that differs",
           "SELECTED reads-a-file-test.py: it reads inputs/read-directly.txt, which differs"
           in out, out)
+
+    # Given twice, as the after-merge test run gives it the pull request's head test run's
+    # commit and the newest main commit whose after-merge test run passed.
+    changed = git(repo, "rev-parse", "HEAD").stdout.strip()
+    result = selective_run(root, base, changed)
+    out = lines(result.stdout)
+    check("given two commits, a suite only one comparison selects does not run, and its NOT "
+          "SELECTED line names the comparison that leaves it out",
+          result.returncode == 0 and ran(root) == []
+          and any(line.startswith(f"NOT SELECTED reads-a-file-test.py: the comparison with "
+                                  f"{changed[:12]} leaves it out: none of the ")
+                  and f"files it read differs since {changed[:12]}" in line for line in out)
+          and f"selected by inputs changed since {base[:12]} and since {changed[:12]}"
+          in result.stdout
+          and out[-1].endswith(f"suites not selected, their recorded inputs unchanged since "
+                               f"{base[:12]} or since {changed[:12]}"),
+          (ran(root), result.stdout, result.stderr))
+    commit_files(repo, {"inputs/read-directly.txt": "third\n"}, "change the file again")
+    result = selective_run(root, base, changed)
+    out = lines(result.stdout)
+    check("given two commits, a suite both comparisons select runs, and its SELECTED line "
+          "gives each comparison's reason",
+          ran(root) == ["reads-a-file-test.py"]
+          and f"SELECTED reads-a-file-test.py: the comparison with each commit selects it: "
+              f"{base[:12]}: it reads inputs/read-directly.txt, which differs; {changed[:12]}: "
+              f"it reads inputs/read-directly.txt, which differs" in out,
+          (ran(root), result.stdout, result.stderr))
+    result = selective_run(root, changed, "no-such-commit")
+    check("a second commit git cannot resolve stops the run with exit 2, naming it",
+          result.returncode == 2 and ran(root) == []
+          and "git cannot resolve no-such-commit to a commit" in result.stderr,
+          (result.returncode, result.stdout, result.stderr))
     base = git(repo, "rev-parse", "HEAD").stdout.strip()
 
     commit_files(repo, {"inputs/read-by-a-child.txt": "second\n"}, "change a child's input")
