@@ -417,6 +417,8 @@ def run(arguments):
 
 
 def run_under_lock(arguments, state_file):
+    import tempfile
+
     started = utc_now()
     try:
         state = read_state(state_file)
@@ -450,7 +452,7 @@ def run_under_lock(arguments, state_file):
     quiet.close()
     print(f"{PROGRAM}: running, because {why_due}")
     passing = state.get("passing_commit")
-    base = Path(arguments.temporary_directory) / PROGRAM
+    base = Path(arguments.temporary_directory or tempfile.gettempdir()) / PROGRAM
     worktree, log_dir = base / "worktree-of-main", base / "logs"
     base.mkdir(parents=True, exist_ok=True)
     if worktree.exists():
@@ -653,13 +655,13 @@ def merge_gate_notice(state_file, clone):
 
 def parse_arguments(argv):
     import argparse
-    import tempfile
 
     parser = argparse.ArgumentParser(prog=PROGRAM, description=__doc__.split("\n")[0])
     parser.add_argument("--clone", default=str(REPOSITORY_ROOT))
     parser.add_argument("--state-file", default=str(DEFAULT_STATE_FILE))
     parser.add_argument("--log-store-root", default=DEFAULT_LOG_STORE_ROOT)
-    parser.add_argument("--temporary-directory", default=tempfile.gettempdir())
+    # Read only when a run makes its worktree: gettempdir() raises when no temporary directory is writable.
+    parser.add_argument("--temporary-directory")
     parser.add_argument("--runner-lock-file",
                         default=str(Path.home() / ".claude" / ".run-all-test-suites.lock"))
     parser.add_argument("--test-suite-runner-program")
