@@ -17,9 +17,10 @@ claim sets the file's modification time to the claim time, because a rename keep
 what the 30-minute limit reads. A returned alert keeps its agent-seat, because files are moved, never rewritten.
 
 Failures: a file another agent-session moved first is skipped, never an error. A pending file that is not a JSON
-object, or that cannot be read, such as a directory, is moved into unreadable/, where nothing returns it to pending/,
-and its ValueError or OSError raised, naming where it went, so the next prompt claims the alerts after it; a claimed file that is not a JSON object raises ValueError, and any
-other OSError is raised; the caller reports each.
+object, or that cannot be read, such as a directory, is moved into ~/.local/state/nedsnodes/user-alerts/unreadable/,
+where nothing returns it to pending/, and its ValueError or OSError raised, naming the full path it went to, so the
+next prompt claims the alerts after it; a claimed file that is not a JSON object raises ValueError, and any other
+OSError is raised; the caller reports each.
 """
 import importlib.util
 import json
@@ -104,7 +105,8 @@ def user_alerts_claim_every_pending_for_agent_seat_by_rename_into_claimed(agent_
     oldest first. An agent_seat of None, an agent-session whose agent-seat is unknown, claims nothing."""
     directory = user_alerts_directory()
     pending, claimed = directory / "pending", directory / "claimed"
-    # Not claimed/, whose entries go back to pending/ after the time limit and would block the claim again.
+    # ~/.local/state/nedsnodes/user-alerts/unreadable/, not claimed/, whose entries go back to pending/ after the
+    # time limit and would block the claim again.
     unreadable = directory / "unreadable"
     if agent_seat is None or not pending.is_dir():
         return []

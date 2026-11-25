@@ -161,7 +161,7 @@ def run_unreadable_pending_cases(root):
     except ValueError as error:
         raised = error
     check("a pending file that is not a JSON object raises ValueError naming unreadable/, even in an agent-seat it "
-          "would not go to, and is moved into unreadable/", raised is not None and "unreadable" in str(raised)
+          "would not go to, and is moved into unreadable/", raised is not None and ".local/state/nedsnodes/user-alerts/unreadable/" in str(raised)
           and (directory / "unreadable" / "0-not-an-object.json").is_file(), repr(raised))
     claimed = alerts.user_alerts_claim_every_pending_for_agent_seat_by_rename_into_claimed(DEFAULT_SEAT, now=NOW)
     check("after a pending file that is not a JSON object, the next claim takes the alerts sorted after it",
@@ -176,7 +176,7 @@ def run_unreadable_pending_cases(root):
     except IsADirectoryError as error:
         raised = error
     check("a pending entry that cannot be read, a directory, raises its OSError naming unreadable/ and is moved there",
-          raised is not None and "unreadable" in str(raised)
+          raised is not None and ".local/state/nedsnodes/user-alerts/unreadable/" in str(raised)
           and (directory / "unreadable" / "0-a-directory.json").is_dir()
           and not (directory / "pending" / "0-a-directory.json").exists(), repr(raised))
     later = NOW + timedelta(minutes=31)
@@ -216,7 +216,7 @@ def run_unreadable_pending_dangling_link_case(root):
     unreadable_entry = directory / "unreadable" / "0-dangling.json"
     check("a pending link to a directory that dangles once moved is reported, not read as another agent-session's "
           "claim, even when setting a modification time would find nothing, and is moved into unreadable/",
-          isinstance(raised, IsADirectoryError) and "unreadable" in str(raised) and unreadable_entry.is_symlink()
+          isinstance(raised, IsADirectoryError) and ".local/state/nedsnodes/user-alerts/unreadable/" in str(raised) and unreadable_entry.is_symlink()
           and not (directory / "claimed" / "0-dangling.json").is_symlink(), repr(raised))
 
 
