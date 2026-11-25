@@ -113,7 +113,11 @@ names a thing removed; `#not_asked_rename` gives the old name, then the new one,
 separated by a space, each in backquotes when it holds a space itself, as in
 #not_asked_rename `instruction guard` `instruction-file guard`; `#not_asked_glossary_term`
 names each glossary term the change puts in, in backquotes when it holds a space;
-`#not_asked_hashtag_marker` names each hashtag marker the change adds. An unused or old name is searched for as written and,
+`#not_asked_hashtag_marker` names each hashtag marker the change adds;
+`#not_asked_search` gives the first and last day of the search for the problem a
+dropped proposal guarded against, the count of cases found and the places
+searched, as in `#not_asked_search 2026-10-26 to 2026-11-25, 0 cases, in the
+log-store's session dialogs and user messages and the commits on main`. An unused or old name is searched for as written and,
 when it has two or more words, with its words joined by hyphens, by underscores
 and by nothing, a run of digits both kept with the letters before it and
 split off as a word of its own; every
@@ -550,10 +554,11 @@ NOT_ASKED_EITHER_GROUND = f"one of these two alone: {NOT_ASKED_COST_GROUND}, or 
 INSTRUCTION_FILE_GUARD_FILE = REPOSITORY_TOP / ".claude" / "guard-hooks" / "instruction-file-guard.py"
 SYSTEM_GLOSSARIES_LISTED_FILE = REPOSITORY_TOP / "scripts" / "system-glossaries-listed-on-the-project-glossary-test.py"
 OPTION_NUMBERS = (2, 3)
-EVIDENCE_LINE = re.compile(r"^\s*(?:(?:[-*+]|\d+[.)]|>)\s+)*[*_`]*(#not_asked_(?:touches|test|source|unused|rename|glossary_term|hashtag_marker))"
+EVIDENCE_LINE = re.compile(r"^\s*(?:(?:[-*+]|\d+[.)]|>)\s+)*[*_`]*(#not_asked_(?:touches|test|source|unused|rename|glossary_term|hashtag_marker|search))"
                            rf"{MARKER_END}[*_`]*[:\s]*(.*)$")
-TOUCHES, TEST, SOURCE, UNUSED, RENAME, GLOSSARY_TERM, ADDED_HASHTAG_MARKER = (
-    f"#not_asked_{name}" for name in ("touches", "test", "source", "unused", "rename", "glossary_term", "hashtag_marker"))
+TOUCHES, TEST, SOURCE, UNUSED, RENAME, GLOSSARY_TERM, ADDED_HASHTAG_MARKER, SEARCH = (
+    f"#not_asked_{name}" for name in ("touches", "test", "source", "unused", "rename", "glossary_term", "hashtag_marker",
+                                      "search"))
 NotAskedEvidence = collections.namedtuple("NotAskedEvidence",
                                           "value rating found touched tests lines marks top item")
 NoAnswerCase = collections.namedtuple("NoAnswerCase", "value label meaning ratings needed checks evidence ground flag")
@@ -654,8 +659,42 @@ def system_glossary_problems(found):
     return not_system_glossary_problems(found.touched, found.top, found.item)
 
 
+def dropped_proposal_search_problems(found):
+    """Return why an item that drops a proposed check cannot settle on its `#not_asked_search` line: the line must
+    give a window of at least SEARCH_WINDOW_DAYS ending no earlier than yesterday, 0 cases, and the places searched;
+    and a dropped proposal adds no `#new` text."""
+    problems = [NOT_ASKED_DROPPED_PROPOSAL_NEW_TEXT_PROBLEM] if proposed_texts(found.marks, {NEW_MARK}) else []
+    values = found.found[SEARCH]
+    if not values:
+        return problems + [MissingEvidenceLine(NOT_ASKED_NO_LINE_PROBLEM.format(marker=SEARCH, why=NOT_ASKED_WHY[SEARCH]))]
+    yesterday = datetime.datetime.now(datetime.timezone.utc).date() - datetime.timedelta(days=1)
+    for value in values:
+        days = SEARCH_DAY.findall(value)
+        count = SEARCH_COUNT.search(value)
+        places = SEARCH_DAY.sub(" ", SEARCH_COUNT.sub(" ", value))
+        if len(days) != 2 or count is None or not SEARCH_PLACE_WORD.search(places):
+            problems.append(MissingEvidenceLine(NOT_ASKED_SEARCH_SHAPE_PROBLEM.format(marker=SEARCH, value=value)))
+            continue
+        try:
+            first, last = (datetime.date.fromisoformat(day) for day in days)
+        except ValueError:
+            problems.append(MissingEvidenceLine(NOT_ASKED_SEARCH_SHAPE_PROBLEM.format(marker=SEARCH, value=value)))
+            continue
+        if (last - first).days < SEARCH_WINDOW_DAYS:
+            problems.append(NOT_ASKED_SEARCH_WINDOW_SHORT_PROBLEM.format(marker=SEARCH, first=first, last=last,
+                                                                         days=SEARCH_WINDOW_DAYS))
+        if last < yesterday:
+            problems.append(NOT_ASKED_SEARCH_WINDOW_OLD_PROBLEM.format(marker=SEARCH, last=last))
+        if int(count[1]):
+            problems.append(NOT_ASKED_SEARCH_FOUND_CASES_PROBLEM.format(marker=SEARCH, count=count[1]))
+    return problems
+
+
 NOT_ASKED_FLAG, ALREADY_DECIDED_FLAG = "--not-asked", "--already-decided"
 NOT_ASKED_ANY_RATING = (NOT_ASKED_RATED_NONE, NOT_ASKED_RATED_WEAK)
+EVERY_RATING = ("none", "weak", "medium", "strong", "very strong")
+DROPPED_PROPOSAL_VALUE = "proposed-check-dropped-search-found-no-case"
+DROPPED_PROPOSAL_GROUND = "that the problem the dropped proposal guarded against may still come, at any rating"
 HANDOFF_INTERNALS_VALUE = "handoff-internals"
 HANDOFF_INTERNALS_CITATION = "the user-ruling on the handoff's internals in nn-systems/handoff/handoff.system.design.md"
 HANDOFF_INTERNALS_NAMED = re.compile(r"handoff|initial-agent-instructions", re.I)
@@ -717,6 +756,14 @@ NO_ANSWER_CASES = (
                  (NOT_ASKED_RATED_WEAK,), (TOUCHES,), (no_kind_problems,),
                  "a touches line, which may be empty; no touched Markdown file is one the instruction-file guard "
                  "protects", NOT_ASKED_EARLIER_APPROVAL_GROUND, NOT_ASKED_FLAG),
+    # CLAUDE.md's guard rule: a proposal whose search of the last 30 days found no case is dropped without the user,
+    # whatever its case against's rating.
+    NoAnswerCase(DROPPED_PROPOSAL_VALUE, "proposed check dropped, search found no case",
+                 "an item that recommends dropping a proposed check, test, guard, refusal or hook, because a search of "
+                 "the last 30 days, of every place the problem would leave a trace, found no case of it",
+                 EVERY_RATING, (SEARCH,), (dropped_proposal_search_problems,),
+                 "a search line giving a window of at least 30 days that ends no earlier than yesterday, 0 cases, "
+                 "and the places searched; no `#new` text", None, NOT_ASKED_FLAG),
     NoAnswerCase(HANDOFF_INTERNALS_VALUE, "the handoff's own internals",
                  "an item about the handoff's own internals, such as what the handoff-supervisor, the session-handoff "
                  "file or the initial-agent-instructions do, when it only removes or shortens something and its case "
@@ -739,6 +786,9 @@ NO_ANSWER_TABLE_RULES = (
     "write or time spent, or only that the change alters text the user approved word for word on an earlier date; the "
     "item says which kind, with its evidence. Whether the instruction-file guard protects the file, and how long the "
     "text is, do not matter for these kinds.",
+    "An item that recommends dropping a proposed check, test, guard, refusal or hook needs no answer, whatever its "
+    "case against's rating, when a search of the last 30 days, of every place the problem would leave a trace, found "
+    "no case of it.",
     "Every other item is shown, including any rated above none that adds a rule, instruction sentence, check, hook, "
     "job, glossary term, design choice, setting or recurring expense, or that recommends doing nothing.",
     "Before settling an item, run its row's command and ask the advisor whether a later ruling or another open item "
@@ -747,6 +797,14 @@ NO_ANSWER_TABLE_RULES = (
     "The minutes record a settled item as <accepted>, with \"not asked\" and its kind number, or \"case against none\"; "
     "it keeps its number and its place in the count M, and its change is made with the walk's other approved changes.",
 )
+
+
+def not_asked_grounds(value):
+    """What the case against may name for the item to settle as the row `value`, as refusals and judgement lines
+    say it."""
+    if value == DROPPED_PROPOSAL_VALUE:
+        return DROPPED_PROPOSAL_GROUND
+    return NOT_ASKED_GROUNDS.get(value, NOT_ASKED_EITHER_GROUND)
 
 
 def no_answer_case(value):
@@ -1250,11 +1308,29 @@ NOT_ASKED_MARKER_SHAPE_PROBLEM = ("- `{value}` on its `{marker}` line is not a h
                                   "digits, `_` or `-`.")
 NOT_ASKED_MARKER_READ_PROBLEM = ("- the marker `{value}` is in {files}, which are not Markdown; a marker a program, "
                                  "a test or a setting reads changes what the program does, so the user sees it.")
+NOT_ASKED_SEARCH_SHAPE_PROBLEM = ("- its `{marker}` line `{value}` does not give the search's first and last day, as "
+                                  "YYYY-MM-DD, the count of cases found, as in `0 cases`, and the places searched.")
+NOT_ASKED_SEARCH_WINDOW_SHORT_PROBLEM = ("- its `{marker}` line searched {first} to {last}, shorter than the {days} "
+                                         "days the guard rule in CLAUDE.md asks for.")
+NOT_ASKED_SEARCH_WINDOW_OLD_PROBLEM = ("- its `{marker}` line's search ended on {last}, before yesterday; search again "
+                                       "up to today, since a case may have come since.")
+NOT_ASKED_SEARCH_FOUND_CASES_PROBLEM = ("- its `{marker}` line found {count} cases; a case found is the failure that "
+                                        "has happened, so the proposal is shown to the user with those cases cited.")
+NOT_ASKED_DROPPED_PROPOSAL_NEW_TEXT_PROBLEM = ("- it has a `#new` line, which A would add; an item that drops a "
+                                               "proposal adds no text, so it recommends something else and is shown.")
+SEARCH_DAY = re.compile(r"\b\d{4}-\d{2}-\d{2}\b")
+SEARCH_COUNT = re.compile(r"\b(\d+)\s+cases?\b", re.I)
+# The places are what is left once the days and the count are taken out, less joining words and punctuation.
+SEARCH_PLACE_WORD = re.compile(r"\b(?!(?:to|in|and|of|the|from|through)\b)[A-Za-z][\w'.-]*")
+SEARCH_WINDOW_DAYS = 30
 NOT_ASKED_WHY = {
     TOUCHES: "list on it every file the change edits or deletes, separated by spaces.",
     TEST: "name on it the test that fails before the fix and passes after it.",
     SOURCE: "cite on it the ruling, the merged code or the command that shows the fact.",
     RENAME: "give on it the old name, then the new name, each in backquotes when it holds a space.",
+    SEARCH: ("give on it the search's first and last day, the count of cases found and the places searched, as in "
+             "`#not_asked_search 2026-10-26 to 2026-11-25, 0 cases, in the log-store's session dialogs and user "
+             "messages and the commits on main`."),
 }
 NOT_ASKED_JUDGEMENT_LINES = (
     "{item} is recorded as settled without asking the user, {label}; the program checked only what code can.",
@@ -1266,6 +1342,11 @@ NOT_ASKED_JUDGEMENT_LINES = (
     "answer line, and close records only the last one, so this line is then set aside.",
 )
 # Code cannot see these in a change, so an item of no kind rated weak leaves them to the agent.
+# Code cannot tell from the item what was proposed, or where the problem would leave its trace.
+NOT_ASKED_DROPPED_PROPOSAL_JUDGEMENT_LINE = (
+    "Judge also whether {item} proposes a check, test, guard, refusal or hook and recommends dropping it, and whether "
+    "the problem would have left a trace in the places its search line names; if it would leave none there, as for "
+    "code too new to have run, do not run close: present {item} to the user.")
 NOT_ASKED_WEAK_JUDGEMENT_LINE = (
     "{item} is of " + NOT_ASKED_KINDS_NAMED + " and its case against is rated weak: if its change "
     "widens an agent's permissions, as a settings change can, or turns off a guard, do not run close: present {item} to the user.")
@@ -2410,8 +2491,7 @@ def check(arguments):
         if problems:
             raise Failure(NOT_ASKED_REFUSED.format(item=item, kind=arguments.not_asked,
                                                    label=not_asked_label(arguments.not_asked),
-                                                   grounds=NOT_ASKED_GROUNDS.get(arguments.not_asked,
-                                                                                 NOT_ASKED_EITHER_GROUND),
+                                                   grounds=not_asked_grounds(arguments.not_asked),
                                                    problems="\n".join(problems),
                                                    document=document,
                                                    command=check_command_with_cwd(top, "--not-asked",
@@ -2466,10 +2546,12 @@ def check(arguments):
         output += [line.format(document=document, item=item) for line in CHECK_JUDGEMENT_LINES]
     if arguments.not_asked is not None:
         output += [line.format(item=item, label=not_asked_label(arguments.not_asked),
-                               grounds=NOT_ASKED_GROUNDS.get(arguments.not_asked, NOT_ASKED_EITHER_GROUND))
+                               grounds=not_asked_grounds(arguments.not_asked))
                    for line in NOT_ASKED_JUDGEMENT_LINES]
         if arguments.not_asked in NOT_ASKED_WEAK_GROUND_LABELS:
             output.append(NOT_ASKED_WEAK_JUDGEMENT_LINE.format(item=item))
+        if arguments.not_asked == DROPPED_PROPOSAL_VALUE:
+            output.append(NOT_ASKED_DROPPED_PROPOSAL_JUDGEMENT_LINE.format(item=item))
     output.append(CHECK_CLOSE_LINE.format(command=step_command_with_cwd(top, "close")))
     log = arguments.counts_log or (log_store_records.parent / COUNTS_LOG_FILE_NAME if log_store_records else None)
     try:
