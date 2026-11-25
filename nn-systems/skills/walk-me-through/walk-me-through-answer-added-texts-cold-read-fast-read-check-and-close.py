@@ -40,8 +40,8 @@ leaves with no decision, REASON saying why, which changes nothing. When the
 walk-minutes hold an `#item_page` line for the item, a link or a failed
 publish, the user was shown it, so --moved-on writes its answer line opening
 `shown to the user,` in place of `settled without asking the user,`, and CLOSE
-says the item was shown in place of telling the agent to list it as settled
-without being shown.
+says the item was shown in place of saying it was settled without being
+shown.
 --bump ITEM, for the user's "bump" and the item he names, records no answer: it
 makes ITEM, an item not yet shown named by its heading's title, the next item
 shown, numbering it and moving it to stand right before the waiting item in the
@@ -879,7 +879,6 @@ NO_ANSWER_TABLE_RULES = (
     "job, glossary term, design choice, setting or recurring expense, or that recommends doing nothing.",
     "Before settling an item, run its row's command and ask the advisor whether a later ruling or another open item "
     "overtakes it; if the program refuses, the advisor objects or the advisor call fails, show the item.",
-    "After settling an item of no kind, say in your next message that you settled it, so that he can have it reversed.",
     "The minutes record a settled item as <accepted>, with \"not asked\" and its kind number, or \"case against none\"; "
     "it keeps its number and its place in the count M, and its change is made with the walk's other approved changes.",
 )
@@ -1449,7 +1448,6 @@ GIT_GREP_FAILED = (GIT_GREP_FAILED_REASON + "\n"
                    "present {item} to the user and run check with the flag for his answer, as `--help` lists it.")
 CLOSE_NOT_SHOWN_LINES = (
     "{item} is recorded in the minutes as settled without being shown to the user.",
-    "List it, with its number, in one line of your next message to the user.",
 )
 CLOSE_ALREADY_DECIDED_CHANGE = "Its change may now be made."
 # Both line formats are agreed with merge-lane-2, whose hold command writes the first into its review and whose
