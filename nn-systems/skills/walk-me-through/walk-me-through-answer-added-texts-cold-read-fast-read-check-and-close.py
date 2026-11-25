@@ -2231,10 +2231,7 @@ def file_name_part(text):
 
 
 def append_to_minutes(minutes, lines):
-    existing = minutes.read_text(encoding="utf-8")
-    separator = "" if existing.endswith("\n") else "\n"
-    with open(minutes, "a", encoding="utf-8") as file:
-        file.write(separator + "\n".join(lines) + "\n")
+    load_walk_finder().append_to_minutes(minutes, lines)
 
 
 def part_answer(value):

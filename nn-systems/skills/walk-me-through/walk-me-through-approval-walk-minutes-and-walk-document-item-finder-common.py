@@ -400,6 +400,24 @@ def next_to_present(minutes_text, parser):
     return value, not hashtag, last < len(markers) - 1
 
 
+def append_to_minutes(minutes, lines, paragraph_of_its_own=False):
+    """Append lines to the walk-minutes file minutes, each on a line of its own.
+
+    It appends and never rewrites the file, because hooks that run in parallel on one prompt each add lines, and a
+    whole-file rewrite would drop a line another wrote between its read and its write. paragraph_of_its_own puts a
+    blank line before the lines, so that an unclosed inline mark, such as `<!--`, in the paragraph above cannot
+    join them."""
+    existing = minutes.read_text(encoding="utf-8") if minutes.exists() else ""
+    if not existing:
+        separator = ""
+    elif paragraph_of_its_own:
+        separator = "" if existing.endswith("\n\n") else "\n" if existing.endswith("\n") else "\n\n"
+    else:
+        separator = "" if existing.endswith("\n") else "\n"
+    with open(minutes, "a", encoding="utf-8") as file:
+        file.write(separator + "\n".join(lines) + "\n")
+
+
 def text_wrapped_as_markdown_code_span(text):
     """Return text as a code span CODE_SPAN reads whole, on one line, its whitespace runs squeezed to single spaces.
 

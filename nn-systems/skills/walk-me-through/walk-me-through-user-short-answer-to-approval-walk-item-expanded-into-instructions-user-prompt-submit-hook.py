@@ -1288,13 +1288,12 @@ def own_words_context(payload, opening, opening_author_unknown, recorded_item=No
 def approval_walk_waiting_item_user_own_words_reply_appended_to_walk_minutes(minutes, item, prompt):
     """Append the line recording prompt as the user's reply in his own words to item; return no lines, or, when the
     append fails, the lines telling the agent to add it."""
+    walk_finder = load_walk_finder()
     line = APPROVAL_WALK_WAITING_ITEM_USER_OWN_WORDS_REPLY_WALK_MINUTES_LINE.format(
         date_and_time=datetime.datetime.now(datetime.timezone.utc).strftime("%Y-%m-%d %H:%MZ"), item=item,
-        words=load_walk_finder().text_wrapped_as_markdown_code_span(prompt))
+        words=walk_finder.text_wrapped_as_markdown_code_span(prompt))
     try:
-        separator = "" if minutes.read_text(encoding="utf-8").endswith("\n") else "\n"
-        with open(minutes, "a", encoding="utf-8") as file:
-            file.write(separator + line + "\n")
+        walk_finder.append_to_minutes(minutes, [line], paragraph_of_its_own=True)
     except OSError as error:
         return [text.format(minutes=minutes, error=repr(error), line=line)
                 for text in APPROVAL_WALK_WAITING_ITEM_USER_OWN_WORDS_REPLY_NOT_RECORDED_LINES]

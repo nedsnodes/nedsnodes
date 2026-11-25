@@ -2737,6 +2737,17 @@ def test_a_reply_in_his_own_words_is_recorded_in_the_walk_minutes_against_the_wa
           paused_minutes.read_text() == paused_before, paused_minutes.read_text())
 
 
+def test_a_recorded_reply_is_a_paragraph_of_its_own_so_an_html_comment_above_cannot_swallow_its_code_span():
+    case = Case(next_to_present="item 4 of 9")
+    minutes = case.minutes("item 3 of 9: answer A <!-- note -->\n#next_to_present item 4 of 9")
+    case.run("#next_to_present closed <!--")
+    walk_finder = HOOK_MODULE.load_walk_finder()
+    check("a reply holding `<!--` after minutes whose last paragraph holds an inline HTML comment leaves item 4 "
+          "waiting",
+          walk_finder.next_to_present(minutes.read_text(), walk_finder.markdown_parser())[0] == "item 4 of 9",
+          minutes.read_text())
+
+
 def test_a_reply_in_his_own_words_that_cannot_be_recorded_says_why_and_gives_the_line_to_add():
     case = Case(next_to_present="item 4 of 9")
     minutes = case.walk / f"{WALK_NAME}-minutes.md"
