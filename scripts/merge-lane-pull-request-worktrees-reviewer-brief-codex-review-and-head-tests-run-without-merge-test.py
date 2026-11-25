@@ -794,9 +794,13 @@ def main():
 
         def run_in_process_with_repository_root(repository_root, tools_worktree):
             # In-process, so the worktree is made from a scratch repository whose origin is
-            # the scratch origin, never from this repository and GitHub.
+            # the scratch origin, never from this repository and GitHub; under the same
+            # isolated git settings as run_program, so the caller's git config cannot refuse it.
             saved_root = program.common.REPOSITORY_ROOT
+            saved_environment = dict(os.environ)
             program.common.REPOSITORY_ROOT = repository_root
+            os.environ.clear()
+            os.environ.update(GIT_ENVIRONMENT)
             output = io.StringIO()
             try:
                 with contextlib.redirect_stdout(output):
@@ -807,6 +811,8 @@ def main():
                         "--review-tools-worktree-at-main", str(tools_worktree)])
             finally:
                 program.common.REPOSITORY_ROOT = saved_root
+                os.environ.clear()
+                os.environ.update(saved_environment)
             return exit_code, output.getvalue()
 
         made_worktree = scratch / "review-tools-worktree-made-by-the-run"
@@ -818,15 +824,18 @@ def main():
               and "is missing" not in output,
               f"exit {exit_code}\n{output}")
 
-        not_a_repository = scratch / "not-a-repository"
-        not_a_repository.mkdir()
-        unmade_worktree = scratch / "review-tools-worktree-that-cannot-be-made"
-        exit_code, output = run_in_process_with_repository_root(not_a_repository,
-                                                                unmade_worktree)
+        # A path under a regular file, which git cannot create from the scratch clone, so
+        # the failure never reaches a checkout that encloses the scratch directory.
+        regular_file = scratch / "a-regular-file"
+        regular_file.write_text("not a directory\n")
+        unmade_worktree = regular_file / "review-tools-worktree-that-cannot-be-made"
+        worktrees_before = git(checkout, "worktree", "list", "--porcelain")
+        exit_code, output = run_in_process_with_repository_root(checkout, unmade_worktree)
         check("a review tools worktree that cannot be made exits 2 before any step, naming "
-              "git's failure, with the generic instruction",
+              "git's failure, with the generic instruction, and registers no worktree",
               exit_code == 2 and not unmade_worktree.exists()
-              and f"git worktree add -q --detach {unmade_worktree} HEAD in {not_a_repository} "
+              and git(checkout, "worktree", "list", "--porcelain") == worktrees_before
+              and f"git worktree add -q --detach {unmade_worktree} HEAD in {checkout} "
                   f"exited" in output
               and output.rstrip().endswith(generic_instruction),
               f"exit {exit_code}\n{output}")
