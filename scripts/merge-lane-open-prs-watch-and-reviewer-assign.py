@@ -189,8 +189,8 @@ NOTICE_FIRST_LINE_CHARS = 300
 STATUS_UNREADABLE = "status unreadable"
 
 POLL_ONCE_DIRECTORY_NAME = "open-pull-request-watcher-poll-once-state-events-and-lock"
-POLL_ONCE_DEFAULT_DIRECTORY = (ghi_md_edit_job.common.DEFAULT_MERGE_LANE_WORKTREES_AND_OUTPUTS_DIRECTORY
-                               / POLL_ONCE_DIRECTORY_NAME)
+OPEN_PRS_WATCH_POLL_ONCE_STATE_EVENTS_AND_LOCK_DEFAULT_DIRECTORY = (
+    ghi_md_edit_job.common.DEFAULT_MERGE_LANE_WORKTREES_AND_OUTPUTS_DIRECTORY / POLL_ONCE_DIRECTORY_NAME)
 WATCH_OPEN_PULL_REQUESTS_POLL_STATE_BETWEEN_CRON_RUNS_FILE_NAME = "poll-state.json"
 WATCH_OPEN_PULL_REQUESTS_EVENTS_LOG_FILE_NAME = "pull-request-events.log"
 LOCK_FILE_NAME = "poll-once.lock"
@@ -1159,7 +1159,7 @@ def parse_arguments(argv):
                                    "a state file exists")
     parser.add_argument("--poll-once-directory", type=Path,
                         help="directory of --poll-once's state, event file and lock "
-                             f"(default: {POLL_ONCE_DEFAULT_DIRECTORY} with the default --repo; "
+                             f"(default: {OPEN_PRS_WATCH_POLL_ONCE_STATE_EVENTS_AND_LOCK_DEFAULT_DIRECTORY} with the default --repo; "
                              "another --repo must name its own)")
     parser.add_argument("--task-list-directory", type=Path,
                         default=Path.home() / ".claude" / "tasks" / "nedsnodes-merge-lane-2-tasks",
@@ -1223,7 +1223,7 @@ def main(argv=None):
                      f"the default repository, whose state the default --poll-once-directory "
                      f"holds, so name a directory for {arguments.repo} with --poll-once-directory.")
                 return 2
-            arguments.poll_once_directory = POLL_ONCE_DEFAULT_DIRECTORY
+            arguments.poll_once_directory = OPEN_PRS_WATCH_POLL_ONCE_STATE_EVENTS_AND_LOCK_DEFAULT_DIRECTORY
         return poll_once(arguments, assignments_file, options_in_use)
     token, reason = read_token(Path(arguments.token_file).expanduser())
     if reason is not None:

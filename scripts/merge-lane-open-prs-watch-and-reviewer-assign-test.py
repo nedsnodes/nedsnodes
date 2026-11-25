@@ -2065,8 +2065,8 @@ def run_poll_once_cases(scratch_root, token_file):
 
     machine = machine_for("another-repository-default-directory")
     # Should these cases regress into a poll, it must not touch merge-lane-2's real state or tasks.
-    saved_default = watcher_module.POLL_ONCE_DEFAULT_DIRECTORY
-    watcher_module.POLL_ONCE_DEFAULT_DIRECTORY = machine.directory
+    saved_default = watcher_module.OPEN_PRS_WATCH_POLL_ONCE_STATE_EVENTS_AND_LOCK_DEFAULT_DIRECTORY
+    watcher_module.OPEN_PRS_WATCH_POLL_ONCE_STATE_EVENTS_AND_LOCK_DEFAULT_DIRECTORY = machine.directory
     safe = ["--task-list-directory", str(machine.tasks), "--needs-a-look-directory",
             str(machine.notices), "--token-file", str(token_file)]
     errors = io.StringIO()
@@ -2074,7 +2074,7 @@ def run_poll_once_cases(scratch_root, token_file):
         with contextlib.redirect_stderr(errors):
             code = watcher_module.main(["--poll-once", "--repo", "someone/elsewhere", *safe])
     finally:
-        watcher_module.POLL_ONCE_DEFAULT_DIRECTORY = saved_default
+        watcher_module.OPEN_PRS_WATCH_POLL_ONCE_STATE_EVENTS_AND_LOCK_DEFAULT_DIRECTORY = saved_default
     check("--poll-once with another --repo and no --poll-once-directory exits 2 and names the "
           "option, before any poll",
           code == 2 and "--poll-once-directory" in errors.getvalue()
