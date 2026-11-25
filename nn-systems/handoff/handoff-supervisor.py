@@ -1290,11 +1290,16 @@ def successor_initial_agent_instructions_line_naming_waiting_approval_walk_item(
         document = minutes.with_name(name + ".md")
         text = document.read_text(encoding="utf-8")
         spans = walk_finder.item_unit_spans(text, parser)
-        # Every named item is checked, so that a missing or repeated heading is reported; the point is read from
+        # The total is counted before any heading is looked up, so that a missing or repeated heading leaves the
+        # count its `of M`: an `#item_page` line without it is not read. Every named item is checked, against the
+        # total the walk-minutes gave, so that a missing or repeated heading is reported; the point is read from
         # the first-named item's unit alone, because units come back in walk-document order, and a later waiting
         # item's heading may name the first item too.
-        walk_finder.waiting_item_units(document, value, numbers, total, parser, spans)
-        total, units = walk_finder.waiting_item_units(document, value, [number], total, parser, spans)
+        total_in_walk_minutes = total
+        if total is None:
+            total = walk_finder.approval_walk_item_total_shown_and_waiting_counted_from_walk_document(spans)
+        walk_finder.waiting_item_units(document, value, numbers, total_in_walk_minutes, parser, spans)
+        _, units = walk_finder.waiting_item_units(document, value, [number], total_in_walk_minutes, parser, spans)
         point = walk_short_answer_hook.heading_points(text.split("\n"), units, parser).get(number)
     except Exception as error:
         print(f"handoff-supervisor: waiting approval-walk item's walk-document unreadable: "
