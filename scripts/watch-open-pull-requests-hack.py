@@ -51,7 +51,11 @@ no open pull request, or more than one, or comes back to a pull request
 already passed, the pull request is taken as not stacked. Every other one
 goes to whichever agent-seat of
 MERGE_LANE_PULL_REQUEST_REVIEW_ASSIGNEE_AGENT_SEATS_IN_TIE_ORDER has fewer
-pull requests waiting, ties to the first; each assignment counts at once. A
+pull requests waiting, ties to the first, leaving out the agent-seat named as
+the author of the pull request's first commit, which the agent-seat
+launchers set to the agent-seat that wrote it; each assignment counts at
+once. A stacked pull request still takes its bottom's agent-seat, so the
+author of its first commit is not checked. A
 pull request waits for its agent-seat when it is open, not a draft, and no
 review by ned-review-merge on its newest commit carries a verdict, read as
 the fix-round program reads one: the state APPROVED or CHANGES_REQUESTED,
@@ -170,6 +174,7 @@ query($owner: String!, $name: String!, $cursor: String) {
         createdAt
         baseRefName
         headRefName
+        commits(first: 1) { nodes { commit { author { name } } } }
         reviews(author: "%s", last: %d) { nodes { state body commit { oid } } }
         macClaudeReviews: reviews(author: "%s", last: %d) { nodes { state commit { oid } } }
       }
@@ -260,6 +265,8 @@ def pull_request_from_node(node):
             return None, f"pull request #{number} came back with no usable list of {field}"
         review_lists[field] = reviews
     author = node.get("author")
+    first_commits = (node.get("commits") or {}).get("nodes") or [{}]
+    first_commit_author = (first_commits[0].get("commit") or {}).get("author") or {}
     return {
         "number": number,
         "head_sha": head_sha,
@@ -267,6 +274,8 @@ def pull_request_from_node(node):
         "is_draft": bool(node.get("isDraft")),
         # GitHub returns null authors for deleted accounts.
         "author": (author or {}).get("login") or "(unknown)",
+        # The agent-seat launchers set GIT_AUTHOR_NAME to the agent-seat's name.
+        "first_commit_author_name": first_commit_author.get("name"),
         "created_at": node["createdAt"],
         "base_branch": node["baseRefName"],
         "head_branch": node["headRefName"],
@@ -537,9 +546,11 @@ def merge_lane_pull_request_review_assignments_for_unassigned_pull_requests(pull
         if not pull_request["is_draft"] and pull_request_waits_for_merge_lane_verdict(pull_request):
             counts[lane] += 1
 
-    def fewest_waiting():
-        return min(MERGE_LANE_PULL_REQUEST_REVIEW_ASSIGNEE_AGENT_SEATS_IN_TIE_ORDER,
-                   key=lambda lane: counts[lane])
+    def fewest_waiting(pull_request):
+        # A merge lane never reviews a pull request it wrote.
+        lanes = [lane for lane in MERGE_LANE_PULL_REQUEST_REVIEW_ASSIGNEE_AGENT_SEATS_IN_TIE_ORDER
+                 if lane != pull_request.get("first_commit_author_name")]
+        return min(lanes, key=lambda lane: counts[lane])
 
     for pull_request in unassigned:
         # The bottom of an earlier one's stack is assigned already.
@@ -547,10 +558,10 @@ def merge_lane_pull_request_review_assignments_for_unassigned_pull_requests(pull
             continue
         bottom = pull_request_stack_bottom(pull_request, open_pull_requests_by_head_branch)
         if bottom is None:
-            assign(pull_request, fewest_waiting())
+            assign(pull_request, fewest_waiting(pull_request))
             continue
         if bottom["number"] not in assignments:
-            assign(bottom, fewest_waiting())
+            assign(bottom, fewest_waiting(bottom))
         assign(pull_request, assignments[bottom["number"]])
     return dealt
 
