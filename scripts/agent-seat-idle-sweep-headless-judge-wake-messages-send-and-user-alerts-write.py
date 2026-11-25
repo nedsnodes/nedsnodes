@@ -26,8 +26,8 @@ Each invocation, under a lock that keeps two from overlapping:
    rule 2 has unbacked promises and announced actions judged and named to it; rule 3 sends the
    handoff text; rule 4 ends a wait no rule 2 message was sent on; rule 5 has the judge
    decide whether to message it, and write the message, except that an open
-   pull-request events task on merge-lane-2's task list wakes it by code, with no judge, at most
-   once in 15 minutes for one task. The judge is not told of a background
+   pull-request events task on merge-lane-2's task list wakes it by code, with no judge, once per
+   task; after that wake, the judge decides as for any other open task. The judge is not told of a background
    command whose verdict gives a `timeout_ends_at` not yet reached, since such work ends by itself, nor of a background command, subagent or workflow a rule 5 message
    has already named, since the sweep asks once about each; when something runs and all of it is
    such work, the judge is not asked. Code ends a rule 5 message with a list of the open tasks
@@ -175,6 +175,8 @@ HEADLESS_USAGE_LIMIT_PAUSE = "headless_usage_limit_pause"
 WAIT_STEP_SECONDS = 15 * 60
 JUDGE_ASK_AGAIN_SECONDS = 15 * 60
 PULL_REQUEST_EVENTS_TASK_ID = "pull_request_events_task_id"
+# Logged when an open wait's events task closes while rule 2 sentences keep the wait open.
+PULL_REQUEST_EVENTS_TASK_LEFT_WAIT = "pull_request_events_task_left_wait"
 LIMIT_WAKE_GRACE_SECONDS = 5 * 60
 DELIVERY_CHECK_AFTER_SECONDS = 60
 # Claude Code stamps a record when it writes it, which may be a moment before the send returns.
@@ -500,10 +502,13 @@ class SweepLog:
         owed, owed_by = False, None
         for event in self.of_seat(seat, "wait_step", "wait_ended", PROMISE_MESSAGE,
                                   PROMISE_MESSAGE_SEND_FAILED, RULE_2_SENTENCES_ON_WAIT,
-                                  "message_sent"):
+                                  "message_sent", PULL_REQUEST_EVENTS_TASK_LEFT_WAIT):
             invocation = event.get("agent_seat_idle_sweep_invocation_started_at")
             if event["event"] == "wait_ended":
                 wait, owed = None, False
+            elif event["event"] == PULL_REQUEST_EVENTS_TASK_LEFT_WAIT:
+                if wait is not None:
+                    wait[PULL_REQUEST_EVENTS_TASK_ID] = None
             elif event["event"] == RULE_2_SENTENCES_ON_WAIT:
                 if wait is not None:
                     if owed and owed_by != invocation:
@@ -1291,8 +1296,15 @@ class Sweep:
         if wait and wait[PULL_REQUEST_EVENTS_TASK_ID] and (
                 not events_task or events_task["id"] != wait[PULL_REQUEST_EVENTS_TASK_ID]):
             # The task may be completed by a subagent, whose calls the main transcript lacks.
-            self.end_wait(seat, "its pull-request events task is no longer open")
-            wait = None
+            if PROMISE in wait:
+                # Rule 2 sentences on the wait are logged as checked, so ending the wait would lose
+                # them: only the events task's part of the wait ends.
+                self.record({"event": PULL_REQUEST_EVENTS_TASK_LEFT_WAIT, "agent_seat": seat,
+                             PULL_REQUEST_EVENTS_TASK_ID: wait[PULL_REQUEST_EVENTS_TASK_ID]})
+                wait = self.log.open_wait(seat)
+            else:
+                self.end_wait(seat, "its pull-request events task is no longer open")
+                wait = None
         if (wait and TELL_USER in wait and rule == 5 and events_task
                 and not self.woken_for_pull_request_events_task(seat, events_task)):
             # The user already has that wait's alert; a new events task must not wait behind it.

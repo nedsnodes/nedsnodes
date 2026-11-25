@@ -3451,6 +3451,32 @@ check("an events task completed where the transcript does not show it, as by a s
 
 machine = Machine()
 machine.seat(EVENTS_SEAT, DONE_TURN)
+events_task(machine)
+machine.script(sent_ok(EVENTS_SEAT))
+machine.run(0)
+with machine.log.open("a") as log:
+    # A rule 2 sentence the sweep put on the wake's wait and logged as checked.
+    log.write(json.dumps({"event": "wait_step", "agent_seat": EVENTS_SEAT, "at": at(5),
+                          "step": "promise"}) + "\n")
+    log.write(json.dumps({"event": "rule_2_sentences_on_wait", "agent_seat": EVENTS_SEAT,
+                          "at": at(5), "kinds": ["promise"], "sentences": ["I will push it."],
+                          "records": [["r1", "I will push it."]],
+                          "earliest_sentence_at": at(4)}) + "\n")
+    log.write(json.dumps({"event": "sentence_checked", "agent_seat": EVENTS_SEAT, "at": at(5),
+                          "record_uuid": "r1", "sentence": "I will push it."}) + "\n")
+events_task(machine, status="completed")
+machine.script(judged(False, reason="nothing left"), sent_ok(EVENTS_SEAT))
+machine.run(16)
+check("an events task completed while rule 2 sentences are on the wake's wait ends only the events "
+      "task's part: the wait stays open and its escalation names the sentence",
+      not machine.events("wait_ended")
+      and machine.events("pull_request_events_task_left_wait")
+      and any(event["step"] == "escalate" for event in machine.events("wait_step"))
+      and "I will push it." in machine.events("message_sent")[-1]["text"],
+      (machine.events("wait_step"), machine.events("wait_ended"), machine.events("message_sent")))
+
+machine = Machine()
+machine.seat(EVENTS_SEAT, DONE_TURN)
 events_task(machine, blockedBy=["2"])
 (machine.tasks / f"nedsnodes-{EVENTS_SEAT}-tasks" / "2.json").write_text(json.dumps(
     {"id": "2", "subject": "task 2", "status": "pending", "blocks": ["1"], "blockedBy": []}))
