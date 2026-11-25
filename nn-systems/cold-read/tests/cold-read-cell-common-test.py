@@ -891,6 +891,20 @@ with tempfile.TemporaryDirectory() as scratch:
                           .replace(" --global --add safe.directory", "", 1)],
                          capture_output=True, text=True).stdout == separator_path,
           repr(copied_remedy))
+    apostrophe_path = "/x/a b'c"
+    git_quoted_apostrophe_path = "'" + apostrophe_path.replace("'", "'\\''") + "'"
+    joined_apostrophe_remedy = common_module.join_error_text_lines_with_one_space(
+        f"fatal: detected dubious ownership in repository at '{apostrophe_path}'\n"
+        "To add an exception for this directory, call:\n\n"
+        f"\tgit config --global --add safe.directory {git_quoted_apostrophe_path}")
+    copied_apostrophe_remedy = joined_apostrophe_remedy.split("call: ", 1)[1]
+    check("git's remedy for a path holding U+2028 and an apostrophe, copied from the joined "
+          "line, still names the original path",
+          len(joined_apostrophe_remedy.splitlines()) == 1
+          and subprocess.run(["bash", "-c", copied_apostrophe_remedy.replace("git config", "printf %s", 1)
+                              .replace(" --global --add safe.directory", "", 1)],
+                             capture_output=True, text=True).stdout == apostrophe_path,
+          repr(joined_apostrophe_remedy))
     check("a U+2028 outside any quoted span is written as its escape",
           common_module.join_error_text_lines_with_one_space("fatal: a\u2028b") == "fatal: a\\u2028b")
 
