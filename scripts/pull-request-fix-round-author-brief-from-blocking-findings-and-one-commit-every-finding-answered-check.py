@@ -468,7 +468,7 @@ def does_merge_lane_review_ask_for_fix_round(review, pull_request_author_login, 
 def round_reviews(number, pull_request_author_login, reviewer_login):
     """merge-lane-2's latest changes-requested review; the round's reviews, in the order GitHub
     returns them; whether a round record already names that review; the round's number; and the id of every
-    review on the frozen-head, dismissed ones and earlier rounds' included."""
+    review on the frozen-head that no earlier round's record names, dismissed ones included."""
     reviews = gh_json_lines(["api", "--paginate", f"repos/{{owner}}/{{repo}}/pulls/{number}/reviews",
                              "--jq", ".[]"])
     records = round_records(number)
@@ -498,7 +498,8 @@ def round_reviews(number, pull_request_author_login, reviewer_login):
                           and review.get("state") not in ("PENDING", "DISMISSED")]
             return (anchor, round_list, recorded,
                     round_count([own[index][1] for index in requested], records),
-                    [review.get("id") for review in reviews if review.get("commit_id") == frozen_head])
+                    [review.get("id") for review in reviews
+                     if review.get("commit_id") == frozen_head and review.get("id") not in earlier_rounds])
     latest = own[-1][1]
     on_commit = f" on commit {latest.get('commit_id')}" if latest.get("state") == "COMMENTED" else ""
     raise Refused(f"The latest review of pull request {number} by {reviewer_login} ({latest.get('html_url')}) "
@@ -867,12 +868,14 @@ def answers_file_answers_every_finding_of_round(path, finding_count, review_subm
     return set(range(1, finding_count + 1)) <= entries.keys()
 
 
-def pull_request_fix_round_answers_kept_copies_directory_path_named_by_changes_requested_review(worktree, number, round_review_id):
+def pull_request_fix_round_answers_kept_copies_directory_path_named_by_changes_requested_review(worktree, number, round_review_id, common=None):
     """Where this round's copies of the answers file go: in the common git directory, because removing a linked
     worktree deletes its own git directory; one directory per round, named by the round's first changes-requested
-    review, which a rerun shares and a later round on the same frozen-head does not, so that a brief names only
-    this round's copies."""
-    common = git(["-C", str(worktree), "rev-parse", "--path-format=absolute", "--git-common-dir"]).strip()
+    review, which a rerun shares and a later round on the same frozen-head does not. Directories named
+    pr-<n>-frozen-head-<sha>, which earlier versions of this program wrote, are not read. common, when given, is
+    the worktree's common git directory, so that a caller naming several reviews' directories resolves it once."""
+    if common is None:
+        common = git(["-C", str(worktree), "rev-parse", "--path-format=absolute", "--git-common-dir"]).strip()
     return Path(common) / ANSWERS_KEPT_COPIES_DIRECTORY_NAME / f"pr-{number}-review-{round_review_id}"
 
 
@@ -953,12 +956,13 @@ def topic_worktree_at_frozen_head(number, reviewer_login, branch, frozen_head, f
     and say how to finish the round when a stopped fix-round subagent left every answer, with its commit or none."""
     worktree = topic_worktree_of_branch(branch) or topic_worktree_made_by_creator(branch)
     in_worktree = ["-C", str(worktree)]
-    # Ignored files are left out: they never reach a commit. So is the answers file this program writes, which a
-    # branch cut before .gitignore named it does not ignore.
+    # Ignored files are left out: they never reach a commit. So is the answers file this program writes while it is
+    # untracked, which a branch cut before .gitignore named it does not ignore; a staged one is a change, because
+    # the next commit would carry it.
     answers_name = ANSWERS_FILE_NAME_FORMAT.format(number=number)
     changed = [entry for entry in git_output.nul_separated_fields(git([*in_worktree, "status", "--porcelain", "-z",
                                                                        "--untracked-files=all"]))
-               if entry[3:] != answers_name]
+               if not (entry[3:] == answers_name and entry[:2] == "??")]
     quoted = shlex.quote(str(worktree))
     # Each command stands on a line of its own, so that no punctuation of the sentence around it is copied with it.
     rerun = f"cd {quoted} && {program_command(number, reviewer_login)}"
@@ -1048,16 +1052,20 @@ def print_brief(number, reviewer_login):
     kept_copies_directory = pull_request_fix_round_answers_kept_copies_directory_path_named_by_changes_requested_review(
         worktree, number, round_review_id
     )
+    common = git(["-C", str(worktree), "rev-parse", "--path-format=absolute", "--git-common-dir"]).strip()
+    other_reviews_directories = [
+        pull_request_fix_round_answers_kept_copies_directory_path_named_by_changes_requested_review(
+            worktree, number, other_review_id, common)
+        for other_review_id in frozen_head_review_ids if other_review_id != round_review_id]
     # Listed before the answers file is rewritten, so that a directory that cannot be listed stops the brief while
-    # the subagent's answers are still in place.
-    other_reviews_kept_copies = [
-        kept_answers
-        for other_review_id in frozen_head_review_ids if other_review_id != round_review_id
-        for kept_answers in answers_kept_copies_oldest_first(
-            pull_request_fix_round_answers_kept_copies_directory_path_named_by_changes_requested_review(
-                worktree, number, other_review_id))]
+    # the subagent's answers are still in place, and again after it, so that a copy an overlapping brief run made
+    # meanwhile is named too.
+    for directory in other_reviews_directories:
+        answers_kept_copies_oldest_first(directory)
     kept_copies = fix_round_answers_file_placeholder_line_per_finding_write_and_earlier_files_kept_copies_list_oldest_first(answers_path, len(findings) + len(nits),
                                                                      kept_copies_directory)
+    other_reviews_kept_copies = [kept_answers for directory in other_reviews_directories
+                                 for kept_answers in answers_kept_copies_oldest_first(directory)]
     lines = [
         f"Fix-round brief for pull request {url}",
         f"Frozen-head: {frozen_head}",
