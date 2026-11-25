@@ -931,19 +931,46 @@ def newest_main_commit_whose_after_merge_test_run_left_no_test_failing_read(git,
     return commit, None
 
 
+def newest_main_commit_whose_after_merge_test_run_left_no_test_failing_held(path):
+    """Say what the record at path holds after a failed write, and which commit the next
+    after-merge test run compares with because of it."""
+    no_record = ("so the next after-merge test run compares with its pull request's head commit, "
+                 "or the commit its head test run passed on, and runs more suites than it needs "
+                 "until a merge records its commit there.")
+    try:
+        commit = path.read_text(encoding="utf-8").strip()
+    except FileNotFoundError:
+        return f"{path} does not exist, {no_record}"
+    except (OSError, UnicodeDecodeError) as error:
+        return f"{path} could not be read back ({error}), {no_record}"
+    if len(commit) != 40 or any(character not in "0123456789abcdef" for character in commit):
+        return f"{path} now holds {commit[:60]!r}, which is not one commit hash, {no_record}"
+    return (f"{path} still holds {commit[:12]}, the commit it held before, so the next "
+            f"after-merge test run compares with that older commit, when it is an ancestor of "
+            f"the merge, and runs more suites than it needs until a merge records its commit "
+            f"there.")
+
+
 def newest_main_commit_whose_after_merge_test_run_left_no_test_failing_written(merge_commit):
     """Record merge_commit as the newest main commit whose after-merge test run left no test
     failing; print what happened and return False when it could not be written."""
     path = newest_main_commit_whose_after_merge_test_run_left_no_test_failing_file()
+    # Written beside the record and renamed over it, so that a write failing part way, as on a
+    # full disk, leaves the record as it was instead of truncated.
+    temporary = path.with_name(f"{path.name}.{os.getpid()}.tmp")
     try:
         path.parent.mkdir(parents=True, exist_ok=True)
-        path.write_text(merge_commit + "\n", encoding="utf-8")
+        temporary.write_text(merge_commit + "\n", encoding="utf-8")
+        os.replace(temporary, path)
     except OSError as error:
+        try:
+            temporary.unlink(missing_ok=True)
+        except OSError:
+            pass
         print(f"STOP: merged, and main's test run left no test failing, but {merge_commit[:12]} "
               f"was not recorded in {path}: {error}\n"
-              f"Until a later merge records its commit there, each after-merge test run selects "
-              f"its suites by comparing with an older commit, and so runs more suites than it "
-              f"needs. Nothing else waits on this record: the program goes on and exits 3.\n"
+              f"{newest_main_commit_whose_after_merge_test_run_left_no_test_failing_held(path)} "
+              f"Nothing else waits on this record: the program goes on and exits 3.\n"
               f"If the error names a cause you can fix, such as a permission on a directory, fix "
               f"that cause only: do not write {path} by hand, and nothing needs to be run again, "
               f"because the next merge whose test run leaves no test failing writes it. "

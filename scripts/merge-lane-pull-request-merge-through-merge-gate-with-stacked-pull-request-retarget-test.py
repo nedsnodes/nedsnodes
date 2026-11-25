@@ -727,8 +727,50 @@ def newest_main_commit_left_no_test_failing_cases(scratch):
           and f"{path} could not be read: " in output
           and f"STOP: merged, and main's test run left no test failing, but {merge_commit[:12]} "
               f"was not recorded in {path}: " in output
+          and f"{path} could not be read back (" in output
           and f"Otherwise, {TELL_THE_USER_WITH_THE_ERROR}" in output,
           f"exit {exit_code}\n{output}\n{calls}")
+
+    real_write_text = Path.write_text
+
+    def write_text_failing_part_way_in_the_record_directory(self, data, *arguments, **options):
+        # Only the program's own writes fail; the case's setup writes the record first.
+        if (sys._getframe(1).f_globals is vars(program)
+                and self.parent.name == "nedsnodes" and self.name.startswith(
+                "newest-main-commit-whose-after-merge-test-run-left-no-test-failing")):
+            with open(self, "w", encoding="utf-8") as opened:
+                opened.write(data[:5])
+            raise OSError(28, "No space left on device")
+        return real_write_text(self, data, *arguments, **options)
+
+    Path.write_text = write_text_failing_part_way_in_the_record_directory
+    try:
+        for name, written in (("no-test-failing-write-fails-part-way-over-a-record", "PARENT\n"),
+                              ("no-test-failing-write-fails-part-way-with-no-record", "")):
+            exit_code, output, calls, parent, merge_commit, recorded = case(name, written)
+            directory = scratch / name
+            path = newest_main_commit_left_no_test_failing_file(directory)
+            left_over = sorted(item.name for item in path.parent.iterdir()) if path.parent.is_dir() else []
+            if written:
+                held = (f"{path} still holds {parent[:12]}, the commit it held before, so the next "
+                        f"after-merge test run compares with that older commit")
+                expected_record, expected_left_over = parent, [path.name]
+            else:
+                held = (f"{path} does not exist, so the next after-merge test run compares with its "
+                        f"pull request's head commit")
+                expected_record, expected_left_over = None, []
+            check(f"{name.replace('-', ' ')}: a write of the record that fails after opening its "
+                  f"file leaves the record as it was, and the STOP says what it holds and which "
+                  f"commit the next after-merge test run compares with",
+                  exit_code == 3 and recorded == expected_record
+                  and left_over == expected_left_over
+                  and f"STOP: merged, and main's test run left no test failing, but "
+                      f"{merge_commit[:12]} was not recorded in {path}: [Errno 28] No space left "
+                      f"on device" in output
+                  and held in output,
+                  f"exit {exit_code}\n{output}\n{recorded}\n{left_over}")
+    finally:
+        Path.write_text = real_write_text
 
 
 def author_seat_made(directory):
