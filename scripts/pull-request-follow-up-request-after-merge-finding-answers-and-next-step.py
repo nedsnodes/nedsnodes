@@ -63,7 +63,9 @@ by gh not starting, is tried once more, and a second try that passes is printed 
 because a pull request for the branch is already open, as after a first try that opened it but failed, that pull
 request's link is recorded; when gh pr create exits 0 printing no link, the link gh pr list --head <branch> prints is
 recorded. A push that fails is not tried again. What a push that succeeds prints on stderr, such as the pre-push
-hook saying it let the push through without one of its checks, is printed on stderr.
+hook saying it let the push through without one of its checks, is printed on stderr. The description gh pr create
+gets ends with the line "#follow_up_request pull request <number>", unless a line of it already is that line, so
+scripts/merge-lane-pull-request-reviewer-brief-compose-with-facts.py gives the reviewer this follow-up request's block.
 
 record-finding-leave-out-reason: record the reason against the finding; refuse a finding that does
 not exist or already has an answer other than waiting for the user's decision, and an empty reason.
@@ -545,6 +547,15 @@ def read_title_and_description(path):
     return title.strip(), description
 
 
+def build_pull_request_description_ending_with_follow_up_request_line(description, number):
+    """The description, with the line "#follow_up_request pull request <number>" added at its end unless a line of it
+    already is that line."""
+    request_line = f"{FOLLOW_UP_REQUEST_LINE_START} pull request {number}"
+    if any(line.rstrip() == request_line for line in description.splitlines()):
+        return description
+    return description.rstrip("\n") + f"\n\n{request_line}\n"
+
+
 def unanswered_started_findings(record, branch=None):
     """The findings start-topic-branch recorded, for branch or for any, that have no answer, lowest first."""
     answers = record.get("answers", {})
@@ -619,7 +630,8 @@ def open_pull_request(number, findings, confirm_dispatching_agent_checked_new_sh
     if push_warnings.strip():
         print(f"git push -u origin {branch} succeeded, and printed:\n{push_warnings.rstrip()}", file=sys.stderr)
     output, opened = gh_pr_create_tried_twice(
-        ["pr", "create", "--base", "main", "--head", branch, "--title", title, "--body", description])
+        ["pr", "create", "--base", "main", "--head", branch, "--title", title,
+         "--body", build_pull_request_description_ending_with_follow_up_request_line(description, number)])
     links = PULL_REQUEST_LINK_PATTERN.findall(output)
     if not links:
         links = [link_gh_pr_list_finds(number, branch, output)]
