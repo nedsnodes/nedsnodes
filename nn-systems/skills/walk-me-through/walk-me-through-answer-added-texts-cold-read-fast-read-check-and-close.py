@@ -341,6 +341,10 @@ the new item approved, disapproved or already decided, it also writes the
 already-decided line, with the same outcome, for each item a held-answer line
 holds for it that no close line decides yet; after a deferral, a move on or
 answers to parts, the held item stays waiting, so the walk comes back to it.
+When the new item has sub-steps, and the minutes decide every sub-step so that
+the new item counts as approved or disapproved, the first CLOSE that finds the
+new item so decided writes the already-decided line, with that outcome, for the
+held item, whichever item that CLOSE itself records.
 When it holds or defers the answer, it prints the lines the agent's next
 message must include, the status lines among them. When an item waits, it
 prints the command that gives that item its cold-read-fast-read before it is
@@ -4458,25 +4462,38 @@ def item_a_bump_suspended(walk_finder, minutes, parser, decided_numbers, order, 
     return []
 
 
-def held_items_decided_with(walk_finder, minutes, parser, answered_numbers, item, outcome):
-    """Return the close lines that give outcome to each item whose answer the minutes hold for the answered
-    items, directly or through a chain of held items, and that no close line decides yet."""
+def held_items_decided_with(walk_finder, minutes, parser, answered_numbers, item, outcome, decided_through_sub_steps):
+    """Return [(close line, the text of the item whose outcome it records)], one close line for each item whose answer the
+    minutes hold, directly or through a chain of held items, and that no close line decides yet, giving it the
+    outcome of what it was held for: outcome for answered_numbers, when outcome is given, and, for an item
+    decided_through_sub_steps maps to approved or disapproved, as items_decided_through_sub_steps gives them, that
+    item's outcome."""
     text = minutes.read_text(encoding="utf-8")
     decided, _ = minutes_record(walk_finder, text, parser)
     holds = held_answers(walk_finder, text, parser)
+    # Each released number maps to (its outcome, the item whose outcome it carries), so a chain started by this
+    # close's answer still names the answered item.
+    released = {number: (outcome, item) for number in answered_numbers} if outcome else {}
+    for number, word in decided_through_sub_steps.items():
+        if word in RULING_GIVEN_WORDS.values():
+            released.setdefault(number, (next(key for key, value in RULING_GIVEN_WORDS.items() if value == word),
+                                         None))
     # An item held for an item this close decides is decided too, so it releases the items held for it in turn.
-    released, lines = set(answered_numbers), []
-    progress = True
+    lines, progress = [], True
     while progress:
         progress = False
         for held_text, held_numbers, new_text, new_numbers in holds:
-            if new_numbers <= released and not held_numbers <= decided:
-                decided.update(held_numbers)
-                released.update(held_numbers)
-                progress = True
-                ruled_by = item if new_numbers <= set(answered_numbers) else new_text
-                lines.append(CLOSE_ALREADY_DECIDED_MINUTES.format(
-                    item=held_text, ruling=HELD_RULING.format(new_item=ruled_by), outcome=outcome))
+            sources = {released.get(number) for number in new_numbers}
+            if None in sources or len({held_outcome for held_outcome, _ in sources}) != 1 or held_numbers <= decided:
+                continue
+            held_outcome, source = sources.pop()
+            source = source or new_text
+            decided.update(held_numbers)
+            released.update(dict.fromkeys(held_numbers, (held_outcome, source)))
+            progress = True
+            ruled_by = item if new_numbers <= set(answered_numbers) else new_text
+            lines.append((CLOSE_ALREADY_DECIDED_MINUTES.format(
+                item=held_text, ruling=HELD_RULING.format(new_item=ruled_by), outcome=held_outcome), source))
     return lines
 
 
@@ -4679,15 +4696,21 @@ def close(arguments):
     append_to_minutes(minutes, [recorded])
     word = RULING_GIVEN_WORDS[held_outcome] if held_outcome else word
     rulings = [(number, word) for number in answered_numbers]
-    if held_outcome:
-        held = held_items_decided_with(walk_finder, minutes, parser, answered_numbers, item, held_outcome)
-        if held:
-            append_to_minutes(minutes, held)
-        for line in held:
-            deferred_item_heading_noted(walk_finder, minutes, walk_finder.parse_items(line.split(": ")[0])[0], total,
-                                        parser, noted=False)
-        output += [CLOSE_HELD_DECIDED.format(item=item, held=line.split(": ")[0]) for line in held]
-        rulings += [(number, word) for line in held
+    # A held answer is released by its new item's own answer, or by the last of its sub-steps, at this close or,
+    # for one an earlier close missed, at any close after it.
+    words, _ = minutes_ruling_words(walk_finder, minutes.read_text(encoding="utf-8"), parser)
+    held = held_items_decided_with(
+        walk_finder, minutes, parser, answered_numbers, item, held_outcome,
+        items_decided_through_sub_steps(order, words, sub_steps_of,
+                                        held_answers_unresolved(walk_finder, minutes.read_text(encoding="utf-8"),
+                                                                parser)))
+    if held:
+        append_to_minutes(minutes, [line for line, _ in held])
+    for line, ruled_by in held:
+        deferred_item_heading_noted(walk_finder, minutes, walk_finder.parse_items(line.split(": ")[0])[0], total,
+                                    parser, noted=False)
+        output.append(CLOSE_HELD_DECIDED.format(item=ruled_by, held=line.split(": ")[0]))
+        rulings += [(number, RULING_GIVEN_WORDS[line.rsplit(" ", 1)[-1]])
                     for number in walk_finder.parse_items(line.split(": ")[0])[0]]
     after = minutes.read_text(encoding="utf-8")
     words, _ = minutes_ruling_words(walk_finder, after, parser)

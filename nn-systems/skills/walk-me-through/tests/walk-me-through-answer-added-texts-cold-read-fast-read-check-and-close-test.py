@@ -3448,6 +3448,43 @@ def test_an_item_whose_held_answer_is_unresolved_is_named_again_once_its_sub_ste
           described(closed) + case.minutes.read_text())
 
 
+HELD_FOR_ITEM_2_LINE = ("item 1 of 2: answer held: item 2 of 2, raised by a fast-read finding, waits for the user's "
+                        "answer. <open>\n")
+RELEASED_BY_ITEM_2_LINE = ("item 1 of 2: already decided by the user's answer to item 2 of 2, for which its answer was "
+                           "held; the walk does not come back to it. <accepted>")
+
+
+def test_an_answer_held_for_an_item_with_sub_steps_is_recorded_when_its_last_sub_step_is_approved():
+    case = Case(next_to_present="item 2.2 of 2", document=SUB_STEPS_THEN_ITEMS_WAITING_ON_THEIR_ITEM_DOCUMENT)
+    case.minutes.write_text("# Minutes\n\n" + HELD_FOR_ITEM_2_LINE
+                            + "item 2.1 of 2: moved on; the item asked for no decision. <moved on, no decision>\n"
+                            + "#next_to_present item 2.2 of 2\n")
+    case.run("check")
+    closed = case.run("close")
+    check("approving item 2's last sub-step, its other sub-step moved on, records item 2's approval for item 1, "
+          "whose answer was held for item 2, says so, and the walk goes on past both",
+          closed.returncode == 0 and RELEASED_BY_ITEM_2_LINE in case.minutes.read_text()
+          and "item 1 of 2, whose answer was held for item 2 of 2, is recorded with item 2 of 2's outcome."
+          in closed.stdout and marker(case) == "#next_to_present item 3 of 4",
+          described(closed) + case.minutes.read_text())
+
+
+def test_an_answer_held_for_an_item_an_earlier_close_decided_through_sub_steps_is_recorded_at_the_next_close():
+    document = SUB_STEPS_THEN_ITEMS_WAITING_ON_THEIR_ITEM_DOCUMENT.replace(
+        "## Nothing reports a renamed constant", "## Item 3 of 4: Nothing reports a renamed constant")
+    case = Case(next_to_present="item 3 of 4", document=document)
+    case.minutes.write_text("# Minutes\n\n" + HELD_FOR_ITEM_2_LINE
+                            + "item 2.1 of 2: moved on; the item asked for no decision. <moved on, no decision>\n"
+                            + approved_line("item 2.2 of 2") + "#next_to_present item 3 of 4\n")
+    case.run("check", "--deferred")
+    closed = case.run("close")
+    check("a close on another item, even a deferral, records the approval of item 2, decided through its sub-steps "
+          "before this program released held answers so, for item 1, whose answer was held for item 2",
+          closed.returncode == 0 and RELEASED_BY_ITEM_2_LINE in case.minutes.read_text()
+          and "item 1 of 2, whose answer was held for item 2 of 2, is recorded with item 2 of 2's outcome."
+          in closed.stdout, described(closed) + case.minutes.read_text())
+
+
 def test_close_posts_the_ruling_on_an_item_its_answer_decides_through_the_last_sub_step():
     pull_requests = held_pull_requests((501, [f"#held_on_ruling {WALK_NAME} item 2"]),
                                        (502, [f"#held_on_ruling {WALK_NAME} item 2.2"]))
