@@ -24,7 +24,10 @@ makes useless a point fix or workaround they kept. For each pull request a
 in it, the facts give merge-lane-2's follow-up request block for that pull
 request as --review-tools-worktree-at-main's FOLLOW_UP_REQUEST_PROGRAM_FILE_NAME
 prints it, so the reviewer can check the answers against the findings' own
-text. The facts end with the pull request's description, which the brief
+text. When that program refuses (exit 1), the fact quotes its refusal instead,
+since a refusal is the same on every run; only its failure (any other nonzero
+exit) stops the brief. An entry whose claude_reviewer is false gets no such
+fact and runs no such program, because no Claude reviewer reads its brief. The facts end with the pull request's description, which the brief
 quotes as the author's claims. The reviewer runs with no GitHub login, so the
 brief is where it reads the description and the follow-up request blocks. The brief is written to
 briefs/brief-<tag>-mac-claude.md under the worktrees and outputs directory, and
@@ -87,6 +90,8 @@ GITHUB_ISSUE_OR_PULL_REQUEST_LINK = re.compile(
 MERGED_PULL_REQUESTS_LIMIT = "100000"
 FOLLOW_UP_REQUEST_PROGRAM_FILE_NAME = "pull-request-follow-up-request-after-merge-finding-answers-and-next-step.py"
 FOLLOW_UP_REQUEST_PULL_REQUEST_NUMBER = re.compile(r"#follow_up_request pull request ([0-9]+)\b")
+# The follow-up request program's exit code for a refusal, which says why and is the same on every run.
+FOLLOW_UP_REQUEST_PROGRAM_REFUSED_EXIT_CODE = 1
 
 
 def parse_arguments(argv):
@@ -114,12 +119,16 @@ def parse_arguments(argv):
     return common.resolve_path_options(parser.parse_args(argv))
 
 
-def run(command, gh_token=None):
+def run(command, gh_token=None, answer_exit_codes=()):
+    """`command`'s standard output; a nonzero exit not in `answer_exit_codes` raises StepFailed,
+    and an exit in it returns the completed process, whose output is that exit's answer."""
     environment = run_all_test_suites.environment_without_git_redirecting_variables()
     if gh_token is not None:
         environment["GH_TOKEN"] = gh_token
     completed = subprocess.run(
         command, capture_output=True, text=True, stdin=subprocess.DEVNULL, env=environment)
+    if completed.returncode in answer_exit_codes:
+        return completed
     if completed.returncode != 0:
         raise StepFailed(f"{' '.join(command)} exited {completed.returncode}: "
                          f"{completed.stderr.strip()}")
@@ -202,11 +211,18 @@ def follow_up_request_blocks_text(description, review_tools_worktree, gh_token):
     in a "#follow_up_request pull request <number>", lowest number first."""
     texts = []
     for followed_up in sorted({int(number) for number in FOLLOW_UP_REQUEST_PULL_REQUEST_NUMBER.findall(description)}):
-        block = run([sys.executable, str(review_tools_worktree / "scripts" / FOLLOW_UP_REQUEST_PROGRAM_FILE_NAME),
-                     str(followed_up), "print-follow-up-request-block-from-merge-lane-2-reviews"], gh_token).strip()
-        texts.append(f"- merge-lane-2's follow-up request for pull request #{followed_up}, which the description "
-                     f"names, as `scripts/{FOLLOW_UP_REQUEST_PROGRAM_FILE_NAME} {followed_up} "
-                     "print-follow-up-request-block-from-merge-lane-2-reviews` prints it from merge-lane-2's reviews"
+        printed = run([sys.executable, str(review_tools_worktree / "scripts" / FOLLOW_UP_REQUEST_PROGRAM_FILE_NAME),
+                       str(followed_up), "print-follow-up-request-block-from-merge-lane-2-reviews"], gh_token,
+                      answer_exit_codes=(FOLLOW_UP_REQUEST_PROGRAM_REFUSED_EXIT_CODE,))
+        program = (f"`scripts/{FOLLOW_UP_REQUEST_PROGRAM_FILE_NAME} {followed_up} "
+                   "print-follow-up-request-block-from-merge-lane-2-reviews`")
+        heading = f"- merge-lane-2's follow-up request for pull request #{followed_up}, which the description names"
+        if isinstance(printed, subprocess.CompletedProcess):
+            texts.append(f"{heading}: {program} refused to print it, so this brief holds no follow-up request "
+                         "block for that pull request. Its refusal:\n\n" + quoted(printed.stderr.strip()) + "\n")
+            continue
+        block = printed.strip()
+        texts.append(f"{heading}, as {program} prints it from merge-lane-2's reviews"
                      + (":\n\n" + quoted(block) + "\n" if block else
                         ": it printed no finding, so merge-lane-2's reviews of that pull request hold no "
                         "non-blocking finding."))
@@ -254,7 +270,8 @@ def compose(spec, arguments, review_tools_worktree, instructions_file, merged_pu
     closing_issues, description = pull_request_closing_issues_and_description(
         number, merged_pull_requests.gh_token)
     facts.append(follow_up_pull_requests_text(number, closing_issues, merged_pull_requests))
-    facts.extend(follow_up_request_blocks_text(description, review_tools_worktree, merged_pull_requests.gh_token))
+    if spec.get("claude_reviewer", True):
+        facts.extend(follow_up_request_blocks_text(description, review_tools_worktree, merged_pull_requests.gh_token))
     facts.append(f"- Hazards: {spec['hazards']}")
     facts.append("- The author's description of the pull request, quoted below. It is what "
                  "the author claims; check each claim against the repository yourself, "
