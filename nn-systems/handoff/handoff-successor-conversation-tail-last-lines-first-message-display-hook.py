@@ -23,7 +23,8 @@ Not handled:
   checkout: nothing shows the lines and their file stays;
 - lines that leave a Markdown fenced code block open when they end, as a cut inside a block
   can: the lines and the batch are drawn as one Markdown text, so the closing heading and the
-  first message are then drawn as code.
+  first message are drawn as code up to the first fence in them that closes the open block, and
+  as Markdown after it.
 """
 
 import json
