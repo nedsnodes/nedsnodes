@@ -134,7 +134,9 @@ class BenchmarkTest(unittest.TestCase):
         code, _, err = self.run_benchmark(StubModel("m1: NO\nm2: NO\nm3: NO\n", sleep=5), repeats="3")
         self.assertEqual(code, BENCHMARK.EXIT_MODEL_AND_EFFORT_DROPPED_PAST_TIME_LIMIT)
         self.assertIn("DROPPED: This run stopped because claude claude-sonnet-5-5 at effort low took over 1 seconds", err)
-        self.assertIn("Do not run this model and effort again; go on with the next model and effort", err)
+        self.assertIn("is dropped from the benchmark at --hits-from grep:hits_newest_first and --first-n 3", err)
+        self.assertIn("Do not run this model and effort at that --hits-from and --first-n again; go on with the next "
+                      "combination you were given, if any.", err)
         [row] = self.rows_written()
         self.assertEqual((row["state"], row["exit_code"]), (BENCHMARK.BENCHMARK_ROW_STATE_MODEL_AND_EFFORT_DROPPED_PAST_TIME_LIMIT, None))
         self.assertLess(row["seconds"], 4)
@@ -185,12 +187,14 @@ class BenchmarkTest(unittest.TestCase):
         stub = StubModel("m1: NO\n")
         for argv_change, message in [
                 (("--case-set", str(self.root)), "is not a case set: it has no cases/ directory and no "
-                                                 "candidate-entries.jsonl file"),
+                                                 "candidate-entries.jsonl file. A case set holds both.\nRun again "
+                                                 "with --case-set naming a directory that holds both."),
                 (("--hits-from", "meaning:hits"), "holds no list 'meaning:hits'; no model was run. The lists it holds "
                                                   "are: grep:hits_newest_first.\nRun again with --hits-from"),
                 (("--case", "no-such-case"), "has the case_id no-such-case. The case_ids it holds are: case-a.\n"
                                              "Run again with each --case"),
-                (("--first-n", "0"), "--first-n was 0, and must be 1 or more")]:
+                (("--first-n", "0"), "--first-n was 0, and must be 1 or more: it is how many messages from the "
+                                     "top of each case's list the model is given.\nRun again with --first-n 1 or more.")]:
             with self.subTest(change=argv_change):
                 BENCHMARK.agent_binary_model_run_argv_stdin_working_directory_and_answer_stdout_or_report_file = stub
                 argv = {"--case-set": str(self.root / "case-set"), "--runtime": "claude", "--model": "m", "--effort": "low",
@@ -244,21 +248,24 @@ class BenchmarkTest(unittest.TestCase):
         self.assertEqual(incomplete["out"], ["has 3 rows, fewer than its 2 cases times 2 repeats"])
 
     def test_score_without_rows_could_not_run(self):
-        self.assertIn("hold no rows, so there is nothing to score.\nRun score again with --rows naming", self.score([])[2])
+        self.assertIn("hold no rows, so there is nothing to score.\nRun score again with --rows naming the files that "
+                      "the run commands' --rows named.", self.score([])[2])
         code, _, err = self.main("score", "--rows", str(self.root / "missing.jsonl"))
         self.assertEqual(code, BENCHMARK.EXIT_COULD_NOT_RUN)
-        self.assertIn("missing.jsonl does not exist.\nRun score again with --rows naming", err)
+        self.assertIn("missing.jsonl does not exist.\nRun score again with --rows naming the files that the run "
+                      "commands' --rows named.", err)
         code, _, err = self.main("score", "--rows", str(self.root))
         self.assertEqual(code, BENCHMARK.EXIT_COULD_NOT_RUN)
         self.assertIn("cannot open the rows file", err)
+        self.assertIn("Run the same command again with --rows naming a rows file you can open.", err)
 
     def test_score_refuses_a_line_that_is_not_a_json_row(self):
         self.rows.write_text(json.dumps(self.row("a", 1, 5, True)) + "\nnot json\n")
         code, _, err = self.main("score", "--rows", str(self.rows))
         self.assertEqual(code, BENCHMARK.EXIT_COULD_NOT_RUN)
         self.assertIn(f"line 2 of the rows file {self.rows} is not a JSON row", err)
-        self.assertIn("'not json'. run writes whole JSON rows", err)
-        self.assertIn("Delete that line, then run the same command again", err)
+        self.assertIn("'not json'. The run command writes whole JSON rows", err)
+        self.assertIn(f"Delete that line. Then run again each run command that wrote to {self.rows}", err)
 
     def test_score_reads_a_rows_file_named_twice_once(self):
         self.rows.write_text(json.dumps(self.row("a", 1, 5, True)) + "\n")
@@ -272,6 +279,8 @@ class BenchmarkTest(unittest.TestCase):
                       f"{self.rows}. score would count that run twice, so it scored nothing.", err)
         self.assertIn("If the two lines are the same: delete either one", err)
         self.assertIn("tell the user both lines' files and line numbers, and ask which to keep", err)
+        self.assertIn("If you are a subagent, send this whole message to the agent that dispatched you instead of asking "
+                      "the user.", err)
 
     def test_claude_invocation_uses_the_common_prefix_no_tools_and_an_empty_directory(self):
         prompt_file = self.root / "p.md"

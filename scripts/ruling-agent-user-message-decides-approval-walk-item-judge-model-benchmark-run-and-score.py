@@ -337,9 +337,10 @@ def dropped_message(arguments, case_id, already):
     when = f"{arguments.rows} already shows that" if already else "This run stopped because"
     return (f"DROPPED: {when} {arguments.runtime} {arguments.model} at effort {arguments.effort} took over "
             f"{BENCHMARK_MODEL_RUN_SECONDS_LIMIT_THAT_DROPS_THE_MODEL_AND_EFFORT} seconds on case {case_id}, so this "
-            f"model and effort is dropped from the benchmark: no further case or repeat of it is run, and score lists "
-            f"it as out.\nDo not run this model and effort again; go on with the next model and effort you were given, "
-            f"if any.")
+            f"model and effort is dropped from the benchmark at --hits-from {arguments.hits_from} and --first-n "
+            f"{arguments.first_n}: no further case or repeat of it is run there, and score lists it as out.\nDo not "
+            f"run this model and effort at that --hits-from and --first-n again; go on with the next combination you "
+            f"were given, if any.")
 
 
 def combination_key(row):
@@ -356,20 +357,21 @@ def read_rows(paths, missing_ok=False):
             if missing_ok:
                 continue
             raise CouldNotRun(f"the rows file {path} does not exist.\nRun score again with --rows naming the files "
-                              f"run wrote its rows to, its own --rows.") from None
+                              f"that the run commands' --rows named.") from None
         except OSError as error:
-            raise CouldNotRun(f"cannot open the rows file {path}: {error}.\nRun score again with --rows naming the "
-                              f"files run wrote its rows to, its own --rows.") from error
+            raise CouldNotRun(f"cannot open the rows file {path}: {error}.\nRun the same command again with --rows "
+                              f"naming a rows file you can open.") from error
         for number, line in enumerate(lines, 1):
             if line.strip():
                 try:
                     rows.append((json.loads(line), path, number))
                 except json.JSONDecodeError as error:
                     raise CouldNotRun(f"line {number} of the rows file {path} is not a JSON row ({error}): "
-                                      f"{line[:200]!r}. run writes whole JSON rows, so this line was cut short, such "
-                                      f"as by a run killed while writing it, or edited by hand.\nDelete that line, "
-                                      f"then run the same command again; a later run of that model and effort runs "
-                                      f"the deleted row's case and repeat again.") from None
+                                      f"{line[:200]!r}. The run command writes whole JSON rows, so this line was cut "
+                                      f"short, such as by a run command killed while writing it, or edited by hand.\n"
+                                      f"Delete that line. Then run again each run command that wrote to {path}: each "
+                                      f"runs only the cases and repeats the file lacks, so the deleted row's run is "
+                                      f"made again. Then run score.") from None
     return rows
 
 
@@ -393,7 +395,7 @@ def score(arguments):
         groups.setdefault(combination_key(row), []).append(row)
     if not groups:
         raise CouldNotRun(f"the rows files {', '.join(paths)} hold no rows, so there is nothing to score.\n"
-                          f"Run score again with --rows naming the files run wrote its rows to, its own --rows.")
+                          f"Run score again with --rows naming the files that the run commands' --rows named.")
     for key, rows in sorted(groups.items()):
         case_ids = sorted({row["case_id"] for row in rows})
         repeats = sorted({row["repeat"] for row in rows})
