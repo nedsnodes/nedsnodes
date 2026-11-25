@@ -169,6 +169,7 @@ REVIEW_PLAN_TIMEOUT_SECONDS = 300
 CODEX_FINDING_HEADING = re.compile(r"^- \[(?:Codex priority )?(P[0-3])(?: \(P0 highest\))?\] (.+)$")
 # The review worktree's own path differs between runs on the same commit.
 CODEX_FINDING_WORKTREE_PATH = re.compile(r"\S*/pr\d+-head/")
+CODEX_REPORT_PROVENANCE_COMMENT = re.compile(r"\A<!--.*?-->\n?", re.DOTALL)
 CODEX_GRADES_BODY_HEADING = "**Codex findings graded:**"
 OUTSIDE_THE_DIFF_HEADING = fix_round.OUTSIDE_THE_DIFF_HEADING
 OUTSIDE_THE_DIFF_LINE_FORMAT = "- `{path}:{line}`: {body}"
@@ -411,7 +412,9 @@ def codex_findings_in_report(report):
 
 def codex_findings_on_commit(outputs_directory, number, head):
     """Return the findings of the Codex runs recorded for this commit, {} when they found nothing or
-    failed, or None when no run record names it; raise CodexRunRecordUnusable when one cannot be read."""
+    failed, or None when no run record names it; raise CodexRunRecordUnusable when one cannot be read, or
+    when a successful run's report is a JSON object after its provenance comment, whose findings have no
+    finding lines and would otherwise read as none."""
     findings, recorded = {}, False
     for record_file in sorted((outputs_directory / "cx").glob(
             f"pr{number}-*/{common.CODEX_REVIEW_RUN_RECORD_FILE_NAME}")):
@@ -428,11 +431,29 @@ def codex_findings_on_commit(outputs_directory, number, head):
         if exit_code != 0:
             continue
         try:
-            findings.update(codex_findings_in_report(Path(report_file).read_text(encoding="utf-8")))
+            report = Path(report_file).read_text(encoding="utf-8")
         except (OSError, UnicodeDecodeError) as error:
             raise CodexRunRecordUnusable(
                 f"the Codex run record {record_file} says the run succeeded, but its report could not "
                 f"be read: {error}")
+        # Codex sometimes writes its review as a JSON object, whose findings have no heading line.
+        if CODEX_REPORT_PROVENANCE_COMMENT.sub("", report, count=1).lstrip().startswith("{"):
+            directory_option = (
+                "" if outputs_directory == common.DEFAULT_MERGE_LANE_WORKTREES_AND_OUTPUTS_DIRECTORY
+                else f" --merge-lane-worktrees-and-outputs-directory {shlex.quote(str(outputs_directory))}")
+            raise CodexRunRecordUnusable(
+                f"review not posted: the Codex report {report_file} is a JSON object after its provenance "
+                f"comment. This program reads findings only from finding lines, so it would count the run as "
+                f"one with no findings and ask for no grades.\n"
+                f"Do not post the review any other way.\n"
+                f"Run the Codex cell on commit {head} again, from the same base; the cell now writes a JSON "
+                f"review as finding lines:\n"
+                f"  scripts/merge-lane-code-review-codex-cell-run-on-pull-request-head.py {number} "
+                f"{record.get('base_commit')}{directory_option}\n"
+                f"Then run this posting command again.\n"
+                f"If the new report is JSON again, send merge-lane-2, with the SendMessage tool, the report's "
+                f"path and this message's first line.")
+        findings.update(codex_findings_in_report(report))
     return findings if recorded else None
 
 
