@@ -328,6 +328,16 @@ def finding_fact_line_count_cases(scratch):
     check("two Codex entries with the same priority and heading are counted apart, though they share an id",
           result.code == 0 and "; 1 of 2 Codex finding(s) lack an answered fact line" in result.stdout,
           result.detail)
+    earlier = f"<!-- provenance -->\n\n- [Codex priority P2 (P0 highest)] {first}\n  The earlier run, without lines.\n"
+    later = f"<!-- provenance -->\n\n- [Codex priority P2 (P0 highest)] {first}\n  Body.\n{indented}\n"
+    result = run_program(scratch, json.dumps({"verdict": "APPROVE", "body": "The review body.", "comments": [
+        finding(2, "fix-next", "merge-lane-2's own restatement, without fact lines.")],
+        "merge_lane_codex_review_finding_grades": grades[:1]}),
+        arguments=MERGE_LANE_ARGUMENTS, codex_runs=((HEAD, 0, earlier), (HEAD, 0, later)))
+    check("two Codex runs on one commit that report the same finding are both counted, the later run not "
+          "replacing the earlier run's entry",
+          result.code == 0 and "; 1 of 2 Codex finding(s) lack an answered fact line: "
+          f"{codex_finding_id('P2', first)} lacks 'Main has it:'" in result.stdout, result.detail)
 
 
 def codex_finding_grade_cases(scratch):

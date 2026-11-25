@@ -536,7 +536,9 @@ def codex_findings_on_commit(outputs_directory, number, head):
                 "findings from, but holds a JSON \"findings\" list that is not empty: it is likely Codex's "
                 "review as a JSON object, written in a form neither the Codex cell nor this program "
                 "recognizes, such as with text before its ```json fence")
-        findings.update(report_findings)
+        # Runs on one commit share ids; each run's entries are kept, so the fact-line count sees them all.
+        for finding_id, (priority, text, entries) in report_findings.items():
+            findings.setdefault(finding_id, (priority, text, []))[2].extend(entries)
     return findings if recorded else None
 
 
