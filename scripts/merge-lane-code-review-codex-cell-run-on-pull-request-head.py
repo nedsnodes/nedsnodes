@@ -6,7 +6,8 @@ Usage:
       <base commit> [--merge-lane-worktrees-and-outputs-directory DIR] [--merge-lane-review-worktrees-directory DIR] [--review-tools-worktree-at-main DIR]
 
 The base commit is the merge base for a first review, or the nn-head-commit
-reviewed before for a fix-round. Saves the pull request's description from
+reviewed before for a fix-round, unless that fix-round merged main or rewrote
+history, when it is the merge base again. Saves the pull request's description from
 GitHub to
 cx/pr<n>-<first 8 characters of the base>/pull-request-description.md under
 the worktrees and outputs directory, then runs
@@ -57,7 +58,8 @@ def parse_arguments(argv):
                     "commit, with the pull request's description.")
     parser.add_argument("pull_request", type=int, help="the pull request's number")
     parser.add_argument("base_commit",
-                        help="the merge base, or for a fix-round the nn-head-commit reviewed before")
+                        help="the merge base, or for a fix-round that neither merged main nor "
+                             "rewrote history, the nn-head-commit reviewed before")
     common.add_directory_options(parser, "cx/")
     return common.resolve_path_options(parser.parse_args(argv))
 
