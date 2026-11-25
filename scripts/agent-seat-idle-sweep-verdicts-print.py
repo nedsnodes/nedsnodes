@@ -387,7 +387,9 @@ class TranscriptFacts:
         self.turn_ended_after_last_model_turn_record = False
         self.turn_ending_messages = []   # (record, time, time of the prompt that began its turn)
         self.task_tool_calls = []        # (time, name, input, task id), only calls whose result succeeded
-        self.tool_calls = []             # (time, name, input), every tool call
+        self.tool_calls = []             # (time, name, input, tool use id), every tool call
+        self.failed_tool_use_ids = set() # each tool use whose result carries is_error
+        self.assistant_texts = []        # (time, text), every assistant record with text
         self.launch_times = {}           # subagent or background task id -> time
         self.last_task_notification = {} # task id -> (time, whether it is interim)
         self.background_command_calls = BackgroundCommandCalls()
@@ -545,6 +547,7 @@ def read_main_transcript(path):
     for record in transcript_records(path):
         moment = parse_time(record.get("timestamp"))
         task_id_by_succeeded_tool_use_id.update(succeeded_task_tool_result_task_ids(record))
+        facts.failed_tool_use_ids |= failed_tool_use_ids(record)
         if awaiting_turn_start and record.get("type") == "user":
             turn_started_at = moment
             awaiting_turn_start = False
@@ -558,6 +561,7 @@ def read_main_transcript(path):
             facts.turn_ended_after_last_model_turn_record = False
         if record.get("type") == "assistant" and message_text(record).strip():
             newest_text_record = (record, moment, turn_started_at)
+            facts.assistant_texts.append((moment, message_text(record)))
         if ((record.get("type") == "system" and record.get("subtype") == "turn_duration")
                 or user_messages.is_interrupt_notice(record)):
             facts.turn_ended_after_last_model_turn_record = True
@@ -567,7 +571,8 @@ def read_main_transcript(path):
                 facts.turn_ending_messages.append(newest_text_record)
                 newest_text_record = None
         for block in tool_uses(record):
-            facts.tool_calls.append((moment, block.get("name"), block.get("input") or {}))
+            facts.tool_calls.append((moment, block.get("name"), block.get("input") or {},
+                                     block.get("id")))
             if block.get("name") in TASK_TOOL_NAMES:
                 task_tool_calls.append(
                     (block.get("id"), (moment, block.get("name"), block.get("input") or {})))
@@ -605,6 +610,25 @@ def succeeded_task_tool_result_task_ids(record):
             if success:
                 task_ids[block.get("tool_use_id")] = success["created"] or success["updated"]
     return task_ids
+
+
+def failed_tool_use_ids(record):
+    content = (record.get("message") or {}).get("content")
+    if record.get("type") != "user" or not isinstance(content, list):
+        return set()
+    return {block.get("tool_use_id") for block in content
+            if isinstance(block, dict) and block.get("type") == "tool_result"
+            and block.get("is_error") is True}
+
+
+def judged_tool_call(moment, name, tool_input, failed):
+    """A tool call as a rule 2 judge is handed it. "failed" is there only when the call's result
+    carried is_error, since a failed call does not do the action it was for."""
+    call = {"time": iso(moment), "name": name,
+            "input": json.dumps(tool_input, ensure_ascii=False)[:fields.TOOL_CALL_INPUT_CHARACTERS_KEPT]}
+    if failed:
+        call["failed"] = True
+    return call
 
 
 def tool_result_text(block):
@@ -799,32 +823,36 @@ def last_message_of(facts):
 def transcript_tool_calls_and_assistant_texts_since(path, since):
     """Every tool call, its input cut as the judge's other tool calls are, and every assistant text
     in the transcript written after since. Raises ReadFailure as transcript_records does."""
-    tool_calls, texts = [], []
+    tool_calls, texts, failed = [], [], set()
     for record in transcript_records(path):
+        failed |= failed_tool_use_ids(record)
         moment = parse_time(record.get("timestamp"))
         if moment is None or moment <= since:
             continue
         for block in tool_uses(record):
-            tool_calls.append({"time": iso(moment), "name": block.get("name"),
-                               "input": json.dumps(block.get("input") or {}, ensure_ascii=False)[
-                                   :fields.TOOL_CALL_INPUT_CHARACTERS_KEPT]})
+            tool_calls.append((moment, block.get("name"), block.get("input") or {}, block.get("id")))
         if record.get("type") == "assistant" and message_text(record).strip():
             texts.append({"time": iso(moment), "text": message_text(record)})
-    return {"tool_calls": tool_calls, "assistant_texts": texts}
+    return {"tool_calls": [judged_tool_call(moment, name, tool_input, tool_use_id in failed)
+                           for moment, name, tool_input, tool_use_id in tool_calls],
+            "assistant_texts": texts}
 
 
-def tool_calls_since_start_of_earliest_turn_with_sentence_to_judge(facts, judged):
-    """Every tool call from the start of the earliest turn that ended on a judged sentence's
-    message: the judge looks there for the call, the task or the file that backs a sentence."""
+def tool_calls_and_assistant_texts_since_start_of_earliest_turn_with_sentence_to_judge(facts, judged):
+    """Every tool call and every assistant text from the start of the earliest turn that ended on
+    a judged sentence's message: the judge looks there for the call, the task, the file or the
+    text that backs a sentence. Returns (tool calls, text messages)."""
     uuids = {item["record_uuid"] for item in judged}
     starts = [turn_started_at or moment for record, moment, turn_started_at
               in facts.turn_ending_messages if record.get("uuid") in uuids and (turn_started_at or moment)]
     if not starts:
-        return []
+        return [], []
     earliest = min(starts)
-    return [{"time": iso(moment), "name": name,
-             "input": json.dumps(tool_input, ensure_ascii=False)[:fields.TOOL_CALL_INPUT_CHARACTERS_KEPT]}
-            for moment, name, tool_input in facts.tool_calls if moment and moment >= earliest]
+    return ([judged_tool_call(moment, name, tool_input, tool_use_id in facts.failed_tool_use_ids)
+             for moment, name, tool_input, tool_use_id in facts.tool_calls
+             if moment and moment >= earliest],
+            [{"time": iso(moment), "text": text}
+             for moment, text in facts.assistant_texts if moment and moment >= earliest])
 
 
 def rules_three_to_five(verdict, put_off_at, checker, task_directory,
@@ -893,7 +921,7 @@ def verdict_for_seat(seat, paths, now, since, checker, parser, usage_limit_recor
         verdict["last_activity"] = {"time": iso(last_spend),
                                     "source": str(source) if last_spend else None}
         verdict[fields.LAST_TOOL_CALL_AT] = iso(max(
-            (moment for moment, _, _ in facts.tool_calls if moment), default=None))
+            (moment for moment, _, _, _ in facts.tool_calls if moment), default=None))
         verdict[fields.LAST_USER_TYPED_AT] = iso(facts.last_user_typed)
         verdict[fields.SUCCESSFUL_TASK_TOOL_CALLS_SETTING_PREREQUISITES_OR_BLOCKED_BY] = [
             {"time": iso(moment), "name": name, "task": task_id}
@@ -966,8 +994,10 @@ def verdict_for_seat(seat, paths, now, since, checker, parser, usage_limit_recor
         judged = sentences_by_code_reading.get(fields.JUDGE)
         unbacked = sentences_by_code_reading.get(fields.UNBACKED)
         if judged:
-            verdict[fields.TOOL_CALLS_SINCE_START_OF_EARLIEST_TURN_WITH_SENTENCE_TO_JUDGE] = (
-                tool_calls_since_start_of_earliest_turn_with_sentence_to_judge(facts, judged))
+            (verdict[fields.TOOL_CALLS_SINCE_START_OF_EARLIEST_TURN_WITH_SENTENCE_TO_JUDGE],
+             verdict[fields.ASSISTANT_TEXT_MESSAGES_SINCE_START_OF_EARLIEST_TURN_WITH_SENTENCE_TO_JUDGE]) = (
+                tool_calls_and_assistant_texts_since_start_of_earliest_turn_with_sentence_to_judge(
+                    facts, judged))
             # Only the judge can find every sentence backed, and then rules 3 to 5 decide; a
             # sentence code already found unbacked means that can never happen. Rule 2 is set
             # after those reads, so one that fails leaves the rule null.

@@ -347,9 +347,9 @@ still running".
 SENTENCE_BACKED_RULES = """\
 - An announced action, such as "Next I'm starting the pull request", is backed when a tool call in \
 the same turn, before or after the sentence, or a later one does the action, or a background task \
-it started is still running; when the action is to tell the user something, by a text message \
-that tells it; and when the agent-seat put the action off, by a task whose prerequisites or \
-blockedBy name what the action waits on.
+it started is still running; when the action is to tell the user something, by a text message in \
+the same turn or a later one that tells it; and when the agent-seat put the action off, by an open \
+task whose prerequisites or blockedBy name what the action waits on.
 - A promise to act after an event, such as "I'll report when PR 927 merges", is backed by a task \
 whose prerequisites or blockedBy name the event, so the idle check raises it.
 - A standing rule, such as "from now on" or "Noted", is backed by the hook or test that enforces \
@@ -360,7 +360,11 @@ Judge each sentence by the rule of the kind the JSON gives it, because the messa
 unbacked sentence is worded for that kind; a sentence that, read whole, only declines an action \
 and commits the agent-seat to nothing later, such as "ned-box's load is near 22, so I'm starting \
 nothing else for now", leaves nothing undone: it is backed. A hold or a promise to act after an \
-event puts off an action until something happens; judge it by its own rule above.
+event puts off an action until something happens; judge it by its own rule above. An announced \
+action the agent-seat later called off, such as "Next I'm opening the pull request" followed by \
+"I won't open it after all", is unbacked; so is one it put off with nothing named that the action \
+waits on, such as "I'll do it later". A tool call marked failed did not do its action, so it backs \
+nothing.
 """
 
 SENTENCES_JUDGE_PROMPT = """\
@@ -369,9 +373,10 @@ messages that ended its turns hold the sentences below, each a promise or an ann
 each sentence, judge whether it is backed, by these rules:
 
 """ + SENTENCE_BACKED_RULES + """
-The tool calls the agent-seat made from the earliest sentence's turn on are in the JSON below, with \
-the tasks they created or updated and the files they changed; so are its open tasks that have \
-prerequisites or blockedBy, whenever they were created, and what is running. Send nothing. \
+The tool calls and text messages the agent-seat wrote from the earliest sentence's turn on are in \
+the JSON below, with the tasks the calls created or updated and the files they changed; so are its \
+open tasks that have prerequisites or blockedBy, whenever they were created, and what is running. \
+Send nothing. \
 Answer, for every sentence by its index, backed true or false, and reason, one sentence.
 
 {facts}"""
@@ -1550,6 +1555,11 @@ class Sweep:
                                     for index, item in enumerate(judged)],
                          tool_calls_since_start_of_earliest_turn_with_sentence_to_judge=verdict.get(
                              fields.TOOL_CALLS_SINCE_START_OF_EARLIEST_TURN_WITH_SENTENCE_TO_JUDGE, []),
+                         assistant_text_messages_since_start_of_earliest_turn_with_sentence_to_judge=[
+                             dict(item, text=item["text"][-JUDGED_TEXT_CHARACTERS:])
+                             for item in verdict.get(
+                                 fields.ASSISTANT_TEXT_MESSAGES_SINCE_START_OF_EARLIEST_TURN_WITH_SENTENCE_TO_JUDGE,
+                                 [])],
                          open_tasks_with_prerequisites_or_blocked_by=verdict.get(
                              fields.OPEN_TASKS_WITH_PREREQUISITES_OR_BLOCKED_BY, []))
             prompt = SENTENCES_JUDGE_PROMPT.format(
@@ -1606,11 +1616,11 @@ class Sweep:
 
 
 def sentence_answer_problem(answer, count):
-    indexes = sorted(item.get("index") for item in (answer or {}).get("sentences", [])
-                     if isinstance(item, dict))
-    if indexes != list(range(count)) or not all(
-            isinstance(item.get("backed"), bool) and isinstance(item.get("reason"), str)
-            for item in answer["sentences"]):
+    items = answer.get("sentences") if isinstance(answer, dict) else None
+    if not (isinstance(items, list) and all(
+            isinstance(item, dict) and type(item.get("index")) is int
+            and isinstance(item.get("backed"), bool) and isinstance(item.get("reason"), str)
+            for item in items) and sorted(item["index"] for item in items) == list(range(count))):
         return f"the judge's answer does not give backed true or false and a reason once for each " \
                f"of {count} sentences: {json.dumps(answer)[:500]}"
     return None

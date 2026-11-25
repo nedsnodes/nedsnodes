@@ -1718,6 +1718,62 @@ check("the rule 2 judge and the re-check are given one definition of backed, so 
       STANDING_RULE_BACKED in rule_2_prompt and STANDING_RULE_BACKED in recheck_prompt
       and "now follows it" not in recheck_prompt, recheck_prompt[:900])
 
+# The user's ruling of 2026-11-24 on an announced action, word for word.
+ANNOUNCED_ACTION_BACKED = (
+    'An announced action, such as "Next I\'m starting the pull request", is backed when a tool call '
+    "in the same turn, before or after the sentence, or a later one does the action, or a background "
+    "task it started is still running; when the action is to tell the user something, by a text "
+    "message in the same turn or a later one that tells it; and when the agent-seat put the action "
+    "off, by an open task whose prerequisites or blockedBy name what the action waits on.")
+check("the rule 2 judge and the re-check are given the user's rule for an announced action word for "
+      "word, and told that a tool call marked failed backs nothing",
+      all(ANNOUNCED_ACTION_BACKED in prompt and "A tool call marked failed did not do its action"
+          in prompt for prompt in (rule_2_prompt, recheck_prompt)), rule_2_prompt[:1500])
+
+# The first judge sees the agent-seat's text messages of the sentence's turn: one that already told
+# the user what the sentence announced can back it.
+TOLD_THE_USER = "The test failed: test_merge_gate exits 1 on an empty description."
+machine = Machine()
+machine.seat("alpha", [user("go", at(-12)), assistant(TOLD_THE_USER, at(-11.9)),
+                       assistant(tool=("Bash", {"command": "false"}), when=at(-11.8), tool_id="t-false"),
+                       {"type": "user", "timestamp": at(-11.7), "message": {"role": "user", "content": [
+                           {"type": "tool_result", "tool_use_id": "t-false", "is_error": True,
+                            "content": "Exit code 1"}]}},
+                       assistant("Next I'll tell the user the test failed.", at(-11.6)),
+                       turn_end(at(-11.5))])
+machine.script(rechecked(True))
+machine.run(0)
+facts = first_judge_facts(machine.claude_calls())
+check("the first rule 2 judge is handed the text messages and tool calls of the sentence's turn, a "
+      "failed call marked failed",
+      [item["text"] for item in facts.get(
+          "assistant_text_messages_since_start_of_earliest_turn_with_sentence_to_judge", [])]
+      == [TOLD_THE_USER, "Next I'll tell the user the test failed."]
+      and [(call["name"], call.get("failed")) for call in facts.get(
+          "tool_calls_since_start_of_earliest_turn_with_sentence_to_judge", [])]
+      == [("Bash", True)], facts)
+
+# A judge's answer of the wrong shape is a judge failure, never a crash.
+for case, answer in (
+        ("an index missing beside an integer one",
+         {"sentences": [{"index": 0, "backed": True, "reason": "r"}, {"backed": True, "reason": "r"}]}),
+        ("a string index beside an integer one",
+         {"sentences": [{"index": 0, "backed": True, "reason": "r"},
+                        {"index": "1", "backed": True, "reason": "r"}]}),
+        ("the right indexes and an item that is not an object",
+         {"sentences": [{"index": 0, "backed": True, "reason": "r"}, "backed"]}),
+        ("sentences null", {"sentences": None})):
+    machine = Machine()
+    machine.seat("alpha", [user("go"), assistant(OPENING_PULL_REQUEST), turn_end()])
+    machine.script({"answer": answer})
+    code, output = machine.run(0)
+    check(f"a rule 2 judge whose answer has {case}: a judge failure, exit 1, no traceback",
+          code == 1 and "Traceback" not in output
+          and "the judge's answer does not give backed" in
+          (machine.events("headless_failed") or [{}])[0].get("problem", "")
+          and not machine.events("message_sent"),
+          (code, output[-500:], machine.events("headless_failed")))
+
 # Another agent-seat's headless agent-session breaks this one's task list after the verdict's read.
 machine = Machine()
 machine.seat("beta", [user("go"), assistant(OPENING_PULL_REQUEST), turn_end()], session="s-beta")
