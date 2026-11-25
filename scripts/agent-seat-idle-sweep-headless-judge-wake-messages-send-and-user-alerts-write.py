@@ -44,9 +44,10 @@ Each invocation, under a lock that keeps two from overlapping:
    succeeded and that sets `metadata.prerequisites` or `addBlockedBy`. A message starts a wait, unless a wait is
    already open: 15 minutes later, if the agent-seat is idle, code sends the escalation, which
    quotes the message that opened the wait and each rule 2 message whose send on the open wait
-   failed, and names the sentences on the wait that no message was sent for; 15 minutes after
-   that, if the agent-seat is still idle, code logs the step that follows the escalation, which
-   sends nothing and writes no user-alert, and sends it nothing more on the wait. A rule 2
+   failed, and names the sentences on the wait that no message was sent for and those of a rule 2
+   message sent on the wait that the re-check did not find backed; 15 minutes after that, if the
+   agent-seat is still idle, code logs the step that follows the escalation, which sends nothing
+   and writes no user-alert, and sends it nothing more on the wait. A rule 2
    message due on a wait whose escalation is due goes on the wait first, so that the re-check
    judges its sentences and the escalation names them instead of the message. Before the escalation of a wait a rule 2 message was sent on, the
    rule 2 judge re-checks every sentence the wait must answer for, those of a message whose send
@@ -175,8 +176,6 @@ HEADLESS_USAGE_LIMIT_PAUSE = "headless_usage_limit_pause"
 WAIT_STEP_SECONDS = 15 * 60
 JUDGE_ASK_AGAIN_SECONDS = 15 * 60
 PULL_REQUEST_EVENTS_TASK_ID = "pull_request_events_task_id"
-# Logged when an open wait's events task closes while rule 2 sentences keep the wait open.
-PULL_REQUEST_EVENTS_TASK_LEFT_WAIT = "pull_request_events_task_left_wait"
 LIMIT_WAKE_GRACE_SECONDS = 5 * 60
 DELIVERY_CHECK_AFTER_SECONDS = 60
 # Claude Code stamps a record when it writes it, which may be a moment before the send returns.
@@ -514,13 +513,10 @@ class SweepLog:
         owed, owed_by, owed_by_nudge = False, None, False
         for event in self.of_seat(seat, "wait_step", "wait_ended", PROMISE_MESSAGE,
                                   PROMISE_MESSAGE_SEND_FAILED, RULE_2_SENTENCES_ON_WAIT,
-                                  "message_sent", PULL_REQUEST_EVENTS_TASK_LEFT_WAIT):
+                                  "message_sent"):
             invocation = event.get("agent_seat_idle_sweep_invocation_started_at")
             if event["event"] == "wait_ended":
                 wait, owed = None, False
-            elif event["event"] == PULL_REQUEST_EVENTS_TASK_LEFT_WAIT:
-                if wait is not None:
-                    wait[PULL_REQUEST_EVENTS_TASK_ID] = None
             elif event["event"] == RULE_2_SENTENCES_ON_WAIT:
                 if wait is not None:
                     if owed and owed_by != invocation:
@@ -929,23 +925,14 @@ def open_pull_request_events_task(seat, tasks_root):
     because a verdict names open tasks only when nothing runs, and merge-lane-2 often has a
     subagent running while events wait. Raises OSError."""
     list_directory = tasks_root / f"nedsnodes-{seat}-tasks"
-    if seat != PULL_REQUEST_EVENTS_AGENT_SEAT or not list_directory.is_dir():
+    if seat != PULL_REQUEST_EVENTS_AGENT_SEAT:
         return None
-    tasks = {}
-    for path in list_directory.glob("*.json"):
-        try:
-            task = json.loads(path.read_text(encoding="utf-8"))
-        except (FileNotFoundError, ValueError):
-            # Claude Code may be replacing the file or have deleted it since the listing.
-            continue
-        if isinstance(task, dict):
-            tasks[path.stem] = task
+    due_task_hook = verdicts_print.due_task_hook
+    tasks = due_task_hook.read_tasks(list_directory)
     for task_id, task in tasks.items():
-        blockers = task.get("blockedBy") or []
-        if (task.get("status") != "completed"
+        if (task.get("status") in due_task_hook.OPEN_TASK_STATUSES
                 and task.get("subject") == agent_seat_task_list.AGENT_SEAT_TASK_LIST_MERGE_LANE_2_READ_PULL_REQUEST_EVENTS_TASK_SUBJECT_LINE
-                and all(tasks.get(str(blocker), {}).get("status") == "completed"
-                        for blocker in blockers)):
+                and not due_task_hook.is_held_by_blockers(task, tasks, list_directory)):
             return {"id": task_id}
     return None
 
@@ -1317,18 +1304,13 @@ class Sweep:
             self.end_wait(seat, "it spent tokens after the step that follows the escalation")
             wait = None
         events_task = open_pull_request_events_task(seat, self.paths.tasks_root)
-        if wait and wait[PULL_REQUEST_EVENTS_TASK_ID] and (
+        # The task may be completed by a subagent, whose calls the main transcript lacks. Rule 2
+        # sentences on the wait are logged as checked, so ending the wait would lose them: it stays
+        # open, and its escalation names those still owed.
+        if wait and wait[PULL_REQUEST_EVENTS_TASK_ID] and PROMISE not in wait and (
                 not events_task or events_task["id"] != wait[PULL_REQUEST_EVENTS_TASK_ID]):
-            # The task may be completed by a subagent, whose calls the main transcript lacks.
-            if PROMISE in wait:
-                # Rule 2 sentences on the wait are logged as checked, so ending the wait would lose
-                # them: only the events task's part of the wait ends.
-                self.record({"event": PULL_REQUEST_EVENTS_TASK_LEFT_WAIT, "agent_seat": seat,
-                             PULL_REQUEST_EVENTS_TASK_ID: wait[PULL_REQUEST_EVENTS_TASK_ID]})
-                wait = self.log.open_wait(seat)
-            else:
-                self.end_wait(seat, "its pull-request events task is no longer open")
-                wait = None
+            self.end_wait(seat, "its pull-request events task is no longer open")
+            wait = None
         if (wait and TELL_USER in wait and events_task
                 and not self.woken_for_pull_request_events_task(seat, events_task)):
             # The user already has that wait's alert; a new events task must not wait behind it,
@@ -1592,8 +1574,12 @@ class Sweep:
 
     def woken_for_pull_request_events_task(self, seat, task):
         """Whether any agent-session of the agent-seat was woken for this task: one wake per task,
-        as the judge reminds once per subject; the wait's escalation follows that wake."""
-        return any(event.get(PULL_REQUEST_EVENTS_TASK_ID) == task["id"]
+        as the judge reminds once per subject; the wait's escalation follows that wake. A wake
+        whose send failed, or that the delivery check did not find, woke no one."""
+        not_found = {event["message_id"] for event in self.log.of_seat(seat, "delivery_checked")
+                     if not event["found"]}
+        return any(event.get(PULL_REQUEST_EVENTS_TASK_ID) == task["id"] and event["send"]
+                   and event.get("message_id") not in not_found
                    for event in self.log.of_seat(seat, "judge_answer"))
 
     def wake_for_pull_request_events_task(self, seat, verdict, stretch, task):
