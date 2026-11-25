@@ -131,9 +131,9 @@ def load_payload(text):
         return {"outcome": "UNPARSEABLE", "stdout": text}
 
 
-def run_gatekeeper(arguments, state_home):
+def run_gatekeeper(arguments, state_home, extra_environment=None):
     """Invoke the program as an agent would: a subprocess, JSON on stdout."""
-    environment = {**os.environ, "XDG_STATE_HOME": str(state_home)}
+    environment = {**os.environ, "XDG_STATE_HOME": str(state_home), **(extra_environment or {})}
     environment.pop("CLAUDE_CODE_SESSION_ID", None)
     completed = subprocess.run(
         [sys.executable, str(SCRIPT_PATH), *arguments],
@@ -662,9 +662,12 @@ with tempfile.TemporaryDirectory() as workspace_name:
     # --- slice 4: the worker lifecycle (T7, T8) -----------------------------
     remote, work, base = make_fixture(workspace, "nowait")
     (work / "README.md").write_text("seed\nasync change\n", encoding="utf-8")
+    # The worker pauses after its push, holding open the gap in which status
+    # already answers checked-in from main's history but the worker has not
+    # yet swept its workspace; the sweep check must wait for the worker.
     code, payload = run_gatekeeper(
         base_request(work, remote, base, ["README.md"], "async change") + ["--no-wait"],
-        state_home,
+        state_home, {"GATEKEEPER_TEST_WORKER_PAUSE_AT": "after-push"},
     )
     check("T7 --no-wait answers accepted with the digest",
           payload.get("outcome") == "accepted"
@@ -690,8 +693,17 @@ with tempfile.TemporaryDirectory() as workspace_name:
           status_payload.get("outcome") == "checked-in", status_payload)
     check("T7 the async change is on main",
           git(["show", "main:README.md"], remote).stdout == "seed\nasync change\n")
+    nowait_workspace = state_home / "nedschorus-gatekeeper" / nowait_digest
+    # A worker refused before after-push has already swept its workspace, so
+    # it is released only once status says checked-in; the workspace is seen
+    # while the worker is held, so a one-shot absence check cannot pass early.
+    worker_held_at_checked_in = status_payload.get("outcome") == "checked-in"
+    check("T7 the workspace exists while the worker is held after its push",
+          worker_held_at_checked_in and nowait_workspace.is_dir(), str(nowait_workspace))
+    if worker_held_at_checked_in and nowait_workspace.is_dir():
+        (nowait_workspace / ".main-gatekeeper-test-worker-paused-at-after-push-release-signal-from-test").write_text("", encoding="utf-8")
     check("T7 the worker swept its workspace on success",
-          not (state_home / "nedschorus-gatekeeper" / nowait_digest).exists())
+          worker_held_at_checked_in and wait_for(lambda: not nowait_workspace.exists()))
     code, payload = run_gatekeeper(["cancel", nowait_digest, "--repo", str(work)],
                                    state_home)
     check("T8 cancel after the push answers too-late",

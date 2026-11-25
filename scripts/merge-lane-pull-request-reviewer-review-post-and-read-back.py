@@ -7,7 +7,9 @@ says? Exits 0 if the review was posted and read back as expected, 2 otherwise.
 Usage:
   scripts/merge-lane-pull-request-reviewer-review-post-and-read-back.py
       --pull-request N --head-commit SHA
-      [--github-account mac-claude|ned-review-merge] <review file>
+      [--github-account mac-claude|ned-review-merge]
+      [--merge-lane-worktrees-and-outputs-directory DIR]
+      [--pull-request-review-plan-program PATH] <review file>
 
 The review file is one JSON object with exactly "verdict", APPROVE or
 REQUEST_CHANGES; "body", the review's text; and "comments", a list of inline
@@ -59,6 +61,27 @@ reads non-blocking findings by:
   APPROVE otherwise. A file whose verdict is REQUEST_CHANGES with no
   must-fix-now comment is refused rather than posted as an approval.
 
+merge-lane-2's verdict review answers for every Codex finding on the reviewed
+commit. The program reads each codex-review-run-record.json under
+<--merge-lane-worktrees-and-outputs-directory>/cx/pr<n>-*/ whose "head_commit"
+is --head-commit, as merge-lane-code-review-codex-cell-run-on-pull-request-head.py
+writes it, and each finding heading, "- [Codex priority Pn (P0 highest)] ..." or
+the older "- [Pn] ...", of the report of each run that exited 0:
+- the file's optional "merge_lane_codex_review_finding_grades" lists one
+  {"finding": <the id the refusal prints>, "grade": <grade>} per finding, the grade one
+  of FINDING_CATEGORIES or "does-not-hold", which alone also takes a one-line "reason".
+  The program refuses a finding with no grade, a grade for no finding on this commit, and
+  a must-fix-now grade on a review with no must-fix-now comment. It adds the grades to
+  the posted body under a heading;
+- a run that found nothing, or exited nonzero, needs no grade, and the review posts as
+  it would without this check;
+- when no run record names the commit, the program reads the commit's review tier from
+  pull-request-review-plan.py --json, the delta tier when the plan says a delta-only
+  review applies. At no-reviewer-tier no Codex run belongs to the review, and it posts
+  as it would without this check. At any other tier the program refuses until the Codex
+  cell has run on the commit. A plan that fails, or does not give a known tier for this
+  commit, also refuses, since the program then cannot tell whether a run belongs.
+
 merge-lane-2's review file may instead be exactly {"body": ...}, a review with
 no verdict, posted as COMMENT with the body as written, for the review
 scripts/merge-gate.sh asks for when the pull request has activity after
@@ -89,6 +112,7 @@ that review <id> was posted if it came after GitHub returned the id.
 """
 
 import argparse
+import hashlib
 import importlib.util
 import json
 import os
@@ -127,6 +151,19 @@ NIT_CATEGORY = "fix-in-maintenance"
 BLOCKING_MARK = "**Blocks** "
 NON_BLOCKING_CATEGORY_MARK_FORMAT = "**{category}** "
 BLOCKING_COUNT_FORMAT = "**Blocking: {count}**"
+DOES_NOT_HOLD_GRADE = "does-not-hold"
+CODEX_FINDING_GRADES_KEY = "merge_lane_codex_review_finding_grades"
+NO_REVIEWER_TIER = "no-reviewer-tier"
+REVIEW_TIERS_THAT_RUN_CODEX = ("codex-review-and-head-tests-tier", "claude-and-codex-review-and-head-tests-tier")
+REVIEW_PLAN_PROGRAM = Path(__file__).resolve().with_name("pull-request-review-plan.py")
+# The plan prints its JSON and exits 3 when a message in it has no fast-read command; its tier still holds.
+REVIEW_PLAN_EXIT_CODES_WITH_A_PLAN = (0, 3)
+# The plan makes several GitHub reads and a diff of the pull request.
+REVIEW_PLAN_TIMEOUT_SECONDS = 300
+CODEX_FINDING_HEADING = re.compile(r"^- \[(?:Codex priority )?(P[0-3])(?: \(P0 highest\))?\] (.+)$")
+# The review worktree's own path differs between runs on the same commit.
+CODEX_FINDING_WORKTREE_PATH = re.compile(r"\S*/pr\d+-head/")
+CODEX_GRADES_BODY_HEADING = "**Codex findings graded:**"
 OUTSIDE_THE_DIFF_HEADING = fix_round.OUTSIDE_THE_DIFF_HEADING
 OUTSIDE_THE_DIFF_LINE_FORMAT = "- `{path}:{line}`: {body}"
 OUTSIDE_THE_DIFF_LINE_PATTERN = fix_round.OUTSIDE_THE_DIFF_LINE_PATTERN
@@ -176,6 +213,26 @@ POST_FAILED = (
     "If it lists one or more reviews, do not post again: {account} already has a review on this "
     "commit, whether this command's post or an earlier one, and the list gives each one's id and "
     "link.")
+CODEX_FINDINGS_NOT_GRADED = (
+    "review not posted: {count} Codex finding(s) on commit {head} have no grade in the review file "
+    "{path}:\n{findings}\n"
+    "Add one entry per finding to the file's \"merge_lane_codex_review_finding_grades\" list, as "
+    "{{\"finding\": \"<id>\", \"grade\": \"<grade>\"}}, the grade one of {grades}.\n"
+    "When a finding does not hold, use the grade does-not-hold and add a one-line \"reason\".\n"
+    "Then run the same command again.")
+NO_CODEX_RUN_RECORD = (
+    "review not posted: no Codex run record under {directory} names commit {head}, and "
+    "scripts/pull-request-review-plan.py gives this review {tier}, which runs Codex.\n"
+    "Run the Codex cell on this commit with "
+    "scripts/merge-lane-code-review-codex-cell-run-on-pull-request-head.py {number} <base commit>, the "
+    "base being the merge base, or for a fix-round the head reviewed before.\n"
+    "Then run the same command again.")
+REVIEW_TIER_UNREADABLE = (
+    "review not posted: no Codex run record names commit {head}, and its review tier could not be read "
+    "from {program}: {reason}\n"
+    "Without the tier, this program cannot tell whether a Codex run belongs to this review.\n"
+    "If the text above gives a step, do it, then run the same command again.\n"
+    "Otherwise, tell the user this message.")
 READ_BACK_FAILED = (
     "review {review_id} was posted, but reading it back failed: {reason}\n"
     "Do not post the review again: it is on the pull request.\n"
@@ -202,9 +259,14 @@ class GhFailed(Exception):
     pass
 
 
+class CodexRunRecordUnusable(Exception):
+    pass
+
+
 def read_review_file(path, account):
-    """Return (verdict, body, comments) from the account's review file, verdict None for merge-lane-2's
-    review with no verdict, or raise ReviewFileUnusable."""
+    """Return (verdict, body, comments, Codex answers) from the account's review file, verdict None for
+    merge-lane-2's review with no verdict, or raise ReviewFileUnusable. The Codex answers are the file's
+    grades of Codex findings, as a dict holding CODEX_FINDING_GRADES_KEY when the file has it."""
     try:
         review = json.loads(path.read_text(encoding="utf-8"))
     except (OSError, UnicodeDecodeError) as error:
@@ -214,7 +276,13 @@ def read_review_file(path, account):
     if account == MERGE_LANE_ACCOUNT and isinstance(review, dict) and set(review) == {"body"}:  # pragma: no mutate, --github-account allows only mac-claude and ned-review-merge, and mac-claude sorts before ned-review-merge, so >= gives what == gives
         if not isinstance(review["body"], str) or not review["body"].strip():
             raise ReviewFileUnusable("has no \"body\" text")
-        return None, review["body"], []
+        return None, review["body"], [], {}
+    codex_answers = {}
+    if account == MERGE_LANE_ACCOUNT and isinstance(review, dict):  # pragma: no mutate, --github-account allows only mac-claude and ned-review-merge, and mac-claude sorts before ned-review-merge, so >= gives what == gives
+        review = dict(review)
+        if CODEX_FINDING_GRADES_KEY in review:
+            codex_answers[CODEX_FINDING_GRADES_KEY] = review.pop(CODEX_FINDING_GRADES_KEY)
+        codex_answers_check(codex_answers)
     if not isinstance(review, dict) or set(review) != {"verdict", "body", "comments"}:
         raise ReviewFileUnusable(
             "must hold one JSON object with exactly \"verdict\", \"body\" and \"comments\""
@@ -238,7 +306,7 @@ def read_review_file(path, account):
             "a text \"body\"" + (", and a \"finding_category\"," if categorized else ",")
             + " with no other keys" + (" but an optional \"nit\": true" if categorized else ""))
     if not categorized:
-        return verdict, body, comments
+        return verdict, body, comments, codex_answers
     for comment in comments:
         where = f"{comment['path']}:{comment['line']}"
         if comment["finding_category"] not in FINDING_CATEGORIES:
@@ -276,7 +344,139 @@ def read_review_file(path, account):
             f"comment, so it refuses the file rather than post it as an approval. Give the "
             f"category {BLOCKING_CATEGORY} to each comment that blocks the merge; if no comment "
             f"blocks it, make the verdict APPROVE")
-    return verdict, body, comments
+    return verdict, body, comments, codex_answers
+
+
+def one_line_text(value):
+    return isinstance(value, str) and bool(value.strip()) and len(value.splitlines()) == 1
+
+
+def codex_answers_check(answers):
+    """Raise ReviewFileUnusable when the review file's Codex answers are malformed."""
+    grades = answers.get(CODEX_FINDING_GRADES_KEY, [])
+    if not isinstance(grades, list):
+        raise ReviewFileUnusable(f"has a \"{CODEX_FINDING_GRADES_KEY}\" that is not a list")
+    seen = set()
+    for entry in grades:
+        if not isinstance(entry, dict) or not isinstance(entry.get("finding"), str):
+            raise ReviewFileUnusable(f"has a \"{CODEX_FINDING_GRADES_KEY}\" entry with no text \"finding\"")
+        finding, grade = entry["finding"], entry.get("grade")
+        if finding in seen:
+            raise ReviewFileUnusable(f"grades Codex finding {finding} more than once")
+        seen.add(finding)
+        if grade not in (*FINDING_CATEGORIES, DOES_NOT_HOLD_GRADE):
+            raise ReviewFileUnusable(f"gives Codex finding {finding} the grade {grade!r}, not one of "
+                                     f"{', '.join((*FINDING_CATEGORIES, DOES_NOT_HOLD_GRADE))}")
+        keys = {"finding", "grade", "reason"} if grade == DOES_NOT_HOLD_GRADE else {"finding", "grade"}
+        if set(entry) != keys or (grade == DOES_NOT_HOLD_GRADE and not one_line_text(entry["reason"])):
+            raise ReviewFileUnusable(
+                f"has a grade for Codex finding {finding} that is not exactly \"finding\" and \"grade\", "
+                f"with a one-line \"reason\" only for {DOES_NOT_HOLD_GRADE}")
+
+
+def codex_findings_in_report(report):
+    """{finding id: (priority, heading text)} for each finding heading of a Codex report."""
+    findings = {}
+    for line in report.splitlines():
+        heading = CODEX_FINDING_HEADING.match(line)
+        if heading:
+            text = CODEX_FINDING_WORKTREE_PATH.sub("", heading[2])
+            identity = f"{heading[1]}\0{text}".encode("utf-8")
+            findings[hashlib.sha256(identity).hexdigest()[:12]] = (heading[1], text)
+    return findings
+
+
+def codex_findings_on_commit(outputs_directory, number, head):
+    """Return the findings of the Codex runs recorded for this commit, {} when they found nothing or
+    failed, or None when no run record names it; raise CodexRunRecordUnusable when one cannot be read."""
+    findings, recorded = {}, False
+    for record_file in sorted((outputs_directory / "cx").glob(
+            f"pr{number}-*/{common.CODEX_REVIEW_RUN_RECORD_FILE_NAME}")):
+        try:
+            record = json.loads(record_file.read_text(encoding="utf-8"))
+            record_head, exit_code, report_file = record["head_commit"], record["exit_code"], record["report_file"]
+        except (OSError, ValueError, KeyError, TypeError) as error:
+            raise CodexRunRecordUnusable(f"the Codex run record {record_file} could not be read: {error!r}")
+        if not isinstance(exit_code, int) or isinstance(exit_code, bool) or not isinstance(report_file, str):
+            raise CodexRunRecordUnusable(f"the Codex run record {record_file} holds a field of the wrong type")
+        if record_head != head:
+            continue
+        recorded = True
+        if exit_code != 0:
+            continue
+        try:
+            findings.update(codex_findings_in_report(Path(report_file).read_text(encoding="utf-8")))
+        except (OSError, UnicodeDecodeError) as error:
+            raise CodexRunRecordUnusable(
+                f"the Codex run record {record_file} says the run succeeded, but its report could not "
+                f"be read: {error}")
+    return findings if recorded else None
+
+
+def review_tier_of_commit(plan_program, number, head):
+    """Return the review tier the plan gives this commit, or raise CodexRunRecordUnusable with the refusal."""
+    def unreadable(reason):
+        return CodexRunRecordUnusable(REVIEW_TIER_UNREADABLE.format(head=head, program=plan_program, reason=reason))
+    try:
+        completed = subprocess.run(
+            [sys.executable, str(plan_program), "--pull-request", str(number), "--json",
+             "--repository", str(Path(__file__).resolve().parents[1])],
+            capture_output=True, text=True, stdin=subprocess.DEVNULL, timeout=REVIEW_PLAN_TIMEOUT_SECONDS,
+            env=common.run_all_test_suites.environment_without_git_redirecting_variables())
+    except (OSError, subprocess.TimeoutExpired) as error:
+        raise unreadable(f"it could not be run: {error}")
+    if completed.returncode not in REVIEW_PLAN_EXIT_CODES_WITH_A_PLAN:
+        raise unreadable(f"it exited {completed.returncode}: {completed.stderr.strip()}")
+    try:
+        plan = json.loads(completed.stdout)
+        plan_head, delta_only = plan["head"], plan["delta_only_review_applies"]
+        tier = plan["delta_tier"] if delta_only is True else plan["tier"]
+    except (ValueError, KeyError, TypeError) as error:
+        raise unreadable(f"its output is not a plan: {error!r}")
+    if plan_head != head:
+        raise unreadable(f"the pull request's head is now {plan_head}, so review that commit instead")
+    if tier != NO_REVIEWER_TIER and tier not in REVIEW_TIERS_THAT_RUN_CODEX:
+        raise unreadable(f"it gives the unknown tier {tier!r}")
+    return tier
+
+
+def body_with_codex_answers(body, comments, answers, findings, tier, number, head, review_file, outputs_directory):
+    """Return the body with the Codex grades, or raise CodexRunRecordUnusable with the whole refusal when
+    an answer is missing or does not fit the run records. tier is None unless findings is None."""
+    grades = {entry["finding"]: entry for entry in answers.get(CODEX_FINDING_GRADES_KEY, [])}
+    if findings is None:
+        if grades:
+            raise CodexRunRecordUnusable(
+                f"review not posted: the review file {review_file} grades Codex findings, but no Codex run "
+                f"record names commit {head}.\nRemove \"{CODEX_FINDING_GRADES_KEY}\" and run the same command "
+                f"again, or run the Codex review on this commit first.")
+        if tier != NO_REVIEWER_TIER:
+            raise CodexRunRecordUnusable(NO_CODEX_RUN_RECORD.format(
+                directory=outputs_directory / "cx", head=head, tier=tier, number=number))
+        return body
+    unknown = sorted(set(grades) - set(findings))
+    if unknown:
+        raise CodexRunRecordUnusable(
+            f"review not posted: the review file {review_file} grades {', '.join(unknown)}, which no Codex "
+            f"report on commit {head} holds.\nRemove or correct each, then run the same command again.")
+    missing = [finding for finding in findings if finding not in grades]
+    if missing:
+        raise CodexRunRecordUnusable(CODEX_FINDINGS_NOT_GRADED.format(
+            count=len(missing), head=head, path=review_file,
+            findings="\n".join(f"- {finding}: {findings[finding][0]} {findings[finding][1]}" for finding in missing),
+            grades=", ".join((*FINDING_CATEGORIES, DOES_NOT_HOLD_GRADE))))
+    if not findings:
+        return body
+    if (any(entry["grade"] == BLOCKING_CATEGORY for entry in grades.values())
+            and not any(comment["finding_category"] == BLOCKING_CATEGORY for comment in comments)):
+        raise CodexRunRecordUnusable(
+            f"review not posted: the review file {review_file} grades a Codex finding {BLOCKING_CATEGORY}, but "
+            f"has no {BLOCKING_CATEGORY} comment, so the review would not block the merge.\nAdd the comment, "
+            f"or change the grade, then run the same command again.")
+    lines = [f"- {finding} ({findings[finding][0]}): {grades[finding]['grade']}"
+             + (f", {grades[finding]['reason']}" if "reason" in grades[finding] else "")
+             + f": {findings[finding][1]}" for finding in findings]
+    return "\n".join((f"{body}\n\n{CODEX_GRADES_BODY_HEADING}", *lines))
 
 
 def review_comment_opening_mark_for_finding_category(category, nit=False):
@@ -446,6 +646,13 @@ def parse_arguments(argv):
                         default=MAC_CLAUDE_ACCOUNT,
                         help="the GitHub account the review is posted as, which also sets the "
                              "review file's format (default: mac-claude)")
+    parser.add_argument("--merge-lane-worktrees-and-outputs-directory", type=Path,
+                        default=common.DEFAULT_MERGE_LANE_WORKTREES_AND_OUTPUTS_DIRECTORY,
+                        help="holds cx/, the Codex run records (default: "
+                             f"{common.DEFAULT_MERGE_LANE_WORKTREES_AND_OUTPUTS_DIRECTORY})")
+    parser.add_argument("--pull-request-review-plan-program", type=Path, default=REVIEW_PLAN_PROGRAM,
+                        help="the program that gives the review tier when no Codex run record names the "
+                             "commit (default: this checkout's pull-request-review-plan.py)")
     parser.add_argument("review_file", type=Path,
                         help="the review: a JSON object with verdict, body and comments")
     return parser.parse_args(argv)
@@ -462,7 +669,7 @@ def main(argv=None):
     arguments = parse_arguments(argv)
     number, head, account = arguments.pull_request, arguments.head_commit, arguments.github_account
     try:
-        verdict, body, comments = read_review_file(arguments.review_file, account)
+        verdict, body, comments, codex_answers = read_review_file(arguments.review_file, account)
     except ReviewFileUnusable as error:
         # merge-lane-2 writes its own file, so no reviewer's run is to blame and it can fix the file.
         print(NOT_POSTED.format(reason=f"the review file {arguments.review_file} {error}")
@@ -470,6 +677,19 @@ def main(argv=None):
               else REVIEW_FILE_UNUSABLE.format(path=arguments.review_file, reason=error),
               file=sys.stderr)
         return EXIT_NOT_POSTED
+    if verdict is not None and account == MERGE_LANE_ACCOUNT:  # pragma: no mutate, --github-account allows only mac-claude and ned-review-merge, and mac-claude sorts before ned-review-merge, so >= gives what == gives
+        outputs_directory = arguments.merge_lane_worktrees_and_outputs_directory
+        try:
+            findings = codex_findings_on_commit(outputs_directory, number, head)
+            tier = (review_tier_of_commit(arguments.pull_request_review_plan_program, number, head)
+                    if findings is None else None)
+            body = body_with_codex_answers(body, comments, codex_answers, findings, tier, number, head,
+                                           arguments.review_file, outputs_directory)
+        except CodexRunRecordUnusable as error:
+            refusal = str(error)
+            print(refusal if refusal.startswith("review not posted:") else NOT_POSTED.format(reason=refusal),
+                  file=sys.stderr)
+            return EXIT_NOT_POSTED
     try:
         token = read_token(account)
     except GhFailed as error:
