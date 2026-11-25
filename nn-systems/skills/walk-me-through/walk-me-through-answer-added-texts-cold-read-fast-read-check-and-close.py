@@ -1592,7 +1592,6 @@ PROPOSED_TEXT_REVISIONS_BEFORE_FRESH_AGENT_REWRITE = 3
 PROPOSED_TEXT_REVISIONS_FILE = "item-{number}-proposed-text-revisions.json"
 FRESH_AGENT_REWRITE_FILE = "item-{number}-fresh-agent-rewrite.md"
 USER_WORDS_IN_MINUTES_PHRASE = "his words"
-USER_WORDS_LINE_OPENING = "User ("
 MARKDOWN_LINK_TARGET = re.compile(r"\]\(\s*<?([^)\s>]+)>?(?:\s+\"[^\"]*\")?\s*\)|<([A-Za-z][A-Za-z0-9+.-]*:[^>\s]+)>")
 PROPOSED_TEXT_REVISIONS_UNREADABLE = (
     "{item} is not read: {path}, this program's count of the revisions of the `#new` lines of item {whole_number} and its "
@@ -3251,8 +3250,7 @@ def approval_walk_item_linked_files(text, ned_box_home, mac_mount):
 
 
 def approval_walk_item_user_words_in_minutes(walk_finder, parser, minutes_text, whole_number, titles):
-    """Return each line of the walk-minutes that records the user's words, as a line opening `User (`, an answer
-    line or a bump line, and names, before his words, item whole_number, one of its sub-steps, one of titles, or an
+    """Return each line of the walk-minutes that holds the user's words and names, before his words, item whole_number, one of its sub-steps, one of titles, or an
     item whose held answer raised item whole_number, or that waited when the user bumped it, or that raised an item
     that did, with its sub-steps: the user's reply on that item is what the raised item is about."""
     wholes = {whole_number}
@@ -3274,8 +3272,7 @@ def approval_walk_item_user_words_in_minutes(walk_finder, parser, minutes_text, 
         # Only the item named ahead of his words counts: his words, or an agent's note quoting another walk, can
         # name any item number.
         naming = line.split(USER_WORDS_IN_MINUTES_PHRASE, 1)[0]
-        if naming == line or not (line.startswith(USER_WORDS_LINE_OPENING) or ANSWER_LINE.match(line)
-                                  or BUMP_MINUTES_LINE.match(line)):
+        if naming == line:
             continue
         named = set()
         for numbers in walk_finder.WITHDRAWN_HEADING_ITEMS.finditer(naming):
