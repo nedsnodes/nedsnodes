@@ -1048,9 +1048,12 @@ def print_follow_up_request_block_from_merge_lane_2_reviews(number):
         earlier = [found for found in findings if found["review"] != review]
         restates = [None] * len(parsed)
 
+        # A Codex finding id names one finding, so a comment that shares one with a finding in the same category
+        # and path is that finding, however a later review reworded it.
         def same_finding(one, other):
-            return one["compared"] == other["compared"] and (
-                one["finding"] == other["finding"] or bool(one["codex_finding_ids"] & other["codex_finding_ids"]))
+            return one["finding"] == other["finding"] or (
+                one["compared"][:2] == other["compared"][:2]
+                and bool(one["codex_finding_ids"] & other["codex_finding_ids"]))
 
         # A later review restates each earlier finding at most once. A restatement that keeps the earlier
         # text or Codex finding id is paired first, so that the order GitHub numbered the comments in cannot
@@ -1066,7 +1069,8 @@ def print_follow_up_request_block_from_merge_lane_2_reviews(number):
                     and not any(paired is found for paired in restates)]
             unpaired = [(index, comment) for index, comment in enumerate(parsed)
                         if restates[index] is None and comment["compared"] == compared
-                        and not any(restates[other] is not None and same_finding(comment, parsed[other])
+                        and not any(restates[other] is not None and (same_finding(comment, parsed[other])
+                                                                     or same_finding(comment, restates[other]))
                                     for other in range(len(parsed)))]
             distinct = []
             for _index, comment in unpaired:

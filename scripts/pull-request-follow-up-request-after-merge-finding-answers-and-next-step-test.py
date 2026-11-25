@@ -1668,6 +1668,44 @@ def test_print_block():
           code == 0 and err == "" and out == (f"#follow_up_request pull request {NUMBER}\n"
                                                "1. fix-next: `scripts/thing.py:3`: Rename it (Codex finding "
                                                "0123456789ab).\n"), out + err)
+    code, out, err = print_block([merge_lane_review(1), merge_lane_review(2)],
+                                 [merge_lane_comment(10, 1, "**fix-next** Rename it (Codex finding aaaaaaaaaaaa)."),
+                                  merge_lane_comment(20, 2, "**fix-next** Rename the helper (Codex finding "
+                                                            "aaaaaaaaaaaa)."),
+                                  merge_lane_comment(21, 2, "**fix-next** Rename it (Codex finding eeeeeeeeeeee).",
+                                                     line=9)])
+    check(f"{PRINT_BLOCK} pairs a later review's reworded comment with the earlier finding by its Codex finding id, "
+          "and prints a new finding worded as the earlier one",
+          code == 0 and err == "" and out == (f"#follow_up_request pull request {NUMBER}\n"
+                                               "1. fix-next: `scripts/thing.py:3`: Rename it (Codex finding "
+                                               "aaaaaaaaaaaa).\n"
+                                               "2. fix-next: `scripts/thing.py:9`: Rename it (Codex finding "
+                                               "eeeeeeeeeeee).\n"), out + err)
+    code, out, err = print_block([merge_lane_review(1), merge_lane_review(2), merge_lane_review(3)],
+                                 [merge_lane_comment(10, 1, "**fix-next** Rename it (Codex finding aaaaaaaaaaaa)."),
+                                  merge_lane_comment(11, 1, "**fix-next** Rename it (Codex finding bbbbbbbbbbbb).",
+                                                     line=7),
+                                  merge_lane_comment(12, 1, "**fix-next** Rename it (Codex finding cccccccccccc).",
+                                                     line=11),
+                                  merge_lane_comment(20, 2, "**fix-next** Rename it (Codex finding bbbbbbbbbbbb).",
+                                                     line=7),
+                                  merge_lane_comment(21, 2, "**fix-next** Rename it (Codex finding cccccccccccc).",
+                                                     line=11),
+                                  merge_lane_comment(22, 2, "**fix-next** Rename it (Codex finding dddddddddddd).",
+                                                     line=5),
+                                  merge_lane_comment(30, 3, "**fix-next** Rename it (Codex finding aaaaaaaaaaaa).",
+                                                     line=5),
+                                  merge_lane_comment(31, 3, "**fix-next** Rename it (Codex finding dddddddddddd).",
+                                                     line=5)])
+    check(f"{PRINT_BLOCK} takes a third review's two comments under the two Codex finding ids one earlier finding "
+          "gathered as that one finding, and prints all three findings",
+          code == 0 and err == "" and out == (f"#follow_up_request pull request {NUMBER}\n"
+                                               "1. fix-next: `scripts/thing.py:3`: Rename it (Codex finding "
+                                               "aaaaaaaaaaaa).\n"
+                                               "2. fix-next: `scripts/thing.py:7`: Rename it (Codex finding "
+                                               "bbbbbbbbbbbb).\n"
+                                               "3. fix-next: `scripts/thing.py:11`: Rename it (Codex finding "
+                                               "cccccccccccc).\n"), out + err)
     code, out, err = print_block([merge_lane_review(1)],
                                  [merge_lane_comment(10, 1, "**fix-next** Rename it (Codex finding 0123456789ab)."),
                                   merge_lane_comment(11, 1, "**fix-next** Rename it Codex finding 0123456789ab.",
