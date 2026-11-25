@@ -158,8 +158,9 @@ LINK_LOOKUP = re.compile(r"repos/[^/]+/[^/]+/issues/[0-9]+")
 failures = []
 scratch = Path(tempfile.mkdtemp(prefix="merge-gate-test-"))
 
-GH_STAND_IN = r'''#!/usr/bin/env python3
-import json, os, re, sys
+# Launched about 1300 times a test run: the interpreter's own path, without site or the
+# environment's PYTHON variables, starts about 8 ms faster than /usr/bin/env python3.
+GH_STAND_IN = f'#!{sys.executable} -IS\n' + r'''import json, os, re, sys
 argv = sys.argv[1:]
 with open(os.environ["MERGE_GATE_TEST_GH_CALL_LOG"], "a") as log:
     log.write(json.dumps({"argv": argv, "gh_token": os.environ.get("GH_TOKEN")}) + "\n")
@@ -611,8 +612,16 @@ def no_sandbox_state(**last_run_fields):
     return state
 
 
+def gate_copy_whose_clone_is_no_repository(gate):
+    """A failed run's notice runs git log on the clone beside the gate. Run on the checkout,
+    that git log makes scripts/run-all-test-suites.py select this suite whenever any file
+    is added; a copy's clone is a scratch directory."""
+    return gate_copy(gate.read_text())
+
+
 def case_no_sandbox_notice_for_a_failed_run_and_the_gate_still_passes(gate):
-    run = run_gate(gate, BASE_PR, BASE_HEAD, BASE_APPROVAL["submitted_at"], base_routes(),
+    run = run_gate(gate_copy_whose_clone_is_no_repository(gate), BASE_PR, BASE_HEAD,
+                   BASE_APPROVAL["submitted_at"], base_routes(),
                    no_sandbox_suites_state=NO_SANDBOX_FAILED_RUN)
     return (passed_pinned_to(run, BASE_PR, BASE_APPROVAL["commit_id"])
             and NO_SANDBOX_NOTICE_HEADING in run.stderr
@@ -622,7 +631,8 @@ def case_no_sandbox_notice_for_a_failed_run_and_the_gate_still_passes(gate):
 
 def case_no_sandbox_notice_leaves_a_refusal_a_refusal(gate):
     other = captured_value("nedschorus-nedschorus-636-pr-view-state.json", "headRefOid")
-    run = run_gate(gate, BASE_PR, other, BASE_APPROVAL["submitted_at"], base_routes(),
+    run = run_gate(gate_copy_whose_clone_is_no_repository(gate), BASE_PR, other,
+                   BASE_APPROVAL["submitted_at"], base_routes(),
                    no_sandbox_suites_state=NO_SANDBOX_FAILED_RUN)
     return (refused_with(run, BASE_PR, "head moved") and NO_SANDBOX_NOTICE_HEADING in run.stderr,
             run.summary())
