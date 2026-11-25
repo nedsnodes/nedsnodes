@@ -3020,9 +3020,10 @@ def waiting_item_read(arguments, sub_step_of=None):
     not_shown = rated_none_item_not_to_be_shown(walk_finder, top, minutes, value, numbers, total, parser, named)
     if not_shown is not None:
         settle = check_command_with_cwd(top, "--not-asked", NOT_ASKED_RATED_NONE)
-        print("\n".join(line.format(item=item, document=not_shown, command=settle,
-                                    read_command=command_reading_again)
-                        for line in [*RATED_NONE_NOT_SHOWN_LINES, *no_answer_rows]))
+        # The rows are already formatted, and may hold braces from a path or a title.
+        print("\n".join([*(line.format(item=item, document=not_shown, command=settle,
+                                        read_command=command_reading_again)
+                            for line in RATED_NONE_NOT_SHOWN_LINES), *no_answer_rows]))
         return 0
     key = text_key(text)
     while read_outcome(reads, key) is None and worker_alive(reads, key):
