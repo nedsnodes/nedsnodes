@@ -62,6 +62,9 @@ HANDOFF_DEFERRED_MARKER = "handoff_deferred_marker"  # path or null
 USAGE_LIMIT = "usage_limit"
 SENTENCES = "sentences"
 OPEN_TASKS_NOTHING_HOLDS = "open_tasks_nothing_holds"  # [{"id", "subject"}]
+# Set at rule 3, and at rule 2 when its fallback reached rule 3: why open_tasks_nothing_holds could
+# not be read, which leaves it null
+OPEN_TASKS_NOTHING_HOLDS_NOT_READ_BECAUSE = "open_tasks_nothing_holds_not_read_because"
 # [{"kind", "number"}], once each, at rules 3 to 5, and at rule 2 when its fallback reached them: each prerequisite of an open task, such as
 # {"kind": "pr_merged", "number": 50}, that was not asked of GitHub because the due-task hook's
 # GitHubConditionChecker had spent its time budget, so the task it holds may be free; absent when none
@@ -91,7 +94,8 @@ OPTIONAL = (DECISION, NOT_CHECKED, SUPERVISOR_LAST_POLL_AT, LAST_ACTIVITY, LAST_
             TURN_ENDED,
             APPROVAL_WALK_ITEMS_WAITING_ON_THE_USER, IDLE, NOT_IDLE_BECAUSE, RUNNING,
             HANDOFF_DEFERRED_MARKER,
-            USAGE_LIMIT, SENTENCES, OPEN_TASKS_NOTHING_HOLDS, GITHUB_CONDITIONS_SKIPPED_FOR_BUDGET, TEXT, IF_EVERY_SENTENCE_BACKED,
+            USAGE_LIMIT, SENTENCES, OPEN_TASKS_NOTHING_HOLDS, OPEN_TASKS_NOTHING_HOLDS_NOT_READ_BECAUSE,
+            GITHUB_CONDITIONS_SKIPPED_FOR_BUDGET, TEXT, IF_EVERY_SENTENCE_BACKED,
             LAST_TURN_ENDING_MESSAGE,
             TOOL_CALLS_SINCE_START_OF_EARLIEST_TURN_WITH_SENTENCE_TO_JUDGE,
             ASSISTANT_TEXT_MESSAGES_SINCE_START_OF_EARLIEST_TURN_WITH_SENTENCE_TO_JUDGE,

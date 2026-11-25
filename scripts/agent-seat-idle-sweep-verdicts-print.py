@@ -869,6 +869,13 @@ def rules_three_to_five(verdict, put_off_at, checker, task_directory,
         try:
             verdict["open_tasks_nothing_holds"] = open_tasks_nothing_holds(
                 task_directory, checker, due_task_raise_state_directory)
+        except ReadFailure as error:
+            if not verdict["handoff_deferred_marker"]:
+                raise
+            # The open tasks matter only when the sender withholds the handoff message, so a
+            # failed read of them must not stop that message or an escalation already due.
+            verdict["open_tasks_nothing_holds"] = None
+            verdict["open_tasks_nothing_holds_not_read_because"] = str(error)
         finally:
             # A gh failure raises after the scan, so the skips it made are named even then.
             skipped = dict.fromkeys(checker.conditions_skipped_for_budget[skipped_before:])

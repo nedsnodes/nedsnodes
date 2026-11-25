@@ -622,8 +622,17 @@ try:
           verdicts["alpha"].get("rule") == 3 and verdicts["alpha"].get("text")
           == "Your handoff was put off at 2026-11-02T10:30:00Z and nothing is running now. "
              "Is now a good time to hand off?", verdicts["alpha"])
+    machine.task("alpha", "1", metadata={"prerequisites": [{"pr_merged": 50}]})
+    machine.gh_responses.write_text("{}")
+    _, verdicts, _ = machine.run()
+    check("handoff put off and gh fails on a task's prerequisite: still rule 3, with the failure "
+          "beside the open tasks instead of in errors",
+          verdicts["alpha"].get("rule") == 3 and not verdicts["alpha"]["errors"]
+          and verdicts["alpha"]["open_tasks_nothing_holds"] is None
+          and "GitHub could not say whether pr_merged 50"
+          in verdicts["alpha"]["open_tasks_nothing_holds_not_read_because"], verdicts["alpha"])
 
-    # --- what is running, and rule 5 -------------------------------------------------------------
+    # --- what is running, and rule 5-------------------------------------------------------------
     machine = Machine()
     machine.seat("alpha", [user("go"),
                            user("", at="2026-11-02T11:20:00Z",
