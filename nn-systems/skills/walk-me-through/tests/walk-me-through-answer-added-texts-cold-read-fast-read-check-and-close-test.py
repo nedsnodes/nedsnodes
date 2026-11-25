@@ -40,6 +40,7 @@ _git_environment_fixture = importlib.util.module_from_spec(_git_environment_fixt
 _git_environment_fixture_spec.loader.exec_module(_git_environment_fixture)
 _git_environment_fixture.remove_git_redirecting_environment_variables_from_this_process()
 
+DIALOG_EXTRACTOR_FILE = Path(__file__).resolve().parents[4] / "scripts" / "handoff-extract-conversation.py"
 PROGRAM = (Path(__file__).resolve().parents[1]
            / "walk-me-through-answer-added-texts-cold-read-fast-read-check-and-close.py")
 _cold_read_scratch_fixture_spec = importlib.util.spec_from_file_location(
@@ -729,21 +730,40 @@ def test_the_waiting_item_read_step_reads_an_item_of_progress_talk_without_askin
           described(result))
 
 
+def session_dialog_with_its_transcript_write(log_store, session_id, texts):
+    """Write an agent-session's transcript of texts, the agent's and the user's in turn, the agent's first, and the
+    session dialog the session dialog extractor renders from it, into log_store; return the dialog's path."""
+    key = "-home-nedlern-agents-MD-skills-2"
+    transcript = log_store / "agent-session-files-by-machine" / "ned-box" / "projects" / key / f"{session_id}.jsonl"
+    transcript.parent.mkdir(parents=True, exist_ok=True)
+    transcript.write_text("\n".join(json.dumps(
+        {"type": "user", "entrypoint": "cli", "message": {"content": text}} if index % 2
+        else {"type": "assistant", "message": {"content": [{"type": "text", "text": text}]}})
+        for index, text in enumerate(texts)) + "\n")
+    spec = importlib.util.spec_from_file_location("handoff_extract_conversation", DIALOG_EXTRACTOR_FILE)
+    extractor = importlib.util.module_from_spec(spec)
+    sys.modules[spec.name] = extractor
+    spec.loader.exec_module(extractor)
+    turns, report = extractor.complete_dialog_turns_and_report(transcript)
+    dialog = log_store / "session-dialogs" / "ned-box" / key / f"{session_id}-dialog-complete.md"
+    dialog.parent.mkdir(parents=True, exist_ok=True)
+    dialog.write_text(extractor.render_companion(turns, report) + "\n\n<!-- written by the extractor -->\n")
+    return dialog
+
+
+def dialog_line_of(dialog, text):
+    """The line number of the line of dialog that is text."""
+    return dialog.read_text().split("\n").index(text) + 1
+
+
+KEPT_POEM_RULING = "Keep one poem per job, as we agreed."
+
+
 def case_with_a_session_dialog_naming_the_item_title():
     """A Case whose log-store holds one agent-session that named item 3's title; return it and the dialog's path."""
     case = Case(document=marks_document("The tests are still running.\n"))
-    key = "-home-nedlern-agents-MD-skills-2"
-    dialog = case.log_store / "session-dialogs" / "ned-box" / key / "s1-dialog-complete.md"
-    dialog.parent.mkdir(parents=True)
-    dialog.write_text("# Complete session dialog\n\n---\n\n## Agent\n\nShall I split the page?\n\n## User\n\n"
-                      "Keep one poem per job, as we agreed.\n\n## Agent\n\n## Item 3 of 9: the opening sentence\n\n")
-    transcript = case.log_store / "agent-session-files-by-machine" / "ned-box" / "projects" / key / "s1.jsonl"
-    transcript.parent.mkdir(parents=True)
-    transcript.write_text("\n".join(json.dumps(record) for record in [
-        {"type": "assistant", "message": {"content": [{"type": "text", "text": "Shall I split the page?"}]}},
-        {"type": "user", "entrypoint": "cli", "message": {"content": "Keep one poem per job, as we agreed."}},
-        {"type": "assistant", "message": {"content": [{"type": "text",
-                                                       "text": "## Item 3 of 9: the opening sentence"}]}}]) + "\n")
+    dialog = session_dialog_with_its_transcript_write(case.log_store, "s1", [
+        "Shall I split the page?", KEPT_POEM_RULING, "## Item 3 of 9: the opening sentence"])
     return case, dialog
 
 
@@ -758,7 +778,7 @@ def title_search_lines_printed(result):
     return lines[1:end + 1]
 
 
-TITLE_SEARCH_SAVED_TITLES_LINE = json.dumps(["the opening sentence"])
+TITLE_SEARCH_SAVED_TITLES_LINE = json.dumps([[["the opening sentence"], ["3"]]])
 
 
 def test_the_waiting_item_read_step_prints_the_user_messages_of_an_agent_session_that_named_the_item_title():
@@ -770,8 +790,9 @@ def test_the_waiting_item_read_step_prints_the_user_messages_of_an_agent_session
           result.returncode == 0 and "had to be run now" in lines[0]
           and lines[1].startswith("The user's words where the item's title, \"the opening sentence\", was named "
                                   "before: 1 agent-session(s)")
-          and lines[3:6] == [f"  agent  {dialog}:7  Shall I split the page?",
-                             f"  user   {dialog}:11  Keep one poem per job, as we agreed.",
+          and lines[3:6] == [f"  agent  {dialog}:{dialog_line_of(dialog, 'Shall I split the page?')}  Shall I split "
+                             f"the page?",
+                             f"  user   {dialog}:{dialog_line_of(dialog, KEPT_POEM_RULING)}  {KEPT_POEM_RULING}",
                              "Walk-minutes lines naming the title: 0."],
           described(result))
     cache = title_search_cache_file(case)
@@ -832,7 +853,7 @@ def test_the_waiting_item_read_step_prints_the_title_search_in_full_and_why_when
     lines = result.stdout.split("\n")
     printed = title_search_lines_printed(result)
     check("a cache file that cannot be written leaves the search printed in full, with why it was not saved",
-          result.returncode == 0 and f"  user   {dialog}:11  Keep one poem per job, as we agreed." in printed
+          result.returncode == 0 and f"  user   {dialog}:{dialog_line_of(dialog, KEPT_POEM_RULING)}  {KEPT_POEM_RULING}" in printed
           and lines[len(printed) + 1].startswith(
               f"The search for the user's words above was not saved in {title_search_cache_file(case)}, so the next "
               f"run of this step prints it in full again: [Errno ")
@@ -842,7 +863,7 @@ def test_the_waiting_item_read_step_prints_the_title_search_in_full_and_why_when
     lines = result.stdout.split("\n")
     printed = title_search_lines_printed(result)
     check("without an agent-session id the search is printed in full, with why it was not saved",
-          result.returncode == 0 and f"  user   {dialog}:11  Keep one poem per job, as we agreed." in printed
+          result.returncode == 0 and f"  user   {dialog}:{dialog_line_of(dialog, KEPT_POEM_RULING)}  {KEPT_POEM_RULING}" in printed
           and lines[len(printed) + 1].endswith(
               "prints it in full again: CLAUDE_CODE_SESSION_ID is not set, so the agent-session that ran the step is "
               "not known."),
@@ -872,7 +893,7 @@ def test_the_waiting_item_read_step_saves_the_title_search_only_once_it_is_print
           described(failed))
     result = case.run(WAITING_ITEM_READ_STEP_NAME)
     check("the rerun after a failed read prints the search in full and saves it",
-          result.returncode == 0 and f"  user   {dialog}:11  Keep one poem per job, as we agreed." in result.stdout
+          result.returncode == 0 and f"  user   {dialog}:{dialog_line_of(dialog, KEPT_POEM_RULING)}  {KEPT_POEM_RULING}" in result.stdout
           and title_search_cache_file(case).is_file(), described(result))
 
 
@@ -891,6 +912,42 @@ def test_the_waiting_item_read_step_refuses_when_the_search_for_the_user_earlier
           in result.stderr and "KeyError" in result.stderr
           and case.calls.read_text() == "" and case.minutes.read_text() == minutes_before
           and not title_search_cache_file(case).exists(), described(result))
+
+
+def test_the_waiting_item_read_step_searches_each_item_shown_together_by_its_own_title_and_numbers():
+    document = (marks_document("The tests are still running.\n")
+                + "\n## Item 4 of 9: the closing sentence\n\nThe page ends.\n#case_against weak: it is short.\n\n"
+                  "Recommendation: keep it.\n")
+    case = Case(next_to_present="items 3 and 4 of 9", document=document)
+    session_dialog_with_its_transcript_write(case.log_store, "s2", [
+        "Item 4 of 9: the closing sentence", "Leave the closing sentence alone."])
+    session_dialog_with_its_transcript_write(case.log_store, "s3", [
+        "Item 4 of 9: the opening sentence", "Not about item 3."])
+    result = case.run(WAITING_ITEM_READ_STEP_NAME)
+    check("with two items shown together, the second item's title is searched too, and a short title only after its "
+          "own item's number",
+          result.returncode == 0 and "Leave the closing sentence alone." in result.stdout
+          and "Not about item 3." not in result.stdout, described(result))
+
+
+def test_the_waiting_item_read_step_searches_a_linked_title_in_the_closing_line_form_too():
+    case = Case(document=marks_document("The tests are still running.\n").replace(
+        "## Item 3 of 9: the opening sentence", "## Item 3 of 9: the [opening](https://example.com/o) sentence"))
+    session_dialog_with_its_transcript_write(case.log_store, "s4", [
+        "[Item 3 of 9, the opening sentence](https://claude.ai/artifact/x) · A approve · D disapprove", "a"])
+    result = case.run(WAITING_ITEM_READ_STEP_NAME)
+    check("a title holding a link is searched as the closing line carries it, the link's text only",
+          result.returncode == 0 and "\n  user   " in result.stdout and "  a\n" in result.stdout, described(result))
+
+
+def test_the_waiting_item_read_step_searches_a_title_that_opens_with_a_dash():
+    case = Case(document=marks_document("The tests are still running.\n").replace(
+        "## Item 3 of 9: the opening sentence", "## Item 3 of 9: --feature"))
+    session_dialog_with_its_transcript_write(case.log_store, "s5", [
+        "Item 3 of 9: --feature", "Remove the flag."])
+    result = case.run(WAITING_ITEM_READ_STEP_NAME)
+    check("a title opening with `-` is searched for, not read as an option of the search",
+          result.returncode == 0 and "Remove the flag." in result.stdout, described(result))
 
 
 def test_the_waiting_item_read_step_does_not_refuse_a_status_claim_in_an_item_settled_without_being_shown():

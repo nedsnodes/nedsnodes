@@ -453,9 +453,11 @@ prints no such command.
 
 USER'S EARLIER WORDS. For an item that is to be shown, the step then runs
 walk-me-through-approval-walk-item-title-search-user-messages-in-session-dialogs-and-lines-in-walk-minutes-print.py
-with the item's title, the title of each earlier text of it read, which the
-next paragraph finds, and the item's numbers; a Withdrawn heading carries no
-title. It prints what that program prints right after its first line, which
+once for each heading that names a waiting item, with its title, in the
+closing line's form too when that differs, as when the title holds a link,
+and the numbers of the waiting items it names; a lone waiting item's search
+also gives the title of each earlier text of it read, which the next
+paragraph finds, and a Withdrawn heading carries no title. It prints what that program prints right after its first line, which
 names the read's report: each message the user typed
 in an agent-session whose saved dialog names a title, after the agent message
 it answers, and each walk-minutes line naming one, each with its file and line.
@@ -464,7 +466,7 @@ search said, and exits 1; any exit of the search but its found and nothing-found
 exits is a failure. The step saves what the search prints, a search with no
 hits too, as it prints it, in
 `docs/walk/title-search-cache/<walk name>-item-<N>-<agent-session id>.md`, the
-titles searched for as a JSON list on its first line, the agent-session id
+titles and numbers searched for as a JSON list on its first line, the agent-session id
 being $CLAUDE_CODE_SESSION_ID. A later run for the item in the same
 agent-session prints only a line naming that file, unless the file is missing
 or the item's titles differ from the saved ones; then it searches, prints and
@@ -3456,23 +3458,42 @@ def approval_walk_item_system_status_claims_not_rechecked_refused(text, item, do
     return SYSTEM_STATUS_CLAIMS_RECHECKED_LINE.format(item=item, matched=matched, rechecked=rechecked)
 
 
-def approval_walk_item_title_user_messages_in_earlier_agent_sessions_lines(walk_finder, minutes, text, earlier,
-                                                                         numbers, item, command):
-    """Return a function that saves and returns the lines TITLE_SEARCH_PROGRAM prints for the item's title and the
-    title of each earlier read text of it, as earlier_read_texts_of_item returns them; raise Failure when the search
-    failed. A Withdrawn version heading carries no title, so those read texts are the item's only earlier titles the
-    program can know.
+def approval_walk_item_title_search_groups(walk_finder, document, value, numbers, total, parser, earlier):
+    """Return [(titles, item numbers)] for each heading in document that names waiting items, in its order: its
+    title, in the closing line's form too when that differs, as when the title holds a link, with the numbers of
+    the waiting items it names, so that a short title is matched only after its own numbers. A lone waiting item's
+    titles also hold the title of each earlier read text of it, as earlier_read_texts_of_item returns them; a
+    Withdrawn version heading carries no title, so those read texts are its only earlier titles the program can
+    know."""
+    lines = document.read_text(encoding="utf-8").split("\n")
+    _, units = walk_finder.waiting_item_units(document, value, numbers, total, parser)
+    without_links = load_module("walk_me_through_user_short_answer_hook", SHORT_ANSWER_HOOK_FILE).without_links
+    groups = []
+    for unit in units:
+        headings = [lines[unit[3]]] + ([copied for _, _, copied in earlier] if len(units) == 1 else [])
+        titles = []
+        for heading in headings:
+            title = item_title(walk_finder, heading.split("\n", 1)[0])
+            for form in ([title, without_links(title, parser)] if title else []):
+                if form not in titles:
+                    titles.append(form)
+        if titles:
+            groups.append((titles, [number for number in numbers if number in unit[0]]))
+    return groups
+
+
+def approval_walk_item_title_user_messages_in_earlier_agent_sessions_lines(walk_finder, minutes, groups, numbers,
+                                                                         item, command):
+    """Return a function that saves and returns the lines TITLE_SEARCH_PROGRAM prints for each of groups, as
+    approval_walk_item_title_search_groups returns them, one search per group; raise Failure when a search failed.
 
     Call the function only in the statement that prints its lines: the lines are saved in the title search cache
     file for the item and this agent-session, and a later run for the same titles in the same agent-session prints
     only a line naming that file, since fix rounds rerun the step, so lines saved but never printed are never read."""
-    titles = []
-    for heading in [text] + [copied for _, _, copied in earlier]:
-        title = item_title(walk_finder, heading.split("\n", 1)[0])
-        if title and title not in titles:
-            titles.append(title)
-    if not titles:
+    if not groups:
         return lambda: []
+    # The groups' titles and numbers, as JSON lists, so a change to either searches again.
+    titles = [[group_titles, group_numbers] for group_titles, group_numbers in groups]
     variable = load_module("cold_read_record_names", RECORD_NAMES_FILE).AGENT_SESSION_ID_ENVIRONMENT_VARIABLE
     session_id = os.environ.get(variable)
     cache = (minutes.parent / TITLE_SEARCH_CACHE_DIRECTORY_NAME
@@ -3480,15 +3501,18 @@ def approval_walk_item_title_user_messages_in_earlier_agent_sessions_lines(walk_
                                                    numbers="-and-".join(numbers), session=session_id))
     if session_id and title_search_cache_titles(cache) == titles:
         return lambda: [TITLE_SEARCH_CACHE_PRINTED_BEFORE.format(item=item, path=cache)]
-    words = [word for title in titles for word in ("--title", title)]
-    words += [word for number in numbers for word in ("--item-number", number)]
-    result = subprocess.run([sys.executable, str(TITLE_SEARCH_PROGRAM), *words], capture_output=True, text=True,
-                            stdin=subprocess.DEVNULL)
     exits = load_module("title_search", TITLE_SEARCH_PROGRAM)
-    if result.returncode not in (exits.EXIT_FOUND, exits.EXIT_NOTHING_FOUND):
-        raise Failure(APPROVAL_WALK_ITEM_TITLE_SEARCH_FAILED.format(
-            item=item, exit=result.returncode, said=result.stderr.strip() or "nothing", command=command))
-    lines = result.stdout.rstrip("\n").split("\n") if result.stdout.strip() else []
+    lines = []
+    for group_titles, group_numbers in groups:
+        # In the `=` form, so that a title opening with `-` is not read as an option.
+        words = ([f"--title={title}" for title in group_titles]
+                 + [f"--item-number={number}" for number in group_numbers])
+        result = subprocess.run([sys.executable, str(TITLE_SEARCH_PROGRAM), *words], capture_output=True, text=True,
+                                stdin=subprocess.DEVNULL)
+        if result.returncode not in (exits.EXIT_FOUND, exits.EXIT_NOTHING_FOUND):
+            raise Failure(APPROVAL_WALK_ITEM_TITLE_SEARCH_FAILED.format(
+                item=item, exit=result.returncode, said=result.stderr.strip() or "nothing", command=command))
+        lines += result.stdout.rstrip("\n").split("\n") if result.stdout.strip() else []
     if not session_id:
         return lambda: lines + [TITLE_SEARCH_CACHE_NOT_SAVED.format(
             path=minutes.parent / TITLE_SEARCH_CACHE_DIRECTORY_NAME,
@@ -3591,7 +3615,8 @@ def waiting_item_read(arguments, sub_step_of=None):
         recheck_line = approval_walk_item_system_status_claims_not_rechecked_refused(
             text, item, document, rerun, rechecked)
         past_words = approval_walk_item_title_user_messages_in_earlier_agent_sessions_lines(
-            walk_finder, minutes, text, earlier, numbers, item, rerun)
+            walk_finder, minutes, approval_walk_item_title_search_groups(
+                walk_finder, document, value, numbers, total, parser, earlier), numbers, item, rerun)
     if sub_step_of:
         # An item read before it was split keeps that text, as an item revised after its read does.
         for above in sub_step_of[2]:

@@ -13,10 +13,11 @@ item is shown, giving the item's title, each title an earlier read text of the i
 WHAT IT SEARCHES. The log-store's session dialogs,
 session-dialogs/<machine>/<project-key>/*-dialog-complete.md, and the walk-minutes files, *-minutes.md, in the
 log-store's walk/ and in /home/nedlern/agents/*/docs/walk/, those of the walk/ directories that exist. A line names
-a title when it holds the title, in any case, where it reads as one: after "Item" and any number, as in
-"Item 6 of 27: <title>", in quotes, or as a whole heading or list line, its `#`, `-` or `1.` and emphasis marks
-allowed. A title of fewer than four words, such as "The fix", is too common for that, so it names one only right
-after "Item" and one of the item's own numbers.
+a title when it holds the title, in any case and with no letter or digit right after it, where it reads as one: after
+a running count as the walk finder reads one, as in "Item 6 of 27: <title>" or "**Items 9.1, 9.2 of 35**: <title>",
+in quotes, or as a whole heading or list line, its `#`, `-` or `1.` and emphasis marks allowed. A title of fewer than
+four words, such as "The fix", is too common for that, so it names one only after a running count that names one of
+the item's own numbers.
 
 WHAT IT PRINTS. For each agent-session whose dialog names a title, newest first, each message the user typed in it,
 the whole agent-session and not only near the title, since the user's ruling can come before the title is named;
@@ -50,6 +51,8 @@ from pathlib import Path
 
 PROGRAM_PATH = Path(__file__).resolve()
 SEARCH_PROGRAM_FILE = PROGRAM_PATH.parents[3] / "scripts" / "log-store-past-discussions-regex-search-newest-first.py"
+DIALOG_EXTRACTOR_FILE = PROGRAM_PATH.parents[3] / "scripts" / "handoff-extract-conversation.py"
+WALK_FINDER_FILE = PROGRAM_PATH.with_name("walk-me-through-approval-walk-minutes-and-walk-document-item-finder-common.py")
 NED_BOX_PROGRAM_PATH = f"/home/nedlern/Projects/nedsnodes/nn-systems/skills/walk-me-through/{PROGRAM_PATH.name}"
 DEFAULT_AGENT_HOMES_DIRECTORY = Path("/home/nedlern/agents")
 AGENT_HOMES_DIRECTORY_OVERRIDE_ENVIRONMENT_VARIABLE = "WALK_ME_THROUGH_AGENT_HOMES_DIRECTORY_OVERRIDE"
@@ -68,30 +71,41 @@ FAILURES_CLOSING_LINE = (
     "without a FAILED line.")
 
 
-def load_search():
-    spec = importlib.util.spec_from_file_location("log_store_past_discussions_regex_search_newest_first",
-                                                  SEARCH_PROGRAM_FILE)
+def load_module(name, path):
+    spec = importlib.util.spec_from_file_location(name, path)
     module = importlib.util.module_from_spec(spec)
+    # The extractor's dataclasses look their module up in sys.modules while it loads.
+    sys.modules[name] = module
     spec.loader.exec_module(module)
     return module
 
 
-search = load_search()
+search = load_module("log_store_past_discussions_regex_search_newest_first", SEARCH_PROGRAM_FILE)
+walk_finder = load_module("walk_me_through_approval_walk_minutes_and_walk_document_item_finder_common",
+                          WALK_FINDER_FILE)
 
 
-def title_pattern(title, numbers):
-    """The regular expression for a line that names title as a title; see the module's WHAT IT SEARCHES."""
-    escaped = re.escape(title)
-    numbered = r"[\d.]+"
+def title_matcher(title, numbers):
+    """A function telling whether a line names title as a title; see the module's WHAT IT SEARCHES."""
+    # Not \b, which needs a word character before it, so that a title ending in punctuation still ends here.
+    escaped = re.escape(title) + r"(?!\w)"
+    # The running count as the walk finder reads one, its bold closing before or after the count's `:`.
+    item_form = re.compile(rf"\bitems?\s+(?P<numbers>{walk_finder.NUMBER_LIST})(?:\s+of\s+\d+)?[*_]*\s*[:,.]?\s*"
+                           rf"[*_\"“]*\s*" + escaped, re.IGNORECASE)
     if len(title.split()) < SHORT_TITLE_WORDS:
-        numbered = "(?:" + "|".join(re.escape(number) for number in numbers) + r")(?![\d.]*\d)"
-    item_form = (r"\bitems?\s+(?:[\d.]+\s+(?:and|to)\s+)*" + numbered
-                 + r"(?:\s+(?:and|to)\s+[\d.]+)*(?:\s+of\s+\d+)?\s*[:,]?\s*[*_\"“]*\s*" + escaped)
-    if len(title.split()) < SHORT_TITLE_WORDS:
-        return re.compile(item_form, re.IGNORECASE)
+        def names(line):
+            for match in item_form.finditer(line):
+                try:
+                    if set(walk_finder.expand_numbers(match["numbers"])) & set(numbers):
+                        return True
+                except walk_finder.UnusableRange:
+                    continue
+            return False
+        return names
     quoted = r"[\"“'‘]\s*" + escaped + r"\s*[\"”'’]"
     whole_line = r"^\s*(?:#+|[-*+]|\d+[.)])?\s*[*_]*" + escaped + r"[*_]*\s*[.:]?\s*$"
-    return re.compile("|".join([item_form, quoted, whole_line]), re.IGNORECASE)
+    pattern = re.compile("|".join([item_form.pattern, quoted, whole_line]), re.IGNORECASE)
+    return lambda line: pattern.search(line) is not None
 
 
 def ripgrep_lines(titles, paths, glob, failures):
@@ -142,14 +156,24 @@ def transcript_turns(transcript):
     return turns
 
 
-def dialog_line(dialog_lines, heading, text, start):
-    """(line number in the dialog of the turn under heading whose text opens as text does, or None, and where to
-    look for the next turn); turns are looked for in order, so a repeated message takes its own place."""
-    first = text.strip().split("\n", 1)[0]
-    for index in range(start, len(dialog_lines) - 2):
-        if dialog_lines[index] == heading and dialog_lines[index + 2] == first:
-            return index + 3, index + 3
-    return None, start
+def dialog_lines_by_transcript_line(transcript, dialog_text):
+    """{transcript line number: the dialog line where that record's turn text starts}, from the session dialog
+    extractor's own turns, or {} when dialog_text is not what the extractor renders from the transcript now, as
+    when the transcript grew after the dialog was written; a turn the dialog leaves out has no entry."""
+    extractor = load_module("handoff_extract_conversation", DIALOG_EXTRACTOR_FILE)
+    turns, report = extractor.complete_dialog_turns_and_report(transcript)
+    rendered = extractor.render_companion(turns, report)
+    if not dialog_text.startswith(rendered + "\n"):
+        return {}
+    turn_lines = [len("\n".join(extractor.render_turn(turn)).split("\n")) for turn in turns]
+    # render_turn puts a user or agent turn's text two lines below its heading.
+    line = len(rendered.split("\n")) - sum(turn_lines) + 3
+    placed = {}
+    for turn, count in zip(turns, turn_lines):
+        if "line_index" in turn:
+            placed[turn["line_index"] + 1] = line
+        line += count
+    return placed
 
 
 def flat(text):
@@ -177,17 +201,15 @@ def session_lines(root, dialog, title_lines, failures):
     if not any(voice == "user" for voice, _, _ in turns):
         return None
     try:
-        lines = dialog.read_bytes().decode("utf-8", "replace").split("\n")
+        placed = dialog_lines_by_transcript_line(transcript, dialog.read_bytes().decode("utf-8", "replace"))
     except OSError as error:
         failures.append(f"could not read the session dialog {dialog} after ripgrep searched it, so its messages are "
                         f"cited by the transcript's lines: {error}")
-        lines = []
+        placed = {}
     printed = [f"{named_at}:"]
     agent = shown_agent = None
-    start = 0
     for voice, text, number in turns:
-        heading = "## User" if voice == "user" else "## Agent"
-        line, start = dialog_line(lines, heading, text, start)
+        line = placed.get(number)
         cited = f"{dialog}:{line}" if line else f"{transcript}:{number}"
         if voice != "user":
             agent = (cited, text)
@@ -207,7 +229,7 @@ def session_lines(root, dialog, title_lines, failures):
 
 def found_lines(root, agent_homes, titles, numbers, failures):
     """(lines to print, whether anything was found)."""
-    patterns = [title_pattern(title, numbers) for title in titles]
+    matchers = [title_matcher(title, numbers) for title in titles]
     dialogs_directory = root / search.SESSION_DIALOGS
     walk_directories = [directory for directory in [root / "walk", *sorted(agent_homes.glob("*/docs/walk"))]
                         if directory.is_dir()]
@@ -218,7 +240,7 @@ def found_lines(root, agent_homes, titles, numbers, failures):
     minutes_hits = ripgrep_lines(titles, walk_directories, WALK_MINUTES_GLOB, failures)
     named = {}
     for path, number, text in dialog_hits:
-        if any(pattern.search(text) for pattern in patterns):
+        if any(names(text) for names in matchers):
             named.setdefault(Path(path), []).append(number)
     sessions, skipped = [], 0
     for dialog, title_lines in named.items():
@@ -241,7 +263,7 @@ def found_lines(root, agent_homes, titles, numbers, failures):
     for _, printed in sessions:
         lines += printed
     minutes = [(path, number, text) for path, number, text in minutes_hits
-               if any(pattern.search(text) for pattern in patterns)]
+               if any(names(text) for names in matchers)]
     lines.append(f"Walk-minutes lines naming the title: {len(minutes)}.")
     lines += [f"  {path}:{number}  {text}" for path, number, text in minutes]
     return lines, bool(sessions or minutes)
