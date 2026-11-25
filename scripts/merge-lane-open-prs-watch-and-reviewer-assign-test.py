@@ -2011,6 +2011,20 @@ def run_poll_once_cases(scratch_root, token_file):
           and "could not record" in machine.tasks_read()[0]["subject"] + machine.errors,
           f"{code} {machine.errors}")
 
+    machine = machine_for("append-fails-after-assigning")
+    machine.assignments.write_text("", encoding="utf-8")
+    machine.poll = []
+    machine.run("--poll-once-write-baseline")
+    machine.events_path.mkdir()
+    machine.poll = [poll_once_pull_request(1)]
+    code = machine.run()
+    description = machine.tasks_read()[0]["description"] if machine.tasks_read() else ""
+    check("when the event file cannot be written after a review was assigned, the failure task "
+          "names the REVIEW-ASSIGNED line no later run writes",
+          code == 1 and machine.assignments.read_text(encoding="utf-8").startswith("1 ")
+          and "PR #1 REVIEW-ASSIGNED" in description and "by hand" in description,
+          f"{code} {description} {machine.errors}")
+
     machine = machine_for("truncated-events")
     machine.poll = []
     machine.run("--poll-once-write-baseline")

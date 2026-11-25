@@ -119,9 +119,12 @@ event file, the WATCH line once per case as the state file records. A failed
 poll keeps the state, assigns nothing, and only
 WATCH_OPEN_PULL_REQUESTS_FAILED_GITHUB_POLLS_IN_A_ROW_BEFORE_FAILURE_TASK failed polls in a row open a task.
 Not detected: an event file emptied and then refilled by later polls to at least
-as many lines as were delivered, whose lost lines no task names; and, when
+as many lines as were delivered, whose lost lines no task names; when
 writing the task fails at that failed poll, the rest of the same outage, which
-opens no task. A cron run, the loop watcher and the seed each hold a lock file
+opens no task; and a run killed after it rewrote the assignment file and before
+it appended the REVIEW-ASSIGNED lines, whose pull requests then stay assigned
+with no line. A run that fails at the append names those pull requests in its
+failure task. A cron run, the loop watcher and the seed each hold a lock file
 beside the assignment file from reading it to replacing it.
 
 Polling needs no public webhook endpoint. GraphQL selects only needed fields
@@ -1047,7 +1050,19 @@ def poll_once(arguments, assignments_file, options_in_use):
                 state["failed_polls"] += 1
             now = time.time()
             # The event is on disk before the state forgets it, so a crash repeats an event at worst.
-            event_lines_append(events_path, lines, now)
+            try:
+                event_lines_append(events_path, lines, now)
+            except OSError as error:
+                # The assignment file already holds these, so no later poll writes their lines.
+                assigned = [line for line in lines if " REVIEW-ASSIGNED " in line]
+                return failure_reported(
+                    task_list_directory, "it could not record or deliver events",
+                    f"{error}. Undelivered events stay in {events_path} for the next run once this "
+                    f"is repaired"
+                    + ("." if not assigned else
+                       ", except these REVIEW-ASSIGNED lines: the assignment file already holds "
+                       "their pull requests, so no later run writes them. Forward each to its "
+                       "merge-lane agent-seat by hand: " + "; ".join(assigned)))
             poll_state_write(state_path, state)
             events_task_opened_when_due(state, state_path, events_path, task_list_directory, now)
         except PollStateUnusable as error:
