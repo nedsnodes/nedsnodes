@@ -103,12 +103,11 @@ answer.
 AN ITEM'S TEXT. approval_walk_item_heading_and_item_page_body_lines gives the
 lines of an item that the item page builder puts on its page.
 approval_walk_item_text_as_shown_to_user gives the item's text as the user is
-shown it, from which the short-answer hook reads the decision-bearing lines
-the user must have been shown before his answer to the item counts: the same
-lines without the `#approval_walk_item_` lines, which the check program writes
-for agents. The
-short-answer hook drops each running count's `of M` only when it compares,
-because M changes when items are added to the walk.
+shown it, whose heading the short-answer hook looks for in the agent's messages
+before his answer to the item counts: the same lines without the
+`#approval_walk_item_` lines, which the check program writes for agents. The
+short-answer hook drops each running count's `of M` only when it looks for the
+heading, because M changes when items are added to the walk.
 
 ITEM PAGES. The walk-me-through skill publishes each item as a page before
 any message shows it, and records the page's link in the walk-minutes as a
@@ -801,13 +800,7 @@ def own_lines_of_unit(text, parser, lines, unit, openings, own=None, keep_setext
     item_opening_lines' result once one call has needed it, so that the walk-document is read once. Below a setext
     heading, the heading's further lines come first, whatever own is, since the heading names every number in unit,
     as a paragraph, and a blank line stands where its underline was; with keep_setext_underline, for a caller that
-    puts the heading line back above them, the underline stays, so that the heading is still a heading.
-
-    Not handled: a further line of a setext heading indented four spaces or more, such as `    #new Hide rows.`, is
-    heading text in the walk-document but becomes an indented code block once the underline is replaced, so a
-    message that leaves that line out is not caught. Nor, with keep_setext_underline, is a further line such as
-    `#new Hide rows.`: it stays heading text, and the short-answer hook, which skips headings, does not check that
-    the message showed it."""
+    puts the heading line back above them, the underline stays, so that the heading is still a heading."""
     heading_end, ranges = approval_walk_unit_heading_end_and_item_line_ranges_below_heading_line(
         text, parser, lines, unit, openings, own)
     if heading_end > unit[3] + 1 and not keep_setext_underline:
@@ -866,7 +859,7 @@ def approval_walk_text_with_running_count_totals_removed(text):
 
 def approval_walk_item_text_as_shown_to_user(text, parser, all_units, unit, number):
     """Return the Markdown the user is shown for item number of the walk-document text, from which the short-answer
-    hook reads the heading and the decision-bearing lines it looks for in the agent's message:
+    hook reads the heading it looks for in the agent's messages:
     approval_walk_item_heading_and_item_page_body_lines' heading and lines, without the `#approval_walk_item_` lines."""
     heading, body = approval_walk_item_heading_and_item_page_body_lines(text, parser, all_units, unit, number)
     shown = heading + "\n" + "\n".join(body)

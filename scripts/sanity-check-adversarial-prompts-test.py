@@ -530,6 +530,14 @@ def main():
           "WARNING: the review copy was modified outside the cells' scratch "
           f"directories, seen when cut-adversarial-prompt-claude finished: {stray_name}" in output,
           f"output was {output!r}")
+    check("the overwritten-stray-write warning is followed by its instruction line",
+          f"overwrote it: {out_path}\n"
+          f"{runner_gate.SANITY_CHECK_STRAY_FILE_AT_CELL_REPORT_PATH_REPLACED_BY_REPORT_WARNING_NEXT_STEP_INSTRUCTION}\n" in output,
+          f"output was {output!r}")
+    check("the review-copy warning is followed by its instruction line",
+          f"finished: {stray_name}\n"
+          f"{runner_gate.SANITY_CHECK_REVIEW_COPY_MODIFIED_OUTSIDE_CELL_SCRATCH_WARNING_NEXT_STEP_INSTRUCTION}\n" in output,
+          f"output was {output!r}")
 
     # Case 19: the per-cell scratch directory the runner makes. The prompts
     # used to say "write no files", which the cells did not reliably keep and
@@ -942,6 +950,30 @@ def main():
     check("a quote found nowhere warns",
           "quote found in no tracked file" in buffer.getvalue(),
           f"output was {buffer.getvalue()!r}")
+    check("the unfound-quote warning is followed by its instruction line",
+          buffer.getvalue().splitlines()[1:2] == [runner_scan.SANITY_CHECK_CELL_REPORT_QUOTE_FOUND_IN_NO_TRACKED_FILE_WARNING_NEXT_STEP_INSTRUCTION],
+          f"output was {buffer.getvalue()!r}")
+
+    class WriteCallsRecorder(io.StringIO):
+        def __init__(self):
+            super().__init__()
+            self.calls = []
+
+        def write(self, text):
+            self.calls.append(text)
+            return super().write(text)
+
+    # Each write is where another cell's thread can cut in; the warning and its
+    # instruction must arrive in one, or a `saved:` line can land between them.
+    recorder = WriteCallsRecorder()
+    with contextlib.redirect_stdout(recorder):
+        runner_scan.quote_scan(corpus, 'It says "words that appear in no file at all" here.', "q3")
+    instruction = runner_scan.SANITY_CHECK_CELL_REPORT_QUOTE_FOUND_IN_NO_TRACKED_FILE_WARNING_NEXT_STEP_INSTRUCTION
+    check("a warning and its instruction line reach stdout in one write, so a parallel "
+          "cell's line cannot land between them",
+          any(call.startswith("WARNING: ") and f"\n{instruction}\n" in call
+              for call in recorder.calls),
+          f"write calls were {recorder.calls!r}")
 
     # The print modes: each surface arrives on stdout, and the requester
     # surface carries both of its sources.
@@ -1175,6 +1207,9 @@ def main():
               "Invalid API key" in said, said)
         check("and the stdout it failed with, where a CLI puts its reason instead",
               "Credit balance is too low" in said, said)
+        check("the failed-model warning is followed by its instruction line",
+              f"WARNING: {fable} failed (exit 1)\n"
+              f"{runner_chain.SANITY_CHECK_CELL_MODEL_RUN_FAILED_WARNING_NEXT_STEP_INSTRUCTION}\n" in said, said)
         check("the cell still falls back, and the review is returned, never printed",
               (code, output, model) == (0, "opus's review\n", opus)
               and "opus's review" not in said, (code, output, model, said))
