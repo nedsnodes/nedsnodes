@@ -240,7 +240,7 @@ the claude launcher on claude-opus-5-5 at high effort, with
 COLD_READ_FAST_READ_WHAT_SHOULD_BE_CODE_QUESTION_PROMPT_TEMPLATE below, whose reading rules are cut from
 FAST_CLARIFY_PROMPT_TEMPLATE. Its answer, under its own provenance stamp,
 becomes the report's `## Question 4: What should be code` section, placed
-before the sentence coverage section, so the report has four sections. The
+before the new words section and the sentence coverage section. The
 two cells can run at once because neither writes in the checkout while the
 other runs: each writes its report into this program's temporary directory,
 and the claude launcher reports as a stray write any file in the checkout
@@ -263,6 +263,21 @@ check program,
 nn-systems/skills/walk-me-through/walk-me-through-answer-added-texts-cold-read-fast-read-check-and-close.py,
 passes it on every fast read it runs. A read run from the Mac on ned-box
 passes the option on to the read there.
+
+NEW WORDS. The fast-clarify cell also lists, in a `## New words` section,
+the words the sentences the edit added or changed use in a meaning of their
+own: none for an edit that only removed text, and, for a document read whole,
+the words the whole document uses so. Once the cell's report has landed, and before the read waits for
+Question 4,
+nn-systems/cold-read/cold-read-fast-read-new-words-fresh-reader-meaning-check.py
+takes that section out of the report, drops each word a glossary or the
+ordinary hyphenated words list has, and checks each other word with two
+calls on the fast cold-read-tier through the launcher that wrote the report:
+one guesses the word's meaning from the word alone, the other answers
+MATCHES or DIFFERS against the meaning the cell gave. The report gains a
+section, before the sentence coverage, saying what became of each word; its
+entries are not findings, and take no finding outcome. A word whose check
+fails is listed there as not checked, and the read's exit is unchanged.
 """
 
 from __future__ import annotations
@@ -315,6 +330,12 @@ _finding_outcomes_spec = importlib.util.spec_from_file_location(
     pathlib.Path(__file__).with_name("cold-read-fast-read-report-findings-parse-and-finding-outcomes-check-common.py"))
 finding_outcomes = importlib.util.module_from_spec(_finding_outcomes_spec)
 _finding_outcomes_spec.loader.exec_module(finding_outcomes)
+# Reads the fast-clarify cell's New words section and checks each word against a fresh reader's guess.
+_new_words_spec = importlib.util.spec_from_file_location(
+    "cold_read_fast_read_new_words_fresh_reader_meaning_check",
+    pathlib.Path(__file__).with_name("cold-read-fast-read-new-words-fresh-reader-meaning-check.py"))
+new_words = importlib.util.module_from_spec(_new_words_spec)
+_new_words_spec.loader.exec_module(new_words)
 _git_redirecting_removal_spec = importlib.util.spec_from_file_location(
     "git_redirecting_environment_variables_removal_common",
     REPO_ROOT / "nn-systems" / "general-tools"
@@ -359,7 +380,7 @@ EMBEDDED_PROMPT_FILE_NAME = "cold-read-fast-read-embedded-fast-clarify-prompt.md
 # cold-read-cell launcher; {CHANGED_SENTENCE_IDS} and {REMOVED_TEXT} by
 # fast_clarify_prompt_with_edit_placeholders_filled.
 FAST_CLARIFY_PROMPT_TEMPLATE = """\
-Read {TARGET_PATH} in full, including any YAML frontmatter, and answer three questions about it, in three sections, in the order below. Before the documents, read `CLAUDE.md` at the repository's root and the project glossary at `docs/nedsnodes-wiki/nedsnodes-glossary.md`: every agent that acts on the documents has read both. For a term the project glossary does not list, look in the system glossary it names, as `CLAUDE.md` says. Your context is deliberately minimal — what your runtime already loaded, those files, the document or documents under review, and what the documents reference, which you follow as far as you need to understand them, the way a reader would. A reference is a repository path; a bare file name that matches exactly one file in the repository, which you may search the repository for; or a web page they link to, GitHub issue and pull request pages included. A bare file name that matches no file or several is reported, not guessed at. Nothing else: do not go looking beyond what the documents reference. Report findings only about the document or documents under review, not about what you read along the way. Never open a credential file, even when the document names it: a `.token` file, anything under `~/.config/nedsnodes/` or `~/.ssh/`, a program's login file, a keychain item, or a `.env` file. That limit is the point, because {TARGET_PATH} must be usable by a future agent who has only this info. {TARGET_PATH} is read-only: do not edit it or anything else in the checkout. The one file you create is your report. If {TARGET_PATH} contains multiple documents, treat them like chapters of one book: any one of them can define or explain what the others rely on, and they should be consistent amongst themselves; repetition is fine, gaps or inconsistencies are not. Read all of them, then answer the 3 questions for each document in the report.
+Read {TARGET_PATH} in full, including any YAML frontmatter, and answer three questions about it, in three sections, in the order below, then list its new words in a fourth section. Before the documents, read `CLAUDE.md` at the repository's root and the project glossary at `docs/nedsnodes-wiki/nedsnodes-glossary.md`: every agent that acts on the documents has read both. For a term the project glossary does not list, look in the system glossary it names, as `CLAUDE.md` says. Your context is deliberately minimal — what your runtime already loaded, those files, the document or documents under review, and what the documents reference, which you follow as far as you need to understand them, the way a reader would. A reference is a repository path; a bare file name that matches exactly one file in the repository, which you may search the repository for; or a web page they link to, GitHub issue and pull request pages included. A bare file name that matches no file or several is reported, not guessed at. Nothing else: do not go looking beyond what the documents reference. Report findings only about the document or documents under review, not about what you read along the way. Never open a credential file, even when the document names it: a `.token` file, anything under `~/.config/nedsnodes/` or `~/.ssh/`, a program's login file, a keychain item, or a `.env` file. That limit is the point, because {TARGET_PATH} must be usable by a future agent who has only this info. {TARGET_PATH} is read-only: do not edit it or anything else in the checkout. The one file you create is your report. If {TARGET_PATH} contains multiple documents, treat them like chapters of one book: any one of them can define or explain what the others rely on, and they should be consistent amongst themselves; repetition is fine, gaps or inconsistencies are not. Read all of them, then answer the 3 questions for each document in the report, and list the new words of every document in the one fourth section.
 
 ## Question 1: What it says
 
@@ -386,7 +407,11 @@ Sentences the edit added or changed: {CHANGED_SENTENCE_IDS}. Text the edit remov
 
 Number the items in sections 2 and 3 separately, ORDERED MOST IMPORTANT FIRST — the issue most likely to stop a fresh-reader leads its section. If there are no issues, say "No issues".
 
-Lay out your report as follows, and do not look for an example report: first the list of the files you were told to examine; then `## Question 1: What it says`, with each sentence id on a line of its own and its bullets under it; then `## Question 2: Where you struggled` and `## Question 3: What it does not cover that it implies it should`, each a numbered list in which every item quotes a phrase and then says in one sentence what is wrong.
+## New words
+
+Which words do these lines use in a meaning of their own that neither the glossaries nor plain English give them? These lines are the sentences the edit added or changed, which the paragraph after Question 3 names. When that paragraph names neither sentences nor removed text, the document is read whole, and these lines are the whole document; when it names removed text alone, no line was added, so write `- none`. A word here may be a phrase of several words. List each word once, however many documents use it. Write each such word on a line of its own: a hyphen and a space, the word in backquotes, a colon and a space, then the meaning the text gives it, in one sentence, or, when the text never says, the meaning you take from how the text uses it, as in ``- `rider`: the words the user types after the A or D that answers an approval-walk item``. When there is no such word, write the one line `- none`. Write nothing else in this section: a program reads it, and reports a line in any other form as unreadable.
+
+Lay out your report as follows, and do not look for an example report: first the list of the files you were told to examine; then `## Question 1: What it says`, with each sentence id on a line of its own and its bullets under it; then `## Question 2: Where you struggled` and `## Question 3: What it does not cover that it implies it should`, each a numbered list in which every item quotes a phrase and then says in one sentence what is wrong; then `## New words`, with the lines that section asks for.
 
 Write your report to {REPORT_PATH}, once, when your analysis is complete. That file is your entire deliverable: what you say in conversation is discarded. Start your report with a list of the files you were told to examine. Note if you were unable to read any of them. {REPORT_PATH} is the only file to create; write nothing anywhere else.
 """
@@ -534,6 +559,7 @@ COLD_READ_FAST_READ_RUN_ON_NED_BOX_OVER_SSH_TIMEOUT_SECONDS = (
     FAST_READ_ATTEMPTS * len(agy_cell.TIER_TO_AGY_MODEL_CHAIN[FAST_READ_TIER])
     * agy_cell.COLD_READ_AGY_CELL_PER_MODEL_RUN_KILL_AFTER_SECONDS
     + COLD_READ_FAST_READ_SONNET_BACKUP_RUN_ALLOWANCE_SECONDS + 5 * 60
+    + new_words.NEW_WORDS_MEANING_CHECKS_TOTAL_TIME_LIMIT_SECONDS
     + COLD_READ_FAST_READ_WHAT_SHOULD_BE_CODE_QUESTION_MODEL_RUN_TIMEOUT_SECONDS)
 
 
@@ -1687,14 +1713,24 @@ def fast_read_report_finish_and_print_path(
     marked_copy_kept, full_run_class_name, bare_references, launch_sha256: str,
     on_records_route: bool, backup_line: str,
     question_4_cell: typing.Optional[WhatShouldBeCodeQuestionCell], edit_changed_ids: list,
-    edit_removed_units: list, quota_line: str = "",
+    edit_removed_units: list, scratch: pathlib.Path, word_check_launcher: pathlib.Path, quota_line: str = "",
 ) -> int:
     """Turn the cell's report, cell_report, into the read's, written once at
     report: wait for the Question 4 cell, if one was started, and add its section, attach the sentences, the
     coverage and the bare numbers, name an edit made during the read and the
-    Sonnet backup, ship the record, print the path. Returns 0, or 1 when
+    Sonnet backup, ship the record, print the path. Before waiting for
+    Question 4, take the cell's New words section out of its report and check
+    each word through word_check_launcher, the launcher that wrote the report,
+    and add the section that says what became of each. Returns 0, or 1 when
     the record did not reach the log-store, whether or not Question 4 was
-    answered."""
+    answered or the new words were checked."""
+    new_words_answer = new_words.fast_clarify_cell_report_new_words_section_split_off_and_parse(
+        cell_report.read_text(encoding="utf-8"))
+    new_words_section, new_words_stderr_lines = new_words.new_words_fresh_reader_meaning_checks_run_into_report_section_and_stderr_lines(
+        new_words_answer, whole_document=not (edit_changed_ids or edit_removed_units),
+        ask=new_words.cold_read_cell_launcher_call_function_factory_with_one_deadline_shared_by_all_calls(word_check_launcher, scratch))
+    for line in new_words_stderr_lines:
+        print(line, file=sys.stderr)
     question_4_section = (
         what_should_be_code_section(question_4_cell) if question_4_cell is not None
         else f"\n{WHAT_SHOULD_BE_CODE_QUESTION_REPORT_SECTION_HEADING}\n\n{WITHOUT_QUESTION_4_SECTION_LINE}\n")
@@ -1702,8 +1738,8 @@ def fast_read_report_finish_and_print_path(
     # the restatement claiming its id, and say which sentences no
     # restatement claimed.
     attached = attach_sentences_and_coverage(
-        cell_report.read_text(encoding="utf-8"), sentences, target,
-        marked_copy_kept, full_run_class_name, question_4_section)
+        new_words_answer.report_text_without_answer, sentences, target,
+        marked_copy_kept, full_run_class_name, question_4_section + new_words_section)
     if edit_changed_ids or edit_removed_units:
         attached += (f"- The reviewer was told what the edit did: sentences added or "
                      f"changed, {len(edit_changed_ids)}; text removed or replaced, "
@@ -1934,14 +1970,15 @@ def main() -> int:
             full_run_class_name=full_run_class_name, bare_references=bare_references,
             launch_sha256=launch_sha256, on_records_route=on_records_route,
             question_4_cell=question_4_cell, edit_changed_ids=edit_changed_ids,
-            edit_removed_units=edit_removed_units)
+            edit_removed_units=edit_removed_units, scratch=pathlib.Path(scratch))
         try:
             quota_error_line = ""
             for attempt in range(1, FAST_READ_ATTEMPTS + 1):  # pragma: no mutate, FAST_READ_ATTEMPTS is even, so | 1 gives + 1
                 exit_code, output = run_one_fast_clarify_cell(
                     AGY_CELL_LAUNCHER, marked_copy, cell_report, prompt_file)
                 if exit_code == 0:
-                    return fast_read_report_finish_and_print_path(**finish, backup_line="")
+                    return fast_read_report_finish_and_print_path(
+                        **finish, backup_line="", word_check_launcher=AGY_CELL_LAUNCHER)
                 gemini_cause = cold_read_cell_reviewer_launcher_failure_cause_line(
                     AGY_CELL_LAUNCHER, exit_code, output)
                 if exit_code == EXIT_BAD_INVOCATION:
@@ -1970,7 +2007,7 @@ def main() -> int:
                 CLAUDE_CELL_LAUNCHER, marked_copy, cell_report, prompt_file)
             if exit_code == 0:
                 return fast_read_report_finish_and_print_path(
-                    **finish,
+                    **finish, word_check_launcher=CLAUDE_CELL_LAUNCHER,
                     backup_line=(f"{SONNET_BACKUP_HASHTAG} The Gemini fast-clarify cell "
                                  f"failed ({gemini_cause}), so {SONNET_BACKUP_MODEL} read "
                                  "this document instead, as the provenance stamp says."),
