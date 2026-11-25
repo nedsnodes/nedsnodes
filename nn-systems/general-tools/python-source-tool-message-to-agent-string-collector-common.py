@@ -11,8 +11,8 @@ keyword of that parameter; a string in a raise statement; a string
 assigned to a name ending in one of AGENT_STRING_NAME_SUFFIXES, or in one of
 them followed by S; the value, in a dict literal, of one of
 TOOL_MESSAGE_TO_AGENT_HOOK_OUTPUT_KEYS, the keys through which a Claude Code hook's JSON
-output reaches the agent, when that value is a string-building expression, as a local name's
-binding below may be, or a name assigned a string once at module level; and the module docstring of a file
+output reaches the agent, when that value is a text-building expression, as text_building_parts
+says and a local name's binding below may be, or a name assigned a string once at module level; and the module docstring of a file
 whose source holds the text __doc__ anywhere, comments and strings included,
 since argparse prints __doc__ for --help. A string written in a function's return statement is a message too when a
 call of that function, by its bare name, reaches one of the forms above the way a local name
@@ -47,7 +47,7 @@ non-empty string literal, an f-string, a + chain holding a string literal, a str
 % something or a string literal's join, or a + chain, a % or a .format call that gives a module string
 constant's name as text, as START + END does, as text_building_parts says, or to a conditional expression with
 such a branch, and the name reaches one of the forms above, or a return statement that returns the name or
-a string built from it, directly or through another such local name; each binding is then
+a string built from it, as text_building_parts says, directly or through another such local name; each binding is then
 an entry at its own lines, labelled with the name, and only the binding's string-building
 branches are read. A conditional expression's condition is not read, in a binding or at a
 form, so its strings and names are not text. A local name that a return statement returns,
@@ -588,6 +588,10 @@ class AgentFacingStringNodeCollector(ast.NodeVisitor):
     visit_AnnAssign = visit_assignment_value
     visit_AugAssign = visit_assignment_value
 
+    def builds_text(self, expression):
+        return bool(text_building_parts(expression, self.rendered_module_string_values,
+                                        self.text_carrying_parameters))
+
     def visit_Dict(self, node):
         for key, value in zip(node.keys, node.values):
             if not (isinstance(key, ast.Constant) and key.value in TOOL_MESSAGE_TO_AGENT_HOOK_OUTPUT_KEYS):
@@ -598,7 +602,7 @@ class AgentFacingStringNodeCollector(ast.NodeVisitor):
                     pass  # A comprehension's own target: neither the function's local nor the module's constant.
                 elif self.enclosing_local_string_bindings and value.id in self.enclosing_local_string_bindings[-1]:
                     self.collect_local_strings_reaching(value)
-            elif string_building_parts(value):
+            elif self.builds_text(value):
                 self.collect_sink_expression(value, label)
             self.collect_module_constants_named(value)
         self.generic_visit(node)
@@ -611,7 +615,7 @@ class AgentFacingStringNodeCollector(ast.NodeVisitor):
             self.collect_module_constants_named(node.value, "prompt" if is_prompt else "message")
             self.function_names_called_for_text.update(function_names_called_for_text(node.value))
         # A local returned inside a list, a tuple or a call is data, such as a command's argument.
-        if isinstance(node.value, ast.Name) or (node.value is not None and string_building_parts(node.value)):
+        if isinstance(node.value, ast.Name) or (node.value is not None and self.builds_text(node.value)):
             self.collect_local_strings_reaching(node.value, is_prompt=is_prompt)
         self.generic_visit(node)
 
@@ -624,22 +628,16 @@ def is_string_expression(expression):
         isinstance(expression, ast.Constant) and isinstance(expression.value, str))
 
 
-def string_building_parts(expression):
-    """The parts of the expression that build a string: the expression itself when it is a
-    non-empty string literal, an f-string, a + chain with a string literal or f-string among its
-    operands, a string literal % something, or a string literal's join; and such parts among the branches of a
-    conditional expression, its condition left out."""
-    if isinstance(expression, ast.IfExp):
-        return [*string_building_parts(expression.body), *string_building_parts(expression.orelse)]
+def is_string_built_from_a_literal(expression):
+    """A non-empty string literal, an f-string, a + chain with a string literal or f-string among
+    its operands, a string literal % something, or a string literal's join."""
     if isinstance(expression, ast.BinOp) and isinstance(expression.op, ast.Add):
-        builds = any(is_string_literal_node(operand) for operand in addition_chain_operands(expression))
-    elif isinstance(expression, ast.BinOp) and isinstance(expression.op, ast.Mod):
-        builds = is_string_literal_node(expression.left)
-    elif isinstance(expression, ast.Constant):
-        builds = isinstance(expression.value, str) and expression.value != ""
-    else:
-        builds = isinstance(expression, ast.JoinedStr) or is_join_on_string_literal(expression)
-    return [expression] if builds else []
+        return any(is_string_literal_node(operand) for operand in addition_chain_operands(expression))
+    if isinstance(expression, ast.BinOp) and isinstance(expression.op, ast.Mod):
+        return is_string_literal_node(expression.left)
+    if isinstance(expression, ast.Constant):
+        return isinstance(expression.value, str) and expression.value != ""
+    return isinstance(expression, ast.JoinedStr) or is_join_on_string_literal(expression)
 
 
 def is_join_on_string_literal(expression):
@@ -946,15 +944,20 @@ def nodes_in_own_scope(function):
 
 
 def text_building_parts(expression, module_string_values, text_carrying_parameters):
-    """The parts of the expression that build text: those string_building_parts names, and a +
-    chain, a % or a .format call that name_nodes_given_as_text finds giving a module string
-    constant's name, as START + END does; among a conditional expression's branches, its condition
-    left out. A bare name is an alias, such as mode = MODE, which may be compared later, and a list
-    or tuple is data, such as a command's words."""
+    """The parts of the expression that build text, the one test every local binding, followed
+    return and hook output value is read by: a string built from a literal, as
+    is_string_built_from_a_literal says, and a + chain, a % or a .format call that
+    name_nodes_given_as_text finds giving a module string constant's name, as START + END and
+    line + END do; among a conditional expression's branches, its condition left out. A bare name
+    is an alias, such as mode = MODE, which may be compared later, and a list or tuple, or a +
+    chain holding one, is data, such as a command's words in ["python3", FLAG] + args."""
     if isinstance(expression, ast.IfExp):
         return [*text_building_parts(expression.body, module_string_values, text_carrying_parameters),
                 *text_building_parts(expression.orelse, module_string_values, text_carrying_parameters)]
-    if string_building_parts(expression):
+    if any(isinstance(operand, (ast.List, ast.Tuple, ast.Set, *COMPREHENSION_TYPES))
+           for operand in addition_chain_operands(expression)):
+        return []
+    if is_string_built_from_a_literal(expression):
         return [expression]
     if not ((isinstance(expression, ast.BinOp) and isinstance(expression.op, (ast.Add, ast.Mod)))
             or format_receiver_name(expression) is not None):

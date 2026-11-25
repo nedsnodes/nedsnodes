@@ -890,6 +890,23 @@ check("recognized: a module string constant in the value of a name ending in a s
       [(entry["text"], entry["label"], entry["collected_string_is_module_constant_whose_value_also_steers_the_program"])
        for entry in found if entry["label"] == "NOTE ="] == [("try again", "NOTE =", False)], found)
 
+for case_name, source in (
+        ("a followed return of a local + a module string constant",
+         'START = "s"\nEND = "e"\ndef msg():\n    line = START + END\n    return line + END\n'
+         'def main():\n    print(msg())\n'),
+        ("a hook output value of a local + a module string constant",
+         'import json\nSTART = "s"\nEND = "e"\ndef main():\n    line = START + END\n'
+         '    print(json.dumps({"reason": line + END}))\n')):
+    found = entries(source)
+    check(f"recognized, unmarked: module string constants reaching {case_name}",
+          sorted((entry["label"], entry["collected_string_is_module_constant_whose_value_also_steers_the_program"])
+                 for entry in found) == [("END =", False), ("START =", False)], found)
+
+found = texts('FLAG = "--check"\ndef command(args):\n    cmd = ["python3", FLAG] + args\n    return cmd\n'
+              'def main(args):\n    print(command(args))\n')
+check("not recognized: a local bound to a list + more words, returned and printed",
+      not ({"python3", "--check"} & set(found)), found)
+
 WALK_ME_THROUGH_CLOSE_PATH = (Path(__file__).resolve().parents[2] / "skills" / "walk-me-through"
                               / "walk-me-through-answer-added-texts-cold-read-fast-read-check-and-close.py")
 labels = [entry["label"] for entry in collector.tool_message_to_agent_string_nodes_in_source(
