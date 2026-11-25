@@ -43,9 +43,8 @@ is main's last tested commit: the newest commit on the merge commit's
 first-parent line that after-merge-test-run-passed-main-commits.txt, in the
 worktrees and outputs directory, names. The diff from that commit holds every
 merge since main was last tested, so a change to a file under the runner's
-EVERY_SUITE_RUNS_WHEN_THESE_CHANGE still runs every suite, while a merge of a
-branch that started long ago no longer brings in changes main has already
-tested. When that file names no such commit, cannot be read, or git cannot
+EVERY_SUITE_RUNS_WHEN_THESE_CHANGE still runs every suite, while a change main
+merged and tested before that commit selects nothing. When that file names no such commit, cannot be read, or git cannot
 list the first-parent line, <since> is the nn-head-commit, which predates
 main's newer merges and so selects more suites, never fewer; the program prints
 that it fell back. When the runner exits 0 with a SUMMARY line, the program

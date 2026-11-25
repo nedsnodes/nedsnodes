@@ -772,6 +772,31 @@ def main_last_tested_commit_cases(scratch):
               f"{first[:12]}, so a merge between them may not have been tested." in output,
           f"exit {exit_code}\n{output}\n{json.dumps(calls)}")
 
+    name = "passed-main-commits-file-appended-when-the-first-parent-is-main-last-tested"
+    exit_code, output, _, _, _ = run_case(
+        scratch, name, [(GATE_PASSED, 0)], default_routes(STACKED_AND_NOT), origin_files=files,
+        main_commits_after_the_first=history, before_the_program_runs=record_names(1),
+        head_test_run_test_logs=[("MERGED.txt", head_test_run_record("MERGED", 0))])
+    directory = scratch / name
+    _, runner_changed, merge_commit = main_commits(directory)
+    calls = runner_calls(scratch, name)
+    check("a passing run that selected since the head test run's commit appends the merge "
+          "commit when the merge commit's first parent is main's last tested commit",
+          exit_code == 0 and calls and calls[0]["argv"][1] == merged_commit(scratch, name)
+          and passed_main_commits_file(directory).read_text()
+          == f"{runner_changed}\n{merge_commit}\n",
+          f"exit {exit_code}\n{output}\n{json.dumps(calls)}")
+
+    name = "passed-main-commits-file-made-by-the-first-passing-run"
+    exit_code, output, _, _, _ = run_case(
+        scratch, name, [(GATE_PASSED, 0)], default_routes(STACKED_AND_NOT))
+    record = passed_main_commits_file(scratch / name)
+    check("with no passed main commits file, a passing run selects since the head commit and "
+          "makes the file, holding only the merge commit",
+          exit_code == 0 and runner_calls(scratch, name)[0]["argv"][1] == HEAD
+          and record.exists() and record.read_text() == f"{origin_commit(scratch, name)}\n",
+          f"exit {exit_code}\n{output}")
+
     def record_names_a_commit_off_main(directory):
         record = passed_main_commits_file(directory)
         record.parent.mkdir(parents=True, exist_ok=True)
