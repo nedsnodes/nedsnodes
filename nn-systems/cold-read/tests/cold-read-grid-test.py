@@ -1864,6 +1864,54 @@ try:
           and "git status failed when it checked (injected git status failure)" in lines[0],
           repr(lines))
 
+    # Git's dubious-ownership message runs over several lines; printed as given, its later
+    # lines would sit where the agent's Monitor shows the instruction.
+    def failing_working_tree_state_with_several_lines():
+        raise grid_module.cell_common.WriteDetectorUnavailable(
+            "fatal: detected dubious ownership in repository\nTo add an exception, run:\n\n"
+            "\tgit config --global --add safe.directory /somewhere")
+
+    grid_module.cell_common.working_tree_state = failing_working_tree_state_with_several_lines
+    try:
+        several_lines_reason_lines = grid_module.stopped_cells_write_check_lines(
+            [scratch / "claude-hunt-deep.md"], set(), None, set())
+    finally:
+        grid_module.cell_common.working_tree_state = real_working_tree_state
+    several_lines_printed = "\n".join(several_lines_reason_lines).splitlines()
+    check("a git error of several lines stays on the WRITE CHECK DID NOT RUN line, "
+          "so the next line is the instruction",
+          len(several_lines_printed) == 2
+          and "dubious ownership in repository To add an exception, run: git config" in several_lines_printed[0]
+          and several_lines_printed[1].startswith("Before you do anything else"),
+          repr(several_lines_printed))
+
+    # Git's -z output keeps a newline in a path; the STRAY WRITE line and its undo command
+    # must each stay one line, and the command must still name that one file.
+    newline_repository = (scratch / "checkout-stopped-cell-writes-a-path-with-a-newline").resolve()
+    newline_repository.mkdir()
+    subprocess.run(["git", "-C", str(newline_repository), "init", "--quiet"], check=True)
+    (newline_repository / "seed.md").write_text("Seed.\n", encoding="utf-8")
+    subprocess.run(["git", "-C", str(newline_repository), "add", "seed.md"], check=True)
+    subprocess.run(["git", "-C", str(newline_repository), "-c", "user.name=grid test",
+                    "-c", "user.email=grid-test@example.invalid", "commit", "--quiet", "-m", "seed"],
+                   check=True)
+    with mock.patch.object(grid_module.cell_common, "REPO_ROOT", newline_repository):
+        newline_baseline = grid_module.cell_common.working_tree_state()
+        (newline_repository / "stray\nwrite's.md").write_text("Stray.\n", encoding="utf-8")
+        newline_lines = grid_module.stopped_cells_write_check_lines(
+            [scratch / "claude-hunt-deep.md"], newline_baseline, None, set())
+    newline_printed = "\n".join(newline_lines).splitlines()
+    newline_commands = re.findall(r"`(rm -r -- [^`]*)`", newline_printed[-1]) if newline_printed else []
+    check("a path holding a newline gives a STRAY WRITE line and an undo line, one line each",
+          len(newline_printed) == 2
+          and newline_printed[0].startswith("STRAY WRITE: $'stray\\x0awrite\\'s.md' changed")
+          and len(newline_commands) == 1, repr(newline_printed))
+    if newline_commands:
+        subprocess.run(["bash", "-c", newline_commands[0]], check=True)
+    check("the one-line undo command deletes the file whose path holds a newline",
+          not (newline_repository / "stray\nwrite's.md").exists()
+          and (newline_repository / "seed.md").exists(), repr(newline_commands))
+
     # A stopped cell that moves a file the agent had already edited: restoring or deleting the
     # destination would delete it, and the agent's edits with it. Git pairs the move as a
     # rename only for a `git mv` of similar content, and a cell may re-create the old name,
