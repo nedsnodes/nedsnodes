@@ -243,7 +243,7 @@ HASHTAG_MARKER = re.compile(r"^#\w+\s+")
 EMPHASIS_AND_SPACING = re.compile(r"[\s*_#>`]+")
 ANSWER_LINE_START = "answer a to approve"
 
-# The prompt, schema and system prompt the 2026-11-25 benchmark scored as `labeller-one`, word for word.
+# The user approved these three as a benchmark scored them, word for word; a change to any needs a new score.
 MODEL_SCHEMA = {"type": "object", "required": ["labels"], "properties": {"labels": {"type": "array", "items": {
     "type": "object", "required": ["id", "ask", "reason"],
     "properties": {"id": {"type": "string"}, "ask": {"type": "boolean"}, "reason": {"type": "string"}}}}}}
