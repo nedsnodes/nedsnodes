@@ -77,7 +77,7 @@ the older "- [Pn] ...", of the report of each run that exited 0:
   of FINDING_CATEGORIES or "does-not-hold", which alone also takes a one-line "reason".
   The program refuses a finding with no grade, a grade for no finding on this commit, and
   a must-fix-now, fix-next, fix-in-maintenance or file-for-later grade with no comment of that
-  finding_category whose body holds the finding's id, since the fix-round program and the
+  finding_category whose body names the finding as "Codex finding <id>", since the fix-round program and the
   after-merge follow-up program read findings only from comments. It adds the grades to
   the posted body under a heading. Two findings of one report with the same priority and
   heading text get one id, and one grade answers both;
@@ -252,23 +252,23 @@ NO_CODEX_RUN_RECORD = (
     "Then run this posting command again.")
 CODEX_GRADE_WITH_NO_COMMENT = (
     "review not posted: the review file {path} grades {count} Codex finding(s) must-fix-now, fix-next, "
-    "fix-in-maintenance or file-for-later, but has no comment of that \"finding_category\" whose \"body\" holds the "
-    "finding's id:\n{findings}\n"
+    "fix-in-maintenance or file-for-later, but has no comment of that \"finding_category\" whose \"body\" names the "
+    "finding as \"Codex finding <id>\":\n{findings}\n"
     "The programs that act on such findings, "
     "scripts/pull-request-fix-round-author-brief-from-blocking-findings-and-one-commit-every-finding-answered-check.py "
     "and scripts/pull-request-follow-up-request-after-merge-finding-answers-and-next-step.py, read findings "
     "only from comments, so the grade alone would leave the finding unacted on.\n"
     "For each finding listed, add to \"comments\" an entry like the others, with \"path\", \"line\", "
-    "\"body\" and \"finding_category\", the category being the grade and the body holding the id anywhere, "
-    "as in \"... (Codex finding <id>)\".\n"
+    "\"body\" and \"finding_category\", the category being the grade and the body naming the finding "
+    "anywhere as \"Codex finding <id>\", such as \"... (Codex finding <id>)\".\n"
     "If the finding does not hold after all, change its grade to does-not-hold with a one-line \"reason\" "
     "instead.\n"
     "Then run this posting command again.\n"
     "From now on, give every Codex finding you grade must-fix-now, fix-next, fix-in-maintenance or "
-    "file-for-later a comment of that category naming its id.")
-# How a comment names the Codex finding it carries; restated findings are compared without it, because a
-# finding's id changes when its line range does.
-CODEX_FINDING_ID_MARK_IN_REVIEW_COMMENT_PATTERN = re.compile(r" ?\(?Codex finding [0-9a-f]{12}\)?")
+    "file-for-later a comment of that category naming it as \"Codex finding <id>\".")
+# How a comment names the Codex finding it carries, the only form the grade check accepts; restated findings are
+# compared without it, because a finding's id changes when its line range does.
+CODEX_FINDING_ID_MARK_IN_REVIEW_COMMENT_PATTERN = re.compile(r" ?\(?Codex finding ([0-9a-f]{12})\)?")
 REVIEW_TIER_UNREADABLE = (
     "review not posted: no Codex run record names commit {head}, and its review tier could not be read "
     "from {program}: {reason}\n"
@@ -519,7 +519,8 @@ def body_with_codex_answers(body, comments, answers, findings, plan, number, hea
     if not findings:
         return body
     uncommented = [finding for finding in findings if grades[finding]["grade"] in FINDING_CATEGORIES
-                   and not any(comment["finding_category"] == grades[finding]["grade"] and finding in comment["body"]
+                   and not any(comment["finding_category"] == grades[finding]["grade"]
+                               and finding in CODEX_FINDING_ID_MARK_IN_REVIEW_COMMENT_PATTERN.findall(comment["body"])
                                for comment in comments)]
     if uncommented:
         raise CodexRunRecordUnusable(CODEX_GRADE_WITH_NO_COMMENT.format(

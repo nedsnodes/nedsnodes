@@ -271,11 +271,11 @@ def main():
               "to 5, and exits 0",
               completed.returncode == 0 and ran_in_order_then_together(calls, STEPS), detail)
         check("each step gets the one head and main commit, the filled-in copy, the merge "
-              "base as the Codex base, and both directory options",
+              "base as the Codex base, the head as the Codex step's expected head, and both directory options",
               [argv_of(calls, step) for step in STEPS] == [
                   ["7", head_commit, main_commit, *directory_options],
                   [str(filled_in_file), *directory_options],
-                  ["7", merge_base, *directory_options],
+                  ["7", merge_base, "--expected-head-commit", head_commit, *directory_options],
                   ["7", "--head-commit", head_commit, "--main-commit", main_commit, *directory_options],
                   ["7", "7a", head_commit, *directory_options]], detail)
         filled_in = json.loads(filled_in_file.read_text()) if filled_in_file.exists() else None
@@ -316,10 +316,11 @@ def main():
                                           "reviewed_before": head_reviewed_before[:10]}],
             "--head-commit-reviewed-before", head_reviewed_before[:12])
         detail = f"exit {completed.returncode}\n{completed.stdout}{completed.stderr}\n{calls}"
-        check("a fix-round's Codex base is the full nn-head-commit reviewed before, and "
-              "abbreviated commits in the file and the option are accepted",
+        check("a fix-round's Codex base is the full nn-head-commit reviewed before, its expected head the "
+              "full head commit, and abbreviated commits in the file and the option are accepted",
               completed.returncode == 0 and len(calls) == 5
-              and argv_of(calls, STEPS[2]) == ["7", head_reviewed_before, *directory_options]
+              and argv_of(calls, STEPS[2]) == ["7", head_reviewed_before, "--expected-head-commit", head_commit,
+                                               *directory_options]
               and "(nn-head-commit reviewed before)" in completed.stdout, detail)
         filled_in = json.loads(filled_in_file.read_text())
         check("a head named in the file is replaced by its full commit in the filled-in copy",
@@ -382,7 +383,7 @@ def main():
                   and all(other in completed.stdout for other in others)
                   and "never met the other steps" not in completed.stdout
                   and completed.stdout.count("nothing was merged.") == 1, detail)
-            expected_arguments = {3: ["7", merge_base], 4: ["7", "--head-commit", head_commit, "--main-commit", main_commit],
+            expected_arguments = {3: ["7", merge_base, "--expected-head-commit", head_commit], 4: ["7", "--head-commit", head_commit, "--main-commit", main_commit],
                                   5: ["7", "7a", head_commit]}
             rerun_line = (f"  step {position}: "
                           + shlex.join([sys.executable, str(checkout / "scripts" / step),
@@ -850,7 +851,7 @@ def main():
         check("a fix-round whose head does not descend from the nn-head-commit reviewed before "
               "gets the merge base with main as its Codex base",
               completed.returncode == 0
-              and argv_of(calls, STEPS[2]) == ["7", merge_base, *directory_options]
+              and argv_of(calls, STEPS[2])[:2] == ["7", merge_base]
               and "(merge base, because the head does not descend from the nn-head-commit "
                   "reviewed before)" in completed.stdout,
               f"exit {completed.returncode}\n{completed.stdout}{completed.stderr}\n{calls}")

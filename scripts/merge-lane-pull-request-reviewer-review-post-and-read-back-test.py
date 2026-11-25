@@ -269,13 +269,6 @@ def merge_lane_review_page(review_id, state, submitted_at):
             "commit_id": HEAD, "submitted_at": submitted_at}
 
 
-def posting_program_finding_categories():
-    spec = importlib.util.spec_from_file_location("posting_program_categories", PROGRAM)
-    module = importlib.util.module_from_spec(spec)
-    spec.loader.exec_module(module)
-    return module.FINDING_CATEGORIES
-
-
 def codex_finding_id(priority, text):
     return hashlib.sha256(f"{priority}\0{text}".encode("utf-8")).hexdigest()[:12]
 
@@ -303,27 +296,26 @@ def codex_finding_grade_cases(scratch):
     check("one ungraded finding among graded ones is refused and named",
           result.code == 2 and "1 Codex finding(s)" in result.stderr and second_id in result.stderr
           and f"- {first_id}:" not in result.stderr, result.detail)
-    commented = [finding(2, "fix-next", f"Keep the error ({first_id}).")]
-    result = run_program(scratch, graded(merge_lane_codex_review_finding_grades=all_grades),
-                         arguments=MERGE_LANE_ARGUMENTS, codex_runs=runs)
-    check("a fix-next Codex grade with no comment naming the finding is refused before GitHub, naming it",
-          result.code == 2 and not result.calls and "1 Codex finding(s)" in result.stderr
-          and f"- {first_id}: fix-next: {first}" in result.stderr and second_id not in result.stderr, result.detail)
+    commented = [finding(2, "fix-next", f"Keep the error (Codex finding {first_id}).")]
     for name, comments in (
-            ("a comment of another category", [finding(2, "file-for-later", f"Keep the error ({first_id}).")]),
-            ("a fix-next comment about something else", [finding(2, "fix-next", "Another finding.")])):
+            ("a comment of another category", [finding(2, "file-for-later", f"Keep the error (Codex finding {first_id}).")]),
+            ("a fix-next comment about something else", [finding(2, "fix-next", "Another finding.")]),
+            ("a fix-next comment naming the id without \"Codex finding\"",
+             [finding(2, "fix-next", f"Keep the error ({first_id}).")])):
         result = run_program(scratch, graded(comments=comments, merge_lane_codex_review_finding_grades=all_grades),
                              arguments=MERGE_LANE_ARGUMENTS, codex_runs=runs)
         check(f"a fix-next Codex grade whose only comment is {name} is refused",
-              result.code == 2 and not result.calls and "holds the finding's id" in result.stderr, result.detail)
-    for grade in posting_program_finding_categories():
+              result.code == 2 and not result.calls and "names the finding as \"Codex finding <id>\"" in result.stderr, result.detail)
+    for grade in load_posting_program().FINDING_CATEGORIES:
         result = run_program(scratch, graded(merge_lane_codex_review_finding_grades=[
             {"finding": first_id, "grade": grade}, all_grades[1]]), arguments=MERGE_LANE_ARGUMENTS, codex_runs=runs)
-        check(f"a {grade} Codex grade with no comment is refused, since a program after the post "
-              "reads that grade only from comments",
-              result.code == 2 and not result.calls and "holds the finding's id" in result.stderr, result.detail)
+        check(f"a {grade} Codex grade with no comment is refused before GitHub, naming that one finding, since a "
+              "program after the post reads that grade only from comments",
+              result.code == 2 and not result.calls and "names the finding as \"Codex finding <id>\"" in result.stderr
+              and "1 Codex finding(s)" in result.stderr and f"- {first_id}: {grade}: {first}" in result.stderr
+              and second_id not in result.stderr, result.detail)
     result = run_program(scratch, graded(
-        comments=[finding(2, "file-for-later", f"Keep the error ({first_id}).")],
+        comments=[finding(2, "file-for-later", f"Keep the error (Codex finding {first_id}).")],
         merge_lane_codex_review_finding_grades=[{"finding": first_id, "grade": "file-for-later"}, all_grades[1]]),
         arguments=MERGE_LANE_ARGUMENTS, codex_runs=runs)
     check("a file-for-later Codex grade with a file-for-later comment naming it posts",
@@ -338,16 +330,12 @@ def codex_finding_grade_cases(scratch):
               f"- {second_id} (P3): does-not-hold, The line is unreachable.: {second}")
           and set(result.posted) == {"commit_id", "event", "body", "comments"}, result.detail)
     blocked =[{"finding": first_id, "grade": "must-fix-now"}, all_grades[1]]
-    result = run_program(scratch, graded(merge_lane_codex_review_finding_grades=blocked), arguments=MERGE_LANE_ARGUMENTS,
-                         codex_runs=runs)
-    check("a must-fix-now Codex grade with no must-fix-now comment is refused",
-          result.code == 2 and not result.calls and "holds the finding's id" in result.stderr, result.detail)
     result = run_program(scratch, graded("REQUEST_CHANGES", [finding(2, "must-fix-now")],
                                          merge_lane_codex_review_finding_grades=blocked),
                          arguments=MERGE_LANE_ARGUMENTS, codex_runs=runs)
     check("a must-fix-now Codex grade whose only must-fix-now comment is about something else is refused",
           result.code == 2 and not result.calls and f"- {first_id}: must-fix-now" in result.stderr, result.detail)
-    result = run_program(scratch, graded("REQUEST_CHANGES", [finding(2, "must-fix-now", f"Keep the error ({first_id}).")],
+    result = run_program(scratch, graded("REQUEST_CHANGES", [finding(2, "must-fix-now", f"Keep the error (Codex finding {first_id}).")],
                                          merge_lane_codex_review_finding_grades=blocked),
                          arguments=MERGE_LANE_ARGUMENTS, codex_runs=runs)
     found = fix_round_blocking_findings(load_fix_round_program(), [result.posted]) if result.posted else None

@@ -20,7 +20,8 @@ and stderr go to the same directory.
 The same directory also gets codex-review-run-record.json, holding
 "pull_request", "head_commit", "base_commit", "exit_code" and "report_file".
 It is removed before the run and written after it, so a run that was killed
-leaves none. A second run for the same pull request and base always replaces
+leaves none; a run refused because pr<n>-head's commit could not be read or is
+not --expected-head-commit leaves the earlier record as it was. A second run for the same pull request and base always replaces
 the first run's record, so after a rerun that fails the posting program no
 longer sees the first run's findings and asks no grade for them; it replaces
 the report only when Codex ran, so a rerun stopped before Codex starts, by a
@@ -81,12 +82,6 @@ def main(argv=None):
     outputs.mkdir(parents=True, exist_ok=True)
     environment = run_all_test_suites.environment_without_git_redirecting_variables()
     record = outputs / common.CODEX_REVIEW_RUN_RECORD_FILE_NAME
-    try:
-        record.unlink(missing_ok=True)
-    except OSError as error:
-        print(f"PR {number}: Codex review not run: could not remove the earlier run record "
-              f"{record}: {error}\nFix the cause, then run this again.")
-        return 2
     head = subprocess.run(
         ["git", "-C", str(common.pull_request_head_worktree(arguments, number)), "rev-parse",
          "--verify", "HEAD^{commit}"],
@@ -102,6 +97,12 @@ def main(argv=None):
               f"{head.stdout.strip()}, not {arguments.expected_head_commit}, so the review would "
               f"record the wrong commit.\nRebuild the pull request's worktrees at "
               f"{arguments.expected_head_commit}, then run this again.")
+        return 2
+    try:
+        record.unlink(missing_ok=True)
+    except OSError as error:
+        print(f"PR {number}: Codex review not run: could not remove the earlier run record "
+              f"{record}: {error}\nFix the cause, then run this again.")
         return 2
     exit_code = codex_review_exit_code(arguments, outputs, environment)
     temporary = record.with_name(f"{record.name}.{os.getpid()}.tmp")
