@@ -39,3 +39,7 @@ When a walk-document line opens with `#NEW text`, the question Stop hook accepts
 ## Source
 
 merge-lane-3 graded this finding file-for-later in its review of [PR 4695](https://github.com/nedsnodes/nedsnodes/pull/4695), from the mac-claude reviewer's inline comment at the hook's line 560.
+
+## Outcome
+
+[PR 4724](https://github.com/nedsnodes/nedsnodes/pull/4724), "Walk #new marks: the hook and the check program read them with one shared pattern", merged on 2026-11-25 as b0a67a66. The short-answer hook and the walk check program now read `#new` and `#new_if_d` marks with one shared pattern, `APPROVAL_WALK_ITEM_NEW_TEXT_MARK_LINE_PATTERN`. merge-lane-1 ran step 4 over 8642 walk-documents holding 21708 `#new` lines, and no line reads differently. Four fix-in-maintenance findings from its review went to its author as follow-ups: the check program keeps the alias `NEW_LINE`, which step 2 asked to remove; the agreement test leaves out the `#NEW_IF_D x` row; mark lines inside HTML comments are still read; and the check program loads the finder twice per run.
