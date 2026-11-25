@@ -718,6 +718,30 @@ def newest_main_commit_left_no_test_failing_cases(scratch):
               f"one given, {merged[:12]}" in output,
           f"exit {exit_code}\n{output}\n{calls}")
 
+    # The merge commit's runner exists but cannot be read, as when its permissions deny reading.
+    real_read_text = Path.read_text
+
+    def runner_unreadable(path, *args, **kwargs):
+        if path.name == "run-all-test-suites.py":
+            raise PermissionError(13, "Permission denied", str(path))
+        return real_read_text(path, *args, **kwargs)
+
+    Path.read_text = runner_unreadable
+    try:
+        exit_code, output, calls, parent, merge_commit, recorded = case(
+            "no-test-failing-at-parent-and-runner-unreadable", "PARENT\n",
+            head_test_run_test_logs=[("MERGED.txt", head_test_run_record("MERGED", 0))])
+    finally:
+        Path.read_text = real_read_text
+    merged = merged_commit(scratch, "no-test-failing-at-parent-and-runner-unreadable")
+    check("when the test runner at the merge commit cannot be read, the after-merge test run "
+          "leaves it to the run, comparing with both commits, instead of stopping in a traceback",
+          exit_code == 0 and len(calls) == 1
+          and calls[0]["argv"][:4] == ["--only-suites-whose-recorded-inputs-changed-since", parent,
+                                       "--only-suites-whose-recorded-inputs-changed-since", merged]
+          and "alone after all" not in output,
+          f"exit {exit_code}\n{output}\n{calls}")
+
     exit_code, output, calls, parent, merge_commit, recorded = case(
         "no-test-failing-at-parent-and-head-test-run-failed", "PARENT\n",
         head_test_run_test_logs=[("MERGED.txt", head_test_run_record("MERGED", 1))])

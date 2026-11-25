@@ -1272,9 +1272,13 @@ def after_merge_test_run(arguments, merge_commit, base_branch):
               f"run passed on, so a suite runs only when both comparisons select it")
     worktree_runner = worktree / "scripts" / "run-all-test-suites.py"
     # A runner that is missing or cannot be read is left to the run below, which reports it.
-    if (len(compared_with) > 1 and worktree_runner.is_file()
+    try:
+        worktree_runner_text = worktree_runner.read_text(encoding="utf-8", errors="replace")
+    except OSError:
+        worktree_runner_text = None
+    if (len(compared_with) > 1 and worktree_runner_text is not None
             and TEST_RUNNER_SOURCE_LINE_WHOSE_PRESENCE_SHOWS_THE_RUNNER_SELECTS_SUITES_SINCE_EVERY_COMMIT_GIVEN
-            not in worktree_runner.read_text(encoding="utf-8", errors="replace")):
+            not in worktree_runner_text):
         print(f"comparing with {compared_with[0][:12]} alone after all: the test runner at the "
               f"merge commit predates comparing with several commits, and would keep only the "
               f"last one given, {compared_with[-1][:12]}")
