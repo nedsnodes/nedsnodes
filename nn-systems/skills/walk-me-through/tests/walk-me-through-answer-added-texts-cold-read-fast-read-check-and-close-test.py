@@ -5656,6 +5656,24 @@ def test_every_fast_read_is_run_without_question_4():
     check("the read ahead and the read of a waiting item are each run with --without-question-4",
           len(read_ahead) == 1 and len(waiting) == 1
           and all("--without-question-4" in arguments for arguments in read_ahead + waiting), repr(reads))
+    check("the read ahead and the read of a waiting item are each run with --approval-walk-item, and a fast read "
+          "of a text an answer adds is not",
+          all("--approval-walk-item" in arguments for arguments in read_ahead + waiting)
+          and not any("--approval-walk-item" in arguments for arguments, _ in added), repr(reads))
+
+
+def test_the_waiting_item_read_step_leaves_out_each_paragraph_holding_an_old_text_but_its_new_lines():
+    case = Case(document=marks_document(
+        'The page changes.\n\nOld: "The page lists two poems."\n\n**Old:** "It ends\nwith a list."\n'
+        '#new "It ends with one poem."\n\n#old "The title is long."\n\n#new "The page lists one poem."\n'))
+    result = case.run(WAITING_ITEM_READ_STEP_NAME)
+    read = case.calls.read_text()
+    check("the read step hands the reviewer the item without its `Old:` and `#old` paragraphs, keeping a `#new` "
+          "line that shares a paragraph with an old text",
+          result.returncode == 0 and read == (
+              '## Item 3 of 9: the opening sentence\n\nThe page changes.\n\n#new "It ends with one poem."\n\n'
+              '#new "The page lists one poem."\n\n#case_against weak: the page grows.\n\n'
+              'Recommendation: change it.\n'), described(result) + repr(read))
 
 
 def test_close_reads_the_item_after_the_next_one_ahead_and_the_read_step_uses_it():

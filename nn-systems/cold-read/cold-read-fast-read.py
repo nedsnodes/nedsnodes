@@ -265,6 +265,14 @@ check program,
 nn-systems/skills/walk-me-through/walk-me-through-answer-added-texts-cold-read-fast-read-check-and-close.py,
 passes it on every fast read it runs. A read run from the Mac on ned-box
 passes the option on to the read there.
+
+AN APPROVAL-WALK ITEM. With --approval-walk-item the prompt gets
+APPROVAL_WALK_ITEM_FAST_CLARIFY_PROMPT_PARAGRAPH, before its paragraph on where
+the report is written: it asks for the item's proposed texts to be read alone
+first, their findings first, and says that text on a branch is not expected
+on main. The walk check program passes it on the fast read of a whole item,
+whose old texts it has left out; a read run from the Mac on ned-box passes it
+on as it does --without-question-4.
 """
 
 from __future__ import annotations
@@ -397,6 +405,20 @@ Write your report to {REPORT_PATH}, once, when your analysis is complete. That f
 # heading included. The heading is also the report section's.
 WHAT_SHOULD_BE_CODE_QUESTION_REPORT_SECTION_HEADING = "## Question 4: What should be code"
 WITHOUT_QUESTION_4_OPTION = "--without-question-4"
+APPROVAL_WALK_ITEM_OPTION = "--approval-walk-item"
+APPROVAL_WALK_ITEM_FAST_CLARIFY_PROMPT_PARAGRAPH = (
+    "{TARGET_PATH} is one item of an approval-walk: it asks the user to approve a change. On each line that opens "
+    "with `#new` or `#new_if_d`, the text after that mark is a proposed text, which the change would add to a "
+    "document. The texts the change would replace were left out of your copy on purpose; do not report them "
+    "missing. Read each proposed text first as if it stood alone, without the item's other sentences to explain "
+    "it; then read the rest of the item. Under each of Questions 2 and 3, give the findings on the proposed texts "
+    "read alone under the heading `### The proposed texts read alone`, then the other findings under the heading "
+    "`### The rest of the item`, each heading's findings ordered most important first and numbered on from the "
+    "heading before; write \"No issues\" under a heading with none, and leave out both headings when the item has "
+    "no proposed text. Text that the item says is on a branch, or in a pull request not yet merged, is not "
+    "expected on main: that main lacks it is no finding.\n\n")
+# The paragraph above goes just before the template's paragraph that opens with these words.
+APPROVAL_WALK_ITEM_PARAGRAPH_GOES_BEFORE = "Write your report to {REPORT_PATH}"
 WITHOUT_QUESTION_4_SECTION_LINE = (
     f"Question 4 was not asked: this fast read was run with {WITHOUT_QUESTION_4_OPTION}.")
 WHAT_SHOULD_BE_CODE_QUESTION = WHAT_SHOULD_BE_CODE_QUESTION_REPORT_SECTION_HEADING + """
@@ -1414,17 +1436,24 @@ def cold_read_target_compare_with_base_text_returning_added_or_changed_sentence_
     return changed, removed
 
 
-def fast_clarify_prompt_with_edit_placeholders_filled(changed: list, removed: list) -> str:
-    """FAST_CLARIFY_PROMPT_TEMPLATE with the edit's two placeholders filled;
-    the launcher fills {TARGET_PATH} and {REPORT_PATH}. A removed unit that
-    holds either of those two placeholders has its brace JSON-escaped, so the
-    launcher leaves the quoted text as the base held it."""
+def fast_clarify_prompt_with_edit_placeholders_filled(changed: list, removed: list,
+                                                     approval_walk_item: bool = False) -> str:
+    """FAST_CLARIFY_PROMPT_TEMPLATE with the edit's two placeholders filled,
+    and with APPROVAL_WALK_ITEM_FAST_CLARIFY_PROMPT_PARAGRAPH when
+    approval_walk_item; the launcher fills {TARGET_PATH} and {REPORT_PATH}. A
+    removed unit that holds either of those two placeholders has its brace
+    JSON-escaped, so the launcher leaves the quoted text as the base held it."""
     def quoted(unit: str) -> str:
         text = json.dumps(unit, ensure_ascii=False)
         for placeholder in ("{TARGET_PATH}", "{REPORT_PATH}"):
             text = text.replace(placeholder, "\\u007b" + placeholder[1:])
         return text
-    return (FAST_CLARIFY_PROMPT_TEMPLATE
+    template = FAST_CLARIFY_PROMPT_TEMPLATE
+    if approval_walk_item:
+        template = template.replace(
+            APPROVAL_WALK_ITEM_PARAGRAPH_GOES_BEFORE,
+            APPROVAL_WALK_ITEM_FAST_CLARIFY_PROMPT_PARAGRAPH + APPROVAL_WALK_ITEM_PARAGRAPH_GOES_BEFORE, 1)
+    return (template
             .replace(CHANGED_SENTENCE_IDS_PLACEHOLDER,
                      ", ".join(f"[{name}]" for name in changed) or NOTHING_IN_THE_EDIT)
             .replace(REMOVED_TEXT_PLACEHOLDER,
@@ -1823,6 +1852,9 @@ def main() -> int:
         WITHOUT_QUESTION_4_OPTION, action="store_true",
         help="ask Questions 1 to 3 only; start no Question 4 cell")
     parser.add_argument(
+        APPROVAL_WALK_ITEM_OPTION, action="store_true",
+        help="the target is one approval-walk item: read its proposed texts alone first")
+    parser.add_argument(
         finding_outcomes.FINDING_OUTCOMES_RECORD_OPTION, metavar="COLD_READ_RECORD", type=pathlib.Path,
         help="instead of reading a document, record the outcome of every finding of the fast read report "
              "this cold-read-record directory holds, as the command a read prints says")
@@ -1874,7 +1906,8 @@ def main() -> int:
         return 1
     except NedBoxWorktreeUnreadableThroughMacMount as error:
         return cold_read_fast_read_run_on_ned_box_over_ssh(
-            error.ned_box_target, (WITHOUT_QUESTION_4_OPTION,) if args.without_question_4 else ())
+            error.ned_box_target, ((WITHOUT_QUESTION_4_OPTION,) if args.without_question_4 else ())
+            + ((APPROVAL_WALK_ITEM_OPTION,) if args.approval_walk_item else ()))
     except CheckoutRootUnreadable as error:
         print(f"{PROGRAM}: no fast read ran and no report was written: could "
               f"not tell which checkout holds the target, so could not tell "
@@ -1907,7 +1940,7 @@ def main() -> int:
     with tempfile.TemporaryDirectory(prefix="cold-read-fast-read-") as scratch:
         prompt_file = pathlib.Path(scratch) / EMBEDDED_PROMPT_FILE_NAME
         prompt_file.write_text(fast_clarify_prompt_with_edit_placeholders_filled(
-            edit_changed_ids, edit_removed_units), encoding="utf-8")
+            edit_changed_ids, edit_removed_units, args.approval_walk_item), encoding="utf-8")
         # What the reviewer actually reads: the cold-read-target with an id on
         # every sentence. On the records route it is kept beside the report,
         # as the evidence of what was put in front of the reviewer; on the

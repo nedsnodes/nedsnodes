@@ -3282,6 +3282,37 @@ with tempfile.TemporaryDirectory() as edit_scratch:
     edit_report = (edit_scratch / "scratch-checkout" / "cold-read-records"
                    / f"a-design-{FIXED_RECORD_STAMP_FOR_TESTS}" / "cold-read-fast-read.md")
 
+    # An approval-walk item: the reviewer reads its proposed texts alone first.
+    repository = build_scratch_repository(edit_scratch)
+    walk_item_relative = "docs/walk/a-walk-item-draft.md"
+    (repository / walk_item_relative).write_text(
+        "## Item 1 of 1: a change\n\n#new The page lists one poem.\n", encoding="utf-8")
+    walk_item_report = repository / "docs" / "walk" / "a-walk-item-cold-read-fast-read.md"
+    result = run_fast_read(
+        repository, edit_stubs,
+        {"*": {"report": "STUB FAST READ\n", "dump_prompt": str(edit_prompt)}},
+        walk_item_report, walk_item_relative, edit_counter,
+        options=("--without-question-4", "--approval-walk-item"))
+    received = edit_prompt.read_text(encoding="utf-8") if edit_prompt.is_file() else ""
+    check("with --approval-walk-item, the reviewer is told to read each proposed text alone first and give its "
+          "findings first under their own heading, and that text on a branch is not expected on main, before "
+          "where to write the report",
+          result.returncode == 0
+          and "Read each proposed text first as if it stood alone" in received
+          and "under the heading `### The proposed texts read alone`, then the other findings" in received
+          and "is not expected on main: that main lacks it is no finding." in received
+          and received.index("is not expected on main") < received.index("Write your report to"),
+          f"exit {result.returncode}; stderr={result.stderr[-300:]!r}; prompt={received[-1500:]!r}")
+    edit_prompt.unlink(missing_ok=True)
+    run_fast_read(
+        repository, edit_stubs,
+        {"*": {"report": "STUB FAST READ\n", "dump_prompt": str(edit_prompt)}},
+        walk_item_report, walk_item_relative, edit_counter, options=("--without-question-4",))
+    received = edit_prompt.read_text(encoding="utf-8") if edit_prompt.is_file() else ""
+    check("without --approval-walk-item, the prompt says nothing of proposed texts or branches",
+          received and "proposed text" not in received and "not expected on main" not in received,
+          repr(received[-500:]))
+
     # A tracked document changed since origin/main: the reviewer is told what changed.
     repository = build_scratch_repository(edit_scratch)
     (repository / design_relative).write_text(

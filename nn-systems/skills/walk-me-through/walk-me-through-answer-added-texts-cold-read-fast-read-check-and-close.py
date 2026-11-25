@@ -368,7 +368,10 @@ since no read ahead was started while item 1 was shown.
 APPROVAL-WALK-WAITING-ITEM-COLD-READ-FAST-READ gives the item the
 `#next_to_present` line names its cold-read-fast-read, as its text stands: the
 item's lines in the walk-document, heading and fenced code included, keyed by
-the sha256 of that text unchanged, whitespace included. It first refuses,
+the sha256 of that text unchanged, whitespace included. The reviewer is given
+that text without each paragraph holding a line that opens `Old:` or `#old`,
+all but its `#new` and `#new_if_d` lines, and the read is run with
+--approval-walk-item, as a read ahead is. It first refuses,
 as CHECK does and before it starts any read, an item with a `#new` or
 `#new_if_d` mark whose text would not be read whole; then it refuses, also
 before any read, an item whose text up to its first `###` sub-step, or one of
@@ -581,6 +584,7 @@ REPOSITORY_TOP = HERE.parents[2]
 WALK_FINDER_FILE = HERE / "walk-me-through-approval-walk-minutes-and-walk-document-item-finder-common.py"
 FAST_READ_PROGRAM = REPOSITORY_TOP / "nn-systems" / "cold-read" / "cold-read-fast-read.py"
 FAST_READ_WITHOUT_QUESTION_4_OPTION = "--without-question-4"
+FAST_READ_APPROVAL_WALK_ITEM_OPTION = "--approval-walk-item"
 RECORD_SHIPPER_FILE = REPOSITORY_TOP / "nn-systems" / "cold-read" / "cold-read-record-ship.py"
 RECORD_NAMES_FILE = REPOSITORY_TOP / "nn-systems" / "cold-read" / "cold-read-record-names-common.py"
 FINDING_OUTCOMES_COMMON_FILE = (REPOSITORY_TOP / "nn-systems" / "cold-read"
@@ -1175,6 +1179,7 @@ WALK_CATEGORY_TAG = "#approval_walk_item_in_category_"
 WALK_WAITS_ON_TAG = "#approval_walk_item_waits_on"
 WALK_FIRST_ENTERED_TAG = "#approval_walk_item_first_entered"
 LINE_OPENING_MARKERS = r"^\s*(?:(?:[-*+]|\d+[.)]|>)\s+)*[*_`]*"
+OLD_TEXT_LINE = re.compile(LINE_OPENING_MARKERS + r"(?:Old:|#old" + MARKER_END + ")")
 WALK_CATEGORY_LINE = re.compile(LINE_OPENING_MARKERS + re.escape(WALK_CATEGORY_TAG))
 # Words joined by single underscores, so the closing `_` or `__` of underscore emphasis is not read into the tag.
 WALK_CATEGORY_TAGS_IN_LINE = re.compile(re.escape(WALK_CATEGORY_TAG) + r"(?:[^\W_]+(?:_[^\W_]+)*)?")
@@ -2263,18 +2268,21 @@ def scratch_directory_removed_on_every_exit(after_removal):
             signal.signal(number, handler)
 
 
-def run_fast_read(text, name, fast_read_program, after_removal):
+def run_fast_read(text, name, fast_read_program, after_removal, approval_walk_item=False):
     """Fast-read the text from a scratch file; return (the report's directory, the lines the fast read printed
     on stderr about an unshipped record or a changed target), or raise FastReadFailed. after_removal is as
-    scratch_directory_removed_on_every_exit takes it.
+    scratch_directory_removed_on_every_exit takes it. approval_walk_item gives the fast read the prompt for a
+    whole approval-walk item.
 
     The scratch directory is removed on every exit, SIGTERM and SIGHUP included: the fast read keeps its own copy
     of the text in its record's target/, which is where a later check looks for it."""
     with scratch_directory_removed_on_every_exit(after_removal) as scratch:
         target = Path(scratch) / f"{name}.md"
         target.write_text(text + "\n", encoding="utf-8")
-        result = subprocess.run([sys.executable, str(fast_read_program), "--target", str(target),
-                                 FAST_READ_WITHOUT_QUESTION_4_OPTION], capture_output=True, text=True)
+        options = [FAST_READ_WITHOUT_QUESTION_4_OPTION] + ([FAST_READ_APPROVAL_WALK_ITEM_OPTION]
+                                                           if approval_walk_item else [])
+        result = subprocess.run([sys.executable, str(fast_read_program), "--target", str(target), *options],
+                                capture_output=True, text=True)
     lines = result.stdout.strip().split("\n")
     failed = [line for line in lines if line.startswith("FAILED")]
     if failed:
@@ -2285,7 +2293,7 @@ def run_fast_read(text, name, fast_read_program, after_removal):
     only_the_record_not_shipped = result.returncode == 1 and any(
         note.startswith(FAST_READ_RECORD_NOT_SHIPPED_MARKERS) for note in notes)
     if (result.returncode != 0 and not only_the_record_not_shipped) or not lines[-1]:
-        ran = shlex.join([str(fast_read_program), "--target", str(target), FAST_READ_WITHOUT_QUESTION_4_OPTION])
+        ran = shlex.join([str(fast_read_program), "--target", str(target), *options])
         raise FastReadFailed(f"FAILED: {ran} exited {result.returncode} "
                              f"without naming a report; its stderr: {result.stderr.strip()[-500:]}")
     return Path(lines[-1]).parent, notes
@@ -2817,12 +2825,28 @@ def read_ahead_bound_to_item(reads, key, outcome, item):
     return bound
 
 
+def approval_walk_item_text_without_old_texts(text):
+    """The item's text with each paragraph that holds a line opening `Old:` or `#old` left out, all but its `#new`
+    and `#new_if_d` lines: findings on a text being replaced crowd out those on the text replacing it."""
+    parts = re.split(r"(\n(?:[ \t]*\n)+)", text)
+    kept = []
+    for index in range(0, len(parts), 2):
+        lines = parts[index].split("\n")
+        if any(OLD_TEXT_LINE.match(line) for line in lines):
+            lines = [line for line in lines if NEW_LINE.match(line)]
+            if not lines:
+                continue
+        kept.append("\n".join(lines) + (parts[index + 1] if index + 1 < len(parts) else ""))
+    return "".join(kept).rstrip("\n")
+
+
 def fast_read_outcome(text, name, fast_read_program, after_removal):
-    """Fast-read the text and return the outcome a read-ahead worker writes: done with the report and the fast
-    read's notes, or failed with its FAILED line. after_removal is as scratch_directory_removed_on_every_exit
-    takes it."""
+    """Fast-read the approval-walk item's text, its old texts left out, and return the outcome a read-ahead worker
+    writes: done with the report and the fast read's notes, or failed with its FAILED line. after_removal is as
+    scratch_directory_removed_on_every_exit takes it."""
     try:
-        record, notes = run_fast_read(text, name, fast_read_program, after_removal)
+        record, notes = run_fast_read(approval_walk_item_text_without_old_texts(text), name, fast_read_program,
+                                      after_removal, approval_walk_item=True)
     except FastReadFailed as failure:
         return {"status": READ_FAILED, "failed": failure.args[0]}
     record_names = load_module("cold_read_record_names", RECORD_NAMES_FILE)
