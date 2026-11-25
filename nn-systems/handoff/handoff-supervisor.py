@@ -1393,7 +1393,8 @@ def conversation_tail_last_lines_display_file_write(
 
     The display is optional, and the caller runs after the handoff's counter is saved, where a
     raise would stop the successor's launch: a read or write failure is reported on stderr and
-    the successor launches without the display."""
+    the successor launches without the display. The report gives no instruction: this stderr goes
+    to the agent-seat's tmux pane, where no agent reads it, and a missing display costs no work."""
     display_path = successor_conversation_tail_display_hook.conversation_tail_last_lines_display_file_path_for_session_id(
         handoff_directory, session_id)
     try:
@@ -1405,8 +1406,7 @@ def conversation_tail_last_lines_display_file_write(
         print(f"handoff-supervisor: the user is not shown the last session's last lines above "
               f"the successor's first message, because reading the conversation-tail "
               f"{conversation_tail_path} failed: {error}. The successor launches as usual. "
-              f"No work is lost.\n"
-              f"Fix the cause the error names, so that later session-handoffs show the lines.",
+              f"No work is lost.",
               file=sys.stderr)
         return
     lines = text.removesuffix("\n").split("\n")[-CONVERSATION_TAIL_LAST_LINE_COUNT_SHOWN_ABOVE_FIRST_MESSAGE:]
@@ -1421,8 +1421,7 @@ def conversation_tail_last_lines_display_file_write(
               f"the successor's first message, because writing {display_path}, the file the "
               f"first-message display hook reads them from, failed: {error}. The successor "
               f"launches as usual, and the conversation-tail stays whole at "
-              f"{conversation_tail_path}, so no work is lost.\n"
-              f"Fix the cause the error names, so that later session-handoffs show the lines.",
+              f"{conversation_tail_path}, so no work is lost.",
               file=sys.stderr)
 
 
