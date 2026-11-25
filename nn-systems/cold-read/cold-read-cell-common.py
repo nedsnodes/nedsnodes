@@ -1125,6 +1125,11 @@ def run_cell(
         if exit_code == 0 and staging_directory is not None:
             exit_code = move_staged_report(program, reviewer_report, report)
         return exit_code
+    except CellRefusal as refusal:
+        # build_invocation refuses the prompt itself, so it refuses for the chain's first model, before any runs.
+        print("\n".join(f"{program}: {line}" for line in str(refusal).splitlines()), file=sys.stderr)
+        report_stray_writes(program, baseline, report)
+        return refusal.exit_code
     finally:
         # A report that could not be moved stays where the failure message says it is.
         if staging_root is not None and not reviewer_report.exists():
