@@ -1192,8 +1192,7 @@ def git_command_requoted_on_one_line(line: str) -> str:
         arguments = shlex.split(line)
     except ValueError:
         return escaped_where_it_splits_a_line(line)
-    return " ".join(shell_quoted_on_one_line(argument) if holds_a_line_breaking_character(argument)
-                    else shlex.quote(argument) for argument in arguments)
+    return " ".join(map(shell_quoted_on_one_line, arguments))
 
 
 def report_stray_writes(program: str, baseline, own_report_path=None) -> None:
