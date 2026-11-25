@@ -1670,7 +1670,9 @@ def rounds_on_one_head_cases(root, repository, base, frozen_head):
           code == 0 and "Send merge-lane-2 this message" in out and len(posts) == 1
           and posts[0][:3] == ["api", f"repos/{{owner}}/{{repo}}/issues/{NUMBER}/comments", "-f"]
           and posts[0][3].startswith(f"body=Fix-round answered without a commit: frozen-head {frozen_head}, "
-                                     "reviews 20 21.\n"), err + out + json.dumps(posts))
+                                     "reviews 20 21.\n")
+          and f"Posted by scripts/{PROGRAM.name} --check." in posts[0][3]
+          and str(PROGRAM.resolve()) not in posts[0][3], err + out + json.dumps(posts))
     recorded = dict(one_round, **{ISSUE_COMMENTS: {"stdout": lines([round_record(frozen_head, [20, 21])])}})
     del recorded[ROUND_RECORD_POST + "*"]
     code, out, err = run(root, repository, recorded, "--check", "--answers", answers_file(root, GOOD_ANSWERS))

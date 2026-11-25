@@ -1618,7 +1618,8 @@ def check_round(number, reviewer_login, answers_path, commit_name,
                     + ", ".join(recorded_suites) + "."]
     if commit == frozen_head and unrecorded_review_ids:
         gh(["api", f"repos/{{owner}}/{{repo}}/issues/{number}/comments", "-f", "body=" + ROUND_RECORD_FORMAT.format(
-            frozen_head=frozen_head, review_ids=" ".join(map(str, unrecorded_review_ids)), program=PROGRAM)])
+            frozen_head=frozen_head, review_ids=" ".join(map(str, unrecorded_review_ids)),
+            program=f"scripts/{Path(PROGRAM).name}")])
     lines += ["", f"Send {merge_lane} this message with SendMessage:", "", *message]
     print("\n".join(lines))
 
