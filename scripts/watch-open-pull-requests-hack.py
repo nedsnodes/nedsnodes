@@ -90,7 +90,10 @@ WATCH_OPEN_PULL_REQUESTS_MINIMUM_SECONDS_BETWEEN_EVENTS_TASKS ago; a run that fi
 and sends no message. A missing or unreadable state file stops the run with a
 task saying how to repair it, and never becomes a new baseline, which would
 drop the events since the last run; --poll-once-write-baseline makes the first
-state file. A failed poll keeps the state, and only
+state file. Each successful poll also assigns reviews as above; its
+REVIEW-ASSIGNED lines, and a WATCH line saying assignment stopped, go to the
+event file, the WATCH line once per case as the state file records. A failed
+poll keeps the state, assigns nothing, and only
 WATCH_OPEN_PULL_REQUESTS_FAILED_GITHUB_POLLS_IN_A_ROW_BEFORE_FAILURE_TASK failed polls in a row open a task.
 
 Polling needs no public webhook endpoint. GraphQL selects only needed fields
@@ -567,14 +570,14 @@ def merge_lane_pull_request_review_assignments_for_unassigned_pull_requests(pull
     return dealt
 
 
-def merge_lane_pull_request_review_assignment_lines(path, pull_requests, state):
+def merge_lane_pull_request_review_assignment_lines(path, pull_requests, state, report_stop=emit):
     """Deal the pull requests with no assignment, write them to the assignment file, and return
-    a REVIEW-ASSIGNED event line for each one the file holds afterwards. A failure prints a WATCH
-    line each time its case differs from the last poll's, as state records."""
+    a REVIEW-ASSIGNED event line for each one the file holds afterwards. A failure passes a WATCH
+    line to report_stop each time its case differs from the last poll's, as state records."""
 
     def stop(case, message):
         if state.get("stopped") != case:
-            emit(message)
+            report_stop(message)
         state["stopped"] = case
 
     try:
@@ -753,6 +756,7 @@ def poll_state_read(path):
         usable = (isinstance(state["notices"], dict)
                   and type(state["failed_polls"]) is int
                   and type(state["event_lines_delivered"]) is int
+                  and isinstance(state.get("review_assignment", {}), dict)
                   and (state["last_events_task_opened_at"] is None
                        or isinstance(state["last_events_task_opened_at"], (int, float))))
     except (KeyError, TypeError, ValueError, AttributeError) as error:
@@ -894,6 +898,10 @@ def poll_once(arguments):
             if reason is None:
                 state["failed_polls"] = 0
                 lines += events_for_poll(state["pull_requests"], pull_requests)
+                # Cron's output goes to a log nobody reads, so a stop goes to the event file.
+                lines += merge_lane_pull_request_review_assignment_lines(
+                    arguments.merge_lane_pr_review_assignments_file, pull_requests,
+                    state.setdefault("review_assignment", {}), report_stop=lines.append)
                 state["pull_requests"] = {
                     number: {"head_sha": seen["head_sha"], "is_draft": seen["is_draft"]}
                     for number, seen in pull_requests_by_number(pull_requests).items()}

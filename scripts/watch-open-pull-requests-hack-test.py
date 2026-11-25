@@ -1615,6 +1615,9 @@ class PollOnceMachine:
         self.poll = []
         self.state_path = self.directory / watcher_module.WATCH_OPEN_PULL_REQUESTS_POLL_STATE_BETWEEN_CRON_RUNS_FILE_NAME
         self.events_path = self.directory / watcher_module.WATCH_OPEN_PULL_REQUESTS_EVENTS_LOG_FILE_NAME
+        self.assignments = scratch / "assignments.txt"
+        self.assignments.write_text(EVERY_PULL_REQUEST_ASSIGNED_FILE.read_text(encoding="utf-8"),
+                                    encoding="utf-8")
 
     def time(self):
         return self.now
@@ -1632,7 +1635,8 @@ class PollOnceMachine:
                     flag, "--token-file", str(self.token_file),
                     "--poll-once-directory", str(self.directory),
                     "--task-list-directory", str(self.tasks),
-                    "--needs-a-look-directory", str(self.notices)])
+                    "--needs-a-look-directory", str(self.notices),
+                    "--merge-lane-pr-review-assignments-file", str(self.assignments)])
         finally:
             (watcher_module.time, watcher_module.fetch_open_pull_requests,
              watcher_module.SECRETS_TO_REDACT[:]) = saved
@@ -1658,7 +1662,8 @@ class PollOnceMachine:
 
 def poll_once_pull_request(number, head="a", draft=False):
     return {"number": number, "head_sha": head * 40, "title": "t", "is_draft": draft,
-            "author": "nedlern"}
+            "author": "nedlern", "created_at": f"2026-11-24T00:00:{number:02d}Z",
+            "base_branch": "main", "head_branch": f"branch-{number}", "reviews": []}
 
 
 def run_poll_once_cases(scratch_root, token_file):
@@ -1829,6 +1834,48 @@ def run_poll_once_cases(scratch_root, token_file):
     code = machine.run()
     check("an unusable token exits 1 and opens a task",
           code == 1 and "token" in machine.tasks_read()[0]["subject"], machine.tasks_read())
+
+    machine = machine_for("review-assigned")
+    machine.assignments.write_text("1 merge-lane-1\n", encoding="utf-8")
+    machine.poll = [poll_once_pull_request(1)]
+    machine.run("--poll-once-write-baseline")
+    machine.poll = [poll_once_pull_request(1), poll_once_pull_request(2)]
+    code = machine.run()
+    check("a run assigns a new pull request to the merge-lane agent-seat with fewer waiting, writes "
+          "it to the assignment file, and puts its REVIEW-ASSIGNED line in the event file",
+          code == 0 and machine.assignments.read_text(encoding="utf-8")
+          == "1 merge-lane-1\n2 merge-lane-3\n"
+          and len(machine.event_lines()) == 2 and "PR #2 OPENED" in machine.event_lines()[0]
+          and "PR #2 REVIEW-ASSIGNED merge-lane-3" in machine.event_lines()[1],
+          f"{code} {machine.event_lines()} {machine.errors}")
+    machine.now += 60
+    machine.poll = "GitHub is down"
+    machine.run()
+    check("a failed poll assigns nothing",
+          machine.assignments.read_text(encoding="utf-8") == "1 merge-lane-1\n2 merge-lane-3\n"
+          and len(machine.event_lines()) == 2, machine.event_lines())
+
+    machine = machine_for("assignment-file-missing")
+    machine.assignments.unlink()
+    machine.poll = [poll_once_pull_request(1)]
+    machine.run("--poll-once-write-baseline")
+    first_code = machine.run()
+    machine.now += 60
+    second_code = machine.run()
+    stopped = [line for line in machine.event_lines() if "WATCH: review assignment stopped" in line]
+    check("a missing assignment file puts one WATCH line with the seed step in the event file, "
+          "not one per run, and opens a task naming it",
+          (first_code, second_code) == (0, 0) and len(stopped) == 1
+          and any("--merge-lane-pr-review-assignments-file-write-from-seed-and-reviewed-prs-then-exit"
+                  in line for line in machine.event_lines())
+          and len(machine.tasks_read()) == 1 and not machine.assignments.exists(),
+          f"{machine.event_lines()} {machine.tasks_read()} {machine.errors}")
+    machine.assignments.write_text("", encoding="utf-8")
+    machine.now += 60
+    machine.run()
+    check("once the file exists, the next run assigns the pull request",
+          machine.assignments.read_text(encoding="utf-8") == "1 merge-lane-1\n"
+          and "REVIEW-ASSIGNED merge-lane-1" in machine.event_lines()[-1], machine.event_lines())
 
     machine = machine_for("directory-unusable")
     machine.directory.write_text("a file", encoding="utf-8")

@@ -3137,7 +3137,9 @@ sys.stdout.write(open(os.environ["FAKE_GITHUB_ANSWER"]).read())
 def github_answer(*numbers):
     return json.dumps({"data": {"repository": {"pullRequests": {
         "nodes": [{"number": number, "title": "t", "isDraft": False, "headRefOid": "a" * 40,
-                   "author": {"login": "nedlern"}} for number in numbers],
+                   "author": {"login": "nedlern"}, "createdAt": "2026-11-02T00:00:00Z",
+                   "baseRefName": "main", "headRefName": f"branch-{number}",
+                   "reviews": {"nodes": []}} for number in numbers],
         "pageInfo": {"hasNextPage": False, "endCursor": None}}}}})
 
 
@@ -3155,6 +3157,10 @@ class RealWatcher:
         self.token.write_text("fixture-token-never-a-real-credential")
         self.tasks = machine.tasks / f"nedsnodes-{EVENTS_SEAT}-tasks"
         self.tasks.mkdir(exist_ok=True)
+        # Every number assigned already, so no REVIEW-ASSIGNED line; the default file is
+        # merge-lane-2's real one.
+        self.assignments = self.root / "assignments.txt"
+        self.assignments.write_text("1 merge-lane-1\n2 merge-lane-3\n")
 
     def run(self, flag, *numbers):
         self.answer.write_text(github_answer(*numbers))
@@ -3164,7 +3170,8 @@ class RealWatcher:
             [sys.executable, str(PROGRAM.with_name("watch-open-pull-requests-hack.py")), flag,
              "--token-file", str(self.token), "--poll-once-directory", str(self.root / "state"),
              "--task-list-directory", str(self.tasks),
-             "--needs-a-look-directory", str(self.root / "notices")],
+             "--needs-a-look-directory", str(self.root / "notices"),
+             "--merge-lane-pr-review-assignments-file", str(self.assignments)],
             env=environment, capture_output=True, text=True, check=False).returncode
 
     def complete_tasks(self):
