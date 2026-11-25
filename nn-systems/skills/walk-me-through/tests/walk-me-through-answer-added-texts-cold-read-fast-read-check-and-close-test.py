@@ -4181,6 +4181,10 @@ def test_an_item_dropping_a_proposed_check_settles_at_any_rating_when_its_search
                             r"makes its change\. Fast reads:\n", minutes) is not None
               and "Judge also whether item 1 of 3 proposes a check, test, guard, refusal or hook and recommends "
                   "dropping it" in result.stdout, described(result) + minutes)
+    found_in = dropped_proposal_case(search=search_line(places="found in the session dialogs and the commits on main"))
+    result = found_in.run("check", "--not-asked", DROPPED)
+    check("a search line with a word between the count and `in`, as in `0 cases found in ...`, settles",
+          result.returncode == 0, described(result))
     closed = case.run("close")
     check("close records the dropped proposal as accepted, and moves `#next_to_present` past it",
           closed.returncode == 0
@@ -4219,6 +4223,20 @@ def test_an_item_dropping_a_proposed_check_is_refused_without_a_full_recent_sear
     check("an item with a `#new` text is refused, since a dropped proposal adds none",
           *refused_as_dropped(dropped_proposal_case(new_text="#new The counter checks its total.\n\n"),
                               "it has a `#new` line, which A would add"))
+
+
+def test_read_step_tells_the_agent_to_correct_a_malformed_search_line_not_to_add_one():
+    two_counts = dropped_proposal_case(search=search_line(places="in the session dialogs but 2 cases on main"))
+    rows = no_answer_rows_printed(result := two_counts.run(WAITING_ITEM_READ))
+    dropped = [row for row in rows if row.startswith("- proposed check dropped, search found no case:")]
+    check("an item whose search line has two counts is told to correct that line, not to add an evidence line",
+          len(dropped) == 1 and "needs correcting" in dropped[0] and "rather than adding another" in dropped[0]
+          and "Only evidence is missing" not in dropped[0], described(result))
+    absent = dropped_proposal_case(search="")
+    rows = no_answer_rows_printed(result := absent.run(WAITING_ITEM_READ))
+    dropped = [row for row in rows if row.startswith("- proposed check dropped, search found no case:")]
+    check("an item with no search line is still told to add one",
+          len(dropped) == 1 and "Only evidence is missing" in dropped[0], described(result))
 
 
 def test_an_item_of_no_kind_with_an_empty_touches_line_settles_as_a_change_that_touches_no_file():
@@ -5250,7 +5268,7 @@ def no_answer_rows_printed(result):
     """The lines of the read step's stdout that are rows of the no-answer table."""
     return [line for line in result.stdout.splitlines()
             if line.startswith("- ") and ("Its evidence passes" in line or "Only evidence is missing" in line
-                                          or "could not be checked" in line)]
+                                          or "needs correcting" in line or "could not be checked" in line)]
 
 
 def test_help_prints_every_row_of_the_no_answer_table():
