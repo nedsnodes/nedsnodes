@@ -1131,3 +1131,25 @@ The claim check's evidence:
 > - The list leaves out nn-systems/handoff/handoff-asked-stop-typing-user-notice-user-prompt-submit-hook.py, which reads the agent-session's transcript for its title: :10-13 `The line names the new agent-session by this agent-session's current title, the customTitle of the last custom-title record in its transcript`.
 > - The agent-crash-watcher reads no transcript itself. It only builds the folder path (nn-systems/handoff/handoff-agent-crash-watcher.py:1195) and reads transcripts only through recovery's `assess_seat` (:1187).
 State: open
+
+## E97 — possible problem: an assertion of the overview is contradicted
+
+Claim: Stop-typing hook (line 37): "naming the new agent-session by the title the user gave the current agent-session in claude.ai, which the new one keeps, or else by the agent-seat's name"
+Found by: the overview claim check of 2026-11-25 against commit d284cb2683fa3800b4600bf974fa22a8ab7fe053; its report is /home/nedlern/nedsnodes-logs/overview-write-architecture-overview-claim-check-reports/nedsnodes-handoff-architecture-overview/b164e854de15dc9f1b625ec979346500d49b13e6-2026-11-25T23-03-34-128213Z.md.
+Fixed by: regular maintenance, in the overview.
+Goes wrong when: a reader takes the assertion as exact.
+The claim check's evidence:
+> - When there is no title, the hook falls back to the agent-seat's stored Remote Control name, and only then to the agent-seat's name. nn-systems/handoff/handoff-asked-stop-typing-user-notice-user-prompt-submit-hook.py:94-96 "# The handoff-supervisor launches the successor under the stored name ..." then `return remote_control_name_common.handoff_remote_control_name_read_stored_or_default_to_agent_seat_name(agent_seat)`
+> - The rest of the sentence is supported: UserPromptSubmit at .claude/settings.json:87-88; "once per marker file" at :17; "The message itself always goes through unchanged" at :8.
+State: open
+
+## E98 — possible problem: an assertion of the overview is contradicted
+
+Claim: Shared state `<seat>-remote-control-name` (line 91): "read through the same module by the handoff-supervisor at each launch and by the Remote Control reconnect watcher"
+Found by: the overview claim check of 2026-11-25 against commit d284cb2683fa3800b4600bf974fa22a8ab7fe053; its report is /home/nedlern/nedsnodes-logs/overview-write-architecture-overview-claim-check-reports/nedsnodes-handoff-architecture-overview/b164e854de15dc9f1b625ec979346500d49b13e6-2026-11-25T23-03-34-128213Z.md.
+Fixed by: regular maintenance, in the overview.
+Goes wrong when: a reader takes the assertion as exact.
+The claim check's evidence:
+> - The stop-typing hook also reads the file through that module: nn-systems/handoff/handoff-asked-stop-typing-user-notice-user-prompt-submit-hook.py:96 `return remote_control_name_common.handoff_remote_control_name_read_stored_or_default_to_agent_seat_name(agent_seat)`
+> - The handoff-supervisor also reads it at the session-handoff, not only at launch: handoff-supervisor.py:2591. The list of readers is incomplete.
+State: open
