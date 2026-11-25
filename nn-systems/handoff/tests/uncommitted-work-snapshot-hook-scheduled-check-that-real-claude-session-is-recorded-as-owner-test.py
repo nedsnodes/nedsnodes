@@ -373,44 +373,116 @@ def test_a_scratch_clone_that_cannot_be_made_fails():
               name, record or completed.stderr)
 
 
-def test_the_scratch_clone_holds_every_tracked_file_of_the_code_directories():
-    clone = SCRATCH / "scratch-clone-module-check"
-    owner_check.make_scratch_clone(clone)
-    tracked = set(subprocess.run(
-        ["git", "-C", str(REPOSITORY_ROOT), "ls-files", *owner_check.SCRATCH_CLONE_REPOSITORY_DIRECTORIES_TO_COPY],
-        capture_output=True, text=True, check=True).stdout.splitlines())
+def test_the_scratch_clone_makes_only_the_files_the_hook_loads_inputs_of_this_suite():
+    # The test runner selects this suite for a change to any file its run reads, so a clone
+    # copying every tracked file would select it for nearly every change.
+    recorder = SCRATCH / "input-recorder"
+    recorder.mkdir()
+    (recorder / "sitecustomize.py").write_text(owner_check.runner.PYTHON_INPUT_RECORDER_SOURCE)
+    (recorder / owner_check.runner.PYTHON_INPUT_RECORDER_MARKER_FILE_NAME).write_text("")
+    log = SCRATCH / "input-recorder-log"
+    log.write_text("")
+    clone = SCRATCH / "scratch-clone-recorded"
+    subprocess.run(
+        [sys.executable, "-c",
+         "import importlib.util, sys; from pathlib import Path; "
+         "spec = importlib.util.spec_from_file_location('owner_check', sys.argv[1]); "
+         "module = importlib.util.module_from_spec(spec); spec.loader.exec_module(module); "
+         "module.make_scratch_clone(Path(sys.argv[2]))", str(CHECK), str(clone)],
+        capture_output=True, text=True, check=True, cwd=REPOSITORY_ROOT,
+        env=dict(os.environ, PYTHONPATH=str(recorder),
+                 **{owner_check.runner.RECORDED_INPUTS_LOG_VARIABLE: str(log),
+                    owner_check.runner.RECORDED_INPUTS_CHECKOUT_VARIABLE: str(REPOSITORY_ROOT)}))
+    lines = log.read_text().splitlines()
+    reads = {Path(line.split("\t", 1)[1]).relative_to(REPOSITORY_ROOT).as_posix()
+             for line in lines if line.startswith("read\t")}
+    git_calls = [line for line in lines if line.startswith("git\t")]
     in_clone = set(subprocess.run(
         ["git", "-C", str(clone), "ls-files"], capture_output=True, text=True,
         check=True).stdout.splitlines()) - {".gitignore"}
-    check(tracked and in_clone == tracked,
-          "the scratch clone holds every tracked file under scripts/ and nn-systems/, so it "
-          "cannot miss a module the hook loads", sorted(tracked ^ in_clone)[:10])
+    needed = {"scripts/uncommitted-work-snapshot-hook.py",
+              "scripts/worktree-owner-file-read-and-write.py",
+              "nn-systems/handoff/uncommitted-work-snapshots.py",
+              "nn-systems/general-tools/agent-seat-name-regular-expression-constant-same-as-launch-claude-ubuntu-check-common.py"}
+    check(needed <= in_clone and in_clone <= reads and "scripts/merge-gate.sh" not in reads
+          and not git_calls,
+          "the scratch clone holds the hook and the modules it loads, and the suite's recorded "
+          "inputs hold no unrelated file such as scripts/merge-gate.sh and no git listing of "
+          "the checkout",
+          f"missing {sorted(needed - in_clone)}, copied but not recorded "
+          f"{sorted(in_clone - reads)}, {len(reads)} reads, git calls {git_calls[:2]}")
 
 
-def test_the_scratch_clone_holds_uncommitted_edits_of_tracked_files():
-    # The mutation runner and an agent testing an edit both run this suite on uncommitted code.
-    repository = SCRATCH / "repository-with-uncommitted-edit"
-    for directory in owner_check.SCRATCH_CLONE_REPOSITORY_DIRECTORIES_TO_COPY:
-        (repository / directory).mkdir(parents=True)
-        (repository / directory / "tracked.txt").write_text("tracked\n")
-    module = repository / "scripts" / "module.py"
-    module.write_text("committed = True\n")
-    for arguments in (["init", "-q"], ["add", "-A"], ["commit", "-q", "-m", "module"]):
-        subprocess.run(["git", "-C", str(repository), "-c", "user.name=test",
-                        "-c", "user.email=test@nedschorus.invalid", *arguments],
-                       capture_output=True, check=True)
-    module.write_text("committed = False\n")
-    clone = SCRATCH / "scratch-clone-of-uncommitted-edit"
+def repository_whose_modules_load(module_text):
+    """A working tree whose hook modules load scripts/module.py, beside an unrelated file."""
+    repository = SCRATCH / f"repository-{len(list(SCRATCH.glob('repository-*')))}"
+    loader = ("import importlib.util; from pathlib import Path; "
+              "spec = importlib.util.spec_from_file_location('m', "
+              "Path(__file__).resolve().parents[{depth}] / 'scripts' / 'module.py'); "
+              "spec.loader.exec_module(importlib.util.module_from_spec(spec))\n")
+    for relative in (owner_check.MODULE_RELATIVE, owner_check.OWNER_FILE_MODULE_RELATIVE,
+                     owner_check.HOOK_RELATIVE):
+        (repository / relative).parent.mkdir(parents=True, exist_ok=True)
+        (repository / relative).write_text(loader.format(depth=len(relative.parts) - 1))
+    (repository / "scripts" / "module.py").write_text(module_text)
+    (repository / "scripts" / "unrelated.py").write_text("unrelated = True\n")
+    return repository
+
+
+def scratch_clone_of(repository, clone):
     real = owner_check.REPOSITORY_ROOT
     try:
         owner_check.REPOSITORY_ROOT = repository
         owner_check.make_scratch_clone(clone)
     finally:
         owner_check.REPOSITORY_ROOT = real
+
+
+def test_the_scratch_clone_holds_uncommitted_edits_of_the_files_the_hook_loads():
+    # The mutation runner and an agent testing an edit both run this suite on uncommitted code.
+    repository = repository_whose_modules_load("committed = True\n")
+    for arguments in (["init", "-q"], ["add", "-A"], ["commit", "-q", "-m", "modules"]):
+        subprocess.run(["git", "-C", str(repository), "-c", "user.name=test",
+                        "-c", "user.email=test@nedschorus.invalid", *arguments],
+                       capture_output=True, check=True)
+    (repository / "scripts" / "module.py").write_text("committed = False\n")
+    clone = SCRATCH / "scratch-clone-of-uncommitted-edit"
+    scratch_clone_of(repository, clone)
     copied = (clone / "scripts" / "module.py").read_text() if (clone / "scripts" / "module.py").exists() else None
-    check(copied == "committed = False\n",
-          "the scratch clone holds a tracked file's uncommitted edit, so the suite tests the "
-          "code under test, not the last commit", repr(copied))
+    check(copied == "committed = False\n" and not (clone / "scripts" / "unrelated.py").exists(),
+          "the scratch clone holds a loaded file's uncommitted edit, so the suite tests the code "
+          "under test, and leaves out a file the hook does not load", repr(copied))
+
+
+def test_a_deleted_file_the_hook_does_not_load_leaves_the_scratch_clone_whole():
+    repository = repository_whose_modules_load("loaded = True\n")
+    subprocess.run(["git", "-C", str(repository), "init", "-q"], capture_output=True, check=True)
+    subprocess.run(["git", "-C", str(repository), "add", "-A"], capture_output=True, check=True)
+    (repository / "scripts" / "unrelated.py").unlink()
+    clone = SCRATCH / "scratch-clone-after-unrelated-deletion"
+    scratch_clone_of(repository, clone)
+    check((clone / "scripts" / "module.py").exists(),
+          "a tracked file deleted from the working tree but not from the index, which the hook "
+          "does not load, does not stop the scratch clone")
+
+
+def test_a_deleted_file_the_hook_loads_fails_the_check_naming_it():
+    repository = repository_whose_modules_load("loaded = True\n")
+    (repository / "scripts" / "module.py").unlink()
+    scratch = SCRATCH / "scratch-of-deleted-loaded-file"
+    scratch.mkdir()
+    real = owner_check.REPOSITORY_ROOT
+    try:
+        owner_check.REPOSITORY_ROOT = repository
+        lines = owner_check.owner_check_result_lines(
+            type("Arguments", (), {"claude_program": str(FAKE_CLAUDE), "timeout_seconds": 60}),
+            scratch)
+    finally:
+        owner_check.REPOSITORY_ROOT = real
+    check(len(lines) == 1 and lines[0].startswith("FAIL the scratch clone could not be made: ")
+          and "module.py" in lines[0],
+          "a file the hook loads that is deleted from the working tree fails the check, naming "
+          "the file", lines)
 
 
 def test_an_owner_file_module_that_does_not_load_fails_the_check():
@@ -473,8 +545,10 @@ def main():
                      test_the_record_goes_to_the_log_store_by_default,
                      test_the_records_directory_is_the_kind_the_log_store_readme_names,
                      test_a_scratch_clone_that_cannot_be_made_fails,
-                     test_the_scratch_clone_holds_every_tracked_file_of_the_code_directories,
-                     test_the_scratch_clone_holds_uncommitted_edits_of_tracked_files,
+                     test_the_scratch_clone_makes_only_the_files_the_hook_loads_inputs_of_this_suite,
+                     test_the_scratch_clone_holds_uncommitted_edits_of_the_files_the_hook_loads,
+                     test_a_deleted_file_the_hook_does_not_load_leaves_the_scratch_clone_whole,
+                     test_a_deleted_file_the_hook_loads_fails_the_check_naming_it,
                      test_an_owner_file_module_that_does_not_load_fails_the_check,
                      test_a_check_that_cannot_run_fails,
                      test_an_error_after_claude_started_is_not_reported_as_a_failed_start,
