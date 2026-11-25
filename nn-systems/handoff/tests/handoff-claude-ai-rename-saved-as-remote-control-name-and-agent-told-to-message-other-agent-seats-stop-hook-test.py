@@ -16,6 +16,8 @@ from pathlib import Path
 HOOK = (Path(__file__).resolve().parent.parent
         / "handoff-claude-ai-rename-saved-as-remote-control-name-and-agent-told-to-message-other-agent-seats-stop-hook.py")
 SEAT_VARIABLE = "NEDSNODES_HANDOFF_SUPERVISOR_AGENT_NAME"
+SESSION_VARIABLE = "NEDSNODES_HANDOFF_SUPERVISOR_SESSION_ID"
+LAUNCHED_SESSION = "launched-session"
 failures = 0
 
 
@@ -26,12 +28,16 @@ def check(name, passed, detail=""):
 
 
 def run_hook(home, stdin_text, seat="seat-a"):
-    environment = {**os.environ, "HOME": str(home)}
+    environment = {**os.environ, "HOME": str(home), SESSION_VARIABLE: LAUNCHED_SESSION}
     environment.pop(SEAT_VARIABLE, None)
     if seat:
         environment[SEAT_VARIABLE] = seat
     return subprocess.run([sys.executable, str(HOOK)], input=stdin_text, capture_output=True,
                           text=True, env=environment, timeout=30, check=False)
+
+
+def payload(transcript, **fields):
+    return json.dumps({"session_id": LAUNCHED_SESSION, "transcript_path": transcript, **fields})
 
 
 def transcript_with_titles(directory, *titles):
@@ -49,43 +55,49 @@ with tempfile.TemporaryDirectory() as directory:
     stored = handoffs / "seat-a-remote-control-name"
 
     transcript = transcript_with_titles(directory, "seat-a")
-    result = run_hook(home, json.dumps({"transcript_path": transcript}))
+    result = run_hook(home, payload(transcript))
     check("a title equal to the agent-seat name stores nothing and says nothing",
           result.returncode == 0 and result.stdout == "" and not stored.exists(), result)
 
     transcript = transcript_with_titles(directory, "seat-a", "----new name")
-    result = run_hook(home, json.dumps({"transcript_path": transcript, "stop_hook_active": True}))
+    result = run_hook(home, payload(transcript, stop_hook_active=True))
     check("while the agent answers a Stop hook, a changed title waits for the next turn's end",
           result.returncode == 0 and result.stdout == "" and not stored.exists(), result)
 
-    result = run_hook(home, json.dumps({"transcript_path": transcript}))
+    result = run_hook(home, payload(transcript))
     context = json.loads(result.stdout)["hookSpecificOutput"]["additionalContext"]
     check("a changed title is stored", stored.read_text(encoding="utf-8") == "----new name\n")
     check("the agent is given the exact line to send every other agent-seat",
-          "seat-a is now ----new name in Remote Control; message it there." in context
+          "The agent-seat seat-a is now ----new name in Remote Control; send it messages under that name." in context
           and "to each other session ListAgents lists that is not offline" in context
           and "send to each, addressed as `<name> [<ref>]`" in context, context)
 
-    result = run_hook(home, json.dumps({"transcript_path": transcript}))
+    result = run_hook(home, payload(transcript))
     check("the same title at the next turn's end says nothing", result.stdout == "", result.stdout)
 
+    child_transcript = transcript_with_titles(directory, "child's title")
+    result = run_hook(home, json.dumps({"session_id": "child-session", "transcript_path": child_transcript}))
+    check("a child session that inherited the supervisor's variables stores nothing",
+          result.returncode == 0 and result.stdout == ""
+          and stored.read_text(encoding="utf-8") == "----new name\n", result)
+
     transcript = transcript_with_titles(directory, "----new name", "third")
-    result = run_hook(home, json.dumps({"transcript_path": transcript}))
+    result = run_hook(home, payload(transcript))
     check("a second rename names the stored name as the old name",
           "----new name is now third" in result.stdout, result.stdout)
 
     stored.unlink()
-    result = run_hook(home, json.dumps({"transcript_path": transcript}), seat="")
+    result = run_hook(home, payload(transcript), seat="")
     check("a session no handoff-supervisor launched stores nothing",
           result.returncode == 0 and result.stdout == "" and not stored.exists(), result)
 
     no_title = Path(directory) / "no-title.jsonl"
     no_title.write_text('{"type":"user"}\n', encoding="utf-8")
-    result = run_hook(home, json.dumps({"transcript_path": str(no_title)}))
+    result = run_hook(home, payload(str(no_title)))
     check("a transcript with no custom-title record changes nothing",
           result.returncode == 0 and result.stdout == "" and not stored.exists(), result)
 
-    result = run_hook(home, json.dumps({"transcript_path": str(home / "missing.jsonl")}))
+    result = run_hook(home, payload(str(home / "missing.jsonl")))
     check("a transcript not yet written changes nothing",
           result.returncode == 0 and result.stdout == "" and not stored.exists(), result)
 
@@ -93,14 +105,14 @@ with tempfile.TemporaryDirectory() as directory:
     check("stdin that is not an object exits 1 and names the hook on stderr",
           result.returncode == 1 and result.stdout == "" and HOOK.stem in result.stderr, result)
 
-    result = run_hook(home, json.dumps({"transcript_path": str(home)}))
+    result = run_hook(home, payload(str(home)))
     check("a transcript that cannot be read exits 1 and reports it",
           result.returncode == 1 and "was not stored" in result.stderr
           and "tries again at the next turn's end" in result.stderr, result)
 
     stored.mkdir()
     transcript = transcript_with_titles(directory, "renamed")
-    result = run_hook(home, json.dumps({"transcript_path": transcript}))
+    result = run_hook(home, payload(transcript))
     check("a name that cannot be read or stored exits 1 and reports it",
           result.returncode == 1 and "was not stored" in result.stderr, result)
 
