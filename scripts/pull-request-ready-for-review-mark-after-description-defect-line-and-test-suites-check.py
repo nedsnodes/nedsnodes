@@ -66,7 +66,6 @@ GIT_MERGE_BASE_IS_ANCESTOR_NO = 1
 # --untracked-files=normal overrides a status.showUntrackedFiles=no setting, which would hide
 # untracked files from the check.
 UNCOMMITTED_CHANGES_COMMAND = ["git", "status", "--porcelain", "--untracked-files=normal"]
-MERGE_BASE_WITH_ORIGIN_MAIN_COMMAND = ["git", "merge-base", "origin/main", "HEAD"]
 MESSAGE_PREFIX = "pull request ready for review: "
 # Messages follow docs/nedsnodes-wiki/nedsnodes-how-to-write-a-tool-message-to-agent-such-as-a-hook-refusal-or-script-error.md.
 NOTHING_CHANGED_LINE = "Nothing was changed on GitHub."
@@ -310,7 +309,7 @@ def check_and_mark_ready(number, runner, output):
             f"file with gh pr edit {number} --body-file <file>, which replaces the whole "
             "description, and run this again.")
     merge_base = run_command(
-        MERGE_BASE_WITH_ORIGIN_MAIN_COMMAND, runner, GIT_TIMEOUT_SECONDS,
+        ["git", "merge-base", "origin/main", head], runner, GIT_TIMEOUT_SECONDS,
         "finding this checkout's merge base with origin/main",
         NOTHING_CHANGED_LINE + "\n"
         "If git's error says origin/main is not a valid object name: run git fetch origin main, "

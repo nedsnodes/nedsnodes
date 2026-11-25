@@ -109,7 +109,7 @@ class FakeRunner:
             kind = "ancestor"
         elif command == program.UNCOMMITTED_CHANGES_COMMAND:
             kind = "status"
-        elif command == program.MERGE_BASE_WITH_ORIGIN_MAIN_COMMAND:
+        elif command[:3] == ["git", "merge-base", "origin/main"]:
             kind = "merge-base"
         elif command[:3] == ["git", "worktree", "add"]:
             kind = "worktree-add"
@@ -175,9 +175,9 @@ def main():
     scratch = added[5]
     check("the test suites run in a detached scratch worktree of the pushed nn-head-commit, with that "
           "worktree's own runner, selecting the suites whose recorded inputs changed since the "
-          "checkout's merge base with origin/main, waiting for the machine's test lock, and the "
+          "checked HEAD commit's merge base with origin/main, named by its hash, waiting for the machine's test lock, and the "
           "scratch worktree is removed after",
-          program.MERGE_BASE_WITH_ORIGIN_MAIN_COMMAND == ["git", "merge-base", "origin/main", "HEAD"]
+          runner.commands["merge-base"] == ["git", "merge-base", "origin/main", HEAD]
           and added[:5] == ["git", "worktree", "add", "--quiet", "--detach"] and added[6] == HEAD
           and not scratch.startswith(CHECKOUT)
           and runner.options["suites"]["cwd"] == scratch
