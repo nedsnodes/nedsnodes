@@ -623,6 +623,11 @@ class MissingEvidenceLine(str):
     """A problem that adding an evidence line to the item would cure, as against one the item's change has."""
 
 
+class MalformedEvidenceLine(str):
+    """A problem that correcting an evidence line the item already has would cure; adding a second line would not,
+    since `check` still reads the first."""
+
+
 def rating_and_needed_lines_problems(found):
     rating, case = found.rating, no_answer_case(found.value)
     problems = [] if rating in NOT_ASKED_RATINGS else [NOT_ASKED_RATING_PROBLEM.format(rating=rating)]
@@ -731,12 +736,12 @@ def dropped_proposal_search_problems(found):
         count = counts[0] if len(counts) == 1 else None
         places = SEARCH_PLACES.match(value[count.end():]) if count else None
         if len(days) != 2 or count is None or not places or not SEARCH_PLACE_WORD.search(places[1]):
-            problems.append(MissingEvidenceLine(NOT_ASKED_SEARCH_SHAPE_PROBLEM.format(marker=SEARCH, value=value)))
+            problems.append(MalformedEvidenceLine(NOT_ASKED_SEARCH_SHAPE_PROBLEM.format(marker=SEARCH, value=value)))
             continue
         try:
             first, last = (datetime.date.fromisoformat(day) for day in days)
         except ValueError:
-            problems.append(MissingEvidenceLine(NOT_ASKED_SEARCH_SHAPE_PROBLEM.format(marker=SEARCH, value=value)))
+            problems.append(MalformedEvidenceLine(NOT_ASKED_SEARCH_SHAPE_PROBLEM.format(marker=SEARCH, value=value)))
             continue
         if (last - first).days < SEARCH_WINDOW_DAYS:
             problems.append(NOT_ASKED_SEARCH_WINDOW_SHORT_PROBLEM.format(marker=SEARCH, first=first, last=last,
@@ -1380,8 +1385,8 @@ NOT_ASKED_DROPPED_PROPOSAL_NEW_TEXT_PROBLEM = ("- it has a `#new` line, which A 
                                                "proposal adds no text, so it recommends something else and is shown.")
 SEARCH_DAY = re.compile(r"\b\d{4}-\d{2}-\d{2}\b")
 SEARCH_COUNT = re.compile(r"\b(\d+)\s+cases?\b", re.I)
-# The places are the text after the single count's `in`.
-SEARCH_PLACES = re.compile(r"\W*in\b(.*)", re.I | re.S)
+# The places are the text after the single count's `in`, which may follow a word or two, as in `0 cases found in`.
+SEARCH_PLACES = re.compile(r"\W*(?:[A-Za-z]+\W+)*?in\b(.*)", re.I | re.S)
 SEARCH_PLACE_WORD = re.compile(r"\b(?!(?:to|in|and|of|the|from|through)\b)[A-Za-z][\w'.-]*")
 SEARCH_WINDOW_DAYS = 30
 NOT_ASKED_WHY = {
@@ -3365,6 +3370,9 @@ NO_ANSWER_ROWS_HEADING = ("Rows of the no-answer table {item} could settle by; i
 NO_ANSWER_ROW_PASSES = "- {label}: {meaning}. Its evidence passes: run `{command}` and do what it prints."
 NO_ANSWER_ROW_LINE_MISSING = ("- {label}: {meaning}. Only evidence is missing: {missing} Add it to {document}, then "
                               "run `{command}` and do what it prints.")
+NO_ANSWER_ROW_LINE_MALFORMED = ("- {label}: {meaning}. Its evidence line needs correcting: {malformed} Correct that line "
+                                "in {document}, rather than adding another, then run `{command}` and do what it "
+                                "prints.")
 NO_ANSWER_ROW_NOT_CHECKED = ("- {label}: its evidence could not be checked, so it is not offered; present {item} "
                              "unless another row fits: {error}")
 
@@ -3395,6 +3403,11 @@ def no_answer_rows_for_waiting_item_lines(walk_finder, top, minutes, value, numb
             continue
         if not problems:
             rows.append(NO_ANSWER_ROW_PASSES.format(label=case.label, meaning=case.meaning, command=command))
+        elif all(isinstance(problem, (MissingEvidenceLine, MalformedEvidenceLine)) for problem in problems) and any(
+                isinstance(problem, MalformedEvidenceLine) for problem in problems):
+            malformed = " ".join(problem.removeprefix("- ") for problem in problems)
+            rows.append(NO_ANSWER_ROW_LINE_MALFORMED.format(label=case.label, meaning=case.meaning,
+                                                            malformed=malformed, document=document, command=command))
         elif all(isinstance(problem, MissingEvidenceLine) for problem in problems):
             missing = " ".join(problem.removeprefix("- ") for problem in problems)
             rows.append(NO_ANSWER_ROW_LINE_MISSING.format(label=case.label, meaning=case.meaning, missing=missing,
