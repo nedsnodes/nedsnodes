@@ -183,6 +183,49 @@ def test_a_short_title_names_the_item_after_every_running_count_the_walk_finder_
           result.stdout + result.stderr)
 
 
+def test_a_short_title_closed_by_underscore_emphasis_names_the_item(root):
+    store = Store(root)
+    single = store.session("single", [agent_record("Item 9.2 of 35: _The fix_"), user_record("single answer")])
+    double = store.session("double", [agent_record("Item 9.2 of 35: __The fix__"), user_record("double answer")])
+    result = store.run("--title", "The fix", "--item-number", "9.2")
+    check("a short title closed by `_` or `__` emphasis names the item, since `_` is no letter after a title",
+          result.returncode == 0
+          and all(f"{dialog}:{line_in(dialog, answer)}  {answer}" in result.stdout
+                  for dialog, answer in [(single, "single answer"), (double, "double answer")]),
+          result.stdout + result.stderr)
+
+
+def test_a_backward_range_is_ignored_and_a_valid_running_count_beside_it_still_names_the_item(root):
+    store = Store(root)
+    dialog = store.session("ranges", [agent_record("Items 9.3 to 9.1 of 35: The fix"), user_record("backward answer"),
+                                      agent_record("Item 9.2 of 35: The fix"), user_record("valid answer")])
+    store.session("backward-only", [agent_record("Items 9.3 to 9.1 of 35: The fix"), user_record("alone answer")])
+    result = store.run("--title", "The fix", "--item-number", "9.2")
+    check("a running count with a backward range names no item, and the search goes on to the valid count after it",
+          result.returncode == 0 and f"{dialog}:{line_in(dialog, 'valid answer')}  valid answer" in result.stdout
+          and "alone answer" not in result.stdout,
+          result.stdout + result.stderr)
+
+
+def test_a_dialog_older_than_its_transcript_is_cited_by_transcript_lines(root):
+    store = Store(root)
+    dialog = store.session("grown", [agent_record(f"## {ITEM_6_TITLE}\n\nThe successor looks first."),
+                                     user_record("approve item 6")])
+    transcript = (store.log_store / "agent-session-files-by-machine" / "ned-box" / "projects" / PROJECT_KEY
+                  / "grown.jsonl")
+    # The transcript grows after its dialog was written, so the dialog is no longer what the extractor renders.
+    with transcript.open("a") as handle:
+        handle.write(json.dumps(agent_record("Item 6 is approved.")) + "\n")
+        handle.write(json.dumps(user_record("thanks")) + "\n")
+    result = store.run("--title", ITEM_6_TITLE, "--item-number", "6")
+    check("when the dialog no longer matches its transcript, each message is cited by its transcript line",
+          result.returncode == 0
+          and f"  user   {transcript}:2  approve item 6\n" in result.stdout
+          and f"  user   {transcript}:4  thanks\n" in result.stdout
+          and f"{dialog}:" not in result.stdout.split("\n", 1)[1],
+          result.stdout + result.stderr)
+
+
 def test_a_turn_the_dialog_leaves_out_is_cited_by_its_transcript_line_and_moves_no_other_citation(root):
     store = Store(root)
     # The extractor leaves out a short agent reply to a notification, which opens as a later agent message does.

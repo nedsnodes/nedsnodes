@@ -740,12 +740,18 @@ def heading_points(lines, spans, parser):
     """{item number: the point its heading states after the running count's colon, without its links} for the
     walk's items; a deferred item's note is not part of its point."""
     points = {}
-    walk_finder = load_walk_finder()
     for numbers, _, _, first, _ in spans:
-        match = HEADING_POINT.match(walk_finder.approval_walk_item_heading_with_deferred_note_removed(lines[first]))
-        if match and match[1]:
-            points.update({number: without_links(match[1], parser) for number in numbers})
+        point = approval_walk_item_heading_point_without_links(lines[first], parser)
+        if point is not None:
+            points.update({number: point for number in numbers})
     return points
+
+
+def approval_walk_item_heading_point_without_links(line, parser):
+    """The point one heading line states after the running count's colon, without its links, as the closing line
+    shows it, or None when it states none; a deferred item's note is not part of its point."""
+    match = HEADING_POINT.match(load_walk_finder().approval_walk_item_heading_with_deferred_note_removed(line))
+    return without_links(match[1], parser) if match and match[1] else None
 
 
 def without_links(markdown, parser):
