@@ -906,11 +906,14 @@ def newest_main_commit_left_no_test_failing_cases(scratch):
         return commit
 
     def commit_the_branch_holds_only_through_its_second_parent(directory):
-        # Main's first-failing commit merged the branch's cut-from commit in as its second
-        # parent, so their merge base is that commit, which main's tip never was; main's own
-        # first-parent history never meets the branch's, so no commit can be named.
+        # Main's first-failing commit merged the branch's own merge commit in as its second
+        # parent, so their merge base is that topic commit, which main's tip never was, while
+        # main's first parents still reach the commit the branch was cut from: that commit, not
+        # the merge base, is where the branch left main's history.
         tools = directory / "review-tools"
         cut_from = git_output(tools, "rev-parse", "HEAD")
+        git("fetch", "-q", "origin", "refs/merge-test/merge-commit", cwd=tools)
+        topic_commit = git_output(tools, "rev-parse", "FETCH_HEAD")
 
         def commit_tree(*parents, message):
             arguments = []
@@ -921,8 +924,10 @@ def newest_main_commit_left_no_test_failing_cases(scratch):
                  "-m", message],
                 capture_output=True, text=True, env=GIT_ENVIRONMENT, check=True).stdout.strip()
 
-        mains_tip = commit_tree(message="main's history, apart from the branch's")
-        return commit_tree(mains_tip, cut_from, message="main merges the branch's base in")
+        mains_tip = commit_tree(cut_from, message="main moves on after the branch was cut")
+        first_failed = commit_tree(mains_tip, topic_commit, message="main merges the branch in")
+        left_main[directory.name] = (cut_from, first_failed)
+        return first_failed
 
     def one_recorded_and_one_new_case(directory):
         failed_suites_record_written(directory, tests=["case recorded"])
@@ -957,12 +962,11 @@ def newest_main_commit_left_no_test_failing_cases(scratch):
               "'stacked-topic-branch' left, so this check cannot say whose failure it is: say so "
               "when you tell the author and the user."],
              ["main may be broken", "git could not say"]),
-            ("failed-into-another-branch-main-took-the-cut-from-commit-in-by-a-merge",
+            ("failed-into-another-branch-main-merged-the-branch-in-after-it-was-cut",
              RUNNER_FAILED, 3,
              ["STOP: merged, but the test run of 'stacked-topic-branch' at ",
               "failed tests that are not main's failures", TELL_AUTHOR_AND_USER],
-             ["main may be broken", "git could not say", "Before the author fixes it, run ",
-              "left main's history"]),
+             ["main may be broken", "git could not say"]),
             ("failed-into-another-branch-recorded-suite-new-case", RUNNER_FAILED, 3,
              ["STOP: merged, but the test run of 'stacked-topic-branch' at ",
               "failed tests that are not main's failures", TELL_AUTHOR_AND_USER],
@@ -981,7 +985,7 @@ def newest_main_commit_left_no_test_failing_cases(scratch):
         prepare = {
             "failed-into-another-branch-cut-before-main-began-failing":
                 recorded_at_commit(commit_the_branch_does_not_hold),
-            "failed-into-another-branch-main-took-the-cut-from-commit-in-by-a-merge":
+            "failed-into-another-branch-main-merged-the-branch-in-after-it-was-cut":
                 recorded_at_commit(commit_the_branch_holds_only_through_its_second_parent),
             "failed-into-another-branch-recorded-suite-new-case": one_recorded_and_one_new_case,
             "failed-into-another-branch-first-failing-commit-unknown":
