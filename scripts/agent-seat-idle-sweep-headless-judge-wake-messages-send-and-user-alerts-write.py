@@ -545,7 +545,9 @@ class SweepLog:
                 if event["step"] == NUDGE:
                     wait = {"session_id": event["session_id"],
                             "first_idle_at": event["first_idle_at"], NUDGE: event["at"],
-                            "nudge_text": event["text"], PROMISE_MESSAGES: [],
+                            "nudge_text": event["text"],
+                            PULL_REQUEST_EVENTS_TASK_ID: event.get(PULL_REQUEST_EVENTS_TASK_ID),
+                            PROMISE_MESSAGES: [],
                             FAILED_PROMISE_MESSAGES: [], SENTENCES_WITH_NO_MESSAGE_EVENT: []}
                     owed = False
                     if event.get("rule") != 2:
@@ -900,15 +902,22 @@ def open_pull_request_events_task(seat, tasks_root):
     list_directory = tasks_root / f"nedsnodes-{seat}-tasks"
     if seat != PULL_REQUEST_EVENTS_AGENT_SEAT or not list_directory.is_dir():
         return None
+    tasks = {}
     for path in list_directory.glob("*.json"):
         try:
             task = json.loads(path.read_text(encoding="utf-8"))
         except (FileNotFoundError, ValueError):
             # Claude Code may be replacing the file or have deleted it since the listing.
             continue
-        if (isinstance(task, dict) and task.get("status") != "completed"
-                and task.get("subject") == agent_seat_task_list.AGENT_SEAT_TASK_LIST_MERGE_LANE_2_READ_PULL_REQUEST_EVENTS_TASK_SUBJECT_LINE):
-            return {"id": path.stem}
+        if isinstance(task, dict):
+            tasks[path.stem] = task
+    for task_id, task in tasks.items():
+        blockers = task.get("blockedBy") or []
+        if (task.get("status") != "completed"
+                and task.get("subject") == agent_seat_task_list.AGENT_SEAT_TASK_LIST_MERGE_LANE_2_READ_PULL_REQUEST_EVENTS_TASK_SUBJECT_LINE
+                and all(tasks.get(str(blocker), {}).get("status") == "completed"
+                        for blocker in blockers)):
+            return {"id": task_id}
     return None
 
 
@@ -1278,6 +1287,17 @@ class Sweep:
         if wait and TELL_USER in wait and stretch and parse_time(stretch) > parse_time(wait[TELL_USER]):
             self.end_wait(seat, "it spent tokens after the user was told")
             wait = None
+        events_task = open_pull_request_events_task(seat, self.paths.tasks_root)
+        if wait and wait[PULL_REQUEST_EVENTS_TASK_ID] and (
+                not events_task or events_task["id"] != wait[PULL_REQUEST_EVENTS_TASK_ID]):
+            # The task may be completed by a subagent, whose calls the main transcript lacks.
+            self.end_wait(seat, "its pull-request events task is no longer open")
+            wait = None
+        if (wait and TELL_USER in wait and rule == 5 and events_task
+                and not self.woken_for_pull_request_events_task(seat, events_task)):
+            # The user already has that wait's alert; a new events task must not wait behind it.
+            self.end_wait(seat, "a new pull-request events task opened after the user was told")
+            wait = None
         promise_text, promise_on_wait = None, False
         judged_sentences = rule == 2
         sentences_checked = []
@@ -1378,10 +1398,11 @@ class Sweep:
     def end_wait(self, seat, why, **details):
         self.record({"event": "wait_ended", "agent_seat": seat, "why": why, **details})
 
-    def start_wait(self, seat, verdict, stretch, step_text, rule):
+    def start_wait(self, seat, verdict, stretch, step_text, rule, events_task_id=None):
         self.record({"event": "wait_step", "agent_seat": seat, "step": NUDGE, "rule": rule,
                      "session_id": verdict[fields.SESSION_ID], "first_idle_at": stretch,
-                     "text": step_text})
+                     "text": step_text,
+                     **({PULL_REQUEST_EVENTS_TASK_ID: events_task_id} if events_task_id else {})})
 
     def sentences_on_open_wait(self, seat, wait, items):
         """Log that the open wait answers for these sentences, before they are logged as checked,
@@ -1518,29 +1539,34 @@ class Sweep:
         if rule == 3:
             subject = f"handoff put off: {text}"
             if subject in self.reminded_subjects(seat, verdict):
-                if verdict.get(fields.OPEN_TASKS_NOTHING_HOLDS):
-                    self.judge_idle_seat(seat, {**verdict, fields.HANDOFF_DEFERRED_MARKER: None},
-                                         stretch)
+                if (verdict.get(fields.OPEN_TASKS_NOTHING_HOLDS)
+                        or open_pull_request_events_task(seat, self.paths.tasks_root)):
+                    self.idle_seat_open_work(
+                        seat, {**verdict, fields.HANDOFF_DEFERRED_MARKER: None}, stretch)
                 return
             self.start_wait(seat, verdict, stretch, text, 3)
             self.reminder_sent(seat, verdict, self.send(seat, verdict, text, NUDGE), [subject])
         elif rule == 5:
-            events_task = open_pull_request_events_task(seat, self.paths.tasks_root)
-            if events_task:
-                self.wake_for_pull_request_events_task(seat, verdict, stretch, events_task)
-            else:
-                self.judge_idle_seat(seat, verdict, stretch)
+            self.idle_seat_open_work(seat, verdict, stretch)
+
+    def idle_seat_open_work(self, seat, verdict, stretch):
+        """Wake merge-lane-2 in code for an events task it was not yet woken for, since the user
+        was told this wake happens; ask the judge about everything else."""
+        events_task = open_pull_request_events_task(seat, self.paths.tasks_root)
+        if events_task and not self.woken_for_pull_request_events_task(seat, events_task):
+            self.wake_for_pull_request_events_task(seat, verdict, stretch, events_task)
+        else:
+            self.judge_idle_seat(seat, verdict, stretch)
+
+    def woken_for_pull_request_events_task(self, seat, task):
+        """Whether any agent-session of the agent-seat was woken for this task: one wake per task,
+        as the judge reminds once per subject; the wait's escalation follows that wake."""
+        return any(event.get(PULL_REQUEST_EVENTS_TASK_ID) == task["id"]
+                   for event in self.log.of_seat(seat, "judge_answer"))
 
     def wake_for_pull_request_events_task(self, seat, verdict, stretch, task):
-        """Wake merge-lane-2 for its events task in code, since the user was told this wake happens."""
-        answer = self.log.last_judge_answer(seat)
-        if (answer and answer.get(PULL_REQUEST_EVENTS_TASK_ID) == task["id"]
-                and answer["session_id"] == verdict[fields.SESSION_ID]
-                and seconds_between(agent_seat_idle_sweep_invocation_started_at(answer), self.now)
-                < JUDGE_ASK_AGAIN_SECONDS):
-            return
         text = PULL_REQUEST_EVENTS_WAKE_TEXT.format(task_id=task["id"])
-        self.start_wait(seat, verdict, stretch, text, 5)
+        self.start_wait(seat, verdict, stretch, text, 5, events_task_id=task["id"])
         sent = self.send(seat, verdict, text, NUDGE)
         self.record({"event": "judge_answer", "agent_seat": seat, "rule": 5,
                      "session_id": verdict[fields.SESSION_ID], "last_activity": stretch,
