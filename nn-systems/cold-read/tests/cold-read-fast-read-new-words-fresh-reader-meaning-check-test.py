@@ -37,33 +37,34 @@ def check(case_name, condition, detail=""):
         failures.append(case_name)
 
 
-# --- Reading the cell's New words section --------------------------------------------------------------------
+# --- Reading the cell's section of words with a meaning of their own --------------------------------------------------------------------
 report = ("## Question 1: What it says\n\n[s1]\n- a point\n\n## Question 3: What it does not cover\n\nNo issues\n\n"
-          "## New words\n\n- `rider`: the words typed after the answer letter\n- `Rider`: a repeat\n\n"
-          "- `fresh read`: a read by a new agent\n")
+          "## Words with a meaning of their own\n\n- `rider`: the words typed after the answer letter\n- `Rider`: a repeat\n\n"
+          "- `fresh read`: a read by a new agent\n- `rider`: the words typed after the answer letter\n")
 answer = new_words.fast_clarify_cell_report_new_words_section_split_off_and_parse(report)
-check("each word line is read as (word, meaning), a repeat in another case is dropped",
-      answer.words == [("rider", "the words typed after the answer letter"),
+check("each word line is read as (word, meaning); a word given a second meaning keeps both lines, and a repeated "
+      "line is dropped",
+      answer.words == [("rider", "the words typed after the answer letter"), ("Rider", "a repeat"),
                        ("fresh read", "a read by a new agent")] and answer.problems == [], repr(answer))
-check("the New words section is taken out of the report, and the rest is kept",
-      "## New words" not in answer.report_text_without_answer and "`rider`" not in answer.report_text_without_answer
+check("the section is taken out of the report, and the rest is kept",
+      "## Words with a meaning of their own" not in answer.report_text_without_answer and "`rider`" not in answer.report_text_without_answer
       and "## Question 3: What it does not cover\n\nNo issues" in answer.report_text_without_answer,
       repr(answer.report_text_without_answer))
-answer = new_words.fast_clarify_cell_report_new_words_section_split_off_and_parse("## Question 1: x\n\n## New words\n\n- none\n")
+answer = new_words.fast_clarify_cell_report_new_words_section_split_off_and_parse("## Question 1: x\n\n## Words with a meaning of their own\n\n- none\n")
 check("`- none` lists no word and is no problem", answer.words == [] and answer.problems == [], repr(answer))
 answer = new_words.fast_clarify_cell_report_new_words_section_split_off_and_parse(
-    "## New words\n\n- `rider`: a meaning\n\n## Question 9: after\n\n1. kept\n")
+    "## Words with a meaning of their own\n\n- `rider`: a meaning\n\n## Question 9: after\n\n1. kept\n")
 check("a heading after the section ends it",
       answer.words == [("rider", "a meaning")] and "1. kept" in answer.report_text_without_answer, repr(answer))
 answer = new_words.fast_clarify_cell_report_new_words_section_split_off_and_parse(
-    "### New words\n\n- `alpha`: one\n\n# Second document\n\n### New words\n\n- `beta`: two\n")
+    "### Words with a meaning of their own\n\n- `alpha`: one\n\n# Second document\n\n### Words with a meaning of their own\n\n- `beta`: two\n")
 check("a report about several documents gives every section's words",
       [word for word, _ in answer.words] == ["alpha", "beta"], repr(answer))
-answer = new_words.fast_clarify_cell_report_new_words_section_split_off_and_parse("## Question 1: x\n\n```\n## New words\n```\n")
-check("a report with no New words section outside fenced code is a problem, not a list of no words",
-      answer.words == [] and answer.problems == ["the fast-clarify cell's report has no `## New words` section"],
+answer = new_words.fast_clarify_cell_report_new_words_section_split_off_and_parse("## Question 1: x\n\n```\n## Words with a meaning of their own\n```\n")
+check("a report with no such section outside fenced code is a problem, not a list of no words",
+      answer.words == [] and answer.problems == ["the fast-clarify cell's report has no `## Words with a meaning of their own` section"],
       repr(answer))
-answer = new_words.fast_clarify_cell_report_new_words_section_split_off_and_parse("## New words\n\n1. rider - a meaning\n- `ok`: fine\n")
+answer = new_words.fast_clarify_cell_report_new_words_section_split_off_and_parse("## Words with a meaning of their own\n\n1. rider - a meaning\n- `ok`: fine\n")
 check("a line in another form is a problem quoting it, and the readable lines are still read",
       answer.words == [("ok", "fine")] and len(answer.problems) == 1 and "1. rider - a meaning" in answer.problems[0],
       repr(answer))
@@ -120,7 +121,7 @@ def ask_by_word(table):
 
 
 answer = new_words.fast_clarify_cell_report_new_words_section_split_off_and_parse(
-    "## New words\n\n- `rider`: words after the letter\n- `nudge`: a reminder\n- `flaky`: fails at random\n"
+    "## Words with a meaning of their own\n\n- `rider`: words after the letter\n- `nudge`: a reminder\n- `flaky`: fails at random\n"
     "- `agent-seats`: named agents\n- `/cold-read`: the skill\n- `bad line\n")
 section, stderr_lines = new_words.new_words_fresh_reader_meaning_checks_run_into_report_section_and_stderr_lines(
     answer, whole_document=False,
@@ -143,17 +144,17 @@ check("the section says its entries are not findings, and the findings parser co
 check("an edit's section names the sentences the edit added or changed",
       "the sentences the edit added or changed use" in section, section)
 check("stderr counts every fate, and names each word not checked with its cause",
-      stderr_lines[0].startswith("cold-read-fast-read: new words: 5 listed, 2 already in a glossary, "
+      stderr_lines[0].startswith("cold-read-fast-read: words with a meaning of their own: 5 listed, 2 already in a glossary, "
                                  "1 read as the text means, 1 read another way, 2 not checked")
       and any("`flaky` not checked" in line for line in stderr_lines)
       and any("bad line" in line for line in stderr_lines), repr(stderr_lines))
 
 calls = []
 section, stderr_lines = new_words.new_words_fresh_reader_meaning_checks_run_into_report_section_and_stderr_lines(
-    new_words.fast_clarify_cell_report_new_words_section_split_off_and_parse("## New words\n\n- none\n"), whole_document=True,
+    new_words.fast_clarify_cell_report_new_words_section_split_off_and_parse("## Words with a meaning of their own\n\n- none\n"), whole_document=True,
     ask=lambda *arguments: calls.append(arguments), known_words=lambda: calls.append("glossary") or set())
 check("a list of no words makes no model call and reads no glossary, and the section says no word was listed",
-      calls == [] and "listed no new words" in section and "the document use" in section, section)
+      calls == [] and "listed no such word" in section and "the document use" in section, section)
 
 
 def glossaries_unlistable():
@@ -161,7 +162,7 @@ def glossaries_unlistable():
 
 
 section, stderr_lines = new_words.new_words_fresh_reader_meaning_checks_run_into_report_section_and_stderr_lines(
-    new_words.fast_clarify_cell_report_new_words_section_split_off_and_parse("## New words\n\n- `rider`: m\n"), whole_document=False,
+    new_words.fast_clarify_cell_report_new_words_section_split_off_and_parse("## Words with a meaning of their own\n\n- `rider`: m\n"), whole_document=False,
     ask=ask_by_word({"rider": (("g", ""), ("DIFFERS", ""))}), known_words=glossaries_unlistable)
 check("when git cannot list the glossaries, the section and stderr say so, and every word is still checked",
       "the glossaries could not be listed" in section and "not a git repository" in section

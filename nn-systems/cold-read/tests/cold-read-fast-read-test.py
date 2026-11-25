@@ -3404,7 +3404,7 @@ with tempfile.TemporaryDirectory() as edit_scratch:
           and launches_counted(edit_counter) == 0,
           f"exit {result.returncode}; stdout={result.stdout!r}; stderr={result.stderr[-400:]!r}")
 
-# --- New words: the cell's list is checked word by word, and the report says what became of each.
+# --- Words with a meaning of their own: the cell's list is checked word by word, and the report says what became of each.
 with tempfile.TemporaryDirectory() as new_words_scratch_name:
     new_words_scratch = Path(new_words_scratch_name).resolve()
     repository = build_scratch_repository(new_words_scratch)
@@ -3417,7 +3417,7 @@ with tempfile.TemporaryDirectory() as new_words_scratch_name:
     new_words_counter = new_words_scratch / "agy-launches"
     new_words_module = script_under_test_module().new_words
     cell_report_with_new_words = (
-        "STUB FAST READ: of the walk item\n\n## New words\n\n"
+        "STUB FAST READ: of the walk item\n\n## Words with a meaning of their own\n\n"
         "- `rider`: the words the user types after the A or D that answers an approval-walk item\n"
         "- `agent-seat`: an agent with a name of its own\n")
     result = run_fast_read(
@@ -3430,12 +3430,12 @@ with tempfile.TemporaryDirectory() as new_words_scratch_name:
     new_words_text = (new_words_suggestions.read_text(encoding="utf-8")
                       if new_words_suggestions.is_file() else "")
     check("a listed word a fresh reader takes another way is named in the report's new words section, "
-          "with the text's meaning and the guess, and the cell's own New words section is gone",
+          "with the text's meaning and the guess, and the cell's own section of those words is gone",
           result.returncode == 0
           and new_words_module.NEW_WORDS_REPORT_SECTION_HEADING in new_words_text
           and "- `rider`: the text means: the words the user types after the A or D" in new_words_text
           and "a model took it to mean: A person riding a horse." in new_words_text
-          and "\n## New words\n" not in new_words_text,
+          and "\n## Words with a meaning of their own\n" not in new_words_text,
           f"exit {result.returncode}; report={new_words_text[-1500:]!r}; stderr={result.stderr[-800:]!r}")
     check("a listed word a glossary has is dropped, not checked, and the read launches the two calls "
           "for the other word only",
@@ -3443,7 +3443,7 @@ with tempfile.TemporaryDirectory() as new_words_scratch_name:
           and launches_counted(new_words_counter) == 3,
           f"launches={launches_counted(new_words_counter)}; report={new_words_text[-600:]!r}")
     check("stderr counts what became of the listed words",
-          "cold-read-fast-read: new words: 2 listed, 1 already in a glossary, 0 read as the text means, "
+          "cold-read-fast-read: words with a meaning of their own: 2 listed, 1 already in a glossary, 0 read as the text means, "
           "1 read another way, 0 not checked" in result.stderr, result.stderr[-800:])
 
 print()

@@ -2,8 +2,9 @@
 """Check each new word a cold-read-fast-read's fast-clarify cold-read-cell lists against what a fresh reader
 guesses it means, for nn-systems/cold-read/cold-read-fast-read.py.
 
-The fast-clarify cell ends its report with a `## New words` section: one line per word, or phrase, that the
-lines the edit added or changed use in a meaning of their own, written ``- `<word>`: <meaning>``, or the one
+The fast-clarify cell ends its report with a `## Words with a meaning of their own` section, here called its new
+words: one line per word, or phrase, and meaning, that the lines the edit added or changed use in a meaning of
+their own, written ``- `<word>`: <meaning>``, or the one
 line `- none`. This module takes that section out of the cell's report, drops each word a glossary or the
 ordinary hyphenated words list already has, and, for each other word, asks one model call what the word
 means, given the word alone, and a second model call whether that guess matches the meaning the text gives.
@@ -42,7 +43,8 @@ new_shared_names = importlib.util.module_from_spec(_new_shared_names_spec)
 _new_shared_names_spec.loader.exec_module(new_shared_names)
 
 PROGRAM = "cold-read-fast-read"
-NEW_WORDS_ANSWER_HEADING = re.compile(r"^#{1,3}\s+New words\s*$")
+NEW_WORDS_ANSWER_HEADING_TEXT = "Words with a meaning of their own"
+NEW_WORDS_ANSWER_HEADING = re.compile(r"^#{1,3}\s+" + re.escape(NEW_WORDS_ANSWER_HEADING_TEXT) + r"\s*$")
 ANY_HEADING = re.compile(r"^#{1,6}\s")
 CODE_FENCE = re.compile(r"^\s*(```|~~~)")
 NEW_WORD_LINE = re.compile(r"^- `([^`]+)`: (\S.*)$")
@@ -52,7 +54,8 @@ NEW_WORD_MEANING_COMPARE_ANSWER_MATCHES = "MATCHES"
 NEW_WORD_MEANING_COMPARE_ANSWER_DIFFERS = "DIFFERS"
 NOT_CHECKED = "not checked"
 
-NEW_WORDS_REPORT_SECTION_HEADING = "## New words checked against a fresh reader's guess (added by cold-read-fast-read)"
+NEW_WORDS_REPORT_SECTION_HEADING = (
+    "## Words with a meaning of their own, checked against a fresh reader's guess (added by cold-read-fast-read)")
 NAMING_PAGE = "docs/nedsnodes-wiki/nedsnodes-how-to-choose-a-name-for-files-code-and-glossary-terms.md"
 # Both calls run on the cold-read-tier the fast-clarify cell ran on, through the launcher that wrote its report.
 NEW_WORD_MODEL_CALL_COLD_READ_TIER = "fast"
@@ -82,7 +85,7 @@ NEW_WORD_MEANING_COMPARE_PROMPT_TEMPLATE = (
 
 
 class NewWordsAnswer(typing.NamedTuple):
-    """The cell's report without its New words section, the (word, meaning) pairs that section lists, and
+    """The cell's report without its section of words with a meaning of their own, the (word, meaning) pairs that section lists, and
     each problem that kept a word of it from being read."""
     report_text_without_answer: str
     words: list
@@ -98,7 +101,7 @@ class NewWordCheck(typing.NamedTuple):
 
 
 def fast_clarify_cell_report_new_words_section_split_off_and_parse(report_text: str) -> NewWordsAnswer:
-    """Take every `New words` section out of the fast-clarify cell's report and read its lines. A report
+    """Take every section headed NEW_WORDS_ANSWER_HEADING_TEXT out of the fast-clarify cell's report and read its lines. A report
     about several documents may give one section per document, so every section is read."""
     kept, answer_lines, fenced, inside, sections = [], [], False, False, 0
     for line in report_text.split("\n"):
@@ -112,20 +115,21 @@ def fast_clarify_cell_report_new_words_section_split_off_and_parse(report_text: 
         (answer_lines if inside else kept).append(line)
     words, problems, seen = [], [], set()
     if not sections:
-        problems.append("the fast-clarify cell's report has no `## New words` section")
+        problems.append(f"the fast-clarify cell's report has no `## {NEW_WORDS_ANSWER_HEADING_TEXT}` section")
     for line in answer_lines:
         stripped = line.strip()
         if not stripped or stripped == NO_NEW_WORDS_LINE:
             continue
         parsed = NEW_WORD_LINE.match(stripped)
         if parsed is None:
-            problems.append(f"this line of the `## New words` section is not in the form ``- `<word>`: "
+            problems.append(f"this line of the `## {NEW_WORDS_ANSWER_HEADING_TEXT}` section is not in the form ``- `<word>`: "
                             f"<meaning>``: {stripped}")
             continue
-        word = parsed.group(1).strip()
-        if word.lower() not in seen:
-            seen.add(word.lower())
-            words.append((word, parsed.group(2).strip()))
+        word, meaning = parsed.group(1).strip(), parsed.group(2).strip()
+        # One line per meaning: two documents may give one word two meanings, and each is checked.
+        if (word.lower(), meaning) not in seen:
+            seen.add((word.lower(), meaning))
+            words.append((word, meaning))
     return NewWordsAnswer("\n".join(kept), words, problems)
 
 
@@ -228,7 +232,7 @@ def new_words_fresh_reader_meaning_checks_run_into_report_section_and_stderr_lin
             problems.append(f"the glossaries could not be listed, so no word was dropped as one a glossary "
                             f"has: {error}")
             known = set()
-        dropped = [word for word, _ in to_check if word_is_known(word, known)]
+        dropped = list(dict.fromkeys(word for word, _ in to_check if word_is_known(word, known)))
         to_check = [(word, meaning) for word, meaning in to_check if not word_is_known(word, known)]
     checks = []
     if to_check:
@@ -244,7 +248,7 @@ def new_words_fresh_reader_meaning_checks_run_into_report_section_and_stderr_lin
              f"list has, one model given only the word guessed its meaning, and a second compared that guess with "
              f"the meaning the text gives. The entries below are not findings and take no finding outcome.", ""]
     if not answer.words and not problems:
-        lines += ["The fast-clarify cell listed no new words.", ""]
+        lines += ["The fast-clarify cell listed no such word.", ""]
     if differs:
         lines += ["A fresh reader takes these words another way. Rewrite each in plain words, dismiss it as "
                   "plain English, or propose it as a project-term:", ""]
@@ -264,10 +268,10 @@ def new_words_fresh_reader_meaning_checks_run_into_report_section_and_stderr_lin
         lines += ["A glossary or the ordinary hyphenated words list already has these words: "
                   + ", ".join(f"`{word}`" for word in dropped) + ".", ""]
     stderr_lines = [
-        f"{PROGRAM}: new words: {len(answer.words)} listed, {len(dropped)} already in a glossary, "
+        f"{PROGRAM}: words with a meaning of their own: {len(answer.words)} listed, {len(dropped)} already in a glossary, "
         f"{len(matches)} read as the text means, {len(differs)} read another way, "
         f"{len(not_checked) + len(problems)} not checked; the report's section "
         f"`{NEW_WORDS_REPORT_SECTION_HEADING}` lists each."]
-    stderr_lines += [f"{PROGRAM}: new word `{check.word}` not checked: {check.cause}." for check in not_checked]
-    stderr_lines += [f"{PROGRAM}: new words not checked: {problem}." for problem in problems]
+    stderr_lines += [f"{PROGRAM}: word with a meaning of its own `{check.word}` not checked: {check.cause}." for check in not_checked]
+    stderr_lines += [f"{PROGRAM}: words with a meaning of their own not checked: {problem}." for problem in problems]
     return "\n".join(lines), stderr_lines
