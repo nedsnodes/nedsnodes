@@ -21,8 +21,9 @@ Not handled:
   directory, so the lines are not shown and their file stays;
 - an agent-seat checkout whose settings predate this hook, while the supervisor runs from a newer
   checkout: nothing shows the lines and their file stays;
-- a cut that starts inside a fenced code block: the lines and the batch are drawn as one Markdown
-  text, so the closing heading and the first message are drawn as code.
+- a cut that starts inside a fenced code block and keeps its closing fence line, which Markdown
+  then reads as an opening one: the lines and the batch are drawn as one Markdown text, so the
+  closing heading and the first message are drawn as code.
 """
 
 import json
