@@ -354,6 +354,35 @@ with tempfile.TemporaryDirectory() as scratch:
           and f"prompt_file={draft_prompt} " in report_text.splitlines()[0],
           repr(report_text[:300]))
 
+    # --- A prompt over Linux's one-argument limit reaches codex on stdin -----
+    # Linux refuses any one argument over 131,072 bytes (MAX_ARG_STRLEN) with E2BIG.
+    oversize_prompt = scratch / "an-oversize-draft-prompt.md"
+    oversize_prompt.write_text("Read {TARGET_PATH}; write to {REPORT_PATH}.\n"
+                               + "filler line of an oversize prompt\n" * 6000
+                               + "OVERSIZE TAIL MARKER\n", encoding="utf-8")
+    received_stdin_path = scratch / "oversize-prompt-codex-stdin.txt"
+    oversize_argv_path = scratch / "oversize-prompt-codex-argv.json"
+    stub_recording_stdin = STUB_CODEX_WRITES_REPORT.replace(
+        "import os, sys\n",
+        "import os, sys\n"
+        f"open({str(received_stdin_path)!r}, 'w', encoding='utf-8').write(sys.stdin.read())\n", 1)
+    report.unlink(missing_ok=True)
+    result = run_cell(stubs, stub_recording_stdin, report,
+                      "--cell", "defect-hunt", "--tier", "deep", "--target", str(target),
+                      "--prompt-file", str(oversize_prompt), argv_path=oversize_argv_path)
+    received_stdin = (received_stdin_path.read_text(encoding="utf-8")
+                      if received_stdin_path.is_file() else "")
+    oversize_argv = (json.loads(oversize_argv_path.read_text(encoding="utf-8"))
+                     if oversize_argv_path.is_file() else [])
+    check("a prompt over 131,072 bytes reaches codex whole on stdin, `-` its last argument, "
+          "and the cell exits 0",
+          result.returncode == 0 and len(received_stdin.encode("utf-8")) > 131072
+          and received_stdin.endswith("OVERSIZE TAIL MARKER\n")
+          and oversize_argv[-1:] == ["-"]
+          and max((len(argument.encode("utf-8")) for argument in oversize_argv), default=0) < 4096,
+          f"exit {result.returncode}; stdin bytes {len(received_stdin.encode('utf-8'))}; "
+          f"argv tail {oversize_argv[-2:]!r}; stderr={result.stderr[-400:]!r}")
+
     # --- Codex is given no GitHub token from its caller --------------------
     # An agent-seat's supervisor sets GH_TOKEN to the agent-seat's own token; each variable is
     # set on its own so that a launcher still passing either one fails its own case.

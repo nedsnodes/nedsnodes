@@ -144,7 +144,8 @@ Running a sanity-check, and reading its output:
   same prompt, in the same copy, unless the cause is one only the user can
   clear or the launch timed out. The cause classes: `logged-out`,
   `agent-binary-missing`, `account-limit` and `model-limit`, which only the
-  user can clear and which are never relaunched; `timeout`, the launch cut off
+  user can clear and which are never relaunched; `agent-binary-start-failed`,
+  an agent-binary found but refused by the operating system, as for E2BIG; `timeout`, the launch cut off
   after an hour, never relaunched, because the same launch would cost the same
   hour; `exit-<code>`, any other failed launch, whose detail is the last line
   the CLI wrote; `no-report`, an exit of 0 with nothing written; and
@@ -672,7 +673,7 @@ def run_claude(prompt: str, checkout: pathlib.Path = None) -> tuple:
             print(f"WARNING: {model} could not be run: {error}", flush=True)
             last_cause = common.classify_failed_attempt(
                 stdout="", stderr="", exit_code=None, recognised_texts=(),
-                start_error=str(error))
+                start_error=error)
             continue
         # The agent-binary's own words survive every ending, the house chain's rule
         # (BOTH STREAMS ARE CAPTURED, in run_model_chain,
@@ -801,7 +802,8 @@ def run_codex(prompt: str, checkout: pathlib.Path = None) -> tuple:
         "--output-last-message", str(last_message_path),
         "-m", CODEX_MODEL,
         "-c", f"model_reasoning_effort={REASONING_EFFORT}",
-        prompt,
+        # The prompt goes on stdin: Linux refuses one argument over 131,072 bytes.
+        "-",
     ]
     try:
         # Both streams are captured, where they used to go to DEVNULL: a Codex
@@ -821,7 +823,7 @@ def run_codex(prompt: str, checkout: pathlib.Path = None) -> tuple:
         # encoding is named, so a run started where the locale is not UTF-8
         # reads the review as the CLI wrote it.
         completed = run_agent_binary_unless_run_stopped(
-            command, stdin=subprocess.DEVNULL, stdout=subprocess.PIPE,
+            command, input=prompt, stdout=subprocess.PIPE,
             stderr=subprocess.PIPE, text=True, encoding="utf-8",
             errors="replace", timeout=CELL_TIMEOUT_SECONDS,
         )
@@ -1583,7 +1585,7 @@ def launch_cell_once(cell: str, adversarial_prompt: str, runtime: str, prompt: s
         # A missing or unexecutable CLI fails this cell, never the whole run.
         return FailedLaunch(*common.classify_failed_attempt(
             stdout="", stderr="", exit_code=None, recognised_texts=(),
-            start_error=str(exc)))
+            start_error=exc))
     if code != 0:
         # The attempts, when there were several: a claude cell whose whole
         # chain failed exits 1 for every reason, so the exit code alone says

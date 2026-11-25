@@ -1410,8 +1410,11 @@ def main():
     runner_launch = load_runner()
     launches = []
 
+    launch_inputs = []
+
     def capture_launch(command, *arguments, **keywords):
         launches.append((list(command), keywords.get("cwd")))
+        launch_inputs.append((command[0], keywords.get("input")))
         return subprocess.CompletedProcess(list(command), 0, "a review\n", "")
 
     review_checkout = pathlib.Path("/a/review/copy/of/the/commit")
@@ -1434,6 +1437,12 @@ def main():
           launch_error is None and len(codex_commands) == 1
           and codex_commands[0][codex_commands[0].index("-C") + 1] == str(review_checkout),
           f"error {launch_error!r}, codex commands {codex_commands}")
+    # Linux refuses any one argument over 131,072 bytes (MAX_ARG_STRLEN) with E2BIG.
+    check("a codex cell gets its prompt on stdin, with `-` as its last argument",
+          launch_error is None and len(codex_commands) == 1 and codex_commands[0][-1] == "-"
+          and "a prompt no model ever sees" not in codex_commands[0]
+          and ("codex", "a prompt no model ever sees") in launch_inputs,
+          f"error {launch_error!r}, codex commands {codex_commands}, inputs {launch_inputs}")
 
     # Cases 29-33 drive main() over a scratch repository with the agent-binaries
     # replaced, so no model is called. A text carrying every adversarial prompt's required

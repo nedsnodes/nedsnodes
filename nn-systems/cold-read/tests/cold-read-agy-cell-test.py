@@ -15,9 +15,12 @@ WHAT IS PINNED HERE.
   - The invocation is the one measured working in the 2026-09-04 campaign:
     --add-dir <repo> (or AGENTS.md does not load), --dangerously-skip-permissions
     (or the report's Write is blocked headless), --model, --effort,
-    --print-timeout, and the prompt as the VALUE of --print, with both
-    paths substituted into it; and --output-format stream-json in place of
-    the campaign's text.
+    --print-timeout, and the prompt, with both paths substituted into it,
+    on stdin as one stream-json line, with --print given an empty value;
+    and --output-format stream-json in place of the campaign's text. A
+    prompt over 131,072 bytes, the most Linux accepts in one argument,
+    reaches agy whole, and an agy that exits before reading it fails as
+    exit-N with its own stderr, not as an agent-binary that could not start.
 
   - agy's result line ends the run, because agy often hangs after it, deaf
     to SIGTERM. The stdout a real agy run printed, saved in
@@ -154,8 +157,11 @@ NEAR_MISS_RECOVERY_PHRASE = cell_common.NEAR_MISS_RECOVERY_PHRASE
 LONG_CHAT_REVIEW = " ".join(f"word{index}" for index in range(150)) + "\n"
 SHORT_CHAT_REMARK = "I have written the report to the path you gave me.\n"
 
-# A stand-in for the `agy` CLI. It reads the model from --model and the
-# prompt from --print's value, then does what the plan says for that model:
+# A stand-in for the `agy` CLI. It reads the model from --model and, with
+# --input-format, the prompt from the one stream-json line on stdin, unless
+# "exit_before_reading_stdin" makes it exit with "exit" before reading any;
+# without --input-format it takes --print's value. It then does what the plan
+# says for that model:
 # "report" is text to write to the report path (absent means write nothing),
 # "near_miss" writes the report one directory away from where it was asked,
 # "stdout" is the model's chat text, "dump_argv" and "dump_prompt" are paths
@@ -182,9 +188,16 @@ STUB_AGY = """#!/usr/bin/env python3
 import json, os, pathlib, sys
 argv = sys.argv
 model = argv[argv.index("--model") + 1] if "--model" in argv else "*"
-prompt = argv[argv.index("--print") + 1] if "--print" in argv else ""
 plan = json.loads(os.environ["COLD_READ_AGY_CELL_TEST_STUB_PLAN"])
 step = plan.get(model, plan.get("*", {}))
+prompt = argv[argv.index("--print") + 1] if "--print" in argv else ""
+stdin_line = ""
+if "--input-format" in argv and not step.get("exit_before_reading_stdin"):
+    stdin_line = sys.stdin.readline()
+    prompt = json.loads(stdin_line)["message"]["content"]
+if step.get("exit_before_reading_stdin"):
+    sys.stderr.write(step.get("stderr", ""))
+    sys.exit(step.get("exit", 1))
 report_path = pathlib.Path(os.environ["COLD_READ_AGY_CELL_TEST_STUB_REPORT_PATH"])
 if step.get("ignore_sigterm"):
     import signal
@@ -599,13 +612,55 @@ with tempfile.TemporaryDirectory() as scratch:
           and argv[argv.index("--output-format") + 1] == "stream-json",
           repr(argv))
     received_prompt = prompt_dump.read_text(encoding="utf-8") if prompt_dump.is_file() else ""
-    check("the prompt is the value of --print, with both paths substituted",
-          "--print" in argv and argv[argv.index("--print") + 1] == received_prompt
+    check("the prompt reaches agy on stdin as stream-json, not as --print's value, "
+          "with both paths substituted",
+          argv[argv.index("--input-format") + 1] == "stream-json"
+          and "--print" in argv and argv[argv.index("--print") + 1] == ""
+          and received_prompt not in argv
           and str(repository / TARGET_RELATIVE_PATH) in received_prompt
           and str(report) in received_prompt
           and "{TARGET_PATH}" not in received_prompt
           and "{REPORT_PATH}" not in received_prompt,
           repr(received_prompt[:300]))
+
+    # Linux refuses any one argument over 131,072 bytes (MAX_ARG_STRLEN) with E2BIG.
+    oversize_prompt_relative_path = "docs/drafts/agy-cell-test-oversize-prompt.md"
+    oversize_prompt_body = ("Read {TARGET_PATH}; write to {REPORT_PATH}.\n"
+                            + "filler line of an oversize prompt\n" * 6000 + "OVERSIZE TAIL MARKER\n")
+    (repository / oversize_prompt_relative_path).parent.mkdir(parents=True, exist_ok=True)
+    (repository / oversize_prompt_relative_path).write_text(oversize_prompt_body, encoding="utf-8")
+    report = report_path_for(repository, "oversize-prompt")
+    argv_dump = scratch / "oversize-prompt-argv.json"
+    prompt_dump = scratch / "oversize-prompt-prompt.txt"
+    result = run_agy_cell(
+        repository, stubs,
+        {"*": {"report": "STUB REVIEW\n", "dump_argv": str(argv_dump),
+               "dump_prompt": str(prompt_dump)}},
+        report, "--prompt-file", oversize_prompt_relative_path,
+    )
+    argv = json.loads(argv_dump.read_text(encoding="utf-8")) if argv_dump.is_file() else []
+    received_prompt = prompt_dump.read_text(encoding="utf-8") if prompt_dump.is_file() else ""
+    check("a prompt over 131,072 bytes reaches agy whole on stdin, and the cell exits 0",
+          result.returncode == 0 and len(received_prompt.encode("utf-8")) > 131072
+          and received_prompt.endswith("OVERSIZE TAIL MARKER\n")
+          and max((len(argument.encode("utf-8")) for argument in argv), default=0) < 4096,
+          f"exit {result.returncode}; prompt bytes {len(received_prompt.encode('utf-8'))}; "
+          f"stderr={result.stderr[-400:]!r}")
+    report = report_path_for(repository, "oversize-prompt-unread")
+    result = run_agy_cell(
+        repository, stubs,
+        {"*": {"exit_before_reading_stdin": True, "exit": 3,
+               "stderr": "agy-stub-exited-before-reading-stdin\n"}},
+        report, "--prompt-file", oversize_prompt_relative_path,
+    )
+    check("an agy that exits before reading an oversize prompt fails as exit-3 with its own "
+          "stderr, not as a start failure",
+          result.returncode == 1
+          and "agy-stub-exited-before-reading-stdin" in result.stderr
+          and "cause: exit-3" in result.stderr
+          and "agent-binary-missing" not in result.stderr
+          and "agent-binary-start-failed" not in result.stderr,
+          repr(result.stderr[-600:]))
 
     # The fast read on the Mac sizes its ssh time limit from the per-model
     # constant, so --print-timeout must follow it, not a literal that happens

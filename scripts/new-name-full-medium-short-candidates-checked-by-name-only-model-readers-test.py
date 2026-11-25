@@ -430,9 +430,13 @@ def test_reader_command_gives_each_runtime_nothing_but_the_name():
            and stdin_text == "P" and argv[:3] == ["claude", "-p", "--strict-mcp-config"]
            and argv[argv.index("--permission-mode") + 1] == "dontAsk",
            "claude reader has no connectors, no tools and no settings, prompt on stdin")
-    argv, _, answer = check.reader_command("codex", "gpt-6.1-terra", "medium", "P", folder)
-    expect(argv[argv.index("-s") + 1] == "read-only" and "--ephemeral" in argv and argv[-1] == "P"
-           and answer == folder / "answer.txt", "codex reader is read-only, ephemeral, in the empty folder")
+    argv, stdin_text, answer = check.reader_command("codex", "gpt-6.1-terra", "medium", "P", folder)
+    expect(argv[argv.index("-s") + 1] == "read-only" and "--ephemeral" in argv and argv[-1] == "-"
+           and stdin_text == "P" and answer == folder / "answer.txt",
+           "codex reader is read-only, ephemeral, in the empty folder, prompt on stdin")
+    argv, stdin_text, _ = check.reader_command("agy", "gemini-3.8-flash-low", None, "P", folder)
+    expect(argv[-1] == "-" and "P" not in argv and stdin_text == "P",
+           "agy reader asks the agy runner to read the prompt from stdin")
 
 
 def test_run_reader_reports_nonzero_exit_and_timeout():

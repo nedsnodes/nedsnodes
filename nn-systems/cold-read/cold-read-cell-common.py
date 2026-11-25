@@ -345,6 +345,9 @@ AGENT_BINARY_WIDE_CAUSE_CLASSES = frozenset(
 USER_CLEARABLE_CAUSE_CLASSES = frozenset(
     {"logged-out", "agent-binary-missing", "account-limit", "model-limit"})
 CAUSE_DETAIL_MAX_CHARACTERS = 120
+# The operating system found the agent-binary but would not start it, such as for E2BIG, an
+# argument list over its limit; installing the agent-binary does not clear it.
+AGENT_BINARY_START_FAILED_CAUSE_CLASS = "agent-binary-start-failed"
 # Drop per-attempt timestamps from details that the grid reports for an entire agent-binary.
 DETAIL_IS_REST_OF_LINE = "rest-of-line"
 DETAIL_IS_WHOLE_LINE = "whole-line"
@@ -363,7 +366,7 @@ class RecognisedFailureText(typing.NamedTuple):
 
 
 def classify_failed_attempt(
-    *, stdout: str, stderr: str, exit_code, recognised_texts, start_error: str = "",
+    *, stdout: str, stderr: str, exit_code, recognised_texts, start_error: OSError = None,
 ) -> tuple:
     """Return (cause class, detail) for an attempt that produced no report."""
     for line in f"{stdout}\n{stderr}".splitlines():
@@ -382,7 +385,9 @@ def classify_failed_attempt(
                     detail = text.detail
                 return text.cause_class, detail
     if start_error:
-        return "agent-binary-missing", start_error
+        if isinstance(start_error, FileNotFoundError):
+            return "agent-binary-missing", str(start_error)
+        return AGENT_BINARY_START_FAILED_CAUSE_CLASS, str(start_error)
     if exit_code == 0:
         # The reviewer's closing words usually say why it wrote nothing, such as a refused write.
         closing = [line.strip() for line in stdout.splitlines() if line.strip()]
@@ -785,9 +790,19 @@ def run_reviewer_program_until_its_result_line(
                                 daemon=True)]
     for reader in readers:
         reader.start()
-    if stdin_text:
-        process.stdin.write(stdin_text)
-    process.stdin.close()
+
+    def write_stdin():
+        # A prompt larger than the pipe's buffer blocks this write until the reviewer reads it,
+        # so it runs beside the deadline wait. A reviewer that exits without reading it all
+        # breaks the pipe; its exit status and stderr then say why, not this write.
+        try:
+            if stdin_text:
+                process.stdin.write(stdin_text)
+            process.stdin.close()
+        except BrokenPipeError:
+            pass
+
+    threading.Thread(target=write_stdin, daemon=True).start()
 
     def completed(result_class, returncode, stdout, pipes_close_by=None):
         # stderr carries agy's AGY_ERROR and login lines, which callers parse,
@@ -910,7 +925,7 @@ def run_model_chain(
             print(f"{program}: {model} could not be run: {error}", file=sys.stderr)
             print(cause_line(program, *classify_failed_attempt(
                 stdout="", stderr="", exit_code=None, recognised_texts=(),
-                start_error=str(error))), file=sys.stderr)
+                start_error=error)), file=sys.stderr)
             continue
         recognised_texts = (recognised_failure_texts_for_model(model)
                             if recognised_failure_texts_for_model else ())
