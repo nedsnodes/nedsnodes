@@ -715,7 +715,7 @@ def run_merge_lane_pull_request_review_assignment_watcher_cases():
         assignments.write_text("1 merge-lane-1\n", encoding="utf-8")
         _, lines, _ = watch([open_now, open_now])
         check("the baseline poll assigns a pull request with no line, prints one REVIEW-ASSIGNED "
-              "line naming the agent-seat, and appends it to the file",
+              "line naming the agent-seat, and writes it to the file",
               [line for line in lines if not line.startswith("WATCH: ")]
               == [f"PR #40 REVIEW-ASSIGNED merge-lane-3 {'a' * 8} nedlern: title 40"]
               and assignments.read_text(encoding="utf-8") == "1 merge-lane-1\n40 merge-lane-3\n",
@@ -748,15 +748,17 @@ def run_merge_lane_pull_request_review_assignment_watcher_cases():
               "\n".join(lines))
 
         assignments.write_text("1 merge-lane-1\n", encoding="utf-8")
-        assignments.chmod(0o400)
+        scratch.chmod(0o500)
         try:
             _, lines, _ = watch([open_now, open_now])
         finally:
-            assignments.chmod(0o600)
-        check("an assignment file that cannot be appended to stops assignment with one WATCH line, "
-              "and prints no REVIEW-ASSIGNED line for what it could not record",
-              sum("cannot be appended to" in line for line in lines) == 1
-              and not any(line.startswith("PR #") for line in lines), "\n".join(lines))
+            scratch.chmod(0o700)
+        check("an assignment file that cannot be rewritten stops assignment with one WATCH line, "
+              "prints no REVIEW-ASSIGNED line, and is left as it was",
+              sum("cannot be rewritten" in line for line in lines) == 1
+              and not any(line.startswith("PR #") for line in lines)
+              and assignments.read_text(encoding="utf-8") == "1 merge-lane-1\n",
+              "\n".join(lines))
         _, lines, _ = watch([open_now])
         check("once the file can be written, the next poll assigns what waited",
               any("PR #40 REVIEW-ASSIGNED" in line for line in lines)
@@ -780,7 +782,7 @@ def run_merge_lane_pull_request_review_assignment_watcher_cases():
 
         assignments.write_text("1 merge-lane-1", encoding="utf-8")
         _, lines, _ = watch([open_now])
-        check("an append to a file whose last line has no newline starts on a line of its own",
+        check("a write to a file whose last line has no newline puts the new line on a line of its own",
               assignments.read_text(encoding="utf-8") == "1 merge-lane-1\n40 merge-lane-3\n"
               and any("PR #40 REVIEW-ASSIGNED merge-lane-3" in line for line in lines),
               "\n".join(lines))
@@ -791,47 +793,42 @@ def run_merge_lane_pull_request_review_assignment_watcher_cases():
         with contextlib.redirect_stdout(io.StringIO()):
             appended(assignments, open_now, state)
         assignments.write_text("1 merge-lane-1\n", encoding="utf-8")
-        assignments.chmod(0o400)
+        scratch.chmod(0o500)
         output = io.StringIO()
         try:
             with contextlib.redirect_stdout(output):
                 events = appended(assignments, open_now, state)
         finally:
-            assignments.chmod(0o600)
-        check("a file made after a missing-file stop, but that cannot be appended to, prints a "
+            scratch.chmod(0o700)
+        check("a file made after a missing-file stop, but that cannot be rewritten, prints a "
               "WATCH line of its own for the new case",
-              events == [] and "cannot be appended to" in output.getvalue()
+              events == [] and "cannot be rewritten" in output.getvalue()
               and "#40" in output.getvalue(), output.getvalue())
 
-        class AppendFailsAfterFirstLine(type(assignments)):
-            """Writes the first appended line, then fails as a full disk does."""
+        class WriteFailsPartway(type(assignments)):
+            """Writes the first half of the new file, then fails as a full disk does."""
 
-            def open(self, *args, **kwargs):
-                real = super().open(*args, **kwargs)
-                real_write = real.write
-
-                def write(text):
-                    real_write(text.splitlines(keepends=True)[0])
-                    raise OSError(28, "No space left on device")
-                real.write = write
-                return real
+            def write_text(self, text, *args, **kwargs):
+                super().write_text(text[:len(text) // 2], *args, **kwargs)
+                raise OSError(28, "No space left on device")
 
         assignments.write_text("1 merge-lane-1\n", encoding="utf-8")
         two_new = [*open_now, assignable(41, created_at="2026-11-24T06:00:00Z")]
         output = io.StringIO()
         with contextlib.redirect_stdout(output):
-            events = appended(AppendFailsAfterFirstLine(assignments), two_new, {})
-        check("an append that fails partway prints REVIEW-ASSIGNED for the line it did record, "
-              "and names only the pull request it did not as dealt again",
-              [event.split(" ")[:4] for event in events] == [["PR", "#40", "REVIEW-ASSIGNED",
-                                                              "merge-lane-3"]]
-              and "pull requests #41 are given no" in output.getvalue()
-              and assignments.read_text(encoding="utf-8") == "1 merge-lane-1\n40 merge-lane-3\n",
+            events = appended(WriteFailsPartway(assignments), two_new, {})
+        check("a write that fails partway leaves the file as it was, prints no REVIEW-ASSIGNED "
+              "line, and names every pull request it dealt as dealt again",
+              events == [] and "pull requests #40, #41 are given no" in output.getvalue()
+              and assignments.read_text(encoding="utf-8") == "1 merge-lane-1\n",
               f"{events}\n{output.getvalue()}")
         _, lines, _ = watch([two_new])
-        check("the next poll deals what the failed append did not record, and only that",
-              [line for line in lines if " REVIEW-ASSIGNED " in line]
-              == [f"PR #41 REVIEW-ASSIGNED merge-lane-1 {'a' * 8} nedlern: title 41"],
+        check("the next poll deals every pull request the failed write dealt",
+              [line.split(" ")[:4] for line in lines if " REVIEW-ASSIGNED " in line]
+              == [["PR", "#40", "REVIEW-ASSIGNED", "merge-lane-3"],
+                  ["PR", "#41", "REVIEW-ASSIGNED", "merge-lane-1"]]
+              and assignments.read_text(encoding="utf-8")
+              == "1 merge-lane-1\n40 merge-lane-3\n41 merge-lane-1\n",
               "\n".join(lines))
 
         # The seed.

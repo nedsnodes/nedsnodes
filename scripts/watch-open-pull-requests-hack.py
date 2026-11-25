@@ -41,7 +41,7 @@ request that is not a draft and has no line in the assignment file yet a
 merge-lane agent-seat to review it, oldest first, and prints PR #<number>
 REVIEW-ASSIGNED <merge-lane agent-seat> for each. The assignment file,
 --merge-lane-pr-review-assignments-file, holds one `<number> <merge-lane
-agent-seat>` line per pull request; only this watcher appends to it. A pull
+agent-seat>` line per pull request; only this watcher writes it. A pull
 request with a line keeps that agent-seat for every fix-round. A stacked
 pull request, whose base branch is not main, takes the agent-seat of the
 bottom of its stack: the open pull request whose head branch is its base,
@@ -60,10 +60,11 @@ opens with the line APPROVE or REQUEST_CHANGES. Only the newest
 REVIEWS_READ_PER_PULL_REQUEST reviews by ned-review-merge on each pull
 request are read. A missing, unreadable or malformed assignment file stops
 all assignment, so that no pull request it names is assigned again; so does
-a file that cannot be appended to, until it can: a pull request an append
-that failed partway did record gets its REVIEW-ASSIGNED line, and the rest
-are dealt again. Each prints a WATCH line whenever the failure's case
-differs from the last poll's.
+a file that cannot be rewritten, until it can. The watcher writes the whole
+new file beside it and renames it over the old one, so a failed write leaves
+the old file whole and every pull request it dealt is dealt again at the
+next poll. Each failure prints a WATCH line whenever its case differs from
+the last poll's.
 --merge-lane-pr-review-assignments-file-write-from-seed-and-reviewed-prs-then-exit
 makes the file once, and --merge-lane-pr-review-assignments-list-for lists
 one agent-seat's pull requests.
@@ -536,7 +537,7 @@ def merge_lane_pull_request_review_assignments_for_unassigned_pull_requests(pull
 
 
 def merge_lane_pull_request_review_assignment_lines(path, pull_requests, state):
-    """Deal the pull requests with no assignment, append them to the assignment file, and return
+    """Deal the pull requests with no assignment, write them to the assignment file, and return
     a REVIEW-ASSIGNED event line for each one the file holds afterwards. A failure prints a WATCH
     line each time its case differs from the last poll's, as state records."""
 
@@ -560,38 +561,26 @@ def merge_lane_pull_request_review_assignment_lines(path, pull_requests, state):
         state["stopped"] = None
         return []
     numbers = ", ".join(f"#{pull_request['number']}" for pull_request, _ in dealt)
+    # A whole new file renamed over the old one: a write that fails leaves the old file whole,
+    # so every pull request dealt here is dealt again at the next poll. A .partial file left by a
+    # failed write is overwritten by the next one.
+    partial = path.with_name(path.name + ".partial")
     try:
-        with path.open("a+", encoding="utf-8") as assignments_file:
-            assignments_file.seek(0)
-            # A last line without its newline would run into the first appended one.
-            text = assignments_file.read()
-            separator = "\n" if text and not text.endswith("\n") else ""
-            assignments_file.write(separator + "".join(f"{pull_request['number']} {lane}\n"
-                                                       for pull_request, lane in dealt))
-    except OSError as error:
-        try:
-            recorded = merge_lane_pull_request_review_assignments_file_read(path)
-        except MergeLanePullRequestReviewAssignmentsFileUnusable as read_error:
-            stop("append-damaged",
-                 f"WATCH: review assignment stopped: appending to the assignment file {path} "
-                 f"failed ({error}) and left it unusable: {read_error}. No REVIEW-ASSIGNED line "
-                 f"is printed for pull requests {numbers}; "
-                 f"the watch goes on otherwise.\n"
-                 f"{merge_lane_pull_request_review_assignments_file_repair_steps(path, read_error.case)}"
-                 f"  The watcher assigns again at the first poll that reads the whole file.")
-            return []
-        landed = [(pull_request, lane) for pull_request, lane in dealt
-                  if recorded.get(pull_request["number"]) == lane]
-        missing = [f"#{pull_request['number']}" for pull_request, lane in dealt
-                   if recorded.get(pull_request["number"]) != lane]
-        stop("append",
+        text = path.read_text(encoding="utf-8")
+        separator = "\n" if text and not text.endswith("\n") else ""
+        partial.write_text(text + separator + "".join(f"{pull_request['number']} {lane}\n"
+                                                      for pull_request, lane in dealt),
+                           encoding="utf-8")
+        os.replace(partial, path)
+    except (OSError, UnicodeDecodeError) as error:
+        stop("write",
              f"WATCH: review assignment stopped: the assignment file {path} cannot be "
-             f"appended to ({error}), so pull requests {', '.join(missing)} are given no merge-lane "
-             f"agent-seat to review them; the watch goes on otherwise.\n"
-             f"  Make the file writable by the user {getpass.getuser()}, who runs the watcher. "
-             f"Each later poll deals those pull requests again, and the first poll that can "
-             f"append them to the file prints their REVIEW-ASSIGNED lines.")
-        return [event_line(pull_request, f"REVIEW-ASSIGNED {lane}") for pull_request, lane in landed]
+             f"rewritten ({error}); it is left as it was, so pull requests {numbers} are given no "
+             f"merge-lane agent-seat to review them; the watch goes on otherwise.\n"
+             f"  Make the file and its directory writable by the user {getpass.getuser()}, who "
+             f"runs the watcher. Each later poll deals those pull requests again, and the first "
+             f"poll that can write them to the file prints their REVIEW-ASSIGNED lines.")
+        return []
     state["stopped"] = None
     return [event_line(pull_request, f"REVIEW-ASSIGNED {lane}") for pull_request, lane in dealt]
 
@@ -753,7 +742,7 @@ def parse_arguments(argv):
     parser.add_argument("--merge-lane-pr-review-assignments-file", type=Path,
                         default=MERGE_LANE_PULL_REQUEST_REVIEW_ASSIGNMENTS_DEFAULT_FILE,
                         help="the file of '<pull request number> <merge-lane agent-seat>' "
-                             "lines this watcher reads and appends to at each poll "
+                             "lines this watcher reads and rewrites at each poll "
                              "(default: %(default)s)")
     instead_of_watching = parser.add_mutually_exclusive_group()
     instead_of_watching.add_argument(
