@@ -100,7 +100,7 @@ def merge_gate_notice(suites):
     lines = [f"{NOTICE_HEADING}: {count} test(s) in {len(suites)} test suite(s) failed an "
              f"after-merge test run of main and have not passed since. The gate goes on; each "
              f"later after-merge test run runs them again, and a test that passes, or that a suite "
-             f"run to the end no longer reports, leaves this notice."]
+             f"run to the end with no failure no longer reports, leaves this notice."]
     for suite, entry in sorted(suites.items()):
         for test, fields in sorted(entry["failed_tests"].items()):
             task = (f"repair task #{fields['repair_task_id']} on "

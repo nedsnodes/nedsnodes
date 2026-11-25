@@ -1566,6 +1566,16 @@ def failed_suites_kept_in_view_cases(scratch):
           worked and set(left["scripts/x-test.py"]["failed_tests"]) == {"case a", "scripts/x-test.py"}
           and left["scripts/x-test.py"]["failed_tests"]["case a"]["pull_request"] == "9"
           and "left the failed suites record" not in output, f"{worked} {left}\n{output}")
+    worked, left, output = kept_in_view_directly(
+        older, newer, x_suite('<testcase name="case b"><failure message="x"/></testcase>'),
+        test="case a")
+    check("a recorded test stays unchanged when its suite, at a later commit, failed another "
+          "case and stopped before this one with no traceback, as a shell suite under set -e does",
+          worked and left.get("scripts/x-test.py", {}).get("failed_tests", {}).get("case a") == {
+              "commit": older, "last_failed_commit": older, "pull_request": "9", "log": None,
+              "failed_at": "2026-11-20T17:18:00Z", "repair_task_agent_seat": None,
+              "repair_task_id": None}
+          and "left the failed suites record" not in output, f"{worked} {left}\n{output}")
     worked, left, output = kept_in_view_directly(newer, newer, other_case, test="case a")
     check("a recorded test not reported at the commit where it last failed stays",
           worked and "case a" in left["scripts/x-test.py"]["failed_tests"], f"{left}\n{output}")
@@ -1588,11 +1598,15 @@ def failed_suites_kept_in_view_cases(scratch):
     worked, left, output = kept_in_view_directly(
         older, newer, x_suite('<testcase name="case b"><failure message="x"/></testcase>'),
         test="scripts/x-test.py exit")
-    check("a recorded failure after the last case line leaves once the suite runs to the end "
-          "without one",
-          "scripts/x-test.py exit" not in left["scripts/x-test.py"]["failed_tests"]
-          and "case b" in left["scripts/x-test.py"]["failed_tests"],
+    check("a recorded failure after the last case line stays while the suite fails another case, "
+          "which it may have stopped at",
+          {"scripts/x-test.py exit", "case b"}
+          <= set(left.get("scripts/x-test.py", {}).get("failed_tests", {})),
           f"{left}\n{output}")
+    worked, left, output = kept_in_view_directly(
+        older, newer, x_suite('<testcase name="case b"/>'), test="scripts/x-test.py exit")
+    check("a recorded failure after the last case line leaves once the suite passes every case",
+          worked and left == {} and "reported nothing for it" in output, f"{left}\n{output}")
     worked, left, output = kept_in_view_directly(
         "0" * 40, newer, x_suite('<testcase name="scripts/x-test.py"><failure message="x"/>'
                                  '</testcase><testcase name="case n"><failure message="x"/>'
