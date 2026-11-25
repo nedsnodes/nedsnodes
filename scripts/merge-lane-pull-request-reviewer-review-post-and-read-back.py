@@ -71,7 +71,7 @@ the older "- [Pn] ...", of the report of each run that exited 0:
   {"finding": <the id the refusal prints>, "grade": <grade>} per finding, the grade one
   of FINDING_CATEGORIES or "does-not-hold", which alone also takes a one-line "reason".
   The program refuses a finding with no grade, a grade for no finding on this commit, and
-  a must-fix-now, fix-next or fix-in-maintenance grade with no comment of that
+  a must-fix-now, fix-next, fix-in-maintenance or file-for-later grade with no comment of that
   finding_category whose body holds the finding's id, since the fix-round program and the
   after-merge follow-up program read findings only from comments. It adds the grades to
   the posted body under a heading. Two findings of one report with the same priority and
@@ -81,9 +81,11 @@ the older "- [Pn] ...", of the report of each run that exited 0:
 - when no run record names the commit, the program reads the commit's review tier from
   pull-request-review-plan.py --json, the delta tier when the plan says a delta-only
   review applies. At no-reviewer-tier no Codex run belongs to the review, and it posts
-  as it would without this check. At any other tier the program refuses until the Codex
-  cell has run on the commit, and prints the command that runs it from the plan's base:
-  the earlier reviewed head when a delta-only review applies, the merge base otherwise.
+  as it would without this check, unless the file grades Codex findings, which it then
+  refuses. At any other tier the program refuses until the Codex cell has run on the
+  commit, with or without grades in the file, and prints the command that runs it from
+  the plan's base, the earlier reviewed head when a delta-only review applies, the merge
+  base otherwise, naming the commit so the run refuses a pr<n>-head worktree at another one.
   A plan that fails, or does not give a known tier for this
   commit, also refuses, since the program then cannot tell whether a run belongs.
 
@@ -230,11 +232,12 @@ NO_CODEX_RUN_RECORD = (
     "review not posted: no Codex run record under {directory} names commit {head}, and "
     "scripts/pull-request-review-plan.py gives this review {tier}, which runs Codex.\n"
     "Run the Codex cell on this commit from {base_reason}, the base the review plan gives:\n"
-    "  scripts/merge-lane-code-review-codex-cell-run-on-pull-request-head.py {number} {base}{directory_option}\n"
+    "  scripts/merge-lane-code-review-codex-cell-run-on-pull-request-head.py {number} {base} "
+    "--expected-head-commit {head}{directory_option}\n"
     "Then run this posting command again.")
 CODEX_GRADE_WITH_NO_COMMENT = (
-    "review not posted: the review file {path} grades {count} Codex finding(s) must-fix-now, fix-next or "
-    "fix-in-maintenance, but has no comment of that \"finding_category\" whose \"body\" holds the "
+    "review not posted: the review file {path} grades {count} Codex finding(s) must-fix-now, fix-next, "
+    "fix-in-maintenance or file-for-later, but has no comment of that \"finding_category\" whose \"body\" holds the "
     "finding's id:\n{findings}\n"
     "The programs that act on such findings, "
     "scripts/pull-request-fix-round-author-brief-from-blocking-findings-and-one-commit-every-finding-answered-check.py "
@@ -243,13 +246,16 @@ CODEX_GRADE_WITH_NO_COMMENT = (
     "For each finding listed, add to \"comments\" an entry like the others, with \"path\", \"line\", "
     "\"body\" and \"finding_category\", the category being the grade and the body holding the id anywhere, "
     "as in \"... (Codex finding <id>)\".\n"
-    "If the finding needs no action after all, change its grade to file-for-later, or to does-not-hold with "
-    "a one-line \"reason\", instead.\n"
+    "If the finding does not hold after all, change its grade to does-not-hold with a one-line \"reason\" "
+    "instead.\n"
     "Then run this posting command again.\n"
-    "From now on, give every Codex finding you grade must-fix-now, fix-next or fix-in-maintenance a comment "
-    "of that category naming its id.")
+    "From now on, give every Codex finding you grade must-fix-now, fix-next, fix-in-maintenance or "
+    "file-for-later a comment of that category naming its id.")
 # The grades a program after the post acts on, so each needs a comment it can read.
-CODEX_GRADES_NEEDING_A_COMMENT = ("must-fix-now", "fix-next", "fix-in-maintenance")
+CODEX_GRADES_NEEDING_A_COMMENT = ("must-fix-now", "fix-next", "fix-in-maintenance", "file-for-later")
+# How a comment names the Codex finding it carries; restated findings are compared without it, because a
+# finding's id changes when its line range does.
+CODEX_FINDING_ID_MARK_IN_REVIEW_COMMENT_PATTERN = re.compile(r" ?\(?Codex finding [0-9a-f]{12}\)?")
 REVIEW_TIER_UNREADABLE = (
     "review not posted: no Codex run record names commit {head}, and its review tier could not be read "
     "from {program}: {reason}\n"
@@ -472,12 +478,12 @@ def body_with_codex_answers(body, comments, answers, findings, plan, number, hea
     unless findings is None."""
     grades = {entry["finding"]: entry for entry in answers.get(CODEX_FINDING_GRADES_KEY, [])}
     if findings is None:
-        if grades:
+        tier, base, base_reason = plan
+        if grades and tier == NO_REVIEWER_TIER:
             raise CodexRunRecordUnusable(
                 f"review not posted: the review file {review_file} grades Codex findings, but no Codex run "
-                f"record names commit {head}.\nRemove \"{CODEX_FINDING_GRADES_KEY}\" and run the same command "
-                f"again, or run the Codex review on this commit first.")
-        tier, base, base_reason = plan
+                f"record names commit {head}, and the review plan gives {tier}, which runs no Codex.\n"
+                f"Remove \"{CODEX_FINDING_GRADES_KEY}\" and run the same command again.")
         if tier != NO_REVIEWER_TIER:
             directory_option = (
                 "" if outputs_directory == common.DEFAULT_MERGE_LANE_WORKTREES_AND_OUTPUTS_DIRECTORY

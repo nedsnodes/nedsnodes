@@ -1546,6 +1546,13 @@ def test_print_block():
           "readable review approves",
           code == 2 and out == "" and err.startswith("FAILED: GitHub returned a review by ned-review-merge without a "
                                                      "state, so its verdict cannot be read: "), out + err)
+    code, out, err = print_block([merge_lane_review(2), merge_lane_review(1)],
+                                 [merge_lane_comment(10, 1, "**fix-next** Rename it (Codex finding 0123456789ab)."),
+                                  merge_lane_comment(11, 2, "**fix-next** Rename it (Codex finding ba9876543210).")])
+    check(f"{PRINT_BLOCK} prints a restated Codex finding once when only its Codex finding id differs",
+          code == 0 and err == "" and out == (f"#follow_up_request pull request {NUMBER}\n"
+                                               "1. fix-next: `scripts/thing.py:3`: Rename it (Codex finding "
+                                               "0123456789ab).\n"), out + err)
     code, out, err = print_block([merge_lane_review(1)], [merge_lane_comment(10, 1, "**fix-next** Rename it.")],
                                  read_back=lambda text: [])
     check(f"{PRINT_BLOCK} prints nothing and fails with exit 2 when its block does not read back as itself",
