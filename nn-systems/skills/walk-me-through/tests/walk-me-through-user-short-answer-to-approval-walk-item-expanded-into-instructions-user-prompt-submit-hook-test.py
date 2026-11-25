@@ -1589,9 +1589,33 @@ def test_condition_and_rider():
         lines = case.lines(prompt)
         check(f"{prompt!r} applies the answer, then the rest",
               lines is not None and lines[1] == f"The user added to the answer: \"{rest}\"."
-              and lines[2] == "Act on the answer as the lines below say, then act on what he added."
+              and lines[2] == ("Act on the answer as the lines below say, then make what he added the next item, as the "
+                               "walk-me-through skill says.")
+              and lines[3] == "If what he added contradicts or limits the answer, ask him which he means before acting on either."
+              and lines[4] == "The answer itself means:"
               and any(line.startswith(meaning) for line in lines), f"lines {lines!r}")
 
+
+def test_added_words_with_no_walk_or_an_unknown_walk_are_not_made_a_walk_item():
+    next_item = ("Act on the answer as the lines below say, then make what he added the next item, as the "
+                 "walk-me-through skill says.")
+    lines = Case().lines("A, and also rename the flag")
+    check("with no approval-walk open, added words are acted on or recorded as a task, not made a walk item",
+          lines is not None and lines[0].endswith("no approval-walk is open.")
+          and lines[1] == "The user added to the answer: \"and also rename the flag\"."
+          and lines[2] == "Act on the answer as the lines below say, then act on what he added."
+          and "If what he added cannot be done this turn, record it as a task." in lines
+          and next_item not in lines, f"lines {lines!r}")
+    case = Case(next_to_present="item 3 of 9")
+    (case.walk / f"{WALK_NAME}-minutes.md").write_bytes(b"#next_to_present item 3 of 9 \xff\xfe\n")
+    lines = case.lines("A, and also rename the flag")
+    walk_open, no_walk = (lines.index("If an approval-walk is open:"), lines.index("If no approval-walk is open:")) \
+        if lines is not None and "If an approval-walk is open:" in lines and "If no approval-walk is open:" in lines else (None, None)
+    check("when the walk state cannot be read, the next-item line is only under the open-walk branch",
+          walk_open is not None and walk_open < no_walk
+          and next_item in lines[walk_open:no_walk] and next_item not in lines[:walk_open] + lines[no_walk:]
+          and "Act on the answer as the lines below say, then act on what he added." in lines[no_walk:]
+          and "If what he added cannot be done this turn, record it as a task." in lines[no_walk:], f"lines {lines!r}")
 
 def test_e_points_at_the_explain_skill():
     lines = Case(next_to_present="item 3 of 9").lines("e")
@@ -2621,7 +2645,8 @@ def test_settled_line_unreadable_transcript_falls_back_to_the_prompts_opening():
           and "could not tell who wrote this prompt" in lines[1] and "the last line does not apply" in lines[1]
           and lines[2] == SETTLED_LINE, f"exit {result.returncode}, stdout {result.stdout!r}")
     check("the failed-read opening says a paused approval-walk has no item waiting",
-          "unless an `#approval_walk_paused` line follows that line, which means no item is waiting" in lines[0],
+          bool(lines) and "unless an `#approval_walk_paused` line follows that line, which means no item is waiting"
+          in lines[0],
           lines[0] if lines else "no lines")
     result = case.run("<task-notification>a task ended</task-notification>", transcript_path=transcript)
     check("a task notice with an unreadable transcript prints nothing",
@@ -2688,20 +2713,15 @@ def test_own_words_output_given_the_walk_state_already_read_does_not_read_it_aga
     payload = {"prompt": "repeat 99", "cwd": "/nonexistent"}
     walk = types.SimpleNamespace(item="item 4 of 9", name=WALK_NAME)
     try:
-        output = hook.own_words_output(payload, (walk, None))
+        output = hook.own_words_output(payload, walk)
         context = output["hookSpecificOutput"]["additionalContext"].split("\n")
     except Exception as error:
         context = [repr(error)]
     check("given read_walk's result, own_words_output names its item and does not read the walk again",
           context[0].endswith(f"item 4 of 9 of approval-walk {WALK_NAME} is waiting for the user's answer, and his "
                               "reply is in his own words.") and context[-1] == SETTLED_LINE, f"context {context!r}")
-    output = hook.own_words_output(payload, (None, None))
+    output = hook.own_words_output(payload, None)
     check("given read_walk's result of no open walk, own_words_output prints nothing", output is None, repr(output))
-    output = hook.own_words_output(payload, (None, OSError("unreadable minutes")))
-    context = output["hookSpecificOutput"]["additionalContext"].split("\n") if output else []
-    check("given read_walk's error, own_words_output opens with the failed read",
-          bool(context) and "reading the approval-walk state failed" in context[0] and "unreadable minutes" in context[0],
-          f"context {context!r}")
 
 
 def test_settled_line_follows_every_line_of_an_answer_typed_on_several_lines():

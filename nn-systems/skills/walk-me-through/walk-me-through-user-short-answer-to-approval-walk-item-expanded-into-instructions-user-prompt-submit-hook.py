@@ -521,6 +521,13 @@ CONDITION_LINES = (
 )
 RIDER_LINES = (
     "The user added to the answer: \"{rest}\".",
+    "Act on the answer as the lines below say, then make what he added the next item, as the walk-me-through skill says.",
+    "If what he added contradicts or limits the answer, ask him which he means before acting on either.",
+    "The answer itself means:",
+)
+# With no approval-walk open there is no item to make the added words into.
+WALK_ME_THROUGH_USER_SHORT_ANSWER_WITH_USER_ADDED_WORDS_WHEN_NO_APPROVAL_WALK_IS_OPEN_AGENT_INSTRUCTION_LINES = (
+    "The user added to the answer: \"{rest}\".",
     "Act on the answer as the lines below say, then act on what he added.",
     "If what he added contradicts or limits the answer, ask him which he means before acting on either.",
     "If what he added cannot be done this turn, record it as a task.",
@@ -1157,7 +1164,7 @@ def output_for(payload):
     except Exception as error:
         walk, walk_error = None, error
     if named_item_missing(answer, walk, walk_error):
-        return own_words_output(payload, (walk, walk_error))
+        return own_words_output(payload, walk)
     no_decision_context = no_decision_sub_step_answer_context(answer, walk)
     if no_decision_context:
         return {"hookSpecificOutput": {"hookEventName": "UserPromptSubmit", "additionalContext": no_decision_context}}
@@ -1207,25 +1214,25 @@ def prompt_typed_by_user_and_transcript_read_error(payload):
         return not payload["prompt"].lstrip().startswith(alerts_hook.NOT_TYPED_PROMPT_OPENINGS), error
 
 
-def own_words_output(payload, walk_read=None):
+WALK_NOT_READ = object()
+
+
+def own_words_output(payload, walk=WALK_NOT_READ):
     """The output for a prompt that is no short answer: the settled-discussion line while an item waits, else None.
-    Reads only the walk-minutes, not the walk-document, whose faults concern the answer forms. walk_read, when given,
-    is (read_walk's result, the error it raised or None), so the approval-walk state is not read a second time."""
+    Reads only the walk-minutes, not the walk-document, whose faults concern the answer forms. walk, when given,
+    is what read_walk returned, so the approval-walk state is not read a second time."""
     if not (payload.get("prompt") or "").strip():
         return None
     if agent_session_unattended():
         return None
-    if walk_read is not None:
-        walk, walk_error = walk_read
-        if walk_error is None and walk is None:
+    if walk is not WALK_NOT_READ:
+        if walk is None:
             return None
-        if walk_error is None:
-            waiting = {"item": walk.item, "walk": walk.name}
-            opening = WALK_ME_THROUGH_HOOK_AGENT_CONTEXT_OPENING_WHEN_APPROVAL_WALK_ITEM_WAITING_AND_USER_REPLY_NOT_SHORT_ANSWER_LINE.format(**waiting)
-            opening_author_unknown = WALK_ME_THROUGH_HOOK_AGENT_CONTEXT_OPENING_WHEN_APPROVAL_WALK_ITEM_WAITING_AND_PROMPT_AUTHOR_UNKNOWN_LINE.format(**waiting)
-        else:
-            opening = opening_author_unknown = WALK_ME_THROUGH_HOOK_AGENT_CONTEXT_OPENING_WHEN_APPROVAL_WALK_STATE_READ_FAILED_AND_USER_REPLY_NOT_SHORT_ANSWER_LINE.format(error=repr(walk_error))
-        return own_words_context(payload, opening, opening_author_unknown)
+        waiting = {"item": walk.item, "walk": walk.name}
+        return own_words_context(
+            payload,
+            WALK_ME_THROUGH_HOOK_AGENT_CONTEXT_OPENING_WHEN_APPROVAL_WALK_ITEM_WAITING_AND_USER_REPLY_NOT_SHORT_ANSWER_LINE.format(**waiting),
+            WALK_ME_THROUGH_HOOK_AGENT_CONTEXT_OPENING_WHEN_APPROVAL_WALK_ITEM_WAITING_AND_PROMPT_AUTHOR_UNKNOWN_LINE.format(**waiting))
     try:
         walk_finder = load_walk_finder()
         top = walk_finder.checkout_top(Path(payload.get("cwd") or os.getcwd()))
@@ -1273,22 +1280,24 @@ def named_item_missing(answer, walk, walk_error):
 def context_lines_for(answer, walk, walk_error):
     """Return the additionalContext lines for the answer, opening line first, given the open approval-walk as
     read_walk read it, or the error reading it raised. An answer the user typed on several lines stays in one entry."""
-    prefix = []
+    prefix, walk_prefix, no_walk_prefix = [], [], []
     if answer["form"] == "condition":
         prefix = [line.format(condition=answer["condition"]) for line in CONDITION_LINES]
     elif answer["form"] == "rider":
-        prefix = [line.format(rest=answer["rest"]) for line in RIDER_LINES]
+        walk_prefix = [line.format(rest=answer["rest"]) for line in RIDER_LINES]
+        no_walk_prefix = [line.format(rest=answer["rest"]) for line in WALK_ME_THROUGH_USER_SHORT_ANSWER_WITH_USER_ADDED_WORDS_WHEN_NO_APPROVAL_WALK_IS_OPEN_AGENT_INSTRUCTION_LINES]
     if walk_error is not None:
         lines = [WALK_UNKNOWN_OPENING_LINE.format(answer=answer["answer"], error=repr(walk_error)), WALK_UNKNOWN_FIND]
-        lines += prefix + [IF_WALK_OPEN]
+        lines += prefix + [IF_WALK_OPEN] + walk_prefix
         lines += meaning_lines(answer, WalkState("", "the waiting item", [], None, {}, None), True)
-        lines += [IF_NO_WALK] + meaning_lines(answer, None, False)
+        lines += [IF_NO_WALK] + no_walk_prefix + meaning_lines(answer, None, False)
     else:
         if walk is None:
-            lines = [NO_WALK_OPENING_LINE.format(answer=answer["answer"])] + prefix + meaning_lines(answer, None, False)
+            lines = ([NO_WALK_OPENING_LINE.format(answer=answer["answer"])] + prefix + no_walk_prefix
+                     + meaning_lines(answer, None, False))
         else:
             lines = ([OPEN_WALK_OPENING_LINE.format(answer=answer["answer"], item=walk.item, walk=walk.name)]
-                     + prefix + meaning_lines(answer, walk, True))
+                     + prefix + walk_prefix + meaning_lines(answer, walk, True))
     return lines
 
 

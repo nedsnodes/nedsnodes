@@ -40,13 +40,16 @@ the account now logged in; --usage-limit-record-uuid-to-ignore names a limit rec
 longer applies to, which the second build-slice decides from its log. It runs on ned-box and reads
 only ned-box's files, so it does not see the Mac's agent-seats. It does not tell a sentence that
 assesses an action from one that promises it: a sentence that opens with an announced-action
-phrase and names a time, such as "Going on with item 2 tomorrow sounds risky.", reads as
-`promise_after_event`, so rule 2 can send an unbacked-promise nudge for it without the judge.
+phrase and names a time can read as `promise_after_event`, as
+"Going on with item 2 tomorrow sounds risky." does, so rule 2 can send an unbacked-promise nudge
+for it without the judge.
 
 How it fails: when a file it must read cannot be read, or is not UTF-8 or JSON where a whole line
 is expected, or `gh` cannot answer, the agent-seat's line carries the failure under "errors" and
 "rule" is null, every other agent-seat is still reported, and the program exits 1. A task file
 that does not hold a task with an id is such a failure, when rule 4 reads the task list. A
+prerequisite left unasked because the GitHub time budget was spent is not a failure: the line names
+it under "github_conditions_skipped_for_budget", and rule 5 applies instead of rule 4. A
 failure it does not expect, such as a file that changes between two reads of it, stops the program
 with a traceback and exit 1. A transcript's last line that Claude Code is still writing is
 skipped, except when it holds the key of a subagent or background-command launch: that is then a
@@ -533,6 +536,9 @@ def read_main_transcript(path):
     awaiting_turn_start = True
     task_tool_calls = []                 # (tool use id, (time, name, input))
     task_id_by_succeeded_tool_use_id = {}
+    # An interrupt notice is a user record the user did not type, and a queued message re-sent
+    # after an interrupt was typed once, when it was queued.
+    turn_reader = user_messages.TurnReader()
     for record in transcript_records(path):
         moment = parse_time(record.get("timestamp"))
         task_id_by_succeeded_tool_use_id.update(succeeded_task_tool_result_task_ids(record))
@@ -541,7 +547,8 @@ def read_main_transcript(path):
             awaiting_turn_start = False
         if spends_tokens(record) and moment:
             facts.last_token_spend = max(filter(None, (facts.last_token_spend, moment)))
-        if moment and (user_messages.typed_by_user(record) or user_messages.queued_by_user(record)):
+        turn = turn_reader.turn(record)
+        if moment and turn and turn[0] == "user":
             facts.last_user_typed = max(filter(None, (facts.last_user_typed, moment)))
         if is_model_turn_record(record):
             facts.last_model_turn_record = record
@@ -549,8 +556,7 @@ def read_main_transcript(path):
         if record.get("type") == "assistant" and message_text(record).strip():
             newest_text_record = (record, moment, turn_started_at)
         if ((record.get("type") == "system" and record.get("subtype") == "turn_duration")
-                or (record.get("type") == "user"
-                    and message_text(record).strip().startswith("[Request interrupted by user"))):
+                or user_messages.is_interrupt_notice(record)):
             facts.turn_ended_after_last_model_turn_record = True
             awaiting_turn_start = True
             turn_started_at = None
@@ -805,15 +811,22 @@ def rules_three_to_five(verdict, put_off_at, checker, task_directory,
                         due_task_raise_state_directory):
     running = any(verdict["running"].values())
     if not running:
-        # A condition the shared GitHub budget skipped may be met, so it leaves the verdict to rule 5.
+        # The checker is shared by every agent-seat, so only the skips appended here are this one's.
         skipped_before = len(checker.conditions_skipped_for_budget)
-        verdict["open_tasks_nothing_holds"] = open_tasks_nothing_holds(
-            task_directory, checker, due_task_raise_state_directory)
+        try:
+            verdict["open_tasks_nothing_holds"] = open_tasks_nothing_holds(
+                task_directory, checker, due_task_raise_state_directory)
+        finally:
+            # A gh failure raises after the scan, so the skips it made are named even then.
+            skipped = dict.fromkeys(checker.conditions_skipped_for_budget[skipped_before:])
+            if skipped:
+                verdict[fields.GITHUB_CONDITIONS_SKIPPED_FOR_BUDGET] = [
+                    {"kind": kind, "number": number} for kind, number in skipped]
         if verdict["handoff_deferred_marker"]:
             return {fields.RULE: 3, fields.DECISION: fields.WAKE_HANDOFF_PUT_OFF,
                     fields.TEXT: HANDOFF_PUT_OFF_TEXT.format(time=iso(put_off_at))}
-        if (not verdict["open_tasks_nothing_holds"]
-                and len(checker.conditions_skipped_for_budget) == skipped_before):
+        # A condition the shared GitHub budget skipped may be met, so it leaves the verdict to rule 5.
+        if not skipped and not verdict["open_tasks_nothing_holds"]:
             return {fields.RULE: 4, fields.DECISION: fields.NO_WAKE}
     return {fields.RULE: 5, fields.DECISION: fields.JUDGE}
 
