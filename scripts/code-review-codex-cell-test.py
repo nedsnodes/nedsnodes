@@ -481,7 +481,7 @@ with tempfile.TemporaryDirectory() as scratch:
                           "--output", str(refused_report))
         check(f"a report Codex wrote as {case} exits 1, naming the report, leaving no report "
               "and the text Codex wrote on stderr",
-              result.returncode == 1 and str(refused_report) in result.stderr
+              result.returncode == 1 and str(refused_report.resolve()) in result.stderr
               and report_text in result.stderr and "Traceback" not in result.stderr
               and not refused_report.exists(),
               f"exit {result.returncode}; stderr={result.stderr!r}")
