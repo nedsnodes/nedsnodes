@@ -338,6 +338,27 @@ def case_types_the_stored_remote_control_name(namespace):
         fixture.close()
 
 
+def case_stored_name_unreadable_while_waiting_after_a_typing(namespace):
+    fixture = lost_seat("name-unreadable-in-wait", namespace)
+    real_home = os.environ.get("HOME")
+    try:
+        with tempfile.TemporaryDirectory() as home:
+            name_file = Path(home) / ".claude" / "handoffs" / f"{fixture.seat}-remote-control-name"
+            name_file.parent.mkdir(parents=True)
+            os.environ["HOME"] = home
+            fixture.run()
+            name_file.mkdir()
+            exit_code, errors = fixture.run()
+            # The first typing may still bring Remote Control back; telling the user to type is premature.
+            check("a stored name that cannot be read while the watcher waits after its typing: "
+                  "nothing reported, nothing typed again",
+                  exit_code == 0 and fixture.decisions() == ["typed"] and not fixture.notices(),
+                  (exit_code, errors, fixture.entries(), fixture.notices()))
+    finally:
+        os.environ["HOME"] = real_home
+        fixture.close()
+
+
 def case_unreadable_stored_remote_control_name(namespace):
     fixture = lost_seat("name-unreadable", namespace)
     real_home = os.environ.get("HOME")
@@ -1288,6 +1309,7 @@ def main():
         case_types_on_disconnect(namespace)
         case_types_the_stored_remote_control_name(namespace)
         case_unreadable_stored_remote_control_name(namespace)
+        case_stored_name_unreadable_while_waiting_after_a_typing(namespace)
         case_typing_that_leaves_remote_control_off(namespace)
         case_typing_again_stops_once_reconnected(namespace)
         case_typing_logged_under_decisions_file_name_before_program_prefix(namespace)

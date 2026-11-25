@@ -41,11 +41,14 @@ def remote_control_name_file_path(agent_seat: str) -> Path:
 
 def handoff_remote_control_name_read_stored_or_default_to_agent_seat_name(agent_seat: str) -> str:
     """Return the stored name, or the agent-seat name when none is stored; raise OSError if unreadable."""
+    path = remote_control_name_file_path(agent_seat)
     try:
-        stored = remote_control_name_file_path(agent_seat).read_text(
-            encoding="utf-8").strip()
+        stored = path.read_text(encoding="utf-8").strip()
     except FileNotFoundError:
         return agent_seat
+    except UnicodeDecodeError as error:
+        # Every caller handles OSError alone; a ValueError would escape them.
+        raise OSError(f"{path} is not UTF-8 text: {error}") from error
     return stored or agent_seat
 
 

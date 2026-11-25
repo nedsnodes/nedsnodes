@@ -2488,6 +2488,13 @@ def handoff_supervisor_not_restarted_on_main_code_notice(
             f"{RESTART_PROGRAM_PATH_FROM_HOME} {seat}", on_the_mac))
 
 
+HANDOFF_SUPERVISOR_CLAUDE_AI_RENAME_NOT_CHECKED_SUCCESSOR_NOTICE_TEMPLATE = (
+    "The handoff-supervisor could not check whether the user renamed agent-seat {agent_seat} in "
+    "claude.ai during the last agent-session, so a rename, if any, was not passed on: {error}\n"
+    "If ListAgents lists this agent-session under a name other than the one the other agent-seats "
+    "use for it, send each of them that name with SendMessage.")
+
+
 def handoff_supervisor_remote_control_name_choose_for_agent_session_launch(agent_seat: str) -> str:
     """Return the stored Remote Control name; an unreadable name file must not stop a launch."""
     try:
@@ -2501,32 +2508,47 @@ def handoff_supervisor_remote_control_name_choose_for_agent_session_launch(agent
 
 
 def handoff_supervisor_claude_ai_rename_save_as_remote_control_name_and_add_instruction_to_successor_notice(settings: SupervisorSettings, successor_notice: str,
-                                                retiring_session_id: Optional[str],
+                                                launched_session_id: Optional[str],
                                                 launched_remote_control_name: Optional[str]) -> str:
-    """Store a rename the retiring agent-session's last turn end did not, and, when the stored name
-    differs from the name the retiring agent-session was launched under, add the instruction to tell
-    the other agent-seats."""
-    if not retiring_session_id:
+    """Store a rename the launched agent-session's last turn end did not, and, when the name
+    changed during that agent-session, add the instruction to tell the other agent-seats."""
+    # The launched session, not the handoff's writer: a session that took over the worktree
+    # may carry a title of its own, which is not this agent-seat's name.
+    if not launched_session_id:
         return successor_notice
+    rename, failure = None, ""
     try:
         transcript_path = claude_code_session_transcript_lookup_and_text_search_common.claude_code_session_transcript_path_found_by_session_id(
-            retiring_session_id, settings.working_directory, PROJECTS_ROOT)
+            launched_session_id, settings.working_directory, PROJECTS_ROOT)
         rename = (remote_control_name_common.handoff_remote_control_name_save_when_transcript_custom_title_changed_and_return_rename(
             settings.agent, transcript_path) if transcript_path is not None else None)
-        stored_name = remote_control_name_common.handoff_remote_control_name_read_stored_or_default_to_agent_seat_name(settings.agent)
     except (OSError, claude_code_session_transcript_lookup_and_text_search_common.ClaudeCodeSessionTranscriptFoundInSeveralProjectDirectoriesError) as error:
-        print(f"handoff-supervisor: whether the user renamed agent-seat {settings.agent} in claude.ai "
-              f"could not be checked, so the rename, if any, was not carried to the successor: {error}\n"
-              "If the user did rename it, tell the other agent-seats the new name with SendMessage.",
-              file=sys.stderr)
+        failure = HANDOFF_SUPERVISOR_CLAUDE_AI_RENAME_NOT_CHECKED_SUCCESSOR_NOTICE_TEMPLATE.format(
+            agent_seat=settings.agent, error=error)
+    try:
+        stored_name = remote_control_name_common.handoff_remote_control_name_read_stored_or_default_to_agent_seat_name(settings.agent)
+    except OSError as error:
+        failure = HANDOFF_SUPERVISOR_CLAUDE_AI_RENAME_NOT_CHECKED_SUCCESSOR_NOTICE_TEMPLATE.format(
+            agent_seat=settings.agent, error=error)
+        stored_name = None
+    if failure:
+        print(f"handoff-supervisor: {failure}", file=sys.stderr)
+        successor_notice = f"{successor_notice} {failure}" if successor_notice else failure
+    if stored_name is None:
         return successor_notice
-    # The retiring agent-session may have handed off before it sent the line the Stop hook gave it.
-    # A state file written before the launched name was recorded has only the rename found here.
-    old_name = launched_remote_control_name or (rename.old_name if rename else stored_name)
+    if rename is not None:
+        # A rename back to the launched name undoes one the Stop hook stored and the others were told.
+        old_name = (rename.old_name
+                    if not launched_remote_control_name or rename.new_name == launched_remote_control_name
+                    else launched_remote_control_name)
+    else:
+        # The Stop hook stored a rename the agent-session may have handed off before announcing.
+        # A state file written before the launched name was recorded has no rename to announce here.
+        old_name = launched_remote_control_name or stored_name
     if stored_name == old_name:
         return successor_notice
-    rename = remote_control_name_common.RemoteControlRename(old_name, stored_name)
-    instruction = remote_control_name_common.handoff_remote_control_rename_message_other_agent_seats_instruction_build(rename)
+    instruction = remote_control_name_common.handoff_remote_control_rename_message_other_agent_seats_instruction_build(
+        remote_control_name_common.RemoteControlRename(old_name, stored_name))
     return f"{successor_notice} {instruction}" if successor_notice else instruction
 
 
@@ -2714,7 +2736,7 @@ def supervise_sessions(settings: SupervisorSettings) -> int:
                 retiring_session_id_from_handoff_writer_or_tracked_launch(tracked_session_id, boot_fields)
                 if tracked_session_id else None)
             successor_notice = handoff_supervisor_claude_ai_rename_save_as_remote_control_name_and_add_instruction_to_successor_notice(
-                settings, successor_notice, retiring_session_id, state.get(LAUNCHED_REMOTE_CONTROL_NAME_STATE_KEY))
+                settings, successor_notice, tracked_session_id, state.get(LAUNCHED_REMOTE_CONTROL_NAME_STATE_KEY))
             successor_session_id, ignition_plan = (
                 carry_over_to_successor(settings, retiring_session_id, boot_fields, generation)
                 if retiring_session_id else (None, None)
@@ -2922,7 +2944,7 @@ def supervise_sessions(settings: SupervisorSettings) -> int:
         retiring_session_id = retiring_session_id_from_handoff_writer_or_tracked_launch(
             session_id, handoff_fields)
         successor_notice = handoff_supervisor_claude_ai_rename_save_as_remote_control_name_and_add_instruction_to_successor_notice(
-            settings, successor_notice, retiring_session_id, state.get(LAUNCHED_REMOTE_CONTROL_NAME_STATE_KEY))
+            settings, successor_notice, session_id, state.get(LAUNCHED_REMOTE_CONTROL_NAME_STATE_KEY))
         successor_session_id, ignition_plan = carry_over_to_successor(
             settings, retiring_session_id, handoff_fields, generation
         )

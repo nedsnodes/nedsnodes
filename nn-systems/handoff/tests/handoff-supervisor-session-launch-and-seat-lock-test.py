@@ -1422,10 +1422,33 @@ with tempfile.TemporaryDirectory() as rename_directory:
             kept = carry("earlier notice", "seat-a")
         check("an unreadable stored name launches under the agent-seat name and reports it",
               name == "seat-a" and "could not be read" in errors.getvalue(), errors.getvalue())
-        check("a rename that cannot be stored keeps the notice and reports it",
-              kept == "earlier notice" and "not carried to the successor" in errors.getvalue(),
-              errors.getvalue())
+        check("a rename that cannot be stored keeps the notice and reports it, to the console and "
+              "to the successor",
+              kept.startswith("earlier notice The handoff-supervisor could not check whether the user "
+                              "renamed agent-seat seat-a")
+              and "could not check whether the user renamed" in errors.getvalue(),
+              kept + " | " + errors.getvalue())
         name_file.rmdir()
+        name_file.write_bytes(b"\xff\xfe not utf-8\n")
+        errors = io.StringIO()
+        with contextlib.redirect_stderr(errors):
+            name = supervisor.handoff_supervisor_remote_control_name_choose_for_agent_session_launch("seat-a")
+            kept = carry("earlier notice", "seat-a")
+        check("a stored name that is not UTF-8 text launches under the agent-seat name and is "
+              "reported, naming the file",
+              name == "seat-a" and "is not UTF-8 text" in errors.getvalue()
+              and str(name_file) in errors.getvalue()
+              and "The handoff-supervisor could not check" in kept,
+              kept + " | " + errors.getvalue())
+        name_file.write_text("--renamed\n", encoding="utf-8")
+        (other_project / "retiring.jsonl").write_text(
+            '{"type":"custom-title","customTitle":"seat-a"}\n', encoding="utf-8")
+        notice = carry("", "seat-a")
+        check("a rename back to the launched name, found at the handoff, tells the others the name "
+              "the Stop hook stored and announced is gone",
+              "The agent-seat --renamed is now seat-a in Remote Control; send it messages under that name." in notice
+              and name_file.read_text(encoding="utf-8").strip() == "seat-a", notice)
+        name_file.write_text("--renamed\n", encoding="utf-8")
         second_project = projects / "-a-third-worktree"
         second_project.mkdir()
         (second_project / "retiring.jsonl").write_text(
@@ -1433,9 +1456,12 @@ with tempfile.TemporaryDirectory() as rename_directory:
         errors = io.StringIO()
         with contextlib.redirect_stderr(errors):
             kept = carry("earlier notice", "seat-a")
-        check("a session id found in two project directories keeps the notice and reports it",
-              kept == "earlier notice" and "several project directories" in errors.getvalue(),
-              errors.getvalue())
+        check("a session id found in two project directories is reported to the console and the "
+              "successor, and a rename the Stop hook stored is still announced",
+              kept.startswith("earlier notice The handoff-supervisor could not check")
+              and "several project directories" in errors.getvalue()
+              and "The agent-seat seat-a is now --renamed in Remote Control" in kept,
+              kept + " | " + errors.getvalue())
     finally:
         os.environ["HOME"] = real_home
         supervisor.PROJECTS_ROOT = real_projects_root
