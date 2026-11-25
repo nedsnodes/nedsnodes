@@ -3018,10 +3018,12 @@ def item_title(walk_finder, line, with_text_after_title=False):
     # One match reads the label at most once, through the finder's own label pieces; the emphasis can close before
     # the label, as in `**Item 3 of 9**: (revised) x`, or after it, as in `**Item 3 of 9 (revised):** x`.
     separators = r"[ :,.;]*"
-    label = rf"(?:[\s,:;.\-\u2013\u2014]*{walk_finder.REVISED_LABEL}[ :,.;\-\u2013\u2014]*)?"
+    revised = walk_finder.APPROVAL_WALK_ITEM_HEADING_REVISED_LABEL_REGEX
+    label = rf"(?:[\s,:;.\-\u2013\u2014]*{revised}[ :,.;\-\u2013\u2014]*)?"
     closer = re.escape(opener)
     # The bare word may end at the closing emphasis only straight after the count, as the finder's REVISED reads it.
-    word = rf"{walk_finder.REVISED_LABEL_BEFORE_CLOSING_EMPHASIS}(?P<after_word>{closer}){separators}|" if opener else ""
+    word = (rf"{walk_finder.APPROVAL_WALK_ITEM_HEADING_REVISED_LABEL_BEFORE_CLOSING_EMPHASIS_REGEX}"
+            rf"(?P<after_word>{closer}){separators}|") if opener else ""
     opening = re.match(rf"{word}{separators}(?:(?P<before>{closer}){separators}{label}|{label}(?P<after>{closer})"
                        rf"{separators}|{label})", line[count.end():], re.I)
     title = line[count.end() + opening.end():]
@@ -3054,13 +3056,13 @@ def emphasis_closer(walk_finder, text, opener):
 def markdown_with_link_syntax_dropped(markdown, parser, hook):
     """The inline Markdown with each link's text kept, its link syntax gone and the rest's emphasis and code spans as
     written, as an earlier message quoting the title would give it; unlike the closing line's point, nothing is
-    escaped. hook is the short-answer hook's module, whose code_span_markdown rebuilds a code span."""
+    escaped. hook is the short-answer hook's module, whose markdown_it_code_inline_token_to_code_span_markdown_with_padding_restored rebuilds a code span."""
     pieces = []
     for token in parser.parseInline(markdown)[0].children:
         if token.type in ("link_open", "link_close"):
             continue
         if token.type == "code_inline":
-            pieces.append(hook.code_span_markdown(token))
+            pieces.append(hook.markdown_it_code_inline_token_to_code_span_markdown_with_padding_restored(token))
         elif token.type in ("softbreak", "hardbreak"):
             pieces.append(" ")
         else:

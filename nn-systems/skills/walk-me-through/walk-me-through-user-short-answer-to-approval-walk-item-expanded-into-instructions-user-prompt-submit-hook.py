@@ -766,13 +766,13 @@ def without_links(markdown, parser):
             # markup or an entity is escaped again, or the closing line would show something the heading does not.
             pieces.append(re.sub(r"([\\`*_\[\]<>!&])", r"\\\1", token.content))
         elif token.type == "code_inline":
-            pieces.append(code_span_markdown(token))
+            pieces.append(markdown_it_code_inline_token_to_code_span_markdown_with_padding_restored(token))
         else:
             pieces.append(token.markup or token.content)
     return "".join(pieces)
 
 
-def code_span_markdown(token):
+def markdown_it_code_inline_token_to_code_span_markdown_with_padding_restored(token):
     """The Markdown of the parser's code_inline token, as the source wrote it: the parser drops the padding space that
     lets a code span's content start or end with a backtick or a space; without it the rebuilt fence takes in an
     edge backtick, or the parser strips an edge space."""
