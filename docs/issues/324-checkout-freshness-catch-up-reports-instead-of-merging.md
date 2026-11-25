@@ -237,7 +237,7 @@ user:
 - (a) the hook fast-forwards a branch whose own-commit count is zero — no
   merge commit, nothing authored, but it does move the working branch, which
   the ruling's words forbid;
-- (b) `scripts/ghi-guide-agent-ask.py` refreshes that checkout itself with
+- (b) `scripts/ghi-guide-ask.py` refreshes that checkout itself with
   `git merge --ff-only origin/main` before each ask, keeping the hook's rule
   absolute and putting the refresh in the one caller that knows the answer is
   program-consumed.
