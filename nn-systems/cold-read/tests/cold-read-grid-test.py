@@ -1847,6 +1847,20 @@ try:
         check(f"the lifted {marker} line is followed by its instruction line",
               len(printed_lines) == 2 and printed_lines[0].startswith(marker)
               and printed_lines[1] == instruction, repr(printed_lines))
+    # The grid reads the cell log with str.splitlines, which also splits at U+2028, U+2029 and
+    # U+0085; a git reason holding one, as in a path, must reach the lifted line whole.
+    cell_log = io.StringIO()
+    with contextlib.redirect_stderr(cell_log):
+        grid_module.cell_common.report_stray_writes(program, grid_module.cell_common.WriteDetectorUnavailable(
+            "fatal: detected dubious ownership in repository at '/x/a\u2028b\u2029c\x85d'\nTo add an exception, run:"))
+    printed = io.StringIO()
+    with contextlib.redirect_stdout(printed):
+        grid_module.lift_cell_status_lines(scratch / "claude-hunt-deep.md", cell_log.getvalue().splitlines())
+    printed_lines = printed.getvalue().splitlines()
+    check("a failed snapshot's git reason holding U+2028, U+2029 and U+0085 is lifted whole on one line",
+          len(printed_lines) == 2 and printed_lines[0].startswith("WRITE CHECK DID NOT RUN:")
+          and "'/x/a\\u2028b\\u2029c\\x85d' To add an exception, run:" in printed_lines[0],
+          repr(printed_lines))
     check("the FELL BACK instruction is the text item 24 of the approval-walk approved",
           grid_module.COLD_READ_CELL_FELL_BACK_TO_ANOTHER_MODEL_STATUS_LINE_NEXT_STEP_INSTRUCTION
           == "If this report drives a change, name the model that wrote it in cold-read-triage.md.",

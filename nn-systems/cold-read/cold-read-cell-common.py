@@ -1044,7 +1044,7 @@ def run_cell(
     try:
         baseline = working_tree_state()
     except WriteDetectorUnavailable as error:
-        baseline = ColdReadCellWorkingTreeSnapshotFailedStandInBaselineWithGitReason(error)
+        baseline = error
         print(f"{program}: could not snapshot the working tree ({error}); "
               "stray writes will not be checked for this run.", file=sys.stderr)
 
@@ -1159,25 +1159,22 @@ def path_shown_on_one_line(path: str) -> str:
 def join_error_text_lines_with_one_space(text) -> str:
     """`text`'s lines joined by one space, each line's own spaces kept: a path in a git
     message may hold two spaces in a row. Only a newline or carriage return ends a line
-    here, so a U+2028 or U+0085 inside a path in the message stays in that path."""
-    return " ".join(line.strip() for line in re.split(r"\r\n|\r|\n", str(text)) if line.strip())
-
-
-class ColdReadCellWorkingTreeSnapshotFailedStandInBaselineWithGitReason:
-    """The baseline a cell passes when its pre-run snapshot failed, holding git's reason,
-    so the stray-write line the grid lifts from the cell log carries that reason."""
-
-    def __init__(self, reason) -> None:
-        self.reason = join_error_text_lines_with_one_space(reason)
+    here; any other character str.splitlines splits at, such as a U+2028 inside a path in
+    the message, is written as its escape, such as `\\u2028`, so the printed line stays one
+    line for the grid, which reads the cell log with str.splitlines."""
+    joined = " ".join(line.strip() for line in re.split(r"\r\n|\r|\n", str(text)) if line.strip())
+    return "".join(
+        character.encode("unicode_escape").decode("ascii")
+        if len(f"a{character}a".splitlines()) > 1 else character for character in joined)
 
 
 def report_stray_writes(program: str, baseline, own_report_path=None) -> None:
     """Report changes outside the requested report without raising."""
     # Check every agent-binary and every exit path: a failed reviewer may still have edited the target.
-    if baseline is None or isinstance(baseline, ColdReadCellWorkingTreeSnapshotFailedStandInBaselineWithGitReason):
-        reason = f" (git status failed: {baseline.reason})" if baseline is not None else ""
+    if isinstance(baseline, WriteDetectorUnavailable):
         print(f"{program}: {STRAY_WRITE_CHECK_SKIPPED_PHRASE} — no pre-run "
-              f"snapshot of the working tree was taken{reason}. This is "
+              f"snapshot of the working tree was taken (git status failed: "
+              f"{join_error_text_lines_with_one_space(baseline)}). This is "
               f"{COLD_READ_CELL_STRAY_WRITE_CHECK_SKIPPED_IS_NOT_A_CLEAN_RESULT_PHRASE}.", file=sys.stderr)
         return
     try:
