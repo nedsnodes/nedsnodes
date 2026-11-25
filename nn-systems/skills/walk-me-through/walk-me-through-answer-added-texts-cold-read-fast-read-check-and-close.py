@@ -2901,10 +2901,11 @@ def earlier_read_texts_kept_as_withdrawn_versions(walk_finder, minutes, value, n
 
 
 def withdrawn_versions_inserted_below_live_version(walk_finder, parser, lines, first, number, earlier, item,
-                                                   live_text, document, kept_line):
-    """Insert into lines, a walk-document's, each of earlier that is neither live_text nor already below the live
-    version of the unit whose heading is line first, under a WITHDRAWN_VERSION_HEADING for item number; return
-    kept_line for each, naming its heading."""
+                                                   live_text, document, kept_line, inserted_heading_lines=None):
+    """Insert into lines, a walk-document's, each of earlier whose body is neither live_text's nor the whole body of
+    a version already kept below the live version of the unit whose heading is line first, under a
+    WITHDRAWN_VERSION_HEADING for item number; return kept_line for each, naming its heading, and append each
+    inserted heading's line index to inserted_heading_lines when it is given."""
     kept = []
     for _, outcome, copied in earlier:
         body = heading_body(walk_finder, copied)
@@ -2912,19 +2913,23 @@ def withdrawn_versions_inserted_below_live_version(walk_finder, parser, lines, f
         # From the live version's end to the next item: the versions already kept there, and any notes.
         start = next(other[4] for other in spans if other[3] == first)
         below = min([other[3] for other in spans if other[3] > first] + [len(lines)])
-        if squeezed(body) in (squeezed(heading_body(walk_finder, live_text)), "") or squeezed(body) in squeezed(
-                "\n".join(lines[start:below])):
-            continue
         prose = walk_finder.prose_lines("\n".join(lines), parser)
-        version = 1 + sum(1 for line in prose[start:below]
-                          if (heading := MARKDOWN_HEADING.match(line))
-                          and walk_finder.WITHDRAWN_HEADING.match(heading[1])
-                          and number in walk_finder.withdrawn_heading_items(heading[1]))
+        withdrawn = [index for index in range(start, below)
+                     if (heading := MARKDOWN_HEADING.match(prose[index]))
+                     and walk_finder.WITHDRAWN_HEADING.match(heading[1])
+                     and number in walk_finder.withdrawn_heading_items(heading[1])]
+        kept_bodies = {squeezed("\n".join(lines[index + 1:end]))
+                       for index, end in zip(withdrawn, [*withdrawn[1:], below])}
+        if squeezed(body) in (squeezed(heading_body(walk_finder, live_text)), "") or squeezed(body) in kept_bodies:
+            continue
+        version = 1 + len(withdrawn)
         while below > 0 and not lines[below - 1].strip():
             below -= 1
         heading = WITHDRAWN_VERSION_HEADING.format(version=version, number=number)
         # One element per line: item_unit_spans counts lines, so a later span must see each of them.
         lines[below:below] = ["", heading, ""] + body.split("\n")
+        if inserted_heading_lines is not None:
+            inserted_heading_lines.append(below + 1)
         kept.append(kept_line.format(item=item, report=outcome.get("report"), document=document,
                                      heading=heading))
     return kept
@@ -3090,9 +3095,10 @@ def approval_walk_item_text_replace_with_fresh_agent_rewrite_file(
         kept_end -= 1
     replaced = "\n".join([lines[unit[3]], *lines[kept_end:unit[4]]])
     written = [*lines[:kept_end], "", *rewrite.split("\n"), "", *lines[unit[4]:]]
+    inserted = []
     kept = withdrawn_versions_inserted_below_live_version(
         walk_finder, parser, written, unit[3], number, [(None, {}, replaced)], item,
-        "\n".join([lines[unit[3]], rewrite]), document, FRESH_AGENT_REWRITE_REPLACED_TEXT_KEPT)
+        "\n".join([lines[unit[3]], rewrite]), document, FRESH_AGENT_REWRITE_REPLACED_TEXT_KEPT, inserted)
     # The rewrite was checked alone; only the whole document shows a fence it leaves open running on below it.
     before = [unit_found[:3] for unit_found in walk_finder.item_unit_spans(text, parser)]
     after = [unit_found[:3] for unit_found in walk_finder.item_unit_spans("\n".join(written), parser)]
@@ -3101,11 +3107,9 @@ def approval_walk_item_text_replace_with_fresh_agent_rewrite_file(
                                                                after=[found[0] for found in after]))
     read_headings = {token.map[0] for token in parser.parse("\n".join(written))
                      if token.type == "heading_open" and token.map}
-    withdrawn = [index for index, line in enumerate(written) if index > unit[3]
-                 and re.fullmatch(re.escape(WITHDRAWN_VERSION_HEADING).replace(r"\{version\}", r"\d+").replace(
-                     r"\{number\}", re.escape(number)), line)]
-    if kept and withdrawn and withdrawn[-1] not in read_headings:
-        raise refused(FRESH_AGENT_REWRITE_WITHDRAWN_HEADING_NOT_READ.format(heading=written[withdrawn[-1]]))
+    unread = [index for index in inserted if index not in read_headings]
+    if unread:
+        raise refused(FRESH_AGENT_REWRITE_WITHDRAWN_HEADING_NOT_READ.format(heading=written[unread[0]]))
     document.write_text("\n".join(written), encoding="utf-8")
     return kept
 

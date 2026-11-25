@@ -7483,6 +7483,19 @@ def test_a_fresh_agent_rewrite_of_an_item_sharing_its_heading_is_refused_writing
           after + "\n---\n" + refusal)
 
 
+def test_a_fresh_agent_rewrite_keeps_the_text_it_replaces_when_an_earlier_withdrawn_version_contains_it():
+    after, kept, _ = fresh_agent_rewrite_put_in_place(
+        "contained-in-earlier-version", "# A walk\n\n## Item 3 of 9: three\n\n#new \"Blue.\"\n\n"
+        "#### Withdrawn version 1 of item 3\n\n#new \"Blue.\" and yellow.\n\n## Item 4 of 9: four\n\nFour.\n",
+        "3", '#new "Green."\n')
+    check("the replaced text, which an earlier, longer withdrawn version contains but is not, is kept as withdrawn "
+          "version 2",
+          after == ("# A walk\n\n## Item 3 of 9: three\n\n#new \"Green.\"\n\n"
+                    "#### Withdrawn version 1 of item 3\n\n#new \"Blue.\" and yellow.\n\n"
+                    "#### Withdrawn version 2 of item 3\n\n#new \"Blue.\"\n\n## Item 4 of 9: four\n\nFour.\n")
+          and len(kept) == 1, after + "\n---\n" + repr(kept))
+
+
 def test_a_fresh_agent_rewrite_below_a_setext_heading_keeps_the_underline():
     after, kept, _ = fresh_agent_rewrite_put_in_place(
         "setext", "# A walk\n\nItem 3 of 9: three\n------------------\n\nOld text.\n\n## Item 4 of 9: four\n\nFour.\n",
