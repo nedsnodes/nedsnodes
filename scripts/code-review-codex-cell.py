@@ -583,7 +583,7 @@ CODEX_TITLE_PRIORITY_LABEL = re.compile(r"^\[P[0-3]\] ")
 CODEX_REVIEW_OBJECT_IN_JSON_FENCE = re.compile(r"\A```(?:json)?[ \t]*\n(.*)\n```\Z", re.DOTALL)
 
 
-def codex_review_object_text(report: str):
+def codex_review_object_json_text_from_report_or_none_when_prose(report: str):
     """The JSON object text of a report that is Codex's review object, bare or inside one ```json
     fence, or None for a report in prose."""
     text = report.strip()
@@ -601,7 +601,7 @@ def one_line(value: str) -> bool:
 
 def codex_review_object_as_prose_report(text: str) -> str:
     """The report Codex writes from its review object, given the object's JSON text, as
-    codex_review_object_text() returns it.
+    codex_review_object_json_text_from_report_or_none_when_prose() returns it.
 
     The prose is
     Codex's: the explanation, then "Full review comments:" and per finding a
@@ -814,7 +814,7 @@ def main(argv=None) -> int:
     # Provenance header, so a report read later is pinned to its inputs, as
     # the cold-read cells' reports are.
     report = output_path.read_text(encoding="utf-8")
-    review_object_text = codex_review_object_text(report)
+    review_object_text = codex_review_object_json_text_from_report_or_none_when_prose(report)
     if review_object_text is not None:
         try:
             report = codex_review_object_as_prose_report(review_object_text)

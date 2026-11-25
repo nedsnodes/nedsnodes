@@ -470,7 +470,7 @@ def codex_findings_on_commit(outputs_directory, number, head):
                 f"the Codex run record {record_file} says the run succeeded, but its report could not "
                 f"be read: {error}")
         # A cell older than the conversion wrote Codex's review object as the report.
-        review_object_text = codex_cell.codex_review_object_text(
+        review_object_text = codex_cell.codex_review_object_json_text_from_report_or_none_when_prose(
             CODEX_REPORT_PROVENANCE_COMMENT.sub("", report, count=1))
         if review_object_text is not None:
             try:
