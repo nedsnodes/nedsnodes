@@ -11,7 +11,7 @@ Usage:
 The program an agent uses to hand Codex a task. It always:
   - reads the prompt from the brief file, never from the command line;
   - gives Codex the prompt on stdin, closed after it, never as an argument,
-    because Linux refuses any one argument over 131,072 bytes;
+    because Linux refuses any one argument of 131,072 bytes or more;
   - writes Codex's whole output to a run log, by default `<report>.run.log`;
   - leaves at <report> Codex's final message, unless Codex itself wrote a
     file there during the run, as a brief may tell it to: that file is kept,

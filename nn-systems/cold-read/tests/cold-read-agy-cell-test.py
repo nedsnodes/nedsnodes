@@ -659,7 +659,7 @@ with tempfile.TemporaryDirectory() as scratch:
           and "agy-stub-exited-before-reading-stdin" in result.stderr
           and "cause: exit-3" in result.stderr
           and "agent-binary-missing" not in result.stderr
-          and "agent-binary-start-failed" not in result.stderr,
+          and "agent-binary-argument-list-too-long" not in result.stderr,
           repr(result.stderr[-600:]))
 
     # The fast read on the Mac sizes its ssh time limit from the per-model

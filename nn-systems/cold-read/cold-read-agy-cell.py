@@ -43,12 +43,13 @@ THE INVOCATION, as measured working in the 2026-09-04 campaign
 run-astra-and-gemini-cells.py on the cold-read-research machine, not
 committed): `agy --add-dir <repo> --dangerously-skip-permissions --model <id>
 --effort <eff> --print-timeout 30m --output-format text --print <prompt>`.
-That is the campaign's command; the cell's own differs in how the prompt
-reaches agy and in one flag, as this paragraph says.
-The cell sends the prompt on stdin instead of as `--print`'s value, because
-Linux refuses any one argument over 131,072 bytes: `--input-format
-stream-json` reads one JSON line, `{"event":"user","message":{"content":
-<prompt>}}`, from stdin, and needs `--print ""`. `--add-dir` is required, or the
+That is the campaign's command. The cell's own differs in two ways. It sends
+the prompt on stdin, not as `--print`'s value, because Linux refuses any one
+argument of 131,072 bytes or more: `--input-format stream-json` reads this
+one JSON line from stdin, and takes `--print ""`:
+  {"event":"user","message":{"content":<prompt>}}
+And it passes `--output-format stream-json`, for the reason the next
+paragraph gives. `--add-dir` is required, or the
 repository's AGENTS.md does not load. `--dangerously-skip-permissions` is what
 lets the Write of the report happen headless. Antigravity's model ids carry the
 effort as a suffix (gemini-3.8-flash-{low,medium,high}); `--effort` is passed

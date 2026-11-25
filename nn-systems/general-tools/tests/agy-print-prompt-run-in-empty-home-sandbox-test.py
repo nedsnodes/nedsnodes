@@ -252,10 +252,10 @@ def cases_with_the_stand_in_sandbox(root, home):
         no_answer = root / f"no-answer-agy-{len(wanted)}"
         stub_agy(no_answer, f"cat > /dev/null\necho '{stub_stdout}'\nexit 0\n")
         result = run_program(home, f"{no_answer}:{fake_directory}", "--model", "m", "say hi")
-        check(f"agy exiting 0 having {case}: exit 1, nothing on stdout, the cause and the "
-              "retry instruction on stderr",
+        check(f"agy exiting 0 having {case}: exit 1, nothing on stdout, the cause and what "
+              "to do on stderr",
               result.returncode == 1 and result.stdout == "" and wanted in result.stderr
-              and "run the same command once more" in result.stderr,
+              and "do not take the empty stdout for agy's answer" in result.stderr,
               repr((result.returncode, result.stdout, result.stderr)))
 
     result = run_program(home, f"{echoing}:{fake_directory}", "say hi")

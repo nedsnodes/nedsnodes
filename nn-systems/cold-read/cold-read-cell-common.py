@@ -4,6 +4,7 @@
 from __future__ import annotations
 
 import argparse
+import errno
 import fcntl
 import hashlib
 import json
@@ -345,9 +346,9 @@ AGENT_BINARY_WIDE_CAUSE_CLASSES = frozenset(
 USER_CLEARABLE_CAUSE_CLASSES = frozenset(
     {"logged-out", "agent-binary-missing", "account-limit", "model-limit"})
 CAUSE_DETAIL_MAX_CHARACTERS = 120
-# The operating system found the agent-binary but would not start it, such as for E2BIG, an
-# argument list over its limit; installing the agent-binary does not clear it.
-AGENT_BINARY_START_FAILED_CAUSE_CLASS = "agent-binary-start-failed"
+# The operating system refused the command line the cell built as too long (E2BIG);
+# installing or repairing the agent-binary does not clear it.
+AGENT_BINARY_ARGUMENT_LIST_TOO_LONG_CAUSE_CLASS = "agent-binary-argument-list-too-long"
 # Drop per-attempt timestamps from details that the grid reports for an entire agent-binary.
 DETAIL_IS_REST_OF_LINE = "rest-of-line"
 DETAIL_IS_WHOLE_LINE = "whole-line"
@@ -385,9 +386,9 @@ def classify_failed_attempt(
                     detail = text.detail
                 return text.cause_class, detail
     if start_error:
-        if isinstance(start_error, FileNotFoundError):
-            return "agent-binary-missing", str(start_error)
-        return AGENT_BINARY_START_FAILED_CAUSE_CLASS, str(start_error)
+        if start_error.errno == errno.E2BIG:
+            return AGENT_BINARY_ARGUMENT_LIST_TOO_LONG_CAUSE_CLASS, str(start_error)
+        return "agent-binary-missing", str(start_error)
     if exit_code == 0:
         # The reviewer's closing words usually say why it wrote nothing, such as a refused write.
         closing = [line.strip() for line in stdout.splitlines() if line.strip()]

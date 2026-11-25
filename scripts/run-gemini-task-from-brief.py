@@ -33,8 +33,8 @@ the log.
 Runs `agy models` inside the same sandbox before starting the task, refusing
 unknown names with the known names. The default is gemini-4-neon-high.
 Gives agy the task on stdin, as the one stream-json line that the
-cold-read agy cell sends, because Linux refuses any one argument over
-131,072 bytes; agy's output is then stream-json events. Logs both output
+cold-read agy cell sends, because Linux refuses any one argument of
+131,072 bytes or more; agy's output is then stream-json events. Logs both output
 streams to REPORT.run.log, or to
 --run-log; an existing log at that path is overwritten. The
 deadline covers model discovery and task execution after sandbox setup;

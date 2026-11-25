@@ -6,8 +6,8 @@ Usage:
   nn-systems/general-tools/agy-print-prompt-run-in-empty-home-sandbox.py --model MODEL - < FILE
 
 MODEL is a model name agy accepts, such as gemini-3.8-flash-medium. A PROMPT
-of `-` is read from stdin; use it for a prompt over 131,072 bytes, the most
-Linux accepts in one argument.
+of `-` is read from stdin; use it for a prompt of 131,072 bytes or more,
+which Linux refuses as one argument.
 
 Runs `agy --model MODEL` without --dangerously-skip-permissions, inside bwrap
 or sandbox-exec, the sandbox program, and gives agy the prompt on stdin as
@@ -151,10 +151,11 @@ def main() -> int:
     if exit_code == 0 and (not results or results[0][0] != 0):
         print(f"{PROGRAM}: agy exited 0 but "
               + ("printed no result line" if not results else "its result's status is not SUCCESS")
-              + ", so this program printed no answer; agy's own message, if it gave one, "
-              "is above.\n"
-              f"{PROGRAM}: run the same command once more; if it fails the same way, "
-              "report this line and agy's message above to whoever asked for the answer.",
+              + ", so agy gave no answer and this program printed nothing to stdout. "
+              "agy's own stderr, if it wrote any, is just above this line.\n"
+              f"{PROGRAM}: do not take the empty stdout for agy's answer; give these two "
+              "lines, and agy's stderr above them, to the agent or user that asked you for "
+              "the answer.",
               file=sys.stderr)
         return 1
     if results:

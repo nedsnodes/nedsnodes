@@ -144,8 +144,9 @@ Running a sanity-check, and reading its output:
   same prompt, in the same copy, unless the cause is one only the user can
   clear or the launch timed out. The cause classes: `logged-out`,
   `agent-binary-missing`, `account-limit` and `model-limit`, which only the
-  user can clear and which are never relaunched; `agent-binary-start-failed`,
-  an agent-binary found but refused by the operating system, as for E2BIG; `timeout`, the launch cut off
+  user can clear and which are never relaunched;
+  `agent-binary-argument-list-too-long`, a command line the operating
+  system refused as too long; `timeout`, the launch cut off
   after an hour, never relaunched, because the same launch would cost the same
   hour; `exit-<code>`, any other failed launch, whose detail is the last line
   the CLI wrote; `no-report`, an exit of 0 with nothing written; and
@@ -802,7 +803,7 @@ def run_codex(prompt: str, checkout: pathlib.Path = None) -> tuple:
         "--output-last-message", str(last_message_path),
         "-m", CODEX_MODEL,
         "-c", f"model_reasoning_effort={REASONING_EFFORT}",
-        # The prompt goes on stdin: Linux refuses one argument over 131,072 bytes.
+        # The prompt goes on stdin: Linux refuses one argument of 131,072 bytes or more.
         "-",
     ]
     try:

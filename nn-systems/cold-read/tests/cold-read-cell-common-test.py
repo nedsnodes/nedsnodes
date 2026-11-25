@@ -951,14 +951,21 @@ with tempfile.TemporaryDirectory() as scratch:
         too_long = OSError(errno.E2BIG, "Argument list too long", "true")
     except OSError as error:
         too_long = error
-    check("an agent-binary the operating system refused to start, as for E2BIG, is "
-          "agent-binary-start-failed, not agent-binary-missing",
+    check("a command line the operating system refused as too long (E2BIG) is "
+          "agent-binary-argument-list-too-long, not agent-binary-missing",
           classify(exit_code=None, start_error=too_long)
-          == ("agent-binary-start-failed", str(too_long)) and too_long.errno == errno.E2BIG,
+          == ("agent-binary-argument-list-too-long", str(too_long))
+          and too_long.errno == errno.E2BIG,
           repr(classify(exit_code=None, start_error=too_long)))
-    check("agent-binary-start-failed is neither user-clearable nor agent-binary-wide",
-          "agent-binary-start-failed" not in common_module.USER_CLEARABLE_CAUSE_CLASSES
-          and "agent-binary-start-failed" not in common_module.AGENT_BINARY_WIDE_CAUSE_CLASSES)
+    not_executable = PermissionError(errno.EACCES, "Permission denied", "claude")
+    check("an agent-binary found but not executable is still agent-binary-missing",
+          classify(exit_code=None, start_error=not_executable)
+          == ("agent-binary-missing", "[Errno 13] Permission denied: 'claude'"),
+          repr(classify(exit_code=None, start_error=not_executable)))
+    check("agent-binary-argument-list-too-long is neither user-clearable nor agent-binary-wide",
+          "agent-binary-argument-list-too-long" not in common_module.USER_CLEARABLE_CAUSE_CLASSES
+          and "agent-binary-argument-list-too-long"
+          not in common_module.AGENT_BINARY_WIDE_CAUSE_CLASSES)
     check("exit 0 with no report is no-report, with the reviewer's last line as the reason",
           classify(stdout="I read it.\n\nI wrote nothing.\n\n", exit_code=0)
           == ("no-report", "no report written; the reviewer's last line: I wrote nothing."),
