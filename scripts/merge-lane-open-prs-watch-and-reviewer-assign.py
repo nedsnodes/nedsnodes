@@ -65,7 +65,9 @@ the fix-round program reads one: the state APPROVED or CHANGES_REQUESTED,
 or, on a pull request ned-review-merge opened, a COMMENTED review whose body
 opens with the line APPROVE or REQUEST_CHANGES, or there a review by
 mac-claude whose state is APPROVED or CHANGES_REQUESTED, which the merge gate
-takes as the verdict. A pull request dealt with its verdict already on its
+takes as the verdict, once ned-review-merge has also reviewed that commit. On
+a pull request another account opened, mac-claude's reviews are not required
+to be readable. A pull request dealt with its verdict already on its
 newest commit does not add to its agent-seat's count. Only the newest
 REVIEWS_READ_PER_PULL_REQUEST reviews by each of the two accounts on each
 pull request are read, so a verdict followed by REVIEWS_READ_PER_PULL_REQUEST
@@ -208,7 +210,7 @@ STACK_BOTTOM_BASE_BRANCH = "main"
 REVIEWS_READ_PER_PULL_REQUEST = 20
 # GitHub refuses an approval from a pull request's author, so on a pull request ned-review-merge
 # opened, the merge gate takes this account's approval as the verdict.
-MAC_CLAUDE_REVIEWER_LOGIN = "mac-claude"
+MAC_CLAUDE_ACCOUNT = "mac-claude"
 
 # A short redaction pattern would corrupt ordinary output; reject invalid credentials at startup.
 MINIMUM_PLAUSIBLE_TOKEN_CHARS = 8
@@ -236,7 +238,7 @@ query($owner: String!, $name: String!, $cursor: String) {
   }
 }
 """ % (PAGE_SIZE, fix_round.MERGE_LANE_2_REVIEWER_LOGIN, REVIEWS_READ_PER_PULL_REQUEST,
-       MAC_CLAUDE_REVIEWER_LOGIN, REVIEWS_READ_PER_PULL_REQUEST)
+       MAC_CLAUDE_ACCOUNT, REVIEWS_READ_PER_PULL_REQUEST)
 
 # Redact every output path, including quoted gh stderr.
 SECRETS_TO_REDACT = []
@@ -308,8 +310,14 @@ def pull_request_from_node(node):
     for field in ("createdAt", "baseRefName", "headRefName"):
         if not isinstance(node.get(field), str):
             return None, f"pull request #{number} came back with no {field}"
-    review_lists = {}
-    for field in ("reviews", "macClaudeReviews"):
+    author = node.get("author")
+    # GitHub returns null authors for deleted accounts.
+    author = (author or {}).get("login") or "(unknown)"
+    # mac-claude's reviews decide nothing on a pull request another account opened.
+    required_review_lists = (("reviews", "macClaudeReviews")
+                             if author == fix_round.MERGE_LANE_2_REVIEWER_LOGIN else ("reviews",))
+    review_lists = {"macClaudeReviews": []}
+    for field in required_review_lists:
         reviews = node.get(field)
         reviews = reviews.get("nodes") if isinstance(reviews, dict) else None
         # A review with no state would make the fix-round program's verdict reader raise.
@@ -317,7 +325,6 @@ def pull_request_from_node(node):
                 isinstance(review, dict) and isinstance(review.get("state"), str) for review in reviews):
             return None, f"pull request #{number} came back with no usable list of {field}"
         review_lists[field] = reviews
-    author = node.get("author")
     first_commits = (node.get("commits") or {}).get("nodes") or [{}]
     first_commit_author = (first_commits[0].get("commit") or {}).get("author") or {}
     return {
@@ -325,8 +332,7 @@ def pull_request_from_node(node):
         "head_sha": head_sha,
         "title": node.get("title") or "",
         "is_draft": bool(node.get("isDraft")),
-        # GitHub returns null authors for deleted accounts.
-        "author": (author or {}).get("login") or "(unknown)",
+        "author": author,
         # The agent-seat launchers set GIT_AUTHOR_NAME to the agent-seat's name.
         "first_commit_author_name": first_commit_author.get("name"),
         "created_at": node["createdAt"],
@@ -575,26 +581,33 @@ def merge_lane_pull_request_review_assignments_file_write(path, text):
 
 
 def pull_request_waits_for_merge_lane_verdict(pull_request):
-    """Whether no review on the newest commit carries a verdict: one by ned-review-merge, or, on a
-    pull request ned-review-merge opened, an approval or request for changes by mac-claude."""
+    """Whether the pull request is not a draft and no review on its newest commit carries a
+    verdict: one by ned-review-merge, or, on a pull request ned-review-merge opened, an approval or
+    request for changes by mac-claude once ned-review-merge has also reviewed that commit."""
+    if pull_request["is_draft"]:
+        return False
+
     def on_head(review):
         return (review.get("commit") or {}).get("oid") == pull_request["head_sha"]
 
+    merge_lane_reviews_on_head = [review for review in pull_request["reviews"] if on_head(review)]
     if any(fix_round.merge_lane_review_verdict_from_review_state_or_comment_review_first_line(
                review, pull_request["author"], fix_round.MERGE_LANE_2_REVIEWER_LOGIN)
-           for review in pull_request["reviews"] if on_head(review)):
+           for review in merge_lane_reviews_on_head):
         return False
-    return not (pull_request["author"] == fix_round.MERGE_LANE_2_REVIEWER_LOGIN and any(
-        review["state"] in ("APPROVED", "CHANGES_REQUESTED")
-        for review in pull_request["mac_claude_reviews"] if on_head(review)))
+    # Until the lane posts its own review, its grading of Codex findings can still turn
+    # mac-claude's approval into a request for changes.
+    return not (pull_request["author"] == fix_round.MERGE_LANE_2_REVIEWER_LOGIN
+                and merge_lane_reviews_on_head and any(
+                    review["state"] in ("APPROVED", "CHANGES_REQUESTED")
+                    for review in pull_request["mac_claude_reviews"] if on_head(review)))
 
 
 def merge_lane_pull_request_reviews_waiting_counts(pull_requests, assignments):
     counts = dict.fromkeys(MERGE_LANE_PULL_REQUEST_REVIEW_ASSIGNEE_AGENT_SEATS_IN_TIE_ORDER, 0)
     for pull_request in pull_requests:
         lane = assignments.get(pull_request["number"])
-        if (lane in counts and not pull_request["is_draft"]
-                and pull_request_waits_for_merge_lane_verdict(pull_request)):
+        if lane in counts and pull_request_waits_for_merge_lane_verdict(pull_request):
             counts[lane] += 1
     return counts
 
@@ -636,7 +649,7 @@ def merge_lane_pull_request_review_assignments_for_unassigned_pull_requests(pull
         assignments[pull_request["number"]] = lane
         dealt.append((pull_request, lane))
         # As in the starting counts, which leave out a pull request that already has its verdict.
-        if not pull_request["is_draft"] and pull_request_waits_for_merge_lane_verdict(pull_request):
+        if pull_request_waits_for_merge_lane_verdict(pull_request):
             counts[lane] += 1
 
     def fewest_waiting(pull_request):
