@@ -47,12 +47,15 @@ Each invocation, under a lock that keeps two from overlapping:
    failed, and names the sentences on the wait that no message was sent for; 15 minutes after
    that, if the agent-seat is still idle, code logs the step that follows the escalation, which
    sends nothing and writes no user-alert, and sends it nothing more on the wait. A rule 2
-   message due on a wait whose escalation is due goes on the wait first, so that the re-check
-   judges its sentences and the escalation names them instead of the message. Before the escalation of a wait a rule 2 message was sent on, the
-   rule 2 judge re-checks every sentence the wait must answer for, those of a message whose send
-   failed and those whose first judge failed included, against the agent-seat's tool calls, text
-   messages and tasks since the earliest of them; when it finds each backed, the wait ends with no
-   escalation.
+   message due on a wait whose escalation is due goes on the wait first, so that the escalation
+   names its sentences instead of the message. Each rule 2 message labels the sentences it names
+   S1, S2 and so on, the labels running on across the wait, and asks for one reply line for each:
+   `#done S1`, `#task S1 #<task number>` or `#dropped S1 <reason>`. At every run while the wait is
+   open, code reads the reply lines in the agent-seat's text messages written after the message
+   that labeled each sentence, and ends the wait once every sentence the wait answers for has a
+   label and a valid reply line, as reply_line_answers says; no model judges a reply line. The
+   escalation labels the sentences no message labeled and names each sentence still without a
+   valid reply line.
 
 Every message to an agent-seat goes through Sweep.send_wake_message, which ends it with
 DO_NOT_REPLY_SENTENCE: the headless agent-session that sends it reads no reply, and may still
@@ -71,7 +74,7 @@ stream-json output and checks each against that ref and the text code wrote. Eac
 What it does not handle: it runs only on ned-box and reads only ned-box's agent-seats. One
 invocation runs its headless agent-sessions one after another, so a slow judge delays every other
 agent-seat's step, and the lock makes the next minute's invocation skip, until it ends. A reply
-in text alone ends no wait unless the re-check of step 5 finds every sentence backed; a wait also
+in text alone ends no wait unless it holds the reply lines of step 5; a wait also
 ends when the agent-seat makes a tool call after the nudge that opened the wait or has nothing to do (rule 4), in either
 case only when no rule 2 message was sent on the wait, makes the task call a rule 2 message
 asked for, as step 5 says, stops at a usage limit (rule 1), starts a
@@ -79,8 +82,8 @@ new agent-session, or spends tokens after the step that follows the escalation. 
 rule 3 or rule 5 message with a tool call and goes idle again is nudged again only about something
 new, or once the user has typed, and is not escalated; a command that hangs after the one
 question about it reaches nobody until the agent-seat looks. One that answers a rule 2 message
-with a tool call and a fresh promise is escalated, unless the re-check finds every sentence
-backed, because a tool call that ended a promise wait
+with a tool call and a fresh promise is escalated, unless it writes a valid reply line for every
+sentence, because a tool call that ended a promise wait
 would let an agent-seat that makes a fresh promise at each rule 2 message be nudged again forever
 and never escalated.
 
@@ -271,15 +274,45 @@ FAILED_PROMISE_MESSAGES = "failed_promise_messages"
 # An event logged before sentences are logged as checked on an open wait: the wait answers for them
 # whether their message is then sent, its send fails, their judge failed so that no message follows,
 # or the invocation is stopped. A promise_message event naming a sentence's record takes that
-# sentence off it; a failed send leaves it, so the re-check reads a failed message's sentences
-# from it, while the escalation quotes the failed message's own text.
+# sentence off it; a failed send leaves it, so the task-call ending counts a failed message's
+# sentences from it, while the escalation quotes the failed message's own text.
 RULE_2_SENTENCES_ON_WAIT = "rule_2_sentences_on_wait"
 # On an escalation's message_sent event: the records of the sentences on the wait that the text
 # code wrote names, written in the same event as the send so that no stop between two writes loses
 # them.
 ESCALATION_NAMED_RECORDS = "escalation_named_records"
-# What Sweep.due_step returns when the re-check ended the wait.
-WAIT_ENDED_BY_RECHECK = "wait ended by the re-check"
+# On a promise_message or promise_message_send_failed event: the label each sentence it names was
+# given, in the order of its sentences or records; on an escalation's message_sent event, in the
+# order of its ESCALATION_NAMED_RECORDS. An event logged before labels were written has none.
+LABELS = "labels"
+ESCALATION_NAMED_LABELS = "escalation_named_labels"
+# On an open wait: each labeled sentence, [{"label", "sentence", "at"}], "at" being when the
+# message that labeled it was sent or tried, since a reply line written before it answers nothing.
+LABELED_SENTENCES = "labeled_sentences"
+# On an open wait: whether some sentence it answers for has no label, so that no reply lines end it.
+UNLABELED_SENTENCES = "unlabeled_sentences"
+# The three reply-line hashtags and the label each sentence gets; every text and the pattern below
+# are built from these, so that a rename is made here alone.
+REPLY_LINE_DONE, REPLY_LINE_TASK, REPLY_LINE_DROPPED = "#done", "#task", "#dropped"
+SENTENCE_LABEL_PREFIX = "S"
+REPLY_LINES_REQUEST = (
+    "End the next message you write in your own agent-session with one line for each numbered "
+    f"sentence: {REPLY_LINE_DONE} {SENTENCE_LABEL_PREFIX}1 once you have done it, "
+    f"{REPLY_LINE_TASK} {SENTENCE_LABEL_PREFIX}1 #<task number> naming the open task that backs it, "
+    f"or {REPLY_LINE_DROPPED} {SENTENCE_LABEL_PREFIX}1 <reason> when you take it back or call it "
+    f"off, with {SENTENCE_LABEL_PREFIX}1 replaced by each sentence's label, such as "
+    f"{SENTENCE_LABEL_PREFIX}2. Write these lines in your own agent-session, where the idle sweep "
+    "reads them; they are not a reply, so send them to no one.")
+REPLY_LINES_ESCALATION_TEXT = ("\n\nThese numbered sentences have no valid reply line yet, so write one "
+                               "for each of them; a sentence not listed here needs none:\n\n"
+                               "{quoted_lines}\n\n" + REPLY_LINES_REQUEST)
+# A reply line, alone on its line, perhaps as a list item or in backquotes: its form, its label's
+# number and the rest of the line.
+REPLY_LINE_PATTERN = re.compile(
+    r"^\s*(?:[-*]\s+)?`?(" + "|".join(map(re.escape, (REPLY_LINE_DONE, REPLY_LINE_TASK,
+                                                       REPLY_LINE_DROPPED)))
+    + r")\s+" + re.escape(SENTENCE_LABEL_PREFIX) + r"(\d+)\b(.*?)`?\s*$")
+TASK_REPLY_REST_PATTERN = re.compile(r"^\s+#(\d+)\s*$")
 # On an open wait: the sentences no message event has taken off it, one entry per sentence,
 # [{"record", "at", "kinds", "sentences", "earliest_sentence_at"}, and "failed" once a send naming
 # it failed, "named_by_escalation" once an escalation named it]. "record" is (record_uuid,
@@ -383,7 +416,7 @@ still running".
 
 {facts}"""
 
-# The one definition of a backed sentence, which both rule 2 judges are given.
+# The one definition of a backed sentence, which the rule 2 judge is given.
 SENTENCE_BACKED_RULES = """\
 - An announced action, such as "Next I'm starting the pull request", is backed when a tool call in \
 the same turn, before or after the sentence, or a later one does the action, or a background task \
@@ -421,20 +454,6 @@ Answer, for every sentence by its index, backed true or false, and reason, one s
 
 {facts}"""
 
-RECHECK_JUDGE_PROMPT = """\
-You re-check sentences for the idle sweep, a program on ned-box. From {nudge_time} on, the idle \
-sweep tried to send the agent-seat {seat} messages naming the sentences below, each a promise or an \
-announced action it found unbacked, and {seat} is idle again. Before the sweep sends {seat} a \
-firmer message, judge whether each sentence is now backed, by these rules:
-
-""" + SENTENCE_BACKED_RULES + """
-The tool calls and text messages {seat} wrote since {since}, when it wrote the earliest of the \
-sentences, its task calls since then that set prerequisites or addBlockedBy and succeeded, and its \
-open tasks that have prerequisites or blockedBy, whenever they were created, are in the JSON below, \
-with what is running. Send nothing. \
-Answer, for every sentence by its index, backed true or false, and reason, one sentence.
-
-{facts}"""
 
 
 # --- The log, and the state derived from it ---
@@ -522,9 +541,11 @@ class SweepLog:
                 if wait is not None:
                     wait[FAILED_PROMISE_MESSAGES].append({"at": event["at"], "text": event["text"]})
                     named = records_of(event)
+                    labels = labels_by_record(event.get("records", []), event.get(LABELS))
                     for entry in wait[SENTENCES_WITH_NO_MESSAGE_EVENT]:
                         if entry["record"] in named:
                             entry["at"], entry["failed"] = event["at"], True
+                            labeled(wait, entry, labels, event["at"])
                 owed = False
             elif event["event"] == "message_sent":
                 if ESCALATION_NAMED_RECORDS not in event:
@@ -533,10 +554,13 @@ class SweepLog:
                 # The escalation is the first message that names these sentences, so a task call
                 # before its send cannot answer it.
                 if wait is not None:
+                    labels = labels_by_record(event[ESCALATION_NAMED_RECORDS],
+                                              event.get(ESCALATION_NAMED_LABELS))
                     for entry in wait[SENTENCES_WITH_NO_MESSAGE_EVENT]:
                         if entry["record"] in named:
                             entry["at"] = event["send_started_at"]
                             entry["named_by_escalation"] = True
+                            labeled(wait, entry, labels, event["send_started_at"])
             elif event["event"] == PROMISE_MESSAGE:
                 if wait is None:
                     continue
@@ -547,7 +571,12 @@ class SweepLog:
                     wait[PROMISE_MESSAGES].append({
                         "at": event.get("send_started_at", event["at"]),
                         "kinds": set(event["kinds"]), "sentences": event["sentences"],
-                        "earliest_sentence_at": event.get("earliest_sentence_at")})
+                        "earliest_sentence_at": event.get("earliest_sentence_at"),
+                        LABELS: event.get(LABELS)})
+                    for label, sentence in zip(event.get(LABELS) or [], event["sentences"]):
+                        wait[LABELED_SENTENCES].append({
+                            "label": label, "sentence": sentence,
+                            "at": event.get("send_started_at", event["at"])})
                 owed = False
             elif event["step"] == NUDGE or (wait is not None and event["step"] == PROMISE):
                 if event["step"] == NUDGE:
@@ -555,7 +584,7 @@ class SweepLog:
                             "first_idle_at": event["first_idle_at"], NUDGE: event["at"],
                             "nudge_text": event["text"],
                             PULL_REQUEST_EVENTS_TASK_ID: event.get(PULL_REQUEST_EVENTS_TASK_ID),
-                            PROMISE_MESSAGES: [],
+                            PROMISE_MESSAGES: [], LABELED_SENTENCES: [],
                             FAILED_PROMISE_MESSAGES: [], SENTENCES_WITH_NO_MESSAGE_EVENT: []}
                     owed = False
                     if event.get("rule") != 2:
@@ -564,6 +593,11 @@ class SweepLog:
                 owed, owed_by = True, invocation
             elif wait is not None:
                 wait[event["step"]] = event["at"]
+        if wait is not None:
+            wait[UNLABELED_SENTENCES] = (
+                wait[PROMISE_MESSAGES] is None
+                or any(not message[LABELS] for message in wait[PROMISE_MESSAGES])
+                or any("label" not in entry for entry in wait[SENTENCES_WITH_NO_MESSAGE_EVENT]))
         return wait
 
     def last_judge_answer(self, seat):
@@ -692,6 +726,29 @@ def sentences_on_wait_entries(event):
               "earliest_sentence_at": event.get("earliest_sentence_at")}
     return [dict(common, record=tuple(record), sentences=[record[1]])
             for record in event["records"]]
+
+
+def labels_by_record(records, labels):
+    """Each record's label, from an event's records and the labels logged in their order; none
+    when the event was logged before labels were."""
+    return {tuple(record): label for record, label in zip(records, labels or [])}
+
+
+def labeled(wait, entry, labels, at):
+    """Give a SENTENCES_WITH_NO_MESSAGE_EVENT entry the label a message gave its sentence at at,
+    and list it among the wait's labeled sentences."""
+    if entry["record"] in labels and "label" not in entry:
+        entry["label"] = labels[entry["record"]]
+        wait[LABELED_SENTENCES].append({"label": entry["label"], "sentence": entry["record"][1],
+                                        "at": at})
+
+
+def next_label_number(wait):
+    """The number of the next label on the wait, since labels run on across it, so that a reply
+    line names one sentence."""
+    return 1 + max((int(item["label"][len(SENTENCE_LABEL_PREFIX):])
+                    for item in (wait or {}).get(LABELED_SENTENCES, [])),
+                   default=0)
 
 
 def records_of(event):
@@ -958,6 +1015,9 @@ class Sweep:
         self.machine = machine
         self.failed = False
         self.read_failures_this_run = set()
+        # Each agent-seat's reply_line_answers at this invocation's check, which the escalation
+        # names those not valid from; None when the transcript or task list could not be read.
+        self.reply_line_answers_by_seat = {}
         self.started_monotonic = time.monotonic()
 
     def current(self):
@@ -1121,7 +1181,8 @@ class Sweep:
         # text is this program's defect, which sent_texts_differ has already reported.
         named = ({} if sentences_on_wait is None
                  else {ESCALATION_NAMED_RECORDS: [list(entry["record"])
-                                                  for entry in sentences_on_wait]})
+                                                  for entry in sentences_on_wait],
+                       ESCALATION_NAMED_LABELS: [entry["label"] for entry in sentences_on_wait]})
         return self.message_sent(seat, verdict, sent_text, step, started_at, **named)
 
     def message_sent(self, seat, verdict, text, step, started_at, **details):
@@ -1292,6 +1353,16 @@ class Sweep:
                                          for sentence in message["sentences"]],
                               task_calls=settling_calls)
                 wait = None
+        if wait and PROMISE in wait:
+            answers = self.reply_lines(seat, verdict, wait)
+            self.reply_line_answers_by_seat[seat] = answers
+            if (answers and not wait[UNLABELED_SENTENCES]
+                    and all(answer["valid"] for answer in answers.values())):
+                self.end_wait(seat, "a valid reply line answers every sentence on the wait",
+                              reply_lines=[{"label": label, "sentence": answer["sentence"],
+                                            "line": answer["line"]}
+                                           for label, answer in answers.items()])
+                wait = None
         if wait and TELL_USER in wait and stretch and parse_time(stretch) > parse_time(wait[TELL_USER]):
             self.end_wait(seat, "it spent tokens after the step that follows the escalation")
             wait = None
@@ -1328,8 +1399,8 @@ class Sweep:
                 return
             promise_text, promise_kinds, promise_records = promise or (None, None, ())
             if wait and promise_text:
-                # Before the due step, so that the re-check judges these sentences too and the
-                # escalation names them: a message on an open wait does not restart its 15 minutes.
+                # Before the due step, so that the escalation names these sentences: a message on
+                # an open wait does not restart its 15 minutes.
                 self.sentences_on_open_wait(seat, wait, promise_records)
                 promise_on_wait = True
             if (outcome == "failed" or promise_on_wait) and wait:
@@ -1346,12 +1417,8 @@ class Sweep:
         if rule == 4 and wait and PROMISE not in wait:
             self.end_wait(seat, "nothing to do")
             wait = None
-        step = self.due_step(seat, verdict, wait) if wait else None
-        if step == WAIT_ENDED_BY_RECHECK:
-            wait = None
-            if promise_on_wait:
-                # The re-check judged these sentences too, and found them backed.
-                promise_text = None
+        if wait:
+            self.due_step(seat, verdict, wait)
         if wait and promise_on_wait:
             # An escalation, this invocation's or one an invocation stopped after before logging
             # these sentences as checked, was the message of each sentence it named: the promise
@@ -1361,9 +1428,7 @@ class Sweep:
                      if entry.get("named_by_escalation")}
             promise_records = [item for item in promise_records
                                if (item["record_uuid"], item["sentence"]) not in named]
-            if promise_records:
-                promise_text, promise_kinds, promise_records = self.promise_message(promise_records)
-            else:
+            if not promise_records:
                 promise_text = None
         paused = self.headless_usage_limit_pause_holds()
         # An escalation stopped at a usage limit can start the pause after the sentences were
@@ -1381,6 +1446,11 @@ class Sweep:
         if paused:
             return
         if promise_text:
+            # Labeled here, from the wait as logged now, so that an escalation earlier in this
+            # invocation that labeled sentences leaves this message's labels after its own.
+            promise_text, promise_kinds, promise_records = self.promise_message(
+                promise_records, next_label_number(self.log.open_wait(seat) if wait else None))
+            promise_labels = promise_text_labels(promise_text)
             promise_sentences = [item["sentence"] for item in promise_records]
             earliest_sentence_at = earliest_sentence_time(promise_records)
             # A promise given in answer to a message goes on the open wait, so that repeated
@@ -1390,23 +1460,25 @@ class Sweep:
                 # a promise message whose own send failed still reaches the agent-seat.
                 self.start_wait(seat, verdict, stretch, promise_text, 2)
                 self.record({"event": PROMISE_MESSAGE, "agent_seat": seat, "kinds": promise_kinds,
-                             "sentences": promise_sentences,
+                             "sentences": promise_sentences, LABELS: promise_labels,
                              "earliest_sentence_at": earliest_sentence_at})
                 self.send(seat, verdict, promise_text, NUDGE)
             else:
                 # The sentences are already logged as checked, so only the wait's escalation can
-                # still report the promise: it quotes a failed message's own text, and the re-check
-                # reads its sentences from the wait.
+                # still report the promise: it quotes a failed message's own text, whose labels
+                # the failure event logs, so that reply lines can answer them.
                 records = [[item["record_uuid"], item["sentence"]] for item in promise_records]
                 sent = self.send(seat, verdict, promise_text, NUDGE)
                 if sent:
                     self.record({"event": PROMISE_MESSAGE, "agent_seat": seat, "records": records,
                                  "kinds": promise_kinds, "sentences": promise_sentences,
+                                 LABELS: promise_labels,
                                  "send_started_at": sent["send_started_at"],
                                  "earliest_sentence_at": earliest_sentence_at})
                 else:
                     self.record({"event": PROMISE_MESSAGE_SEND_FAILED, "agent_seat": seat,
-                                 "records": records, "text": promise_text})
+                                 "records": records, LABELS: promise_labels,
+                                 "text": promise_text})
         elif not wait:
             self.nudge(seat, verdict, rule, text, stretch)
 
@@ -1435,89 +1507,53 @@ class Sweep:
                      "records": [[item["record_uuid"], item["sentence"]] for item in new],
                      "earliest_sentence_at": earliest_sentence_time(new)})
 
-    def raised_sentences_backed_at_recheck(self, seat, verdict, wait, messages):
-        """Have the judge re-check every sentence of messages, the groups the wait answers for,
-        against what the agent-seat did since the earliest of them, and end the wait when it finds
-        each backed. Returns whether the wait ended. A judge that fails leaves the wait open for
-        the escalation, which a usage-limit pause the judge started holds until the reset, when
-        the re-check is asked again."""
-        raised = [(message["at"], sentence) for message in messages
-                  for sentence in message["sentences"]]
-        # From the sentence, not the nudge: an agent-seat may keep its word between the two, after
-        # the turn the rule 2 judge looked at.
-        since = min(parse_time(message["earliest_sentence_at"] or message["at"])
-                    for message in messages)
+    def reply_lines(self, seat, verdict, wait):
+        """reply_line_answers for the wait's labeled sentences, from the agent-seat's text messages
+        since the earliest message that labeled one; None when the transcript or the task list
+        cannot be read, which is a read failure for the agent-seat, so that the wait stays open for
+        the escalation and later agent-seats are still swept."""
+        labeled = wait[LABELED_SENTENCES]
+        if not labeled:
+            return {}
+        since = min(parse_time(item["at"]) for item in labeled)
         try:
             done = verdicts_print.transcript_tool_calls_and_assistant_texts_since(
                 Path(verdict[fields.TRANSCRIPT_PATH]), since)
-        except verdicts_print.ReadFailure as error:
-            # As a failed judge: the escalation goes ahead, and later agent-seats are still swept.
+            open_ids = open_task_ids(seat, self.paths.tasks_root)
+        except (verdicts_print.ReadFailure, OSError) as error:
             self.read_failure(seat, str(error))
-            return False
-        facts = dict(
-            self.facts(seat, verdict, judged_text), step=ESCALATE, nudge_at=wait[NUDGE], since=iso(since),
-            sentences=[{"index": index, "raised_at": raised_at,
-                        "kind": verdicts_print.sentence_kind(sentence), "sentence": sentence}
-                       for index, (raised_at, sentence) in enumerate(raised)],
-            tool_calls_since=done["tool_calls"],
-            text_messages_since=[dict(item, text=judged_text(item["text"]))
-                                 for item in done["assistant_texts"]],
-            successful_task_tool_calls_setting_prerequisites_or_blocked_by_since=[
-                call for call in verdict.get(
-                    fields.SUCCESSFUL_TASK_TOOL_CALLS_SETTING_PREREQUISITES_OR_BLOCKED_BY) or []
-                if call["time"] and parse_time(call["time"]) > since],
-            open_tasks_with_prerequisites_or_blocked_by=verdict.get(
-                fields.OPEN_TASKS_WITH_PREREQUISITES_OR_BLOCKED_BY, []))
-        prompt = RECHECK_JUDGE_PROMPT.format(
-            seat=seat, nudge_time=parse_time(wait[NUDGE]).strftime("%Y-%m-%d %H:%MZ"),
-            since=since.strftime("%Y-%m-%d %H:%MZ"),
-            facts=json.dumps(facts, indent=1, ensure_ascii=False))
-        outcome = run_headless(prompt, SENTENCES_ANSWER_SCHEMA, "", self.working_directory,
-                               self.timeout_seconds)
-        problem = outcome.error or sentence_answer_problem(outcome.answer, len(raised))
-        if problem:
-            self.headless_failed(seat, "re-check whether the sentences its promise messages named "
-                                 "are backed", problem, outcome.error_kind or JUDGE_ANSWER_UNUSABLE,
-                                 outcome)
-            return False
-        answers = sorted(outcome.answer["sentences"], key=lambda answer: answer["index"])
-        self.record({"event": "judge_answer", "agent_seat": seat, "rule": 2, "step": ESCALATE,
-                     "answers": answers})
-        if not all(answer["backed"] for answer in answers):
-            return False
-        self.end_wait(seat, "the judge found every sentence its promise messages named backed",
-                      sentences=[sentence for _, sentence in raised],
-                      judge_reasons=[answer["reason"] for answer in answers])
-        return True
+            return None
+        return reply_line_answers(labeled, done["assistant_texts"],
+                                  verdict.get(fields.LAST_TOOL_CALL_AT), open_ids)
 
     def due_step(self, seat, verdict, wait):
-        """The step of an open wait that is due: the escalation 15 minutes after the nudge, unless
-        the re-check ends the wait, then the step that follows it 15 minutes later, which sends
-        nothing and writes no user-alert; after that, none. The escalation is a send, so a headless
-        usage-limit pause holds it. Returns WAIT_ENDED_BY_RECHECK when the re-check ended the
-        wait, else None.
+        """Log and send the step of an open wait that is due: the escalation 15 minutes after the
+        nudge, then the step that follows it 15 minutes later, which sends nothing and writes no
+        user-alert; after that, none. The escalation is a send, so a headless usage-limit pause
+        holds it.
 
-        The escalation quotes each message whose send failed and names every other sentence no
-        message event holds, so that a sentence still owed is named whether or not a message for
-        it was tried."""
+        The escalation quotes each message whose send failed and names, labeled, every other
+        sentence no message event holds, so that a sentence still owed is named whether or not a
+        message for it was tried; on a wait a rule 2 message was sent on, it then names each
+        labeled sentence with no valid reply line and asks again for the reply lines."""
         if TELL_USER in wait:
-            return None
+            return
         minutes = int(seconds_between(wait["first_idle_at"] or wait[NUDGE], self.now) // 60)
         failed = wait[FAILED_PROMISE_MESSAGES]
         unsent = [entry for entry in wait[SENTENCES_WITH_NO_MESSAGE_EVENT] if not entry.get("failed")]
         if ESCALATE in wait:
             if seconds_between(wait[ESCALATE], self.now) >= WAIT_STEP_SECONDS:
                 self.record({"event": "wait_step", "agent_seat": seat, "step": TELL_USER})
-            return None
+            return
         if (seconds_between(wait[NUDGE], self.now) >= WAIT_STEP_SECONDS
                 and not self.headless_usage_limit_pause_holds()):
-            # None: a rule 2 message's sentences are not in the log, so no judge can answer for them.
-            messages = (sentence_groups_wait_answers_for(wait)
-                        if wait[PROMISE_MESSAGES] is not None else [])
-            if messages and self.raised_sentences_backed_at_recheck(seat, verdict, wait, messages):
-                return WAIT_ENDED_BY_RECHECK
-            if self.headless_usage_limit_pause_holds():
-                return None
+            first = next_label_number(wait)
+            unsent = [dict(entry, label=sentence_label(first + index))
+                      for index, entry in enumerate(unsent)]
+            answers = self.reply_line_answers_by_seat.get(seat) or {}
+            unanswered = [(item["label"], item["sentence"]) for item in wait[LABELED_SENTENCES]
+                          if not answers.get(item["label"], {}).get("valid")]
+            unanswered += [(entry["label"], entry["sentences"][0]) for entry in unsent]
             text = ESCALATION_TEXT.format(
                 minutes=minutes, nudge_time=parse_time(wait[NUDGE]).strftime("%Y-%m-%d %H:%MZ"),
                 quoted_nudge=quoted(wait["nudge_text"])) + "".join(
@@ -1525,14 +1561,16 @@ class Sweep:
                         time=parse_time(message["at"]).strftime("%Y-%m-%d %H:%MZ"),
                         quoted_text=quoted(message["text"]))
                     for message in failed) + (UNSENT_SENTENCES_ESCALATION_TEXT.format(
-                        quoted_text=quoted("\n".join(sentence for entry in unsent
-                                                      for sentence in entry["sentences"])))
-                        if unsent else "")
+                        quoted_text=quoted("\n".join(f"{entry['label']}: {entry['sentences'][0]}"
+                                                      for entry in unsent)))
+                        if unsent else "") + (REPLY_LINES_ESCALATION_TEXT.format(
+                            quoted_lines=quoted("\n".join(f"{label}: {sentence}"
+                                                           for label, sentence in unanswered)))
+                            if PROMISE in wait and unanswered else "")
             self.record({"event": "wait_step", "agent_seat": seat, "step": ESCALATE, "text": text})
             # A failed send leaves a rule 2 message due in this step to be sent: a send stopped at
             # a usage limit holds it back until the reset.
             self.send(seat, verdict, text, ESCALATE, unsent)
-        return None
 
     def nudge(self, seat, verdict, rule, text, stretch):
         if rule == 3:
@@ -1760,13 +1798,15 @@ class Sweep:
             return "all backed", None, new
         return "unbacked", self.promise_message(unbacked), new
 
-    def promise_message(self, items):
-        """One rule 2 message naming every one of items: (its text, the sorted kinds of the
-        sentences it names, items)."""
-        return ("\n".join(UNBACKED_SENTENCE_LINES[item["kind"]].format(
+    def promise_message(self, items, first_number=1):
+        """One rule 2 message naming every one of items, each line labeled from S<first_number>
+        on, and asking for their reply lines: (its text, the sorted kinds of the sentences it
+        names, items)."""
+        return ("\n".join(f"{sentence_label(first_number + index)}: " + UNBACKED_SENTENCE_LINES[item["kind"]].format(
             sentence=item["sentence"],
             minutes=int(seconds_between(item["time"], self.now) // 60) if item["time"] else "some")
-            for item in items), sorted({item["kind"] for item in items}), items)
+            for index, item in enumerate(items)) + "\n\n" + REPLY_LINES_REQUEST,
+            sorted({item["kind"] for item in items}), items)
 
     def sentences_checked(self, seat, items):
         for item in items:
@@ -1793,6 +1833,64 @@ class Sweep:
         self.record({"event": "limit_wake", "agent_seat": seat, "record_uuid": record_uuid,
                      "why": why})
         self.send(seat, verdict, text, LIMIT_WAKE)
+
+
+def sentence_label(number):
+    return f"{SENTENCE_LABEL_PREFIX}{number}"
+
+
+def promise_text_labels(text):
+    """The labels a promise message's lines carry, in order."""
+    return re.findall(r"^(" + re.escape(SENTENCE_LABEL_PREFIX) + r"\d+): ", text, re.MULTILINE)
+
+
+def open_task_ids(seat, tasks_root):
+    """The ids of the agent-seat's tasks not marked completed. Raises OSError."""
+    list_directory = tasks_root / f"nedsnodes-{seat}-tasks"
+    if not list_directory.is_dir():
+        return set()
+    ids = set()
+    for path in list_directory.glob("*.json"):
+        try:
+            task = json.loads(path.read_text(encoding="utf-8"))
+        except (FileNotFoundError, ValueError):
+            # Claude Code may be replacing the file or have deleted it since the listing.
+            continue
+        if isinstance(task, dict) and task.get("status") != "completed":
+            ids.add(path.stem)
+    return ids
+
+
+def reply_line_answers(labeled_sentences, texts, last_tool_call_at, open_ids):
+    """{label: {"sentence", "line", "valid"}} for each labeled sentence: its latest reply line,
+    None when it has none, and whether that line is valid. A line counts only in a text written
+    after the message that labeled its sentence. #done is valid when the agent-seat's last tool
+    call came after that message, and one call answers every such sentence; #task when it names an
+    open task, whatever the task records; #dropped when a reason follows the label. Code cannot
+    tell whether a call did what the sentence said: the wait_ended event lists the lines for a
+    reader to check."""
+    answers = {item["label"]: {"sentence": item["sentence"], "line": None, "valid": False}
+               for item in labeled_sentences}
+    labeled_at = {item["label"]: parse_time(item["at"]) for item in labeled_sentences}
+    for text in sorted(texts, key=lambda text: parse_time(text["time"])):
+        written = parse_time(text["time"])
+        for line in text["text"].split("\n"):
+            match = REPLY_LINE_PATTERN.match(line)
+            if not match:
+                continue
+            form = match.group(1)
+            label, rest = sentence_label(int(match.group(2))), match.group(3)
+            if label not in answers or written <= labeled_at[label]:
+                continue
+            if form == REPLY_LINE_DONE:
+                valid = bool(last_tool_call_at) and parse_time(last_tool_call_at) > labeled_at[label]
+            elif form == REPLY_LINE_TASK:
+                number = TASK_REPLY_REST_PATTERN.match(rest)
+                valid = bool(number) and number.group(1) in open_ids
+            else:
+                valid = bool(rest.strip())
+            answers[label].update(line=line.strip(), valid=valid)
+    return answers
 
 
 def sentence_answer_problem(answer, count):
