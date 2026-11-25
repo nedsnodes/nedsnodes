@@ -4,9 +4,12 @@ change in an open approval-walk: its check step, which fast-reads each text
 the answer adds to the waiting item, `#new` or `#new_if_d`, that has not had a
 fast read, and its close step.
 
-Most cases run the program as a subprocess in a scratch checkout this suite
-made; the rest load it into this process, in a forked child where a signal
-must end the process. cold-read-fast-read.py is replaced by a stand-in this suite writes, so no
+Most cases run the program's main() in a scratch checkout this suite made,
+in a child forked from a copy of the program loaded once; a case about the
+process itself, such as its closed stdout, a stop signal or a PYTHONPATH, or
+about its command line as a shell runs it, launches it as a subprocess; the
+rest load it into this process, in a forked child where a signal must end the
+process. cold-read-fast-read.py is replaced by a stand-in this suite writes, so no
 case calls a model, except one case that runs a copy of the real
 cold-read-fast-read.py with stub models, to show the check reads that
 program's own output. The exit code is asserted on every case.
@@ -27,6 +30,7 @@ import subprocess
 import sys
 import tempfile
 import time
+import traceback
 import types
 from pathlib import Path
 
@@ -330,6 +334,12 @@ class Case:
                    "--cold-read-records", str(self.records),
                    "--fast-read-program", str(fast_read_program or self.stand_in),
                    "--counts-log", str(counts_log or self.counts_log), "--gh-program", str(self.gh)]
+        # A variable such as PYTHONPATH acts only when an interpreter starts.
+        interpreter_settings_changed = any(environment.get(name) != os.environ.get(name)
+                                           for name in {*environment, *os.environ} if name.startswith("PYTHON"))
+        if (not stdout_closed and ignored_signal is None and not mode.startswith(("stopped", "signalled"))
+                and not interpreter_settings_changed):
+            return self.run_forked(command, environment, stop_signal_dispositions)
         if not stdout_closed:
             return subprocess.run(command, capture_output=True, text=True, env=environment, cwd=self.checkout,
                                   preexec_fn=stop_signal_dispositions)
@@ -342,6 +352,64 @@ class Case:
             os.close(writer)
         result.stdout = ""
         return result
+
+    forked_runs = 0
+
+    def run_forked(self, command, environment, stop_signal_dispositions):
+        """Run command's main() in a forked child of a copy of the program loaded once, ending the child as the
+        interpreter would end it. Starting the interpreter, compiling the program and running its imports cost most
+        of what a launch costs; a case about the process itself still launches it."""
+        global PROGRAM_LOADED_ONCE_FOR_FORKED_RUNS
+        if PROGRAM_LOADED_ONCE_FOR_FORKED_RUNS is None:
+            PROGRAM_LOADED_ONCE_FOR_FORKED_RUNS = load_program()
+        Case.forked_runs += 1
+        output_paths = [self.root / f"forked-run-{Case.forked_runs}-{stream}" for stream in ("stdout", "stderr")]
+        sys.stdout.flush()
+        sys.stderr.flush()
+        child = os.fork()
+        if child == 0:
+            exit_code = 1
+            try:
+                for descriptor, path in zip((1, 2), output_paths):
+                    opened = os.open(path, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
+                    os.dup2(opened, descriptor)
+                    os.close(opened)
+                sys.stdout = io.TextIOWrapper(io.FileIO(1, "w", closefd=False), encoding="utf-8")
+                sys.stderr = io.TextIOWrapper(io.FileIO(2, "w", closefd=False), encoding="utf-8",
+                                              errors="backslashreplace", line_buffering=True)
+                os.chdir(self.checkout)
+                os.environ.clear()
+                os.environ.update(environment)
+                # This process cached its own temporary directory; the program must take the case's TMPDIR.
+                tempfile.tempdir = None
+                stop_signal_dispositions()
+                sys.argv = command[1:]
+                try:
+                    try:
+                        exit_code = PROGRAM_LOADED_ONCE_FOR_FORKED_RUNS.main()
+                    except SystemExit as stopped:
+                        exit_code = stopped.code
+                    if exit_code is None:
+                        exit_code = 0
+                    elif not isinstance(exit_code, int):
+                        print(exit_code, file=sys.stderr)
+                        exit_code = 1
+                    sys.stdout.flush()
+                except BaseException:
+                    traceback.print_exc()
+                    exit_code = 1
+                sys.stderr.flush()
+            finally:
+                # Never return: the child would run the rest of the suite and remove its scratch directory.
+                os._exit(exit_code & 0xFF if isinstance(exit_code, int) else 1)
+        _, status = os.waitpid(child, 0)
+        stdout, stderr = (path.read_text(encoding="utf-8") for path in output_paths)
+        for path in output_paths:
+            path.unlink()
+        return subprocess.CompletedProcess(command, os.waitstatus_to_exitcode(status), stdout, stderr)
+
+
+PROGRAM_LOADED_ONCE_FOR_FORKED_RUNS = None
 
 
 def check_command_for(case, *words):
