@@ -491,7 +491,7 @@ check("rule 5: a verdict not to send is logged with its reason, and no wait star
       and not machine.events("wait_step"), machine.events())
 LONG_DONE_TEXT = f"Done. {LONG_TEXT * 3} Done."
 machine = Machine()
-machine.seat("alpha", [user("go"), assistant(LONG_DONE_TEXT), turn_end()])
+machine.seat("alpha", [user("go"), assistant(LONG_DONE_TEXT, uuid="r1"), turn_end()])
 machine.task("alpha", "1")
 machine.script(judged(False, reason="it is waiting"))
 machine.run(0)
@@ -499,7 +499,8 @@ calls = machine.claude_calls()
 check("rule 5: a last message longer than the judge is handed reaches it as its end only, as the "
       "design says",
       len(calls) == 1 and json.dumps(LONG_DONE_TEXT[-4000:])[1:-1] in calls[0]["prompt"]
-      and "[...]" not in calls[0]["prompt"], calls)
+      and LONG_DONE_TEXT[:100] not in calls[0]["prompt"] and "[...]" not in calls[0]["prompt"],
+      calls)
 walk_item_machine = Machine()
 walk_item_machine.seat("alpha", DONE_TURN)
 walk_item_machine.task("alpha", "1")

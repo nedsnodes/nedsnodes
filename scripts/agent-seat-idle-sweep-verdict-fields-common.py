@@ -72,7 +72,8 @@ IF_EVERY_SENTENCE_BACKED = "if_every_sentence_backed"  # {"rule", "decision", ma
 LAST_TURN_ENDING_MESSAGE = "last_turn_ending_message"
 # [{"time", "name", "input", maybe "failed"}]: each tool call from the start of the earliest turn
 # holding a sentence the judge decides, with its input cut to TOOL_CALL_INPUT_CHARACTERS_KEPT
-# characters of JSON, and "failed": true when its result carried is_error
+# characters of JSON, and "failed": true when its result has is_error true, or, for a task call,
+# when it has no success result, an interrupted call included
 TOOL_CALLS_SINCE_START_OF_EARLIEST_TURN_WITH_SENTENCE_TO_JUDGE = (
     "tool_calls_since_start_of_earliest_turn_with_sentence_to_judge")
 # [{"time", "text"}]: each assistant text from the start of the same turn, whole
