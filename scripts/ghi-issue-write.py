@@ -471,7 +471,11 @@ GHI_GUIDE_ASK_ANSWER_NOT_USABLE_STDERR_LINE_OPENING_TO_MATCH = "ghi-guide's answ
 # named `<GHI-MD name>-proposed-improvements-or-changes-ghi-guide-agent-<YYYY-MM-DD>[-<n>].md`.
 # GHI_GUIDE_LOG_STORE_DIRECTORY_VARIABLE points a test at a local directory.
 PROPOSED_IMPROVEMENTS_OR_CHANGES_INFIX = "-proposed-improvements-or-changes-"
-PROPOSED_IMPROVEMENTS_OR_CHANGES_SOURCE_GHI_GUIDE = "ghi-guide"
+# This name, GHI_GUIDE_LOG_STORE_DIRECTORY, GHI_GUIDE_QUESTION_LINE_OPENING and
+# GHI_GUIDE_REVIEWED_TEXT_KEY_LINE_OPENING keep ghi-guide's former name,
+# ghi-guide-agent: the files already in the log-store carry it, and a rerun
+# finds its file by them.
+PROPOSED_IMPROVEMENTS_OR_CHANGES_SOURCE_GHI_GUIDE = "ghi-guide-agent"
 # Such a file's whole name, from any source. Older versions of this tool
 # landed them on main beside a GHI-MD; one found there is never counted or
 # linked as one of the issue's files.

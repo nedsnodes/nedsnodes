@@ -389,7 +389,7 @@ def run_remote_ghi_guide_log_store_cases(scratch: Path):
               lambda: (first == ("570-a-proposed-improvements-or-changes-ghi-guide-agent-"
                         "2026-10-03.md")
               and second == ("570-a-proposed-improvements-or-changes-ghi-"
-                             "domain-guide-2026-10-03-2.md")
+                             "guide-agent-2026-10-03-2.md")
               and (remote_store / first).read_text() == written_text),
               (first, second))
         (remote_store / "570-ab-proposed-improvements-or-changes-ghi-guide-agent-"
@@ -1766,7 +1766,7 @@ def run_cases(scratch: Path):
               lambda: (second_name == ("a-proposed-improvements-or-changes-ghi-guide-agent-"
                               "2026-10-03-2.md")
               and (collision_store / "a-proposed-improvements-or-changes-"
-                   "ghi-guide-2026-10-03.md").read_text() == "earlier\n"),
+                   "ghi-guide-agent-2026-10-03.md").read_text() == "earlier\n"),
               second_name)
 
         store_is_a_file = scratch / "store-is-a-file"
@@ -1817,7 +1817,7 @@ def run_cases(scratch: Path):
                             "finding\n\nBody.\n")
         draft_slug = tool.slug("Reopen a closed issue to add its last finding")
         proposed_name = (f"{draft_slug}-proposed-improvements-or-changes-"
-                         "ghi-guide-2026-10-03.md")
+                         "ghi-guide-agent-2026-10-03.md")
         create_store = log_store_at(scratch / "create-store")
         draft_dir = scratch / "draft-dir"
         draft_dir.mkdir()
@@ -1930,7 +1930,7 @@ def run_cases(scratch: Path):
                   == [f"docs/issues/573-{draft_slug}.tool.design.md"]
                   and sorted(item.name for item in design_store.iterdir())
                   == [f"{draft_slug}.tool.design-proposed-improvements-or-"
-                      "changes-ghi-guide-2026-10-03.md"]
+                      "changes-ghi-guide-agent-2026-10-03.md"]
                   and design_question_lines[-1].startswith("Filed GHI 573.")
                   and "Dispatch a forked subagent now"
                   in design_question_lines[-1]),
@@ -2601,7 +2601,7 @@ def ran_with(recorder, *fragments):
 
 
 GHI_GUIDE_HEAD = (f"{EDIT_NAME[:-len('.md')]}-proposed-improvements-or-changes-"
-                 "ghi-guide-")
+                 "ghi-guide-agent-")
 
 
 def ghi_guide_file(question, state="State: open"):
@@ -2848,7 +2848,7 @@ def run_saved_question_on_resume_cases(scratch: Path):
 
     created_name = "a-statusline-that-drops-its-branch-name"
     created_saved = store / (f"{created_name}-proposed-improvements-or-"
-                             "changes-ghi-guide-2026-10-19.md")
+                             "changes-ghi-guide-agent-2026-10-19.md")
     created_saved.write_text(ghi_guide_file("may the filing go ahead?"))
     numbered = Recorder({
         "gh issue view 570": Completed(json.dumps(
@@ -3224,7 +3224,7 @@ def run_edit_cases(scratch: Path):
     tool.proposed_improvements_or_changes_file_date = lambda: "2026-10-03"
     edit_store = log_store_at(scratch / "edit-store")
     proposed_name = (f"{EDIT_NAME[:-len('.md')]}-proposed-improvements-or-"
-                     "changes-ghi-guide-2026-10-03.md")
+                     "changes-ghi-guide-agent-2026-10-03.md")
     proposed_in_store = edit_store / proposed_name
     try:
         conflicting_edit_answers = {
