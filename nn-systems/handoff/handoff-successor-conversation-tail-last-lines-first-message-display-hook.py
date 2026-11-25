@@ -21,9 +21,9 @@ Not handled:
   directory, so the lines are not shown and their file stays;
 - an agent-seat checkout whose settings predate this hook, while the supervisor runs from a newer
   checkout: nothing shows the lines and their file stays;
-- a cut that starts inside a fenced code block and keeps its closing fence line, which Markdown
-  then reads as an opening one: the lines and the batch are drawn as one Markdown text, so the
-  closing heading and the first message are drawn as code.
+- lines that leave a Markdown fenced code block open when they end, as a cut inside a block
+  can: the lines and the batch are drawn as one Markdown text, so the closing heading and the
+  first message are then drawn as code.
 """
 
 import json
@@ -45,7 +45,10 @@ def main() -> int:
         return 0
     path = conversation_tail_last_lines_display_file_path_for_session_id(HANDOFF_DIRECTORY, batch["session_id"])
     try:
-        text = path.read_text(encoding="utf-8")
+        # newline="" keeps a bare "\r" inside a line as the supervisor wrote it, so the lines shown
+        # match the count in their heading.
+        with path.open(encoding="utf-8", newline="") as display_file:
+            text = display_file.read()
     except FileNotFoundError:
         return 0
     print(json.dumps({"hookSpecificOutput": {

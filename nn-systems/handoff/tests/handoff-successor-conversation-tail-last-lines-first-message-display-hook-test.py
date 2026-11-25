@@ -69,6 +69,19 @@ with tempfile.TemporaryDirectory() as directory:
     check("the next message's first batch, with no display file, prints nothing",
           next_message.returncode == 0 and next_message.stdout == "", repr(next_message))
 
+    carriage_return_text = DISPLAY_TEXT.replace("turn 99\n", "turn\r99\n")
+    display_file.write_bytes(carriage_return_text.encode("utf-8"))
+    carriage_return_batch = run_hook(home, index=0)
+    try:
+        carriage_return_output = json.loads(carriage_return_batch.stdout)
+    except json.JSONDecodeError:
+        carriage_return_output = None
+    check("a bare carriage return inside a line of the display file is kept, not turned into a newline",
+          carriage_return_batch.returncode == 0 and carriage_return_output == {"hookSpecificOutput": {
+              "hookEventName": "MessageDisplay",
+              "displayContent": carriage_return_text + "Reading the dialog first.\n"}},
+          repr(carriage_return_batch))
+
     not_json = run_hook(home, index=0, raw_input_text="not json")
     check("stdin that is not JSON exits 1 with nothing on stdout, so the original text is drawn",
           not_json.returncode == 1 and not_json.stdout == "", repr(not_json))
