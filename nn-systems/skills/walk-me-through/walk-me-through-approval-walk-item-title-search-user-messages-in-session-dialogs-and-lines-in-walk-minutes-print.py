@@ -46,6 +46,7 @@ import importlib.util
 import json
 import os
 import re
+import stat
 import sys
 from pathlib import Path
 
@@ -227,17 +228,40 @@ def session_lines(root, dialog, title_lines, failures):
     return printed
 
 
+def walk_directories(root, agent_homes, failures):
+    """The log-store's walk/ and each agent-home's docs/walk/ that exist; one that cannot be looked at, or an
+    agent-homes directory that cannot be listed, is a failure, so its walk-minutes are never left out unseen."""
+    try:
+        homes = sorted(entry.path for entry in os.scandir(agent_homes))
+    except FileNotFoundError:
+        homes = []
+    except OSError as error:
+        failures.append(f"could not list the agent-homes directory {agent_homes}, so no agent-home's walk-minutes "
+                        f"were searched: {error}")
+        homes = []
+    found = []
+    for directory in [root / "walk", *(Path(home) / "docs" / "walk" for home in homes)]:
+        try:
+            mode = directory.stat().st_mode
+        except (FileNotFoundError, NotADirectoryError):
+            continue
+        except OSError as error:
+            failures.append(f"could not look at {directory}, so its walk-minutes were not searched: {error}")
+            continue
+        if stat.S_ISDIR(mode):
+            found.append(directory)
+    return found
+
+
 def found_lines(root, agent_homes, titles, numbers, failures):
     """(lines to print, whether anything was found)."""
     matchers = [title_matcher(title, numbers) for title in titles]
     dialogs_directory = root / search.SESSION_DIALOGS
-    walk_directories = [directory for directory in [root / "walk", *sorted(agent_homes.glob("*/docs/walk"))]
-                        if directory.is_dir()]
     if not dialogs_directory.is_dir():
         failures.append(f"the log-store has no {dialogs_directory}, so no session dialog was searched")
     dialog_hits = ripgrep_lines(titles, [dialogs_directory] if dialogs_directory.is_dir() else [],
                                 "*" + search.SESSION_DIALOG_FILE_NAME_SUFFIX, failures)
-    minutes_hits = ripgrep_lines(titles, walk_directories, WALK_MINUTES_GLOB, failures)
+    minutes_hits = ripgrep_lines(titles, walk_directories(root, agent_homes, failures), WALK_MINUTES_GLOB, failures)
     named = {}
     for path, number, text in dialog_hits:
         if any(names(text) for names in matchers):

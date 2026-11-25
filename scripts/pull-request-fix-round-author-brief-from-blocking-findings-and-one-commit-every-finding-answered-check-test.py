@@ -976,6 +976,33 @@ def stopped_round_cases(root, repository, made, frozen_head, dated_routes, submi
           and all(f"copied it unchanged to {path}" in out for path in copies_of_round), err + out)
     for path in set(kept_directory.iterdir()) - set(copies_of_round):
         path.unlink()
+    other_review_directory = kept_directory.parent / f"pr-{NUMBER}-review-12"
+    other_review_directory.mkdir()
+    other_copy = other_review_directory / f"{Path(ANSWERS_NAME).stem}-saved-under-the-second-review.md"
+    other_copy.write_text(partial)
+    write_answers("1. \n2. \n", 60)
+    code, out, err = run(root, repository, second_part_routes)
+    check("answers kept: a copies directory named by another review on the same frozen-head, as an earlier version "
+          "of this program named it by the round's second changes-requested review, is named in the brief",
+          code == 0 and f"An earlier brief on this frozen-head kept a copy of the answers file under another review, "
+                        f"at {other_copy}." in out, err + out)
+    code, out, err = run(root, repository, dated_routes)
+    check("answers kept: a copies directory named by a review not on the round's frozen-head is not named",
+          code == 0 and str(other_copy) not in out, err + out)
+    write_answers(partial, 60)
+    before = answers.read_bytes()
+    copies_of_round = sorted(kept_directory.iterdir())
+    other_review_directory.chmod(0o300)
+    try:
+        code, out, err = run(root, repository, second_part_routes)
+        unchanged = answers.read_bytes() == before
+    finally:
+        other_review_directory.chmod(0o755)
+    check("answers kept: another review's copies directory that cannot be listed stops the brief with exit 2 before "
+          "the answers file changes, and no new copy is made",
+          code == 2 and unchanged and "could not list the kept copies" in err and str(other_review_directory) in err
+          and sorted(kept_directory.iterdir()) == copies_of_round, err + out)
+    shutil.rmtree(other_review_directory)
     copies_before = sorted(kept_directory.iterdir())
     write_answers(partial, 60)
     before = answers.read_bytes()
@@ -1111,17 +1138,22 @@ def topic_worktree_cases(root, repository, base, frozen_head):
     code, out, err = run(root, repository, routes)
     check("topic-worktree: an untracked file refuses the brief with exit 1, naming it and how to remove it",
           code == 1 and out == "" and "stray.txt" in err and "uncommitted changes or untracked files" in err
-          and f"git -C {made} clean -d --force --exclude=/{ANSWERS_NAME}" in err, err + out)
+          and f"git -C {made} clean -d --force --exclude=/{ANSWERS_NAME}" in err
+          and f"Then run this command again:\ncd {made} && python3 scripts/{PROGRAM.name} {NUMBER}" in err, err + out)
     clean_line = next((line for line in err.splitlines() if " clean -d --force" in line), "")
+    unstage_line = next((line for line in err.splitlines() if " reset --quiet -- " in line), "")
     unignored = root / "branch-whose-gitignore-lacks-the-answers-file"
     git(root, "init", "-q", str(unignored))
     (unignored / ANSWERS_NAME).write_text(GOOD_ANSWERS)
     leftover = unignored / f"{Path(ANSWERS_NAME).stem}-killed.md"
     leftover.write_text("1. \n")
-    subprocess.run(clean_line.replace(str(made), str(unignored)), shell=True, check=True, capture_output=True)
-    check("topic-worktree: the printed clean command, on a branch whose .gitignore does not name the answers file, "
-          "keeps the answers file and removes a temporary file a killed brief run left",
-          (unignored / ANSWERS_NAME).read_text() == GOOD_ANSWERS and not leftover.exists(), clean_line)
+    for line in (unstage_line, clean_line):
+        subprocess.run(line.replace(str(made), str(unignored)), shell=True, check=True, capture_output=True)
+    check("topic-worktree: the printed unstage and clean commands, on a branch whose .gitignore does not name the "
+          "answers file and where it is not staged, succeed, keep the answers file and remove a temporary file a "
+          "killed brief run left",
+          (unignored / ANSWERS_NAME).read_text() == GOOD_ANSWERS and not leftover.exists(),
+          unstage_line + "\n" + clean_line)
     restore_line = next((line for line in err.splitlines() if " restore --staged --worktree" in line), "")
     staged = root / "branch-whose-answers-file-git-add-staged"
     git(root, "init", "-q", str(staged))
@@ -1131,13 +1163,40 @@ def topic_worktree_cases(root, repository, base, frozen_head):
     (staged / ANSWERS_NAME).write_text(GOOD_ANSWERS)
     (staged / "hook.py").write_text("changed\n")
     git(staged, "add", "-A")
-    for line in (restore_line, clean_line):
+    for line in (restore_line, unstage_line, clean_line):
         subprocess.run(line.replace(str(made), str(staged)), shell=True, check=True, capture_output=True)
-    check("topic-worktree: the two printed commands, run in order where git add -A staged the answers file beside "
-          "another change, keep the answers file and undo the other change",
+    check("topic-worktree: the three printed commands, run in order where git add -A staged the answers file beside "
+          "another change, keep the answers file unstaged and undo the other change",
           (staged / ANSWERS_NAME).exists() and (staged / ANSWERS_NAME).read_text() == GOOD_ANSWERS
-          and (staged / "hook.py").read_text() == "committed\n",
-          restore_line + "\n" + clean_line)
+          and (staged / "hook.py").read_text() == "committed\n"
+          and git(staged, "diff", "--cached", "--name-only") == "",
+          restore_line + "\n" + unstage_line + "\n" + clean_line)
+    edited = root / "branch-whose-answers-file-was-staged-then-edited"
+    git(root, "init", "-q", str(edited))
+    (edited / "hook.py").write_text("committed\n")
+    git(edited, "add", "hook.py")
+    git(edited, "-c", "user.name=t", "-c", "user.email=t@t", "commit", "-q", "-m", "base")
+    (edited / ANSWERS_NAME).write_text("1. \n2. \n")
+    git(edited, "add", "-A")
+    (edited / ANSWERS_NAME).write_text(GOOD_ANSWERS)
+    for line in (restore_line, unstage_line, clean_line):
+        subprocess.run(line.replace(str(made), str(edited)), shell=True, check=True, capture_output=True)
+    check("topic-worktree: the three printed commands, run where git add -A staged the answers file and it was "
+          "edited after, succeed and leave it unstaged with its edits",
+          (edited / ANSWERS_NAME).read_text() == GOOD_ANSWERS and git(edited, "diff", "--cached", "--name-only") == "",
+          unstage_line)
+    tracked = root / "branch-whose-head-tracks-the-answers-file"
+    git(root, "init", "-q", str(tracked))
+    (tracked / ANSWERS_NAME).write_text("1. \n2. \n")
+    git(tracked, "add", ANSWERS_NAME)
+    git(tracked, "-c", "user.name=t", "-c", "user.email=t@t", "commit", "-q", "-m", "base")
+    (tracked / ANSWERS_NAME).write_text(GOOD_ANSWERS)
+    git(tracked, "add", "-A")
+    subprocess.run(unstage_line.replace(str(made), str(tracked)), shell=True, check=True, capture_output=True)
+    check("topic-worktree: the printed unstage command, where HEAD tracks the answers file, unstages it without "
+          "staging its deletion and keeps its edits",
+          (tracked / ANSWERS_NAME).read_text() == GOOD_ANSWERS and git(tracked, "diff", "--cached", "--name-only") == "",
+          unstage_line)
     (made / "stray.txt").unlink()
     (made / "hook.py").write_text("changed\n")
     code, out, err = run(root, repository, routes)
@@ -2791,7 +2850,7 @@ def fix_commit_range_two_commit_round_cases(_root, repository, _base, _frozen_he
         original_directory = os.getcwd()
         os.chdir(repository)
         try:
-            return program.fix_commit_range(frozen_head, program.commits_since(frozen_head, head))
+            return program.fix_commit_range(frozen_head, program.commits_since(frozen_head, head), "merge-lane-2")
         except program.Refused as refusal:
             return refusal
         finally:
@@ -3187,7 +3246,53 @@ def conflict_check_cases(root, repository, _base, frozen_head):
     git(repository, "checkout", "-q", "--", "scripts/branch-conflict-check.py")
 
 
+def merge_lane_name_line_cases(root, repository, _base, frozen_head):
+    """The brief and --check send the author's messages to the merge-lane the round's changes-requested review
+    names on the line the posting program writes after the count, and to merge-lane-2 when it names none."""
+    lane_1_review = review(commit_id=frozen_head, body=(
+        "REQUEST_CHANGES\n\n**Blocking: 2**\n\n**Merge-lane: merge-lane-1**\n\nRound 1; merge-lane-2 merges."))
+    routes = routes_for(frozen_head, [lane_1_review])
+    code, out, err = run(root, repository, routes)
+    check("merge-lane name line: a merge-lane-1 review's brief sends every message to merge-lane-1",
+          code == 0 and "tell merge-lane-1 with SendMessage what failed" in out
+          and "send that message to merge-lane-1 with SendMessage" in out
+          and "tell merge-lane-1 with SendMessage what git printed" in out
+          and "merge-lane-2 with SendMessage" not in out and "to merge-lane-2" not in out, err + out)
+    check("merge-lane name line: the brief still says merge-lane-2 sends the non-blocking findings after the merge",
+          "merge-lane-2 sends them after the merge" in out, out)
+
+    answers = answers_file(root, GOOD_ANSWERS)
+    code, out, err = run(root, repository, routes, "--check", "--answers", answers)
+    check("merge-lane name line: --check on a merge-lane-1 round prints the message for merge-lane-1",
+          code == 0 and "Send merge-lane-1 this message with SendMessage:" in out
+          and "merge-lane-2" not in out, err + out)
+
+    for body in ["REQUEST_CHANGES\n\n**Blocking: 2**\n\nmerge-lane-1's review of round 1.",
+                 "REQUEST_CHANGES\n\n**Blocking: 2**\n\nQuoted: **Merge-lane: merge-lane-1**",
+                 "REQUEST_CHANGES\n\n**Blocking: 2**\n\n**Merge-lane: merge-lane-1** wrote this."]:
+        code, out, err = run(root, repository, routes_for(frozen_head, [review(commit_id=frozen_head, body=body)]))
+        check(f"merge-lane name line: a review with no name line where the posting program writes it is briefed, "
+              f"its messages sent to merge-lane-2: {body[34:70]!r}",
+              code == 0 and "send that message to merge-lane-2 with SendMessage" in out
+              and "merge-lane-1 with SendMessage" not in out, err + out)
+
+    program = load_program()
+    lane_3_unmarked = review(commit_id=frozen_head, body=(
+        "REQUEST_CHANGES\n\n**Blocking: 1**\n\n**Merge-lane: merge-lane-3**\n\nNo inline mark."))
+    program.gh_json_lines = lambda arguments: [comment("old.txt", "Unmarked.")]
+    try:
+        program.blocking_findings(NUMBER, lane_3_unmarked, [lane_3_unmarked])
+        refusal = ""
+    except program.Refused as refused:
+        refusal = str(refused)
+    check("merge-lane name line: a refusal about a review's findings, such as a replaced pull request's carried "
+          "review, tells the author to ask the merge-lane that review names",
+          "Ask merge-lane-3 with SendMessage which findings block" in refusal
+          and "merge-lane-2" not in refusal, refusal)
+
+
 gh_timeout_case()
+case("merge-lane name line", merge_lane_name_line_cases)
 case("suites", suite_cases)
 case("architecture overview", architecture_overview_cases)
 case("architecture overview check cannot read", architecture_overview_check_cannot_read_case)

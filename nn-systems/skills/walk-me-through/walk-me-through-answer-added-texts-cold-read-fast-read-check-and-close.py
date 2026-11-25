@@ -464,7 +464,7 @@ it answers, and each walk-minutes line naming one, each with its file and line.
 When the search fails, the step refuses, before any read, printing what the
 search said, and exits 1; any exit of the search but its found and nothing-found
 exits is a failure. The step saves what the search prints, a search with no
-hits too, as it prints it, in
+hits too, once it has written it out, in
 `docs/walk/title-search-cache/<walk name>-item-<N>-<agent-session id>.md`, the
 titles and numbers searched for as a JSON list on its first line, the agent-session id
 being $CLAUDE_CODE_SESSION_ID. A later run for the item in the same
@@ -625,6 +625,11 @@ class MissingEvidenceLine(str):
     """A problem that adding an evidence line to the item would cure, as against one the item's change has."""
 
 
+class MalformedEvidenceLine(str):
+    """A problem that correcting an evidence line the item already has would cure; adding a second line would not,
+    since `check` still reads the first."""
+
+
 def rating_and_needed_lines_problems(found):
     rating, case = found.rating, no_answer_case(found.value)
     problems = [] if rating in NOT_ASKED_RATINGS else [NOT_ASKED_RATING_PROBLEM.format(rating=rating)]
@@ -733,12 +738,12 @@ def dropped_proposal_search_problems(found):
         count = counts[0] if len(counts) == 1 else None
         places = SEARCH_PLACES.match(value[count.end():]) if count else None
         if len(days) != 2 or count is None or not places or not SEARCH_PLACE_WORD.search(places[1]):
-            problems.append(MissingEvidenceLine(NOT_ASKED_SEARCH_SHAPE_PROBLEM.format(marker=SEARCH, value=value)))
+            problems.append(MalformedEvidenceLine(NOT_ASKED_SEARCH_SHAPE_PROBLEM.format(marker=SEARCH, value=value)))
             continue
         try:
             first, last = (datetime.date.fromisoformat(day) for day in days)
         except ValueError:
-            problems.append(MissingEvidenceLine(NOT_ASKED_SEARCH_SHAPE_PROBLEM.format(marker=SEARCH, value=value)))
+            problems.append(MalformedEvidenceLine(NOT_ASKED_SEARCH_SHAPE_PROBLEM.format(marker=SEARCH, value=value)))
             continue
         if (last - first).days < SEARCH_WINDOW_DAYS:
             problems.append(NOT_ASKED_SEARCH_WINDOW_SHORT_PROBLEM.format(marker=SEARCH, first=first, last=last,
@@ -1382,8 +1387,8 @@ NOT_ASKED_DROPPED_PROPOSAL_NEW_TEXT_PROBLEM = ("- it has a `#new` line, which A 
                                                "proposal adds no text, so it recommends something else and is shown.")
 SEARCH_DAY = re.compile(r"\b\d{4}-\d{2}-\d{2}\b")
 SEARCH_COUNT = re.compile(r"\b(\d+)\s+cases?\b", re.I)
-# The places are the text after the single count's `in`.
-SEARCH_PLACES = re.compile(r"\W*in\b(.*)", re.I | re.S)
+# The places are the text after the single count's `in`, which may follow a word or two, as in `0 cases found in`.
+SEARCH_PLACES = re.compile(r"\W*(?:[A-Za-z]+\W+)*?in\b(.*)", re.I | re.S)
 SEARCH_PLACE_WORD = re.compile(r"\b(?!(?:to|in|and|of|the|from|through)\b)[A-Za-z][\w'.-]*")
 SEARCH_WINDOW_DAYS = 30
 NOT_ASKED_WHY = {
@@ -3367,6 +3372,9 @@ NO_ANSWER_ROWS_HEADING = ("Rows of the no-answer table {item} could settle by; i
 NO_ANSWER_ROW_PASSES = "- {label}: {meaning}. Its evidence passes: run `{command}` and do what it prints."
 NO_ANSWER_ROW_LINE_MISSING = ("- {label}: {meaning}. Only evidence is missing: {missing} Add it to {document}, then "
                               "run `{command}` and do what it prints.")
+NO_ANSWER_ROW_LINE_MALFORMED = ("- {label}: {meaning}. Its evidence line needs correcting: {malformed} Correct that line "
+                                "in {document}, rather than adding another, then run `{command}` and do what it "
+                                "prints.")
 NO_ANSWER_ROW_NOT_CHECKED = ("- {label}: its evidence could not be checked, so it is not offered; present {item} "
                              "unless another row fits: {error}")
 
@@ -3397,6 +3405,11 @@ def no_answer_rows_for_waiting_item_lines(walk_finder, top, minutes, value, numb
             continue
         if not problems:
             rows.append(NO_ANSWER_ROW_PASSES.format(label=case.label, meaning=case.meaning, command=command))
+        elif all(isinstance(problem, (MissingEvidenceLine, MalformedEvidenceLine)) for problem in problems) and any(
+                isinstance(problem, MalformedEvidenceLine) for problem in problems):
+            malformed = " ".join(problem.removeprefix("- ") for problem in problems)
+            rows.append(NO_ANSWER_ROW_LINE_MALFORMED.format(label=case.label, meaning=case.meaning,
+                                                            malformed=malformed, document=document, command=command))
         elif all(isinstance(problem, MissingEvidenceLine) for problem in problems):
             missing = " ".join(problem.removeprefix("- ") for problem in problems)
             rows.append(NO_ANSWER_ROW_LINE_MISSING.format(label=case.label, meaning=case.meaning, missing=missing,
@@ -3484,14 +3497,16 @@ def approval_walk_item_title_search_groups(walk_finder, document, value, numbers
 
 def approval_walk_item_title_user_messages_in_earlier_agent_sessions_lines(walk_finder, minutes, groups, numbers,
                                                                          item, command):
-    """Return a function that saves and returns the lines TITLE_SEARCH_PROGRAM prints for each of groups, as
-    approval_walk_item_title_search_groups returns them, one search per group; raise Failure when a search failed.
+    """Return (the lines TITLE_SEARCH_PROGRAM prints for each of groups, as approval_walk_item_title_search_groups
+    returns them, one search per group, a function that saves them and returns the lines to print after them);
+    raise Failure when a search failed.
 
-    Call the function only in the statement that prints its lines: the lines are saved in the title search cache
-    file for the item and this agent-session, and a later run for the same titles in the same agent-session prints
-    only a line naming that file, since fix rounds rerun the step, so lines saved but never printed are never read."""
+    Print them with lines_printed_with_title_search_saved_after, which saves them only once they are printed: the
+    lines are saved in the title search cache file for the item and this agent-session, and a later run for the
+    same titles in the same agent-session prints only a line naming that file, since fix rounds rerun the step, so
+    lines saved but never printed are never read."""
     if not groups:
-        return lambda: []
+        return [], lambda: []
     # The groups' titles and numbers, as JSON lists, so a change to either searches again.
     titles = [[group_titles, group_numbers] for group_titles, group_numbers in groups]
     variable = load_module("cold_read_record_names", RECORD_NAMES_FILE).AGENT_SESSION_ID_ENVIRONMENT_VARIABLE
@@ -3500,8 +3515,7 @@ def approval_walk_item_title_user_messages_in_earlier_agent_sessions_lines(walk_
              / TITLE_SEARCH_CACHE_FILE_NAME.format(walk=minutes.name[:-len(walk_finder.MINUTES_SUFFIX)],
                                                    numbers="-and-".join(numbers), session=session_id))
     if session_id and title_search_cache_titles(cache) == titles:
-        return lambda: [TITLE_SEARCH_CACHE_PRINTED_BEFORE.format(item=item, path=cache)]
-    exits = load_module("title_search", TITLE_SEARCH_PROGRAM)
+        return [TITLE_SEARCH_CACHE_PRINTED_BEFORE.format(item=item, path=cache)], lambda: []
     lines = []
     for group_titles, group_numbers in groups:
         # In the `=` form, so that a title opening with `-` is not read as an option.
@@ -3509,12 +3523,19 @@ def approval_walk_item_title_user_messages_in_earlier_agent_sessions_lines(walk_
                  + [f"--item-number={number}" for number in group_numbers])
         result = subprocess.run([sys.executable, str(TITLE_SEARCH_PROGRAM), *words], capture_output=True, text=True,
                                 stdin=subprocess.DEVNULL)
+        try:
+            exits = load_module("title_search", TITLE_SEARCH_PROGRAM)
+        # Whatever a search that cannot load raises, it is a failed search, reported as the others are.
+        except Exception as error:
+            raise Failure(APPROVAL_WALK_ITEM_TITLE_SEARCH_FAILED.format(
+                item=item, exit=result.returncode, command=command,
+                said="\n".join(filter(None, [result.stderr.strip(), f"Loading it here raised {error!r}."]))))
         if result.returncode not in (exits.EXIT_FOUND, exits.EXIT_NOTHING_FOUND):
             raise Failure(APPROVAL_WALK_ITEM_TITLE_SEARCH_FAILED.format(
                 item=item, exit=result.returncode, said=result.stderr.strip() or "nothing", command=command))
         lines += result.stdout.rstrip("\n").split("\n") if result.stdout.strip() else []
     if not session_id:
-        return lambda: lines + [TITLE_SEARCH_CACHE_NOT_SAVED.format(
+        return lines, lambda: [TITLE_SEARCH_CACHE_NOT_SAVED.format(
             path=minutes.parent / TITLE_SEARCH_CACHE_DIRECTORY_NAME,
             why=TITLE_SEARCH_CACHE_NO_AGENT_SESSION.format(variable=variable))]
 
@@ -3525,9 +3546,21 @@ def approval_walk_item_title_user_messages_in_earlier_agent_sessions_lines(walk_
             temporary.write_text("\n".join([json.dumps(titles)] + lines) + "\n", encoding="utf-8")
             os.replace(temporary, cache)
         except OSError as error:
-            return lines + [TITLE_SEARCH_CACHE_NOT_SAVED.format(path=cache, why=error)]
-        return lines
-    return saved_lines
+            return [TITLE_SEARCH_CACHE_NOT_SAVED.format(path=cache, why=error)]
+        return []
+    return lines, saved_lines
+
+
+def lines_printed_with_title_search_saved_after(first, past_words, rest):
+    """Print first, then the title search's lines of past_words, as
+    approval_walk_item_title_user_messages_in_earlier_agent_sessions_lines returns it, then rest; save the search
+    only once its lines are written out, so a write that fails leaves no cache saying they were printed."""
+    lines, save = past_words
+    print("\n".join([first] + lines))
+    sys.stdout.flush()
+    after = save() + rest
+    if after:
+        print("\n".join(after))
 
 
 def title_search_cache_titles(cache):
@@ -3610,7 +3643,7 @@ def waiting_item_read(arguments, sub_step_of=None):
             approval_walk_item_text_over_word_limit_refused(*above[:6], above[7], command)
     # Before anything is written, so a refused item leaves the walk-minutes and the walk-document as they were; an
     # item settled without being shown is not refused, since no status in it reaches the user.
-    recheck_line, past_words = None, lambda: []
+    recheck_line, past_words = None, ([], lambda: [])
     if rated_none_item_not_to_be_shown(walk_finder, top, minutes, value, numbers, total, parser, named) is None:
         recheck_line = approval_walk_item_system_status_claims_not_rechecked_refused(
             text, item, document, rerun, rechecked)
@@ -3686,8 +3719,8 @@ def waiting_item_read(arguments, sub_step_of=None):
                 rest = no_answer_rows + (withheld or [ITEM_READ_NOT_RUN_NEXT.format(
                     item=item, now_over_later_command=check_command_with_cwd(top, NOW_OVER_LATER_FLAG))]
                     + waiting_on_item_prerequisite_lines(walk_finder, minutes, numbers, total, parser))
-                print("\n".join([ITEM_READ_NOT_RUN.format(item=item, report=latest[1]["report"])] + past_words()
-                                 + rest))
+                lines_printed_with_title_search_saved_after(
+                    ITEM_READ_NOT_RUN.format(item=item, report=latest[1]["report"]), past_words, rest)
                 return 1 if withheld else 0
             why = ITEM_READ_RUN_FACTS.format(report=latest[1]["report"], facts=", ".join(facts[:FACTS_LISTED]))
         walk_name = minutes.name[:-len(walk_finder.MINUTES_SUFFIX)]
@@ -3714,8 +3747,8 @@ def waiting_item_read(arguments, sub_step_of=None):
                            now_over_later_command=check_command_with_cwd(top, NOW_OVER_LATER_FLAG))
                for line in (ITEM_READ_LINES[:1] if withheld else ITEM_READ_LINES)]
             + (withheld or waiting_on_item_prerequisite_lines(walk_finder, minutes, numbers, total, parser)))
-    print("\n".join([ITEM_READ_USED.format(item=item, how=how, report=outcome["report"], notes=notes)] + past_words()
-                     + rest))
+    lines_printed_with_title_search_saved_after(
+        ITEM_READ_USED.format(item=item, how=how, report=outcome["report"], notes=notes), past_words, rest)
     return 1 if withheld else 0
 
 

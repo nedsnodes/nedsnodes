@@ -41,6 +41,15 @@ starts with "- [Pn] " is rewritten, which is where the rubric puts a
 heading; a label elsewhere, such as in a finding's indented body or
 quoted code, is left as Codex wrote it.
 
+Before that, a report that starts with "{" is Codex's review object itself,
+written as the report when the object fails Codex's own parse, such as when
+the reviewer leaves out "overall_confidence_score". The cell writes it in
+the prose form Codex writes from a parsed object, one heading per finding,
+so the review-posting program, which reads only the headings, sees each
+finding and gives it the id it would have had in prose. A report it cannot
+convert ends the run with exit 1 and no report, the text Codex wrote on
+stderr.
+
 What this deliberately does not do: replace the built-in review with a
 custom prompt. On codex-cli 0.147.0 a [PROMPT] is mutually exclusive with
 --base and switches to custom-review mode, losing the built-in rubric
@@ -340,7 +349,8 @@ a defect in this repository's code.
          killed by a signal surfaces from this program in the 192-255 band
          (see the row below). 64 is outside all four.
   1      the review failed and no report survives -- codex could not be
-         launched or timed out, or codex exited 0 having written nothing.
+         launched or timed out, or codex exited 0 having written nothing,
+         or a review object the cell cannot write in prose form.
          Either layer can produce it; the stderr line says which.
   other  codex exec's own exit code. A passed-through 2 specifically means
          CODEX REJECTED THE COMMAND THIS SCRIPT COMPOSED, which is a defect
@@ -555,6 +565,57 @@ def codex_priority_labels_spelled_out(report: str) -> str:
         r"- [Codex priority \1 (P0 highest)] ", report)
 
 
+class CodexReviewObjectNotConvertible(Exception):
+    """A report Codex wrote as its review object that the cell cannot write in prose form."""
+
+
+CODEX_TITLE_PRIORITY_LABEL = re.compile(r"^\[P[0-3]\] ")
+
+
+def codex_review_object_as_prose_report(text: str) -> str:
+    """The report Codex writes from its review object, for a report that is the object itself.
+
+    Codex writes the object as its report when the object fails its own
+    parse, such as when "overall_confidence_score" is missing. The prose is
+    Codex's: the explanation, then "Full review comments:" and per finding a
+    "- [Pn] <title> — <path>:<start>-<end>" line and its body indented by two
+    spaces. Codex always writes both ends of the range."""
+    try:
+        review = json.loads(text)
+    except ValueError as error:
+        raise CodexReviewObjectNotConvertible(f"it is not JSON: {error}")
+    if not isinstance(review, dict) or not isinstance(review.get("findings"), list):
+        raise CodexReviewObjectNotConvertible("it is not an object with a \"findings\" list")
+    if not isinstance(review.get("overall_explanation"), str):
+        raise CodexReviewObjectNotConvertible("it has no text \"overall_explanation\"")
+    findings = []
+    for number, finding in enumerate(review["findings"], 1):
+        try:
+            priority, title, body = finding["priority"], finding["title"], finding["body"]
+            location = finding["code_location"]
+            path, start, end = (location["absolute_file_path"], location["line_range"]["start"],
+                                location["line_range"]["end"])
+        except (KeyError, TypeError) as error:
+            raise CodexReviewObjectNotConvertible(f"finding {number} has no {error}")
+        # The posting program reads only P0 to P3 from a one-line heading.
+        if type(priority) is not int or not 0 <= priority <= 3:
+            raise CodexReviewObjectNotConvertible(
+                f"finding {number}'s \"priority\" is {priority!r}, not an integer from 0 to 3")
+        if (not all(isinstance(value, str) for value in (title, body, path))
+                or "\n" in title or "\n" in path
+                or not all(type(value) is int for value in (start, end))):
+            raise CodexReviewObjectNotConvertible(
+                f"finding {number} has a title, body, path or line range of the wrong type, "
+                "or a title or path of more than one line")
+        indented_body = "\n".join("  " + line if line else line for line in body.split("\n"))
+        findings.append(f"- [P{priority}] {CODEX_TITLE_PRIORITY_LABEL.sub('', title)} — "
+                        f"{path}:{start}-{end}\n{indented_body}")
+    if not findings:
+        return review["overall_explanation"]
+    return (review["overall_explanation"] + "\n\nFull review comments:\n\n"
+            + "\n\n".join(findings))
+
+
 # This script's own refusals, kept off every code `codex exec` produces so a
 # passed-through code stays readable as codex's. sysexits.h's EX_USAGE; the
 # reasoning is in EXIT CODES above.
@@ -721,7 +782,31 @@ def main(argv=None) -> int:
 
     # Provenance header, so a report read later is pinned to its inputs, as
     # the cold-read cells' reports are.
-    report = codex_priority_labels_spelled_out(output_path.read_text(encoding="utf-8"))
+    report = output_path.read_text(encoding="utf-8")
+    if report.lstrip().startswith("{"):
+        try:
+            report = codex_review_object_as_prose_report(report)
+        except CodexReviewObjectNotConvertible as error:
+            # The posting program would read the object as a review with no
+            # findings, so no report survives; stderr keeps Codex's text.
+            output_path.unlink(missing_ok=True)
+            print(f"scripts/code-review-codex-cell.py: codex wrote its review as a JSON object, "
+                  f"and the cell cannot turn it into the finding lines of the report "
+                  f"{output_path}: {error}.\n"
+                  "The cell wrote no report and exits 1, because the review-posting program, "
+                  "scripts/merge-lane-pull-request-reviewer-review-post-and-read-back.py, reads "
+                  "findings only from finding lines, so it would read this review as one with no "
+                  "findings.\n"
+                  "Run the command that ran this cell once more: codex writes its review as JSON "
+                  "only on some runs.\n"
+                  "If the second run prints this message again, give each finding of the text "
+                  "codex wrote, below, its own comment in your review of this commit, with the "
+                  "finding_category you give it; and, unless you are merge-lane-2, send "
+                  "merge-lane-2, with the SendMessage tool, this whole message, so that the "
+                  "cell's code is changed to convert this form.\n"
+                  "The text codex wrote:\n" + report, file=sys.stderr)
+            return 1
+    report = codex_priority_labels_spelled_out(report)
     kind = "base" if arguments.base else "commit"
     output_path.write_text(
         f"<!-- provenance: runtime=codex-exec-review model={arguments.model} "

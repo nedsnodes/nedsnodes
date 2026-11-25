@@ -292,19 +292,21 @@ class Case:
         return record
 
     def run(self, step, *flags, mode="", counts_log=None, fast_read_program=None, environment=None,
-            ignored_signal=None, reply="a", wait_for_reads_ahead=True, agent_session_id=CASE_AGENT_SESSION_ID):
+            ignored_signal=None, reply="a", wait_for_reads_ahead=True, agent_session_id=CASE_AGENT_SESSION_ID,
+            stdout_closed=False):
         """Run the program; a check gets `--user-reply-as-typed reply` unless reply is None or the flags
         hold --not-asked or a reply of their own. Unless told not to, wait for the reads ahead it started.
-        The program runs as agent-session agent_session_id, or with none set when it is None."""
+        The program runs as agent-session agent_session_id, or with none set when it is None. With stdout_closed,
+        its stdout is a pipe whose reading end is closed, and the result's stdout is empty."""
         result = self.run_only(step, *flags, mode=mode, counts_log=counts_log, fast_read_program=fast_read_program,
                                environment=environment, ignored_signal=ignored_signal, reply=reply,
-                               agent_session_id=agent_session_id)
+                               agent_session_id=agent_session_id, stdout_closed=stdout_closed)
         if wait_for_reads_ahead:
             self.wait_for_reads_ahead()
         return result
 
     def run_only(self, step, *flags, mode, counts_log, fast_read_program, environment, ignored_signal, reply,
-                 agent_session_id=CASE_AGENT_SESSION_ID):
+                 agent_session_id=CASE_AGENT_SESSION_ID, stdout_closed=False):
         if step == "check" and reply is not None and not {"--not-asked", "--already-decided", "--now-over-later-already-decided", "--moved-on",
                                                        "--user-reply-as-typed"} & set(flags):
             flags = (*flags, "--user-reply-as-typed", reply)
@@ -324,13 +326,22 @@ class Case:
             for number in (signal.SIGTERM, signal.SIGHUP):
                 signal.signal(number, signal.SIG_IGN if number == ignored_signal else signal.SIG_DFL)
 
-        return subprocess.run(
-            [sys.executable, str(PROGRAM), step, *flags, "--cwd", str(self.checkout),
-             "--cold-read-records", str(self.records),
-             "--fast-read-program", str(fast_read_program or self.stand_in),
-             "--counts-log", str(counts_log or self.counts_log), "--gh-program", str(self.gh)],
-            capture_output=True, text=True, env=environment, cwd=self.checkout,
-            preexec_fn=stop_signal_dispositions)
+        command = [sys.executable, str(PROGRAM), step, *flags, "--cwd", str(self.checkout),
+                   "--cold-read-records", str(self.records),
+                   "--fast-read-program", str(fast_read_program or self.stand_in),
+                   "--counts-log", str(counts_log or self.counts_log), "--gh-program", str(self.gh)]
+        if not stdout_closed:
+            return subprocess.run(command, capture_output=True, text=True, env=environment, cwd=self.checkout,
+                                  preexec_fn=stop_signal_dispositions)
+        reader, writer = os.pipe()
+        os.close(reader)
+        try:
+            result = subprocess.run(command, stdout=writer, stderr=subprocess.PIPE, text=True, env=environment,
+                                    cwd=self.checkout, preexec_fn=stop_signal_dispositions)
+        finally:
+            os.close(writer)
+        result.stdout = ""
+        return result
 
 
 def check_command_for(case, *words):
@@ -948,6 +959,29 @@ def test_the_waiting_item_read_step_searches_a_title_that_opens_with_a_dash():
     result = case.run(WAITING_ITEM_READ_STEP_NAME)
     check("a title opening with `-` is searched for, not read as an option of the search",
           result.returncode == 0 and "Remove the flag." in result.stdout, described(result))
+
+
+def test_the_waiting_item_read_step_saves_no_title_search_when_writing_it_out_fails():
+    case, _ = case_with_a_session_dialog_naming_the_item_title()
+    result = case.run(WAITING_ITEM_READ_STEP_NAME, stdout_closed=True)
+    check("when stdout is a pipe nobody reads, the read step saves no title search, since none of it was printed",
+          result.returncode != 0 and "BrokenPipeError" in result.stderr
+          and not title_search_cache_file(case).exists(), described(result))
+
+
+def test_the_waiting_item_read_step_refuses_when_the_search_program_cannot_be_loaded():
+    case = Case(document=marks_document("The tests are still running.\n"))
+    planted = case.root / "planted-modules"
+    planted.mkdir()
+    # Only the search imports base64, so a planted one that raises breaks the search and not the step.
+    (planted / "base64.py").write_text("raise ImportError('planted base64')\n")
+    result = case.run(WAITING_ITEM_READ_STEP_NAME, environment=dict(os.environ, PYTHONPATH=str(planted)))
+    check("a search program that cannot be loaded is refused as a failed search, with what loading it raised",
+          result.returncode == 1
+          and "the search for what the user said in earlier agent-sessions that named its title failed" in result.stderr
+          and "Loading it here raised ImportError('planted base64')." in result.stderr
+          and "Traceback (most recent call last)" not in result.stderr.split("Loading it here raised")[1]
+          and case.calls.read_text() == "", described(result))
 
 
 def test_the_waiting_item_read_step_does_not_refuse_a_status_claim_in_an_item_settled_without_being_shown():
@@ -4238,6 +4272,10 @@ def test_an_item_dropping_a_proposed_check_settles_at_any_rating_when_its_search
                             r"makes its change\. Fast reads:\n", minutes) is not None
               and "Judge also whether item 1 of 3 proposes a check, test, guard, refusal or hook and recommends "
                   "dropping it" in result.stdout, described(result) + minutes)
+    found_in = dropped_proposal_case(search=search_line(places="found in the session dialogs and the commits on main"))
+    result = found_in.run("check", "--not-asked", DROPPED)
+    check("a search line with a word between the count and `in`, as in `0 cases found in ...`, settles",
+          result.returncode == 0, described(result))
     closed = case.run("close")
     check("close records the dropped proposal as accepted, and moves `#next_to_present` past it",
           closed.returncode == 0
@@ -4276,6 +4314,20 @@ def test_an_item_dropping_a_proposed_check_is_refused_without_a_full_recent_sear
     check("an item with a `#new` text is refused, since a dropped proposal adds none",
           *refused_as_dropped(dropped_proposal_case(new_text="#new The counter checks its total.\n\n"),
                               "it has a `#new` line, which A would add"))
+
+
+def test_read_step_tells_the_agent_to_correct_a_malformed_search_line_not_to_add_one():
+    two_counts = dropped_proposal_case(search=search_line(places="in the session dialogs but 2 cases on main"))
+    rows = no_answer_rows_printed(result := two_counts.run(WAITING_ITEM_READ))
+    dropped = [row for row in rows if row.startswith("- proposed check dropped, search found no case:")]
+    check("an item whose search line has two counts is told to correct that line, not to add an evidence line",
+          len(dropped) == 1 and "needs correcting" in dropped[0] and "rather than adding another" in dropped[0]
+          and "Only evidence is missing" not in dropped[0], described(result))
+    absent = dropped_proposal_case(search="")
+    rows = no_answer_rows_printed(result := absent.run(WAITING_ITEM_READ))
+    dropped = [row for row in rows if row.startswith("- proposed check dropped, search found no case:")]
+    check("an item with no search line is still told to add one",
+          len(dropped) == 1 and "Only evidence is missing" in dropped[0], described(result))
 
 
 def test_an_item_of_no_kind_with_an_empty_touches_line_settles_as_a_change_that_touches_no_file():
@@ -5307,7 +5359,7 @@ def no_answer_rows_printed(result):
     """The lines of the read step's stdout that are rows of the no-answer table."""
     return [line for line in result.stdout.splitlines()
             if line.startswith("- ") and ("Its evidence passes" in line or "Only evidence is missing" in line
-                                          or "could not be checked" in line)]
+                                          or "needs correcting" in line or "could not be checked" in line)]
 
 
 def test_help_prints_every_row_of_the_no_answer_table():

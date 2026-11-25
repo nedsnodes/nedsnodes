@@ -265,6 +265,32 @@ def test_a_transcript_that_cannot_be_read_is_a_failure(root):
           result.stdout + result.stderr)
 
 
+def test_an_agent_home_that_cannot_be_looked_into_is_a_failure(root):
+    store, _, _ = item_6_store(root)
+    closed = store.agent_homes / "closed-seat"
+    (closed / "docs" / "walk").mkdir(parents=True)
+    closed.chmod(0o000)
+    try:
+        result = store.run("--title", ITEM_6_TITLE, "--item-number", "6")
+    finally:
+        closed.chmod(0o755)
+    check("an agent-home whose docs/walk/ cannot be looked at prints a FAILED line naming it and exits 2, and the "
+          "other walk-minutes are still searched",
+          result.returncode == 2
+          and f"FAILED: could not look at {closed / 'docs' / 'walk'}, so its walk-minutes were not searched"
+          in result.stderr and "Walk-minutes lines naming the title: 1." in result.stdout,
+          result.stdout + result.stderr)
+    store.agent_homes.chmod(0o300)
+    try:
+        result = store.run("--title", ITEM_6_TITLE, "--item-number", "6")
+    finally:
+        store.agent_homes.chmod(0o755)
+    check("an agent-homes directory that cannot be listed prints a FAILED line naming it and exits 2",
+          result.returncode == 2
+          and f"FAILED: could not list the agent-homes directory {store.agent_homes}" in result.stderr,
+          result.stdout + result.stderr)
+
+
 def test_a_missing_session_dialogs_directory_is_a_failure(root):
     store = Store(root)
     shutil.rmtree(store.log_store / "session-dialogs")

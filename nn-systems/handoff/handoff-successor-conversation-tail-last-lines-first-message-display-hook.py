@@ -15,6 +15,14 @@ nothing before checking for the file.
 
 A fault, such as stdin that is not a JSON object: Python's traceback on stderr, nothing on
 stdout, exit 1; Claude Code then draws the original text.
+
+Not handled:
+- a supervisor run with a --handoff-dir other than ~/.claude/handoffs: the hook reads only that
+  directory, so the lines are not shown and their file stays;
+- an agent-seat checkout whose settings predate this hook, while the supervisor runs from a newer
+  checkout: nothing shows the lines and their file stays;
+- a cut that starts inside a fenced code block: the lines and the batch are drawn as one Markdown
+  text, so the closing heading and the first message are drawn as code.
 """
 
 import json
@@ -26,7 +34,7 @@ CONVERSATION_TAIL_LAST_LINES_DISPLAY_FILE_SUFFIX = (
     "-conversation-tail-last-lines-for-first-message-display.md")
 
 
-def conversation_tail_last_lines_display_file_path(handoff_directory: Path, session_id: str) -> Path:
+def conversation_tail_last_lines_display_file_path_for_session_id(handoff_directory: Path, session_id: str) -> Path:
     return handoff_directory / f"{session_id}{CONVERSATION_TAIL_LAST_LINES_DISPLAY_FILE_SUFFIX}"
 
 
@@ -34,7 +42,7 @@ def main() -> int:
     batch = json.load(sys.stdin)
     if batch["index"] != 0:
         return 0
-    path = conversation_tail_last_lines_display_file_path(HANDOFF_DIRECTORY, batch["session_id"])
+    path = conversation_tail_last_lines_display_file_path_for_session_id(HANDOFF_DIRECTORY, batch["session_id"])
     try:
         text = path.read_text(encoding="utf-8")
     except FileNotFoundError:

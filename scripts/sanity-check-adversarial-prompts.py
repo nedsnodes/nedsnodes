@@ -1452,8 +1452,11 @@ class RunOutputCopiedToRecordLog:
     is held and written when `attach` names the file. `detach` closes the file
     before the record is shipped, so the copy in the log-store is the whole
     log and the add-only shipper finds it unchanged when the dispositions file
-    is shipped after it. The cells print from several threads; the lock keeps
-    the file's writes whole.
+    is shipped after it. The cells print from several threads, and print()
+    writes its text and its newline as two writes; so each thread's text is
+    held until its line ends, and only whole lines are written, under the
+    lock, to the stream and the file alike. One write of several lines, such
+    as a WARNING line with its instruction, stays together.
     """
 
     def __init__(self, stream) -> None:
@@ -1468,19 +1471,31 @@ class RunOutputCopiedToRecordLog:
         self._held = []
         self._file = None
         self._lock = threading.Lock()
+        self._unended_line_of_this_thread = threading.local()
+
+    def _write_out(self, text: str) -> None:
+        self.stream.write(text)
+        if self._file is not None:
+            self._file.write(text)
+        elif self._held is not None:
+            self._held.append(text)
 
     def write(self, text: str) -> int:
-        self.stream.write(text)
         with self._lock:
-            if self._file is not None:
-                self._file.write(text)
-            elif self._held is not None:
-                self._held.append(text)
+            pending = getattr(self._unended_line_of_this_thread, "text", "") + text
+            whole_lines, newline, unended = pending.rpartition("\n")
+            self._unended_line_of_this_thread.text = unended
+            if newline:
+                self._write_out(whole_lines + newline)
         return len(text)
 
     def flush(self) -> None:
-        self.stream.flush()
         with self._lock:
+            unended = getattr(self._unended_line_of_this_thread, "text", "")
+            if unended:
+                self._unended_line_of_this_thread.text = ""
+                self._write_out(unended)
+            self.stream.flush()
             if self._file is not None:
                 self._file.flush()
 
@@ -1492,6 +1507,7 @@ class RunOutputCopiedToRecordLog:
             self._held = None
 
     def detach(self) -> None:
+        self.flush()
         with self._lock:
             if self._file is not None:
                 self._file.close()

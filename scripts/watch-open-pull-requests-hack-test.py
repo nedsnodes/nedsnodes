@@ -909,14 +909,14 @@ def run_merge_lane_pull_request_review_assignment_watcher_cases():
         stray_partial = scratch / "assignments.txt.partial"
         stray_partial.write_text("someone else's file\n", encoding="utf-8")
         assignments.write_text("1 merge-lane-1\n", encoding="utf-8")
-        assignments.chmod(0o600)
+        assignments.chmod(0o640)  # tempfile.mkstemp makes 0o600, so only a kept mode gives 0o640
         with contextlib.redirect_stdout(io.StringIO()):
             appended(assignments, open_now, {})
         check("a rewrite leaves a file named <assignment file>.partial alone, and keeps the "
               "file's mode",
               stray_partial.read_text(encoding="utf-8") == "someone else's file\n"
               and assignments.read_text(encoding="utf-8") == "1 merge-lane-1\n40 merge-lane-3\n"
-              and stat.S_IMODE(assignments.stat().st_mode) == 0o600,
+              and stat.S_IMODE(assignments.stat().st_mode) == 0o640,
               f"{stray_partial.read_text(encoding='utf-8')!r} {oct(assignments.stat().st_mode)}")
         stray_partial.unlink()
 
@@ -1044,6 +1044,15 @@ def run_merge_lane_pull_request_review_assignment_watcher_cases():
             check("the lookup with another --repo and no assignment file named exits 2 and asks "
                   "for the file",
                   exit_code == 2 and "--merge-lane-pr-review-assignments-file" in errors, errors)
+            _, lines, _ = run_watcher_in_process(
+                ["--repo", "NedsNodes/NedsNodes", "--needs-a-look-directory",
+                 str(scratch / "no-notices")],
+                [[assignable(1), assignable(70)]], token_file)
+            check("--repo spelling the default repository in another case uses the default file "
+                  "and assigns reviews",
+                  any(" REVIEW-ASSIGNED " in line and "#70" in line for line in lines)
+                  and "70 " in stand_in_default.read_text(encoding="utf-8"),
+                  "\n".join(lines))
         finally:
             watcher_module.MERGE_LANE_PULL_REQUEST_REVIEW_ASSIGNMENTS_DEFAULT_FILE = saved_default
 

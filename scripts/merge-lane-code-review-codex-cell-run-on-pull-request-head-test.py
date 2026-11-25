@@ -74,13 +74,13 @@ def read_log(path):
     return [json.loads(line) for line in path.read_text().splitlines()] if path.exists() else []
 
 
-def run_program(scratch, helpers, extra_environment=None, home=None):
+def run_program(scratch, helpers, extra_environment=None, home=None, extra_arguments=()):
     for log in ("gh.log", "cell.log"):
         (scratch / log).unlink(missing_ok=True)
     completed = subprocess.run(
         [sys.executable, str(PROGRAM), "7", BASE, "--merge-lane-worktrees-and-outputs-directory", str(helpers),
          "--merge-lane-review-worktrees-directory", str(review_worktrees_directory(helpers)),
-         "--review-tools-worktree-at-main", str(scratch / "main-checkout")],
+         "--review-tools-worktree-at-main", str(scratch / "main-checkout"), *extra_arguments],
         capture_output=True, text=True,
         env={**os.environ,
              "HOME": str(home or scratch / "home"),
@@ -173,6 +173,19 @@ def main():
         check("an unreadable head commit exits 2 before the review runs, and leaves no earlier record behind",
               completed.returncode == 2 and gh_calls == [] and cell_calls == [] and not record.exists()
               and "could not read the head commit" in completed.stdout,
+              f"exit {completed.returncode}\n{completed.stdout}{completed.stderr}")
+
+        completed, _, cell_calls = run_program(scratch, helpers, extra_arguments=("--expected-head-commit", head))
+        check("a run given the commit pr<n>-head holds as --expected-head-commit reviews it",
+              completed.returncode == 0 and len(cell_calls) == 1
+              and json.loads(record.read_text())["head_commit"] == head,
+              f"exit {completed.returncode}\n{completed.stdout}{completed.stderr}")
+        completed, gh_calls, cell_calls = run_program(scratch, helpers,
+                                                      extra_arguments=("--expected-head-commit", "e" * 40))
+        check("a run whose pr<n>-head holds another commit than --expected-head-commit exits 2 before the "
+              "review, naming both commits, and leaves no record",
+              completed.returncode == 2 and gh_calls == [] and cell_calls == [] and not record.exists()
+              and f"holds commit {head}, not {'e' * 40}" in completed.stdout,
               f"exit {completed.returncode}\n{completed.stdout}{completed.stderr}")
 
         record.mkdir()

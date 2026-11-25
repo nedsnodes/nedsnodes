@@ -40,12 +40,15 @@ and uses when git says it is an ancestor of the merge commit. A test run left no
 test failing when the runner exited 0 with a SUMMARY line, every suite ran to
 the end, every step that keeps failed tests in view worked, and the failed
 suites record below is then empty; the program then writes the merge commit to
-that file, when the pull request merged into main. A test run that fails only tests already on that record exits 0 but
+that file, when the pull request merged into main; a merge into another branch
+leaves both that file and the failed suites record as they were. A test run that fails only tests already on that record exits 0 but
 writes nothing, because main still fails them. Two after-merge test runs that
 overlap, such as a scheduled merge and one by hand, each write their own merge
-commit, so the one that finishes last is kept even when its commit is the older;
-the next run then compares with that older commit, which only selects more
-suites, until a later merge records its own. When the file is missing, unreadable, malformed, or names
+commit, so the one that finishes last is kept even when its commit is the older,
+and the next run compares with that older commit until a later merge records
+its own; that run's selection is not always a superset of the newer commit's,
+because an input a merge changed and a later merge set back is the same at both
+ends of the older comparison. When the file is missing, unreadable, malformed, or names
 a commit that is not an ancestor, which the program prints, <since> is instead
 the pr<n>-merged commit the head test run passed on: of the
 records pull-request-head-test-run.py filed under hr/pr<n>/log-store in the
@@ -143,6 +146,7 @@ import argparse
 import importlib.util
 import json
 import os
+import shlex
 import shutil
 import subprocess
 import sys
@@ -974,7 +978,7 @@ def newest_main_commit_whose_after_merge_test_run_left_no_test_failing_written(m
             left_behind = (f"The temporary file {temporary} could not be removed either: "
                            f"{cleanup_error}. Nothing reads the temporary file as the record, so "
                            f"it does no harm. Once the error's cause is fixed, delete the "
-                           f"temporary file: rm {temporary}\n")
+                           f"temporary file: rm {shlex.quote(str(temporary))}\n")
         print(f"STOP: merged, and main's test run left no test failing, but {merge_commit[:12]} "
               f"was not recorded in {path}: {error}\n"
               f"{left_behind}"
@@ -1058,8 +1062,11 @@ def after_merge_test_run(arguments, merge_commit, base_branch):
         newest_main_commit_whose_after_merge_test_run_left_no_test_failing_read(git, merge_commit))
     if no_test_failing_on_main is not None:
         since = no_test_failing_on_main
-        by_hand = (f"python3 scripts/run-all-test-suites.py "
-                   f"--only-suites-whose-recorded-inputs-changed-since {since}")
+    # From here on the baseline is chosen, so the recovery names it instead of the conditional
+    # built from an earlier read of the record, which an overlapping merge may have replaced.
+    by_hand = (f"python3 scripts/run-all-test-suites.py "
+               f"--only-suites-whose-recorded-inputs-changed-since {since}")
+    if no_test_failing_on_main is not None:
         print(f"selecting the nn-test-suites whose recorded inputs changed since "
               f"{since[:12]}, the newest main commit whose after-merge test run left no test "
               f"failing")
@@ -1131,8 +1138,20 @@ def after_merge_test_run(arguments, merge_commit, base_branch):
     failed_suites_were_the_only_problem = (
         runner.run_all_test_suites_output_parse_whether_failed_suites_were_the_runs_only_problem(
             run_all.returncode, run_all.stdout))
-    kept = failed_suites_kept_in_view(arguments, merge_commit, worktree, log_dir, environment,
-                                      lines)
+    # Both records name main's state alone: a run on another branch neither clears main's
+    # failures nor records its merge commit as main's.
+    if base_branch == "main":
+        kept = failed_suites_kept_in_view(arguments, merge_commit, worktree, log_dir,
+                                          environment, lines)
+    else:
+        print(f"main's failed suites record, {failed_suites_record.failed_suites_record_file()}, "
+              f"was left as it was: pull request {arguments.pull_request} merged into "
+              f"{base_branch!r}, not main, and that record lists only the tests main fails. "
+              f"Nothing to do about the record; this program's closing message, printed after "
+              f"the test run's other steps, says what to do about this test run's result.")
+        kept = {"complete": True, "new_tests": {}, "seat": None, "task_id": None,
+                "why_none": None, "record_empty": True}
+        failed_suites_were_the_only_problem = False
     every_step_complete = done_before_the_run and kept["complete"] and (
         failed_suites_were_the_only_problem or (run_all.returncode == 0 and bool(summaries)))
     # A run that failed only tests already on the record exits 0, yet main still fails them,
