@@ -17,8 +17,12 @@ import sys
 from pathlib import Path
 
 PROGRAM = "handoff-claude-ai-rename-saved-as-remote-control-name-and-agent-told-to-message-other-agent-seats-stop-hook"
-HANDOFF_SUPERVISOR_AGENT_NAME_ENVIRONMENT_VARIABLE = "NEDSNODES_HANDOFF_SUPERVISOR_AGENT_NAME"
-HANDOFF_SUPERVISOR_SESSION_ID_ENVIRONMENT_VARIABLE = "NEDSNODES_HANDOFF_SUPERVISOR_SESSION_ID"
+
+_launched_agent_session_environment_specification = importlib.util.spec_from_file_location(
+    "handoff_supervisor_launched_agent_session_environment_variable_names_common",
+    Path(__file__).with_name("handoff-supervisor-launched-agent-session-environment-variable-names-common.py"))
+launched_agent_session_environment = importlib.util.module_from_spec(_launched_agent_session_environment_specification)
+_launched_agent_session_environment_specification.loader.exec_module(launched_agent_session_environment)
 
 _common_specification = importlib.util.spec_from_file_location(
     "handoff_remote_control_name_common",
@@ -50,12 +54,11 @@ def main() -> int:
             raise ValueError("the input on the hook's stdin is JSON, but not an object")
         if stop_hooks_stay_silent_rule.stop_hook_stays_silent_while_agent_answers_a_stop_hook(payload):
             return 0
-        agent_seat = os.environ.get(HANDOFF_SUPERVISOR_AGENT_NAME_ENVIRONMENT_VARIABLE, "").strip()
+        # A child claude session inherits the supervisor's variables; its own title is not the agent-seat's name.
+        agent_seat = launched_agent_session_environment.handoff_supervisor_launched_agent_session_agent_seat_name_or_empty_for_another_session(
+            os.environ, payload.get("session_id"))
         transcript_path = payload.get("transcript_path")
         if not agent_seat or not isinstance(transcript_path, str) or not transcript_path:
-            return 0
-        # A child claude session inherits the supervisor's variables; its own title is not the agent-seat's name.
-        if payload.get("session_id") != os.environ.get(HANDOFF_SUPERVISOR_SESSION_ID_ENVIRONMENT_VARIABLE):
             return 0
         rename = remote_control_name_common.handoff_remote_control_name_save_when_transcript_custom_title_changed_and_return_rename(
             agent_seat, transcript_path)

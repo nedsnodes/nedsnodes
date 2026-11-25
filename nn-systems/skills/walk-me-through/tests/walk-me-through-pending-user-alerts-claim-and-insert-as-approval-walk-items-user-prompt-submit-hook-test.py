@@ -33,6 +33,9 @@ HOOK = HERE / "walk-me-through-pending-user-alerts-claim-and-insert-as-approval-
 INSERT_PROGRAM = HERE / "walk-me-through-user-alert-insert-as-unnumbered-item-after-waiting-item-and-record-in-walk-minutes.py"
 WALK = "alerts-hook-test-walk-2026-10-27"
 AGENT_SEAT_VARIABLE = "NEDSNODES_HANDOFF_SUPERVISOR_AGENT_NAME"
+SESSION_ID_VARIABLE = "NEDSNODES_HANDOFF_SUPERVISOR_SESSION_ID"
+# The Claude Code session id of the agent-session each case runs the hook in.
+SESSION_ID = "session-under-test"
 # The agent-seat whose agent-session claims an alert naming none.
 DEFAULT_SEAT = "merge-lane-1"
 failures = []
@@ -76,15 +79,18 @@ class Case:
             stream.write(json.dumps({"type": "user", "turnOrigin": origin,
                                      "message": {"role": "user", "content": text}}) + "\n")
 
-    def run(self, prompt, stdin=None, platform="linux", insert_run="", environment_extra=None, agent_seat=DEFAULT_SEAT):
+    def run(self, prompt, stdin=None, platform="linux", insert_run="", environment_extra=None, agent_seat=DEFAULT_SEAT,
+            launched_session_id=SESSION_ID):
         """environment_extra is added to the hook's environment, which holds neither variable that marks an
         agent-session headless, so a case reads the same in a headless reviewer as in an attended agent-session.
         agent_seat is the agent-session's agent-seat, set whatever agent-seat runs the suite; None leaves it unset.
+        launched_session_id is the session id the handoff-supervisor recorded for the agent-session it launched;
+        the payload's is always SESSION_ID, so another value runs the hook in a child of that agent-session.
         insert_run, when given, is a Python expression of the arguments a and k that takes the place of the
         hook's subprocess.run of the insert program, so a case can make that program time out, fail to start or
         die by a signal, which a real run cannot be made to; every other subprocess.run, such as git's, runs."""
         payload = {"hook_event_name": "UserPromptSubmit", "prompt": prompt, "cwd": str(self.checkout),
-                   "transcript_path": str(self.transcript)}
+                   "session_id": SESSION_ID, "transcript_path": str(self.transcript)}
         run_hook_as_platform = ("import runpy, subprocess, sys; sys.platform = sys.argv[1]; "
                                 + ("subprocess.run = (lambda real: lambda *a, **k: "
                                    f"({insert_run}) if 'user-alert-insert' in str(a[0]) else real(*a, **k))"
@@ -92,8 +98,10 @@ class Case:
                                 + "runpy.run_path(sys.argv[2], run_name='__main__')")
         environment = attendance_check.environment_without_agent_session_attendance_variables(os.environ)
         environment.pop(AGENT_SEAT_VARIABLE, None)
+        environment.pop(SESSION_ID_VARIABLE, None)
         if agent_seat is not None:
             environment[AGENT_SEAT_VARIABLE] = agent_seat
+            environment[SESSION_ID_VARIABLE] = launched_session_id
         # Python finds the user's site-packages from HOME, and on the Mac markdown-it-py is installed there.
         environment.update({"HOME": str(self.home), "PYTHONUSERBASE": site.getuserbase()},
                            **(environment_extra or {}))
@@ -217,6 +225,13 @@ def run_agent_seat_cases(root):
     check(f"a typed prompt in {DEFAULT_SEAT}'s agent-session claims the alert naming none",
           case.names("claimed") == ["alert-none", "alert-x"] and "alert alert-none" in context,
           context + result.stderr)
+
+    case = Case(root, "child-agent-session")
+    case.alert("alert-none")
+    result, context = case.run("hello", launched_session_id="parent-session")
+    check(f"a typed prompt in a child of {DEFAULT_SEAT}'s agent-session, which inherits its agent-seat, claims nothing",
+          result.returncode == 0 and result.stdout == "" and case.names("pending") == ["alert-none"],
+          result.stdout + result.stderr)
 
     case = Case(root, "no-agent-seat")
     case.alert("alert-none")
