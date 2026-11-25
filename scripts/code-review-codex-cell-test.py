@@ -210,6 +210,15 @@ CODEX_REVIEW_PROSE_OF_THE_SAME_REVIEW = (
     'validate a different ordering.'))
 
 
+# The refusal's reason, where a case has a wording of its own.
+UNCONVERTIBLE_OBJECT_REASONS = {
+    "a finding that is not an object": 'finding 1, or its "code_location" or "line_range", is not an object',
+    "a finding whose line range is a list": 'finding 1, or its "code_location" or "line_range", is not an object',
+    "a finding whose body holds a lone surrogate escape": "finding 1 has a title, body or path that is not valid UTF-8",
+    "an explanation holding a lone surrogate escape": '"overall_explanation" is not valid UTF-8',
+}
+
+
 def stub_codex_writes(report_text):
     """A stub codex that writes report_text as its report and exits 0."""
     return ("#!/usr/bin/env python3\n"
@@ -460,6 +469,23 @@ with tempfile.TemporaryDirectory() as scratch:
           result.returncode == 0 and text.partition("\n")[2] == "No defects found.",
           f"exit {result.returncode}; stderr={result.stderr!r}; report={text!r}")
 
+    tag_differs_report = scratch / "title-tag-differs-object-report.md"
+    result = run_cell(stubs, stub_codex_writes(json.dumps(
+                          {"findings": [{"title": "[P1] Keep the tag", "body": "b", "priority": 2,
+                                         "code_location": {"absolute_file_path": "/a.py",
+                                                           "line_range": {"start": 1, "end": 1}}},
+                                        {"title": "Add the tag", "body": "b", "priority": 3,
+                                         "code_location": {"absolute_file_path": "/a.py",
+                                                           "line_range": {"start": 2, "end": 2}}}],
+                           "overall_explanation": "E"})),
+                      "--commit", head_sha, "--repo", str(checkout), "--output", str(tag_differs_report))
+    text = tag_differs_report.read_text(encoding="utf-8") if tag_differs_report.is_file() else ""
+    check("a title's own priority tag is kept, as Codex's prose render keeps it, and a title without one "
+          "gets the numeric priority's",
+          result.returncode == 0 and "- [Codex priority P1 (P0 highest)] Keep the tag — /a.py:1-1" in text
+          and "- [Codex priority P3 (P0 highest)] Add the tag — /a.py:2-2" in text,
+          f"exit {result.returncode}; stderr={result.stderr!r}; report={text!r}")
+
     def object_with_first_finding(**changes):
         review = json.loads(json.dumps(CODEX_REVIEW_OBJECT))
         for key, value in changes.items():
@@ -486,6 +512,9 @@ with tempfile.TemporaryDirectory() as scratch:
             ("a finding that is not an object", json.dumps({"findings": ["x"], "overall_explanation": "e"})),
             ("a finding whose line range is a list", object_with_first_finding(
                 code_location={"absolute_file_path": "/a.py", "line_range": [1, 2]})),
+            ("a finding whose body holds a lone surrogate escape", object_with_first_finding(body="b \ud800")),
+            ("an explanation holding a lone surrogate escape", json.dumps(
+                {"findings": [], "overall_explanation": "e \ud800"})),
             ("a finding whose title holds a carriage return",
              object_with_first_finding(title="[P2] \rCheck the lookup")),
             ("a finding whose path holds a Unicode line separator", object_with_first_finding(
@@ -501,6 +530,10 @@ with tempfile.TemporaryDirectory() as scratch:
               and report_text.replace("\r", "\n") in result.stderr and "Traceback" not in result.stderr
               and not refused_report.exists(),
               f"exit {result.returncode}; stderr={result.stderr!r}")
+        expected_reason = UNCONVERTIBLE_OBJECT_REASONS.get(case)
+        if expected_reason is not None:
+            check(f"a report Codex wrote as {case} is refused saying {expected_reason!r}",
+                  expected_reason in result.stderr, f"stderr={result.stderr!r}")
 
     # An --output that already holds a file is still accepted, and the file
     # is replaced rather than appended to.
