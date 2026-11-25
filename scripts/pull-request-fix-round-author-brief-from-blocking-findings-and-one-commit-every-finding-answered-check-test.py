@@ -228,7 +228,7 @@ def scratch_repository(root):
 
 
 def review(state="CHANGES_REQUESTED", commit_id=None, login="ned-review-merge", review_id=11,
-           body="REQUEST_CHANGES\n\n**Blocking: 2**\n\nBoth inline."):
+           body="REQUEST_CHANGES\n\n**Blocking: 2**\n\nmerge-lane-2's review: both inline."):
     return {"id": review_id, "user": {"login": login}, "state": state, "commit_id": commit_id,
             "html_url": f"{URL}#pullrequestreview-{review_id}", "body": body}
 
@@ -497,9 +497,9 @@ def brief_cases(root, repository, base, frozen_head):
           code == 1 and "is APPROVED, not CHANGES_REQUESTED" in err
           and "tell merge-lane-2 why not, with SendMessage" in err, err)
 
-    reposted = dict(routes_for(frozen_head, [review(commit_id=frozen_head, body="Two blockers."),
+    reposted = dict(routes_for(frozen_head, [review(commit_id=frozen_head, body="merge-lane-2's review: two blockers."),
                                              review(state="COMMENTED", commit_id=frozen_head, review_id=12,
-                                                    body="REQUEST_CHANGES\n\n**Blocking: 2**\n\nNow inline.")],
+                                                    body="REQUEST_CHANGES\n\n**Blocking: 2**\n\nmerge-lane-2's review: now inline.")],
                                comments=[BLOCKING_COMMENTS[1]]),
                     **comments_route(12, [BLOCKING_COMMENTS[0], BLOCKING_COMMENTS[2]]))
     code, out, err = run(root, repository, reposted)
@@ -510,8 +510,8 @@ def brief_cases(root, repository, base, frozen_head):
           f"{URL}#pullrequestreview-11 and {URL}#pullrequestreview-12" in out, out)
 
     miscounted = dict(reposted, **{REVIEWS: {"stdout": lines([
-        review(commit_id=frozen_head, body="Two blockers."),
-        review(state="COMMENTED", commit_id=frozen_head, review_id=12, body="REQUEST_CHANGES\n\n**Blocking: 3**\n")])}})
+        review(commit_id=frozen_head, body="merge-lane-2's review: two blockers."),
+        review(state="COMMENTED", commit_id=frozen_head, review_id=12, body="REQUEST_CHANGES\n\n**Blocking: 3**\n\nmerge-lane-2's review.")])}})
     code, out, err = run(root, repository, miscounted)
     check("brief: a later review's stated count is checked against its own marked comments",
           code == 1 and "says **Blocking: 3**" in err and "2 of its own inline comments" in err
@@ -520,7 +520,7 @@ def brief_cases(root, repository, base, frozen_head):
 
     added = dict(routes_for(frozen_head, [review(commit_id=frozen_head),
                                           review(state="COMMENTED", commit_id=frozen_head, review_id=12,
-                                                 body="REQUEST_CHANGES\n\n**Blocking: 1**\n\nOne more.")]),
+                                                 body="REQUEST_CHANGES\n\n**Blocking: 1**\n\nmerge-lane-2's review: one more.")]),
                  **comments_route(12, [comment("run.py", "**Blocks.** run.py drops the exit code.",
                                                line=40, comment_id=4)]))
     code, out, err = run(root, repository, added)
@@ -529,7 +529,7 @@ def brief_cases(root, repository, base, frozen_head):
 
     duplicate = dict(routes_for(frozen_head, [review(commit_id=frozen_head),
                                               review(state="COMMENTED", commit_id=frozen_head, review_id=12,
-                                                     body="Re-posting one.")]),
+                                                     body="merge-lane-2 re-posting one.")]),
                      **comments_route(12, [dict(BLOCKING_COMMENTS[0], id=5,
                                                 html_url=f"{URL}#discussion_r5")]))
     code, out, err = run(root, repository, duplicate)
@@ -539,7 +539,7 @@ def brief_cases(root, repository, base, frozen_head):
 
     moved = dict(routes_for(frozen_head, [review(commit_id=frozen_head),
                                           review(state="COMMENTED", commit_id=frozen_head, review_id=12,
-                                                 body="Now inline.")],
+                                                 body="merge-lane-2's review: now inline.")],
                             comments=[BLOCKING_COMMENTS[1]]),
                  **comments_route(12, [BLOCKING_COMMENTS[0], BLOCKING_COMMENTS[2]]))
     code, out, err = run(root, repository, moved)
@@ -571,11 +571,11 @@ def brief_cases(root, repository, base, frozen_head):
     code, out, err = run(root, repository, routes_for(
         frozen_head, earlier_rounds(2) + [review(commit_id=frozen_head, review_id=11),
                                           review(state="COMMENTED", commit_id=frozen_head, review_id=12,
-                                                 body="Noted.")]) | comments_route(12, []))
+                                                 body="merge-lane-2: noted.")]) | comments_route(12, []))
     check("brief: a comment-only review after the third changes-requested review keeps the advisor sentence",
           code == 0 and out.count(ADVISOR_SENTENCE) == 1, err + out)
     for uncounted_state in ["COMMENTED", "DISMISSED"]:
-        uncounted = review(state=uncounted_state, commit_id=base, review_id=8, body="Held for the user.")
+        uncounted = review(state=uncounted_state, commit_id=base, review_id=8, body="merge-lane-2: held for the user.")
         code, out, err = run(root, repository, routes_for(
             frozen_head, [review(commit_id=base, review_id=9), uncounted,
                           review(commit_id=frozen_head, review_id=11)]))
@@ -613,7 +613,7 @@ def brief_cases(root, repository, base, frozen_head):
           code == 1 and "is APPROVED, not CHANGES_REQUESTED" in err, err)
 
     code, out, err = run(root, repository, routes_for(
-        frozen_head, [review(state="COMMENTED", commit_id=frozen_head, body="Read the new comments.")]))
+        frozen_head, [review(state="COMMENTED", commit_id=frozen_head, body="merge-lane-2: read the new comments.")]))
     check("brief: comment-only reviews with no changes-requested review mean no fix-round, exit 1",
           code == 1 and "is COMMENTED on commit" in err, err)
 
@@ -668,7 +668,7 @@ def brief_cases(root, repository, base, frozen_head):
     for spelling in ["**Blocks.**", "**Blocks:**", "**Blocks**", "**Blocks** (fast-read hold)",
                      "**Blocks the merge.**", "  **Blocks.**"]:
         code, out, err = run(root, repository, routes_for(
-            frozen_head, [review(commit_id=frozen_head, body="REQUEST_CHANGES\n\n**Blocking: 1**\n")],
+            frozen_head, [review(commit_id=frozen_head, body="REQUEST_CHANGES\n\n**Blocking: 1**\n\nmerge-lane-2's review.")],
             comments=[comment("hook.py", f"{spelling} the spelling under test.")]))
         check(f"brief: a comment starting {spelling!r} is a blocking finding",
               code == 0 and "Blocking findings (1)" in out and "the spelling under test" in out, err + out)
@@ -679,7 +679,7 @@ def brief_cases(root, repository, base, frozen_head):
              comment("d.py", "**Blocks** (cold-read-fast-read hold on the progress line) fourth.", comment_id=24),
              comment("e.py", "Non-blocking. A note.", comment_id=25)]
     code, out, err = run(root, repository, routes_for(
-        frozen_head, [review(commit_id=frozen_head, body="REQUEST_CHANGES\n\n**Blocking: 4**\n\nFour findings block.")],
+        frozen_head, [review(commit_id=frozen_head, body="REQUEST_CHANGES\n\n**Blocking: 4**\n\nmerge-lane-2's review: four findings block.")],
         comments=mixed))
     check("brief: a review mixing **Blocks.** and **Blocks** (...) counts all four, as pull request 2145's did",
           code == 0 and "Blocking findings (4)" in out
@@ -690,18 +690,18 @@ def brief_cases(root, repository, base, frozen_head):
                  "**Blocks unclosed is not bold.", "Note: **Blocks.** in the middle is not the mark.",
                  "**Blocks\nacross a line** is not the mark."]:
         code, out, err = run(root, repository, routes_for(
-            frozen_head, [review(commit_id=frozen_head, body="no count stated")],
+            frozen_head, [review(commit_id=frozen_head, body="merge-lane-2's review states no count")],
             comments=[comment("hook.py", body)]))
         check(f"brief: a comment starting {body.splitlines()[0][:20]!r} is not a blocking finding",
               code == 1 and "none of its 1 inline comments starts with the bold word **Blocks**" in err, err)
 
     code, out, err = run(root, repository, routes_for(
-        frozen_head, [review(commit_id=frozen_head, body="REQUEST_CHANGES\n\n**Blocking: 3**\n")]))
+        frozen_head, [review(commit_id=frozen_head, body="REQUEST_CHANGES\n\n**Blocking: 3**\n\nmerge-lane-2's review.")]))
     check("brief: a stated blocking count that differs from the marked comments refuses",
           code == 1 and "says **Blocking: 3**" in err and "2 of its own inline comments" in err, err)
 
     code, out, err = run(root, repository, routes_for(
-        frozen_head, [review(commit_id=frozen_head, body="no count stated")]))
+        frozen_head, [review(commit_id=frozen_head, body="merge-lane-2's review states no count")]))
     check("brief: a body without a stated count is accepted", code == 0, err)
 
     code, out, err = run(root, repository, routes_for(frozen_head, [review(commit_id=None)]))
@@ -1423,7 +1423,8 @@ def comments_route(review_id, comments):
 
 
 def commissioned_reviewer_cases(root, repository, base, frozen_head):
-    """Pull request 2213's reviews, ids, logins, states and order as GitHub returned them, bodies shortened.
+    """Pull request 2213's reviews, ids, logins, states and order as GitHub returned them, bodies shortened, and
+    merge-lane-2's opening with its name, as a merge-lane's review body does.
 
     Round 0: the commissioned reviewer (mac-claude) posts its review as a COMMENT on the frozen-head,
     then merge-lane-2 requests changes on the same commit. Round 1: after the fix commit is pushed,
@@ -1437,7 +1438,7 @@ def commissioned_reviewer_cases(root, repository, base, frozen_head):
         "`include_subagents=True` is the only thing that keeps subagent transcripts in step 1.")
     merge_lane_round_0 = pull_request_2213_review(
         5718084175, "ned-review-merge", "CHANGES_REQUESTED", frozen_head,
-        "Changes requested by merge-lane-2.\n\nBlocking, each in its own inline comment:\n"
+        "merge-lane-2 requests changes.\n\nBlocking, each in its own inline comment:\n"
         f"1. The reviewer's finding at `{bash_guards}:285`.\n2. Codex: the ripgrep prefilter.\n"
         "3. Codex: the grep fallback.\n4. merge-lane-2's fast-read hold.")
     reviewer_comments = [pull_request_2213_comment(
@@ -1581,8 +1582,8 @@ def rounds_on_one_head_cases(root, repository, base, frozen_head):
           code == 1 and "says **Blocking: 2**" in err
           and "1 of the inline comments of the round's other reviews" in err, err)
 
-    first = review(review_id=21, commit_id=frozen_head, body="Round one.")
-    second = review(review_id=22, commit_id=frozen_head, body="Round two: the finding still holds.")
+    first = review(review_id=21, commit_id=frozen_head, body="merge-lane-2's review, round one.")
+    second = review(review_id=22, commit_id=frozen_head, body="merge-lane-2's review, round two: the finding still holds.")
     reviewer = review(state="COMMENTED", review_id=20, commit_id=frozen_head, login="mac-claude",
                       body="REQUEST_CHANGES")
     second_block = [comment("run.py", "**Blocks.** run.py still drops the exit code.", line=40, comment_id=31)]
@@ -1799,7 +1800,7 @@ def moved_into_body_cases(root, repository, base, frozen_head):
 
     # An ungraded round briefs every review's inline Blocks, so only the login check keeps another
     # account's moved-comment section out; logins on both sides of merge-lane-2's catch an ordering comparison.
-    lane_ungraded = review(commit_id=frozen_head, body="REQUEST_CHANGES")
+    lane_ungraded = review(commit_id=frozen_head, body="REQUEST_CHANGES\n\nmerge-lane-2's review.")
     for login in ("mac-claude", "zz-reviewer"):
         other = review(state="COMMENTED", review_id=20, commit_id=frozen_head, login=login,
                        body="REQUEST_CHANGES\n\nComments on lines outside this pull request's diff:\n"
@@ -1862,7 +1863,11 @@ def stated_count_position_cases(root, repository, base, frozen_head):
                  "REQUEST_CHANGES\n\n**Blocking: 2**, both inline.",
                  "**Blocking: 2**\n\nREQUEST_CHANGES",
                  "Changes requested.\n\n**Blocking: 2**\n\nBoth inline."]:
-        prose = dict(routes, **{REVIEWS: {"stdout": lines([dict(grading, body=body)])}})
+        # A later note by the merge-lane's account names the merge-lane, so the body under test need not.
+        lane_note = review(state="COMMENTED", commit_id=frozen_head, review_id=grading["id"] + 1,
+                           body="merge-lane-2's note on its review above.")
+        prose = dict(routes, **{REVIEWS: {"stdout": lines([dict(grading, body=body), lane_note])}},
+                     **comments_route(lane_note["id"], []))
         code, out, err = run(root, repository, prose)
         check(f"a Blocking count away from the line the review poster writes is not read: {body[:40]!r}",
               code == 0 and "Blocking findings (1)" in out, err + out)
@@ -2791,7 +2796,7 @@ def fix_commit_range_two_commit_round_cases(_root, repository, _base, _frozen_he
         original_directory = os.getcwd()
         os.chdir(repository)
         try:
-            return program.fix_commit_range(frozen_head, program.commits_since(frozen_head, head))
+            return program.fix_commit_range(frozen_head, program.commits_since(frozen_head, head), "merge-lane-2")
         except program.Refused as refusal:
             return refusal
         finally:
@@ -2893,7 +2898,7 @@ def nit_cases(root, repository, base, frozen_head):
     check("nits: a round with no nit prints no nit heading", code == 0 and "Nits to fix" not in out, err + out)
 
     code, out, err = run(root, repository, routes_for(
-        frozen_head, [review(commit_id=frozen_head, body="One nit.")], comments=[nit]))
+        frozen_head, [review(commit_id=frozen_head, body="merge-lane-2's review: one nit.")], comments=[nit]))
     check("nits: a changes-requested review whose only marked comment is a nit gives no brief, as with no "
           "blocking finding",
           code == 1 and "none of its 1 inline comments starts with the bold word **Blocks**" in err
@@ -3029,7 +3034,7 @@ def replaces_cases(root, repository, base, frozen_head):
     restated_nit = comment("old.txt", "**fix-in-maintenance, nit** old.txt misspells it.", line=4, comment_id=5)
     restated = replaced_routes(frozen_head, REPLACED_SECOND_HEAD, REPLACED_TWO_ROUNDS, REPLACED_COMMENTS)
     restated[REVIEWS] = {"stdout": lines([review(commit_id=frozen_head,
-                                                 body="REQUEST_CHANGES\n\n**Blocking: 3**\n\nAll inline.")])}
+                                                 body="REQUEST_CHANGES\n\n**Blocking: 3**\n\nmerge-lane-2's review: all inline.")])}
     restated[f"api --paginate repos/{{owner}}/{{repo}}/pulls/{NUMBER}/reviews/11/comments --jq .[]"] = {
         "stdout": lines([*BLOCKING_COMMENTS, restated_finding, restated_nit])}
     code, out, err = run(root, repository, restated)
@@ -3187,7 +3192,46 @@ def conflict_check_cases(root, repository, _base, frozen_head):
     git(repository, "checkout", "-q", "--", "scripts/branch-conflict-check.py")
 
 
+def merge_lane_named_by_review_cases(root, repository, _base, frozen_head):
+    """The brief and --check send the author's messages to the merge-lane whose name opens the round's
+    changes-requested review, after the verdict and count lines; another lane named later in it is not the sender."""
+    lane_1_review = review(commit_id=frozen_head, body=(
+        "REQUEST_CHANGES\n\n**Blocking: 2**\n\nmerge-lane-1's review of round 1, head "
+        f"{frozen_head}. merge-lane-3 asked merge-lane-1 to review it; merge-lane-2 merges."))
+    routes = routes_for(frozen_head, [lane_1_review])
+    code, out, err = run(root, repository, routes)
+    check("merge-lane named by review: a merge-lane-1 review's brief sends every message to merge-lane-1",
+          code == 0 and "tell merge-lane-1 with SendMessage what failed" in out
+          and "send that message to merge-lane-1 with SendMessage" in out
+          and "tell merge-lane-1 with SendMessage what git printed" in out
+          and "merge-lane-2 with SendMessage" not in out and "to merge-lane-2" not in out, err + out)
+
+    answers = answers_file(root, GOOD_ANSWERS)
+    code, out, err = run(root, repository, routes, "--check", "--answers", answers)
+    check("merge-lane named by review: --check on a merge-lane-1 round prints the message for merge-lane-1",
+          code == 0 and "Send merge-lane-1 this message with SendMessage:" in out
+          and "merge-lane-2" not in out, err + out)
+
+    unnamed = review(commit_id=frozen_head, body=(
+        "REQUEST_CHANGES\n\n**Blocking: 2**\n\nRound 1 of head " + frozen_head + "; merge-lane-2 merges."))
+    lane_3_note = review(state="COMMENTED", commit_id=frozen_head, review_id=12,
+                         body="merge-lane-3's note: its review above names no merge-lane.")
+    code, out, err = run(root, repository, {**routes_for(frozen_head, [unnamed, lane_3_note]),
+                                            **comments_route(12, [])})
+    check("merge-lane named by review: when the changes-requested review names no merge-lane, a later review of "
+          "the round by the same account that does names the recipient",
+          code == 0 and "send that message to merge-lane-3 with SendMessage" in out
+          and "merge-lane-2 with SendMessage" not in out, err + out)
+
+    code, out, err = run(root, repository, routes_for(frozen_head, [unnamed]))
+    check("merge-lane named by review: a round whose reviews open with no merge-lane's name refuses with exit 1, "
+          "naming the review, and prints no brief",
+          code == 1 and out == "" and err.startswith("REFUSED: ")
+          and f"{URL}#pullrequestreview-11" in err and "names no merge-lane" in err, err + out)
+
+
 gh_timeout_case()
+case("merge-lane named by review", merge_lane_named_by_review_cases)
 case("suites", suite_cases)
 case("architecture overview", architecture_overview_cases)
 case("architecture overview check cannot read", architecture_overview_check_cannot_read_case)

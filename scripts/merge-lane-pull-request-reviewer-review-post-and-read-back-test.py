@@ -209,7 +209,7 @@ def fix_round_blocking_findings(fix_round, posted_reviews, logins=None):
     fix_round.gh_json_lines = lambda arguments: comments_by_id[
         int(next(argument for argument in arguments if "/reviews/" in argument).split("/")[-2])]
     try:
-        return fix_round.blocking_findings(7, reviews[0], reviews)
+        return fix_round.blocking_findings(7, reviews[0], reviews, "merge-lane-2")
     except fix_round.Refused as refusal:
         return str(refusal)
 
