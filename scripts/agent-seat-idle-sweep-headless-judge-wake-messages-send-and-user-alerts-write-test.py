@@ -3330,22 +3330,31 @@ machine.run(2)
 check("the open wait sends no second wake", not machine.claude_calls(), machine.claude_calls())
 machine.append(EVENTS_SEAT, assistant(None, at(3), tool=("Read", {"file_path": "/x"}), tool_id="r1"),
                task_result("r1", "ok", at(3)), assistant("Done again.", at(4)), turn_end(at(4)))
-machine.script()
+machine.script(judged(False, reason="it is reading the events"))
 machine.run(10)
-check("a tool call ends the wait, and the same task wakes no one again within 15 minutes",
-      not machine.claude_calls()
+calls = machine.claude_calls()
+check("a tool call ends the wait, and the same task is not woken for again in code: the judge is "
+      "asked about the open work instead",
+      len(calls) == 1 and calls[0]["argv"][calls[0]["argv"].index("--tools") + 1] == ""
+      and len(machine.events("message_sent")) == 1
       and machine.events("wait_ended")[-1]["why"] == "it made a tool call after the nudge",
-      (machine.claude_calls(), machine.events("wait_ended")))
-machine.script(sent_ok(EVENTS_SEAT))
-machine.run(17)
-check("the task still open 15 minutes after the wake wakes merge-lane-2 once more",
-      len(machine.claude_calls()) == 1 and len(machine.events("message_sent")) == 2, machine.events())
-watcher.complete_tasks()
-machine.append(EVENTS_SEAT, assistant("Handled.", at(18)), turn_end(at(18)))
+      (calls, machine.events("wait_ended")))
 machine.script()
-machine.run(24)
+machine.run(17)
+check("the task still open 15 minutes after the wake sends no second code-written wake",
+      not machine.claude_calls() and len(machine.events("message_sent")) == 1, machine.events())
+machine.seat(EVENTS_SEAT, [user("go", at(18)), assistant("Started.", at(18)), turn_end(at(18))],
+             session="s-2")
+machine.script(judged(False, reason="a new agent-session"))
+machine.run(19)
+check("a new agent-session of merge-lane-2 is not woken in code again for the same task",
+      len(machine.events("message_sent")) == 1, machine.events("message_sent"))
+watcher.complete_tasks()
+machine.append(EVENTS_SEAT, assistant("Handled.", at(20)), turn_end(at(20)))
+machine.script()
+machine.run(26)
 check("with the events task completed, the sweep wakes no one",
-      not machine.claude_calls() and len(machine.events("message_sent")) == 2
+      not machine.claude_calls() and len(machine.events("message_sent")) == 1
       and machine.events("checked")[-1]["rule"] == 4, machine.claude_calls())
 
 machine = Machine()
@@ -3415,6 +3424,105 @@ machine.run(0)
 check("a wake whose send succeeds is logged as sent",
       [event["send"] for event in machine.events("judge_answer")] == [True],
       machine.events("judge_answer"))
+
+
+def events_task(machine, task_id="1", **fields):
+    directory = machine.tasks / f"nedsnodes-{EVENTS_SEAT}-tasks"
+    directory.mkdir(exist_ok=True)
+    (directory / f"{task_id}.json").write_text(json.dumps(dict(
+        {"id": task_id, "subject": EVENTS_TASK_SUBJECT, "status": "pending", "blocks": [],
+         "blockedBy": []}, **fields)))
+
+
+machine = Machine()
+machine.seat(EVENTS_SEAT, DONE_TURN)
+events_task(machine)
+machine.script(sent_ok(EVENTS_SEAT))
+machine.run(0)
+events_task(machine, status="completed")
+machine.script(judged(False, reason="nothing left"))
+machine.run(16)
+check("an events task completed where the transcript does not show it, as by a subagent, ends the "
+      "wake's wait: no escalation",
+      machine.events("wait_ended")[-1]["why"] == "its pull-request events task is no longer open"
+      and len(machine.events("message_sent")) == 1
+      and not any(event["step"] == "escalate" for event in machine.events("wait_step")),
+      (machine.events("wait_step"), machine.events("wait_ended")))
+
+machine = Machine()
+machine.seat(EVENTS_SEAT, DONE_TURN)
+events_task(machine)
+machine.script(sent_ok(EVENTS_SEAT))
+machine.run(0)
+with machine.log.open("a") as log:
+    # A rule 2 sentence the sweep put on the wake's wait and logged as checked.
+    log.write(json.dumps({"event": "wait_step", "agent_seat": EVENTS_SEAT, "at": at(5),
+                          "step": "promise"}) + "\n")
+    log.write(json.dumps({"event": "rule_2_sentences_on_wait", "agent_seat": EVENTS_SEAT,
+                          "at": at(5), "kinds": ["promise"], "sentences": ["I will push it."],
+                          "records": [["r1", "I will push it."]],
+                          "earliest_sentence_at": at(4)}) + "\n")
+    log.write(json.dumps({"event": "sentence_checked", "agent_seat": EVENTS_SEAT, "at": at(5),
+                          "record_uuid": "r1", "sentence": "I will push it."}) + "\n")
+events_task(machine, status="completed")
+machine.script(judged(False, reason="nothing left"), sent_ok(EVENTS_SEAT))
+machine.run(16)
+check("an events task completed while rule 2 sentences are on the wake's wait ends only the events "
+      "task's part: the wait stays open and its escalation names the sentence",
+      not machine.events("wait_ended")
+      and machine.events("pull_request_events_task_left_wait")
+      and any(event["step"] == "escalate" for event in machine.events("wait_step"))
+      and "I will push it." in machine.events("message_sent")[-1]["text"],
+      (machine.events("wait_step"), machine.events("wait_ended"), machine.events("message_sent")))
+
+machine = Machine()
+machine.seat(EVENTS_SEAT, DONE_TURN)
+events_task(machine, blockedBy=["2"])
+(machine.tasks / f"nedsnodes-{EVENTS_SEAT}-tasks" / "2.json").write_text(json.dumps(
+    {"id": "2", "subject": "task 2", "status": "pending", "blocks": ["1"], "blockedBy": []}))
+machine.script(judged(False, reason="held"))
+machine.run(0)
+calls = machine.claude_calls()
+check("an events task another open task blocks is held work: no code-written wake, the judge is asked",
+      len(calls) == 1 and calls[0]["argv"][calls[0]["argv"].index("--tools") + 1] == ""
+      and not machine.events("message_sent"), (calls, machine.events("message_sent")))
+
+machine = Machine()
+machine.seat(EVENTS_SEAT, DONE_TURN)
+machine.handoff_put_off()
+machine.script(sent_ok(EVENTS_SEAT))
+machine.run(0)
+machine.append(EVENTS_SEAT, cross_session(machine.events("message_sent")[-1]["text"], at(9.5)),
+               assistant(tool=("Read", {"file_path": "x"}), when=at(10)),
+               assistant("Still waiting.", when=at(10)), turn_end(at(10)))
+events_task(machine)
+machine.script(sent_ok(EVENTS_SEAT))
+machine.run(20)
+check("a deferred handoff already reminded of still lets an open events task wake merge-lane-2 in code",
+      len(machine.events("message_sent")) == 2
+      and machine.events("message_sent")[-1]["text"].startswith("Task 1 on your task list"),
+      machine.events("message_sent"))
+
+machine = Machine()
+machine.seat(EVENTS_SEAT, DONE_TURN)
+machine.task(EVENTS_SEAT, "5")
+machine.script(judged(True, 'Your task "task 5" is open and nothing holds it.', raised=["5"]),
+               sent_ok(EVENTS_SEAT))
+machine.run(0)
+machine.script(sent_ok(EVENTS_SEAT))
+machine.run(16)
+machine.script()
+machine.run(32)
+told = [event["step"] for event in machine.events("wait_step")] == ["nudge", "escalate", "tell_user"]
+events_task(machine)
+machine.script(sent_ok(EVENTS_SEAT))
+machine.run(34)
+check("an events task opened after an unrelated wait's user-alert ends that wait and wakes "
+      "merge-lane-2 in code",
+      told and machine.events("wait_ended")[-1]["why"]
+      == "a new pull-request events task opened after the user was told"
+      and machine.events("message_sent")[-1]["text"].startswith("Task 1 on your task list"),
+      (machine.events("wait_step"), machine.events("wait_ended"), machine.events("message_sent")))
 
 # --- no reminder of a wait on the user, and no repeat until the user types ----------------------
 def typed_by_the_user(text, when):
