@@ -140,8 +140,10 @@ a code it does not document, or a read or a retarget on GitHub failed, each
 before any merge; 3 merged, but a step after the merge was not done: a review
 worktree or the pr<n>-merge-commit-on-main-worktree worktree could not be removed, the
 pull request's branch could not be read or deleted after a merge command that exited
-nonzero, the after-merge test run did not pass, because a test not already on the failed
-suites record failed, on main or on the branch merged into, a suite did not run to the end, the runner gave no full verdict, or the
+nonzero, the after-merge test run did not pass, because a test failed that is not main's
+known failure (on main, one not already on the failed suites record; on the branch merged
+into, one the record does not hold or one the record says main first failed at a commit
+the branch does not hold), a suite did not run to the end, the runner gave no full verdict, or the
 merge commit could not be read or its worktree made, or recordings could not be adopted, or
 hr/pr<n>/recorded-inputs could not be removed, or the failed suites record could not be read
 or written, its suites could not be run again, a repair task could not be opened, or the
@@ -895,14 +897,19 @@ def failed_tests_main_does_not_fail_named(arguments, base_branch, merge_commit, 
                   f"{TELL_AUTHOR_AND_USER_THE_STOP_MESSAGE}")
             kept["complete"] = False
         held_by_commit[first_failed] = ancestor.returncode == 0
+        if ancestor.returncode == 1:
+            branch_lacks.add(first_failed)
         return held_by_commit[first_failed]
+
+    branch_lacks = set()
 
     kept = {"complete": True, "new_tests": {}, "seat": None, "task_id": None,
             "why_none": (f"pull request {arguments.pull_request} merged into {base_branch!r}, "
                          f"not main, and this program opens a repair task, a task on the task "
                          f"list of the author of the merge that broke a test, only for a test "
                          f"that fails on main"),
-            "record_empty": True}
+            "record_empty": True,
+            "recorded_tests_first_failed_at_a_commit_the_branch_lacks": []}
     print(f"the failed suites record, {path}, was left as it was: pull request "
           f"{arguments.pull_request} merged into {base_branch!r}, not main, and the failed "
           f"suites record holds main's failures alone. A failed test of this run is main's "
@@ -938,6 +945,10 @@ def failed_tests_main_does_not_fail_named(arguments, base_branch, merge_commit, 
                     suite, test, on_record[test]["commit"]):
                 continue
             kept["new_tests"].setdefault(suite, {})[test] = log
+            if test in on_record and on_record[test]["commit"] in branch_lacks:
+                kept["recorded_tests_first_failed_at_a_commit_the_branch_lacks"].append(
+                    (suite, test, on_record[test]["commit"]))
+    kept["record_path"] = path
     return kept
 
 
@@ -954,8 +965,27 @@ def after_merge_test_run_closing_message_printed_returning_whether_stop(argument
               f"above say, so they fail on {tested} for a reason of its own; the failed suites "
               f"are listed above, each with its log.\n"
               f"No repair task was opened: {kept['why_none']}. The pull request's author fixes "
-              f"these tests on {tested} before it merges into main.\n"
-              f"{TELL_AUTHOR_AND_USER_THE_STOP_MESSAGE}")
+              f"these tests on {tested} before it merges into main.")
+        # The record names the commit whose run recorded the test first; when two runs on main
+        # overlap, an older main commit can fail the test too, so the branch may hold main's
+        # failure after all.
+        for suite, test, commit in kept.get(
+                "recorded_tests_first_failed_at_a_commit_the_branch_lacks", []):
+            print(f"{test_named(suite, test)} is on the failed suites record, "
+                  f"{kept.get('record_path')}, which keeps the main commit whose test run "
+                  f"recorded it first, {commit}. {tested} does not hold that commit, so this "
+                  f"program counts the failure as {tested}'s own. It may still be main's: when "
+                  f"two of main's after-merge test runs overlap, the later commit's run can "
+                  f"record the test first, though the earlier commit fails it too.\n"
+                  f"Before the author fixes it, run {suite} in a worktree at the commit where "
+                  f"{tested} left main, which `git merge-base {merge_commit} origin/main` "
+                  f"prints after `git fetch origin`.\n"
+                  f"If {test_named(suite, test)} fails there too, the failure is main's: say "
+                  f"so when you tell the author and the user, and nothing on {tested} needs "
+                  f"fixing for it.\n"
+                  f"If that test passes there, {tested} broke it: the author fixes it on "
+                  f"{tested}.")
+        print(TELL_AUTHOR_AND_USER_THE_STOP_MESSAGE)
         return True
     if new_tests:
         if run_exit_code == 0:
