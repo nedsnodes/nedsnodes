@@ -983,11 +983,11 @@ def promise_sent_on_rule_five_wait(promise_sender):
 
 
 def failed_send_sentences(machine):
-    """The sentences of each failed promise message, read through the groups its event names, as
+    """The sentences of each failed promise message, read through the records its event names, as
     the program reads them."""
-    groups = {event["group_id"]: event["sentences"]
-              for event in machine.events("rule_2_sentences_on_wait")}
-    return [[sentence for group_id in event.get("group_ids", []) for sentence in groups[group_id]]
+    on_wait = {tuple(record) for event in machine.events("rule_2_sentences_on_wait")
+               for record in event["records"]}
+    return [[record[1] for record in event.get("records", []) if tuple(record) in on_wait]
             for event in machine.events("promise_message_send_failed")]
 
 
@@ -998,7 +998,7 @@ check("rule 2: a promise message on an open wait whose send failed logs the prom
       "failed message's sentences, but no promise_message event",
       [event["step"] for event in machine.events("wait_step")] == ["nudge", "promise"]
       and failed_send_sentences(machine) == [[PROMISE]]
-      and set(machine.events("promise_message_send_failed")[0]) >= {"group_ids", "text"}
+      and set(machine.events("promise_message_send_failed")[0]) >= {"records", "text"}
       and "sentences" not in machine.events("promise_message_send_failed")[0]
       and not machine.events("promise_message") and len(machine.events("headless_failed")) == 1,
       machine.events())
@@ -2606,11 +2606,11 @@ check("after the reset, the promise message the escalation's pause held back is 
       and "after lunch" in machine.events("message_sent")[-1]["text"],
       (code, machine.events("message_sent"), machine.claude_calls()))
 groups = machine.events("rule_2_sentences_on_wait")
-check("after the reset, the promise judged again goes on the group logged before the pause, and "
-      "its message replaces that group",
+check("after the reset, the promise judged again is not logged on the wait a second time, and "
+      "its message takes it off the wait",
       [group["sentences"] for group in groups] == [[SECOND_PROMISE]]
-      and [event.get("group_ids") for event in machine.events("promise_message")][-1:]
-      == [[groups[0]["group_id"]]], (groups, machine.events("promise_message")))
+      and [event.get("records") for event in machine.events("promise_message")][-1:]
+      == [groups[0]["records"]], (groups, machine.events("promise_message")))
 
 machine = Machine()
 machine.seat("alpha", [user("go"), assistant(PROMISE), turn_end()])
@@ -3596,11 +3596,11 @@ machine.append("alpha", user("go on", at(7.5)), assistant(OTHER_PROMISE, at(7.6)
 machine.script(sent_ok())
 machine.run(14)
 groups = machine.events("rule_2_sentences_on_wait")
-check("a batch judged again with one sentence already on a group and one new: the new one goes on a "
-      "group of its own, and the message names both groups",
+check("a batch judged again with one sentence already on the wait and one new: only the new one is "
+      "logged on the wait, and the message takes both off it",
       [group["sentences"] for group in groups] == [[PROMISE], [OTHER_PROMISE]]
-      and [sorted(event.get("group_ids", [])) for event in machine.events("promise_message")][-1:]
-      == [sorted(group["group_id"] for group in groups)],
+      and [sorted(map(tuple, event.get("records", []))) for event in machine.events("promise_message")][-1:]
+      == [sorted(tuple(record) for group in groups for record in group["records"])],
       (groups, machine.events("promise_message")))
 
 # A promise found in the run the escalation falls due in, which only the escalation names.
@@ -3619,13 +3619,13 @@ steps = [event["step"] for event in machine.events("message_sent")]
 check("an escalation sender that drops the promise from the text it sends: the promise gets a "
       "message of its own",
       steps[-2:] == ["escalate", "nudge"] and PROMISE in machine.events("message_sent")[-1]["text"]
-      and not machine.events("escalation_named_sentence_groups"),
+      and not machine.events("message_sent")[-2].get("escalation_named_records"),
       (steps, machine.events("message_sent")))
 
 machine = promise_named_only_by_escalation(sent_ok(), recheck_sleep=2)
-named = machine.events("escalation_named_sentence_groups")
-check("an escalation that names a promise no message named: the group's time moves to the "
-      "escalation's send",
+named = [event for event in machine.events("message_sent") if event.get("escalation_named_records")]
+check("an escalation that names a promise no message named: the sentence's time moves to the "
+      "escalation's send, recorded in the escalation's own message_sent event",
       len(named) == 1 and named[0]["send_started_at"] > machine.events("rule_2_sentences_on_wait")[0]["at"]
       and [event["step"] for event in machine.events("message_sent")][-1] == "escalate",
       (named, machine.events("rule_2_sentences_on_wait")))
@@ -3654,6 +3654,95 @@ check("the promise judged again after the escalation named it gets no message of
       [event["step"] for event in machine.events("message_sent")][-1] == "escalate"
       and len(machine.events("rule_2_sentences_on_wait")) == 1,
       (machine.events("message_sent"), machine.events("rule_2_sentences_on_wait")))
+
+# --- the wait tracks each sentence it answers for, not whole groups ---------------------------------
+def on_wait_sentences(machine):
+    wait = idle_sweep_program.SweepLog(machine.log).open_wait("alpha")
+    return [sentence for entry in wait[idle_sweep_program.SENTENCES_WITH_NO_MESSAGE_EVENT]
+            for sentence in entry["sentences"]]
+
+
+def stopped_after_sentences_on_wait(machine):
+    """Cut the log just after its last rule_2_sentences_on_wait event, as an invocation stopped
+    there leaves it."""
+    lines = machine.log.read_text().splitlines(keepends=True)
+    last = max(number for number, line in enumerate(lines)
+               if json.loads(line)["event"] == "rule_2_sentences_on_wait")
+    machine.log.write_text("".join(lines[:last + 1]))
+
+
+def logged_as_checked(machine, sentence, minutes):
+    record_uuid = next(record[0] for event in machine.events("rule_2_sentences_on_wait")
+                       for record in event["records"] if record[1] == sentence)
+    with machine.log.open("a") as log:
+        log.write(json.dumps({"event": "sentence_checked", "agent_seat": "alpha", "at": at(minutes),
+                              "record_uuid": record_uuid, "sentence": sentence}) + "\n")
+
+
+machine = rule_five_wait_with_promises(assistant(PROMISE, at(1)), turn_end(at(1)), user("go on", at(1.05)),
+                                       assistant(OTHER_PROMISE, at(1.1)), turn_end(at(1.1)))
+machine.script(sent_ok())
+machine.run(7)
+stopped_after_sentences_on_wait(machine)
+logged_as_checked(machine, OTHER_PROMISE, 7.5)
+machine.script(sent_ok())
+machine.run(14)
+check("a message for part of the sentences logged on the wait together takes only that part off "
+      "the wait, and the rest stay owed",
+      [event["step"] for event in machine.events("message_sent")][-1] == "nudge"
+      and on_wait_sentences(machine) == [OTHER_PROMISE],
+      (machine.events("promise_message"), on_wait_sentences(machine)))
+
+machine = promise_named_only_by_escalation(sent_ok())
+machine.log.write_text("".join(
+    line for line in machine.log.read_text().splitlines(keepends=True)
+    if not (json.loads(line).get("agent_seat_idle_sweep_invocation_started_at") == at(16)
+            and json.loads(line)["event"] in ("sentence_checked", "checked"))))
+machine.append("alpha", user("go on", at(16.5)), assistant(OTHER_PROMISE, at(16.6)),
+               turn_end(at(16.6)))
+machine.script(sent_ok())
+machine.run(23)
+last = machine.events("message_sent")[-1]
+check("a promise the escalation named, judged again beside a fresh promise: the message names only "
+      "the fresh one",
+      last["step"] == "nudge" and OTHER_PROMISE in last["text"] and PROMISE not in last["text"],
+      machine.events("message_sent"))
+
+machine = promise_named_only_by_escalation(sent_ok())
+machine.log.write_text("".join(
+    line for line in machine.log.read_text().splitlines(keepends=True)
+    if json.loads(line)["event"] == "message_sent"
+    or not (json.loads(line).get("agent_seat_idle_sweep_invocation_started_at") == at(16)
+            and json.loads(line)["event"] not in ("wait_step", "rule_2_sentences_on_wait",
+                                                  "judge_answer"))))
+machine.script(sent_ok())
+machine.run(17)
+check("an invocation stopped right after the escalation's send: the sentences it named are read "
+      "from its message_sent event, and get no message of their own",
+      [event["step"] for event in machine.events("message_sent")][-1] == "escalate",
+      machine.events("message_sent"))
+
+machine = rule_five_wait_with_promises(assistant(OTHER_PROMISE, at(1)), turn_end(at(1)))
+machine.script(sent_ok())
+machine.run(7)
+stopped_after_sentences_on_wait(machine)
+logged_as_checked(machine, OTHER_PROMISE, 7.5)
+machine.append("alpha", user("go on", at(8)), assistant(PROMISE, at(8.1)), turn_end(at(8.1)))
+machine.script(rechecked(False, False),
+               {"sends": [send_to("alpha", f"You have been idle. You said: {PROMISE}")],
+                "answer": {"sent": True, "reason": "r"}}, sent_ok())
+machine.run(16)
+check("an escalation that names the fresh promise but drops an older owed sentence: the fresh "
+      "promise gets no second message",
+      [event["step"] for event in machine.events("message_sent")][-1] == "escalate",
+      machine.events("message_sent"))
+
+machine = promise_named_only_by_escalation(
+    {"sends": [send_to("alpha", "You have been idle. You said: " + PROMISE.replace(" ", "\n", 1))],
+     "answer": {"sent": True, "reason": "r"}})
+check("an escalation sender that wraps a promise over two lines still names it: no second message",
+      [event["step"] for event in machine.events("message_sent")][-1] == "escalate",
+      machine.events("message_sent"))
 
 if failures:
     print(f"{len(failures)} case(s) failed")
