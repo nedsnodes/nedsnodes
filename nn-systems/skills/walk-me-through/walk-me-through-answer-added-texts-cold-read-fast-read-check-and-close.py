@@ -470,7 +470,7 @@ search said, and exits 1; any exit of the search but its found and nothing-found
 exits is a failure. The step saves what the search prints, a search with no
 hits too, once it has written it out, in
 `docs/walk/title-search-cache/<walk name>-item-<N>-<agent-session id>.md`, the
-titles and numbers searched for as a JSON list on its first line, the agent-session id
+cache format's number and the titles and numbers searched for as a JSON list on its first line, the agent-session id
 being $CLAUDE_CODE_SESSION_ID. A later run for the item in the same
 agent-session prints only a line naming that file, unless the file is missing
 or the item's titles differ from the saved ones; then it searches, prints and
@@ -1695,6 +1695,8 @@ APPROVAL_WALK_ITEM_TITLE_SEARCH_FAILED = (
     "Once the user says the cause is fixed, run `{command}` again.")
 TITLE_SEARCH_CACHE_DIRECTORY_NAME = "title-search-cache"
 TITLE_SEARCH_CACHE_FILE_NAME = "{walk}-item-{numbers}-{session}.md"
+# Raised whenever what a search can print changes, so that a file saved by an older search is searched again.
+TITLE_SEARCH_CACHE_FORMAT = 2
 TITLE_SEARCH_CACHE_PRINTED_BEFORE = (
     "The user's words where {item}'s title was named before were printed in full by an earlier run of this step in "
     "this agent-session, and are saved in {path}; read that file when they are no longer in your context.")
@@ -3632,8 +3634,8 @@ def approval_walk_item_title_user_messages_in_earlier_agent_sessions_lines(walk_
     lines saved but never printed are never read."""
     if not groups:
         return [], lambda: []
-    # The groups' titles and numbers, as JSON lists, so a change to either searches again.
-    titles = [[group_titles, group_numbers] for group_titles, group_numbers in groups]
+    # The cache format and the groups' titles and numbers, as JSON lists, so a change to any of them searches again.
+    titles = [TITLE_SEARCH_CACHE_FORMAT, [[group_titles, group_numbers] for group_titles, group_numbers in groups]]
     variable = load_module("cold_read_record_names", RECORD_NAMES_FILE).AGENT_SESSION_ID_ENVIRONMENT_VARIABLE
     session_id = os.environ.get(variable)
     cache = (minutes.parent / TITLE_SEARCH_CACHE_DIRECTORY_NAME
@@ -3653,11 +3655,13 @@ def approval_walk_item_title_user_messages_in_earlier_agent_sessions_lines(walk_
         # Whatever a search that cannot load raises, it is a failed search, reported as the others are.
         except Exception as error:
             raise Failure(APPROVAL_WALK_ITEM_TITLE_SEARCH_FAILED.format(
-                item=item, exit=result.returncode, command=command,
-                said="\n".join(filter(None, [result.stderr.strip(), f"FAILED: loading the title search here raised {error!r}."]))))
+                item=item, exit=result.returncode, command=command, said=title_search_failure_said(
+                    result.stderr, f"FAILED: loading the title search here raised {error!r}.")))
         if result.returncode not in (exits.EXIT_FOUND, exits.EXIT_NOTHING_FOUND):
             raise Failure(APPROVAL_WALK_ITEM_TITLE_SEARCH_FAILED.format(
-                item=item, exit=result.returncode, said=result.stderr.strip() or "nothing", command=command))
+                item=item, exit=result.returncode, command=command, said=title_search_failure_said(
+                    result.stderr, f"FAILED: the title search exited {result.returncode} without a FAILED line of "
+                                   f"its own, so it crashed or was stopped.")))
         lines += result.stdout.rstrip("\n").split("\n") if result.stdout.strip() else []
     if not session_id:
         return lines, lambda: [TITLE_SEARCH_CACHE_NOT_SAVED.format(
@@ -3674,6 +3678,15 @@ def approval_walk_item_title_user_messages_in_earlier_agent_sessions_lines(walk_
             return [TITLE_SEARCH_CACHE_NOT_SAVED.format(path=cache, why=error)]
         return []
     return lines, saved_lines
+
+
+def title_search_failure_said(stderr, summary):
+    """Return what a failed title search said: its stderr, with the FAILED line summary added when the search
+    printed no FAILED line itself, so that the agent always has a FAILED line to relay."""
+    said = stderr.strip()
+    if any(line.startswith("FAILED:") for line in said.split("\n")):
+        return said
+    return "\n".join(filter(None, [said, summary]))
 
 
 def lines_printed_with_title_search_saved_after(first, past_words, rest):
