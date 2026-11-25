@@ -270,10 +270,12 @@ Each FOUND surface says where this run copied what it found, under
 ~/Downloads/nedschorus-found-copies/<time of the search>/, or prints the command
 that copies it there when the copy needs a mount. Once you have chosen a copy,
 `--restore <copy>` copies it to <path>, creating any missing parent directories
-and replacing any file already there. A relative <path> is placed under the
-top level of the repository --repo is in, as the search reads it, or under
---repo itself when that is in no repository; so give the file's repo-relative
-or absolute path, not a fragment of it.
+and replacing any file already there. Search and --restore read <path> the same
+way: a path written from the current directory ("./x.md", "../x.md") is taken
+from the current directory; any other relative <path> is repo-relative, placed
+under the top level of the repository --repo is in, or under --repo itself
+when that is in no repository; so give the file's repo-relative or absolute
+path, not a fragment of it.
 
 <path> may be repo-relative ("docs/issues/46-x.md"), absolute, or any trailing
 fragment of a path ("dispositions.md"). A fragment matches whole trailing
@@ -2553,8 +2555,9 @@ def main(argv=None, runner=run_command):
                         help="search nothing, and copy the file COPY, such as a copy whose path a search's "
                              "'copied to' line printed, to <path> on this machine, creating any missing parent "
                              "directories and replacing any file already there. A relative COPY is read from the "
-                             "current directory, and a relative <path>, a ./ or .. form included, is placed under the top level of the "
-                             "repository --repo is in, or under --repo when that is in no repository, so give "
+                             "current directory. A <path> written from the current directory, with ./ or .., is placed from "
+                             "there, as a search reads it; any other relative <path> is placed under the top level "
+                             "of the repository --repo is in, or under --repo when that is in no repository, so give "
                              "the file's repo-relative or absolute path, not a fragment of it; a git blob id is "
                              "refused as a usage error. Exits 0 when the copy was made, and 1 when it was not, "
                              "printing what failed on stderr")
@@ -2568,9 +2571,12 @@ def main(argv=None, runner=run_command):
     if args.restore is not None:
         if is_git_blob_id(args.path):
             parser.error("--restore needs the path the file was deleted from, not a git blob id")
-        host, given = locator.split_host(args.path)
-        base = None
-        if host is None and not given.startswith(("/", "~")):
+        try:
+            named = _plain_path_from_cited_query(args.path, fragment_allowed=False)
+        except CitedQueryCannotBePlaced as refusal:
+            parser.error(str(refusal))
+        destination = named
+        if not os.path.isabs(named):
             try:
                 top_level = _git_top_level(args.repo, runner)
             except _GitCommandFailed as failure:
@@ -2578,12 +2584,7 @@ def main(argv=None, runner=run_command):
                       "level of the repository it belongs under: %s"
                       % (THIS_SCRIPT_NAME, args.restore, args.path, failure), file=sys.stderr, flush=True)
                 return EXIT_NOT_RESTORED
-            base = os.path.abspath(top_level or args.repo)
-        try:
-            named = _plain_path_from_cited_query(args.path, cwd=base, fragment_allowed=False)
-        except CitedQueryCannotBePlaced as refusal:
-            parser.error(str(refusal))
-        destination = named if os.path.isabs(named) else os.path.join(base, named)
+            destination = os.path.join(os.path.abspath(top_level or args.repo), named)
         destination_existed = os.path.lexists(destination)
         try:
             restore_copy(args.restore, destination)
