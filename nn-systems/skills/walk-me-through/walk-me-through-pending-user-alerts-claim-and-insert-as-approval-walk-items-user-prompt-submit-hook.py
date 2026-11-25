@@ -83,7 +83,8 @@ INSERT_FAILED_LINES = (
     "Before you act on the user's prompt, fix the cause that message names, if you can, then run: {command}",
     "Then do what that command prints, and act on the user's prompt.",
     "If you cannot fix the cause now, act on the user's prompt: an alert no walk-minutes name is offered again "
-    "on the user's first prompt 30 minutes or more after this one.",
+    "on the user's first prompt, 30 minutes or more after this one, in the agent-session of the agent-seat the "
+    "alert names, or of merge-lane-1 when it names none.",
 )
 WALK_OPEN_LINES = (
     "Before you act on the user's prompt, add the alerts to approval-walk {walk} as items placed after the whole of "
@@ -99,7 +100,8 @@ NO_WALK_LINES = (
     "the walk-me-through skill says, whose items are these alerts alone, one each, its point the alert's title "
     "and its text from the alert's file.",
     "As soon as you create its walk-minutes, write these lines into them, one per alert; an alert that no "
-    "walk-minutes name 30 minutes after this prompt is offered again on the user's next prompt:",
+    "walk-minutes name 30 minutes after this prompt is offered again on the user's next prompt in the "
+    "agent-session of the agent-seat the alert names, or of merge-lane-1 when it names none:",
 )
 USER_ALERT_LINE = "  #user_alert {id}"
 WALK_UNKNOWN_LINE = ("The hook could not tell whether an approval-walk is open in this checkout, because reading "

@@ -140,6 +140,24 @@ def run_agent_seat_cases(root):
               and not any(path.is_file() for path in directory.rglob("*")), repr(raised))
 
 
+def run_unreadable_pending_cases(root):
+    directory = fresh_home(root, "unreadable-pending")
+    (directory / "pending").mkdir(parents=True)
+    (directory / "pending" / "0-not-an-object.json").write_text("[not an object]", encoding="utf-8")
+    after = alerts.user_alert_write_to_pending("after", "text", "act", now=NOW)
+    raised = None
+    try:
+        alerts.user_alerts_claim_every_pending_for_agent_seat_by_rename_into_claimed("seat-y", now=NOW)
+    except ValueError as error:
+        raised = error
+    check("a pending file that is not a JSON object raises ValueError, even in an agent-seat it would not go to, "
+          "and is moved into claimed/", raised is not None
+          and (directory / "claimed" / "0-not-an-object.json").is_file(), repr(raised))
+    claimed = alerts.user_alerts_claim_every_pending_for_agent_seat_by_rename_into_claimed(DEFAULT_SEAT, now=NOW)
+    check("after a pending file that is not a JSON object, the next claim takes the alerts sorted after it",
+          [alert["id"] for alert in claimed] == [after], repr(claimed))
+
+
 def run_claim_cases(root):
     directory = fresh_home(root, "claim")
     check("with no pending/ directory, nothing is claimed", alerts.user_alerts_claim_every_pending_for_agent_seat_by_rename_into_claimed(DEFAULT_SEAT, now=NOW) == [])
@@ -311,6 +329,7 @@ with tempfile.TemporaryDirectory() as temporary_directory:
     scratch = Path(temporary_directory)
     run_write_cases(scratch)
     run_agent_seat_cases(scratch)
+    run_unreadable_pending_cases(scratch)
     run_claim_cases(scratch)
     run_concurrent_claim_cases(scratch)
     run_release_cases(scratch)

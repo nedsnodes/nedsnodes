@@ -103,7 +103,13 @@ def user_alerts_claim_every_pending_for_agent_seat_by_rename_into_claimed(agent_
         claimed.mkdir(parents=True, exist_ok=True)
         target = claimed / path.name
         try:
-            alert = user_alert_read_from_json_file(path)
+            try:
+                alert = user_alert_read_from_json_file(path)
+            except ValueError:
+                # Moved out of pending/ before the error is raised, so the next prompt claims the alerts after it.
+                os.rename(path, target)
+                os.utime(target, (claim_time, claim_time))
+                raise
             if not user_alert_addressed_to_agent_seat(alert, agent_seat):
                 continue
             os.rename(path, target)
