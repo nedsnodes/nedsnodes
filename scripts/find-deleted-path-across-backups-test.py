@@ -4400,6 +4400,29 @@ with tempfile.TemporaryDirectory() as tmp:
           and not (tmp / "s.md").exists(),
           "exit=%s\n%s\n%s" % (code, out, errors))
 
+    # The same for a path written from the current directory: "./link/../d.md" is real/d.md, not ./d.md.
+    os.chdir(str(tmp))
+    try:
+        code, out, errors, calls = run_restore(["./link/../d.md", "--restore", str(copy)])
+    finally:
+        os.chdir(directory_before)
+    check("--restore of a path from the current directory that holds a symlink and then .. places the file in "
+          "the directory the system reaches, not where .. collapsed lexically would",
+          code == 0 and (tmp / "real" / "d.md").is_file() and (tmp / "real" / "d.md").read_bytes() == content
+          and not (tmp / "d.md").exists() and calls == [],
+          "exit=%s calls=%s\n%s\n%s" % (code, calls, out, errors))
+    symlink_at_path = tmp / "real" / "at-path.md"
+    symlink_at_path.symlink_to(tmp / "elsewhere.md")
+    os.chdir(str(tmp / "real"))
+    try:
+        code, out, errors, calls = run_restore(["./at-path.md", "--restore", str(copy)])
+    finally:
+        os.chdir(directory_before)
+    check("--restore keeps the file name as given, replacing a symlink at the path, not the file it leads to",
+          code == 0 and not symlink_at_path.is_symlink() and symlink_at_path.read_bytes() == content
+          and not (tmp / "elsewhere.md").exists(),
+          "exit=%s\n%s\n%s" % (code, out, errors))
+
     real_expanduser = os.path.expanduser
     os.path.expanduser = lambda given: given
     try:

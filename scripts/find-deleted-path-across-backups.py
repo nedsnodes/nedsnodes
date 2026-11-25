@@ -735,7 +735,12 @@ def _plain_path_from_cited_query(query, cwd=None, fragment_allowed=True):
             raise CitedQueryCannotBePlaced(
                 "Give the file's absolute path: the current directory no longer exists, so %r cannot be placed "
                 "from it." % query)
-    return os.path.normpath(os.path.join(cwd, path))
+    # realpath, not normpath: ".." must climb from the directory a symlink leads to, as the system does. The
+    # file name is kept as given, so a symlink at the path itself is replaced, not the file it leads to.
+    parent, name = os.path.split(os.path.join(cwd, path))
+    if name in ("", ".", ".."):
+        return os.path.realpath(os.path.join(parent, name))
+    return os.path.join(os.path.realpath(parent), name)
 
 
 
