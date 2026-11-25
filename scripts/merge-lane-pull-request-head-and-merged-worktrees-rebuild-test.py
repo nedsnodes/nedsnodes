@@ -152,6 +152,15 @@ def main():
                   and git(head_worktree, "rev-parse", "HEAD") == head_commit,
                   f"exit {completed.returncode}\n{completed.stdout}{completed.stderr}")
 
+            (head_worktree / ".git").unlink()
+            (head_worktree / "left-behind.txt").write_text("a change in the damaged worktree\n")
+            completed = run_program(helpers, checkout, "7", head_commit, main_commit)
+            check("a pr<n>-head that lost its .git is deleted and made again, exit 0",
+                  completed.returncode == 0
+                  and not (head_worktree / "left-behind.txt").exists()
+                  and git(head_worktree, "rev-parse", "HEAD") == head_commit,
+                  f"exit {completed.returncode}\n{completed.stdout}{completed.stderr}")
+
         relative_helpers = scratch / "relative-helpers"
         completed = run_program(Path("relative-helpers"), Path("checkout"), "7", head_commit,
                                 main_commit, cwd=scratch)
