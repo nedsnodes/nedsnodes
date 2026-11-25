@@ -1445,6 +1445,73 @@ def test_a_no_decision_sub_step_gets_only_the_next_line():
           "[No decision here; type N or next to continue.](<page link>)" in reason and "A approve" not in reason, reason)
 
 
+def test_closing_lines_of_both_kinds_are_read_in_one_pass_at_the_replys_end():
+    decision_first = NO_DECISION_SUB_STEP_DOCUMENT.replace(
+        "A filter hides old rows.\n\n[No decision here; type N or next to continue.](https://claude.ai/artifact/p41)",
+        "Recommendation: keep it.").replace(
+        "Recommendation: leave the filter out.",
+        "The choice is explained.\n\n[No decision here; type N or next to continue.](https://claude.ai/artifact/p42)")
+    case = Case()
+    case.walk_files(minutes="#next_to_present items 4.1 and 4.2 of 9.", document=decision_first,
+                    pages=NO_DECISION_PAGES)
+    decision_line = "[Item 4.1 of 9, What a filter does](https://claude.ai/artifact/p41) · " + LETTERS
+    no_decision = "[No decision here; type N or next to continue.](https://claude.ai/artifact/p42)"
+    case.reply(f"Recorded.\n\n{decision_line}\n{no_decision}")
+    check_silent("a decision line above a no-decision line passes", case.run())
+    case.reply(f"Recorded.\n\n{no_decision}\n{decision_line}")
+    check_silent("a no-decision line above a decision line passes", case.run())
+    single = Case()
+    single.walk_files(minutes="#next_to_present item 4.1 of 9.", document=NO_DECISION_SUB_STEP_DOCUMENT,
+                      pages=NO_DECISION_PAGES)
+    single.reply(f"```\n{NO_DECISION_LINE}\n```")
+    check_reminded("a no-decision line in a code fence is sent back", single.run(), NO_DECISION_LINE)
+    single.reply(f"{NO_DECISION_LINE}\n\nMore words after it.")
+    check_reminded("a no-decision line with words after it is sent back", single.run(), NO_DECISION_LINE)
+    wrong = "[Item 4.1 of 9, What a filter does](https://claude.ai/artifact/p41) · " + LETTERS
+    single.reply(f"{NO_DECISION_LINE}\n{wrong}")
+    check_reminded("a no-decision line before a final A, D and M line for the same sub-step is sent back",
+                   single.run(), NO_DECISION_LINE)
+
+
+def test_a_no_decision_sub_step_missing_its_line_gets_one_problem():
+    case = Case()
+    case.walk_files(minutes="#next_to_present item 4.1 of 9.", document=NO_DECISION_SUB_STEP_DOCUMENT,
+                    pages=NO_DECISION_PAGES)
+    case.reply("Recorded.")
+    reason = blocked_reason(case.run()) or ""
+    check("a missing no-decision line is not also reported as a missing A, D and M line",
+          "asks for no decision" in reason and "the reply has no closing line for `Item 4.1 of 9`" not in reason
+          and reason.count("`Item 4.1 of 9`") <= 3, reason)
+
+
+def test_a_sub_step_ending_its_paragraph_with_the_no_decision_sentence_asks_none():
+    inline = NO_DECISION_SUB_STEP_DOCUMENT.replace(
+        "A filter hides old rows.\n\n[No decision here; type N or next to continue.](https://claude.ai/artifact/p41)",
+        "A filter hides old rows. No decision here; type N or next to continue.")
+    case = Case()
+    case.walk_files(minutes="#next_to_present item 4.1 of 9.", document=inline, pages=NO_DECISION_PAGES)
+    case.reply("Recorded.")
+    reason = blocked_reason(case.run()) or ""
+    check("the sentence at the end of a paragraph makes the sub-step no-decision",
+          NO_DECISION_LINE in reason and "A approve" not in reason, reason)
+    earlier = NO_DECISION_SUB_STEP_DOCUMENT.replace(
+        "A filter hides old rows.\n\n[No decision here; type N or next to continue.](https://claude.ai/artifact/p41)",
+        "[No decision here; type N or next to continue.](https://claude.ai/artifact/p41)\n\nA filter hides old rows.")
+    case = Case()
+    case.walk_files(minutes="#next_to_present item 4.1 of 9.", document=earlier, pages=NO_DECISION_PAGES)
+    case.reply("Recorded.")
+    check_reminded("the sentence on an earlier line does not make the sub-step no-decision", case.run(), LETTERS)
+
+
+def test_a_recommendation_in_an_html_block_opened_with_a_comment_opening_in_a_tag_keeps_a_d_and_m():
+    hidden = NO_DECISION_SUB_STEP_DOCUMENT.replace(
+        "A filter hides old rows.\n", "<div title=\"<!--\">\nRecommendation: keep it.\n</div>\n")
+    case = Case()
+    case.walk_files(minutes="#next_to_present item 4.1 of 9.", document=hidden, pages=NO_DECISION_PAGES)
+    case.reply("Recorded.")
+    check_reminded("that sub-step keeps A, D and M, as check refuses N on it", case.run(), LETTERS)
+
+
 def test_a_sub_step_that_asks_a_decision_keeps_a_d_and_m():
     case = Case()
     case.walk_files(minutes="#next_to_present item 4.2 of 9.", document=NO_DECISION_SUB_STEP_DOCUMENT,

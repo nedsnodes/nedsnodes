@@ -3535,6 +3535,55 @@ def test_an_answer_to_a_no_decision_sub_step_records_nothing():
           len(lines) == 2 and lines[0].startswith(OWN_WORDS_RULE_OPENING) and lines[1] == SETTLED_LINE, lines)
 
 
+NOT_RECORDED_RULE = "walk-me-through-short-answer-not-recorded-because-sub-step-asks-for-no-decision-hook-message-rule"
+
+
+def test_a_condition_on_an_answer_to_a_no_decision_sub_step_is_not_carried_out():
+    case = Case(next_to_present="item 4.1 of 9", document=NO_DECISION_SUB_STEP_DOCUMENT)
+    case.minutes(NO_DECISION_PAGES + "#next_to_present item 4.1 of 9")
+    text = "\n".join(case.lines("a if you delete the old export", case.transcript("Here.")) or [])
+    check("a condition on a discarded answer is named as not to be carried out",
+          "delete the old export\". Do not do what the condition asks" in text, text)
+    check("a condition on a discarded answer is never an instruction to act", "Act on those words first" not in text, text)
+    text = "\n".join(case.lines("a but fix it", case.transcript("Here.")) or [])
+    check("an independent rider is still an instruction to act",
+          "He also wrote: \"but fix it\". Act on those words first." in text
+          or "He also wrote: \"fix it\". Act on those words first." in text, text)
+
+
+def test_z_and_numbered_options_on_a_no_decision_sub_step_are_refused():
+    case = Case(next_to_present="item 4.1 of 9", document=NO_DECISION_SUB_STEP_DOCUMENT)
+    case.minutes(NO_DECISION_PAGES + "#next_to_present item 4.1 of 9")
+    for prompt in ("z", "4.1 z", "o2", "o3"):
+        text = "\n".join(case.lines(prompt, case.transcript("Here.")) or [])
+        check(f"{prompt!r} on a no-decision sub-step records nothing",
+              NOT_RECORDED_RULE in text and "--user-reply-as-typed" not in text, text)
+
+
+def test_answers_to_a_no_decision_sub_step_and_a_decision_sub_step_together():
+    value = "items 4.1 and 4.2 of 9"
+    case = Case(next_to_present=value, document=NO_DECISION_SUB_STEP_DOCUMENT)
+    case.minutes(NO_DECISION_PAGES + f"#next_to_present {value}")
+    shown = case.transcript("Here.", "### Item 4.2 of 9: The choice\n\nRecommendation: leave the filter out.")
+    text = "\n".join(case.lines("4.1 a, 4.2 d", shown) or [])
+    check("the D for the decision sub-step still counts", NOT_RECORDED_RULE not in text and "4.2 of 9: D" in text, text)
+    check("the A for the no-decision sub-step is not passed on as an answer", "4.1 of 9: A" not in text, text)
+    check("the no-decision sub-step is moved on from with no decision",
+          "--moved-on-no-decision" in text and "`#next_to_present item 4.1 of 9`" in text, text)
+    text = "\n".join(case.lines("4.2 d", shown) or [])
+    check("an answer naming only the decision sub-step is not refused", NOT_RECORDED_RULE not in text, text)
+    text = "\n".join(case.lines("m", shown) or [])
+    check("M while a decision sub-step also waits is not refused", NOT_RECORDED_RULE not in text, text)
+
+
+def test_an_answer_to_an_unpublished_no_decision_sub_step_says_to_publish_it():
+    case = Case(next_to_present="item 4.1 of 9", document=NO_DECISION_SUB_STEP_DOCUMENT)
+    case.minutes("#next_to_present item 4.1 of 9")
+    text = "\n".join(case.lines("a", case.transcript("Here.")) or [])
+    check("an unpublished no-decision sub-step's refusal says to publish its page",
+          "<page link>" in text and "publish its page" in text, text)
+
+
 def test_an_answer_to_a_sub_step_that_asks_a_decision_still_counts():
     case = Case(next_to_present="item 4.2 of 9", document=NO_DECISION_SUB_STEP_DOCUMENT)
     case.minutes(NO_DECISION_PAGES + "#next_to_present item 4.2 of 9")

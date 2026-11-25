@@ -194,6 +194,13 @@ ITEM_LABEL = re.compile(
 APPROVAL_WALK_SUB_STEP_ASKING_FOR_NO_DECISION_CLOSING_LINE_WORDS_WITHOUT_LINK = "No decision here; type N or next to continue."
 SUB_STEP_NO_DECISION_CLOSING_LINE = re.compile(
     rf"^\s*(?:\[{re.escape(APPROVAL_WALK_SUB_STEP_ASKING_FOR_NO_DECISION_CLOSING_LINE_WORDS_WITHOUT_LINK)}\]\((\S+)\)|{re.escape(APPROVAL_WALK_SUB_STEP_ASKING_FOR_NO_DECISION_CLOSING_LINE_WORDS_WITHOUT_LINK)})\s*$")
+# A sub-step's text may end with the no-decision sentence after other words in the same paragraph; a reply's closing
+# line may not, so SUB_STEP_NO_DECISION_CLOSING_LINE stays the reader of replies.
+SUB_STEP_TEXT_ENDING_WITH_NO_DECISION_SENTENCE = re.compile(
+    rf"(?:^|\s)(?:\[{re.escape(APPROVAL_WALK_SUB_STEP_ASKING_FOR_NO_DECISION_CLOSING_LINE_WORDS_WITHOUT_LINK)}\]\(\S+\)|{re.escape(APPROVAL_WALK_SUB_STEP_ASKING_FOR_NO_DECISION_CLOSING_LINE_WORDS_WITHOUT_LINK)})\s*$")
+# CommonMark's open tag, as the Markdown parser reads one; no `<!--` in it opens a comment.
+HTML_OPEN_TAG = re.compile(r"""<[A-Za-z][A-Za-z0-9-]*(?:\s+[A-Za-z_:][A-Za-z0-9:._-]*"""
+                           r"""(?:\s*=\s*(?:[^"'=<>`\x00-\x20]+|'[^']*'|"[^"]*"))?)*\s*/?>""")
 CLOSING_LINE_LABEL = re.compile(rf"Items?\s+({NUMBER_LIST})\s+of\s+(\d+)(?:,\s.*)?", re.S)
 # Only right after the count, as in `(revised)` or `, revised:`, so a title that uses the word drops nothing.
 REVISED = re.compile(r"^[*_\s(,:;.\-\u2013\u2014]*revised\b", re.I)
@@ -279,6 +286,11 @@ def approval_walk_item_last_recommendation_text_from_item_lines(lines):
     found = [match[1].strip(" *_") for match in RECOMMENDATION.finditer("\n".join(lines))]
     found = [text[:-1].rstrip(" *_") if text.endswith(".") else text for text in found]
     return found[-1] if found and found[-1] else None
+
+
+def comment_openings_in_tags_escaped(text):
+    """Return text with each `<!--` inside an HTML open tag, such as `<div title="<!--">`, written as `&lt;!--`."""
+    return HTML_OPEN_TAG.sub(lambda tag: tag[0].replace("<!--", "&lt;!--"), text)
 
 
 def without_html_comments(lines):
@@ -490,8 +502,10 @@ def approval_walk_waiting_sub_step_numbers_whose_text_ends_with_no_decision_clos
         unit = next(unit for unit in waiting_units if number in unit[0])
         shown = approval_walk_item_text_as_shown_to_user(text, parser, all_units, unit, number)
         lines = [line for line in prose_lines(shown, parser) if line.strip()]
-        if (approval_walk_sub_step_no_decision_closing_line_page_link_or_none(lines[-1]) is not None
-                and approval_walk_item_last_recommendation_text_from_item_lines(lines) is None):
+        tag_comments_kept = prose_lines(comment_openings_in_tags_escaped(shown), parser)
+        if (SUB_STEP_TEXT_ENDING_WITH_NO_DECISION_SENTENCE.search(lines[-1])
+                and approval_walk_item_last_recommendation_text_from_item_lines(lines) is None
+                and approval_walk_item_last_recommendation_text_from_item_lines(tag_comments_kept) is None):
             found.add(number)
     return found
 
