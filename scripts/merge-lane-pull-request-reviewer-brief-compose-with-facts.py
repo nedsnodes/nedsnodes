@@ -210,8 +210,7 @@ def follow_up_request_blocks_text(description, review_tools_worktree, gh_token):
     for followed_up in sorted({int(number) for number in FOLLOW_UP_REQUEST_PULL_REQUEST_NUMBER.findall(description)}):
         program = f"`scripts/{FOLLOW_UP_REQUEST_PROGRAM_FILE_NAME} {followed_up} " \
                   "print-follow-up-request-block-from-merge-lane-2-reviews`"
-        fact = (f"- merge-lane-2's follow-up request for pull request #{followed_up}, which the description "
-                f"names, as {program} prints it from merge-lane-2's reviews")
+        fact = f"- merge-lane-2's follow-up request for pull request #{followed_up}, which the description names"
         try:
             block = run([sys.executable, str(review_tools_worktree / "scripts" / FOLLOW_UP_REQUEST_PROGRAM_FILE_NAME),
                          str(followed_up), "print-follow-up-request-block-from-merge-lane-2-reviews"], gh_token,
@@ -219,13 +218,13 @@ def follow_up_request_blocks_text(description, review_tools_worktree, gh_token):
         except Refused as refusal:
             # A refused block is one merge-lane-2 writes by hand, so the brief is still composed, with the refusal
             # in the block's place.
-            texts.append(f"- merge-lane-2's follow-up request for pull request #{followed_up}, which the "
-                         f"description names: {program} refused to print it from merge-lane-2's reviews, "
-                         "saying:\n\n" + quoted(str(refusal)) + "\n")
+            texts.append(f"{fact}: {program} refused to print it from merge-lane-2's reviews, saying:\n\n"
+                         + quoted(str(refusal)) + "\n")
             continue
-        texts.append(fact + (":\n\n" + quoted(block) + "\n" if block else
-                             ": it printed no finding, so merge-lane-2's reviews of that pull request hold no "
-                             "non-blocking finding."))
+        texts.append(f"{fact}, as {program} prints it from merge-lane-2's reviews"
+                     + (":\n\n" + quoted(block) + "\n" if block else
+                        ": it printed no finding, so merge-lane-2's reviews of that pull request hold no "
+                        "non-blocking finding."))
     return texts
 
 
