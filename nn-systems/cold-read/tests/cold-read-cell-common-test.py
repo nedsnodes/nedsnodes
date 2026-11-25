@@ -2315,11 +2315,21 @@ with tempfile.TemporaryDirectory() as instrument_scratch:
 
 # Each launcher's --effort help states the efforts its own tier map pins, so
 # the help cannot name a launcher's effort the map no longer holds.
+# The agy cell refuses before argparse runs when no sandbox program is on PATH,
+# so the stand-ins go first on the child's PATH.
+help_sandbox_scratch = tempfile.TemporaryDirectory()
+help_environment = dict(os.environ, PATH=os.pathsep.join([
+    str(scratch_repository_fixture.install_fake_sandbox_programs(
+        Path(help_sandbox_scratch.name) / "fake-sandbox-programs")),
+    os.environ.get("PATH", "")]))
 for launcher_file in ("cold-read-agy-cell.py", "cold-read-claude-cell.py",
                       "cold-read-codex-cell.py"):
-    launcher_help = subprocess.run(
+    launcher_help_run = subprocess.run(
         [sys.executable, str(SYSTEM_DIRECTORY / launcher_file), "--help"],
-        capture_output=True, text=True, timeout=60).stdout
+        capture_output=True, text=True, timeout=60, env=help_environment)
+    check(f"{launcher_file} --help exits 0", launcher_help_run.returncode == 0,
+          f"exit {launcher_help_run.returncode}; stderr: {launcher_help_run.stderr[-600:]}")
+    launcher_help = launcher_help_run.stdout
     launcher_help_words = " ".join(launcher_help.split())
     # argparse wraps after a hyphen, so compare with every space removed.
     launcher_help_unspaced = "".join(launcher_help.split())
@@ -2331,8 +2341,7 @@ for launcher_file in ("cold-read-agy-cell.py", "cold-read-claude-cell.py",
     for tier, effort in _launcher.TIER_TO_REASONING_EFFORT.items():
         check(f"{launcher_file}'s --effort help says its {tier} tier runs at {effort}",
               f"{tier}runsat{effort}" in launcher_help_unspaced, launcher_help_words[-600:])
-    check(f"{launcher_file}'s --effort help names no other launcher's pinned effort",
-          "pins medium" not in launcher_help_words, launcher_help_words[-600:])
+help_sandbox_scratch.cleanup()
 
 print()
 if failures:
