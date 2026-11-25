@@ -1083,6 +1083,82 @@ def test_the_waiting_item_read_step_searches_an_item_under_a_shared_heading_by_i
           described(result))
 
 
+def test_an_items_title_is_the_same_from_every_form_of_its_heading_or_opening():
+    program = load_program()
+    finder = program.load_walk_finder()
+    for line in (" ## Item 3 of 9: the first", "- **Item 3 of 9**: the first", "**Item 3 of 9: the first** More detail.",
+                 "## Item 3 of 9 (revised): the first", "> ## Item 3 of 9 revised: the first",
+                 "**Item 3 of 9 (revised):** the first", "**Item 3 of 9 revised:** the first",
+                 "**Item 3 of 9**: (revised) the first"):
+        title = program.item_title(finder, line)
+        check(f"`{line}` gives its item the title `the first`", title == "the first", repr(title))
+    kept = program.item_title(finder, "**Item 3 of 9 revised:** New text.", with_text_after_title=True)
+    check("a bold opening closing after its `revised` label keeps its text after the title with no stray delimiter",
+          kept == "New text.", repr(kept))
+    kept = program.item_title(finder, "**Item 3 of 9 (revised):** Revised estimates are due Friday.",
+                              with_text_after_title=True)
+    check("a bold opening's `revised` label is taken off once, so a text opening with the word Revised keeps it",
+          kept == "Revised estimates are due Friday.", repr(kept))
+    earlier = program.heading_body(finder, "**Item 3 of 9 (revised):** estimates are due Friday.")
+    later = program.heading_body(finder, "**Item 3 of 9 (revised):** Revised estimates are due Friday.")
+    check("two versions of a bold-paragraph item differing only by an opening word Revised are different texts, so "
+          "the earlier one is kept as a withdrawn version", earlier != later, repr((earlier, later)))
+    earlier = program.heading_body(finder, "**Item 3 of 9:** estimates are due Friday.")
+    later = program.heading_body(finder, "**Item 3 of 9:** Revised estimates are due Friday.")
+    check("after a closed bold count, an opening word Revised is the item's text, not a `revised` label, so the "
+          "earlier version is kept as a withdrawn version", earlier != later, repr((earlier, later)))
+    for line, title in (("**Item 3 of 9:** Revised estimates", "Revised estimates"),
+                        ("**Item 3 of 9: Revised** More detail.", "Revised"),
+                        ("**Item 3 of 9: Revised estimates** More.", "Revised estimates"),
+                        ("## Item 3 of 9: Revised estimates", "Revised estimates"),
+                        ("**Item 3 of 9**: revised: the first", "the first"),
+                        ("## Item 3 of 9 revised: the first", "the first")):
+        found = program.item_title(finder, line)
+        check(f"`{line}` gives its item the title `{title}`: only `(revised)` and `revised:` are a label",
+              found == title, repr(found))
+
+
+def test_the_waiting_item_read_step_searches_a_bold_list_opening_by_its_title_alone():
+    document = ("# A walk\n\n## Items 3 and 4 of 9: two openings\n\n- **Item 3 of 9**: the first\n\n"
+                "The tests are still running.\n#case_against weak: the page grows.\n\nRecommendation: change it.\n\n"
+                "**Item 4 of 9: the second** More detail.\n\nThe page ends.\n#case_against weak: it is short.\n\n"
+                "Recommendation: keep it.\n")
+    case = Case(document=document)
+    session_dialog_with_its_transcript_write(case.log_store, "s11", ["Item 3 of 9: the first", "First answer."])
+    result = case.run(WAITING_ITEM_READ_STEP_NAME)
+    check("an item opening as a bold list line is searched by its title, not by the whole line",
+          result.returncode == 0 and "First answer." in result.stdout, described(result))
+
+
+def test_the_waiting_item_read_step_searches_a_revised_linked_title_without_its_label_or_escapes():
+    case = Case(document=marks_document("The tests are still running.\n").replace(
+        "## Item 3 of 9: the opening sentence",
+        "## Item 3 of 9 (revised): Keep [the opening](https://example.com/o) sentence *short* & plain"))
+    session_dialog_with_its_transcript_write(case.log_store, "s12", [
+        "Keep the opening sentence *short* & plain", "Shorter still."])
+    result = case.run(WAITING_ITEM_READ_STEP_NAME)
+    check("a revised linked title is searched with its links dropped and its `revised` label, emphasis and `&` as "
+          "an earlier message writes them", result.returncode == 0 and "Shorter still." in result.stdout,
+          described(result))
+
+
+def test_title_search_groups_with_the_same_numbers_are_searched_once():
+    program = load_program()
+    finder = program.load_walk_finder()
+    parser = finder.markdown_parser()
+    root = SUITE_ROOT / "title-groups-merged"
+    root.mkdir(parents=True)
+    document = root / f"{WALK_NAME}.md"
+    document.write_text("# A walk\n\n## Items 3 and 4 of 9: two openings\n\n**Item 3 of 9: the first**\n\n"
+                        "The tests are still running.\n#case_against weak: the page grows.\n\n"
+                        "Recommendation: change it.\n\n**Item 4 of 9: the second**\n\nThe page ends.\n"
+                        "#case_against weak: it is short.\n\nRecommendation: keep it.\n")
+    groups = program.approval_walk_item_title_search_groups(finder, document, "item 3 of 9", ["3"], 9, parser, [])
+    check("the shared heading's title and the one waiting item's own opening title are one search, so no reply prints twice",
+          [numbers for _, numbers in groups] == [["3"]] and "two openings" in groups[0][0]
+          and "the first" in groups[0][0], repr(groups))
+
+
 def test_the_waiting_item_read_step_searches_a_title_that_opens_with_a_dash():
     case = Case(document=marks_document("The tests are still running.\n").replace(
         "## Item 3 of 9: the opening sentence", "## Item 3 of 9: --feature"))
@@ -6073,6 +6149,20 @@ def rewritten_item_3(case, recommendation):
     document.write_text(re.sub(r"(## Item 3 of 5: three\n\n#case_against weak\.\n\n\nRecommendation: )[^\n]*",
                                lambda live: live[1] + recommendation, text, count=1))
     return document
+
+
+def test_the_read_step_keeps_the_earlier_read_text_of_an_item_with_an_indented_heading():
+    case = item_read_case()
+    answered_and_closed(case)
+    document = case.checkout / "docs" / "walk" / f"{WALK_NAME}.md"
+    document.write_text(document.read_text().replace(ITEM_3_HEADING, " " + ITEM_3_HEADING, 1))
+    case.run(WAITING_ITEM_READ)
+    rewritten_item_3(case, "drop it.")
+    result = case.run(WAITING_ITEM_READ)
+    check("an item whose heading is indented keeps the text its earlier read read as Withdrawn version 1",
+          result.returncode == 0
+          and ("Recommendation: drop it.\n\n#### Withdrawn version 1 of item 3\n\n" + ITEM_3_BODY.format("leave it."))
+          in document.read_text(), described(result) + document.read_text())
 
 
 def kept_line(case, document, version):
