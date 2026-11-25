@@ -10,6 +10,7 @@ Run: python3 scripts/run-all-test-suites-machine-wide-test-suite-admission-test.
 import contextlib
 import fcntl
 import importlib.util
+import inspect
 import io
 import json
 import os
@@ -139,6 +140,29 @@ with tempfile.TemporaryDirectory() as scratch_name:
             check(f"the run says what its suite waits for at {label}",
                   said and ("CPU" in said[0] if cpu >= runner.TEST_SUITE_ADMISSION_CPU_PERCENT_BELOW
                               else "memory" in said[0]), said)
+
+    # --- A merge-lane after-merge test run skips the CPU rule alone ----------------
+    for cpu, available, admitted_expected, label in (
+            (100.0, 40 * GB, True, "CPU at 100%"),
+            (100.0, 10 * GB, False, "CPU at 100% and available memory at 10 GB"),
+            (10.0, 2 * GB, False, "available memory below 10 GB")):
+        directory = scratch / f"merge-lane-after-merge-{cpu}-{available}"
+        readings = Readings(cpu, available)
+        said = []
+        clock = Clock()
+        admission = runner.MachineWideTestSuiteAdmission(
+            directory, readings, said.append, clock=clock.clock, sleep=clock.sleep,
+            machine_clock=clock.clock, cpu_rule_skipped=True)
+
+        def give_room(readings=readings):
+            readings.cpu, readings.available = 10.0, 40 * GB
+
+        clock.on_sleep = give_room
+        with admission.admitted("a-test.py") as waited:
+            pass
+        check(f"for a merge-lane after-merge test run, admission "
+              f"{'starts' if admitted_expected else 'holds back'} a suite at {label}",
+              (waited == 0) == admitted_expected, (waited, said))
 
     # --- The thresholds, read through the machine readings from a stubbed psutil -----
     class PsutilReadingCpuAndMemory:
@@ -487,7 +511,8 @@ with tempfile.TemporaryDirectory() as scratch_name:
 
     # --- Start times on a clock every run shares, which never steps back -----------
     check("start times are read on the monotonic clock, which every process on Linux shares",
-          runner.MachineWideTestSuiteAdmission.__init__.__defaults__[-1] is time.monotonic)
+          inspect.signature(runner.MachineWideTestSuiteAdmission).parameters["machine_clock"].default
+          is time.monotonic)
     directory = scratch / "clock-stepped-back"
     admission, clock = admission_in(directory, Readings())
     directory.mkdir(exist_ok=True)
@@ -752,6 +777,26 @@ with tempfile.TemporaryDirectory() as scratch_name:
           runner.TEST_SUITE_CGROUP_SLICE.endswith(".slice")
           and "-" not in runner.TEST_SUITE_CGROUP_SLICE
           and 0 < runner.TEST_SUITE_CGROUP_SLICE_CPU_WEIGHT < 100, runner.TEST_SUITE_CGROUP_SLICE)
+
+    ran = []
+    merge_lane_slice = runner.TEST_SUITE_CGROUP_SLICE_OF_MERGE_LANE_AFTER_MERGE_TEST_RUNS
+    why = runner.why_test_suites_cannot_run_in_cgroup_scopes_on_this_machine_or_none(
+        which=lambda name: f"/usr/bin/{name}",
+        runner=lambda command, *a, **k: ran.append(list(command)) or Succeeded(),
+        cgroup_slice=merge_lane_slice,
+        cpu_weight=runner.TEST_SUITE_CGROUP_SLICE_OF_MERGE_LANE_AFTER_MERGE_TEST_RUNS_CPU_WEIGHT)
+    check("for a merge-lane after-merge test run, the check sets the CPU weight of that run's "
+          "slice, and starts its trial scope there",
+          why is None and len(ran) == 2
+          and ran[0] == ["systemctl", "--user", "set-property", "--runtime", merge_lane_slice,
+                         "CPUWeight=100"]
+          and f"--slice={merge_lane_slice}" in ran[1], (why, ran))
+    check("the merge-lane after-merge test runs' slice also sits directly under the user's "
+          "systemd, at a CPU weight above the other suites' slice",
+          merge_lane_slice.endswith(".slice") and "-" not in merge_lane_slice
+          and merge_lane_slice != runner.TEST_SUITE_CGROUP_SLICE
+          and runner.TEST_SUITE_CGROUP_SLICE_OF_MERGE_LANE_AFTER_MERGE_TEST_RUNS_CPU_WEIGHT
+          > runner.TEST_SUITE_CGROUP_SLICE_CPU_WEIGHT, merge_lane_slice)
 
     check("the cgroup counters give the suite's CPU seconds and peak memory",
           runner.cpu_seconds_and_peak_memory_from_suite_cgroup_statistics(
@@ -1096,9 +1141,11 @@ with tempfile.TemporaryDirectory() as scratch_name:
     # --- A suite with a process killed at its memory ceiling fails, whatever it exits ---
     # A stand-in for the cgroup scope: it runs the suite, then writes the counters a scope
     # with one process killed at its ceiling gives.
-    def scope_that_killed_one_process(statistics_descriptor, in_bwrap, memory_ceiling_bytes):
+    def scope_that_killed_one_process(statistics_descriptor, in_bwrap, memory_ceiling_bytes,
+                                      cgroup_slice):
         ceilings.append(memory_ceiling_bytes)
-        real_scopes.append(real_prefix(statistics_descriptor, in_bwrap, memory_ceiling_bytes))
+        real_scopes.append(real_prefix(statistics_descriptor, in_bwrap, memory_ceiling_bytes,
+                                       cgroup_slice))
         return ("bash", "-c", '"$@"; status=$?; printf "usage_usec 1000000\\nmemory.peak 5\\n'
                 f'oom_kill 1\\n" >&{statistics_descriptor}; exit $status', "scope")
 
@@ -1709,6 +1756,47 @@ with tempfile.TemporaryDirectory() as scratch_name:
               code == runner.EXIT_ALL_PASSED and seconds >= 12
               and runner.RUN_STOPPED_AT_RUN_TIME_LIMIT_NOT_COUNTING_ADMISSION_WAITS_LINE_PREFIX
               not in printed, (code, seconds, printed[-800:]))
+
+        slices_given = []
+
+        def suite_passes_noting_its_slice(*arguments, **options):
+            slices_given.append(options.get("cgroup_slice"))
+            return suite_passes(*arguments, **options)
+
+        slice_weights_set = []
+
+        def cgroup_scopes_available(cgroup_slice, cpu_weight):
+            slice_weights_set.append((cgroup_slice, cpu_weight))
+            return None
+
+        code, printed, _ = main_given(
+            "merge-lane-after-merge-cpu-busy", run_repository, "--merge-lane-after-merge-test-run-suites-skip-admission-cpu-threshold-and-run-at-higher-cpu-weight",
+            run_one_suite=suite_passes_noting_its_slice,
+            why_test_suites_cannot_run_in_cgroup_scopes_on_this_machine_or_none=cgroup_scopes_available,
+            **{**as_if_bwrap, "TEST_SUITE_ADMISSION_CPU_PERCENT_BELOW": 0,
+               "TEST_SUITE_ADMISSION_WAIT_CEILING_SECONDS": 1})
+        merge_lane_slice = runner.TEST_SUITE_CGROUP_SLICE_OF_MERGE_LANE_AFTER_MERGE_TEST_RUNS
+        check("with --merge-lane-after-merge-test-run-suites-skip-admission-cpu-threshold-and-run-at-higher-cpu-weight, a suite starts while the machine's CPU "
+              "is over admission's threshold, in the merge-lane after-merge test runs' slice at "
+              "its CPU weight, and the run says so",
+              code == runner.EXIT_ALL_PASSED and slices_given == [merge_lane_slice]
+              and slice_weights_set == [(merge_lane_slice, 100)]
+              and "whatever the machine's CPU use, as a merge-lane after-merge test run" in printed
+              and f"in {merge_lane_slice} at CPU weight 100" in printed, (code, slices_given, printed[-800:]))
+
+        slices_given.clear()
+        slice_weights_set.clear()
+        code, printed, _ = main_given(
+            "no-merge-lane-flag-cpu-free", run_repository,
+            run_one_suite=suite_passes_noting_its_slice,
+            why_test_suites_cannot_run_in_cgroup_scopes_on_this_machine_or_none=cgroup_scopes_available,
+            **as_if_bwrap)
+        check("without --merge-lane-after-merge-test-run-suites-skip-admission-cpu-threshold-and-run-at-higher-cpu-weight, a suite runs in the suites' slice at its "
+              "CPU weight",
+              code == runner.EXIT_ALL_PASSED and slices_given == [runner.TEST_SUITE_CGROUP_SLICE]
+              and slice_weights_set == [(runner.TEST_SUITE_CGROUP_SLICE,
+                                         runner.TEST_SUITE_CGROUP_SLICE_CPU_WEIGHT)],
+              (code, slices_given, slice_weights_set, printed[-800:]))
 
         def suite_passes_after_two_seconds(*arguments, **options):
             time.sleep(2)

@@ -31,7 +31,9 @@ Then main is tested where the merge changed it: the program fetches the merge
 commit alone from origin into --review-tools-worktree-at-main, which updates no
 remote-tracking branch, makes a detached worktree pr<n>-merge-commit-on-main-worktree
 at the merge commit GitHub reports, and runs that worktree's own
-scripts/run-all-test-suites.py with --only-suites-whose-recorded-inputs-changed-since
+scripts/run-all-test-suites.py with --merge-lane-after-merge-test-run-suites-skip-admission-cpu-threshold-and-run-at-higher-cpu-weight, which
+gives its suites CPU priority over other test runs' suites, when that runner
+takes it, and with --only-suites-whose-recorded-inputs-changed-since
 once for each commit it compares with, so only the suites whose recorded inputs
 changed since a tested tree run: a suite runs only when the comparison with every
 such commit selects it, except that the runner judges a suite the head test run
@@ -1161,6 +1163,19 @@ def after_merge_test_run_by_hand_command(since, merge_commit_text):
             f"since={commit}; else since={since}; fi; {run} \"$since\"")
 
 
+def merge_lane_after_merge_test_run_flag_arguments_or_empty_if_merge_commit_run_all_test_suites_lacks_the_flag(runner_path):
+    """The runner's flag that gives an after-merge test run CPU priority, or nothing when the
+    runner predates it.
+
+    A merge into a base branch other than main can carry a runner older than the flag, which
+    would refuse it. A runner that cannot be read gets nothing, and its run reports why."""
+    flag = "--merge-lane-after-merge-test-run-suites-skip-admission-cpu-threshold-and-run-at-higher-cpu-weight"
+    try:
+        return (flag,) if flag in runner_path.read_text(encoding="utf-8", errors="replace") else ()
+    except OSError:
+        return ()
+
+
 def after_merge_test_run(arguments, merge_commit, base_branch):
     """Run the selective test run in a fresh worktree at merge_commit, the merge into base_branch;
     return an exit code."""
@@ -1278,10 +1293,12 @@ def after_merge_test_run(arguments, merge_commit, base_branch):
           f"{merge_commit[:12]}: the suites whose recorded "
           f"inputs changed since {' and since '.join(commit[:12] for commit in compared_with)}",
           flush=True)
+    runner_at_the_merge_commit = worktree / "scripts" / "run-all-test-suites.py"
     run_all = subprocess.run(
-        [sys.executable, str(worktree / "scripts" / "run-all-test-suites.py"),
+        [sys.executable, str(runner_at_the_merge_commit),
          *[argument for commit in compared_with
            for argument in ("--only-suites-whose-recorded-inputs-changed-since", commit)],
+         *merge_lane_after_merge_test_run_flag_arguments_or_empty_if_merge_commit_run_all_test_suites_lacks_the_flag(runner_at_the_merge_commit),
          "--log-dir", str(log_dir)],
         cwd=worktree, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True,
         env=environment, stdin=subprocess.DEVNULL)
