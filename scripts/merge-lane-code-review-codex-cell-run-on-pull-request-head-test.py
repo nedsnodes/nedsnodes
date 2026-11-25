@@ -14,6 +14,7 @@ Run: python3 scripts/merge-lane-code-review-codex-cell-run-on-pull-request-head-
 import importlib.util
 import json
 import os
+import shlex
 import shutil
 import subprocess
 import sys
@@ -211,11 +212,27 @@ def main():
               and json.loads(record.read_text())["head_commit"] == head
               and f"held commit {head} when the review started and now holds commit {moved_to}" in completed.stdout,
               f"exit {completed.returncode}\n{completed.stdout}{completed.stderr}")
+        rerun_lines = [line for line in completed.stdout.splitlines() if line.startswith("2. Then review again: ")]
+        rerun = shlex.split(rerun_lines[0].removeprefix("2. Then review again: ")) if rerun_lines else []
+        check("that run prints the rebuild command for the commit it was to review, and a rerun command with "
+              "the same base and directories that names that commit as --expected-head-commit",
+              f"merge-lane-pull-request-head-and-merged-worktrees-rebuild.py 7 {head} " in completed.stdout
+              and rerun[1:3] == ["7", BASE]
+              and rerun[rerun.index("--expected-head-commit") + 1] == head
+              and rerun[rerun.index("--merge-lane-review-worktrees-directory") + 1]
+              == str(review_worktrees_directory(helpers)),
+              completed.stdout)
         head = moved_to
 
+        enclosing = {k: v for k, v in os.environ.items() if k != "GIT_DIR"}
+        subprocess.run(["git", "init", "-q", str(scratch)], check=True, env=enclosing)
+        subprocess.run(["git", "-C", str(scratch), "-c", "user.name=t", "-c", "user.email=t@example.invalid",
+                        "commit", "-q", "--allow-empty", "-m", "enclosing checkout"], check=True, env=enclosing)
         completed, _, cell_calls = run_program(scratch, helpers, {"MERGE_LANE_CODEX_TEST_CELL_BREAKS_HEAD": "1"})
         (head_worktree / ".git-away").rename(head_worktree / ".git")
-        check("a run whose pr<n>-head commit cannot be read after the review exits 2 and records exit code 2",
+        shutil.rmtree(scratch / ".git")
+        check("a run whose pr<n>-head loses its .git during the review, inside another checkout, reads no "
+              "commit from that checkout: it exits 2 and records exit code 2",
               completed.returncode == 2 and len(cell_calls) == 1
               and json.loads(record.read_text())["exit_code"] == 2
               and "has a head commit that could not be read" in completed.stdout,

@@ -50,6 +50,7 @@ import argparse
 import importlib.util
 import json
 import os
+import shlex
 import subprocess
 import sys
 from pathlib import Path
@@ -111,12 +112,32 @@ def main(argv=None):
     if head_after.returncode != 0 or head_after.stdout.strip() != head.stdout.strip():
         now_holds = (f"holds commit {head_after.stdout.strip()}" if head_after.returncode == 0
                      else f"has a head commit that could not be read: {head_after.stderr.strip()}")
+        directory_options = [
+            "--merge-lane-worktrees-and-outputs-directory", str(arguments.merge_lane_worktrees_and_outputs_directory),
+            "--merge-lane-review-worktrees-directory", str(arguments.merge_lane_review_worktrees_directory),
+            "--review-tools-worktree-at-main", str(arguments.review_tools_worktree_at_main)]
+        commit_to_review = arguments.expected_head_commit or head.stdout.strip()
+        # The review tools worktree is checked out at the main commit the merged worktree was built on.
+        main_commit = subprocess.run(
+            ["git", "-C", str(arguments.review_tools_worktree_at_main), "rev-parse", "--verify", "HEAD^{commit}"],
+            capture_output=True, text=True, env=environment, stdin=subprocess.DEVNULL).stdout.strip()
+        rebuild = shlex.join([str(Path(__file__).resolve().with_name(
+            "merge-lane-pull-request-head-and-merged-worktrees-rebuild.py")), str(number), commit_to_review,
+            main_commit or "MAIN_COMMIT_FROM_git_rev-parse_origin/main", *directory_options])
+        rerun = shlex.join([str(Path(__file__).resolve()), str(number),
+                            base, "--expected-head-commit", commit_to_review, *directory_options])
         print(f"PR {number}: the Codex review exited {exit_code}, but "
               f"{common.pull_request_head_worktree(arguments, number)} held commit {head.stdout.strip()} "
               f"when the review started and now {now_holds}, so the review may not be of "
               f"{head.stdout.strip()}. The run is recorded as failed, with exit code 2.\n"
-              f"Another run rebuilt the pull request's worktrees during the review: when it has finished, "
-              f"rebuild them at the commit to review, then run this again.")
+              f"Something changed pr{number}-head during the review, such as another run of "
+              f"merge-lane-pull-request-head-and-merged-worktrees-rebuild.py. To review {commit_to_review}:\n"
+              f"1. Rebuild the worktrees: {rebuild}\n"
+              f"   If it fails, do what it prints.\n"
+              f"2. Then review again: {rerun}\n"
+              f"If `gh pr view {number} --json headRefOid` shows a newer head commit, use that commit in place of "
+              f"{commit_to_review} in both commands.\n"
+              f"If the review fails this way a second time, do not retry: send both messages to merge-lane-2.")
         exit_code = 2
     temporary = record.with_name(f"{record.name}.{os.getpid()}.tmp")
     try:
@@ -135,8 +156,10 @@ def main(argv=None):
 
 
 def pull_request_head_commit(arguments, environment):
+    # -C would search upward, so a worktree that lost its .git inside another checkout would read that HEAD.
+    worktree = common.pull_request_head_worktree(arguments, arguments.pull_request)
     return subprocess.run(
-        ["git", "-C", str(common.pull_request_head_worktree(arguments, arguments.pull_request)), "rev-parse",
+        ["git", f"--git-dir={worktree / '.git'}", f"--work-tree={worktree}", "rev-parse",
          "--verify", "HEAD^{commit}"],
         capture_output=True, text=True, env=environment, stdin=subprocess.DEVNULL)
 
