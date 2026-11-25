@@ -382,6 +382,9 @@ def load_module(name, path):
 
 walk_finder = load_module("walk_me_through_approval_walk_minutes_and_walk_document_item_finder_common",
                           WALK_FINDER_FILE)
+# The list and quotation marks that open a Markdown source line; at least one, so a line opening with only spacing
+# keeps it.
+LINE_MARKS = re.compile(rf"^\s*{walk_finder.MARKDOWN_LINE_OPENING_LIST_OR_QUOTATION_MARK_PATTERN_TEXT}+")
 # An item's own heading as the agent shows it, normalized: `Item N of M: <the point>` with one item, whatever M gives.
 ITEM_OWN_HEADING = re.compile(rf"item ({walk_finder.NUMBER}) of \d+(?::|$)")
 current_item_hook = load_module("walk_me_through_agent_reply_to_user_not_ending_with_waiting_item_closing_line_refusal_stop_hook",
@@ -396,7 +399,7 @@ command_line_prefix = load_module("claude_code_headless_run_command_line_prefix_
 def normalized(line):
     """The line with link targets, list, quotation and heading marks, a hashtag marker opening it, emphasis,
     spacing and case dropped."""
-    line = HASHTAG_MARKER.sub("", answer_hook.LINE_MARKS.sub("", LINK.sub(r"\1", line)))
+    line = HASHTAG_MARKER.sub("", LINE_MARKS.sub("", LINK.sub(r"\1", line)))
     return EMPHASIS_AND_SPACING.sub(" ", line).strip().lower()
 
 
@@ -419,7 +422,7 @@ def normalized_lines(lines):
 def answer_sentence(line):
     """The walk-me-through skill's answer line at the start of line, without a list or quotation mark before it, and
     without what an item adds after it on the same line, such as the ` D: <the alternative>` some walk-documents add."""
-    return SENTENCE_END.split(answer_hook.LINE_MARKS.sub("", line.strip()))[0]
+    return SENTENCE_END.split(LINE_MARKS.sub("", line.strip()))[0]
 
 
 def turn_assistant_texts(records):
