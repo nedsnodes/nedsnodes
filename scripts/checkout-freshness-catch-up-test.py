@@ -620,23 +620,55 @@ with tempfile.TemporaryDirectory() as temporary_directory:
           and not stamp_of(pinned).get("pending_agent_notes"),
           agent_text(result) + display_text(result) + str(stamp_of(pinned)))
 
-    tracked = detached_worktree_behind_main("detached-tracked-change-worktree")
-    tracked_head = head_of(tracked)
-    (tracked / "shared.txt").write_text("edited here\n", encoding="utf-8")
-    result = run_catch_up(["--cwd", str(tracked)])
-    check("a detached HEAD with an uncommitted tracked change is not moved",
-          head_of(tracked) == tracked_head, agent_text(result))
-    check("and message B names the change and gives the work-of-its-own line alone",
-          "This checkout's detached HEAD was not moved forward: 1 uncommitted tracked "
-          f"change(s).\n{detached_not_moved_second_line}\n{detached_work_line}\n"
-          f"{NOT_FOR_THE_USER_LINE}" in agent_text(result), agent_text(result))
-    result = run_catch_up(["--cwd", str(tracked)])
+    # Main's last commit changes only scripts/detached-advance.py, so git keeps an
+    # uncommitted change to shared.txt, staged or not, across the move.
+    for staged in (False, True):
+        kept = detached_worktree_behind_main(f"detached-kept-change-staged-{staged}-worktree")
+        (kept / "shared.txt").write_text("edited here\n", encoding="utf-8")
+        if staged:
+            git(["add", "shared.txt"], kept)
+        result = run_catch_up(["--cwd", str(kept)])
+        check(f"a detached HEAD with an uncommitted change (staged: {staged}) to a file main "
+              "does not change is moved forward, and the change is kept as it was",
+              head_of(kept) == main_tip()
+              and (kept / "shared.txt").read_text(encoding="utf-8") == "edited here\n"
+              and (kept / "scripts/detached-advance.py").exists()
+              and git(["diff", "--cached" if staged else "HEAD", "--name-only"],
+                      kept).stdout.split() == ["shared.txt"],
+              agent_text(result))
+        check(f"and (staged: {staged}) neither the agent nor the user is told of a block",
+              "not moved forward" not in agent_text(result) and display_text(result) == "",
+              agent_text(result) + display_text(result))
+
+    commit_file(origin, "shared.txt", "main's edit\n", "main changes a file a detached checkout edits")
+    blocked = detached_worktree_behind_main("detached-blocking-change-worktree")
+    blocked_head = head_of(blocked)
+    (blocked / "shared.txt").write_text("edited here\n", encoding="utf-8")
+    result = run_catch_up(["--cwd", str(blocked)])
+    check("a detached HEAD with an uncommitted change to a file main changes is not moved, "
+          "and the change is kept",
+          head_of(blocked) == blocked_head
+          and (blocked / "shared.txt").read_text(encoding="utf-8") == "edited here\n",
+          agent_text(result))
+    check("and message B names the file that blocks the move and says what to do",
+          "This checkout's detached HEAD was not moved forward: main changes files that hold "
+          "uncommitted changes here.\n"
+          f"{detached_not_moved_second_line}\n"
+          "Main changes these files too, so git cannot keep your uncommitted changes to them "
+          "across the move: shared.txt\n"
+          "This checkout is an agent-home, so git refuses commits in it: carry those changes to "
+          "a worktree of your own on an nn-topic-branch, as the refusal of `git commit` here "
+          "says how, or undo them if they are throwaway; the next turn's end moves the checkout "
+          f"forward.\n{NOT_FOR_THE_USER_LINE}" in agent_text(result), agent_text(result))
+    check("and the block is not sent to the user", display_text(result) == "",
+          display_text(result))
+    result = run_catch_up(["--cwd", str(blocked)])
     check("message B is not repeated while main has not moved",
           agent_text(result) == "", agent_text(result))
-    git(["checkout", "--", "shared.txt"], tracked)
-    result = run_catch_up(["--cwd", str(tracked)])
+    git(["checkout", "--", "shared.txt"], blocked)
+    result = run_catch_up(["--cwd", str(blocked)])
     check("once the change is gone, the next turn's end moves it forward",
-          head_of(tracked) == main_tip(), agent_text(result))
+          head_of(blocked) == main_tip(), agent_text(result))
     check("and the move drops the queued not-moved note instead of repeating it",
           "was not moved forward" not in agent_text(result), agent_text(result))
 
@@ -654,8 +686,8 @@ with tempfile.TemporaryDirectory() as temporary_directory:
     commit_file(both, "own-work.txt", "own\n", "a commit on a detached HEAD")
     (both / "shared.txt").write_text("edited here\n", encoding="utf-8")
     result = run_catch_up(["--cwd", str(both)])
-    check("with a commit and a change, message B names both and gives the work line once",
-          "not moved forward: 1 commit(s) of its own; 1 uncommitted tracked change(s).\n"
+    check("with a commit and a change, message B names the commit and gives the work line once",
+          "not moved forward: 1 commit(s) of its own.\n"
           in agent_text(result) and agent_text(result).count(detached_work_line) == 1,
           agent_text(result))
 
@@ -764,10 +796,10 @@ with tempfile.TemporaryDirectory() as temporary_directory:
     saved_index = unreadable_index.read_bytes()
     unreadable_index.write_bytes(b"not an index")
     result = run_catch_up(["--cwd", str(unreadable)])
-    check("a detached HEAD whose git status cannot be read is not moved, and git is not asked",
+    check("a detached HEAD whose index git cannot read is not moved, and git's refusal is told",
           head_of(unreadable) == unreadable_head
-          and "not moved forward: git status unreadable.\n" in agent_text(result)
-          and "Git refused the fast-forward" not in agent_text(result), agent_text(result))
+          and "not moved forward: git refused the fast-forward.\n" in agent_text(result)
+          and "Git refused the fast-forward: " in agent_text(result), agent_text(result))
     unreadable_index.write_bytes(saved_index)
 
     sequencing = detached_worktree_behind_main("detached-paused-sequence-worktree")
@@ -2166,6 +2198,8 @@ with tempfile.TemporaryDirectory() as notes_scratch:
     configure_identity(detached)
     mark_as_agent_home(detached)
     (detached / "shared.txt").write_text("dirty\n", encoding="utf-8")
+    # Main changes shared.txt too, so git cannot keep the change across the move.
+    commit_file(origin_repo, "shared.txt", "main's edit\n", "advance shared")
     commit_file(origin_repo, "a.txt", "a\n", "advance a")
     stop_only(detached)
     check("a detached HEAD that is not moved queues its note as a blocked note",

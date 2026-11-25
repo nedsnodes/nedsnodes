@@ -896,20 +896,55 @@ def run_launch_time_git_sync_cases(workspace: Path):
     (home / "notes.txt").unlink()
     home_exclude.write_text("", encoding="utf-8")
 
-    # A tracked change is never disturbed, however far behind the branch is.
+    # An uncommitted change to a file main changes is never disturbed, however far behind the
+    # branch is: the branch stays, and the report names the file and what to do.
     (seed / "README.md").write_text("seed\nfrom main\nfurther\nagain\n", encoding="utf-8")
     git_in(["add", "-A"], seed)
     git_in(["commit", "--quiet", "-m", "main moves a third time"], seed)
     git_in(["push", "--quiet", "origin", "main"], seed)
     (home / "README.md").write_text("an edit of a tracked file\n", encoding="utf-8")
+    home_head = git_in(["rev-parse", "HEAD"], home).stdout.strip()
 
     report = supervisor.launch_time_git_sync(home)
-    check("a tracked change leaves the branch as it is, and the report names it",
-          report.startswith("launch-time-git-sync: agent-branch left as is — 1 uncommitted tracked "
-                            "change(s)"), report)
+    check("an uncommitted change to a file main changes leaves the branch as it is, and the "
+          "report names the file and what to do",
+          report == "launch-time-git-sync: agent-branch left as is — main changes these files, "
+                    "so git cannot keep their uncommitted changes across the move: README.md\n"
+                    "To let the checkout move to main, carry those changes to an "
+                    "nn-topic-branch, or undo them if they are throwaway."
+          and git_in(["rev-parse", "HEAD"], home).stdout.strip() == home_head, report)
     check("the tracked change survives the sync",
           (home / "README.md").read_text(encoding="utf-8") == "an edit of a tracked file\n")
     git_in(["checkout", "--quiet", "--", "README.md"], home)
+
+    # An uncommitted change, staged or not, to a file main does not change is kept as it is,
+    # and the branch moves to main under it.
+    (seed / "kept-unstaged.txt").write_text("main's\n", encoding="utf-8")
+    (seed / "kept-staged.txt").write_text("main's\n", encoding="utf-8")
+    git_in(["add", "-A"], seed)
+    git_in(["commit", "--quiet", "-m", "main adds two files"], seed)
+    git_in(["push", "--quiet", "origin", "main"], seed)
+    report = supervisor.launch_time_git_sync(home)
+    check("(fixture) the clean branch takes main's two new files",
+          " fast-forwarded to main (" in report and (home / "kept-staged.txt").is_file(), report)
+    (seed / "README.md").write_text("seed\nfrom main\nfurther\nagain\nfourth\n", encoding="utf-8")
+    git_in(["commit", "--quiet", "-am", "main changes only README.md"], seed)
+    git_in(["push", "--quiet", "origin", "main"], seed)
+    (home / "kept-unstaged.txt").write_text("changed, not staged\n", encoding="utf-8")
+    (home / "kept-staged.txt").write_text("changed and staged\n", encoding="utf-8")
+    git_in(["add", "kept-staged.txt"], home)
+
+    report = supervisor.launch_time_git_sync(home)
+    check("uncommitted changes, staged and not, to files main does not change are kept, and the "
+          "branch is fast-forwarded",
+          " fast-forwarded to main (" in report
+          and git_in(["rev-parse", "HEAD"], home).stdout.strip()
+          == git_in(["rev-parse", "HEAD"], seed).stdout.strip()
+          and (home / "kept-unstaged.txt").read_text(encoding="utf-8") == "changed, not staged\n"
+          and git_in(["diff", "--cached", "--name-only"], home).stdout.split()
+          == ["kept-staged.txt"]
+          and getattr(report, "uncommitted_tracked_changes", None) == 2, report)
+    git_in(["reset", "--quiet", "--hard", "HEAD"], home)
 
     # An operation in progress leaves the checkout as it is, and is named.
     home_git_dir = Path(subprocess.run(["git", "rev-parse", "--absolute-git-dir"], cwd=home,
@@ -921,14 +956,16 @@ def run_launch_time_git_sync_cases(workspace: Path):
           report)
     (home_git_dir / "BISECT_LOG").unlink()
 
-    # A tree whose status git cannot read is never fast-forwarded: nothing inspected it.
+    # A checkout at main whose status git cannot read: the report cannot say it holds no
+    # uncommitted change, so the supervisor does not take its code for main's.
     home_index = home_git_dir / "index"
     saved_index = home_index.read_bytes()
     home_index.write_bytes(b"not an index")
     report = supervisor.launch_time_git_sync(home)
-    check("an unreadable git status leaves the checkout as it is, and the report says so",
-          report.startswith("launch-time-git-sync: agent-branch left as is — git status unreadable"),
-          report)
+    check("a checkout at main with an unreadable git status reports that its uncommitted "
+          "changes could not be counted",
+          "current with main" in report
+          and getattr(report, "uncommitted_tracked_changes", 0) is None, report)
     home_index.write_bytes(saved_index)
 
     # A git directory git cannot read is reported, never raised: the supervisor
@@ -1300,7 +1337,7 @@ def run_launch_time_git_sync_git_failure_cases(root: Path, remote: Path, seed: P
             ("rev-parse --verify --quiet origin/main", "no origin/main"),
             ("rev-parse --verify --quiet HEAD", "no commits yet"),
             ("rev-parse --abbrev-ref HEAD", "current with main"),
-            ("merge-base --is-ancestor origin/main HEAD", " ahead of main"),
+            ("rev-list --count HEAD..origin/main", "current with main"),
             ("rev-list --count origin/main..HEAD", "current with main")):
         report = sync_with_failing_call(home, call)
         check(f"a failed `git {call}` on a level branch is reported with git's error",
@@ -1327,9 +1364,9 @@ def run_launch_time_git_sync_git_failure_cases(root: Path, remote: Path, seed: P
           report.startswith("launch-time-git-sync: main left as is — git directory unreadable")
           and git_in(["rev-parse", "HEAD"], home).stdout.strip() == head_before, report)
     head_before = git_in(["rev-parse", "HEAD"], home).stdout.strip()
-    report = sync_with_failing_call(home, "merge-base --is-ancestor HEAD origin/main")
-    check("a failed `git merge-base --is-ancestor HEAD origin/main` is reported, and "
-          "the checkout is not moved",
+    report = sync_with_failing_call(home, "merge --ff-only")
+    check("a failed `git merge --ff-only` is reported with git's error, and the checkout is "
+          "not moved",
           " left as is — " in report and "fatal: stub failure" in report
           and " behind" not in report
           and git_in(["rev-parse", "HEAD"], home).stdout.strip() == head_before, report)
