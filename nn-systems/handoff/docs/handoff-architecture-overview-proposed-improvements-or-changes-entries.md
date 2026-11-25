@@ -1120,3 +1120,41 @@ The claim check's evidence:
 > - scripts/save-uncommitted-scratch-worktrees-before-reboot.py:40 `whose ~/.claude/handoffs/<seat>-supervisor-state.json is still on this`
 > - The reader list leaves out these three programs. The writer half ("written only by handoff-supervisor.py") is supported by handoff-supervisor.py:705-714. The list is incomplete, and no agent would open a wrong file on it.
 State: open
+
+## E96 — possible problem: an assertion of the overview is contradicted
+
+Claim: naming the new agent-session by the title the user gave the current agent-session in claude.ai, which the new one keeps, or else by the agent-seat's name
+Found by: the overview claim check of 2026-11-25 against commit 2dc7696c3e63ac8e679c4df3714a97689cee122e; its report is /home/nedlern/nedsnodes-logs/overview-write-architecture-overview-claim-check-reports/nedsnodes-handoff-architecture-overview/4661ff1741ba75f58a2959428cf5f5059eeafa16-2026-11-25T23-07-01-281195Z.md.
+Fixed by: regular maintenance, in the overview.
+Goes wrong when: a reader takes the assertion as exact.
+The claim check's evidence:
+> - nn-systems/handoff/handoff-asked-stop-typing-user-notice-user-prompt-submit-hook.py:96 `return remote_control_name_common.handoff_remote_control_name_read_stored_or_default_to_agent_seat_name(agent_seat)`
+> - With no title in the transcript, the hook names the agent-seat's stored Remote Control name. That name differs from the agent-seat's name after a rename in an earlier agent-session. It falls back to the agent-seat's name only when no name is stored (remote-control-name common:76) or the stored name is unreadable (line 98).
+> - Overview line 39 describes this correctly, so this is loose wording in line 37.
+State: open
+
+## E97 — possible problem: an assertion of the overview is contradicted
+
+Claim: When the checkout still cannot be brought to main's commit, or the replacement fails, it carries on with its old code, and the successor's initial-agent-instructions say why and name the program to run
+Found by: the overview claim check of 2026-11-25 against commit 2dc7696c3e63ac8e679c4df3714a97689cee122e; its report is /home/nedlern/nedsnodes-logs/overview-write-architecture-overview-claim-check-reports/nedsnodes-handoff-architecture-overview/4661ff1741ba75f58a2959428cf5f5059eeafa16-2026-11-25T23-07-01-281195Z.md.
+Fixed by: regular maintenance, in the overview.
+Goes wrong when: a reader takes the assertion as exact.
+The claim check's evidence:
+> - handoff-supervisor.py:2643-2647 `changes = report.uncommitted_tracked_change_count` / `if changes == 0:` / `return ""` / ... `return f"{report.splitlines()[0]}, but its checkout holds {held}, so its code may not be main's"`
+> - A checkout already at main's commit that holds uncommitted tracked changes is not restarted either. The overview's list of reasons leaves this case out.
+> - handoff-supervisor.py:2666 `if report and REPOSITORY_ROOT == REFERENCE_CHECKOUT:`. For the reference-checkout this case also triggers `put_reference_checkout_back_on_main`, which the overview attributes only to a checkout that "will not fast-forward".
+> - The successor's notice quotes the actual reason, so no agent acts wrongly.
+State: open
+
+## E98 — possible problem: an assertion of the overview is contradicted
+
+Claim: read through the same module by the handoff-supervisor at each launch and by the Remote Control reconnect watcher.
+Found by: the overview claim check of 2026-11-25 against commit 2dc7696c3e63ac8e679c4df3714a97689cee122e; its report is /home/nedlern/nedsnodes-logs/overview-write-architecture-overview-claim-check-reports/nedsnodes-handoff-architecture-overview/4661ff1741ba75f58a2959428cf5f5059eeafa16-2026-11-25T23-07-01-281195Z.md.
+Fixed by: regular maintenance, in the overview.
+Goes wrong when: a reader takes the assertion as exact.
+The claim check's evidence:
+> - handoff-agent-seat-remote-control-name-stored-after-claude-ai-session-rename-common.py:113 `old_name = handoff_remote_control_name_read_stored_or_default_to_agent_seat_name(agent_seat)`. This runs on every call from the rename hook (rename hook:63).
+> - handoff-asked-stop-typing-user-notice-user-prompt-submit-hook.py:96 reads the file through the same module.
+> - So the rename hook and the stop-typing hook also read `<seat>-remote-control-name`, and the shared-state entry's reader list omits them.
+> - Separately, the sibling file `<seat>-remote-control-names-announced-since-launch` (common:19, written at handoff-supervisor.py:2860 and common:121, read at handoff-supervisor.py:2592) is shared state the overview does not mention.
+State: open
