@@ -64,6 +64,8 @@ Exit codes, and where each comes from:
   Nothing was run.
 - 1, with a line on stderr: agy exited 0 but its result line is missing or
   its status is not SUCCESS. Nothing is printed to stdout.
+- 64, with lines on stderr: the prompt is longer than agy reads whole, the
+  limit nn-systems/cold-read/cold-read-agy-cell.py names. agy was not given it.
 - any other outcome: the code the sandbox program exited with. That is agy's
   own code when agy ran. When the sandbox program failed before agy started,
   it is that program's own code: 1 for bwrap, such as for a bind it cannot
@@ -131,7 +133,14 @@ def main() -> int:
                   file=sys.stderr)
             return 1
     launcher = load_cold_read_skill_agy_cell_launcher_program_module()
-    prompt_arguments, stdin_text = launcher.agy_command_arguments_and_stream_json_stdin_line_build_for_prompt(prompt)
+    try:
+        prompt_arguments, stdin_text = launcher.agy_command_arguments_and_stream_json_stdin_line_build_for_prompt(
+            prompt, prompt_source="PROMPT, or stdin when PROMPT is -",
+            instead="no codex launcher takes this program's place, so tell the agent or user that asked for this "
+                    "answer that the prompt is too long for agy.")
+    except launcher.AgyPromptOverUserMessageLimitRefusal as refusal:
+        print("\n".join(f"{PROGRAM}: {line}" for line in str(refusal).splitlines()), file=sys.stderr)
+        return refusal.exit_code
     agy_arguments = ["--model", arguments.model, *prompt_arguments]
     working_directory_context = (tempfile.TemporaryDirectory(prefix="agy-working-directory-")
                                  if sys.platform == "darwin" else contextlib.nullcontext())

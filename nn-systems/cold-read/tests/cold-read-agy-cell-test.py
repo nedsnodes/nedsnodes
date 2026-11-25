@@ -21,6 +21,10 @@ WHAT IS PINNED HERE.
     prompt over 131,072 bytes, the most Linux accepts in one argument,
     reaches agy whole, and an agy that exits before reading it fails as
     exit-N with its own stderr, not as an agent-binary that could not start.
+    A prompt exactly AGY_USER_MESSAGE_LONGEST_READ_WHOLE_BYTES long reaches
+    agy whole; one byte longer is refused, exit 64, before agy is given it,
+    with a message naming the size, the limit and agy's version, or why the
+    version is unknown.
 
   - agy's result line ends the run, because agy often hangs after it, deaf
     to SIGTERM. The stdout a real agy run printed, saved in
@@ -181,7 +185,9 @@ SHORT_CHAT_REMARK = "I have written the report to the path you gave me.\n"
 # "pipe_holder_outside_group_seconds" starts a child in a session of its own,
 # outside the stub's process group, that holds the stub's stdout and stderr
 # open for that many seconds,
-# and "exit" is the code to exit with. The report path arrives by
+# and "exit" is the code to exit with. `agy --version` prints the plan's
+# "--version" step's "stdout", 1.5.16 by default, and exits with its "exit".
+# The report path arrives by
 # environment, as in the other cell tests, so a reworded template cannot
 # unhook the stub.
 STUB_AGY = """#!/usr/bin/env python3
@@ -190,6 +196,10 @@ argv = sys.argv
 model = argv[argv.index("--model") + 1] if "--model" in argv else "*"
 plan = json.loads(os.environ["COLD_READ_AGY_CELL_TEST_STUB_PLAN"])
 step = plan.get(model, plan.get("*", {}))
+if argv[1:] == ["--version"]:
+    version_step = plan.get("--version", {})
+    sys.stdout.write(version_step.get("stdout", "1.5.16\\n"))
+    sys.exit(version_step.get("exit", 0))
 prompt = argv[argv.index("--print") + 1] if "--print" in argv else ""
 stdin_line = ""
 if "--input-format" in argv and not step.get("exit_before_reading_stdin"):
@@ -626,7 +636,7 @@ with tempfile.TemporaryDirectory() as scratch:
     # Linux refuses any one argument over 131,072 bytes (MAX_ARG_STRLEN) with E2BIG.
     oversize_prompt_relative_path = "docs/drafts/agy-cell-test-oversize-prompt.md"
     oversize_prompt_body = ("Read {TARGET_PATH}; write to {REPORT_PATH}.\n"
-                            + "filler line of an oversize prompt\n" * 6000 + "OVERSIZE TAIL MARKER\n")
+                            + "filler line of an oversize prompt\n" * 4500 + "OVERSIZE TAIL MARKER\n")
     (repository / oversize_prompt_relative_path).parent.mkdir(parents=True, exist_ok=True)
     (repository / oversize_prompt_relative_path).write_text(oversize_prompt_body, encoding="utf-8")
     report = report_path_for(repository, "oversize-prompt")
@@ -661,6 +671,69 @@ with tempfile.TemporaryDirectory() as scratch:
           and "agent-binary-missing" not in result.stderr
           and "agent-binary-argument-list-too-long" not in result.stderr,
           repr(result.stderr[-600:]))
+
+    # agy cuts a prompt over AGY_USER_MESSAGE_LONGEST_READ_WHOLE_BYTES and still exits 0. A template with no
+    # {TARGET_PATH} or {REPORT_PATH} is the whole prompt, so its size is the prompt's.
+    limit = agy_cell.AGY_USER_MESSAGE_LONGEST_READ_WHOLE_BYTES
+    for case, size in (("at-limit", limit), ("one-byte-over", limit + 1)):
+        prompt_relative_path = f"docs/drafts/agy-cell-test-prompt-{case}.md"
+        tail = "LIMIT TAIL MARKER é\n"
+        body = ("x" * 99 + "\n") * (size // 100)
+        body = body[:size - len(tail.encode("utf-8"))] + tail
+        body += "y" * (size - len(body.encode("utf-8")))
+        (repository / prompt_relative_path).write_text(body, encoding="utf-8")
+        report = report_path_for(repository, f"prompt-{case}")
+        prompt_dump = scratch / f"prompt-{case}-prompt.txt"
+        result = run_agy_cell(
+            repository, stubs, {"*": {"report": "STUB REVIEW\n", "dump_prompt": str(prompt_dump)}},
+            report, "--prompt-file", prompt_relative_path)
+        received_prompt = prompt_dump.read_text(encoding="utf-8") if prompt_dump.is_file() else None
+        if case == "at-limit":
+            check(f"a prompt of exactly {limit:,} bytes reaches agy whole, and the cell exits 0",
+                  len(body.encode("utf-8")) == limit and result.returncode == 0 and received_prompt == body,
+                  f"exit {result.returncode}; stderr={result.stderr[-400:]!r}")
+        else:
+            check(f"a prompt of {limit + 1:,} bytes is refused with exit 64 and the marker on the first "
+                  "stderr line, agy never given it, no report",
+                  len(body.encode("utf-8")) == limit + 1 and result.returncode == 64
+                  and agy_cell.AGY_PROMPT_TOO_LONG_FOR_AGY_TO_READ_WHOLE_REFUSAL_MARKER
+                  in result.stderr.splitlines()[0]
+                  and received_prompt is None and not report.exists(),
+                  f"exit {result.returncode}; stderr={result.stderr[-400:]!r}")
+            check("the refusal names the prompt's size, the limit, the installed agy's version and what to do",
+                  f"is {limit + 1:,} bytes of UTF-8, over {limit:,}" in result.stderr
+                  and "the installed agy is version 1.5.16." in result.stderr
+                  and "If you may edit that input and can cut it by 1 bytes or more" in result.stderr
+                  and "Otherwise: if you ran this cell yourself, run nn-systems/cold-read/cold-read-codex-cell.py with the same arguments, but --tier deep" in result.stderr
+                  and "also tell the user" not in result.stderr
+                  and "cut prompt" in result.stderr
+                  and all(line.startswith(f"{agy_cell.PROGRAM}: ") for line in result.stderr.splitlines()),
+                  repr(result.stderr))
+            check("the refusal is no failed attempt of the chain: no cause line, no fallback",
+                  "cause:" not in result.stderr and "every model for this cell failed" not in result.stderr,
+                  repr(result.stderr))
+    report = report_path_for(repository, "prompt-over-limit-version-fails")
+    result = run_agy_cell(
+        repository, stubs, {"*": {"report": "STUB REVIEW\n"}, "--version": {"stdout": "", "exit": 3}},
+        report, "--prompt-file", "docs/drafts/agy-cell-test-prompt-one-byte-over.md")
+    check("with agy --version failing, the refusal still comes, saying the version is unknown and why",
+          result.returncode == 64
+          and "the installed agy is version unknown: agy --version exited 3." in result.stderr
+          and "Whichever you do, also tell the user: \"agy's prompt limit was measured on agy 1.5.16, and the installed agy is version unknown: agy --version exited 3; the limit needs measuring again" in result.stderr,
+          repr(result.stderr))
+    saved_run = agy_cell.subprocess.run
+
+    def run_that_cannot_start(*_arguments, **_keywords):
+        raise FileNotFoundError(2, "No such file or directory", "bwrap")
+    agy_cell.subprocess.run = run_that_cannot_start
+    try:
+        message = agy_cell.agy_prompt_over_user_message_limit_refusal_message_build_from_installed_agy_version_query(
+            limit + 1, "the prompt file", "run something else.")
+    finally:
+        agy_cell.subprocess.run = saved_run
+    check("with agy --version unable to start, the refusal says so in place of the version",
+          "the installed agy is version unknown: agy --version could not be run: "
+          "[Errno 2] No such file or directory: 'bwrap'." in message, repr(message))
 
     # The fast read on the Mac sizes its ssh time limit from the per-model
     # constant, so --print-timeout must follow it, not a literal that happens

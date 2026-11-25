@@ -41,6 +41,8 @@ deadline covers model discovery and task execution after sandbox setup;
 the Codex launcher's process-group cleanup stops agy and its children.
 
 Exits 0 with `report: PATH` for a nonblank report, 2 for invalid arguments,
+64 for a task longer than agy reads whole, the limit
+nn-systems/cold-read/cold-read-agy-cell.py names, before agy is run,
 and 1 with a diagnostic for file errors, unavailable sandbox, agy startup
 or model-list failures, unknown models, timeout, nonzero exit or no report.
 Requires bwrap on Linux or sandbox-exec on macOS; never runs unsandboxed.
@@ -128,6 +130,15 @@ def main(argv=None):
         prompt = brief.read_text(encoding="utf-8")
         if not prompt.strip():
             raise RuntimeError("the brief is empty")
+        try:
+            prompt_arguments, stdin_text = agy_cell.agy_command_arguments_and_stream_json_stdin_line_build_for_prompt(
+                prompt + f"\n\nWrite the task's report to this exact file: {report}\n",
+                prompt_source=f"the --brief file {brief} and one line naming the report",
+                instead="run scripts/run-codex-task-from-brief.py with the same -C, --brief and -o, giving it a "
+                        "codex model with -m in place of any Gemini one.")
+        except agy_cell.AgyPromptOverUserMessageLimitRefusal as refusal:
+            print("\n".join(f"{PROGRAM}: {line}" for line in str(refusal).splitlines()), file=sys.stderr)
+            return refusal.exit_code
         stage = "preparing the sandbox"
         environment = agy_cell.agy_environment_copy_without_gemini_api_key_or_github_token(os.environ)
         writable_folders = [checkout, *roots] if args.sandbox == "workspace-write" else []
@@ -156,8 +167,6 @@ def main(argv=None):
                 command += ["--add-dir", str(root)]
             if args.effort:
                 command += ["--effort", args.effort]
-            prompt_arguments, stdin_text = agy_cell.agy_command_arguments_and_stream_json_stdin_line_build_for_prompt(
-                prompt + f"\n\nWrite the task's report to this exact file: {report}\n")
             command += prompt_arguments
             stage = "running the task"
             print(f"{PROGRAM}: running Gemini in {checkout}; log {log_path}", file=sys.stderr)

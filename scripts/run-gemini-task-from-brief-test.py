@@ -3,7 +3,7 @@
 
 Checks CLI forwarding, sandbox mount order and profiles, model discovery,
 the task on stdin and no argument, even past Linux's 131,072-byte limit on
-one argument, logging, every failure handler and process-group deadlines.
+one argument, the refusal of a task one byte longer than agy reads whole, logging, every failure handler and process-group deadlines.
 Sandbox argument tests do not claim that a host supports sandbox execution.
 Run directly with Python; unittest exits nonzero on a failed assertion.
 """
@@ -33,6 +33,9 @@ mode = os.environ.get("FAKE_AGY_MODE", "report")
 with open(os.environ["FAKE_CALLS"], "a") as f:
     f.write(json.dumps([os.getcwd(), args, sys.stdin.read()]) + "\n")
 print("agy stderr", file=sys.stderr, flush=True)
+if args == ["--version"]:
+    print("1.5.16", flush=True)
+    sys.exit(0)
 if "GEMINI_API_KEY" in os.environ:
     print("agy was given GEMINI_API_KEY", flush=True)
     sys.exit(3)
@@ -138,7 +141,7 @@ class GeminiTaskTests(unittest.TestCase):
 
     def test_brief_over_one_argument_limit_reaches_agy_on_stdin(self):
         # Linux refuses any one argument over 131,072 bytes (MAX_ARG_STRLEN) with E2BIG.
-        self.brief.write_text("filler line of an oversize brief\n" * 6000 + "OVERSIZE TAIL MARKER\n")
+        self.brief.write_text("filler line of an oversize brief\n" * 4500 + "OVERSIZE TAIL MARKER\n")
         result = self.run_cli()
         self.assertEqual(result.returncode, 0, result.stderr)
         cwd, args, stdin = json.loads(self.calls.read_text().splitlines()[1])
@@ -146,6 +149,39 @@ class GeminiTaskTests(unittest.TestCase):
         self.assertGreater(len(task.encode("utf-8")), 131072)
         self.assertIn("OVERSIZE TAIL MARKER", task)
         self.assertLess(max(len(argument.encode("utf-8")) for argument in args), 4096)
+
+    def brief_making_the_task_this_many_bytes(self, size):
+        suffix = f"\n\nWrite the task's report to this exact file: {self.report}\n"
+        brief = "filler line of a brief at agy's limit\n" * (size // 38)
+        brief = brief[:size - len(suffix.encode("utf-8")) - len("TAIL\n")] + "TAIL\n"
+        self.brief.write_text(brief, encoding="utf-8")
+        return brief + suffix
+
+    def test_task_at_agys_limit_reaches_agy_whole(self):
+        limit = runner.agy_cell.AGY_USER_MESSAGE_LONGEST_READ_WHOLE_BYTES
+        task = self.brief_making_the_task_this_many_bytes(limit)
+        self.assertEqual(len(task.encode("utf-8")), limit)
+        result = self.run_cli()
+        self.assertEqual(result.returncode, 0, result.stderr)
+        cwd, args, stdin = json.loads(self.calls.read_text().splitlines()[-1])
+        self.assertEqual(json.loads(stdin)["message"]["content"], task)
+
+    def test_task_one_byte_over_agys_limit_is_refused_before_agy_runs(self):
+        limit = runner.agy_cell.AGY_USER_MESSAGE_LONGEST_READ_WHOLE_BYTES
+        self.brief_making_the_task_this_many_bytes(limit + 1)
+        result = self.run_cli()
+        self.assertEqual(result.returncode, 64, result.stderr)
+        self.assertIn(runner.agy_cell.AGY_PROMPT_TOO_LONG_FOR_AGY_TO_READ_WHOLE_REFUSAL_MARKER,
+                      result.stderr.splitlines()[0])
+        self.assertIn(f"is {limit + 1:,} bytes of UTF-8, over {limit:,}", result.stderr)
+        self.assertIn("the installed agy is version 1.5.16.", result.stderr)
+        self.assertIn("Otherwise: run scripts/run-codex-task-from-brief.py with the same -C, --brief and -o", result.stderr)
+        self.assertIn("If you may edit that input and can cut it by 1 bytes or more", result.stderr)
+        self.assertTrue(all(line.startswith("run-gemini-task-from-brief: ")
+                            for line in result.stderr.splitlines()), result.stderr)
+        calls = [json.loads(line)[1] for line in self.calls.read_text().splitlines()]
+        self.assertEqual(calls, [["--version"]])
+        self.assertFalse(self.log.exists())
 
     def test_defaults(self):
         self.args = self.args[:-2]

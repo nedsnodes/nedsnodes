@@ -24,7 +24,11 @@ and lets the chain advance, so a 1 always means "no review was produced");
 64 this program refused the invocation and never launched agy, naming its
 own fix -- including when this machine has no sandbox to run agy in. 64 rather than the conventional 2 for the reason written beside
 EXIT_BAD_INVOCATION in nn-systems/cold-read/cold-read-cell-common.py, which every
-cold-read-cell shares.
+cold-read-cell shares. One such refusal is of a prompt longer than
+AGY_USER_MESSAGE_LONGEST_READ_WHOLE_BYTES, which agy would cut without a word;
+its first stderr line carries AGY_PROMPT_TOO_LONG_FOR_AGY_TO_READ_WHOLE_REFUSAL_MARKER.
+Every launcher that hands agy a prompt through
+agy_command_arguments_and_stream_json_stdin_line_build_for_prompt refuses so.
 
 WHAT THIS LEG IS FOR (user-ruled 2026-09-07 at the cold-read-research seat,
 after measurements, superseding the earlier ruling that day for low): the
@@ -142,6 +146,7 @@ import os
 import pathlib
 import re
 import shutil
+import subprocess
 import sys
 
 _common_spec = importlib.util.spec_from_file_location(
@@ -176,6 +181,22 @@ COLD_READ_AGY_CELL_PER_MODEL_RUN_KILL_AFTER_SECONDS = (
 COLD_READ_AGY_CELL_WAIT_FOR_REPORT_FILE_AFTER_AGY_STDOUT_RESULT_LINE_BEFORE_PROCESS_GROUP_KILL_SECONDS = 2
 AGY_RESULT_EVENT_NAME = "result"
 AGY_RESULT_SUCCESS_STATUS = "SUCCESS"
+
+# The longest prompt, in UTF-8 bytes, that agy hands the model whole. agy cuts a longer one and exits 0, with no
+# word on stderr or in its stream: a few bytes over, it drops the end; from 192,000 bytes, it keeps the first
+# 191,579 and puts a `<truncated N bytes>` marker in the model's copy. Measured with gemini-4-hydrogen-low on
+# ned-box, by a prompt of an exact size whose last bytes are a canary word the model must repeat: whole at this
+# size, twice; the last byte lost one byte over it, twice. Sizes are the prompt's own bytes, not its JSON-escaped
+# stdin line: newline and space fillers, which JSON escapes differently, were cut at the same sizes. To measure
+# again, run agy-user-message-cut-exact-size-probe.py, in
+# nedlern@ned-box:/home/nedlern/nedsnodes-logs/seats/prime-intellect/agy-user-message-cut-size-bisect-2026-11-24/,
+# at this size and the sizes around it.
+AGY_USER_MESSAGE_LONGEST_READ_WHOLE_BYTES = 191_985
+AGY_USER_MESSAGE_LIMIT_MEASURED_ON_AGY_VERSION = "1.5.16"
+# The refusal exits common.EXIT_BAD_INVOCATION like the launchers' other refusals; a caller that must tell it
+# apart finds this token on the refusal's first stderr line.
+AGY_PROMPT_TOO_LONG_FOR_AGY_TO_READ_WHOLE_REFUSAL_MARKER = "agy-prompt-too-long-for-agy-to-read-whole-refusal"
+AGY_VERSION_QUERY_TIMEOUT_SECONDS = 30
 
 AGY_MISSING_GOOGLE_LOGIN_STDERR_LINE_PREFIX = "Authentication required."
 AGY_LOGGED_OUT_CAUSE_DETAIL = ("agy has no Google login on this machine; "
@@ -275,20 +296,73 @@ def credential_sandbox_prefix(platform: str = sys.platform, *,
     return prefix
 
 
-def agy_command_arguments_and_stream_json_stdin_line_build_for_prompt(prompt: str) -> tuple:
+class AgyPromptOverUserMessageLimitRefusal(common.CellRefusal):
+    """The prompt is longer than agy reads whole; no agy run was started."""
+
+
+def agy_prompt_over_user_message_limit_refusal_message_build_from_installed_agy_version_query(
+        prompt_bytes: int, prompt_source: str, instead: str) -> str:
+    """Return the refusal's text, naming the size, the limit and the installed agy's version.
+
+    prompt_source says which input of the launcher the prompt came from; instead says what to run in its place."""
+    try:
+        completed = subprocess.run([*credential_sandbox_prefix(), "agy", "--version"], capture_output=True,
+                                   stdin=subprocess.DEVNULL,
+                                   text=True, timeout=AGY_VERSION_QUERY_TIMEOUT_SECONDS, check=False,
+                                   env=agy_environment_copy_without_gemini_api_key_or_github_token(os.environ))
+        version = (completed.stdout.strip() if completed.returncode == 0 and completed.stdout.strip()
+                   else f"unknown: agy --version exited {completed.returncode}")
+    except (OSError, subprocess.TimeoutExpired) as error:
+        version = f"unknown: agy --version could not be run: {error}"
+    return (f"refused before agy started (marker for calling programs: "
+            f"{AGY_PROMPT_TOO_LONG_FOR_AGY_TO_READ_WHOLE_REFUSAL_MARKER}): the prompt ("
+            f"{prompt_source}) is {prompt_bytes:,} bytes of UTF-8, over {AGY_USER_MESSAGE_LONGEST_READ_WHOLE_BYTES:,}, "
+            f"the most agy {AGY_USER_MESSAGE_LIMIT_MEASURED_ON_AGY_VERSION} was measured to read whole; the installed "
+            f"agy is version {version}. agy cuts a longer prompt without saying so and still exits 0, so its answer "
+            f"would come from a cut prompt.\n"
+            f"If you may edit that input and can cut it by {prompt_bytes - AGY_USER_MESSAGE_LONGEST_READ_WHOLE_BYTES:,} "
+            f"bytes or more, do so and run the same command again.\n"
+            f"Otherwise: {instead}\n"
+            + ("" if version == AGY_USER_MESSAGE_LIMIT_MEASURED_ON_AGY_VERSION else
+               f"Whichever you do, also tell the user: \"agy's prompt limit was measured on agy "
+               f"{AGY_USER_MESSAGE_LIMIT_MEASURED_ON_AGY_VERSION}, and the installed agy is version {version}; the "
+               f"limit needs measuring again, as the comment beside AGY_USER_MESSAGE_LONGEST_READ_WHOLE_BYTES in "
+               f"nn-systems/cold-read/cold-read-agy-cell.py says.\" If you are a subagent, send that sentence to "
+               f"the agent that dispatched you instead.\n")).rstrip("\n")
+
+
+def agy_command_arguments_and_stream_json_stdin_line_build_for_prompt(
+        prompt: str, *, prompt_source: str, instead: str) -> tuple:
     """Return (agy arguments, stdin text) that give agy the prompt on stdin.
 
     agy's stream-json input requires stream-json output, so a caller reads
     agy's answer from the result line that
-    agy_stream_json_stdout_line_final_result_event_parse_to_exit_code_and_response_or_none parses."""
+    agy_stream_json_stdout_line_final_result_event_parse_to_exit_code_and_response_or_none parses.
+    Raises AgyPromptOverUserMessageLimitRefusal for a prompt agy would cut, whose message names prompt_source as
+    where the prompt came from and instead as what to run in its place."""
+    prompt_bytes = len(prompt.encode("utf-8"))
+    if prompt_bytes > AGY_USER_MESSAGE_LONGEST_READ_WHOLE_BYTES:
+        raise AgyPromptOverUserMessageLimitRefusal(
+            agy_prompt_over_user_message_limit_refusal_message_build_from_installed_agy_version_query(
+                prompt_bytes, prompt_source, instead))
     arguments = ["--input-format", "stream-json", "--output-format", "stream-json", "--print", ""]
     return arguments, json.dumps({"event": "user", "message": {"content": prompt}}) + "\n"
+
+
+AGY_CELL_PROMPT_SOURCE = ("the --prompt-file template, or else the --cell prompt, with its paths filled in; not the "
+                          "--target document, which the prompt names but does not hold")
+AGY_CELL_INSTEAD = (
+    "if you ran this cell yourself, run nn-systems/cold-read/cold-read-codex-cell.py with the same arguments, but "
+    "--tier deep in place of --tier fast, a --report path for codex's report, and no --model or --effort. If a "
+    "program such as nn-systems/cold-read/cold-read-grid.py ran it, that program reports this cell as failed: do not "
+    "run it on agy again.")
 
 
 def invocation_builder(effort: str):
     """Return a callback producing (agy argv, stdin text) for the shared runner."""
     def build_invocation(model: str, prompt: str):
-        prompt_arguments, stdin_text = agy_command_arguments_and_stream_json_stdin_line_build_for_prompt(prompt)
+        prompt_arguments, stdin_text = agy_command_arguments_and_stream_json_stdin_line_build_for_prompt(
+            prompt, prompt_source=AGY_CELL_PROMPT_SOURCE, instead=AGY_CELL_INSTEAD)
         command = [
             *credential_sandbox_prefix(),
             "agy",

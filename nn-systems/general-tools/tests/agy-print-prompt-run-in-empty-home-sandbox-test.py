@@ -23,6 +23,8 @@ and a stub agy stands in for the real one.
     other variables do.
   - A PROMPT of - over 131,072 bytes, read from stdin, reaches agy whole on
     stdin and in no argument.
+  - A PROMPT of - exactly as long as agy reads whole reaches agy whole; one
+    byte longer is refused, exit 64, before agy is given it.
   - A stub agy that exits 0 with no result line, or with a result whose
     status is not SUCCESS, makes the program exit 1 with nothing on stdout.
   - Without --model the program refuses, exit 2.
@@ -230,7 +232,7 @@ def cases_with_the_stand_in_sandbox(root, home):
     received_argv_path = root / "recording-agy-argv.txt"
     stub_agy(recording, f'cat > "{received_stdin_path}"\nprintf "%s\\n" "$@" > "{received_argv_path}"\n'
                         'echo \'{"event":"result","result":{"status":"SUCCESS","response":"answer"}}\'\n')
-    oversize_prompt = "filler line of an oversize prompt\n" * 6000 + "OVERSIZE TAIL MARKER\n"
+    oversize_prompt = "filler line of an oversize prompt\n" * 4500 + "OVERSIZE TAIL MARKER\n"
     result = run_program(home, f"{recording}:{fake_directory}", "--model", "m", "-",
                          caller_stdin=oversize_prompt)
     received_line = (received_stdin_path.read_text(encoding="utf-8")
@@ -243,6 +245,38 @@ def cases_with_the_stand_in_sandbox(root, home):
           and json.loads(received_line or "{}").get("message", {}).get("content") == oversize_prompt
           and "OVERSIZE TAIL MARKER" not in received_argv,
           repr((result.returncode, result.stdout, result.stderr[-300:], len(received_line))))
+
+    # agy cuts a prompt over AGY_USER_MESSAGE_LONGEST_READ_WHOLE_BYTES and still exits 0.
+    limit = program.load_cold_read_skill_agy_cell_launcher_program_module().AGY_USER_MESSAGE_LONGEST_READ_WHOLE_BYTES
+    marker = (program.load_cold_read_skill_agy_cell_launcher_program_module()
+              .AGY_PROMPT_TOO_LONG_FOR_AGY_TO_READ_WHOLE_REFUSAL_MARKER)
+    for case, size in (("at-limit", limit), ("one-byte-over", limit + 1)):
+        limit_recording = root / f"limit-recording-agy-{case}"
+        limit_stdin_path = root / f"limit-recording-agy-{case}-stdin.txt"
+        stub_agy(limit_recording, 'if [ "$1" = "--version" ]; then echo 1.5.16; exit 0; fi\n'
+                                  f'cat > "{limit_stdin_path}"\n'
+                                  'echo \'{"event":"result","result":{"status":"SUCCESS","response":"answer"}}\'\n')
+        prompt = ("filler line of a prompt at agy's limit\n" * (size // 39 + 1))[:size - 5] + "TAIL\n"
+        result = run_program(home, f"{limit_recording}:{fake_directory}", "--model", "m", "-",
+                             caller_stdin=prompt)
+        received_line = limit_stdin_path.read_text(encoding="utf-8") if limit_stdin_path.is_file() else None
+        if case == "at-limit":
+            check(f"PROMPT - of exactly {limit:,} bytes reaches agy whole, exit 0",
+                  len(prompt.encode("utf-8")) == limit and result.returncode == 0 and result.stdout == "answer"
+                  and received_line is not None and json.loads(received_line)["message"]["content"] == prompt,
+                  repr((result.returncode, result.stderr[-300:])))
+        else:
+            check(f"PROMPT - of {limit + 1:,} bytes: refused with exit 64 and the marker before agy is "
+                  "given it, naming the size, the limit, agy's version and what to do",
+                  len(prompt.encode("utf-8")) == limit + 1 and result.returncode == 64
+                  and marker in result.stderr.splitlines()[0]
+                  and received_line is None and result.stdout == ""
+                  and f"is {limit + 1:,} bytes of UTF-8, over {limit:,}" in result.stderr
+                  and "the installed agy is version 1.5.16." in result.stderr
+                  and "Otherwise: no codex launcher takes this program's place" in result.stderr
+                  and "If you may edit that input and can cut it by 1 bytes or more" in result.stderr
+                  and all(line.startswith(f"{program.PROGRAM}: ") for line in result.stderr.splitlines()),
+                  repr((result.returncode, result.stdout, result.stderr)))
 
     for case, stub_stdout, wanted in (
             ("printed no result line", "not a result line", "printed no result line"),
