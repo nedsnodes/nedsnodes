@@ -2579,7 +2579,17 @@ def main(argv=None, runner=run_command):
                       % (THIS_SCRIPT_NAME, args.restore, named, failure), file=sys.stderr, flush=True)
                 return EXIT_NOT_RESTORED
             destination = os.path.join(top_level or args.repo, named)
-        return restore_copy(args.restore, destination)
+        destination_existed = os.path.lexists(destination)
+        try:
+            restore_copy(args.restore, destination)
+        except OSError as error:
+            print("%s: could NOT restore %s to %s — %s: %s; %s"
+                  % (THIS_SCRIPT_NAME, args.restore, destination, type(error).__name__, error,
+                     "the file already there was left as it was" if destination_existed
+                     else "nothing was written there"), file=sys.stderr, flush=True)
+            return EXIT_NOT_RESTORED
+        print("restored %s to %s" % (args.restore, destination), flush=True)
+        return EXIT_RESTORED
 
     use_found_copies_folder(FoundCopiesFolder(args.found_copies_root))
     if is_git_blob_id(args.path):
@@ -2625,19 +2635,36 @@ def main(argv=None, runner=run_command):
 
 
 def restore_copy(copy, destination):
-    """Copy the file copy to destination, creating its missing parent directories; return the exit code."""
-    try:
-        # Opened first, so a copy that cannot be read leaves no new directories behind.
-        with open(copy, "rb") as source:
-            os.makedirs(os.path.dirname(destination) or ".", exist_ok=True)
-            with open(destination, "wb") as target:
+    """Copy the file copy to destination, creating its missing parent directories; raise OSError when it
+    cannot, with any file already at destination left as it was."""
+    # Opened first, so a copy that cannot be read leaves no new directories behind.
+    with open(copy, "rb") as source:
+        if os.path.exists(destination) and os.path.samefile(copy, destination):
+            raise shutil.SameFileError("%s and %s are the same file, so there is nothing to restore"
+                                       % (copy, destination))
+        directory = os.path.dirname(destination) or "."
+        os.makedirs(directory, exist_ok=True)
+        # Staged beside destination, so a write that fails partway never touches the file already there,
+        # and os.replace swaps the whole file in at once.
+        descriptor, staged = tempfile.mkstemp(dir=directory, prefix=".%s." % os.path.basename(destination),
+                                              suffix=".restoring")
+        try:
+            with os.fdopen(descriptor, "wb") as target:
                 shutil.copyfileobj(source, target)
-    except OSError as error:
-        print("%s: could NOT restore %s to %s — %s: %s"
-              % (THIS_SCRIPT_NAME, copy, destination, type(error).__name__, error), file=sys.stderr, flush=True)
-        return EXIT_NOT_RESTORED
-    print("restored %s to %s" % (copy, destination), flush=True)
-    return EXIT_RESTORED
+            if os.path.exists(destination):
+                shutil.copymode(destination, staged)
+            else:
+                # mkstemp makes the file 0600; a file open() creates gets 0666 less the umask.
+                umask = os.umask(0)
+                os.umask(umask)
+                os.chmod(staged, 0o666 & ~umask)
+            os.replace(staged, destination)
+        except BaseException:
+            try:
+                os.unlink(staged)
+            except OSError:
+                pass
+            raise
 
 
 def exit_status(reports):

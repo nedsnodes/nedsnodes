@@ -16,6 +16,7 @@ AND that the output says what to do about it.
 
 import atexit
 import contextlib
+import errno
 import importlib.util
 import io
 import json
@@ -23,6 +24,7 @@ import os
 import re
 import shlex
 import shutil
+import stat
 import subprocess
 import sys
 import tempfile
@@ -4358,6 +4360,67 @@ with tempfile.TemporaryDirectory() as tmp:
     check("--restore with an unknown host's relative path is a usage error, exit 2, running nothing",
           code == 2 and "Give the file's absolute path on elsewhere" in errors and calls == [],
           "exit=%s calls=%s\n%s" % (code, calls, errors))
+
+# --restore refuses a <path> that is the copy itself, and a failed write leaves the file already there as it was.
+with tempfile.TemporaryDirectory() as tmp:
+    tmp = Path(tmp)
+    content = b"the only copy\n"
+    copy = tmp / "found" / "only.md"
+    copy.parent.mkdir()
+    copy.write_bytes(content)
+    symlink = tmp / "symlink.md"
+    symlink.symlink_to(copy)
+    hard_link = tmp / "hard-link.md"
+    os.link(copy, hard_link)
+    for name, destination in (("the same path", copy), ("a symlink to the copy", symlink),
+                              ("a hard link to the copy", hard_link)):
+        code, out, errors, calls = run_restore([str(destination), "--restore", str(copy)])
+        check("--restore to %s exits 1, says the two are the same file, and leaves the copy whole" % name,
+              code == 1 and "same file" in errors and "could NOT restore" in errors and out == ""
+              and copy.read_bytes() == content,
+              "exit=%s size=%s\n%s\n%s" % (code, copy.stat().st_size, out, errors))
+
+    existing = tmp / "kept" / "e.md"
+    existing.parent.mkdir()
+    existing.write_bytes(b"what was there before\n")
+    real_copyfileobj = shutil.copyfileobj
+
+    def copy_then_fail(source, target, *rest):
+        target.write(source.read(4))
+        raise OSError(errno.ENOSPC, "No space left on device")
+
+    shutil.copyfileobj = copy_then_fail
+    try:
+        code, out, errors, calls = run_restore([str(existing), "--restore", str(copy)])
+        fresh = tmp / "kept" / "new.md"
+        fresh_code, fresh_out, fresh_errors, _ = run_restore([str(fresh), "--restore", str(copy)])
+    finally:
+        shutil.copyfileobj = real_copyfileobj
+    check("--restore whose write fails partway exits 1, leaves the file already there as it was, says so, "
+          "and leaves no staged file behind",
+          code == 1 and existing.read_bytes() == b"what was there before\n"
+          and "No space left on device" in errors and "the file already there was left as it was" in errors
+          and sorted(p.name for p in existing.parent.iterdir()) == ["e.md"] and out == "",
+          "exit=%s %s\n%s\n%s" % (code, sorted(existing.parent.iterdir()), out, errors))
+    check("--restore whose write fails partway to a new path exits 1, says nothing was written there, "
+          "and leaves nothing there",
+          fresh_code == 1 and not fresh.exists() and "nothing was written there" in fresh_errors
+          and sorted(p.name for p in existing.parent.iterdir()) == ["e.md"],
+          "exit=%s\n%s" % (fresh_code, fresh_errors))
+
+    restored = tmp / "kept" / "made.md"
+    code, out, errors, calls = run_restore([str(restored), "--restore", str(copy)])
+    umask = os.umask(0)
+    os.umask(umask)
+    check("--restore to a new path gives the file the mode open() would, not mkstemp's 0600",
+          code == 0 and restored.read_bytes() == content
+          and stat.S_IMODE(restored.stat().st_mode) == 0o666 & ~umask,
+          "exit=%s mode=%o\n%s" % (code, stat.S_IMODE(restored.stat().st_mode), errors))
+    existing.chmod(0o640)
+    code, out, errors, calls = run_restore([str(existing), "--restore", str(copy)])
+    check("--restore over a file already there keeps that file's mode",
+          code == 0 and existing.read_bytes() == content and stat.S_IMODE(existing.stat().st_mode) == 0o640,
+          "exit=%s mode=%o\n%s" % (code, stat.S_IMODE(existing.stat().st_mode), errors))
 
 # A copy of this suite whose finder raises on import, as an unhandled error or a Ctrl-C would, still removes
 # its found-copies scratch folder.
