@@ -2760,6 +2760,25 @@ def test_a_reply_in_his_own_words_is_recorded_in_the_walk_minutes_against_the_wa
           paused_minutes.read_text() == paused_before, paused_minutes.read_text())
 
 
+def test_a_handoff_supervisor_first_prompt_marked_human_is_not_recorded_as_his_reply():
+    case = Case(next_to_present="item 4 of 9")
+    minutes = case.walk / f"{WALK_NAME}-minutes.md"
+    before = minutes.read_text()
+    prompt = ("Read /home/nedlern/.claude/handoffs/ned-box-helper-dialog-0058.md — the dialog from the session you are "
+              "continuing, written at 2026-11-25T20:32:08Z. Then take the next step.")
+    document = (case.walk / f"{WALK_NAME}.md").read_text()
+    transcript = case.transcript(document, records=[
+        {"type": "user", "turnOrigin": "human", "origin": {"kind": "human"},
+         "message": {"role": "user", "content": prompt}}])
+    lines = [line for line in transcript.read_text().splitlines()]
+    transcript.write_text("\n".join(lines[1:] + lines[:1]) + "\n")
+    result = case.run(prompt, transcript_path=transcript)
+    check("the handoff-supervisor's first prompt, which Claude Code marks human, gets no own-words message and adds "
+          "nothing to the walk-minutes",
+          result.returncode == 0 and not result.stdout.strip() and minutes.read_text() == before,
+          f"exit {result.returncode}, stdout {result.stdout!r}, minutes {minutes.read_text()!r}")
+
+
 def test_a_recorded_reply_is_a_paragraph_of_its_own_so_an_html_comment_above_cannot_swallow_its_code_span():
     case = Case(next_to_present="item 4 of 9")
     minutes = case.minutes("item 3 of 9: answer A <!-- note -->\n#next_to_present item 4 of 9")

@@ -15,7 +15,9 @@ In an attended agent-session Claude Code also starts this hook for a background-
 agent-session's message. The transcript's newest record carrying `turnOrigin` decides, `human` for his own, when
 that record's text is the payload's prompt; Claude Code may not have written the prompt's record yet when this
 hook runs, and the newest record is then the previous turn's, or there is none. Otherwise the prompt itself
-decides: one that opens as NOT_TYPED_PROMPT_OPENINGS lists is not his.
+decides: one that opens as NOT_TYPED_PROMPT_OPENINGS lists is not his. Before either, a prompt the handoff-supervisor
+or crash recovery starts or resumes an agent-session with is not his, though Claude Code marks it `human`: the
+speaker test in SPEAKER_TEST_FILE recognizes it by those programs' own constants.
 
 ON A TYPED PROMPT the hook calls, from ALERTS_MODULE_FILE, user_alerts_claimed_delete_if_recorded_in_approval_walk_minutes_else_release_to_pending_after_30_minutes,
 then user_alerts_claim_every_pending_for_agent_seat_by_rename_into_claimed, whose docstrings say what each moves.
@@ -57,6 +59,7 @@ ALERTS_MODULE_FILE = (CHECKOUT / "nn-systems" / "general-tools"
                       / "user-alerts-pending-and-claimed-files-write-claim-release-and-delete-common.py")
 HANDOFF_SUPERVISOR_FILE = CHECKOUT / "nn-systems" / "handoff" / "handoff-supervisor.py"
 TRANSCRIPT_READER_FILE = CHECKOUT / "scripts" / "claude-code-session-transcript-records-read-backward-common.py"
+SPEAKER_TEST_FILE = CHECKOUT / "scripts" / "search-user-messages-in-transcripts.py"
 # At most half this hook's timeout in .claude/settings.json, so a stalled insert is reported, not killed with
 # the hook after the alerts are claimed; a test checks.
 INSERT_TIMEOUT_SECONDS = 5
@@ -145,6 +148,9 @@ def record_text(record):
 
 def typed_by_user(payload):
     prompt = payload.get("prompt") or ""
+    speaker_test = load_module("search_user_messages_in_transcripts", SPEAKER_TEST_FILE)
+    if speaker_test.user_turn_text_is_compaction_summary_or_launch_prompt(prompt):
+        return False
     transcript = payload.get("transcript_path")
     if transcript and Path(transcript).expanduser().is_file():
         reader = load_module("claude_code_session_transcript_records_read_backward_common", TRANSCRIPT_READER_FILE)
