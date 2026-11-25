@@ -125,6 +125,16 @@ def run_agent_seat_cases(root):
           [alert["id"] for alert in by_default] == [for_none] and [alert["id"] for alert in by_x] == [for_x]
           and by_x[0].get("claiming_agent_seat_name") == "seat-x", repr((by_default, by_x)))
 
+    directory = fresh_home(root, "agent-seat-name-opening-with-underscore")
+    agent_home("_seat-u")
+    raised = None
+    try:
+        alerts.user_alert_write_to_pending("for u", "text", "act", now=NOW, claiming_agent_seat_name="_seat-u")
+    except ValueError as error:
+        raised = error
+    check("an alert is written for an agent-seat whose name opens with _, which scripts/launch-claude-ubuntu accepts",
+          raised is None and len(list((directory / "pending").glob("*.json"))) == 1, repr(raised))
+
     for name, agent_seat in (("no-agent-home", "seat-z"), ("not-a-checkout", "seat-z-worktrees"),
                              ("path-outside-agents", "../seat-x")):
         directory = fresh_home(root, f"refused-{name}")
@@ -155,6 +165,21 @@ def run_unreadable_pending_cases(root):
           and (directory / "claimed" / "0-not-an-object.json").is_file(), repr(raised))
     claimed = alerts.user_alerts_claim_every_pending_for_agent_seat_by_rename_into_claimed(DEFAULT_SEAT, now=NOW)
     check("after a pending file that is not a JSON object, the next claim takes the alerts sorted after it",
+          [alert["id"] for alert in claimed] == [after], repr(claimed))
+
+    directory = fresh_home(root, "unreadable-pending-directory")
+    (directory / "pending" / "0-a-directory.json").mkdir(parents=True)
+    after = alerts.user_alert_write_to_pending("after", "text", "act", now=NOW)
+    raised = None
+    try:
+        alerts.user_alerts_claim_every_pending_for_agent_seat_by_rename_into_claimed("seat-y", now=NOW)
+    except IsADirectoryError as error:
+        raised = error
+    check("a pending entry that cannot be read, a directory, raises its OSError and is moved into claimed/",
+          raised is not None and (directory / "claimed" / "0-a-directory.json").is_dir()
+          and not (directory / "pending" / "0-a-directory.json").exists(), repr(raised))
+    claimed = alerts.user_alerts_claim_every_pending_for_agent_seat_by_rename_into_claimed(DEFAULT_SEAT, now=NOW)
+    check("after a pending entry that cannot be read, the next claim takes the alerts sorted after it",
           [alert["id"] for alert in claimed] == [after], repr(claimed))
 
 
