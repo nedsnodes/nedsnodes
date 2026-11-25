@@ -558,6 +558,175 @@ def run_failed_extraction_at_a_handoff_case(workspace: Path):
           state.get("consumed_counter") == 3, str(state))
 
 
+def run_claude_ai_rename_carried_to_successor_case(workspace: Path):
+    """The state file holds the name each agent-session was launched under, and a rename the
+    Stop hook stored during an agent-session has its successor tell the other agent-seats. The
+    handoff names as its writer a session that took over the worktree, whose transcript, in
+    another project folder, carries a title of its own: that title is not this agent-seat's name."""
+    agent = "renamecarried"
+    handoff_directory = workspace / "renamecarried"
+    handoff_directory.mkdir(parents=True)
+    takeover_project_directory = supervisor.PROJECTS_ROOT / "renamecarried-takeover-project"
+    takeover_project_directory.mkdir(parents=True)
+    writer_session_id = "12121212-3434-5656-7878-909090909090"
+    (takeover_project_directory / f"{writer_session_id}.jsonl").write_text(
+        '{"type":"custom-title","customTitle":"takeover-title"}\n', encoding="utf-8")
+    name_file = supervisor.remote_control_name_common.remote_control_name_file_path(agent)
+    settings = supervisor.SupervisorSettings(
+        agent=agent, working_directory=workspace, handoff_directory=handoff_directory,
+        agent_command="unused-stub-agent", first_prompt="")
+    launched_states, launched_prompts, recorded_names = [], [], []
+    names_record = supervisor.remote_control_name_common.handoff_agent_seat_remote_control_names_it_was_announced_under_since_its_launch_file_path_build(agent)
+
+    def launch(agent_command, session_id, working_directory, prompt, **_):
+        launched_states.append(json.loads(settings.state_path.read_text(encoding="utf-8")))
+        launched_prompts.append(prompt)
+        recorded_names.append(names_record.read_text(encoding="utf-8").split() if names_record.is_file() else None)
+        if len(launched_prompts) == 1:
+            # As the Stop hook stores a claude.ai rename at a turn's end.
+            name_file.parent.mkdir(parents=True, exist_ok=True)
+            name_file.write_text("renamed-in-claude-ai\n", encoding="utf-8")
+            settings.handoff_path.write_text(
+                f"session-handoff-sequence-number: 1\nwritten-by-session: {writer_session_id}\n"
+                "next-step: carry on\n", encoding="utf-8")
+            return StubLaunchedSession(-15, ended=False)
+        return StubLaunchedSession(0)
+
+    try:
+        with supervisor_names_replaced(
+                launch_agent_session=launch,
+                stop_session=lambda process: process.terminate(),
+                extract_dialog=lambda session_id, working_directory, output_path: False,
+                launch_time_git_sync=lambda working_directory: "launch-time-git-sync: stubbed",
+                remove_finished_worktrees_at_handoff=lambda working_directory: "worktrees: stubbed",
+                memory_review_due_lines=lambda: (),
+                stdin_isatty=True), \
+                contextlib.redirect_stdout(io.StringIO()), contextlib.redirect_stderr(io.StringIO()):
+            supervisor.supervise_sessions(settings)
+        launched_names = [state.get(supervisor.LAUNCHED_REMOTE_CONTROL_NAME_STATE_KEY)
+                          for state in launched_states]
+        check("RENAME CARRIED: the state file holds the name each agent-session is launched under",
+              launched_names == [agent, "renamed-in-claude-ai"], str(launched_names))
+        successor_prompt = launched_prompts[1] if len(launched_prompts) > 1 else ""
+        check("RENAME CARRIED: a rename the Stop hook stored during the agent-session has the "
+              "successor tell the other agent-seats",
+              f"The agent-seat {agent} is now renamed-in-claude-ai in Remote Control; "
+              "send it messages under that name." in successor_prompt,
+              successor_prompt[-900:])
+        check("RENAME CARRIED: each launch starts the record of announced names with its launched name",
+              recorded_names == [[agent], ["renamed-in-claude-ai"]], str(recorded_names))
+        check("RENAME CARRIED: the title of a session that took over the worktree and wrote the "
+              "handoff is not stored as this agent-seat's name",
+              name_file.read_text(encoding="utf-8").strip() == "renamed-in-claude-ai"
+              and "takeover-title" not in successor_prompt,
+              name_file.read_text(encoding="utf-8"))
+    finally:
+        name_file.unlink(missing_ok=True)
+        names_record.unlink(missing_ok=True)
+
+
+def run_rename_before_a_crash_resume_announced_at_the_next_handoff_case(workspace: Path):
+    """A rename the Stop hook stored, followed by a death before the agent-session announced it:
+    the resume continues the same agent-session, so its record of announced names keeps the
+    launched name, and the next handoff tells the others the launched name is now the new one."""
+    agent = "renamebeforecrash"
+    handoff_directory = workspace / "renamebeforecrash"
+    handoff_directory.mkdir(parents=True)
+    case_projects = workspace / "renamebeforecrash-projects"
+    case_projects.mkdir(parents=True)
+    common = supervisor.remote_control_name_common
+    name_file = common.remote_control_name_file_path(agent)
+    names_record = common.handoff_agent_seat_remote_control_names_it_was_announced_under_since_its_launch_file_path_build(agent)
+    settings = supervisor.SupervisorSettings(
+        agent=agent, working_directory=workspace, handoff_directory=handoff_directory,
+        agent_command="unused-stub-agent", first_prompt="")
+    launches, recorded_names = [], []
+
+    def launch(agent_command, session_id, working_directory, prompt, **kwargs):
+        launches.append((session_id, prompt, kwargs.get("resume")))
+        recorded_names.append(common.handoff_agent_seat_remote_control_names_it_was_announced_under_since_its_launch_read(agent))
+        transcript = case_projects / f"{session_id}.jsonl"
+        with transcript.open("a", encoding="utf-8") as stream:
+            stream.write(json.dumps({"type": "user", "message": {"content": prompt}}) + "\n")
+            stream.write(json.dumps({"type": "assistant", "message": {"model": "claude", "content": "work"}}) + "\n")
+        if len(launches) == 1:
+            # As the Stop hook stores a claude.ai rename, then the agent-session dies before announcing it.
+            title_transcript = workspace / "renamebeforecrash-title.jsonl"
+            title_transcript.write_text(
+                json.dumps({"type": "custom-title", "customTitle": "renamed-before-crash"}) + "\n", encoding="utf-8")
+            common.handoff_remote_control_name_save_when_transcript_custom_title_changed_and_return_rename(
+                agent, title_transcript)
+            return StubLaunchedSession(-9)
+        if len(launches) == 2:
+            settings.handoff_path.write_text(
+                f"session-handoff-sequence-number: 1\nwritten-by-session: {session_id}\n"
+                "next-step: carry on\n", encoding="utf-8")
+            return StubLaunchedSession(-15, ended=False)
+        return StubLaunchedSession(0)
+
+    try:
+        with supervisor_names_replaced(
+                launch_agent_session=launch,
+                project_directory_for_working_directory=lambda _: case_projects,
+                stop_session=lambda process: process.terminate(),
+                extract_dialog=lambda session_id, working_directory, output_path: False,
+                launch_time_git_sync=lambda working_directory: "launch-time-git-sync: stubbed",
+                remove_finished_worktrees_at_handoff=lambda working_directory: "worktrees: stubbed",
+                memory_review_due_lines=lambda: (),
+                stdin_isatty=True), \
+                contextlib.redirect_stdout(io.StringIO()), contextlib.redirect_stderr(io.StringIO()):
+            supervisor.supervise_sessions(settings)
+        check("RENAME BEFORE A CRASH: the second launch resumes the same agent-session",
+              len(launches) >= 2 and launches[1][2] is True and launches[1][0] == launches[0][0],
+              str(launches))
+        check("RENAME BEFORE A CRASH: the resume keeps the record of names announced since the launch",
+              len(recorded_names) >= 2 and recorded_names[1] == [agent, "renamed-before-crash"],
+              str(recorded_names))
+        successor_prompt = launches[2][1] if len(launches) > 2 else ""
+        check("RENAME BEFORE A CRASH: the next handoff tells the others the launched name is now the new one",
+              f"The agent-seat {agent} is now renamed-before-crash in Remote Control; "
+              "send it messages under that name." in successor_prompt,
+              successor_prompt[-900:])
+    finally:
+        name_file.unlink(missing_ok=True)
+        names_record.unlink(missing_ok=True)
+
+
+def run_announced_names_record_not_started_case(workspace: Path):
+    """When the record of announced names cannot be started at a launch, the launch goes on and
+    the failure is reported to the console."""
+    agent = "namesrecordblocked"
+    handoff_directory = workspace / "namesrecordblocked"
+    handoff_directory.mkdir(parents=True)
+    names_record = supervisor.remote_control_name_common.handoff_agent_seat_remote_control_names_it_was_announced_under_since_its_launch_file_path_build(agent)
+    names_record.mkdir(parents=True)
+    settings = supervisor.SupervisorSettings(
+        agent=agent, working_directory=workspace, handoff_directory=handoff_directory,
+        agent_command="unused-stub-agent", first_prompt="")
+    launches = []
+
+    def launch(agent_command, session_id, working_directory, prompt, **_):
+        launches.append(session_id)
+        return StubLaunchedSession(0)
+
+    errors = io.StringIO()
+    try:
+        with supervisor_names_replaced(
+                launch_agent_session=launch,
+                stop_session=lambda process: process.terminate(),
+                extract_dialog=lambda session_id, working_directory, output_path: False,
+                launch_time_git_sync=lambda working_directory: "launch-time-git-sync: stubbed",
+                remove_finished_worktrees_at_handoff=lambda working_directory: "worktrees: stubbed",
+                memory_review_due_lines=lambda: (),
+                stdin_isatty=True), \
+                contextlib.redirect_stdout(io.StringIO()), contextlib.redirect_stderr(errors):
+            supervisor.supervise_sessions(settings)
+        check("NAMES RECORD BLOCKED: the launch goes on and the failure is reported",
+              len(launches) == 1 and "could not be started" in errors.getvalue(), errors.getvalue())
+    finally:
+        names_record.rmdir()
+
+
 def process_is_gone_within_seconds(process_id: int, seconds: float) -> bool:
     """True once `ps` finds no process with this id, or finds it a zombie: a
     killed process whose parent has died waits as one until it is reaped."""
@@ -1942,6 +2111,9 @@ with fixture.handoff_supervisor_suite_workspace() as workspace:
     run_no_seat_recycle_refusal_case(workspace)
     run_agent_exit_record_cases(workspace)
     run_failed_extraction_at_a_handoff_case(workspace)
+    run_claude_ai_rename_carried_to_successor_case(workspace)
+    run_announced_names_record_not_started_case(workspace)
+    run_rename_before_a_crash_resume_announced_at_the_next_handoff_case(workspace)
     run_handoff_worktree_cleanup_cases(workspace)
     run_resume_after_a_death_without_a_handoff_cases(workspace)
     run_by_hand_resume_cases(workspace)

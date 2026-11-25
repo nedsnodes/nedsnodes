@@ -1202,7 +1202,7 @@ def case_import_needs_no_temporary_directory(root):
 
 
 def main() -> int:
-    cases = [case_import_needs_no_temporary_directory, case_python_function_used_from_another_file_is_listed,
+    cases = [case_python_function_used_from_another_file_is_listed, case_import_needs_no_temporary_directory,
              case_no_listed_word_is_a_glossary_term, case_committed_changes_are_listed,
              case_changed_file_on_main_is_not_a_new_path, case_function_listed_once_its_caller_appears,
              case_same_name_defined_in_two_files_is_not_a_use, case_one_word_constant_used_elsewhere_is_listed,

@@ -48,7 +48,10 @@ bottom of its stack: the open pull request whose head branch is its base,
 followed down to the one whose base is main; that bottom one, draft or not,
 is assigned first when it has no line. When a lookup on the way down finds
 no open pull request, or more than one, or comes back to a pull request
-already passed, the pull request is taken as not stacked. Every other one
+already passed, the pull request is taken as not stacked. The lookup goes by
+branch name alone, so a fork's pull request whose head branch shares a base
+branch's name is not handled: it can be taken as the pull request below, or
+make the stack read as not stacked. Every other one
 goes to whichever agent-seat of
 MERGE_LANE_PULL_REQUEST_REVIEW_ASSIGNEE_AGENT_SEATS_IN_TIE_ORDER has fewer
 pull requests waiting, ties to the first, leaving out the agent-seat named as
@@ -65,8 +68,14 @@ mac-claude whose state is APPROVED or CHANGES_REQUESTED, which the merge gate
 takes as the verdict. A pull request dealt with its verdict already on its
 newest commit does not add to its agent-seat's count. Only the newest
 REVIEWS_READ_PER_PULL_REQUEST reviews by each of the two accounts on each
-pull request are read. A missing, unreadable or malformed assignment file stops
-all assignment, so that no pull request it names is assigned again; so does
+pull request are read, so a verdict followed by REVIEWS_READ_PER_PULL_REQUEST
+or more reviews by its own account is not read; this is not handled. Such a
+pull request counts as waiting only when no verdict on its newest commit is
+read from either account that counts for it, so on a pull request
+ned-review-merge opened, a mac-claude verdict still read keeps it from
+counting. A missing, unreadable or
+malformed assignment file stops all assignment, so that no pull request it
+names is assigned again; so does
 a file that cannot be rewritten, until it can. The watcher writes the whole
 new file beside it and renames it over the old one, so a failed write leaves
 the old file whole and every pull request it dealt is dealt again at the
