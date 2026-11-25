@@ -16,8 +16,10 @@ when `claude` is not on PATH.
 """
 
 import ast
+import contextlib
 import importlib.machinery
 import importlib.util
+import io
 import json
 import os
 import shutil
@@ -801,18 +803,52 @@ def test_line_marks_strips_the_list_and_quotation_marks_and_keeps_a_mark_only_sp
           hook.normalized(" #new x") == "new x", repr(hook.normalized(" #new x")))
 
 
+def walk_finder_rule_replaced_in(tree, rule):
+    """Sets the value of the module-level assignment that binds the walk finder's list or quotation mark rule to
+    rule, whether the assignment is plain, annotated or chained; fails this case and returns False unless exactly
+    one such assignment exists."""
+    assignments = [node for node in tree.body
+                   if (isinstance(node, ast.Assign) and any(getattr(target, "id", None)
+                       == "MARKDOWN_LINE_OPENING_LIST_OR_QUOTATION_MARK_PATTERN_TEXT" for target in node.targets))
+                   or (isinstance(node, ast.AnnAssign) and node.value is not None and getattr(node.target, "id", None)
+                       == "MARKDOWN_LINE_OPENING_LIST_OR_QUOTATION_MARK_PATTERN_TEXT")]
+    check("the walk finder assigns its list or quotation mark rule once, at module level",
+          len(assignments) == 1, len(assignments))
+    if len(assignments) != 1:
+        return False
+    assignments[0].value = ast.copy_location(ast.Constant(rule), assignments[0].value)
+    return True
+
+
+def test_the_rule_replacement_finds_the_finder_constant_however_it_is_assigned():
+    name = "MARKDOWN_LINE_OPENING_LIST_OR_QUOTATION_MARK_PATTERN_TEXT"
+    for form, source in (("plain", f"{name} = 'old'"), ("annotated", f"{name}: str = 'old'"),
+                         ("chained", f"OTHER = {name} = 'old'")):
+        tree = ast.parse(source)
+        replaced = walk_finder_rule_replaced_in(tree, "new")
+        namespace = {}
+        exec(compile(ast.fix_missing_locations(tree), "<finder variant>", "exec"), namespace)
+        check(f"the rule replacement sets the {form} assignment's value", replaced and namespace[name] == "new",
+              namespace.get(name))
+    failures_before = len(failures)
+    with contextlib.redirect_stdout(io.StringIO()):
+        replaced = walk_finder_rule_replaced_in(ast.parse("OTHER = 'old'"), "new")
+    recorded = failures[failures_before:]
+    del failures[failures_before:]
+    check("a finder with no assignment of the rule makes the replacement report False", replaced is False, replaced)
+    check("a finder with no assignment of the rule fails the once-at-module-level case",
+          recorded == ["the walk finder assigns its list or quotation mark rule once, at module level"], recorded)
+
+
 def modules_loaded_with_the_walk_finder_list_or_quotation_mark_rule_replaced(rule):
     """The walk finder, this hook and the walk check program, each loaded afresh while the walk finder's source
     holds rule in place of its list or quotation mark rule, so a pattern that spells the rule out by hand, rather
-    than building from the finder's constant, still reads the real marks and not rule."""
+    than building from the finder's constant, still reads the real marks and not rule; None when the finder's
+    rule assignment cannot be found, which has already failed a case."""
     finder_file = hook.WALK_FINDER_FILE.resolve()
     replaced = ast.parse(finder_file.read_text(encoding="utf-8"), str(finder_file))
-    assignments = [node for node in replaced.body if isinstance(node, ast.Assign)
-                   and [getattr(target, "id", None) for target in node.targets]
-                   == ["MARKDOWN_LINE_OPENING_LIST_OR_QUOTATION_MARK_PATTERN_TEXT"]]
-    check("the walk finder assigns its list or quotation mark rule once, at module level",
-          len(assignments) == 1, len(assignments))
-    assignments[0].value = ast.copy_location(ast.Constant(rule), assignments[0].value)
+    if not walk_finder_rule_replaced_in(replaced, rule):
+        return None
 
     class ReplacedFinderLoader(importlib.machinery.SourceFileLoader):
         def get_code(self, fullname):
@@ -841,8 +877,10 @@ def modules_loaded_with_the_walk_finder_list_or_quotation_mark_rule_replaced(rul
 
 
 def test_every_pattern_reading_list_or_quotation_marks_follows_the_walk_finder_rule():
-    finder, replaced_hook, close = modules_loaded_with_the_walk_finder_list_or_quotation_mark_rule_replaced(
-        r"(?:Q\s+)")
+    modules = modules_loaded_with_the_walk_finder_list_or_quotation_mark_rule_replaced(r"(?:Q\s+)")
+    if modules is None:
+        return
+    finder, replaced_hook, close = modules
     patterns = (("the `#new` mark pattern", finder.APPROVAL_WALK_ITEM_NEW_TEXT_MARK_LINE_PATTERN, "#new x"),
                 ("the walk check program's `#case_against` line", close.CASE_AGAINST_LINE, "#case_against weak"),
                 ("the walk check program's evidence line", close.EVIDENCE_LINE, "#not_asked_test x"),
