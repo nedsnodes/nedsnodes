@@ -269,6 +269,13 @@ def merge_lane_review_page(review_id, state, submitted_at):
             "commit_id": HEAD, "submitted_at": submitted_at}
 
 
+def posting_program_finding_categories():
+    spec = importlib.util.spec_from_file_location("posting_program_categories", PROGRAM)
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return module.FINDING_CATEGORIES
+
+
 def codex_finding_id(priority, text):
     return hashlib.sha256(f"{priority}\0{text}".encode("utf-8")).hexdigest()[:12]
 
@@ -309,10 +316,10 @@ def codex_finding_grade_cases(scratch):
                              arguments=MERGE_LANE_ARGUMENTS, codex_runs=runs)
         check(f"a fix-next Codex grade whose only comment is {name} is refused",
               result.code == 2 and not result.calls and "holds the finding's id" in result.stderr, result.detail)
-    for grade in ("fix-in-maintenance", "file-for-later"):
+    for grade in posting_program_finding_categories():
         result = run_program(scratch, graded(merge_lane_codex_review_finding_grades=[
             {"finding": first_id, "grade": grade}, all_grades[1]]), arguments=MERGE_LANE_ARGUMENTS, codex_runs=runs)
-        check(f"a {grade} Codex grade with no comment is refused, since the after-merge follow-up program "
+        check(f"a {grade} Codex grade with no comment is refused, since a program after the post "
               "reads that grade only from comments",
               result.code == 2 and not result.calls and "holds the finding's id" in result.stderr, result.detail)
     result = run_program(scratch, graded(

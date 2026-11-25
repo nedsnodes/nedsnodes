@@ -151,7 +151,8 @@ MERGE_LANE_ACCOUNT = "ned-review-merge"
 POSTED_VERDICTS = ("APPROVE", "REQUEST_CHANGES")
 MERGE_GATE = Path(__file__).resolve().with_name("merge-gate.sh")
 NEW_ACTIVITY_COUNT_OPTION = "--print-new-activity-count-after-reviewed-since-bound"
-# The goals and philosophy page's four categories of a finding; only the first blocks.
+# The goals and philosophy page's four categories of a finding; only the first blocks. A program after the
+# post reads each category only from comments, so a Codex finding graded with any of them needs one.
 FINDING_CATEGORIES = ("must-fix-now", "fix-next", "fix-in-maintenance", "file-for-later")
 BLOCKING_CATEGORY = "must-fix-now"
 # The only category a finding marked "nit" may have; the fix-round program carries its nits.
@@ -251,8 +252,6 @@ CODEX_GRADE_WITH_NO_COMMENT = (
     "Then run this posting command again.\n"
     "From now on, give every Codex finding you grade must-fix-now, fix-next, fix-in-maintenance or "
     "file-for-later a comment of that category naming its id.")
-# The grades a program after the post acts on, so each needs a comment it can read.
-CODEX_GRADES_NEEDING_A_COMMENT = ("must-fix-now", "fix-next", "fix-in-maintenance", "file-for-later")
 # How a comment names the Codex finding it carries; restated findings are compared without it, because a
 # finding's id changes when its line range does.
 CODEX_FINDING_ID_MARK_IN_REVIEW_COMMENT_PATTERN = re.compile(r" ?\(?Codex finding [0-9a-f]{12}\)?")
@@ -505,7 +504,7 @@ def body_with_codex_answers(body, comments, answers, findings, plan, number, hea
             grades=", ".join((*FINDING_CATEGORIES, DOES_NOT_HOLD_GRADE))))
     if not findings:
         return body
-    uncommented = [finding for finding in findings if grades[finding]["grade"] in CODEX_GRADES_NEEDING_A_COMMENT
+    uncommented = [finding for finding in findings if grades[finding]["grade"] in FINDING_CATEGORIES
                    and not any(comment["finding_category"] == grades[finding]["grade"] and finding in comment["body"]
                                for comment in comments)]
     if uncommented:
