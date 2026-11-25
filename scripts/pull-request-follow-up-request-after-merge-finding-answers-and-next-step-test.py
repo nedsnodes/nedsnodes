@@ -526,9 +526,10 @@ def test_open():
         check("open sets the branch's upstream", git(worktree, "rev-parse", "--abbrev-ref", "@{upstream}")
               == "origin/topic-one")
         calls = case.gh_calls()
-        check("open creates the pull request from the file",
+        check("open creates the pull request from the file, its description ending with the follow-up request line",
               len(calls) == 1 and calls[0] == "pr create --base main --head topic-one --title Keep code span padding "
-                              "--body Keeps the padding.\n\n#no_defect_fixed\n", str(calls))
+                              "--body Keeps the padding.\n\n#no_defect_fixed\n\n#follow_up_request pull request 1964\n",
+              str(calls))
         check("open records the link against the finding",
               case.answers() == {"started": {"1": "topic-one"}, "answers": {"1": {"link": LINK, "branch": "topic-one"}}}, str(case.answers()))
         check("open removes the title and description file once the pull request is recorded", not description.exists())
@@ -571,6 +572,20 @@ def test_open():
               and case.gh_calls()[-1].startswith("pr create --base main --head topic-two "), str(case.gh_calls()))
     finally:
         case.close()
+
+
+def test_build_pull_request_description_ending_with_follow_up_request_line():
+    holding = "Answers it.\n\n#follow_up_request pull request 1964 \n#no_defect_fixed\n"
+    check("a description already holding the follow-up request line on a line of its own is kept as written",
+          program.build_pull_request_description_ending_with_follow_up_request_line(holding, 1964) == holding)
+    naming_inline = "From merge-lane-2's `#follow_up_request pull request 1964`.\n\n#no_defect_fixed"
+    check("a description naming the request only inside a sentence gets the line at its end",
+          program.build_pull_request_description_ending_with_follow_up_request_line(naming_inline, 1964)
+          == naming_inline + "\n\n#follow_up_request pull request 1964\n")
+    other = "Answers it.\n\n#follow_up_request pull request 1963\n#no_defect_fixed\n"
+    check("a description holding another pull request's follow-up request line gets this one's at its end",
+          program.build_pull_request_description_ending_with_follow_up_request_line(other, 1964)
+          == other + "\n#follow_up_request pull request 1964\n")
 
 
 def test_new_shared_names_wait_for_the_dispatching_agent():
@@ -1593,7 +1608,8 @@ def test_print_block_with_replaced_pull_requests():
 
 
 for test in (test_help, test_block_parsing, test_print_block, test_print_block_with_replaced_pull_requests, test_brief_text, test_no_saved_block, test_start,
-             test_open_refusals, test_open, test_new_shared_names_wait_for_the_dispatching_agent,
+             test_open_refusals, test_open, test_build_pull_request_description_ending_with_follow_up_request_line,
+             test_new_shared_names_wait_for_the_dispatching_agent,
              test_open_pushes_the_checked_out_recorded_branch_not_the_last,
              test_open_failures, test_open_passes_on_what_a_push_that_succeeds_prints,
              test_open_gh_pr_create_second_try_and_gh_pr_list,
