@@ -1493,8 +1493,10 @@ class RunOutputCopiedToRecordLog:
         with self._lock:
             unended = getattr(self._unended_line_of_this_thread, "text", "")
             if unended:
+                # Ended here, or the next line written, such as a WARNING,
+                # would join it, and a filter for lines opening WARNING: miss it.
                 self._unended_line_of_this_thread.text = ""
-                self._write_out(unended)
+                self._write_out(unended + "\n")
             self.stream.flush()
             if self._file is not None:
                 self._file.flush()
@@ -1507,12 +1509,16 @@ class RunOutputCopiedToRecordLog:
             self._held = None
 
     def detach(self) -> None:
-        self.flush()
-        with self._lock:
-            if self._file is not None:
-                self._file.close()
-            self._file = None
-            self._held = None
+        try:
+            self.flush()
+        finally:
+            # Closed even when the flush raises, such as BrokenPipeError once
+            # stdout's reader has exited.
+            with self._lock:
+                if self._file is not None:
+                    self._file.close()
+                self._file = None
+                self._held = None
 
 
 def fresh_record_dir(target_stem: str) -> pathlib.Path:
@@ -1977,13 +1983,15 @@ def main() -> int:
             if run_log.record_directory is not None:
                 print(f"record: {ship_record(run_log.record_directory)}", flush=True)
     finally:
-        run_log.detach()
-        sys.stdout = run_log.stream
-        for number, handler in handlers_before.items():
-            # None is what signal.signal returns for a handler that was not
-            # set from Python, and it cannot be set back.
-            if handler is not None:
-                signal.signal(number, handler)
+        try:
+            run_log.detach()
+        finally:
+            sys.stdout = run_log.stream
+            for number, handler in handlers_before.items():
+                # None is what signal.signal returns for a handler that was not
+                # set from Python, and it cannot be set back.
+                if handler is not None:
+                    signal.signal(number, handler)
     # The run ends as a process that signal ended does, so whatever started it
     # reads the ending it asked for: the agents are stopped, the review copy
     # is removed and the log is closed by now.
