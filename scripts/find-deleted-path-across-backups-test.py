@@ -4361,6 +4361,29 @@ with tempfile.TemporaryDirectory() as tmp:
           code == 2 and "Give the file's absolute path on elsewhere" in errors and calls == [],
           "exit=%s calls=%s\n%s" % (code, calls, errors))
 
+    code, out, errors, calls = run_restore(["someone@elsewhere:x.md", "--restore", str(copy)])
+    check("--restore with an unknown host's bare file name is a usage error, exit 2, running nothing, "
+          "not a write to the repository's file of that name",
+          code == 2 and "Give the file's absolute path on elsewhere" in errors and calls == [],
+          "exit=%s calls=%s\n%s" % (code, calls, errors))
+
+    for given, placed in (("./i.md", repo / "i.md"), ("docs/../j.md", repo / "j.md")):
+        code, out, errors, calls = run_restore([given, "--repo", str(subdirectory), "--restore", str(copy)],
+                                               table=[("rev-parse --show-toplevel", (0, "%s\n" % repo, ""))])
+        check("--restore places the dot-relative path %s under the top level of the repository --repo is in, "
+              "not under the current directory" % given,
+              code == 0 and placed.read_bytes() == content and "restored %s to %s" % (copy, placed) in out
+              and not Path(os.getcwd(), given).exists(), "exit=%s\n%s\n%s" % (code, out, errors))
+
+    spaced = tmp / "repo ending in a space "
+    spaced.mkdir()
+    code, out, errors, calls = run_restore(["k.md", "--repo", str(spaced), "--restore", str(copy)],
+                                           table=[("rev-parse --show-toplevel", (0, "%s\n" % spaced, ""))])
+    check("--restore keeps the whitespace that ends the repository's top-level name, and makes no sibling "
+          "directory without it",
+          code == 0 and (spaced / "k.md").read_bytes() == content
+          and not (tmp / "repo ending in a space").exists(), "exit=%s\n%s\n%s" % (code, out, errors))
+
 # --restore refuses a <path> that is the copy itself, and a failed write leaves the file already there as it was.
 with tempfile.TemporaryDirectory() as tmp:
     tmp = Path(tmp)

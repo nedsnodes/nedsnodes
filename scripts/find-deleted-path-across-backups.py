@@ -708,15 +708,16 @@ class CitedQueryCannotBePlaced(Exception):
     """A cited path cannot be resolved from the available host and directory information."""
 
 
-def _plain_path_from_cited_query(query, cwd=None):
-    """Resolve host, home and dot-relative forms, or raise CitedQueryCannotBePlaced."""
+def _plain_path_from_cited_query(query, cwd=None, fragment_allowed=True):
+    """Resolve host, home and dot-relative forms, or raise CitedQueryCannotBePlaced. An unknown host's bare
+    name is returned as a search fragment, or refused when fragment_allowed is False."""
     host, path = locator.split_host(query)
     if host is not None and not path.startswith("/"):
         home = locator.KNOWN_HOST_HOMES.get(host.split(".")[0])
         inside = path[2:] if path.startswith("~/") else ("" if path == "~" else path)
         if home:
             return os.path.normpath(home + ("/" + inside if inside else ""))
-        if "/" in inside.rstrip("/"):
+        if "/" in inside.rstrip("/") or not fragment_allowed:
             raise CitedQueryCannotBePlaced(
                 "Give the file's absolute path on %s: this program does not know that host's home directory." % host)
         return inside
@@ -1507,8 +1508,10 @@ def _git_top_level(repo, runner):
 
     Raises _GitCommandFailed for any other git failure, such as a bare repository or a corrupt one."""
     code, out, stderr = runner(["git", "-C", repo, "rev-parse", "--show-toplevel"])
-    if code == 0 and out.strip():
-        return out.strip()
+    # Only git's newline goes: a directory name may itself end in whitespace.
+    top_level = out[:-1] if out.endswith("\n") else out
+    if code == 0 and top_level:
+        return top_level
     if code != 0 and git_output.git_stderr_says_outside_a_repository(stderr):
         return None
     raise _GitCommandFailed("git -C %s rev-parse --show-toplevel exited %s — %s"
@@ -2550,7 +2553,7 @@ def main(argv=None, runner=run_command):
                         help="search nothing, and copy the file COPY, such as a copy whose path a search's "
                              "'copied to' line printed, to <path> on this machine, creating any missing parent "
                              "directories and replacing any file already there. A relative COPY is read from the "
-                             "current directory, and a relative <path> is placed under the top level of the "
+                             "current directory, and a relative <path>, a ./ or .. form included, is placed under the top level of the "
                              "repository --repo is in, or under --repo when that is in no repository, so give "
                              "the file's repo-relative or absolute path, not a fragment of it; a git blob id is "
                              "refused as a usage error. Exits 0 when the copy was made, and 1 when it was not, "
@@ -2565,20 +2568,22 @@ def main(argv=None, runner=run_command):
     if args.restore is not None:
         if is_git_blob_id(args.path):
             parser.error("--restore needs the path the file was deleted from, not a git blob id")
-        try:
-            named = _plain_path_from_cited_query(args.path)
-        except CitedQueryCannotBePlaced as refusal:
-            parser.error(str(refusal))
-        destination = named
-        if not os.path.isabs(named):
+        host, given = locator.split_host(args.path)
+        base = None
+        if host is None and not given.startswith(("/", "~")):
             try:
                 top_level = _git_top_level(args.repo, runner)
             except _GitCommandFailed as failure:
                 print("%s: could NOT restore %s to %s — the path is relative, and git could not give the top "
                       "level of the repository it belongs under: %s"
-                      % (THIS_SCRIPT_NAME, args.restore, named, failure), file=sys.stderr, flush=True)
+                      % (THIS_SCRIPT_NAME, args.restore, args.path, failure), file=sys.stderr, flush=True)
                 return EXIT_NOT_RESTORED
-            destination = os.path.join(top_level or args.repo, named)
+            base = os.path.abspath(top_level or args.repo)
+        try:
+            named = _plain_path_from_cited_query(args.path, cwd=base, fragment_allowed=False)
+        except CitedQueryCannotBePlaced as refusal:
+            parser.error(str(refusal))
+        destination = named if os.path.isabs(named) else os.path.join(base, named)
         destination_existed = os.path.lexists(destination)
         try:
             restore_copy(args.restore, destination)
