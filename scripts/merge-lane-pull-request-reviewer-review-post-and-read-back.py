@@ -57,6 +57,11 @@ reads non-blocking findings by:
   "**Blocking: N**" alone on its line, after the verdict line and a blank
   line, the only place the fix-round program's BLOCKING_COUNT_PATTERN reads
   it, and only on merge-lane-2's reviews. No count is written when N is 0;
+- after the count, a blank line and the fix-round program's REVIEW_BODY_POSTED_BY_MERGE_LANE_LINE_FORMAT
+  naming the merge-lane that posts the review, the agent-seat GIT_AUTHOR_NAME names, which
+  the fix-round program sends the round's messages to. Every merge-lane posts as
+  ned-review-merge, so nothing else on GitHub tells them apart. A review that requests
+  changes is refused when GIT_AUTHOR_NAME is not a merge-lane's name, such as merge-lane-1;
 - the posted verdict is REQUEST_CHANGES when any comment is must-fix-now and
   APPROVE otherwise. A file whose verdict is REQUEST_CHANGES with no
   must-fix-now comment is refused rather than posted as an approval.
@@ -201,6 +206,15 @@ NO_NEW_ACTIVITY = (
     "program's docstring describes, and run the same command again.\n"
     "If the gate refused for new activity, run the gate again: what it counted may have been your own "
     "review.")
+NOT_A_MERGE_LANE = (
+    "review not posted: the review requests changes, so its body must name the merge-lane that posts it, "
+    "which this program takes from GIT_AUTHOR_NAME, but GIT_AUTHOR_NAME is {name!r}, not a merge-lane's name "
+    "such as merge-lane-1. The fix-round program sends the pull request author's messages to the merge-lane "
+    "that line names.\n"
+    "Do not post the review any other way.\n"
+    "If you are a merge-lane, run the same command again with your agent-seat's name before it, as in "
+    "GIT_AUTHOR_NAME=merge-lane-1 python3 scripts/merge-lane-pull-request-reviewer-review-post-and-read-back.py ...\n"
+    "Otherwise tell the user this message.")
 NOT_POSTED = (
     "review not posted: {reason}.\n"
     "Do not post the review any other way.\n"
@@ -551,11 +565,11 @@ def outside_the_diff_line(comment):
                       *(OUTSIDE_THE_DIFF_CONTINUATION_INDENT + line for line in rest)])
 
 
-def with_finding_category_marks(body, comments):
+def with_finding_category_marks(body, comments, merge_lane):
     """Return (verdict, body, comments) as posted for categorized comments: each opened with its
     category's mark, or the nit mark for a nit, no finding_category or nit key left, a comment repeating an earlier one's path, line
-    and posted body dropped, as the fix-round program counts it once, and the verdict and the body's
-    count set by the must-fix-now ones left."""
+    and posted body dropped, as the fix-round program counts it once, and the verdict, the body's
+    count and its merge-lane name line set by the must-fix-now ones left."""
     comments = fix_round.without_reposts([
         {"path": comment["path"], "line": comment["line"],
          "body": review_comment_opening_mark_for_finding_category(comment["finding_category"], comment.get("nit", False))
@@ -564,7 +578,8 @@ def with_finding_category_marks(body, comments):
     count = len(fix_round.marked(comments))
     verdict = "REQUEST_CHANGES" if count else "APPROVE"
     if count:
-        body = BLOCKING_COUNT_FORMAT.format(count=count) + "\n\n" + body
+        body = (BLOCKING_COUNT_FORMAT.format(count=count) + "\n\n"
+                + fix_round.REVIEW_BODY_POSTED_BY_MERGE_LANE_LINE_FORMAT.format(merge_lane=merge_lane) + "\n\n" + body)
     return verdict, body, comments
 
 
@@ -755,7 +770,11 @@ def main(argv=None):
                   file=sys.stderr)
             return EXIT_NOT_POSTED
     elif account == MERGE_LANE_ACCOUNT:  # pragma: no mutate, --github-account allows only mac-claude and ned-review-merge, and mac-claude sorts before ned-review-merge, so >= gives what == gives
-        verdict, body, comments = with_finding_category_marks(body, comments)
+        merge_lane = os.environ.get("GIT_AUTHOR_NAME", "")
+        verdict, body, comments = with_finding_category_marks(body, comments, merge_lane)
+        if verdict == "REQUEST_CHANGES" and not fix_round.REVIEW_BODY_POSTED_BY_MERGE_LANE_LINE_PATTERN.match(f"{verdict}\n\n{body}"):
+            print(NOT_A_MERGE_LANE.format(name=merge_lane), file=sys.stderr)
+            return EXIT_NOT_POSTED
     body, inline_comments = with_outside_comments_in_body(body, comments, lines)
     moved_count = len(comments) - len(inline_comments)
     comments = inline_comments

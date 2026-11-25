@@ -114,7 +114,11 @@ names a thing removed; `#not_asked_rename` gives the old name, then the new one,
 separated by a space, each in backquotes when it holds a space itself, as in
 #not_asked_rename `instruction guard` `instruction-file guard`; `#not_asked_glossary_term`
 names each glossary term the change puts in, in backquotes when it holds a space;
-`#not_asked_hashtag_marker` names each hashtag marker the change adds. An unused or old name is searched for as written and,
+`#not_asked_hashtag_marker` names each hashtag marker the change adds;
+`#not_asked_search` gives the first and last day of the search for the problem a
+dropped proposal guarded against, the count of cases found and the places
+searched, as in `#not_asked_search YYYY-MM-DD to YYYY-MM-DD, 0 cases, in the
+log-store's session dialogs and user messages and the commits on main`. An unused or old name is searched for as written and,
 when it has two or more words, with its words joined by hyphens, by underscores
 and by nothing, a run of digits both kept with the letters before it and
 split off as a word of its own; every
@@ -447,6 +451,27 @@ step exits 0 only when it hands the
 item over. CHECK's reads of the texts an answer adds need no outcomes, and it
 prints no such command.
 
+USER'S EARLIER WORDS. For an item that is to be shown, the step then runs
+walk-me-through-approval-walk-item-title-search-user-messages-in-session-dialogs-and-lines-in-walk-minutes-print.py
+with the item's title, the title of each earlier text of it read, which the
+next paragraph finds, and the item's numbers; a Withdrawn heading carries no
+title. It prints what that program prints right after its first line, which
+names the read's report: each message the user typed
+in an agent-session whose saved dialog names a title, after the agent message
+it answers, and each walk-minutes line naming one, each with its file and line.
+When the search fails, the step refuses, before any read, printing what the
+search said, and exits 1; any exit of the search but its found and nothing-found
+exits is a failure. The step saves what the search prints, a search with no
+hits too, as it prints it, in
+`docs/walk/title-search-cache/<walk name>-item-<N>-<agent-session id>.md`, the
+titles searched for as a JSON list on its first line, the agent-session id
+being $CLAUDE_CODE_SESSION_ID. A later run for the item in the same
+agent-session prints only a line naming that file, unless the file is missing
+or the item's titles differ from the saved ones; then it searches, prints and
+saves again. When the file cannot be written, or the agent-session id is not
+set, the step prints the search in full with a line saying why it was not
+saved. walk-files-ship.py does not ship this directory.
+
 Before it reads, the step keeps each earlier version of the item: each text of
 the item that a read wrote its report for, oldest first, goes below the item's
 live version, after the versions kept there already and before the next item,
@@ -551,6 +576,7 @@ RECORD_SHIPPER_FILE = REPOSITORY_TOP / "nn-systems" / "cold-read" / "cold-read-r
 RECORD_NAMES_FILE = REPOSITORY_TOP / "nn-systems" / "cold-read" / "cold-read-record-names-common.py"
 FINDING_OUTCOMES_COMMON_FILE = (REPOSITORY_TOP / "nn-systems" / "cold-read"
                                 / "cold-read-fast-read-report-findings-parse-and-finding-outcomes-check-common.py")
+TITLE_SEARCH_PROGRAM = HERE / "walk-me-through-approval-walk-item-title-search-user-messages-in-session-dialogs-and-lines-in-walk-minutes-print.py"
 PATH_CONSTANTS_FILE = (REPOSITORY_TOP / "nn-systems" / "general-tools"
                        / "ned-box-home-directory-and-its-mac-mount-point-path-constants-common.py")
 COUNTS_LOG_FILE_NAME = "walk-me-through-answer-added-texts-cold-read-fast-read-already-done-or-had-to-run-counts-per-check.tsv"
@@ -583,10 +609,11 @@ NOT_ASKED_EITHER_GROUND = f"one of these two alone: {NOT_ASKED_COST_GROUND}, or 
 INSTRUCTION_FILE_GUARD_FILE = REPOSITORY_TOP / ".claude" / "guard-hooks" / "instruction-file-guard.py"
 SYSTEM_GLOSSARIES_LISTED_FILE = REPOSITORY_TOP / "scripts" / "system-glossaries-listed-on-the-project-glossary-test.py"
 OPTION_NUMBERS = (2, 3)
-EVIDENCE_LINE = re.compile(r"^\s*(?:(?:[-*+]|\d+[.)]|>)\s+)*[*_`]*(#not_asked_(?:touches|test|source|unused|rename|glossary_term|hashtag_marker))"
+EVIDENCE_LINE = re.compile(r"^\s*(?:(?:[-*+]|\d+[.)]|>)\s+)*[*_`]*(#not_asked_(?:touches|test|source|unused|rename|glossary_term|hashtag_marker|search))"
                            rf"{MARKER_END}[*_`]*[:\s]*(.*)$")
-TOUCHES, TEST, SOURCE, UNUSED, RENAME, GLOSSARY_TERM, ADDED_HASHTAG_MARKER = (
-    f"#not_asked_{name}" for name in ("touches", "test", "source", "unused", "rename", "glossary_term", "hashtag_marker"))
+TOUCHES, TEST, SOURCE, UNUSED, RENAME, GLOSSARY_TERM, ADDED_HASHTAG_MARKER, SEARCH = (
+    f"#not_asked_{name}" for name in ("touches", "test", "source", "unused", "rename", "glossary_term", "hashtag_marker",
+                                      "search"))
 NotAskedEvidence = collections.namedtuple("NotAskedEvidence",
                                           "value rating found touched tests lines marks top item")
 NoAnswerCase = collections.namedtuple("NoAnswerCase", "value label meaning ratings needed checks evidence ground flag")
@@ -687,8 +714,47 @@ def system_glossary_problems(found):
     return not_system_glossary_problems(found.touched, found.top, found.item)
 
 
+def dropped_proposal_search_problems(found):
+    """Return why an item that drops a proposed check cannot settle on its `#not_asked_search` line: the line must
+    give a window of at least SEARCH_WINDOW_DAYS ending yesterday or today, one count, of 0 cases, and after it `in`
+    and the places searched;
+    and a dropped proposal adds no `#new` text."""
+    problems = [NOT_ASKED_DROPPED_PROPOSAL_NEW_TEXT_PROBLEM] if proposed_texts(found.marks, {NEW_MARK}) else []
+    values = found.found[SEARCH]
+    if not values:
+        return problems + [MissingEvidenceLine(NOT_ASKED_NO_LINE_PROBLEM.format(marker=SEARCH, why=NOT_ASKED_WHY[SEARCH]))]
+    today = datetime.datetime.now(datetime.timezone.utc).date()
+    yesterday = today - datetime.timedelta(days=1)
+    for value in values:
+        days = SEARCH_DAY.findall(value)
+        counts = list(SEARCH_COUNT.finditer(value))
+        count = counts[0] if len(counts) == 1 else None
+        places = SEARCH_PLACES.match(value[count.end():]) if count else None
+        if len(days) != 2 or count is None or not places or not SEARCH_PLACE_WORD.search(places[1]):
+            problems.append(MissingEvidenceLine(NOT_ASKED_SEARCH_SHAPE_PROBLEM.format(marker=SEARCH, value=value)))
+            continue
+        try:
+            first, last = (datetime.date.fromisoformat(day) for day in days)
+        except ValueError:
+            problems.append(MissingEvidenceLine(NOT_ASKED_SEARCH_SHAPE_PROBLEM.format(marker=SEARCH, value=value)))
+            continue
+        if (last - first).days < SEARCH_WINDOW_DAYS:
+            problems.append(NOT_ASKED_SEARCH_WINDOW_SHORT_PROBLEM.format(marker=SEARCH, first=first, last=last,
+                                                                         days=SEARCH_WINDOW_DAYS))
+        if last < yesterday:
+            problems.append(NOT_ASKED_SEARCH_WINDOW_OLD_PROBLEM.format(marker=SEARCH, last=last))
+        if last > today:
+            problems.append(NOT_ASKED_SEARCH_WINDOW_FUTURE_PROBLEM.format(marker=SEARCH, last=last))
+        if int(count[1]):
+            problems.append(NOT_ASKED_SEARCH_FOUND_CASES_PROBLEM.format(marker=SEARCH, count=count[1]))
+    return problems
+
+
 NOT_ASKED_FLAG, ALREADY_DECIDED_FLAG = "--not-asked", "--already-decided"
 NOT_ASKED_ANY_RATING = (NOT_ASKED_RATED_NONE, NOT_ASKED_RATED_WEAK)
+EVERY_RATING = ("none", "weak", "medium", "strong", "very strong")
+DROPPED_PROPOSAL_VALUE = "proposed-check-dropped-search-found-no-case"
+DROPPED_PROPOSAL_GROUND = "that the problem the dropped proposal guarded against may still come, at any rating"
 HANDOFF_INTERNALS_VALUE = "handoff-internals"
 HANDOFF_INTERNALS_CITATION = "the user-ruling on the handoff's internals in nn-systems/handoff/handoff.system.design.md"
 HANDOFF_INTERNALS_NAMED = re.compile(r"handoff|initial-agent-instructions", re.I)
@@ -750,6 +816,14 @@ NO_ANSWER_CASES = (
                  (NOT_ASKED_RATED_WEAK,), (TOUCHES,), (no_kind_problems,),
                  "a touches line, which may be empty; no touched Markdown file is one the instruction-file guard "
                  "protects", NOT_ASKED_EARLIER_APPROVAL_GROUND, NOT_ASKED_FLAG),
+    # CLAUDE.md's guard rule: a proposal whose search of the last 30 days found no case is dropped without the user,
+    # whatever its case against's rating.
+    NoAnswerCase(DROPPED_PROPOSAL_VALUE, "proposed check dropped, search found no case",
+                 "an item that recommends dropping a proposed check, test, guard, refusal or hook, because a search of "
+                 "the last 30 days, of every place the problem would leave a trace, found no case of it",
+                 EVERY_RATING, (SEARCH,), (dropped_proposal_search_problems,),
+                 "a search line giving a window of at least 30 days that ends no earlier than yesterday, 0 cases, "
+                 "and the places searched; no `#new` text", None, NOT_ASKED_FLAG),
     NoAnswerCase(HANDOFF_INTERNALS_VALUE, "the handoff's own internals",
                  "an item about the handoff's own internals, such as what the handoff-supervisor, the session-handoff "
                  "file or the initial-agent-instructions do, when it only removes or shortens something and its case "
@@ -772,6 +846,9 @@ NO_ANSWER_TABLE_RULES = (
     "write or time spent, or only that the change alters text the user approved word for word on an earlier date; the "
     "item says which kind, with its evidence. Whether the instruction-file guard protects the file, and how long the "
     "text is, do not matter for these kinds.",
+    "An item that recommends dropping a proposed check, test, guard, refusal or hook needs no answer, whatever its "
+    "case against's rating, when a search of the last 30 days, of every place the problem would leave a trace, found "
+    "no case of it.",
     "Every other item is shown, including any rated above none that adds a rule, instruction sentence, check, hook, "
     "job, glossary term, design choice, setting or recurring expense, or that recommends doing nothing.",
     "Before settling an item, run its row's command and ask the advisor whether a later ruling or another open item "
@@ -780,6 +857,14 @@ NO_ANSWER_TABLE_RULES = (
     "The minutes record a settled item as <accepted>, with \"not asked\" and its kind number, or \"case against none\"; "
     "it keeps its number and its place in the count M, and its change is made with the walk's other approved changes.",
 )
+
+
+def not_asked_grounds(value):
+    """What the case against may name for the item to settle as the row `value`, as refusals and judgement lines
+    say it."""
+    if value == DROPPED_PROPOSAL_VALUE:
+        return DROPPED_PROPOSAL_GROUND
+    return NOT_ASKED_GROUNDS.get(value, NOT_ASKED_EITHER_GROUND)
 
 
 def no_answer_case(value):
@@ -1022,9 +1107,7 @@ _PART_VALUE = r"part \d+ " + _one_of(f"{word} {outcome}" for word, outcome in OU
 # The values close fills each placeholder with; {ruling} and {reason} carry the agent's own words, so any text.
 PLACEHOLDER_VALUES = {
     "answered": _one_of([APPROVED, DISAPPROVED] + [f"{APPROVED} option {number}" for number in OPTION_NUMBERS]
-                        + [f"not asked, kind {kind}" for kind in NOT_ASKED_KINDS]
-                        + [f"not asked, case against {NOT_ASKED_RATED_NONE}"]
-                        + [f"not asked, {label}" for label in NOT_ASKED_WEAK_GROUND_LABELS.values()]),
+                        + [f"not asked, {case.label}" for case in NO_ANSWER_CASES if case.flag == NOT_ASKED_FLAG]),
     "outcome": _one_of(OUTCOMES.values()),
     "parts": rf"{_PART_VALUE}(?:, {_PART_VALUE})*",
     "ruling": ".+",
@@ -1283,11 +1366,32 @@ NOT_ASKED_MARKER_SHAPE_PROBLEM = ("- `{value}` on its `{marker}` line is not a h
                                   "digits, `_` or `-`.")
 NOT_ASKED_MARKER_READ_PROBLEM = ("- the marker `{value}` is in {files}, which are not Markdown; a marker a program, "
                                  "a test or a setting reads changes what the program does, so the user sees it.")
+NOT_ASKED_SEARCH_SHAPE_PROBLEM = ("- its `{marker}` line `{value}` does not give the search's first and last day, as "
+                                  "YYYY-MM-DD, the count of cases found, as in `0 cases`, and the places searched.")
+NOT_ASKED_SEARCH_WINDOW_SHORT_PROBLEM = ("- its `{marker}` line searched {first} to {last}, shorter than the {days} "
+                                         "days the guard rule in CLAUDE.md asks for.")
+NOT_ASKED_SEARCH_WINDOW_OLD_PROBLEM = ("- its `{marker}` line's search ended on {last}, before yesterday; search again "
+                                       "up to today, since a case may have come since.")
+NOT_ASKED_SEARCH_WINDOW_FUTURE_PROBLEM = ("- its `{marker}` line's search ends on {last}, after today (UTC); give "
+                                          "the last day actually searched.")
+NOT_ASKED_SEARCH_FOUND_CASES_PROBLEM = ("- its `{marker}` line found {count} cases; a case found is the failure that "
+                                        "has happened, so the proposal is shown to the user with those cases cited.")
+NOT_ASKED_DROPPED_PROPOSAL_NEW_TEXT_PROBLEM = ("- it has a `#new` line, which A would add; an item that drops a "
+                                               "proposal adds no text, so it recommends something else and is shown.")
+SEARCH_DAY = re.compile(r"\b\d{4}-\d{2}-\d{2}\b")
+SEARCH_COUNT = re.compile(r"\b(\d+)\s+cases?\b", re.I)
+# The places are the text after the single count's `in`.
+SEARCH_PLACES = re.compile(r"\W*in\b(.*)", re.I | re.S)
+SEARCH_PLACE_WORD = re.compile(r"\b(?!(?:to|in|and|of|the|from|through)\b)[A-Za-z][\w'.-]*")
+SEARCH_WINDOW_DAYS = 30
 NOT_ASKED_WHY = {
     TOUCHES: "list on it every file the change edits or deletes, separated by spaces.",
     TEST: "name on it the test that fails before the fix and passes after it.",
     SOURCE: "cite on it the ruling, the merged code or the command that shows the fact.",
     RENAME: "give on it the old name, then the new name, each in backquotes when it holds a space.",
+    SEARCH: ("give on it the search's first and last day, the count of cases found and the places searched, as in "
+             "`#not_asked_search 2026-10-26 to 2026-11-25, 0 cases, in the log-store's session dialogs and user "
+             "messages and the commits on main`."),
 }
 NOT_ASKED_JUDGEMENT_LINES = (
     "{item} is recorded as settled without asking the user, {label}; the program checked only what code can.",
@@ -1299,6 +1403,12 @@ NOT_ASKED_JUDGEMENT_LINES = (
     "answer line, and close records only the last one, so this line is then set aside.",
 )
 # Code cannot see these in a change, so an item of no kind rated weak leaves them to the agent.
+# Code cannot tell from the item what was proposed, or where the problem would leave its trace.
+NOT_ASKED_DROPPED_PROPOSAL_JUDGEMENT_LINE = (
+    "Judge also whether {item} proposes a check, test, guard, refusal or hook and recommends dropping it, and whether "
+    "the problem that check guards against would have left a trace in the places its `#not_asked_search` line names. "
+    "If {item} drops no such proposal, or the problem would leave no trace there, as for code too new to have run, do "
+    "not run close: present {item} to the user.")
 NOT_ASKED_WEAK_JUDGEMENT_LINE = (
     "{item} is of " + NOT_ASKED_KINDS_NAMED + " and its case against is rated weak: if its change "
     "widens an agent's permissions, as a settings change can, or turns off a guard, do not run close: present {item} to the user.")
@@ -1430,12 +1540,18 @@ ITEM_READ_SUB_STEP_NAMED = (
     "{item} is split into numbered sub-steps, which the user is shown one at a time, so the step added the line "
     "`#next_to_present {sub_step}` to {minutes}, naming the first sub-step of {item} the walk-minutes record no answer "
     "to, and reads {sub_step} instead of {item}.")
-MARKDOWN_HEADING = re.compile(r"^ {0,3}#{1,6}[ \t]+(.*)$")
 WITHDRAWN_VERSION_HEADING = "#### Withdrawn version {version} of item {number}"
 NUMBER_PREDICTED = "number_predicted"
+# In a read's outcome: the heading its text was kept under, so the text is kept once, whatever is later written
+# near that heading.
+KEPT_AS_WITHDRAWN_VERSION = "kept_as_withdrawn_version"
 ITEM_NUMBER_PREDICTED_FLAG = "--item-number-predicted"
 EARLIER_TEXT_KEPT = ("{item}: its earlier text, which the cold-read-fast-read {report} read, is now kept below its "
                      "live version in {document}, under `{heading}`; leave it there.")
+EARLIER_TEXT_KEPT_NOT_RECORDED = (
+    "{item}: its earlier texts are kept below its live version in {document}, but {outcome} could not be written to "
+    "record that ({error}), so a later read step may keep one again if the kept text is edited. Make {reads} "
+    "writable, then run `{command}` again.")
 FRESH_AGENT_REWRITE_REPLACED_TEXT_KEPT = ("{item}: its text before the fresh-agent's rewrite is now kept below its live "
                                           "version in {document}, under `{heading}`; leave it there.")
 FRESH_AGENT_REWRITE_FLAG = "--approval-walk-item-fresh-agent-rewrite-file"
@@ -1466,7 +1582,9 @@ FRESH_AGENT_REWRITE_SHARED_HEADING = (
     "item under a heading of its own; give {item} a heading of its own in the walk-document first")
 FRESH_AGENT_REWRITE_ITEMS_CHANGED = (
     "would change which items the walk-document holds, from {before} to {after}, as an unclosed code fence in the "
-    "rewrite does by turning the headings below it into code; close or remove the fence")
+    "rewrite does by turning the headings below it into code, or a paragraph opening with a bold running count, such "
+    "as `**Item 3 of 10 revised:**`, does by starting another version of an item; close or remove the fence, and "
+    "remove the count")
 FRESH_AGENT_REWRITE_WITHDRAWN_HEADING_NOT_READ = (
     "would leave `{heading}`, under which the replaced text is kept, read as something other than a heading, as an "
     "unclosed code fence in the rewrite does; close or remove the fence")
@@ -1533,6 +1651,23 @@ RATED_NONE_NOT_SHOWN_LINES = (
     "If the case against is in fact more than none, change the rating on its `#case_against` line, then run "
     "`{read_command}` again.",
 )
+APPROVAL_WALK_ITEM_TITLE_SEARCH_FAILED = (
+    "nothing read: {item} was not given its cold-read-fast-read, because the search for what the user said in earlier "
+    "agent-sessions that named its title failed (exit {exit}), and the user's earlier words may already decide "
+    "the item. The search said:\n{said}\n"
+    "Tell the user what each FAILED line above says, with any remedy the lines after it give, and do not show "
+    "{item} until the command below runs without this refusal, since until then nobody has read his earlier words "
+    "on it; a subagent tells the agent that dispatched it instead.\n"
+    "Once the user says the cause is fixed, run `{command}` again.")
+TITLE_SEARCH_CACHE_DIRECTORY_NAME = "title-search-cache"
+TITLE_SEARCH_CACHE_FILE_NAME = "{walk}-item-{numbers}-{session}.md"
+TITLE_SEARCH_CACHE_PRINTED_BEFORE = (
+    "The user's words where {item}'s title was named before were printed in full by an earlier run of this step in "
+    "this agent-session, and are saved in {path}; read that file when they are no longer in your context.")
+TITLE_SEARCH_CACHE_NOT_SAVED = (
+    "The search for the user's words above was not saved in {path}, so the next run of this step prints it in full "
+    "again: {why}")
+TITLE_SEARCH_CACHE_NO_AGENT_SESSION = "{variable} is not set, so the agent-session that ran the step is not known."
 ITEM_READ_FAILED_LINES = (
     "{item} has had no cold-read-fast-read of its text as it stands, so do not present it yet: the user is shown an "
     "item only after its cold-read-fast-read.",
@@ -2520,8 +2655,7 @@ def check(arguments):
         if problems:
             raise Failure(NOT_ASKED_REFUSED.format(item=item, kind=arguments.not_asked,
                                                    label=not_asked_label(arguments.not_asked),
-                                                   grounds=NOT_ASKED_GROUNDS.get(arguments.not_asked,
-                                                                                 NOT_ASKED_EITHER_GROUND),
+                                                   grounds=not_asked_grounds(arguments.not_asked),
                                                    problems="\n".join(problems),
                                                    document=document,
                                                    command=check_command_with_cwd(top, "--not-asked",
@@ -2576,10 +2710,12 @@ def check(arguments):
         output += [line.format(document=document, item=item) for line in CHECK_JUDGEMENT_LINES]
     if arguments.not_asked is not None:
         output += [line.format(item=item, label=not_asked_label(arguments.not_asked),
-                               grounds=NOT_ASKED_GROUNDS.get(arguments.not_asked, NOT_ASKED_EITHER_GROUND))
+                               grounds=not_asked_grounds(arguments.not_asked))
                    for line in NOT_ASKED_JUDGEMENT_LINES]
         if arguments.not_asked in NOT_ASKED_WEAK_GROUND_LABELS:
             output.append(NOT_ASKED_WEAK_JUDGEMENT_LINE.format(item=item))
+        if arguments.not_asked == DROPPED_PROPOSAL_VALUE:
+            output.append(NOT_ASKED_DROPPED_PROPOSAL_JUDGEMENT_LINE.format(item=item))
     output.append(CHECK_CLOSE_LINE.format(command=step_command_with_cwd(top, "close")))
     log = arguments.counts_log or (log_store_records.parent / COUNTS_LOG_FILE_NAME if log_store_records else None)
     try:
@@ -2884,9 +3020,11 @@ def earlier_read_texts_of_item(walk_finder, minutes, value, numbers, total, pars
 
 
 def earlier_read_texts_kept_as_withdrawn_versions(walk_finder, minutes, value, numbers, total, parser, earlier, item,
-                                                  live_text, kept_line=EARLIER_TEXT_KEPT):
+                                                  live_text, command, kept_line=EARLIER_TEXT_KEPT):
     """Put each of earlier, as earlier_read_texts_of_item returns them, that is neither the live text nor already
-    below it, under a WITHDRAWN_VERSION_HEADING after the item's live version; return kept_line for each."""
+    kept, under a WITHDRAWN_VERSION_HEADING after the item's live version, and record in its read's outcome the
+    heading it is kept under, also for one found already kept; return kept_line for each one put there now. Raise
+    Failure, naming command to run again, when an outcome cannot be written."""
     if not earlier:
         return []
     document = minutes.with_name(minutes.name[:-len(walk_finder.MINUTES_SUFFIX)] + ".md")
@@ -2895,32 +3033,59 @@ def earlier_read_texts_kept_as_withdrawn_versions(walk_finder, minutes, value, n
     lines = text.split("\n")
     kept = withdrawn_versions_inserted_below_live_version(walk_finder, parser, lines, unit[3], numbers[0], earlier,
                                                           item, live_text, document, kept_line)
-    if kept:
+    if any(line is not None for _, _, _, line in kept):
         document.write_text("\n".join(lines), encoding="utf-8")
-    return kept
+    reads = item_reads_directory(walk_finder, minutes)
+    for key, outcome, heading, _ in kept:
+        path = reads / f"{key}-outcome.json"
+        try:
+            write_json(path, {**outcome, KEPT_AS_WITHDRAWN_VERSION: heading})
+        except OSError as error:
+            raise Failure(EARLIER_TEXT_KEPT_NOT_RECORDED.format(
+                item=item, document=document, outcome=path, error=error, reads=reads, command=command)) from error
+    return [line for _, _, _, line in kept if line is not None]
 
 
 def withdrawn_versions_inserted_below_live_version(walk_finder, parser, lines, first, number, earlier, item,
                                                    live_text, document, kept_line, inserted_heading_lines=None):
-    """Insert into lines, a walk-document's, each of earlier whose body is neither live_text's nor the whole body of
-    a version already kept below the live version of the unit whose heading is line first, under a
-    WITHDRAWN_VERSION_HEADING for item number; return kept_line for each, naming its heading, and append each
-    inserted heading's line index to inserted_heading_lines when it is given."""
+    """Insert into lines, a walk-document's, each of earlier, as (key, outcome, text), whose outcome records no
+    keeping and whose body is neither live_text's nor the whole body of a version already kept below the live version
+    of the unit whose heading is line first, under a WITHDRAWN_VERSION_HEADING for item number; return (key, outcome,
+    heading, kept_line) for each, and append each inserted heading's line index to inserted_heading_lines when it is
+    given. For one whose body is already kept there, return (key, outcome, that version's heading line, None), so
+    that its keeping is recorded too, such as after a run whose outcome write failed.
+
+    The versions kept below are the sections under the top-level Withdrawn headings that name item number or no item,
+    such as `#### Withdrawn version 1 of this item`, from the live version's end to the next item or the next
+    heading as high as the unit's own heading or higher, such as a `## Part 2` below a `### Item` heading, which also
+    bounds where a version is inserted."""
     kept = []
-    for _, outcome, copied in earlier:
+    for key, outcome, copied in earlier:
+        if outcome.get(KEPT_AS_WITHDRAWN_VERSION):
+            continue
         body = heading_body(walk_finder, copied)
-        spans = walk_finder.item_unit_spans("\n".join(lines), parser)
-        # From the live version's end to the next item: the versions already kept there, and any notes.
+        text = "\n".join(lines)
+        spans = walk_finder.item_unit_spans(text, parser)
         start = next(other[4] for other in spans if other[3] == first)
-        below = min([other[3] for other in spans if other[3] > first] + [len(lines)])
-        prose = walk_finder.prose_lines("\n".join(lines), parser)
-        withdrawn = [index for index in range(start, below)
-                     if (heading := MARKDOWN_HEADING.match(prose[index]))
-                     and walk_finder.WITHDRAWN_HEADING.match(heading[1])
-                     and number in walk_finder.withdrawn_heading_items(heading[1])]
-        kept_bodies = {squeezed("\n".join(lines[index + 1:end]))
-                       for index, end in zip(withdrawn, [*withdrawn[1:], below])}
-        if squeezed(body) in (squeezed(heading_body(walk_finder, live_text)), "") or squeezed(body) in kept_bodies:
+        tokens = parser.parse(text)
+        # (first line, line after the heading, level, text) of each top-level heading; a setext heading's underline
+        # is inside it.
+        headings = [(token.map[0], token.map[1], walk_finder.heading_level(token), tokens[index + 1].content)
+                    for index, token in enumerate(tokens)
+                    if token.type == "heading_open" and token.map is not None and token.level == 0]
+        level = next((found[2] for found in headings if found[0] == first), 0)
+        below = min([other[3] for other in spans if other[3] > first] + [len(lines)]
+                    + [found[0] for found in headings if found[0] >= start and found[2] <= level
+                       and not walk_finder.WITHDRAWN_HEADING.match(found[3])])
+        withdrawn = [found for found in headings if start <= found[0] < below
+                     and walk_finder.WITHDRAWN_HEADING.match(found[3])
+                     and number in (walk_finder.withdrawn_heading_items(found[3]) or {number})]
+        kept_bodies = {squeezed("\n".join(lines[found[1]:end])): lines[found[0]].strip()
+                       for found, end in zip(withdrawn, [*(later[0] for later in withdrawn[1:]), below])}
+        if squeezed(body) in (squeezed(heading_body(walk_finder, live_text)), ""):
+            continue
+        if squeezed(body) in kept_bodies:
+            kept.append((key, outcome, kept_bodies[squeezed(body)], None))
             continue
         version = 1 + len(withdrawn)
         while below > 0 and not lines[below - 1].strip():
@@ -2930,8 +3095,8 @@ def withdrawn_versions_inserted_below_live_version(walk_finder, parser, lines, f
         lines[below:below] = ["", heading, ""] + body.split("\n")
         if inserted_heading_lines is not None:
             inserted_heading_lines.append(below + 1)
-        kept.append(kept_line.format(item=item, report=outcome.get("report"), document=document,
-                                     heading=heading))
+        kept.append((key, outcome, heading, kept_line.format(item=item, report=outcome.get("report"),
+                                                             document=document, heading=heading)))
     return kept
 
 
@@ -2943,34 +3108,60 @@ def approval_walk_item_new_texts(walk_finder, parser, text):
 
 
 def approval_walk_item_and_sub_steps_live_units(walk_finder, parser, document, whole_number, total, waiting_unit):
-    """Return (the walk-document's lines, the units of the live versions of the whole item whole_number and its
+    """Return (the walk-document's text, the units of the live versions of the whole item whole_number and its
     sub-steps, as waiting_item_units and approval_walk_item_sub_step_units_below_item_in_walk_document find them), so
     that a sub-step under a Withdrawn heading, or of an older version, is left out; a unit ends at the first Withdrawn
-    heading below it. When no heading counts the whole item, the units are those of its sub-steps with
-    waiting_unit's M."""
+    heading below it. When no heading counts the whole item, the units are its sub-steps' that the same rule takes
+    from the first of the run of sub-step units waiting_unit is in, whatever M each gives."""
     text = document.read_text(encoding="utf-8")
     units = walk_finder.item_unit_spans(text, parser)
     try:
         whole = walk_finder.waiting_item_units(document, f"item {whole_number}", [whole_number], total, parser,
                                                units)[1][0]
     except walk_finder.UnusableRange:
-        # Under a heading with no running count, such as `## Item 3: the plan`, the family is every live unit of
-        # item 3's sub-steps with the waiting one's M, so reading 3.1 and then 3.2 compares the same texts.
-        family = [unit for unit in units if unit[1] == waiting_unit[1]
-                  and any(number.split(".")[0] == whole_number for number in unit[0])]
-        return text.split("\n"), family if waiting_unit in family else [*family, waiting_unit]
-    return text.split("\n"), [whole, *walk_finder.approval_walk_item_sub_step_units_below_item_in_walk_document(
+        # Under a heading with no running count, such as `## Item 3: the plan`, the sub-steps are taken from the
+        # first of their run, so reading 3.1 and then 3.2 compares the same texts.
+        position = units.index(waiting_unit)
+        while position and any(number.startswith(whole_number + ".") for number in units[position - 1][0]):
+            position -= 1
+        first = units[position]
+        whole = ([whole_number], first[1], None, first[3] - 1, first[3])
+        family = walk_finder.approval_walk_item_sub_step_units_below_item_in_walk_document(units, whole,
+                                                                                           [whole_number])
+        return text, family if waiting_unit in family else [*family, waiting_unit]
+    return text, [whole, *walk_finder.approval_walk_item_sub_step_units_below_item_in_walk_document(
         units, whole, [whole_number])]
+
+
+def approval_walk_item_and_sub_steps_live_versions_texts(walk_finder, parser, document, whole_number, total,
+                                                         waiting_unit):
+    """Return (the walk-document's lines, [(unit, its text)]) for each unit
+    approval_walk_item_and_sub_steps_live_units returns: its heading line and, from a unit whose heading also names
+    another item, such as `### Items 3.1 and 4.1 of 9`, only the lines of item whole_number and its sub-steps.
+
+    Not handled: a `#new` line indented four spaces that continues a paragraph, such as one holding a bold running
+    count, is prose in the walk-document, but own_lines_of_unit starts each run of lines after a blank line, so in
+    the text returned it is an indented code block, and an edit to it is not counted as a revision."""
+    text, units = approval_walk_item_and_sub_steps_live_units(walk_finder, parser, document, whole_number, total,
+                                                              waiting_unit)
+    lines = text.split("\n")
+    openings = []
+    texts = []
+    for unit in units:
+        own = [number for number in unit[0] if number == whole_number or number.startswith(whole_number + ".")]
+        body = walk_finder.own_lines_of_unit(text, parser, lines, unit, openings,
+                                             own if len(own) < len(unit[0]) else None, keep_setext_underline=True)
+        texts.append((unit, "\n".join([lines[unit[3]], *body])))
+    return lines, texts
 
 
 def approval_walk_item_and_sub_steps_live_versions_proposed_new_texts_read_sorted(
         walk_finder, parser, document, whole_number, total, waiting_unit):
     """Return the `#new` texts of the live versions of item whole_number and its sub-steps, sorted, so that a text
     moved to another sub-step unchanged, as a split into sub-steps moves one, is the same list."""
-    lines, units = approval_walk_item_and_sub_steps_live_units(walk_finder, parser, document, whole_number, total,
-                                                               waiting_unit)
-    return sorted(text for unit in units
-                  for text in approval_walk_item_new_texts(walk_finder, parser, "\n".join(lines[unit[3]:unit[4]])))
+    _, texts = approval_walk_item_and_sub_steps_live_versions_texts(walk_finder, parser, document, whole_number,
+                                                                    total, waiting_unit)
+    return sorted(found for _, text in texts for found in approval_walk_item_new_texts(walk_finder, parser, text))
 
 
 def approval_walk_item_proposed_text_revisions_counted(reads, whole_number, new_texts, restart, item, command):
@@ -3038,13 +3229,13 @@ def approval_walk_item_fresh_agent_rewrite_brief_lines(walk_finder, parser, minu
     """Return the lines of the fresh-agent's brief for rewriting the item in unit, built from the user's words in
     the walk-minutes and the links of the live versions of item whole_number and its sub-steps, with no text of the
     item."""
-    lines, family = approval_walk_item_and_sub_steps_live_units(walk_finder, parser, document, whole_number, total,
-                                                                unit)
-    whole = family[0]
+    lines, texts = approval_walk_item_and_sub_steps_live_versions_texts(walk_finder, parser, document, whole_number,
+                                                                        total, unit)
+    whole = texts[0][0]
     title, whole_title = item_title(walk_finder, lines[unit[3]]), item_title(walk_finder, lines[whole[3]])
     named = f'"{title}"' if whole[3] == unit[3] else f'"{title}", a sub-step of the item "{whole_title}"'
     constants = load_module("ned_box_home_directory_and_its_mac_mount_point_path_constants_common", PATH_CONSTANTS_FILE)
-    links = approval_walk_item_linked_files("\n".join(line for other in family for line in lines[other[3]:other[4]]),
+    links = approval_walk_item_linked_files("\n".join(text for _, text in texts),
                                             constants.NED_BOX_HOME, constants.MAC_MOUNT_OF_NED_BOX_HOME)
     words = approval_walk_item_user_words_in_minutes(walk_finder, minutes.read_text(encoding="utf-8"), whole_number,
                                                      {title, whole_title})
@@ -3095,16 +3286,23 @@ def approval_walk_item_text_replace_with_fresh_agent_rewrite_file(
         kept_end -= 1
     replaced = "\n".join([lines[unit[3]], *lines[kept_end:unit[4]]])
     written = [*lines[:kept_end], "", *rewrite.split("\n"), "", *lines[unit[4]:]]
+    # The rewrite was checked alone; only the whole document shows a fence it leaves open running on below it, or a
+    # bold count paragraph in it read as the item's newer version. Checked before the withdrawn version's lookup of
+    # the item's unit, which such a rewrite leaves without one, and again after its insertion.
+    before = [unit_found[:3] for unit_found in walk_finder.item_unit_spans(text, parser)]
+
+    def refused_unless_items_unchanged():
+        after = [unit_found[:3] for unit_found in walk_finder.item_unit_spans("\n".join(written), parser)]
+        if before != after:
+            raise refused(FRESH_AGENT_REWRITE_ITEMS_CHANGED.format(before=[found[0] for found in before],
+                                                                   after=[found[0] for found in after]))
+    refused_unless_items_unchanged()
     inserted = []
-    kept = withdrawn_versions_inserted_below_live_version(
+    kept = [line for _, _, _, line in withdrawn_versions_inserted_below_live_version(
         walk_finder, parser, written, unit[3], number, [(None, {}, replaced)], item,
         "\n".join([lines[unit[3]], rewrite]), document, FRESH_AGENT_REWRITE_REPLACED_TEXT_KEPT, inserted)
-    # The rewrite was checked alone; only the whole document shows a fence it leaves open running on below it.
-    before = [unit_found[:3] for unit_found in walk_finder.item_unit_spans(text, parser)]
-    after = [unit_found[:3] for unit_found in walk_finder.item_unit_spans("\n".join(written), parser)]
-    if before != after:
-        raise refused(FRESH_AGENT_REWRITE_ITEMS_CHANGED.format(before=[found[0] for found in before],
-                                                               after=[found[0] for found in after]))
+        if line is not None]
+    refused_unless_items_unchanged()
     read_headings = {token.map[0] for token in parser.parse("\n".join(written))
                      if token.type == "heading_open" and token.map}
     unread = [index for index in inserted if index not in read_headings]
@@ -3258,6 +3456,66 @@ def approval_walk_item_system_status_claims_not_rechecked_refused(text, item, do
     return SYSTEM_STATUS_CLAIMS_RECHECKED_LINE.format(item=item, matched=matched, rechecked=rechecked)
 
 
+def approval_walk_item_title_user_messages_in_earlier_agent_sessions_lines(walk_finder, minutes, text, earlier,
+                                                                         numbers, item, command):
+    """Return a function that saves and returns the lines TITLE_SEARCH_PROGRAM prints for the item's title and the
+    title of each earlier read text of it, as earlier_read_texts_of_item returns them; raise Failure when the search
+    failed. A Withdrawn version heading carries no title, so those read texts are the item's only earlier titles the
+    program can know.
+
+    Call the function only in the statement that prints its lines: the lines are saved in the title search cache
+    file for the item and this agent-session, and a later run for the same titles in the same agent-session prints
+    only a line naming that file, since fix rounds rerun the step, so lines saved but never printed are never read."""
+    titles = []
+    for heading in [text] + [copied for _, _, copied in earlier]:
+        title = item_title(walk_finder, heading.split("\n", 1)[0])
+        if title and title not in titles:
+            titles.append(title)
+    if not titles:
+        return lambda: []
+    variable = load_module("cold_read_record_names", RECORD_NAMES_FILE).AGENT_SESSION_ID_ENVIRONMENT_VARIABLE
+    session_id = os.environ.get(variable)
+    cache = (minutes.parent / TITLE_SEARCH_CACHE_DIRECTORY_NAME
+             / TITLE_SEARCH_CACHE_FILE_NAME.format(walk=minutes.name[:-len(walk_finder.MINUTES_SUFFIX)],
+                                                   numbers="-and-".join(numbers), session=session_id))
+    if session_id and title_search_cache_titles(cache) == titles:
+        return lambda: [TITLE_SEARCH_CACHE_PRINTED_BEFORE.format(item=item, path=cache)]
+    words = [word for title in titles for word in ("--title", title)]
+    words += [word for number in numbers for word in ("--item-number", number)]
+    result = subprocess.run([sys.executable, str(TITLE_SEARCH_PROGRAM), *words], capture_output=True, text=True,
+                            stdin=subprocess.DEVNULL)
+    exits = load_module("title_search", TITLE_SEARCH_PROGRAM)
+    if result.returncode not in (exits.EXIT_FOUND, exits.EXIT_NOTHING_FOUND):
+        raise Failure(APPROVAL_WALK_ITEM_TITLE_SEARCH_FAILED.format(
+            item=item, exit=result.returncode, said=result.stderr.strip() or "nothing", command=command))
+    lines = result.stdout.rstrip("\n").split("\n") if result.stdout.strip() else []
+    if not session_id:
+        return lambda: lines + [TITLE_SEARCH_CACHE_NOT_SAVED.format(
+            path=minutes.parent / TITLE_SEARCH_CACHE_DIRECTORY_NAME,
+            why=TITLE_SEARCH_CACHE_NO_AGENT_SESSION.format(variable=variable))]
+
+    def saved_lines():
+        try:
+            cache.parent.mkdir(parents=True, exist_ok=True)
+            temporary = cache.with_name(cache.name + ".writing")
+            temporary.write_text("\n".join([json.dumps(titles)] + lines) + "\n", encoding="utf-8")
+            os.replace(temporary, cache)
+        except OSError as error:
+            return lines + [TITLE_SEARCH_CACHE_NOT_SAVED.format(path=cache, why=error)]
+        return lines
+    return saved_lines
+
+
+def title_search_cache_titles(cache):
+    """Return the titles on the first line of the title search cache file cache, or None when it is missing or
+    cannot be read, so that the search runs again."""
+    try:
+        first = cache.read_text(encoding="utf-8").split("\n", 1)[0]
+        return json.loads(first)
+    except (OSError, ValueError):
+        return None
+
+
 def waiting_item_read(arguments, sub_step_of=None):
     """Give the item the `#next_to_present` line names its cold-read-fast-read, as its text stands.
 
@@ -3289,15 +3547,19 @@ def waiting_item_read(arguments, sub_step_of=None):
     command_reading_again = read_step_command_with_cwd(top, *rechecked_words)
     document, text = item_text(walk_finder, minutes, value, numbers, total, parser,
                                refused_unless_marks_read=(item, command))
-    # Before the kept versions are written, so a refused item's document is left as it was.
-    approval_walk_item_text_over_word_limit_refused(walk_finder, minutes, value, numbers, total, parser, item, command)
+    rewrite_file = arguments.approval_walk_item_fresh_agent_rewrite_file
+    # Before the kept versions are written, so a refused item's document is left as it was. With a rewrite, the
+    # rewrite's own text is checked once it is in place: a rerun after an over-limit rewrite whose count reset failed
+    # must reach the rewrite branch to finish that reset.
+    if rewrite_file is None:
+        approval_walk_item_text_over_word_limit_refused(walk_finder, minutes, value, numbers, total, parser, item,
+                                                        command)
     sub_step = approval_walk_item_first_numbered_sub_step_without_answer(walk_finder, minutes, value, numbers, total,
                                                                          parser)
-    keep = (walk_finder, minutes, value, numbers, total, parser, earlier, item, text)
+    keep = (walk_finder, minutes, value, numbers, total, parser, earlier, item, text, command_reading_again)
     if sub_step:
         return waiting_item_read(arguments, (items_named([sub_step], total), item,
                                              (sub_step_of[2] if sub_step_of else []) + [keep]))
-    rewrite_file = arguments.approval_walk_item_fresh_agent_rewrite_file
     whole_number = numbers[0].split(".")[0]
     if rewrite_file is not None:
         unit = walk_finder.waiting_item_units(document, value, numbers, total, parser)[1][0]
@@ -3318,12 +3580,18 @@ def waiting_item_read(arguments, sub_step_of=None):
                             refused_unless_marks_read=(item, command))
         approval_walk_item_text_over_word_limit_refused(walk_finder, minutes, value, numbers, total, parser, item,
                                                         command)
+        # A read that started from the whole item checks the whole item, its other sub-steps included, as the read
+        # without a rewrite does before it turns to the sub-step.
+        for above in (sub_step_of[2] if sub_step_of else []):
+            approval_walk_item_text_over_word_limit_refused(*above[:6], above[7], command)
     # Before anything is written, so a refused item leaves the walk-minutes and the walk-document as they were; an
     # item settled without being shown is not refused, since no status in it reaches the user.
-    recheck_line = None
+    recheck_line, past_words = None, lambda: []
     if rated_none_item_not_to_be_shown(walk_finder, top, minutes, value, numbers, total, parser, named) is None:
         recheck_line = approval_walk_item_system_status_claims_not_rechecked_refused(
             text, item, document, rerun, rechecked)
+        past_words = approval_walk_item_title_user_messages_in_earlier_agent_sessions_lines(
+            walk_finder, minutes, text, earlier, numbers, item, rerun)
     if sub_step_of:
         # An item read before it was split keeps that text, as an item revised after its read does.
         for above in sub_step_of[2]:
@@ -3332,7 +3600,7 @@ def waiting_item_read(arguments, sub_step_of=None):
         append_to_minutes(minutes, [NEXT_MARKER_LINE.format(value=item)])
         print(ITEM_READ_SUB_STEP_NAMED.format(item=sub_step_of[1], sub_step=item, minutes=minutes))
     for line in earlier_read_texts_kept_as_withdrawn_versions(walk_finder, minutes, value, numbers, total, parser,
-                                                              earlier, item, text):
+                                                              earlier, item, text, command_reading_again):
         print(line)
     if not numbers[1:]:
         unit = walk_finder.waiting_item_units(document, value, numbers, total, parser)[1][0]
@@ -3390,11 +3658,11 @@ def waiting_item_read(arguments, sub_step_of=None):
                 withheld = item_read_findings_without_outcomes_lines(
                     item, latest[1]["report"], reads / f"{latest[0]}-outcome.json", arguments.fast_read_program,
                     command, command_reading_again)
-                print("\n".join([ITEM_READ_NOT_RUN.format(item=item, report=latest[1]["report"])] + no_answer_rows
-                                 + (withheld or [ITEM_READ_NOT_RUN_NEXT.format(
-                                     item=item, now_over_later_command=check_command_with_cwd(top, NOW_OVER_LATER_FLAG))]
-                                    + waiting_on_item_prerequisite_lines(walk_finder, minutes, numbers, total,
-                                                                         parser))))
+                rest = no_answer_rows + (withheld or [ITEM_READ_NOT_RUN_NEXT.format(
+                    item=item, now_over_later_command=check_command_with_cwd(top, NOW_OVER_LATER_FLAG))]
+                    + waiting_on_item_prerequisite_lines(walk_finder, minutes, numbers, total, parser))
+                print("\n".join([ITEM_READ_NOT_RUN.format(item=item, report=latest[1]["report"])] + past_words()
+                                 + rest))
                 return 1 if withheld else 0
             why = ITEM_READ_RUN_FACTS.format(report=latest[1]["report"], facts=", ".join(facts[:FACTS_LISTED]))
         walk_name = minutes.name[:-len(walk_finder.MINUTES_SUFFIX)]
@@ -3416,11 +3684,13 @@ def waiting_item_read(arguments, sub_step_of=None):
     withheld = item_read_findings_without_outcomes_lines(item, outcome["report"], reads / f"{key}-outcome.json",
                                                          arguments.fast_read_program, command,
                                                          command_reading_again)
-    print("\n".join([ITEM_READ_USED.format(item=item, how=how, report=outcome["report"], notes=notes)] + no_answer_rows
-                    + [line.format(item=item, document=document, command=command,
-                                   now_over_later_command=check_command_with_cwd(top, NOW_OVER_LATER_FLAG))
-                       for line in (ITEM_READ_LINES[:1] if withheld else ITEM_READ_LINES)]
-                    + (withheld or waiting_on_item_prerequisite_lines(walk_finder, minutes, numbers, total, parser))))
+    rest = (no_answer_rows
+            + [line.format(item=item, document=document, command=command,
+                           now_over_later_command=check_command_with_cwd(top, NOW_OVER_LATER_FLAG))
+               for line in (ITEM_READ_LINES[:1] if withheld else ITEM_READ_LINES)]
+            + (withheld or waiting_on_item_prerequisite_lines(walk_finder, minutes, numbers, total, parser)))
+    print("\n".join([ITEM_READ_USED.format(item=item, how=how, report=outcome["report"], notes=notes)] + past_words()
+                     + rest))
     return 1 if withheld else 0
 
 

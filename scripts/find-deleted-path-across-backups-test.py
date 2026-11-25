@@ -4361,6 +4361,44 @@ with tempfile.TemporaryDirectory() as tmp:
           code == 2 and "Give the file's absolute path on elsewhere" in errors and calls == [],
           "exit=%s calls=%s\n%s" % (code, calls, errors))
 
+    code, out, errors, calls = run_restore(["someone@elsewhere:x.md", "--restore", str(copy)])
+    check("--restore with an unknown host's bare file name is a usage error, exit 2, running nothing, "
+          "not a write to the repository's file of that name",
+          code == 2 and "Give the file's absolute path on elsewhere" in errors and calls == [],
+          "exit=%s calls=%s\n%s" % (code, calls, errors))
+
+    # A path written from the current directory is placed from there, as a search reads it, never from the
+    # top level: "../up.md" from <repo>/docs is <repo>/up.md, not a file beside the repository.
+    directory_before = os.getcwd()
+    os.chdir(str(subdirectory))
+    try:
+        # os.getcwd() gives the resolved directory, such as macOS's /private/var for /var.
+        for given, placed in (("../up.md", repo.resolve() / "up.md"), ("./i.md", subdirectory.resolve() / "i.md"),
+                              ("sub/../j.md", subdirectory.resolve() / "j.md")):
+            code, out, errors, calls = run_restore([given, "--restore", str(copy)],
+                                                   table=[("rev-parse --show-toplevel", (0, "%s\n" % repo, ""))])
+            check("--restore places %s, run from a subdirectory, from the current directory as a search reads it, "
+                  "not from the top level, and runs no git command" % given,
+                  code == 0 and placed.read_bytes() == content and "restored %s to %s" % (copy, placed) in out
+                  and not (tmp / "up.md").exists() and calls == [], "exit=%s calls=%s\n%s\n%s"
+                  % (code, calls, out, errors))
+    finally:
+        os.chdir(directory_before)
+
+    code, out, errors, calls = run_restore(["~tilde.md", "--repo", str(repo), "--restore", str(copy)])
+    check("--restore places a name that starts with ~ but not ~/ under the repository's top level, "
+          "with no traceback",
+          code == 0 and (repo / "~tilde.md").read_bytes() == content, "exit=%s\n%s\n%s" % (code, out, errors))
+
+    spaced = tmp / "repo ending in a space "
+    spaced.mkdir()
+    code, out, errors, calls = run_restore(["k.md", "--repo", str(spaced), "--restore", str(copy)],
+                                           table=[("rev-parse --show-toplevel", (0, "%s\n" % spaced, ""))])
+    check("--restore keeps the whitespace that ends the repository's top-level name, and makes no sibling "
+          "directory without it",
+          code == 0 and (spaced / "k.md").read_bytes() == content
+          and not (tmp / "repo ending in a space").exists(), "exit=%s\n%s\n%s" % (code, out, errors))
+
 # --restore refuses a <path> that is the copy itself, and a failed write leaves the file already there as it was.
 with tempfile.TemporaryDirectory() as tmp:
     tmp = Path(tmp)

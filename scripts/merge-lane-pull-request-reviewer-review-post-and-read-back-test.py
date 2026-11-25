@@ -168,7 +168,7 @@ def run_program(scratch, review_text, token=TOKEN, arguments=("--pull-request", 
         stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True,
         env={**os.environ, "HOME": str(home), "FAKE_GH_STATE": str(state),
              "PATH": f"{fake_gh_directory}{os.pathsep}{os.environ.get('PATH', '')}",
-             **fake_gh_environment})
+             "GIT_AUTHOR_NAME": "merge-lane-2", **fake_gh_environment})
     hanging = state / "gh-hanging"
     if interrupt is not None:
         deadline = time.monotonic() + 20
@@ -485,7 +485,7 @@ def merge_account_comment_review_cases(scratch):
           "COMMENT, keeping the verdict line, the blocking count and the blocking mark",
           result.code == 0 and result.posted == {
               "commit_id": HEAD, "event": "COMMENT",
-              "body": "REQUEST_CHANGES\n\n**Blocking: 1**\n\nThe review body.",
+              "body": "REQUEST_CHANGES\n\n**Blocking: 1**\n\n**Merge-lane: merge-lane-2**\n\nThe review body.",
               "comments": [{"path": "scripts/thing.py", "line": 2, "body": "**Blocks** Finding on line 2."}]}
           and "by ned-review-merge as COMMENT, verdict REQUEST_CHANGES" in result.stdout
           and "reads back as COMMENTED" in result.stdout, result.detail)
@@ -563,7 +563,7 @@ def merge_lane_cases(scratch):
           "each other comment opened with its category in bold, and no finding_category key sent",
           result.code == 0 and result.posted == {
               "commit_id": HEAD, "event": "REQUEST_CHANGES",
-              "body": "REQUEST_CHANGES\n\n**Blocking: 2**\n\nThe review body.",
+              "body": "REQUEST_CHANGES\n\n**Blocking: 2**\n\n**Merge-lane: merge-lane-2**\n\nThe review body.",
               "comments": [
                   {"path": "scripts/thing.py", "line": 2, "body": "**Blocks** Finding on line 2."},
                   {"path": "scripts/thing.py", "line": 3, "body": "**fix-next** Finding on line 3."},
@@ -574,6 +574,30 @@ def merge_lane_cases(scratch):
           and "by ned-review-merge as REQUEST_CHANGES" in result.stdout
           and MERGE_TOKEN not in result.stdout + result.stderr, result.detail)
     merge_lane_posted = result.posted
+
+    fix_round = load_fix_round_program()
+    result = run_program(scratch, review("REQUEST_CHANGES", comments=[must]), arguments=MERGE_LANE_ARGUMENTS,
+                         GIT_AUTHOR_NAME="merge-lane-1")
+    check("a merge-lane's request for changes names the merge-lane GIT_AUTHOR_NAME names on the line after the "
+          "count, and the fix-round program reads that merge-lane back from the posted body",
+          result.code == 0 and result.posted is not None
+          and result.posted["body"].startswith("REQUEST_CHANGES\n\n**Blocking: 1**\n\n**Merge-lane: merge-lane-1**\n\n")
+          and fix_round.read_merge_lane_that_posted_changes_requested_review_from_body(result.posted) == "merge-lane-1",
+          result.detail)
+    for name in ("", "cold-read-research", "merge-lane-", "merge-lane-1 "):
+        result = run_program(scratch, review("REQUEST_CHANGES", comments=[must]), arguments=MERGE_LANE_ARGUMENTS,
+                             GIT_AUTHOR_NAME=name)
+        check(f"a request for changes with GIT_AUTHOR_NAME {name!r}, not a merge-lane's name, exits 2 without "
+              "posting and says how to post it",
+              result.code == 2 and result.posted is None
+              and f"GIT_AUTHOR_NAME is {name!r}, not a merge-lane's name" in result.stderr
+              and "GIT_AUTHOR_NAME=merge-lane-1 python3 scripts/merge-lane-pull-request-reviewer-review-post-and-read-back.py"
+              in result.stderr, result.detail)
+    result = run_program(scratch, review("APPROVE", comments=[nxt]), arguments=MERGE_LANE_ARGUMENTS,
+                         GIT_AUTHOR_NAME="cold-read-research", FAKE_GH_AUTHOR="an author")
+    check("an approval needs no merge-lane name, so it posts whatever GIT_AUTHOR_NAME is, with no merge-lane line",
+          result.code == 0 and result.posted is not None and result.posted["body"] == "APPROVE\n\nThe review body.",
+          result.detail)
 
     result = run_program(scratch, review("APPROVE", comments=[finding(2, "fix-next"),
                                                               finding(3, "file-for-later")]),

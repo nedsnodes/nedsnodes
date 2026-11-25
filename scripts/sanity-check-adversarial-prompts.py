@@ -681,8 +681,7 @@ def run_claude(prompt: str, checkout: pathlib.Path = None) -> tuple:
             # the run. run_cell's own OSError handler still covers the codex
             # agent-binary, which has no chain to advance.
             failed_attempts.append(f"{model}({type(error).__name__})")
-            print(f"WARNING: {model} could not be run: {error}", flush=True)
-            print(SANITY_CHECK_CELL_MODEL_RUN_FAILED_WARNING_NEXT_STEP_INSTRUCTION, flush=True)
+            print_warning_with_its_next_step(f"{model} could not be run: {error}", SANITY_CHECK_CELL_MODEL_RUN_FAILED_WARNING_NEXT_STEP_INSTRUCTION)
             last_cause = common.classify_failed_attempt(
                 stdout="", stderr="", exit_code=None, recognised_texts=(),
                 start_error=str(error))
@@ -711,8 +710,7 @@ def run_claude(prompt: str, checkout: pathlib.Path = None) -> tuple:
             failed_attempts.append(f"{model}(exit{completed.returncode})")
             if completed.stdout:
                 print(completed.stdout, flush=True)
-            print(f"WARNING: {model} failed (exit {completed.returncode})", flush=True)
-            print(SANITY_CHECK_CELL_MODEL_RUN_FAILED_WARNING_NEXT_STEP_INSTRUCTION, flush=True)
+            print_warning_with_its_next_step(f"{model} failed (exit {completed.returncode})", SANITY_CHECK_CELL_MODEL_RUN_FAILED_WARNING_NEXT_STEP_INSTRUCTION)
             last_cause = common.classify_failed_attempt(
                 stdout=completed.stdout or "", stderr=completed.stderr or "",
                 exit_code=completed.returncode, recognised_texts=recognised_texts)
@@ -722,8 +720,7 @@ def run_claude(prompt: str, checkout: pathlib.Path = None) -> tuple:
             # success to a caller reading only the exit code, and the report it
             # would save is an empty review carrying a provenance stamp.
             failed_attempts.append(f"{model}(no-report)")
-            print(f"WARNING: {model} exited 0 but produced no review", flush=True)
-            print(SANITY_CHECK_CELL_MODEL_RUN_FAILED_WARNING_NEXT_STEP_INSTRUCTION, flush=True)
+            print_warning_with_its_next_step(f"{model} exited 0 but produced no review", SANITY_CHECK_CELL_MODEL_RUN_FAILED_WARNING_NEXT_STEP_INSTRUCTION)
             last_cause = common.classify_failed_attempt(
                 stdout="", stderr=completed.stderr or "", exit_code=0,
                 recognised_texts=recognised_texts)
@@ -996,9 +993,9 @@ def quote_scan(corpus: tuple, report: str, cell: str) -> None:
                 continue
             normalized = normalized_for_quote_match(fragment)
             if not any(normalized in file_text for file_text in corpus):
-                print(f'WARNING: {cell} quote found in no tracked file: '
-                      f'"{fragment[:60]}"', flush=True)
-                print(SANITY_CHECK_CELL_REPORT_QUOTE_FOUND_IN_NO_TRACKED_FILE_WARNING_NEXT_STEP_INSTRUCTION, flush=True)
+                print_warning_with_its_next_step(
+                    f'{cell} quote found in no tracked file: "{fragment[:60]}"',
+                    SANITY_CHECK_CELL_REPORT_QUOTE_FOUND_IN_NO_TRACKED_FILE_WARNING_NEXT_STEP_INSTRUCTION)
 
 
 def missing_report_phrases(adversarial_prompt: str, text: str) -> list:
@@ -1614,10 +1611,10 @@ def launch_cell_once(cell: str, adversarial_prompt: str, runtime: str, prompt: s
         git_check_failed_after_a_cell(cell, f"whether {cell} modified the review copy", failure,
                                       rerun_command)
     if stray:
-        print(f"WARNING: the review copy was modified outside the cells' scratch "
-              f"directories, seen when {cell} finished: {', '.join(stray)}",
-              flush=True)
-        print(SANITY_CHECK_REVIEW_COPY_MODIFIED_OUTSIDE_CELL_SCRATCH_WARNING_NEXT_STEP_INSTRUCTION, flush=True)
+        print_warning_with_its_next_step(
+            f"the review copy was modified outside the cells' scratch "
+            f"directories, seen when {cell} finished: {', '.join(stray)}",
+            SANITY_CHECK_REVIEW_COPY_MODIFIED_OUTSIDE_CELL_SCRATCH_WARNING_NEXT_STEP_INSTRUCTION)
     # After the worktree check, so a cell that ran to the end has its writes
     # compared whatever it returned; before the quote scan and the write, so a
     # text that is not a report raises no warnings to triage, never lands as a
@@ -1643,11 +1640,20 @@ def launch_cell_once(cell: str, adversarial_prompt: str, runtime: str, prompt: s
         + "\n\n" + output,
     )
     if overwrote_stray_write:
-        print(f"WARNING: {cell} found a stray write at its own report path and "
-              f"overwrote it: {out_path}", flush=True)
-        print(SANITY_CHECK_STRAY_FILE_AT_CELL_REPORT_PATH_REPLACED_BY_REPORT_WARNING_NEXT_STEP_INSTRUCTION, flush=True)
+        print_warning_with_its_next_step(
+            f"{cell} found a stray write at its own report path and overwrote it: {out_path}",
+            SANITY_CHECK_STRAY_FILE_AT_CELL_REPORT_PATH_REPLACED_BY_REPORT_WARNING_NEXT_STEP_INSTRUCTION)
     print(f"saved: {out_path}", flush=True)
     return None
+
+
+def print_warning_with_its_next_step(warning: str, next_step_instruction: str) -> None:
+    """Print a WARNING line and the line after it that says what to do about it."""
+    # One write: cells run on parallel threads, and two prints let another cell's
+    # line land between these, where a Monitor filter for the line after each
+    # WARNING would show it in place of the instruction.
+    sys.stdout.write(f"WARNING: {warning}\n{next_step_instruction}\n")
+    sys.stdout.flush()
 
 
 def git_check_failed_after_a_cell(cell: str, what: str, failure, rerun: str) -> None:
