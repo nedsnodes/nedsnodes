@@ -2575,6 +2575,9 @@ def main(argv=None, runner=run_command):
             named = _plain_path_from_cited_query(args.path, fragment_allowed=False)
         except CitedQueryCannotBePlaced as refusal:
             parser.error(str(refusal))
+        if named == "~" or named.startswith("~/"):
+            parser.error("--restore could not expand %r to a home directory, because HOME is unset and this user "
+                         "has no passwd entry; give the file's absolute path instead" % args.path)
         destination = named
         if not os.path.isabs(named):
             try:
@@ -2584,7 +2587,9 @@ def main(argv=None, runner=run_command):
                       "level of the repository it belongs under: %s"
                       % (THIS_SCRIPT_NAME, args.restore, args.path, failure), file=sys.stderr, flush=True)
                 return EXIT_NOT_RESTORED
-            destination = os.path.join(os.path.abspath(top_level or args.repo), named)
+            # realpath, not abspath: ".." must climb from the directory a symlink in --repo leads to, as the
+            # system does, not lexically from the link.
+            destination = os.path.join(top_level or os.path.realpath(args.repo), named)
         destination_existed = os.path.lexists(destination)
         try:
             restore_copy(args.restore, destination)
