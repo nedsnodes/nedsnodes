@@ -227,11 +227,11 @@
       }
     },
     {
-      "name": "watch-open-pull-requests-hack-poll-once-every-minute-cron-job",
+      "name": "merge-lane-open-prs-watch-and-reviewer-assign-poll-once-every-minute-cron-job",
       "owner": "merge-lane-2",
-      "program": "scripts/watch-open-pull-requests-hack.py",
+      "program": "scripts/merge-lane-open-prs-watch-and-reviewer-assign.py",
       "arguments": ["--poll-once"],
-      "output": ".claude/watch-open-pull-requests-hack-poll-once.log",
+      "output": ".claude/merge-lane-open-prs-watch-and-reviewer-assign-poll-once.log",
       "on": {
         "ned-box": {"scheduler": "cron", "schedule": "* * * * *"}
       }

@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
-"""Tests for watch-open-pull-requests-hack.py.
+"""Tests for merge-lane-open-prs-watch-and-reviewer-assign.py.
 
-Run: python3 scripts/watch-open-pull-requests-hack-test.py
+Run: python3 scripts/merge-lane-open-prs-watch-and-reviewer-assign-test.py
 Prints one line per case and exits non-zero if any case fails.
 
 No case reaches GitHub. The subprocess cases put a fake `gh` first on the
@@ -40,7 +40,7 @@ import threading
 import time
 from pathlib import Path
 
-WATCH_SCRIPT = Path(__file__).with_name("watch-open-pull-requests-hack.py")
+WATCH_SCRIPT = Path(__file__).with_name("merge-lane-open-prs-watch-and-reviewer-assign.py")
 
 _spec = importlib.util.spec_from_file_location("watch_open_pull_requests",
                                                WATCH_SCRIPT)
@@ -830,6 +830,66 @@ def run_merge_lane_pull_request_review_assignment_watcher_cases():
               and assignments.read_text(encoding="utf-8")
               == "1 merge-lane-1\n40 merge-lane-3\n41 merge-lane-1\n",
               "\n".join(lines))
+
+        # Two writers at once, as a cron run and the loop watcher are during the cutover: the
+        # first pauses after its read, and the second runs while it waits.
+        assignments.write_text("1 merge-lane-1\n", encoding="utf-8")
+        first_has_read = threading.Event()
+        first_may_replace = threading.Event()
+        real_deal = watcher_module.merge_lane_pull_request_review_assignments_for_unassigned_pull_requests
+
+        def deal_then_wait_in_the_first_writer(pull_requests, file_assignments):
+            dealt = real_deal(pull_requests, file_assignments)
+            if threading.current_thread().name == "first-writer":
+                first_has_read.set()
+                first_may_replace.wait(EVENT_WAIT_BACKSTOP_SECONDS)
+            return dealt
+
+        returned = {}
+
+        # No redirect_stdout here: it swaps sys.stdout for the whole process, not one thread.
+        def writer(name, pull_requests):
+            returned[name] = appended(assignments, pull_requests, {}, report_stop=lambda _line: None)
+
+        watcher_module.merge_lane_pull_request_review_assignments_for_unassigned_pull_requests = (
+            deal_then_wait_in_the_first_writer)
+        try:
+            first = threading.Thread(target=writer, name="first-writer",
+                                     args=("first", [assignable(1), assignable(40)]))
+            first.start()
+            first_has_read.wait(EVENT_WAIT_BACKSTOP_SECONDS)
+            second = threading.Thread(target=writer, name="second-writer",
+                                      args=("second", [assignable(1), assignable(41)]))
+            second.start()
+            second.join(0.5)
+            second_waited = second.is_alive()
+            first_may_replace.set()
+            first.join(EVENT_WAIT_BACKSTOP_SECONDS)
+            second.join(EVENT_WAIT_BACKSTOP_SECONDS)
+        finally:
+            first_may_replace.set()
+            watcher_module.merge_lane_pull_request_review_assignments_for_unassigned_pull_requests = real_deal
+        final = assignments.read_text(encoding="utf-8")
+        check("a second writer waits for the first to replace the assignment file, so the file "
+              "keeps every line either writer reported as REVIEW-ASSIGNED",
+              second_waited and "40 merge-lane-" in final and "41 merge-lane-" in final
+              and len(returned.get("first", [])) == 1 and len(returned.get("second", [])) == 1,
+              f"second waited: {second_waited}\n{final}\n{returned}")
+
+        assignments.write_text("1 merge-lane-1\n", encoding="utf-8")
+        assignments.with_name(assignments.name + ".lock").unlink()
+        scratch.chmod(0o500)
+        output = io.StringIO()
+        try:
+            with contextlib.redirect_stdout(output):
+                events = appended(assignments, open_now, {})
+        finally:
+            scratch.chmod(0o700)
+        check("a lock file that cannot be made stops assignment with one WATCH line, and leaves "
+              "the assignment file as it was",
+              events == [] and "lock file beside the assignment file" in output.getvalue()
+              and assignments.read_text(encoding="utf-8") == "1 merge-lane-1\n",
+              output.getvalue())
 
         # The seed.
         seed = scratch / "seed.txt"
@@ -1828,6 +1888,19 @@ def run_poll_once_cases(scratch_root, token_file):
         code = machine.run()
     check("a run that finds the lock held exits 0 and does nothing",
           code == 0 and not machine.event_lines() and machine.tasks_read() == [], machine.errors)
+
+    machine = machine_for("baseline-locked")
+    machine.poll = []
+    machine.directory.mkdir(parents=True, exist_ok=True)
+    with (machine.directory / watcher_module.LOCK_FILE_NAME).open("w", encoding="utf-8") as held:
+        watcher_module.fcntl.flock(held, watcher_module.fcntl.LOCK_EX)
+        code = machine.run("--poll-once-write-baseline")
+    check("--poll-once-write-baseline that finds the lock held says no baseline was written, "
+          "and exits 1",
+          code == 1 and "no baseline was written" in machine.errors
+          and not (machine.directory
+                   / watcher_module.WATCH_OPEN_PULL_REQUESTS_POLL_STATE_BETWEEN_CRON_RUNS_FILE_NAME).exists(),
+          machine.errors)
 
     machine = machine_for("bad-token")
     machine.token_file = scratch_root / "no-such-token"

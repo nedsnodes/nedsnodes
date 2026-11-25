@@ -3144,7 +3144,7 @@ def github_answer(*numbers):
 
 
 class RealWatcher:
-    """watch-open-pull-requests-hack.py itself, run as cron runs it, against a fake gh."""
+    """merge-lane-open-prs-watch-and-reviewer-assign.py itself, run as cron runs it, against a fake gh."""
 
     def __init__(self, machine):
         self.root = machine.root / "watcher"
@@ -3167,7 +3167,7 @@ class RealWatcher:
         environment = dict(os.environ, FAKE_GITHUB_ANSWER=str(self.answer),
                            PATH=f"{self.root / 'bin'}{os.pathsep}{os.environ['PATH']}")
         return subprocess.run(
-            [sys.executable, str(PROGRAM.with_name("watch-open-pull-requests-hack.py")), flag,
+            [sys.executable, str(PROGRAM.with_name("merge-lane-open-prs-watch-and-reviewer-assign.py")), flag,
              "--token-file", str(self.token), "--poll-once-directory", str(self.root / "state"),
              "--task-list-directory", str(self.tasks),
              "--needs-a-look-directory", str(self.root / "notices"),

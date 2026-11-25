@@ -206,8 +206,8 @@ MAC_NN_SHARED_DATABASE_BACKUP_COPY_PLIST = {
 # The deletion of agent-seat terminal captures older than seven days, last in the table.
 NED_BOX_OPEN_PULL_REQUEST_WATCHER_POLL_LINE = (
     "* * * * * /usr/bin/python3 /home/nedlern/Projects/nedsnodes/scripts/"
-    "watch-open-pull-requests-hack.py --poll-once >> "
-    "/home/nedlern/.claude/watch-open-pull-requests-hack-poll-once.log 2>&1")
+    "merge-lane-open-prs-watch-and-reviewer-assign.py --poll-once >> "
+    "/home/nedlern/.claude/merge-lane-open-prs-watch-and-reviewer-assign-poll-once.log 2>&1")
 NED_BOX_TERMINAL_CAPTURES_DELETE_LINE = (
     "45 5 * * * /usr/bin/python3 /home/nedlern/Projects/nedsnodes/nn-systems/handoff/"
     "agent-seat-terminal-captures-older-than-seven-days-delete.py >> "
@@ -361,13 +361,13 @@ check("the table's jobs are the two typed by hand before this program, the workt
                             "tmux-typing-watcher",
                             "log-store-session-dialogs-refresh",
                             "merge-lane-ghi-md-edit-pull-requests-provisional-additions-only-check-approve-and-merge",
+                            "merge-lane-open-prs-watch-and-reviewer-assign-poll-once-every-minute-cron-job",
                             "nn-shared-database-newest-backup-copy-to-mac",
                             "nn-shared-database-nightly-backup-with-integrity-check",
                             "no-sandbox-test-suites-run-on-main-in-a-quiet-gap",
                             "scheduled-full-test-run-of-main",
                             "transcript-mirror-to-log-store",
-                            "uncommitted-work-snapshot-hook-scheduled-check-that-real-claude-session-is-recorded-as-owner",
-                            "watch-open-pull-requests-hack-poll-once-every-minute-cron-job"],
+                            "uncommitted-work-snapshot-hook-scheduled-check-that-real-claude-session-is-recorded-as-owner"],
       sorted(real_jobs))
 watcher = real_jobs["handoff-agent-crash-watcher"]
 check("the crash restart watcher runs on ned-box only, every minute",
@@ -548,7 +548,7 @@ check("--print as ned-box prints ned-box's cron lines from the real table and ru
           "line:", NED_BOX_FINDING_OUTCOMES_COUNT_LINE,
           "agent-seat-terminal-captures-older-than-seven-days-delete — cron line:",
           NED_BOX_TERMINAL_CAPTURES_DELETE_LINE,
-          "watch-open-pull-requests-hack-poll-once-every-minute-cron-job — cron line:",
+          "merge-lane-open-prs-watch-and-reviewer-assign-poll-once-every-minute-cron-job — cron line:",
           NED_BOX_OPEN_PULL_REQUEST_WATCHER_POLL_LINE],
       (exit_code, printed.getvalue(), errors.getvalue()))
 printed, errors = io.StringIO(), io.StringIO()
