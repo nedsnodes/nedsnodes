@@ -185,7 +185,7 @@ CODEX_FINDING_WORKTREE_PATH = re.compile(r"\S*/pr\d+-head/")
 CODEX_REPORT_PROVENANCE_COMMENT = re.compile(r"\A<!--.*?-->\n?", re.DOTALL)
 # A report with no finding line that holds a non-empty "findings" list of objects is Codex's review
 # object in a wrapper the converter does not take, so it is not posted as a clean review.
-CODEX_REVIEW_OBJECT_FINDINGS_LIST = re.compile(r'"findings"\s*:\s*\[\s*\{')
+CODEX_REVIEW_OBJECT_NON_EMPTY_FINDINGS_LIST_REGEX = re.compile(r'"findings"\s*:\s*\[\s*\{')
 CODEX_GRADES_BODY_HEADING = "**Codex findings graded:**"
 OUTSIDE_THE_DIFF_HEADING = fix_round.OUTSIDE_THE_DIFF_HEADING
 OUTSIDE_THE_DIFF_LINE_FORMAT = "- `{path}:{line}`: {body}"
@@ -481,7 +481,7 @@ def codex_findings_on_commit(outputs_directory, number, head):
                 f"report, whose text is at the end of this message:\n"
                 f"  {codex_cell_command(number, base, head, outputs_directory)}\n"
                 f"If that command exits 0, run this posting command again:\n"
-                f"  {posting_command_as_run()}\n"
+                f"  {review_posting_program_rerun_command_line_with_git_author_name()}\n"
                 f"Otherwise do what that command prints.\n"
                 f"The report's text:\n{report}")
         # A cell older than the conversion wrote Codex's review object as the report.
@@ -495,7 +495,7 @@ def codex_findings_on_commit(outputs_directory, number, head):
                     f"is Codex's review as a JSON object, which this program cannot turn into finding lines, "
                     f"the \"- [Pn] <title> — <path>:<lines>\" lines it reads findings from: {error}")
         report_findings = codex_findings_in_report(report)
-        if not report_findings and CODEX_REVIEW_OBJECT_FINDINGS_LIST.search(report):
+        if not report_findings and CODEX_REVIEW_OBJECT_NON_EMPTY_FINDINGS_LIST_REGEX.search(report):
             raise unusable(
                 "has no finding line, the \"- [Pn] <title> — <path>:<lines>\" lines this program reads "
                 "findings from, but holds a JSON \"findings\" list that is not empty: it is likely Codex's "
@@ -505,7 +505,7 @@ def codex_findings_on_commit(outputs_directory, number, head):
     return findings if recorded else None
 
 
-def posting_command_as_run():
+def review_posting_program_rerun_command_line_with_git_author_name():
     """This posting command as it was run, with the GIT_AUTHOR_NAME that names the merge-lane posting
     the review, which a command line copied from sys.argv alone would leave out."""
     merge_lane = os.environ.get("GIT_AUTHOR_NAME")
