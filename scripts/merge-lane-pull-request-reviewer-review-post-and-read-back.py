@@ -126,9 +126,10 @@ The body starts with a line APPROVE or REQUEST_CHANGES, so the verdict shows
 even when the review is posted as a comment.
 
 For a review with a verdict, the success line also counts the reviewer's findings
-that lack, or leave unanswered, one of the labelled lines docs/agents/pr-reviewer-instructions.md asks
-each finding on code to end with, FINDING_FACT_LINE_LABELS, and names each such finding and the labels it
-lacks: the comments of the
+that lack, or leave unanswered, one of the hashtag lines docs/agents/pr-reviewer-instructions.md asks
+each finding on code to end with, FINDING_FACT_LINE_HASHTAGS, and names each such finding and the hashtags it
+lacks; a line that starts with the older label a hashtag replaced, from FINDING_FACT_LINE_OLDER_LABELS, counts
+as that hashtag's line. The findings are the comments of the
 Claude reviewer's file, and for merge-lane-2's review, the Codex findings on the
 commit, each finding's text running from its heading to the next one. The posted review is then read
 back by the id GitHub returned, and its state and commit must be the ones
@@ -197,14 +198,22 @@ CODEX_FINDING_WORKTREE_PATH = re.compile(r"\S*/pr\d+-head/")
 CODEX_REPORT_PROVENANCE_COMMENT = re.compile(r"\A<!--.*?-->\n?", re.DOTALL)
 CODEX_REVIEW_OBJECT_NON_EMPTY_FINDINGS_LIST_REGEX = re.compile(r'"findings"\s*:\s*\[\s*\{')
 CODEX_GRADES_BODY_HEADING = "**Codex findings graded:**"
-# docs/agents/pr-reviewer-instructions.md asks a reviewer to end each finding on code with these labelled lines.
-FINDING_FACT_LINE_LABELS = ("Main has it:", "This pull request makes it happen:", "Reports success on failure:",
-                            "Shown by:")
-# A label may open a list item of any kind, and its colon may sit inside or outside its code or bold marks.
+# docs/agents/pr-reviewer-instructions.md asks a reviewer to end each finding on code with these hashtag lines.
+FINDING_FACT_LINE_HASHTAGS = ("#defect_already_on_main", "#pull_request_triggers_the_defect",
+                              "#false_report_of_success_on_failure", "#defect_evidence")
+# Reviewers may still write the labels the hashtags replaced, each followed by a colon.
+FINDING_FACT_LINE_OLDER_LABELS = {"Main has it": "#defect_already_on_main",
+                                  "This pull request makes it happen": "#pull_request_triggers_the_defect",
+                                  "Reports success on failure": "#false_report_of_success_on_failure",
+                                  "Shown by": "#defect_evidence"}
+# A hashtag or a label may open a list item of any kind and sit inside code or bold marks, and a label's colon
+# may sit inside or outside them.
 FINDING_FACT_LINE = re.compile(
-    r"^[ \t]*(?:(?:[-*+]|\d+[.)])[ \t]+)?[`*_]*("
-    + "|".join(re.escape(label.removesuffix(":")) for label in FINDING_FACT_LINE_LABELS)
-    + r")[`*_]*:(.*)$", re.MULTILINE)
+    r"^[ \t]*(?:(?:[-*+]|\d+[.)])[ \t]+)?[`*_]*(?:("
+    + "|".join(re.escape(hashtag) for hashtag in FINDING_FACT_LINE_HASHTAGS)
+    + r")(?!\w)|("
+    + "|".join(re.escape(label) for label in FINDING_FACT_LINE_OLDER_LABELS)
+    + r")[`*_]*:)(.*)$", re.MULTILINE)
 FINDING_FACT_LINE_MARKS_AND_SPACE = re.compile(r"[`*_\s]")
 OUTSIDE_THE_DIFF_HEADING = fix_round.OUTSIDE_THE_DIFF_HEADING
 OUTSIDE_THE_DIFF_LINE_FORMAT = "- `{path}:{line}`: {body}"
@@ -444,15 +453,16 @@ def codex_answers_check(answers):
 
 
 def finding_fact_lines_lacking(text):
-    """The labels of the lines that end a finding on code which a finding's text lacks or leaves unanswered,
-    in FINDING_FACT_LINE_LABELS order; empty when every one is there with an answer."""
-    answered = {f"{label}:" for label, answer in FINDING_FACT_LINE.findall(text)
+    """The hashtags of the lines that end a finding on code which a finding's text lacks or leaves unanswered,
+    in FINDING_FACT_LINE_HASHTAGS order; empty when every one is there with an answer."""
+    answered = {hashtag or FINDING_FACT_LINE_OLDER_LABELS[label]
+                for hashtag, label, answer in FINDING_FACT_LINE.findall(text)
                 if FINDING_FACT_LINE_MARKS_AND_SPACE.sub("", answer)}
-    return tuple(label for label in FINDING_FACT_LINE_LABELS if label not in answered)
+    return tuple(hashtag for hashtag in FINDING_FACT_LINE_HASHTAGS if hashtag not in answered)
 
 
 def codex_findings_in_report(report):
-    """{finding id: (priority, heading text, [the fact-line labels each entry lacks])} for each finding heading
+    """{finding id: (priority, heading text, [the fact-line hashtags each entry lacks])} for each finding heading
     of a Codex report; a finding's text runs from its heading to the next one. Entries with the same priority
     and heading share an id, so the list holds one item per entry."""
     findings, finding_id, finding_lines = {}, None, []
@@ -941,8 +951,8 @@ def main(argv=None):
                   file=sys.stderr)
             return EXIT_NOT_POSTED
         moved = f"; {moved_count} comment(s) moved into the body" if moved_count else ""
-        lacks = [f"{name} lacks {', '.join(repr(label) for label in labels)}"
-                 for name, labels in fact_line_lacks if labels]
+        lacks = [f"{name} lacks {', '.join(repr(hashtag) for hashtag in hashtags)}"
+                 for name, hashtags in fact_line_lacks if hashtags]
         lacking = (f"; {len(lacks)} of {len(fact_line_lacks)} "
                    f"{'Codex ' if account == MERGE_LANE_ACCOUNT else ''}finding(s) lack an answered fact line"
                    f"{': ' + ' | '.join(lacks) if lacks else ''}" if fact_line_lacks and verdict else "")

@@ -12,12 +12,12 @@ Code needs PR reviewers. Prose is reviewed before the PR.
 
 Raise a missing guard, validation, retry or workaround as a non-blocking finding, and an added one that fails the two conditions of CLAUDE.md's rule on guards as a blocking finding. Raise a case that a guard, validation, retry or workaround in the code gets wrong as a non-blocking finding too, unless the code then hides a failure or reports one as success, which is graded like any other finding; a non-blocking one leads to a fix only when CLAUDE.md's two conditions on guards hold. A finding that something could be simpler, smaller or gone does not block the merge unless the pull request adds what is not needed.
 
-End each finding on code with these four lines, in this order, each starting with its label and giving one of the answers listed, because the merge lane grades the finding from them:
+End each finding on code with these four lines, in this order, each starting with its hashtag, then a space and one of the answers listed, as in `#false_report_of_success_on_failure no`, because the merge lane grades the finding from them:
 
-- `Main has it:` `yes` when main's code at the merge base, `git merge-base origin/main <nn-head-commit>`, has the same defect; `no`; or `not checked`.
-- `This pull request makes it happen:` `yes` when running the code as the pull request leaves it hits the defect where running main does not, such as by calling code that was already broken in a new way; `no`; or `not checked`.
-- `Reports success on failure:` `yes` when a step whose result someone relies on, such as a write, a copy, a post or a merge, can fail while the code reports success, reports nothing, or reports a failure without saying what the step changed; otherwise `no`. A guard, hook or validation that gets a case wrong is `no` unless it reports a failed step as success.
-- `Shown by:` `record`, then the log line, transcript or earlier run that shows the failure happening; `reproduction`, then the command you ran and what it printed; or `judged from the code only`.
+- `#defect_already_on_main` `yes` when main's code at the merge base, `git merge-base origin/main <nn-head-commit>`, has the same defect; `no`; or `not checked`.
+- `#pull_request_triggers_the_defect` `yes` when running the code as the pull request leaves it hits the defect where running main does not, such as by calling code that was already broken in a new way; `no`; or `not checked`.
+- `#false_report_of_success_on_failure` `yes` when a step whose result someone relies on, such as a write, a copy, a post or a merge, can fail while the code reports success, reports nothing, or reports a failure without saying what the step changed; otherwise `no`. A guard, hook or validation that gets a case wrong is `no` unless it reports a failed step as success.
+- `#defect_evidence` `record`, then the log line, transcript or earlier run that shows the failure happening; `reproduction`, then the command you ran and what it printed; or `judged from the code only`.
 
 On the first two lines, answer `not checked` rather than guess. Report a finding on main's code with these lines too.
 
