@@ -96,7 +96,18 @@ def check(case_name, condition, detail=""):
 def pull_request_node(number, head_sha, title="a title", draft=False,
                       author="nedlern"):
     return {"number": number, "title": title, "isDraft": draft,
-            "headRefOid": head_sha, "author": {"login": author}}
+            "headRefOid": head_sha, "author": {"login": author},
+            "createdAt": "2026-11-24T00:00:00Z", "baseRefName": "main",
+            "headRefName": f"branch-{number}", "reviews": {"nodes": []}}
+
+
+# Every number the event cases use has a line, so they raise no REVIEW-ASSIGNED line; the default
+# file is merge-lane-2's real one.
+EVERY_PULL_REQUEST_ASSIGNED_DIRECTORY = tempfile.TemporaryDirectory()
+EVERY_PULL_REQUEST_ASSIGNED_FILE = (Path(EVERY_PULL_REQUEST_ASSIGNED_DIRECTORY.name)
+                                    / "every-pull-request-assigned.txt")
+EVERY_PULL_REQUEST_ASSIGNED_FILE.write_text(
+    "".join(f"{number} merge-lane-1\n" for number in range(1, 1000)), encoding="utf-8")
 
 
 def graphql_body(nodes, has_next_page=False, end_cursor=None):
@@ -162,7 +173,9 @@ class WatcherProcess:
             [sys.executable, str(WATCH_SCRIPT),
              "--poll-seconds", "0.05",
              "--token-file", str(token_file),
-             "--needs-a-look-directory", str(needs_a_look_directory), *flags],
+             "--needs-a-look-directory", str(needs_a_look_directory),
+             "--merge-lane-pr-review-assignments-file", str(EVERY_PULL_REQUEST_ASSIGNED_FILE),
+             *flags],
             stdout=subprocess.PIPE, stderr=subprocess.PIPE,
             text=True, encoding="utf-8", env=environment)
         self._threads = [
@@ -363,9 +376,20 @@ def run_unit_cases():
         watcher_module.run_gh = saved_run_gh
     check("a deleted author becomes (unknown), not a crash",
           from_node(pull_request_node(3, "cccccccccccc"))[0] is not None
-          and from_node({"number": 3, "headRefOid": "c" * 12,
+          and from_node({**pull_request_node(3, "c" * 12),
                          "author": None})[0]["author"] == "(unknown)",
-          str(from_node({"number": 3, "headRefOid": "c" * 12, "author": None})))
+          str(from_node({**pull_request_node(3, "c" * 12), "author": None})))
+    for field in ("createdAt", "baseRefName", "headRefName"):
+        check(f"pull_request_from_node reports a missing {field} as a reason",
+              from_node({**pull_request_node(3, "c" * 12), field: None})
+              == (None, f"pull request #3 came back with no {field}"),
+              str(from_node({**pull_request_node(3, "c" * 12), field: None})))
+    for label, reviews in [("no reviews field", None),
+                           ("a review with no state", {"nodes": [{"body": "APPROVE"}]})]:
+        check(f"pull_request_from_node reports {label} as a reason, so no verdict is misread",
+              from_node({**pull_request_node(3, "c" * 12), "reviews": reviews})
+              == (None, "pull request #3 came back with no usable list of reviews"),
+              str(from_node({**pull_request_node(3, "c" * 12), "reviews": reviews})))
 
     # ------------------------------------------------------------------
     # Titles are folded then truncated, so a multi-line title cannot
@@ -515,6 +539,304 @@ def run_needs_a_look_unit_cases():
           / job.STATE_DIRECTORY_NAME / "needs-a-look", "")
 
 
+MERGE_LANE_REVIEWER = watcher_module.fix_round.MERGE_LANE_2_REVIEWER_LOGIN
+
+
+def review(state, head_sha, body=""):
+    return {"state": state, "body": body, "commit": {"oid": head_sha * 40}}
+
+
+def assignable(number, created_at="2026-11-24T00:00:00Z", head_sha="a", reviews=(), draft=False,
+               author="nedlern", base_branch="main", head_branch=None):
+    """A pull request as fetch_open_pull_requests returns it."""
+    return {"number": number, "head_sha": head_sha * 40, "title": f"title {number}",
+            "is_draft": draft, "author": author, "created_at": created_at,
+            "base_branch": base_branch, "head_branch": head_branch or f"branch-{number}",
+            "reviews": list(reviews)}
+
+
+def dealt_numbers(pull_requests, assignments):
+    return [(pull_request["number"], lane) for pull_request, lane in
+            watcher_module.merge_lane_pull_request_review_assignments_for_unassigned_pull_requests(
+                pull_requests, assignments)]
+
+
+def run_merge_lane_pull_request_review_assignment_unit_cases():
+    waiting_1, waiting_2, waiting_3 = assignable(1), assignable(2), assignable(3)
+    approved_4 = assignable(4, reviews=[review("APPROVED", "a")])
+    check("a new pull request goes to the merge-lane agent-seat with fewer pull requests waiting",
+          dealt_numbers([waiting_1, waiting_2, waiting_3, assignable(10)],
+                        {1: "merge-lane-1", 2: "merge-lane-1", 3: "merge-lane-3"})
+          == [(10, "merge-lane-3")], "")
+    check("a tie goes to merge-lane-1",
+          dealt_numbers([waiting_1, waiting_3, assignable(10)],
+                        {1: "merge-lane-1", 3: "merge-lane-3"}) == [(10, "merge-lane-1")], "")
+    check("a pull request whose newest commit has a verdict does not wait, so its agent-seat "
+          "counts fewer",
+          dealt_numbers([waiting_1, approved_4, waiting_3, assignable(10)],
+                        {1: "merge-lane-3", 4: "merge-lane-1", 3: "merge-lane-3"})
+          == [(10, "merge-lane-1")], "")
+    changes_on_older_commit = assignable(5, head_sha="b", reviews=[review("CHANGES_REQUESTED", "a")])
+    check("a verdict on an older commit leaves the pull request waiting",
+          dealt_numbers([changes_on_older_commit, assignable(10)], {5: "merge-lane-1"})
+          == [(10, "merge-lane-3")], "")
+    check("a review by ned-review-merge with no verdict leaves the pull request waiting",
+          dealt_numbers([assignable(6, reviews=[review("COMMENTED", "a", "a note")]), assignable(10)],
+                        {6: "merge-lane-1"}) == [(10, "merge-lane-3")], "")
+    own_approved = assignable(7, author=MERGE_LANE_REVIEWER,
+                              reviews=[review("COMMENTED", "a", "APPROVE\nno findings")])
+    check("on a pull request ned-review-merge opened, a COMMENTED review opening with APPROVE is "
+          "a verdict",
+          dealt_numbers([own_approved, waiting_3, assignable(10)],
+                        {7: "merge-lane-1", 3: "merge-lane-3"}) == [(10, "merge-lane-1")], "")
+    check("a pull request ned-review-merge opened is assigned like any other",
+          dealt_numbers([waiting_1, assignable(11, author=MERGE_LANE_REVIEWER)], {1: "merge-lane-1"})
+          == [(11, "merge-lane-3")], "")
+    check("oldest first, each assignment counted at once: three new ones alternate from the tie",
+          dealt_numbers([assignable(22, created_at="2026-11-24T03:00:00Z"),
+                         assignable(20, created_at="2026-11-24T01:00:00Z"),
+                         assignable(21, created_at="2026-11-24T02:00:00Z")], {})
+          == [(20, "merge-lane-1"), (21, "merge-lane-3"), (22, "merge-lane-1")], "")
+    check("merge-lane-2 is never assigned a review, however few it has waiting",
+          dealt_numbers([waiting_1, waiting_3, assignable(10)],
+                        {1: "merge-lane-1", 3: "merge-lane-3"})[0][1] != "merge-lane-2", "")
+    check("a draft is not assigned",
+          dealt_numbers([assignable(10, draft=True)], {}) == [], "")
+    fix_round_head = assignable(8, head_sha="b", reviews=[review("CHANGES_REQUESTED", "a")])
+    check("a pull request with a line keeps it at its fix-round, even when the other agent-seat "
+          "has fewer waiting",
+          dealt_numbers([fix_round_head, waiting_1, waiting_2],
+                        {8: "merge-lane-1", 1: "merge-lane-1", 2: "merge-lane-1"}) == [], "")
+
+    bottom = assignable(30, head_branch="bottom")
+    middle = assignable(31, base_branch="bottom", head_branch="middle")
+    top = assignable(32, base_branch="middle", head_branch="top")
+    check("a stacked pull request takes the agent-seat of the bottom of its stack, not the one "
+          "with fewer waiting",
+          dealt_numbers([bottom, middle, top, waiting_1], {30: "merge-lane-3", 1: "merge-lane-1"})
+          == [(31, "merge-lane-3"), (32, "merge-lane-3")], "")
+    draft_bottom = assignable(30, head_branch="bottom", draft=True)
+    check("a stacked pull request whose bottom has no line has its bottom assigned first, "
+          "draft or not",
+          dealt_numbers([draft_bottom, middle, waiting_1], {1: "merge-lane-1"})
+          == [(30, "merge-lane-3"), (31, "merge-lane-3")], "")
+    check("a stacked pull request whose base no open pull request has as its head branch is "
+          "taken as not stacked",
+          dealt_numbers([middle, waiting_1], {1: "merge-lane-1"}) == [(31, "merge-lane-3")], "")
+    twin = assignable(33, head_branch="bottom")
+    check("a stacked pull request whose base two open pull requests have as their head branch is "
+          "taken as not stacked",
+          dealt_numbers([bottom, twin, middle, waiting_1],
+                        {30: "merge-lane-1", 33: "merge-lane-1", 1: "merge-lane-1"})
+          == [(31, "merge-lane-3")], "")
+    loop_a = assignable(34, base_branch="loop-b", head_branch="loop-a")
+    loop_b = assignable(35, base_branch="loop-a", head_branch="loop-b")
+    check("a cycle of bases ends, and both pull requests are taken as not stacked",
+          dealt_numbers([loop_a, loop_b], {}) == [(34, "merge-lane-1"), (35, "merge-lane-3")], "")
+
+    read = watcher_module.merge_lane_pull_request_review_assignments_file_read
+    unusable = watcher_module.MergeLanePullRequestReviewAssignmentsFileUnusable
+    with tempfile.TemporaryDirectory() as scratch:
+        path = Path(scratch) / "assignments.txt"
+        path.write_text("4028 merge-lane-1\n4319 merge-lane-3\n4470 merge-lane-2\n", encoding="utf-8")
+        check("the assignment file is read, merge-lane-2 included",
+              read(path) == {4028: "merge-lane-1", 4319: "merge-lane-3", 4470: "merge-lane-2"}, "")
+        for label, text, fragment in [
+                ("a line naming no merge-lane agent-seat", "4028 merge-lane-4\n",
+                 "line 1 of the assignment file"),
+                ("a line with no number", "\n", "line 1 of the assignment file"),
+                ("a pull request assigned twice", "1 merge-lane-1\n1 merge-lane-3\n",
+                 "assigns pull request #1 a second time")]:
+            path.write_text(text, encoding="utf-8")
+            try:
+                read(path)
+                outcome = "read without error"
+            except unusable as error:
+                outcome = str(error)
+            check(f"an assignment file with {label} is refused, naming the line", fragment in outcome,
+                  outcome)
+        path.chmod(0)
+        try:
+            read(path)
+            outcome = "read without error"
+        except unusable as error:
+            outcome = str(error)
+        path.chmod(0o600)
+        check("an unreadable assignment file is refused, naming the error",
+              "cannot be read" in outcome and "Permission denied" in outcome, outcome)
+
+
+def run_watcher_in_process(flags, polls, token_file):
+    """Run main() in-process, each poll a list of pull requests or a failure reason string, until
+    it returns or polls past the script. Return (exit code, stdout lines, stderr text)."""
+    output, errors = io.StringIO(), io.StringIO()
+    clock = FakeClock(output)
+    polls_made = []
+
+    def scripted_fetch(_repo, _token):
+        if len(polls_made) == len(polls):
+            raise PollsRanOut(f"the watcher polled a {len(polls) + 1}th time")
+        poll = polls[len(polls_made)]
+        polls_made.append(clock.now)
+        return (None, poll) if isinstance(poll, str) else (poll, None)
+
+    saved = (watcher_module.time, watcher_module.fetch_open_pull_requests,
+             list(watcher_module.SECRETS_TO_REDACT))
+    watcher_module.time = clock
+    watcher_module.fetch_open_pull_requests = scripted_fetch
+    try:
+        with contextlib.redirect_stdout(output), contextlib.redirect_stderr(errors):
+            try:
+                exit_code = watcher_module.main(["--poll-seconds", "60", "--token-file",
+                                                 str(token_file), *flags])
+            except PollsRanOut:
+                exit_code = "still running"
+    finally:
+        (watcher_module.time, watcher_module.fetch_open_pull_requests,
+         watcher_module.SECRETS_TO_REDACT[:]) = saved
+    return exit_code, output.getvalue().splitlines(), errors.getvalue()
+
+
+def run_merge_lane_pull_request_review_assignment_watcher_cases():
+    with tempfile.TemporaryDirectory() as scratch:
+        scratch = Path(scratch)
+        token_file = scratch / "fixture.token"
+        token_file.write_text(FIXTURE_TOKEN + "\n", encoding="utf-8")
+        assignments = scratch / "assignments.txt"
+
+        def watch(polls):
+            return run_watcher_in_process(
+                ["--needs-a-look-directory", str(scratch / "no-notices"),
+                 "--merge-lane-pr-review-assignments-file", str(assignments)], polls, token_file)
+
+        open_now = [assignable(1), assignable(40, created_at="2026-11-24T05:00:00Z")]
+        assignments.write_text("1 merge-lane-1\n", encoding="utf-8")
+        _, lines, _ = watch([open_now, open_now])
+        check("the baseline poll assigns a pull request with no line, prints one REVIEW-ASSIGNED "
+              "line naming the agent-seat, and appends it to the file",
+              [line for line in lines if not line.startswith("WATCH: ")]
+              == [f"PR #40 REVIEW-ASSIGNED merge-lane-3 {'a' * 8} nedlern: title 40"]
+              and assignments.read_text(encoding="utf-8") == "1 merge-lane-1\n40 merge-lane-3\n",
+              "\n".join(lines))
+
+        assignments.unlink()
+        _, lines, _ = watch([open_now, open_now, open_now])
+        stopped = [line for line in lines if "review assignment stopped" in line]
+        check("a missing assignment file stops assignment with one WATCH line, saying how to seed "
+              "it, and is not made",
+              len(stopped) == 1 and "does not exist" in stopped[0]
+              and any("--merge-lane-pr-review-assignments-file-write-from-seed-and-reviewed-prs-"
+                      "then-exit" in line for line in lines)
+              and not any(line.startswith("PR #") for line in lines) and not assignments.exists(),
+              "\n".join(lines))
+
+        assignments.write_text("1 merge-lane-1\nforty merge-lane-3\n", encoding="utf-8")
+        _, lines, _ = watch([open_now, open_now])
+        check("a malformed assignment file stops assignment with one WATCH line naming the line, "
+              "and is left as it was",
+              sum("review assignment stopped" in line for line in lines) == 1
+              and any("line 2 of the assignment file" in line for line in lines)
+              and not any(line.startswith("PR #") for line in lines)
+              and assignments.read_text(encoding="utf-8") == "1 merge-lane-1\nforty merge-lane-3\n",
+              "\n".join(lines))
+
+        assignments.write_text("1 merge-lane-1\n", encoding="utf-8")
+        assignments.chmod(0o400)
+        try:
+            _, lines, _ = watch([open_now, open_now])
+        finally:
+            assignments.chmod(0o600)
+        check("an assignment file that cannot be appended to stops assignment with one WATCH line, "
+              "and prints no REVIEW-ASSIGNED line for what it could not record",
+              sum("cannot be appended to" in line for line in lines) == 1
+              and not any(line.startswith("PR #") for line in lines), "\n".join(lines))
+        _, lines, _ = watch([open_now])
+        check("once the file can be written, the next poll assigns what waited",
+              any("PR #40 REVIEW-ASSIGNED" in line for line in lines)
+              and assignments.read_text(encoding="utf-8").endswith("40 merge-lane-3\n"),
+              "\n".join(lines))
+
+        assignments.write_text("1 merge-lane-1\n", encoding="utf-8")
+        _, lines, _ = watch(["gh: HTTP 503", open_now])
+        check("a failed GitHub query assigns nothing, and the next successful poll assigns",
+              any("BLIND" in line for line in lines)
+              and sum("PR #40 REVIEW-ASSIGNED" in line for line in lines) == 1, "\n".join(lines))
+
+        assignments.write_text("1 merge-lane-1\n", encoding="utf-8")
+        exit_code, lines, _ = run_watcher_in_process(
+            ["--needs-a-look-directory", str(scratch / "no-notices"),
+             "--merge-lane-pr-review-assignments-file", str(assignments),
+             "--exit-after-first-poll-with-events"], [open_now], token_file)
+        check("a REVIEW-ASSIGNED line is an event that ends --exit-after-first-poll-with-events",
+              exit_code == 0 and any("PR #40 REVIEW-ASSIGNED" in line for line in lines),
+              f"exit {exit_code!r}\n" + "\n".join(lines))
+
+        # The seed.
+        seed = scratch / "seed.txt"
+        seed.write_text("4028 merge-lane-1\n4319 merge-lane-3\n", encoding="utf-8")
+        seeded = scratch / "seeded.txt"
+        reviewed = [review("COMMENTED", "a", "a note")]
+        open_at_seed = [assignable(4028), assignable(4100, reviews=reviewed),
+                        assignable(4101, reviews=reviewed), assignable(4102, reviews=reviewed),
+                        assignable(4103)]
+
+        def seed_with(polls):
+            return run_watcher_in_process(
+                ["--merge-lane-pr-review-assignments-file", str(seeded),
+                 "--merge-lane-pr-review-assignments-file-write-from-seed-and-reviewed-prs-then-exit",
+                 str(seed)], polls, token_file)
+
+        exit_code, lines, errors = seed_with(["gh: HTTP 503"])
+        check("the seed exits 1 when GitHub cannot be read, and writes no file",
+              exit_code == 1 and "HTTP 503" in errors and not seeded.exists(), errors)
+        exit_code, lines, errors = seed_with([open_at_seed])
+        check("the seed writes the seed file's lines, then each other open pull request with a "
+              "review by its number's remainder, and none without a review",
+              exit_code == 0
+              and seeded.read_text(encoding="utf-8") == "4028 merge-lane-1\n4319 merge-lane-3\n"
+              "4100 merge-lane-2\n4101 merge-lane-3\n4102 merge-lane-1\n"
+              and any("wrote 5 assignment(s)" in line for line in lines),
+              f"exit {exit_code!r} {errors}\n" + "\n".join(lines))
+        exit_code, lines, errors = seed_with([open_at_seed])
+        check("the seed refuses to replace an assignment file that exists",
+              exit_code == 1 and "already exists" in errors
+              and seeded.read_text(encoding="utf-8").startswith("4028 merge-lane-1\n"), errors)
+        seeded.unlink()
+        seed.write_text("4028 lane-one\n", encoding="utf-8")
+        exit_code, lines, errors = seed_with([open_at_seed])
+        check("a malformed seed file exits 1 and writes no assignment file",
+              exit_code == 1 and "line 1 of the assignment file" in errors and not seeded.exists(),
+              errors)
+
+        # The lookup.
+        assignments.write_text("50 merge-lane-1\n51 merge-lane-1\n52 merge-lane-1\n53 merge-lane-3\n",
+                               encoding="utf-8")
+        open_at_lookup = [assignable(50), assignable(51, reviews=[review("APPROVED", "a")]),
+                          assignable(52, draft=True), assignable(53)]
+
+        def look_up(lane, polls, path=assignments):
+            return run_watcher_in_process(
+                ["--merge-lane-pr-review-assignments-file", str(path),
+                 "--merge-lane-pr-review-assignments-list-for", lane], polls, token_file)
+
+        exit_code, lines, errors = look_up("merge-lane-1", [open_at_lookup])
+        check("the lookup lists the agent-seat's open pull requests that are not drafts, and "
+              "whether each waits for its verdict",
+              exit_code == 0 and lines == [
+                  "merge-lane-1: 2 open pull request(s) that are not drafts are assigned to it; "
+                  "1 of them wait for its verdict on their newest commit",
+                  f"PR #50 WAITS-FOR-VERDICT {'a' * 8} nedlern: title 50",
+                  f"PR #51 HAS-VERDICT {'a' * 8} nedlern: title 51"],
+              f"exit {exit_code!r} {errors}\n" + "\n".join(lines))
+        exit_code, lines, errors = look_up("merge-lane-1", ["gh: HTTP 503"])
+        check("the lookup exits 1 when GitHub cannot be read, naming the failure",
+              exit_code == 1 and "HTTP 503" in errors and not lines, errors)
+        exit_code, lines, errors = look_up("merge-lane-1", [open_at_lookup],
+                                           path=scratch / "absent.txt")
+        check("the lookup exits 1 when the assignment file is missing",
+              exit_code == 1 and "does not exist" in errors, errors)
+
+
 class PollsRanOut(Exception):
     """Raised by the scripted fetch when the watcher polls past the script."""
 
@@ -561,6 +883,7 @@ def run_batched_watcher(polls, batch_seconds, needs_a_look_directory, token_file
                 exit_code = watcher_module.main([
                     "--poll-seconds", "60", "--token-file", str(token_file),
                     "--needs-a-look-directory", str(needs_a_look_directory),
+                    "--merge-lane-pr-review-assignments-file", str(EVERY_PULL_REQUEST_ASSIGNED_FILE),
                     "--batch-events-for-seconds", str(batch_seconds)])
             except PollsRanOut as error:
                 exit_code = f"still running: {error}"
@@ -1194,6 +1517,8 @@ def run_subprocess_cases():
 
 if __name__ == "__main__":
     run_unit_cases()
+    run_merge_lane_pull_request_review_assignment_unit_cases()
+    run_merge_lane_pull_request_review_assignment_watcher_cases()
     run_needs_a_look_unit_cases()
     run_batch_events_cases()
     run_subprocess_cases()
