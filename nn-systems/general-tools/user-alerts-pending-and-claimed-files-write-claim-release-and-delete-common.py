@@ -25,7 +25,8 @@ from pathlib import Path
 
 USER_ALERTS_RELATIVE_TO_HOME = Path(".local") / "state" / "nedsnodes" / "user-alerts"
 CLAIM_LIMIT_SECONDS = 30 * 60
-USER_ALERT_LINE = re.compile(r"#user_alert\s+(\S+)")
+# Anchored to a line's start, because a line holding a quotation, such as a reply recorded in his words, can mention one.
+USER_ALERT_LINE = re.compile(r"^#user_alert\s+(\S+)", re.MULTILINE)
 # Walk-minutes on ned-box, relative to the home directory: closed ones in the log-store, open ones under
 # docs/walk/ of each checkout, which are agent-homes, the worktrees beside or inside them, and the
 # reference-checkout and its worktrees.
@@ -92,7 +93,7 @@ def walk_minutes_files(home):
 
 
 def user_alert_ids_named_in_walk_minutes(home):
-    """Every id a `#user_alert <id>` line names in any walk-minutes on ned-box."""
+    """Every id a line opening `#user_alert <id>` names in any walk-minutes on ned-box."""
     ids = set()
     for path in walk_minutes_files(home):
         try:

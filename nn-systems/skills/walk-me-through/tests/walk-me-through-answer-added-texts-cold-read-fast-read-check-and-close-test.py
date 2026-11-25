@@ -7758,10 +7758,45 @@ def test_the_fresh_agent_brief_holds_the_raising_item_s_answer_words_and_the_hoo
     check("at the third revision the read step prints the brief", last.returncode == 1 and "has been revised three "
           "times" in last.stdout, "".join(described(result) for result in results))
     check("the brief holds the answer words on item 2, whose held answer raised item 3", f"- {raising}" in brief, brief)
-    check("the brief holds the hook's line recording the user's own-words reply to sub-step 3.1",
-          f"- {own_words}" in brief, brief)
+    check("the brief holds the hook's line recording the user's own-words reply to sub-step 3.1, under the heading "
+          "for what he typed while the item waited, not among his words on the item",
+          f"- {own_words}" in brief.split(program_brief_waiting_header())[-1]
+          and program_brief_waiting_header() in brief, brief)
     check("the brief leaves out the words on item 5, whose held answer raised another item",
           "a word on item 5" not in brief, brief)
+
+
+def test_the_user_s_words_on_an_item_are_found_only_by_the_line_s_own_item_and_held_sub_step_not_his_quoted_words():
+    program = load_program()
+    walk_finder = program.load_walk_finder()
+    spec = importlib.util.spec_from_file_location("walk_short_answer_hook_for_words_test", SHORT_ANSWER_HOOK_FILE)
+    hook = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(hook)
+
+    def reply(item, words):
+        return hook.APPROVAL_WALK_WAITING_ITEM_USER_OWN_WORDS_REPLY_WALK_MINUTES_LINE.format(
+            date_and_time="2026-11-25 09:20Z", item=item, words=f"`{words}`")
+    on_4_naming_9 = reply("item 4 of 12", "Use the definition in item 9 of 12")
+    on_9 = reply("item 9 of 12", "a word on item 9")
+    on_2_1 = ('item 2.1 of 12: the user answered approved (2026-11-25 06:20Z) in his words "`a word on 2.1`", which '
+              "makes its change. Fast reads:")
+    on_2_2 = ('item 2.2 of 12: the user answered approved (2026-11-25 06:22Z) in his words "`a word on 2.2`", which '
+              "makes its change. Fast reads:")
+    minutes = "\n\n".join(("# Minutes", on_2_1, on_2_2, "item 2.2 of 12: answer held: item 3 of 12, raised by a "
+                            "fast-read finding, waits for the user's answer. <open>", on_4_naming_9, on_9, ""))
+    parser = walk_finder.markdown_parser()
+    answers, waiting = program.approval_walk_item_user_words_in_minutes(walk_finder, parser, minutes, "9", set())
+    check("a reply recorded on item 4 that names item 9 in his quoted words is not taken as words on item 9",
+          on_4_naming_9 not in answers + waiting and waiting == [on_9] and answers == [], (answers, waiting))
+    answers, waiting = program.approval_walk_item_user_words_in_minutes(walk_finder, parser, minutes, "3", set())
+    check("a held answer on sub-step 2.2 brings 2.2's words into item 3's brief, not those on its sibling 2.1",
+          answers == [on_2_2] and waiting == [], (answers, waiting))
+    check("the program's phrase for the hook's reply record is in the hook's line, so the brief tells the two apart",
+          program.APPROVAL_WALK_WAITING_ITEM_USER_OWN_WORDS_REPLY_WALK_MINUTES_FILE_LINE_MARKER_PHRASE in on_9, on_9)
+
+
+def program_brief_waiting_header():
+    return load_program().FRESH_AGENT_REWRITE_BRIEF_APPROVAL_WALK_WAITING_ITEM_USER_OWN_WORDS_REPLIES_HEADER
 
 
 def test_the_fresh_agent_rewrite_takes_the_place_of_the_item_s_text_and_starts_the_count_again():

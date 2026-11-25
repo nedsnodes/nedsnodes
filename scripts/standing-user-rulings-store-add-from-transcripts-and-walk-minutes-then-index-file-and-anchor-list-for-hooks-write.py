@@ -283,6 +283,9 @@ ANSWER_LINE_WITH_TIME = re.compile(
     r"^(?P<item>items? .+?): the user answered (?P<answered>.+?)(?: #approved_(?:obvious|after_advisor))?"
     r"(?: #case_against_[a-z_]+)? \((?P<when>\d{4}-\d\d-\d\d \d\d:\d\d)(?P<utc>Z)?\)(?: in his words \".*\")?, "
     r"which makes its change\. Fast reads:$", re.IGNORECASE)
+# The fixed opening of the walk-me-through short-answer hook's record of a reply the user typed while an item waited:
+# it decides nothing, so a citation quoted in his words there is no ruling.
+WALK_MINUTES_WAITING_ITEM_REPLY_RECORD = re.compile(r"User \([^)]*\), on .+? while it waited, a reply in his words ")
 USER_RULED_CITATION = re.compile(r"\buser-ruled (?P<date>\d{4}-\d\d-\d\d)(?P<time>T\d\d:\d\d(?::\d\d)?Z)?")
 
 # Messages follow docs/nedsnodes-wiki/nedsnodes-how-to-write-a-tool-message-to-agent-such-as-a-hook-refusal-or-script-error.md.
@@ -681,6 +684,8 @@ def walk_minutes_said_at(line):
         zone = datetime.timezone.utc if match.group("utc") else ZoneInfo(WALK_MINUTES_LOCAL_TIME_ZONE)
         when = datetime.datetime.strptime(match.group("when"), "%Y-%m-%d %H:%M").replace(tzinfo=zone)
         return when.astimezone(datetime.timezone.utc).strftime("%Y-%m-%dT%H:%MZ")
+    if WALK_MINUTES_WAITING_ITEM_REPLY_RECORD.match(line):
+        return None
     match = USER_RULED_CITATION.search(line)
     if match:
         return match.group("date") + (match.group("time") or "")

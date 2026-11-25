@@ -410,17 +410,20 @@ def append_to_minutes(minutes, lines, paragraph_of_its_own=False):
 
     It appends and never rewrites the file, because hooks that run in parallel on one prompt each add lines, and a
     whole-file rewrite would drop a line another wrote between its read and its write. paragraph_of_its_own puts a
-    blank line before the lines, so that an unclosed inline mark, such as `<!--`, in the paragraph above cannot
-    join them."""
-    existing = minutes.read_text(encoding="utf-8") if minutes.exists() else ""
+    blank line before and after the lines, so that an unclosed inline mark, such as `<!--`, in the paragraph above
+    or in a line appended below cannot join them. A missing file raises OSError and is not created, so that a
+    walk-minutes file moved away is reported rather than replaced by a stray one."""
+    existing = minutes.read_text(encoding="utf-8")
     if not existing:
         separator = ""
     elif paragraph_of_its_own:
         separator = "" if existing.endswith("\n\n") else "\n" if existing.endswith("\n") else "\n\n"
     else:
         separator = "" if existing.endswith("\n") else "\n"
-    with open(minutes, "a", encoding="utf-8") as file:
-        file.write(separator + "\n".join(lines) + "\n")
+    ending = "\n\n" if paragraph_of_its_own else "\n"
+    descriptor = os.open(minutes, os.O_WRONLY | os.O_APPEND)
+    with os.fdopen(descriptor, "a", encoding="utf-8") as file:
+        file.write(separator + "\n".join(lines) + ending)
 
 
 def text_wrapped_as_markdown_code_span(text):

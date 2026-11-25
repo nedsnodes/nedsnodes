@@ -2716,7 +2716,7 @@ def test_settled_line_failure_reading_the_walk_keeps_short_answer_output_and_rep
 
 OWN_WORDS_REPLY_RECORDED = re.compile(
     r'\nUser \(\d{4}-\d\d-\d\d \d\d:\d\dZ\), on item 4 of 9 while it waited, a reply in his words that is not a '
-    r'short answer: "(.*)"\n$')
+    r'short answer: "(.*)"\n\n$')
 
 
 def test_a_reply_in_his_own_words_is_recorded_in_the_walk_minutes_against_the_waiting_item():
@@ -2765,6 +2765,25 @@ def test_a_recorded_reply_is_a_paragraph_of_its_own_so_an_html_comment_above_can
           "waiting",
           walk_finder.next_to_present(minutes.read_text(), walk_finder.markdown_parser())[0] == "item 4 of 9",
           minutes.read_text())
+    walk_finder.append_to_minutes(minutes, ["item 4 of 9: a note <!-- by hand -->"])
+    check("a line holding an inline HTML comment appended below the recorded reply leaves item 4 waiting: the "
+          "reply's paragraph ends with a blank line",
+          walk_finder.next_to_present(minutes.read_text(), walk_finder.markdown_parser())[0] == "item 4 of 9",
+          minutes.read_text())
+
+
+def test_appending_to_walk_minutes_moved_away_raises_and_creates_no_stray_file():
+    walk_finder = HOOK_MODULE.load_walk_finder()
+    case = Case(next_to_present="item 4 of 9")
+    minutes = case.walk / f"{WALK_NAME}-minutes.md"
+    minutes.rename(minutes.with_name("moved-away.md"))
+    raised = None
+    try:
+        walk_finder.append_to_minutes(minutes, ["a line"], paragraph_of_its_own=True)
+    except OSError as error:
+        raised = error
+    check("appending to walk-minutes moved away between the read and the append raises and creates no file",
+          isinstance(raised, FileNotFoundError) and not minutes.exists(), repr(raised))
 
 
 def test_a_reply_in_his_own_words_that_cannot_be_recorded_says_why_and_gives_the_line_to_add():
@@ -2781,7 +2800,7 @@ def test_a_reply_in_his_own_words_that_cannot_be_recorded_says_why_and_gives_the
           result.returncode == 0 and len(lines) == 5 and lines[0].startswith(OWN_WORDS_RULE_OPENING)
           and lines[1].startswith(f"The hook could not record the user's reply in the walk-minutes {minutes}: ")
           and "PermissionError" in lines[1] and lines[2].startswith("Add this line as the last line")
-          and OWN_WORDS_REPLY_RECORDED.search("\n" + lines[3] + "\n") is not None and lines[-1] == SETTLED_LINE
+          and OWN_WORDS_REPLY_RECORDED.search("\n" + lines[3] + "\n\n") is not None and lines[-1] == SETTLED_LINE
           and "User (" not in minutes.read_text(),
           f"exit {result.returncode}, stdout {result.stdout!r}, stderr {result.stderr!r}")
 

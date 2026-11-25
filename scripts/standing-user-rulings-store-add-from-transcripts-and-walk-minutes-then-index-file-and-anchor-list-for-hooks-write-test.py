@@ -463,6 +463,21 @@ with tempfile.TemporaryDirectory() as directory:
           rerun.returncode == 0 and "added 0 user-words and 1 walk-minutes-user-ruling entries" in rerun.stdout,
           described(rerun))
 
+# The walk-me-through short-answer hook's record of a reply typed while an item waited decides nothing, even when his
+# quoted words cite a ruling.
+SHORT_ANSWER_HOOK = (Path(__file__).resolve().parents[1] / "nn-systems" / "skills" / "walk-me-through"
+                     / "walk-me-through-user-short-answer-to-approval-walk-item-expanded-into-instructions-user-prompt-submit-hook.py")
+short_answer_hook = load("walk_me_through_short_answer_hook", SHORT_ANSWER_HOOK)
+reply_record = short_answer_hook.APPROVAL_WALK_WAITING_ITEM_USER_OWN_WORDS_REPLY_WALK_MINUTES_LINE.format(
+    date_and_time="2026-11-25 09:20Z", item="item 4 of 9", words="`as we said (user-ruled 2026-11-20)`")
+with tempfile.TemporaryDirectory() as directory:
+    case = Case(directory)
+    case.minutes("alpha-seat-reply-2026-11-25-minutes.md", ["# Minutes", reply_record, cited_line])
+    result = case.run()
+    texts = [row[0] for row in case.query("SELECT text FROM entries WHERE kind = 'walk-minutes-user-ruling'")]
+    check("a reply the hook recorded is not a user-ruling though his quoted words cite one; a citation line still is",
+          result.returncode == 0 and texts == [cited_line], described(result) + f" {texts}")
+
 # A transcript replaced by another file at its path is read from its start.
 # The stored inode is set above, then below, the new file's, whichever order the file system gave them.
 for stored_inode_above in (True, False):
