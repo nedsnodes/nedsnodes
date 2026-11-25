@@ -941,7 +941,8 @@ def gh_api_pages(path):
 
 
 def merge_lane_2_reviews_and_their_comments(number, posting, account):
-    """merge-lane-2's reviews of the pull request, and their comments, each marked with the pull request's number."""
+    """merge-lane-2's reviews of the pull request, and their comments, each marked with the pull request's number
+    and its review's id."""
     try:
         reviews = sorted((review for review in gh_api_pages(f"pulls/{number}/reviews")
                           if review["user"]["login"] == account), key=lambda review: review["id"])
@@ -952,9 +953,10 @@ def merge_lane_2_reviews_and_their_comments(number, posting, account):
         comments = []
         for review in reviews:
             comments += [{"path": comment["path"], "line": comment.get("line") or comment.get("original_line"),
-                          "body": comment["body"]}
+                          "body": comment["body"], "review": review["id"]}
                          for comment in inline if comment["pull_request_review_id"] == review["id"]]
-            comments += posting.outside_the_diff_comments_read_back_from_review_body(review.get("body") or "")
+            comments += [{**comment, "review": review["id"]}
+                         for comment in posting.outside_the_diff_comments_read_back_from_review_body(review.get("body") or "")]
     except (KeyError, TypeError, AttributeError) as error:
         raise StepFailed(f"GitHub's reviews of pull request {number} were not in the expected shape: "
                          f"{type(error).__name__}: {error}") from None
@@ -1020,14 +1022,17 @@ def print_follow_up_request_block_from_merge_lane_2_reviews(number):
                 "If merge-lane-2's reviews hold no such finding, write no block.")
         category, text, _nit = marked
         finding = (category, comment["path"], " ".join(text.split()))
+        review = (comment["pull_request"], comment["review"])
         compared = (category, comment["path"], " ".join(posting.CODEX_FINDING_ID_MARK_IN_REVIEW_COMMENT_PATTERN.sub("", text).split()))
-        if category != posting.BLOCKING_CATEGORY and compared not in [found[4] for found in findings]:
-            findings.append((*finding, comment["line"], compared))
+        # Within one review, two comments alike but for their Codex finding marks are two findings.
+        restated = any(found[:3] == finding or (found[4] == compared and found[5] != review) for found in findings)
+        if category != posting.BLOCKING_CATEGORY and not restated:
+            findings.append((*finding, comment["line"], compared, review))
     if not findings:
         return
     lines = [f"{FOLLOW_UP_REQUEST_LINE_START} pull request {number}"] + [
         f"{index}. {category}: `{path}:{line}`: {text}"
-        for index, (category, path, text, line, _compared) in enumerate(findings, 1)]
+        for index, (category, path, text, line, _compared, _review) in enumerate(findings, 1)]
     block = "\n".join(lines) + "\n"
     try:
         read_back = [request.lines for request in parse_follow_up_request_blocks_from_message_text(block)]

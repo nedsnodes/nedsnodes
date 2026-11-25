@@ -167,11 +167,13 @@ def main():
         check("a run that stopped before the review records exit 2, replacing the earlier record",
               json.loads(record.read_text())["exit_code"] == 2, record.read_text())
 
+        earlier_record = record.read_text()
         head_worktree.rename(head_worktree.with_name("pr7-head-away"))
         completed, gh_calls, cell_calls = run_program(scratch, helpers)
         head_worktree.with_name("pr7-head-away").rename(head_worktree)
-        check("an unreadable head commit exits 2 before the review runs, and leaves no earlier record behind",
-              completed.returncode == 2 and gh_calls == [] and cell_calls == [] and not record.exists()
+        check("an unreadable head commit exits 2 before the review runs, and leaves the earlier record as it was",
+              completed.returncode == 2 and gh_calls == [] and cell_calls == []
+              and record.read_text() == earlier_record
               and "could not read the head commit" in completed.stdout,
               f"exit {completed.returncode}\n{completed.stdout}{completed.stderr}")
 
@@ -180,14 +182,17 @@ def main():
               completed.returncode == 0 and len(cell_calls) == 1
               and json.loads(record.read_text())["head_commit"] == head,
               f"exit {completed.returncode}\n{completed.stdout}{completed.stderr}")
+        earlier_record = record.read_text()
         completed, gh_calls, cell_calls = run_program(scratch, helpers,
-                                                      extra_arguments=("--expected-head-commit", "e" * 40))
-        check("a run whose pr<n>-head holds another commit than --expected-head-commit exits 2 before the "
-              "review, naming both commits, and leaves no record",
-              completed.returncode == 2 and gh_calls == [] and cell_calls == [] and not record.exists()
-              and f"holds commit {head}, not {'e' * 40}" in completed.stdout,
+                                                      extra_arguments=("--expected-head-commit", head[:8]))
+        check("a run whose --expected-head-commit is not the full commit pr<n>-head holds exits 2 before the "
+              "review, naming both commits, and leaves the earlier record for that commit as it was",
+              completed.returncode == 2 and gh_calls == [] and cell_calls == []
+              and record.read_text() == earlier_record and json.loads(earlier_record)["head_commit"] == head
+              and f"holds commit {head}, not {head[:8]}" in completed.stdout,
               f"exit {completed.returncode}\n{completed.stdout}{completed.stderr}")
 
+        record.unlink()
         record.mkdir()
         (record / "keeps-the-directory-from-being-replaced").write_text("")
         completed, _, cell_calls = run_program(scratch, helpers)

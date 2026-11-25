@@ -1553,6 +1553,15 @@ def test_print_block():
           code == 0 and err == "" and out == (f"#follow_up_request pull request {NUMBER}\n"
                                                "1. fix-next: `scripts/thing.py:3`: Rename it (Codex finding "
                                                "0123456789ab).\n"), out + err)
+    code, out, err = print_block([merge_lane_review(1)],
+                                 [merge_lane_comment(10, 1, "**fix-next** Rename it (Codex finding 0123456789ab)."),
+                                  merge_lane_comment(11, 1, "**fix-next** Rename it (Codex finding ba9876543210).", line=7)])
+    check(f"{PRINT_BLOCK} prints both of one review's comments alike but for their Codex finding ids",
+          code == 0 and err == "" and out == (f"#follow_up_request pull request {NUMBER}\n"
+                                               "1. fix-next: `scripts/thing.py:3`: Rename it (Codex finding "
+                                               "0123456789ab).\n"
+                                               "2. fix-next: `scripts/thing.py:7`: Rename it (Codex finding "
+                                               "ba9876543210).\n"), out + err)
     code, out, err = print_block([merge_lane_review(1)], [merge_lane_comment(10, 1, "**fix-next** Rename it.")],
                                  read_back=lambda text: [])
     check(f"{PRINT_BLOCK} prints nothing and fails with exit 2 when its block does not read back as itself",
