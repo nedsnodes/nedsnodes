@@ -284,12 +284,26 @@ def finding_fact_line_count_cases(scratch):
                      "Reports success on failure: no\nShown by is missing."}
     result = run_program(scratch, review("APPROVE", comments=[whole, short]))
     check("the success line counts the Claude reviewer's comments that lack a fact line, reading labels "
-          "with or without list and code marks",
-          result.code == 0 and "; 1 of 2 finding(s) lack one of the lines Main has it:" in result.stdout,
-          result.detail)
+          "with or without list and code marks, and names each with the labels it lacks",
+          result.code == 0 and "; 1 of 2 finding(s) lack an answered fact line: "
+          "scripts/thing.py:3 lacks 'Shown by:'" in result.stdout, result.detail)
+    bare = {"path": "scripts/thing.py", "line": 4,
+            "body": FACT_LINES.replace("- `Shown by:` `judged from the code only`", "- `Shown by:`")}
+    other_marks = {"path": "scripts/thing.py", "line": 5, "body": (
+        "A finding.\n+ **Main has it**: no\n1. This pull request makes it happen: yes\n"
+        "2) `Reports success on failure`: no\n+ __Shown by:__ judged from the code only")}
+    result = run_program(scratch, review("APPROVE", comments=[bare, other_marks]))
+    check("a fact line whose label carries no answer counts as lacking, and a + or numbered list mark or a "
+          "colon outside the label's marks still counts as a fact line",
+          result.code == 0 and "; 1 of 2 finding(s) lack an answered fact line: "
+          "scripts/thing.py:4 lacks 'Shown by:'" in result.stdout, result.detail)
+    result = run_program(scratch, review("APPROVE", comments=[whole]))
+    check("a review whose findings all have their fact lines names none",
+          result.code == 0 and "; 0 of 1 finding(s) lack an answered fact line" in result.stdout
+          and "lacks" not in result.stdout, result.detail)
     result = run_program(scratch, review("APPROVE"))
     check("a review with no findings says nothing of fact lines", result.code == 0
-          and "lack one of the lines" not in result.stdout, result.detail)
+          and "fact line" not in result.stdout, result.detail)
     first, second = "With lines \u2014 scripts/thing.py:2-2", "Without lines \u2014 scripts/thing.py:3-3"
     indented = "\n".join("  " + line for line in FACT_LINES.splitlines())
     report = (f"<!-- provenance -->\n\n- [Codex priority P2 (P0 highest)] {first}\n  Body.\n{indented}\n\n"
@@ -302,7 +316,18 @@ def finding_fact_line_count_cases(scratch):
         arguments=MERGE_LANE_ARGUMENTS, codex_runs=((HEAD, 0, report),))
     check("merge-lane-2's verdict review counts the Codex findings that lack a fact line, each finding's text "
           "running to the next heading, and not merge-lane-2's own comments",
-          result.code == 0 and "; 1 of 2 Codex finding(s) lack one of the lines" in result.stdout, result.detail)
+          result.code == 0 and "; 1 of 2 Codex finding(s) lack an answered fact line: "
+          f"{codex_finding_id('P3', second)} lacks 'Main has it:', 'This pull request makes it happen:', "
+          "'Reports success on failure:'" in result.stdout, result.detail)
+    report = (f"<!-- provenance -->\n\n- [Codex priority P2 (P0 highest)] {first}\n  Body.\n{indented}\n\n"
+              f"- [Codex priority P2 (P0 highest)] {first}\n  The same heading, without lines.\n")
+    result = run_program(scratch, json.dumps({"verdict": "APPROVE", "body": "The review body.", "comments": [
+        finding(2, "fix-next", "merge-lane-2's own restatement, without fact lines.")],
+        "merge_lane_codex_review_finding_grades": grades[:1]}),
+        arguments=MERGE_LANE_ARGUMENTS, codex_runs=((HEAD, 0, report),))
+    check("two Codex entries with the same priority and heading are counted apart, though they share an id",
+          result.code == 0 and "; 1 of 2 Codex finding(s) lack an answered fact line" in result.stdout,
+          result.detail)
 
 
 def codex_finding_grade_cases(scratch):
