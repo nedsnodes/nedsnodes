@@ -64,9 +64,12 @@ mac-claude whose state is APPROVED or CHANGES_REQUESTED, which the merge gate
 takes as the verdict. A pull request dealt with its verdict already on its
 newest commit does not add to its agent-seat's count. Only the newest
 REVIEWS_READ_PER_PULL_REQUEST reviews by each of the two accounts on each
-pull request are read, so a pull request with more reviews than that by an
-account after that account's verdict on its newest commit, none carrying a
-verdict, is not handled: it counts as waiting. A missing, unreadable or
+pull request are read, so a verdict followed by REVIEWS_READ_PER_PULL_REQUEST
+or more reviews by its own account is not read; this is not handled. Such a
+pull request counts as waiting only when no verdict on its newest commit is
+read from either account that counts for it, so on a pull request
+ned-review-merge opened, a mac-claude verdict still read keeps it from
+counting. A missing, unreadable or
 malformed assignment file stops all assignment, so that no pull request it
 names is assigned again; so does
 a file that cannot be rewritten, until it can. The watcher writes the whole
