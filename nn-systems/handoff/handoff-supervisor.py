@@ -1404,9 +1404,10 @@ def conversation_tail_last_lines_display_file_write(
     except OSError as error:
         print(f"handoff-supervisor: the user is not shown the last session's last lines above "
               f"the successor's first message, because reading the conversation-tail "
-              f"{conversation_tail_path} failed: {error}. The successor launches as usual.\n"
-              f"When this repeats at later session-handoffs, fix the cause the error names; a "
-              f"single failure needs nothing, because no work is lost.", file=sys.stderr)
+              f"{conversation_tail_path} failed: {error}. The successor launches as usual. "
+              f"No work is lost.\n"
+              f"Fix the cause the error names, so that later session-handoffs show the lines.",
+              file=sys.stderr)
         return
     lines = text.removesuffix("\n").split("\n")[-CONVERSATION_TAIL_LAST_LINE_COUNT_SHOWN_ABOVE_FIRST_MESSAGE:]
     try:
@@ -1420,9 +1421,9 @@ def conversation_tail_last_lines_display_file_write(
               f"the successor's first message, because writing {display_path}, the file the "
               f"first-message display hook reads them from, failed: {error}. The successor "
               f"launches as usual, and the conversation-tail stays whole at "
-              f"{conversation_tail_path}.\n"
-              f"When this repeats at later session-handoffs, fix the cause the error names; a "
-              f"single failure needs nothing, because no work is lost.", file=sys.stderr)
+              f"{conversation_tail_path}, so no work is lost.\n"
+              f"Fix the cause the error names, so that later session-handoffs show the lines.",
+              file=sys.stderr)
 
 
 @dataclass
