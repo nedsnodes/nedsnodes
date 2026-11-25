@@ -7957,7 +7957,8 @@ def test_the_count_of_proposed_text_revisions_reads_every_sub_step_when_no_headi
     check("reading sub-step 3.1 and then 3.2, unchanged, counts no revision", counts == [0, 0], repr(counts))
 
 
-def withdrawn_versions_inserted(document_text, first_line_text, earlier_bodies, number="3", outcomes=None):
+def withdrawn_versions_inserted(document_text, first_line_text, earlier_bodies, number="3", outcomes=None,
+                                live_text="Live."):
     """Run the program's withdrawn-version insertion on the item whose heading line is first_line_text, once for each
     of earlier_bodies in turn, as reruns of the read step would, each outcome recording no keeping unless outcomes
     gives one; return the document's text after."""
@@ -7970,7 +7971,7 @@ def withdrawn_versions_inserted(document_text, first_line_text, earlier_bodies, 
         outcome = (outcomes or [{}] * len(earlier_bodies))[index]
         program.withdrawn_versions_inserted_below_live_version(
             walk_finder, parser, lines, first, number, [(f"key{index}", outcome, f"{first_line_text}\n\n{body}")],
-            f"item {number} of 9", "Live.", Path("a-walk.md"), program.EARLIER_TEXT_KEPT)
+            f"item {number} of 9", live_text, Path("a-walk.md"), program.EARLIER_TEXT_KEPT)
     return "\n".join(lines)
 
 
@@ -8180,6 +8181,52 @@ def test_an_earlier_text_whose_source_matches_a_kept_version_is_not_kept_again()
     after = withdrawn_versions_inserted(document, "## Item 3 of 9: three", ["\nSet `x` 1.\r\n"])
     check("an earlier text whose source equals the kept version's but for line endings and blank lines is not kept "
           "again", "Withdrawn version 2" not in after, after)
+
+
+def test_an_earlier_text_differing_from_the_live_text_only_inside_a_code_span_is_kept():
+    document = "# A walk\n\n## Item 3 of 9: three\n\nRun `a  b` now.\n\n## Item 4 of 9: four\n\nFour.\n"
+    after = withdrawn_versions_inserted(document, "## Item 3 of 9: three", ["Run `a b` now."],
+                                        live_text="## Item 3 of 9: three\n\nRun `a  b` now.")
+    check("an earlier text that differs from the live text only in the spacing inside a code span is kept as "
+          "version 1, not taken for the live text", "#### Withdrawn version 1 of item 3\n\nRun `a b` now." in after,
+          after)
+
+
+def test_an_earlier_text_differing_from_a_kept_version_only_in_spaces_ending_its_last_line_is_not_kept_again():
+    document = ("# A walk\n\n## Item 3 of 9: three\n\nLive.\n\n#### Withdrawn version 1 of item 3\n\n"
+                "Old text.  \n\n## Item 4 of 9: four\n\nFour.\n")
+    after = withdrawn_versions_inserted(document, "## Item 3 of 9: three", ["Old text."])
+    check("an earlier text that differs from a kept version only in the spaces ending its last line, which the read "
+          "step's copy strips and a rewrite's kept copy keeps, is not kept again", "Withdrawn version 2" not in after,
+          after)
+
+
+def test_the_count_of_proposed_text_revisions_passes_over_a_numbered_item_between_sub_steps():
+    document = ("# A walk\n\n## Item 3: the plan\n\n### Item 3.1 of 10: first\n\n#new \"First.\"\n\n"
+                "## Item 4 of 10: four\n\nFour.\n\n### Item 3.2 of 10: second\n\n#new \"Second.\"\n")
+    texts = [approval_walk_item_and_sub_steps_new_texts_of(f"numbered-between-{number}", document, number)
+             for number in ("3.1", "3.2")]
+    check("with item 4 of the same total between sub-steps 3.1 and 3.2 of an item with no counted heading, the same "
+          "`#new` texts are counted whichever sub-step waits", texts[0] == texts[1] == ["First.", "Second."],
+          repr(texts))
+
+
+def test_a_fresh_agent_rewrite_is_not_refused_for_a_long_segment_of_the_sub_step_it_replaces():
+    case, _, _ = revised_item_case_revised_three_times_across_a_split()
+    document = revised_item_document(case)
+    text = document.read_text()
+    # Inside 3.1's live version, above the Withdrawn headings that end it.
+    live_end = text.index("#### Withdrawn", text.index("### Item 3.1 of 9"))
+    document.write_text(text[:live_end] + "### Item 3.1: details\n\n" + "word " * 600 + "\n\n" + text[live_end:])
+    case.minutes.write_text(case.minutes.read_text() + "#next_to_present item 3 of 9\n")
+    rewrite = case.reads() / "item-3.1-fresh-agent-rewrite.md"
+    rewrite.write_text(f'The page lists each job once.\n\n#new "{REVISED_ITEM_TEXTS[4]}"\n\n'
+                       "#case_against weak: the page grows.\n\nThe alternative: leave it.\n\nRecommendation: do it.\n")
+    result = case.run(WAITING_ITEM_READ_STEP_NAME, FRESH_AGENT_REWRITE_FLAG, str(rewrite))
+    check("a short rewrite of sub-step 3.1, read from the whole item 3, is not refused for the length of a later "
+          "segment inside 3.1, `### Item 3.1: details`, which the rewrite replaces",
+          "over the limit" not in result.stderr + result.stdout and "each job once" in document.read_text(),
+          described(result))
 
 
 def main():
