@@ -285,7 +285,7 @@ STOPPED_CELL_WRITE_CHECK_LINE = (
     "The {cell} cell was stopped before it could check for files it wrote outside its "
     "report, and the grid could not check for it, because {reason}; that is "
     + cell_common.COLD_READ_CELL_STRAY_WRITE_CHECK_SKIPPED_IS_NOT_A_CLEAN_RESULT_PHRASE
-    + ". Before "
+    + ".\nBefore "
     "you do anything else, read `git status` against the edits you know are your own. "
     "Undo a change git status lists, by running `rm -r -- <path>` if it is untracked or "
     f"`git --literal-pathspecs {STRAY_WRITE_RESTORE_ARGUMENTS} <path>` if it is tracked, with <path> "
@@ -294,10 +294,12 @@ STOPPED_CELL_WRITE_CHECK_LINE = (
     "change you did not make, and whenever you are unsure.")
 
 # A stopped cell never reaches its own stray-write check, so the grid runs one for it
-# against the snapshot it took before launching the cells.
+# against the snapshot it took before launching the cells. What to do goes on the next
+# line, as after every other STRAY WRITE and WRITE CHECK DID NOT RUN line, because the
+# cold-read skill arms the Monitor tool to show the line after each.
 STOPPED_CELLS_STRAY_WRITE_LINE = (
     "STRAY WRITE: {path} changed after the cells launched. The grid checked for the stopped "
-    "cells {cells}, whose own check never runs, and cannot tell who changed it. {undo}")
+    "cells {cells}, whose own check never runs, and cannot tell who changed it.\n{undo}")
 STRAY_WRITE_UNDO_UNTRACKED = (
     "If its content shows a reviewer wrote it, delete it: `rm -r -- {absolute_path}`. "
     "Ask the user about it if you did not make it and are unsure.")
@@ -1013,7 +1015,8 @@ def stopped_cells_write_check_lines(stopped_report_paths: list, baseline,
                 error=getattr(error, "stderr", "").strip() or error)
     if reason is not None:
         return [f"WRITE CHECK DID NOT RUN: {path.name} — "
-                + STOPPED_CELL_WRITE_CHECK_LINE.format(cell=cell_name_of(path), reason=reason)
+                + STOPPED_CELL_WRITE_CHECK_LINE.format(cell=cell_name_of(path),
+                                                      reason=cell_common.join_error_text_lines_with_one_space(reason))
                 for path in stopped_report_paths]
     status_codes_by_path = {}
     for entry in entries:
@@ -1026,7 +1029,7 @@ def stopped_cells_write_check_lines(stopped_report_paths: list, baseline,
     touched = sorted({name for name, _ in baseline - current})
     cells = ", ".join(cell_name_of(path) for path in stopped_report_paths)
     # Without --literal-pathspecs, a restore of `chapter[1].md` also discards edits to `chapter1.md`.
-    repository = f"{shlex.quote(str(cell_common.REPO_ROOT))} --literal-pathspecs"
+    repository = f"{cell_common.shell_quoted_on_one_line(str(cell_common.REPO_ROOT))} --literal-pathspecs"
     lines = []
     for name in changed:
         if name in already_reported:
@@ -1039,17 +1042,17 @@ def stopped_cells_write_check_lines(stopped_report_paths: list, baseline,
                 else STRAY_WRITE_UNDO_UNTRACKED if name in untracked
                 else STRAY_WRITE_UNDO_TRACKED)
         codes = status_codes_by_path.get(name, set())
-        absolute_path = shlex.quote(str(cell_common.REPO_ROOT / name))
+        absolute_path = cell_common.shell_quoted_on_one_line(str(cell_common.REPO_ROOT / name))
         what_to_read = (STRAY_WRITE_ALREADY_CHANGED_UNMERGED_READ if codes & GIT_STATUS_UNMERGED_CODES
                         else STRAY_WRITE_ALREADY_CHANGED_UNTRACKED_READ if name in untracked
                         else STRAY_WRITE_ALREADY_CHANGED_STAGED_DELETION_READ if "??" in codes
                         else STRAY_WRITE_ALREADY_CHANGED_TRACKED_READ).format(
-            path=shlex.quote(name), repository=repository, absolute_path=absolute_path)
+            path=cell_common.shell_quoted_on_one_line(name), repository=repository, absolute_path=absolute_path)
         lines.append(STOPPED_CELLS_STRAY_WRITE_LINE.format(
-            path=name, cells=cells, undo=undo.format(
-                path=shlex.quote(name), repository=repository, what_to_read=what_to_read,
+            path=cell_common.path_shown_on_one_line(name), cells=cells, undo=undo.format(
+                path=cell_common.shell_quoted_on_one_line(name), repository=repository, what_to_read=what_to_read,
                 absolute_path=absolute_path,
-                touched=", ".join(shlex.quote(name) for name in touched))))
+                touched=", ".join(cell_common.shell_quoted_on_one_line(name) for name in touched))))
     return lines
 
 

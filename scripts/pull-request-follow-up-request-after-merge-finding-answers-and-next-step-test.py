@@ -269,6 +269,15 @@ def test_block_parsing():
             check(f"a request line {label} is refused, quoting the line and the form", False)
     check("a #follow_up_request inside a sentence is not a request line",
           program.parse_follow_up_request_blocks_from_message_text("Use the #follow_up_request line.\n") == [])
+    for name, character in (("U+0085", "\u0085"), ("U+2028", "\u2028"), ("U+2029", "\u2029")):
+        quoting = (f"#follow_up_request pull request {NUMBER}\n"
+                   f"1. fix-next: under LC_ALL=C bash prints `$'{character}'` as literal text.\n"
+                   "2. fix-in-maintenance: a second finding.\n")
+        [request] = program.parse_follow_up_request_blocks_from_message_text(quoting + "thanks\n")
+        check(f"a finding quoting {name} stays one whole finding, and every finding after it is counted",
+              request.text == quoting and request.finding_count == 2, repr(request.text))
+    [crlf] = program.parse_follow_up_request_blocks_from_message_text(BLOCK.replace("\n", "\r\n"))
+    check("a block whose lines end in CRLF is read as with LF", crlf.text == BLOCK, repr(crlf.text))
 
 
 def test_brief_text():
@@ -526,9 +535,10 @@ def test_open():
         check("open sets the branch's upstream", git(worktree, "rev-parse", "--abbrev-ref", "@{upstream}")
               == "origin/topic-one")
         calls = case.gh_calls()
-        check("open creates the pull request from the file",
+        check("open creates the pull request from the file, its description ending with the follow-up request line",
               len(calls) == 1 and calls[0] == "pr create --base main --head topic-one --title Keep code span padding "
-                              "--body Keeps the padding.\n\n#no_defect_fixed\n", str(calls))
+                              "--body Keeps the padding.\n\n#no_defect_fixed\n\n#follow_up_request pull request 1964\n",
+              str(calls))
         check("open records the link against the finding",
               case.answers() == {"started": {"1": "topic-one"}, "answers": {"1": {"link": LINK, "branch": "topic-one"}}}, str(case.answers()))
         check("open removes the title and description file once the pull request is recorded", not description.exists())
@@ -571,6 +581,20 @@ def test_open():
               and case.gh_calls()[-1].startswith("pr create --base main --head topic-two "), str(case.gh_calls()))
     finally:
         case.close()
+
+
+def test_build_pull_request_description_ending_with_follow_up_request_line():
+    holding = "Answers it.\n\n#follow_up_request pull request 1964 \n#no_defect_fixed\n"
+    check("a description already holding the follow-up request line on a line of its own is kept as written",
+          program.build_pull_request_description_ending_with_follow_up_request_line(holding, 1964) == holding)
+    naming_inline = "From merge-lane-2's `#follow_up_request pull request 1964`.\n\n#no_defect_fixed"
+    check("a description naming the request only inside a sentence gets the line at its end",
+          program.build_pull_request_description_ending_with_follow_up_request_line(naming_inline, 1964)
+          == naming_inline + "\n\n#follow_up_request pull request 1964\n")
+    other = "Answers it.\n\n#follow_up_request pull request 1963\n#no_defect_fixed\n"
+    check("a description holding another pull request's follow-up request line gets this one's at its end",
+          program.build_pull_request_description_ending_with_follow_up_request_line(other, 1964)
+          == other + "\n#follow_up_request pull request 1964\n")
 
 
 def test_new_shared_names_wait_for_the_dispatching_agent():
@@ -1546,6 +1570,42 @@ def test_print_block():
           "readable review approves",
           code == 2 and out == "" and err.startswith("FAILED: GitHub returned a review by ned-review-merge without a "
                                                      "state, so its verdict cannot be read: "), out + err)
+    code, out, err = print_block([merge_lane_review(2), merge_lane_review(1)],
+                                 [merge_lane_comment(10, 1, "**fix-next** Rename it (Codex finding 0123456789ab)."),
+                                  merge_lane_comment(11, 2, "**fix-next** Rename it (Codex finding ba9876543210).")])
+    check(f"{PRINT_BLOCK} prints a restated Codex finding once when only its Codex finding id differs",
+          code == 0 and err == "" and out == (f"#follow_up_request pull request {NUMBER}\n"
+                                               "1. fix-next: `scripts/thing.py:3`: Rename it (Codex finding "
+                                               "0123456789ab).\n"), out + err)
+    code, out, err = print_block([merge_lane_review(1)],
+                                 [merge_lane_comment(10, 1, "**fix-next** Rename it (Codex finding 0123456789ab)."),
+                                  merge_lane_comment(11, 1, "**fix-next** Rename it (Codex finding ba9876543210).", line=7)])
+    check(f"{PRINT_BLOCK} prints both of one review's comments alike but for their Codex finding ids",
+          code == 0 and err == "" and out == (f"#follow_up_request pull request {NUMBER}\n"
+                                               "1. fix-next: `scripts/thing.py:3`: Rename it (Codex finding "
+                                               "0123456789ab).\n"
+                                               "2. fix-next: `scripts/thing.py:7`: Rename it (Codex finding "
+                                               "ba9876543210).\n"), out + err)
+    code, out, err = print_block([merge_lane_review(2), merge_lane_review(1)],
+                                 [merge_lane_comment(10, 1, "**fix-next** Rename it (Codex finding 0123456789ab)."),
+                                  merge_lane_comment(11, 2, "**fix-next** Rename it (Codex finding ba9876543210)."),
+                                  merge_lane_comment(12, 2, "**fix-next** Rename it (Codex finding 5555aaaa5555).",
+                                                     line=7)])
+    check(f"{PRINT_BLOCK} matches an earlier finding to only one comment of a later review, printing a second "
+          "comment alike but for its Codex finding id",
+          code == 0 and err == "" and out == (f"#follow_up_request pull request {NUMBER}\n"
+                                               "1. fix-next: `scripts/thing.py:3`: Rename it (Codex finding "
+                                               "0123456789ab).\n"
+                                               "2. fix-next: `scripts/thing.py:7`: Rename it (Codex finding "
+                                               "5555aaaa5555).\n"), out + err)
+    code, out, err = print_block([merge_lane_review(1)],
+                                 [merge_lane_comment(10, 1, "**fix-next** Rename it (Codex finding 0123456789ab)."),
+                                  merge_lane_comment(11, 1, "**fix-next** Rename it Codex finding 0123456789ab.",
+                                                     line=7)])
+    check(f"{PRINT_BLOCK} prints once one review's two comments naming the same Codex finding id in two forms",
+          code == 0 and err == "" and out == (f"#follow_up_request pull request {NUMBER}\n"
+                                               "1. fix-next: `scripts/thing.py:3`: Rename it (Codex finding "
+                                               "0123456789ab).\n"), out + err)
     code, out, err = print_block([merge_lane_review(1)], [merge_lane_comment(10, 1, "**fix-next** Rename it.")],
                                  read_back=lambda text: [])
     check(f"{PRINT_BLOCK} prints nothing and fails with exit 2 when its block does not read back as itself",
@@ -1586,7 +1646,8 @@ def test_print_block_with_replaced_pull_requests():
 
 
 for test in (test_help, test_block_parsing, test_print_block, test_print_block_with_replaced_pull_requests, test_brief_text, test_no_saved_block, test_start,
-             test_open_refusals, test_open, test_new_shared_names_wait_for_the_dispatching_agent,
+             test_open_refusals, test_open, test_build_pull_request_description_ending_with_follow_up_request_line,
+             test_new_shared_names_wait_for_the_dispatching_agent,
              test_open_pushes_the_checked_out_recorded_branch_not_the_last,
              test_open_failures, test_open_passes_on_what_a_push_that_succeeds_prints,
              test_open_gh_pr_create_second_try_and_gh_pr_list,

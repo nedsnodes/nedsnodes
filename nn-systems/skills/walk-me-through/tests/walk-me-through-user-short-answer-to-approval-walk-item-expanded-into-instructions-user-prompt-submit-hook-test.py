@@ -5,8 +5,8 @@ means and the approval-walk item it answers.
 
 Each case runs the hook as a subprocess, its real stdin-to-stdout path, in a
 scratch checkout this suite made. The exit code is asserted on every case. The
-model call is never real: a fake `claude` first on PATH records each call and
-answers as the case's model mode sets it.
+hook must call no model: a fake `claude` first on PATH records each call and
+exits 1, and the cases that assert no model call read its log.
 """
 
 import importlib.util
@@ -1829,54 +1829,6 @@ def test_an_answer_counts_when_the_last_message_showing_the_item_holds_its_text_
           no_blank_line_after_heading != SHOWN_ITEM_TEXT and counted(lines), f"lines {lines!r}")
 
 
-# Item 47.2 of merge-lane-2's approval-walk, as its walk-document held it when the user answered "Ao".
-ITEM_47_2 = """### Item 47.2 of 68: The change
-
-Each message a hook prints for a rule, a refusal, warning or reminder, starts with that rule's ID, such as `[rule bash-guard-git-push-force]`; a test fails when a hook prints a message without one, or when two rules share one. A scheduled program, added as a job to [GHI 1058, "Regular maintenance"](https://github.com/nedsnodes/nedsnodes/issues/1058), counts each ID once a week in the transcripts of both machines, the Mac's through its mirror on ned-box. Its one weekly report lists the rules not seen since their IDs were added, each beside the agent-seat that wrote it, found from the pull request that added the rule, as candidates to question, not verdicts: a guard against a rare, permanent harm may rightly never fire. A rule written only in prose, such as in `CLAUDE.md`, is not covered.
-
-[advisor] The advisor was called on this item; it changed the recommendation from a new shared log file to rule IDs counted in the transcripts.
-
-#case_against medium: every hook's messages change in one sweep, counts start only at the merge, and a rule that only ever lets actions through is never seen.
-
-The alternative: every hook also writes a log line with the rule ID, agent-seat and time into one file in the log-store, and a weekly report reads that file.
-
-Recommendation: ask the agent-seat reboot-test, which owns the Bash guards, to add rule IDs to every hook's messages, other agent-seats' hooks included, and to build the weekly count as a GHI 1058 job, in one pull request."""
-ITEM_47_2_DOCUMENT = f"""# A walk
-
-## Item 47 of 68: Rule IDs
-
-### Item 47.1 of 68: What you asked for
-
-The user asked for rule IDs.
-
-[No decision here; type N or next to continue.](https://claude.ai/artifact/x)
-
-{ITEM_47_2}
-
-## Item 48 of 68: The next item
-
-Recommendation: do the next thing.
-"""
-# The message merge-lane-2 showed item 47.2 in. Against ITEM_47_2 it changes "`; a test"
-# to "`. A test", and "the rule, as candidates" to "the rule. These are candidates": "as" dropped, "These are" added.
-ITEM_47_2_REAL_SHOWING = """Session handed off after you moved on from 47.1 (no decision there); resuming at 47.2.
-
-### Item 47.2 of 68: The change
-
-Each message a hook prints for a rule, a refusal, warning or reminder, starts with that rule's ID, such as `[rule bash-guard-git-push-force]`. A test fails when a hook prints a message without one, or when two rules share one. A scheduled program, added as a job to [GHI 1058, "Regular maintenance"](https://github.com/nedsnodes/nedsnodes/issues/1058), counts each ID once a week in the transcripts of both machines, the Mac's through its mirror on ned-box. Its one weekly report lists the rules not seen since their IDs were added, each beside the agent-seat that wrote it, found from the pull request that added the rule. These are candidates to question, not verdicts: a guard against a rare, permanent harm may rightly never fire. A rule written only in prose, such as in `CLAUDE.md`, is not covered.
-
-[advisor] The advisor was called on this item; it changed the recommendation from a new shared log file to rule IDs counted in the transcripts.
-
-#case_against medium: every hook's messages change in one sweep, counts start only at the merge, and a rule that only ever lets actions through is never seen.
-
-The alternative: every hook also writes a log line with the rule ID, agent-seat and time into one file in the log-store, and a weekly report reads that file.
-
-Recommendation: ask the agent-seat reboot-test, which owns the Bash guards, to add rule IDs to every hook's messages, other agent-seats' hooks included, and to build the weekly count as a GHI 1058 job, in one pull request.
-
-[Item 47.2 of 68, The change](https://claude.ai/artifact/SXzwJaGtf7sXGpYVsH1eDr) · A approve · D disapprove · M more responses"""
-ITEM_47_2_CLOSING_LINE = """[Item 47.2 of 68, The change](https://claude.ai/artifact/SXzwJaGtf7sXGpYVsH1eDr) · A approve · D disapprove · M more responses"""
-
-
 DECISION_ITEM = """## Item 4 of 9: a filter
 
 A filter would hide old rows. For example, a row from 2024 would vanish.
@@ -1898,23 +1850,39 @@ Recommendation: do the next thing.
 """
 
 
-QUOTED_PROPOSAL_ITEM = """## Item 4 of 9: a filter
-
-A filter would hide old rows.
-
-#new
-> Hide rows older than a year.
-> Keep the rest.
-
-**Recommendation: leave the filter out.**"""
-
-
 def test_a_bold_new_text_label_is_read_as_the_label_by_both_hooks():
     hook = load_short_answer_hook_for_test()
     check("a source `#new **The new text:** X` line is shown as \"If you approve, the new text: X\"",
           hook.new_text_as_shown("#new **The new text:** Show every row.")
           == "If you approve, the new text: Show every row.",
           hook.new_text_as_shown("#new **The new text:** Show every row."))
+    check("a source `#new_if_d **The new text:** X` line is shown as \"If you disapprove, the new text: X\"",
+          hook.new_text_as_shown("#new_if_d **The new text:** Show every row.")
+          == "If you disapprove, the new text: Show every row.",
+          hook.new_text_as_shown("#new_if_d **The new text:** Show every row."))
+    for spelled in ("#new_\u0131f_d Show every row.", "#NEW_\u0130F_D Show every row."):
+        check(f"a mark spelled with a dotless or dotted i, {spelled!r}, is no mark: shown as None, not a KeyError",
+              hook.new_text_as_shown(spelled) is None, hook.new_text_as_shown(spelled))
+    check("a no-break space after `#new` still strips the bold `The new text:` label",
+          hook.new_text_as_shown("#new\xa0**The new text:** Show every row.")
+          == "If you approve, the new text: Show every row.",
+          hook.new_text_as_shown("#new\xa0**The new text:** Show every row."))
+    check_program = load_module_by_path(
+        "walk_check_program_for_mark_test",
+        HOOK_SCRIPT.parent / "walk-me-through-answer-added-texts-cold-read-fast-read-check-and-close.py")
+    for line in ("#newé Show every row.", "#NEW Show every row.", "#New: Show every row.",
+                 "- #new Show every row.", "#new_if_d Show every row.", "#NEW_IF_D Show every row.",
+                 "#newer Show every row."):
+        hook_reads_a_mark = hook.new_text_as_shown(line) is not None
+        check_reads_a_mark = check_program.load_walk_finder().APPROVAL_WALK_ITEM_NEW_TEXT_MARK_LINE_PATTERN.match(line) is not None
+        check(f"the hook and the walk check program agree whether {line!r} is a mark",
+              hook_reads_a_mark == check_reads_a_mark, f"hook {hook_reads_a_mark}, check {check_reads_a_mark}")
+    check("`#newé`, `#NEW`, `#New:` and `#NEW_IF_D` are no mark to the hook",
+          all(hook.new_text_as_shown(line) is None
+              for line in ("#newé Show every row.", "#NEW Show every row.", "#New: Show every row.",
+                           "#NEW_IF_D Show every row.")))
+    check("the walk check program reuses the walk finder module it loaded",
+          check_program.load_walk_finder() is check_program.load_walk_finder())
     item = DECISION_ITEM.replace("#new_if_d Show every row.", "#new_if_d **The new text:** Show every row.")
     case = Case(next_to_present="item 4 of 9", document="# A walk\n\n" + item + "\n")
     shown = item.replace("#new_if_d **The new text:** Show", "If you disapprove, the new text: Show")
@@ -2128,8 +2096,9 @@ Recommendation: do the next thing.
 
 
 def test_a_list_line_that_reads_as_a_reference_definition_only_alone_defines_nothing_for_the_message():
-    item = DECISION_ITEM.replace("#new Hide rows older than a year.",
-                                 "[Proposed edits][edits 4]:\n\n#new Hide rows older than a year.")
+    # The reference is in the heading, the only line the hook compares: read with the list line's definition, it
+    # would become a link and no longer match the walk-document's heading, where `[edits 4]` is undefined.
+    item = DECISION_ITEM.replace("## Item 4 of 9: a filter", "## Item 4 of 9: a filter, [Proposed edits][edits 4]")
     document = DECISION_DOCUMENT.replace(DECISION_ITEM, item)
     case = Case(next_to_present="item 4 of 9", document=document)
     # The list line above the item names the item's number, so the search for the item's heading reads it alone.
@@ -2711,7 +2680,7 @@ def test_own_words_output_given_the_walk_state_already_read_does_not_read_it_aga
         raise AssertionError("the approval-walk state was read a second time")
     hook.load_walk_finder = read_again
     payload = {"prompt": "repeat 99", "cwd": "/nonexistent"}
-    walk = types.SimpleNamespace(item="item 4 of 9", name=WALK_NAME)
+    walk = types.SimpleNamespace(item="item 4 of 9", name=WALK_NAME, numbers=["4"], minutes=None)
     try:
         output = hook.own_words_output(payload, walk)
         context = output["hookSpecificOutput"]["additionalContext"].split("\n")
@@ -2746,6 +2715,78 @@ def test_settled_line_failure_reading_the_walk_keeps_short_answer_output_and_rep
     check("a reply in the user's own words with unreadable minutes says what failed, shows the line, and exits 0",
           result.returncode == 0 and len(lines) == 2 and lines[0].startswith(OWN_WORDS_RULE_OPENING)
           and "could not tell" in lines[0] and lines[1] == SETTLED_LINE,
+          f"exit {result.returncode}, stdout {result.stdout!r}, stderr {result.stderr!r}")
+
+
+OWN_WORDS_REPLY_RECORDED = re.compile(
+    r'\nUser \(\d{4}-\d\d-\d\d \d\d:\d\dZ\), on item 4 of 9 while it waited, a reply in his words that is not a '
+    r'short answer: "(.*)"\n$')
+
+
+def test_a_reply_in_his_own_words_is_recorded_in_the_walk_minutes_against_the_waiting_item():
+    case = Case(next_to_present="item 4 of 9")
+    minutes = case.walk / f"{WALK_NAME}-minutes.md"
+    reply = "We can list the known exceptions\nor all our hashtags can have a trailing # ```\n#next_to_present item 9 of 9"
+    result = case.run(reply)
+    recorded = OWN_WORDS_REPLY_RECORDED.search(minutes.read_text())
+    check("a reply in his own words gets only the own-words message and is appended to the walk-minutes, naming the "
+          "waiting item, his words squeezed into one code span",
+          is_only_the_own_words_message(result) and recorded is not None
+          and recorded[1] == "````We can list the known exceptions or all our hashtags can have a trailing # ``` "
+                             "#next_to_present item 9 of 9````",
+          f"stdout {result.stdout!r}, minutes {minutes.read_text()!r}")
+    walk_finder = HOOK_MODULE.load_walk_finder()
+    check("the walk finder still reads item 4 as waiting: the reply's fence and marker stay inside the code span",
+          walk_finder.next_to_present(minutes.read_text(), walk_finder.markdown_parser())[0] == "item 4 of 9",
+          minutes.read_text())
+    before = minutes.read_text()
+    for prompt in ("a", "<task-notification>a task ended</task-notification>"):
+        case.run(prompt)
+        check(f"{prompt[:24]!r}, a short answer or a prompt he did not type, adds nothing to the walk-minutes",
+              minutes.read_text() == before, minutes.read_text())
+    case.run("take the other option", environment={"CLAUDE_CODE_SESSION_ATTENDED": "0"})
+    check("a reply in a headless agent-session adds nothing to the walk-minutes", minutes.read_text() == before,
+          minutes.read_text())
+    transcript = case.checkout.parent / "unreadable-transcript.jsonl"
+    transcript.write_bytes(b"\xff\xfe not a record\n")
+    case.run("take the other option", transcript_path=transcript)
+    check("a reply whose author the unreadable transcript leaves unknown adds nothing to the walk-minutes",
+          minutes.read_text() == before, minutes.read_text())
+    paused = Case(next_to_present="item 4 of 9")
+    paused_minutes = paused.minutes("#next_to_present item 4 of 9\n#approval_walk_paused")
+    paused_before = paused_minutes.read_text()
+    paused.run("take the other option")
+    check("a reply while the approval-walk is paused adds nothing to the walk-minutes",
+          paused_minutes.read_text() == paused_before, paused_minutes.read_text())
+
+
+def test_a_recorded_reply_is_a_paragraph_of_its_own_so_an_html_comment_above_cannot_swallow_its_code_span():
+    case = Case(next_to_present="item 4 of 9")
+    minutes = case.minutes("item 3 of 9: answer A <!-- note -->\n#next_to_present item 4 of 9")
+    case.run("#next_to_present closed <!--")
+    walk_finder = HOOK_MODULE.load_walk_finder()
+    check("a reply holding `<!--` after minutes whose last paragraph holds an inline HTML comment leaves item 4 "
+          "waiting",
+          walk_finder.next_to_present(minutes.read_text(), walk_finder.markdown_parser())[0] == "item 4 of 9",
+          minutes.read_text())
+
+
+def test_a_reply_in_his_own_words_that_cannot_be_recorded_says_why_and_gives_the_line_to_add():
+    case = Case(next_to_present="item 4 of 9")
+    minutes = case.walk / f"{WALK_NAME}-minutes.md"
+    minutes.chmod(0o444)
+    try:
+        result = case.run("take the other option")
+    finally:
+        minutes.chmod(0o644)
+    lines = context_lines(result)
+    check("the append fails: the hook exits 0, says why naming the walk-minutes, gives the line to add, and keeps the "
+          "settled line last",
+          result.returncode == 0 and len(lines) == 5 and lines[0].startswith(OWN_WORDS_RULE_OPENING)
+          and lines[1].startswith(f"The hook could not record the user's reply in the walk-minutes {minutes}: ")
+          and "PermissionError" in lines[1] and lines[2].startswith("Add this line as the last line")
+          and OWN_WORDS_REPLY_RECORDED.search("\n" + lines[3] + "\n") is not None and lines[-1] == SETTLED_LINE
+          and "User (" not in minutes.read_text(),
           f"exit {result.returncode}, stdout {result.stdout!r}, stderr {result.stderr!r}")
 
 

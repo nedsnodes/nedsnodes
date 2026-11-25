@@ -63,7 +63,9 @@ by gh not starting, is tried once more, and a second try that passes is printed 
 because a pull request for the branch is already open, as after a first try that opened it but failed, that pull
 request's link is recorded; when gh pr create exits 0 printing no link, the link gh pr list --head <branch> prints is
 recorded. A push that fails is not tried again. What a push that succeeds prints on stderr, such as the pre-push
-hook saying it let the push through without one of its checks, is printed on stderr.
+hook saying it let the push through without one of its checks, is printed on stderr. The description gh pr create
+gets ends with the line "#follow_up_request pull request <number>", unless a line of it already is that line, so
+scripts/merge-lane-pull-request-reviewer-brief-compose-with-facts.py gives the reviewer this follow-up request's block.
 
 record-finding-leave-out-reason: record the reason against the finding; refuse a finding that does
 not exist or already has an answer other than waiting for the user's decision, and an empty reason.
@@ -96,7 +98,7 @@ review of the pull request that merge-lane-2's GitHub account posted, with its i
 the comments the posting program, POSTING_PROGRAM_FILE_NAME, moved into its body; read each comment's category by the
 mark that program opened it with; then print the request line and one numbered line for each fix-next,
 fix-in-maintenance or file-for-later finding, "<n>. <category>: `<path>:<line>`: <text>", its text joined onto one
-line; a nit is a fix-in-maintenance finding, so it is printed as one, whether or not a fix-round fixed it. A finding a later review restates, with the same category, path and text, is printed once. Before printing,
+line; a nit is a fix-in-maintenance finding, so it is printed as one, whether or not a fix-round fixed it. A finding a later review restates, with the same category, path and text, is printed once; the text is compared without its "(Codex finding <id>)" mark, since a Codex finding's id changes when its line range does. Before printing,
 the block is parsed back with parse_follow_up_request_blocks_from_message_text(), as the hook parses it, and must
 read back as the same lines. With no such finding it prints nothing. It refuses when merge-lane-2 has no approving
 review of the pull request, and when one of merge-lane-2's comments opens with no mark, as a review posted before
@@ -167,6 +169,7 @@ FOLLOW_UP_REQUEST_BLOCK_SAVE_HOOK_PATH = ("nn-systems/general-tools/pull-request
 MERGE_LANE_2_MERGED_MESSAGE_TO_AUTHOR = "the SendMessage message in which merge-lane-2 tells the pull request's author that the pull request merged"
 FOLLOW_UP_REQUEST_LINE_PATTERN = re.compile(r"^#follow_up_request pull request (\d+)[ \t]*$")
 FINDING_LINE_PATTERN = re.compile(r"^(\d+)\.\s+(\S.*)$")
+ASCII_LINE_END_PATTERN = re.compile(r"\r\n|\r|\n")
 PULL_REQUEST_LINK_PATTERN = re.compile(r"https://github\.com/[^/\s]+/[^/\s]+/pull/\d+")
 PULL_REQUEST_FOLLOW_UP_REQUESTS_DIRECTORY_NAME = "pull-request-follow-up-requests"
 SAVED_FINDINGS_FILE_NAME_FORMAT = "pull-request-{number}-non-blocking-findings.md"
@@ -288,7 +291,8 @@ def parse_follow_up_request_blocks_from_message_text(text):
     on, or that has none; and, quoting the line, for a line that starts with #follow_up_request but is
     not the request line, since merge-lane-2 writes the block by hand and a variant would otherwise be
     skipped without a word."""
-    lines = text.splitlines()
+    # Not str.splitlines(): a finding may quote U+0085, U+2028 or U+2029, which it would treat as line ends.
+    lines = ASCII_LINE_END_PATTERN.split(text)
     requests = []
     for index, line in enumerate(lines):
         request = FOLLOW_UP_REQUEST_LINE_PATTERN.match(line)
@@ -543,6 +547,15 @@ def read_title_and_description(path):
     return title.strip(), description
 
 
+def build_pull_request_description_ending_with_follow_up_request_line(description, number):
+    """The description, with the line "#follow_up_request pull request <number>" added at its end unless a line of it
+    already is that line."""
+    request_line = f"{FOLLOW_UP_REQUEST_LINE_START} pull request {number}"
+    if any(line.rstrip() == request_line for line in description.splitlines()):
+        return description
+    return description.rstrip("\n") + f"\n\n{request_line}\n"
+
+
 def unanswered_started_findings(record, branch=None):
     """The findings start-topic-branch recorded, for branch or for any, that have no answer, lowest first."""
     answers = record.get("answers", {})
@@ -617,7 +630,8 @@ def open_pull_request(number, findings, confirm_dispatching_agent_checked_new_sh
     if push_warnings.strip():
         print(f"git push -u origin {branch} succeeded, and printed:\n{push_warnings.rstrip()}", file=sys.stderr)
     output, opened = gh_pr_create_tried_twice(
-        ["pr", "create", "--base", "main", "--head", branch, "--title", title, "--body", description])
+        ["pr", "create", "--base", "main", "--head", branch, "--title", title,
+         "--body", build_pull_request_description_ending_with_follow_up_request_line(description, number)])
     links = PULL_REQUEST_LINK_PATTERN.findall(output)
     if not links:
         links = [link_gh_pr_list_finds(number, branch, output)]
@@ -941,7 +955,8 @@ def gh_api_pages(path):
 
 
 def merge_lane_2_reviews_and_their_comments(number, posting, account):
-    """merge-lane-2's reviews of the pull request, and their comments, each marked with the pull request's number."""
+    """merge-lane-2's reviews of the pull request, and their comments, each marked with the pull request's number
+    and its review's id."""
     try:
         reviews = sorted((review for review in gh_api_pages(f"pulls/{number}/reviews")
                           if review["user"]["login"] == account), key=lambda review: review["id"])
@@ -952,9 +967,10 @@ def merge_lane_2_reviews_and_their_comments(number, posting, account):
         comments = []
         for review in reviews:
             comments += [{"path": comment["path"], "line": comment.get("line") or comment.get("original_line"),
-                          "body": comment["body"]}
+                          "body": comment["body"], "review": review["id"]}
                          for comment in inline if comment["pull_request_review_id"] == review["id"]]
-            comments += posting.outside_the_diff_comments_read_back_from_review_body(review.get("body") or "")
+            comments += [{**comment, "review": review["id"]}
+                         for comment in posting.outside_the_diff_comments_read_back_from_review_body(review.get("body") or "")]
     except (KeyError, TypeError, AttributeError) as error:
         raise StepFailed(f"GitHub's reviews of pull request {number} were not in the expected shape: "
                          f"{type(error).__name__}: {error}") from None
@@ -1020,13 +1036,26 @@ def print_follow_up_request_block_from_merge_lane_2_reviews(number):
                 "If merge-lane-2's reviews hold no such finding, write no block.")
         category, text, _nit = marked
         finding = (category, comment["path"], " ".join(text.split()))
-        if category != posting.BLOCKING_CATEGORY and finding not in [found[:3] for found in findings]:
-            findings.append((*finding, comment["line"]))
+        review = (comment["pull_request"], comment["review"])
+        compared = (category, comment["path"], " ".join(posting.CODEX_FINDING_ID_MARK_IN_REVIEW_COMMENT_PATTERN.sub("", text).split()))
+        codex_finding_ids = frozenset(posting.CODEX_FINDING_ID_MARK_IN_REVIEW_COMMENT_PATTERN.findall(text))
+        # A later review restates an earlier finding with a new Codex finding id when its line range moved,
+        # but restates each earlier finding at most once: within one review, two comments alike but for
+        # their Codex finding ids are two findings.
+        restated = next((found for found in findings if found["finding"] == finding or (
+            found["compared"] == compared and (found["codex_finding_ids"] == codex_finding_ids or (
+                found["review"] != review and review not in found["restated_in_reviews"])))), None)
+        if restated is not None:
+            restated["restated_in_reviews"].add(review)
+        elif category != posting.BLOCKING_CATEGORY:
+            findings.append({"finding": finding, "line": comment["line"], "compared": compared,
+                             "codex_finding_ids": codex_finding_ids, "review": review,
+                             "restated_in_reviews": set()})
     if not findings:
         return
     lines = [f"{FOLLOW_UP_REQUEST_LINE_START} pull request {number}"] + [
-        f"{index}. {category}: `{path}:{line}`: {text}"
-        for index, (category, path, text, line) in enumerate(findings, 1)]
+        f"{index}. {found['finding'][0]}: `{found['finding'][1]}:{found['line']}`: {found['finding'][2]}"
+        for index, found in enumerate(findings, 1)]
     block = "\n".join(lines) + "\n"
     try:
         read_back = [request.lines for request in parse_follow_up_request_blocks_from_message_text(block)]

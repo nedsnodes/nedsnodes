@@ -50,6 +50,14 @@ with open(os.environ["MERGE_LANE_CODEX_TEST_CELL_LOG"], "a") as log:
     log.write(json.dumps({"argv": argv, "git_dir": os.environ.get("GIT_DIR"),
                           "gh_token": os.environ.get("GH_TOKEN")}) + "\n")
 open(argv[argv.index("--output") + 1], "w").write("the report\n")
+if os.environ.get("MERGE_LANE_CODEX_TEST_CELL_MOVES_HEAD"):
+    import subprocess
+    subprocess.run(["git", "-C", argv[argv.index("--repo") + 1], "-c", "user.name=t", "-c",
+                    "user.email=t@example.invalid", "commit", "-q", "--allow-empty", "-m", "moved"],
+                   check=True, env={k: v for k, v in os.environ.items() if k != "GIT_DIR"})
+if os.environ.get("MERGE_LANE_CODEX_TEST_CELL_BREAKS_HEAD"):
+    repo = argv[argv.index("--repo") + 1]
+    os.rename(os.path.join(repo, ".git"), os.path.join(repo, ".git-away"))
 print("cell stdout")
 print("cell stderr", file=sys.stderr)
 sys.exit(int(os.environ.get("MERGE_LANE_CODEX_TEST_CELL_EXIT", "0")))
@@ -74,13 +82,13 @@ def read_log(path):
     return [json.loads(line) for line in path.read_text().splitlines()] if path.exists() else []
 
 
-def run_program(scratch, helpers, extra_environment=None, home=None):
+def run_program(scratch, helpers, extra_environment=None, home=None, extra_arguments=()):
     for log in ("gh.log", "cell.log"):
         (scratch / log).unlink(missing_ok=True)
     completed = subprocess.run(
         [sys.executable, str(PROGRAM), "7", BASE, "--merge-lane-worktrees-and-outputs-directory", str(helpers),
          "--merge-lane-review-worktrees-directory", str(review_worktrees_directory(helpers)),
-         "--review-tools-worktree-at-main", str(scratch / "main-checkout")],
+         "--review-tools-worktree-at-main", str(scratch / "main-checkout"), *extra_arguments],
         capture_output=True, text=True,
         env={**os.environ,
              "HOME": str(home or scratch / "home"),
@@ -167,14 +175,53 @@ def main():
         check("a run that stopped before the review records exit 2, replacing the earlier record",
               json.loads(record.read_text())["exit_code"] == 2, record.read_text())
 
+        earlier_record = record.read_text()
         head_worktree.rename(head_worktree.with_name("pr7-head-away"))
         completed, gh_calls, cell_calls = run_program(scratch, helpers)
         head_worktree.with_name("pr7-head-away").rename(head_worktree)
-        check("an unreadable head commit exits 2 before the review runs, and leaves no earlier record behind",
-              completed.returncode == 2 and gh_calls == [] and cell_calls == [] and not record.exists()
+        check("an unreadable head commit exits 2 before the review runs, and leaves the earlier record as it was",
+              completed.returncode == 2 and gh_calls == [] and cell_calls == []
+              and record.read_text() == earlier_record
               and "could not read the head commit" in completed.stdout,
               f"exit {completed.returncode}\n{completed.stdout}{completed.stderr}")
 
+        completed, _, cell_calls = run_program(scratch, helpers, extra_arguments=("--expected-head-commit", head))
+        check("a run given the commit pr<n>-head holds as --expected-head-commit reviews it",
+              completed.returncode == 0 and len(cell_calls) == 1
+              and json.loads(record.read_text())["head_commit"] == head,
+              f"exit {completed.returncode}\n{completed.stdout}{completed.stderr}")
+        earlier_record = record.read_text()
+        completed, gh_calls, cell_calls = run_program(scratch, helpers,
+                                                      extra_arguments=("--expected-head-commit", head[:8]))
+        check("a run whose --expected-head-commit is not the full commit pr<n>-head holds exits 2 before the "
+              "review, naming both commits, and leaves the earlier record for that commit as it was",
+              completed.returncode == 2 and gh_calls == [] and cell_calls == []
+              and record.read_text() == earlier_record and json.loads(earlier_record)["head_commit"] == head
+              and f"holds commit {head}, not {head[:8]}" in completed.stdout,
+              f"exit {completed.returncode}\n{completed.stdout}{completed.stderr}")
+
+        completed, _, cell_calls = run_program(scratch, helpers, {"MERGE_LANE_CODEX_TEST_CELL_MOVES_HEAD": "1"},
+                                               extra_arguments=("--expected-head-commit", head))
+        moved_to = subprocess.run(["git", "-C", str(head_worktree), "rev-parse", "HEAD"], check=True,
+                                  capture_output=True, text=True).stdout.strip()
+        check("a run whose pr<n>-head moves during the review exits 2, records exit code 2 with the commit it "
+              "started on, and names both commits",
+              completed.returncode == 2 and len(cell_calls) == 1 and moved_to != head
+              and json.loads(record.read_text())["exit_code"] == 2
+              and json.loads(record.read_text())["head_commit"] == head
+              and f"held commit {head} when the review started and now holds commit {moved_to}" in completed.stdout,
+              f"exit {completed.returncode}\n{completed.stdout}{completed.stderr}")
+        head = moved_to
+
+        completed, _, cell_calls = run_program(scratch, helpers, {"MERGE_LANE_CODEX_TEST_CELL_BREAKS_HEAD": "1"})
+        (head_worktree / ".git-away").rename(head_worktree / ".git")
+        check("a run whose pr<n>-head commit cannot be read after the review exits 2 and records exit code 2",
+              completed.returncode == 2 and len(cell_calls) == 1
+              and json.loads(record.read_text())["exit_code"] == 2
+              and "has a head commit that could not be read" in completed.stdout,
+              f"exit {completed.returncode}\n{completed.stdout}{completed.stderr}")
+
+        record.unlink()
         record.mkdir()
         (record / "keeps-the-directory-from-being-replaced").write_text("")
         completed, _, cell_calls = run_program(scratch, helpers)

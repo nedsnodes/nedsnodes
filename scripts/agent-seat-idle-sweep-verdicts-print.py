@@ -388,7 +388,7 @@ class TranscriptFacts:
         self.turn_ending_messages = []   # (record, time, time of the prompt that began its turn)
         self.task_tool_calls = []        # (time, name, input, task id), only calls whose result succeeded
         self.tool_calls = []             # (time, name, input, tool use id), every tool call
-        self.failed_tool_use_ids = set() # each tool use whose result carries is_error
+        self.failed_tool_use_ids = set() # each tool use whose result carries is_error, or a task call whose result is not a success text
         self.assistant_texts = []        # (time, text), every assistant record with text
         self.launch_times = {}           # subagent or background task id -> time
         self.last_task_notification = {} # task id -> (time, whether it is interim)
@@ -591,6 +591,8 @@ def read_main_transcript(path):
     facts.task_tool_calls = [(*call, task_id_by_succeeded_tool_use_id[tool_use_id])
                              for tool_use_id, call in task_tool_calls
                              if tool_use_id in task_id_by_succeeded_tool_use_id]
+    facts.failed_tool_use_ids |= {tool_use_id for tool_use_id, _ in task_tool_calls
+                                  if tool_use_id not in task_id_by_succeeded_tool_use_id}
     return facts
 
 
@@ -623,7 +625,8 @@ def failed_tool_use_ids(record):
 
 def judged_tool_call(moment, name, tool_input, failed):
     """A tool call as a rule 2 judge is handed it. "failed" is there only when the call's result
-    carried is_error, since a failed call does not do the action it was for."""
+    carried is_error, or the call is a task call whose result is not a success text, since a
+    failed call does not do the action it was for."""
     call = {"time": iso(moment), "name": name,
             "input": json.dumps(tool_input, ensure_ascii=False)[:fields.TOOL_CALL_INPUT_CHARACTERS_KEPT]}
     if failed:
@@ -823,9 +826,10 @@ def last_message_of(facts):
 def transcript_tool_calls_and_assistant_texts_since(path, since):
     """Every tool call, its input cut as the judge's other tool calls are, and every assistant text
     in the transcript written after since. Raises ReadFailure as transcript_records does."""
-    tool_calls, texts, failed = [], [], set()
+    tool_calls, texts, failed, succeeded_task_calls = [], [], set(), set()
     for record in transcript_records(path):
         failed |= failed_tool_use_ids(record)
+        succeeded_task_calls.update(succeeded_task_tool_result_task_ids(record))
         moment = parse_time(record.get("timestamp"))
         if moment is None or moment <= since:
             continue
@@ -833,7 +837,8 @@ def transcript_tool_calls_and_assistant_texts_since(path, since):
             tool_calls.append((moment, block.get("name"), block.get("input") or {}, block.get("id")))
         if record.get("type") == "assistant" and message_text(record).strip():
             texts.append({"time": iso(moment), "text": message_text(record)})
-    return {"tool_calls": [judged_tool_call(moment, name, tool_input, tool_use_id in failed)
+    return {"tool_calls": [judged_tool_call(moment, name, tool_input, tool_use_id in failed or (
+                               name in TASK_TOOL_NAMES and tool_use_id not in succeeded_task_calls))
                            for moment, name, tool_input, tool_use_id in tool_calls],
             "assistant_texts": texts}
 

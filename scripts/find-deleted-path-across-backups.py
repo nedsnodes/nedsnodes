@@ -270,10 +270,12 @@ Each FOUND surface says where this run copied what it found, under
 ~/Downloads/nedschorus-found-copies/<time of the search>/, or prints the command
 that copies it there when the copy needs a mount. Once you have chosen a copy,
 `--restore <copy>` copies it to <path>, creating any missing parent directories
-and replacing any file already there. A relative <path> is placed under the
-top level of the repository --repo is in, as the search reads it, or under
---repo itself when that is in no repository; so give the file's repo-relative
-or absolute path, not a fragment of it.
+and replacing any file already there. Search and --restore read <path> the same
+way: a path written from the current directory ("./x.md", "../x.md") is taken
+from the current directory; any other relative <path> is repo-relative, placed
+under the top level of the repository --repo is in, or under --repo itself
+when that is in no repository; so give the file's repo-relative or absolute
+path, not a fragment of it.
 
 <path> may be repo-relative ("docs/issues/46-x.md"), absolute, or any trailing
 fragment of a path ("dispositions.md"). A fragment matches whole trailing
@@ -708,15 +710,16 @@ class CitedQueryCannotBePlaced(Exception):
     """A cited path cannot be resolved from the available host and directory information."""
 
 
-def _plain_path_from_cited_query(query, cwd=None):
-    """Resolve host, home and dot-relative forms, or raise CitedQueryCannotBePlaced."""
+def _plain_path_from_cited_query(query, cwd=None, fragment_allowed=True):
+    """Resolve host, home and dot-relative forms, or raise CitedQueryCannotBePlaced. An unknown host's bare
+    name is returned as a search fragment, or refused when fragment_allowed is False."""
     host, path = locator.split_host(query)
     if host is not None and not path.startswith("/"):
         home = locator.KNOWN_HOST_HOMES.get(host.split(".")[0])
         inside = path[2:] if path.startswith("~/") else ("" if path == "~" else path)
         if home:
             return os.path.normpath(home + ("/" + inside if inside else ""))
-        if "/" in inside.rstrip("/"):
+        if "/" in inside.rstrip("/") or not fragment_allowed:
             raise CitedQueryCannotBePlaced(
                 "Give the file's absolute path on %s: this program does not know that host's home directory." % host)
         return inside
@@ -1507,8 +1510,10 @@ def _git_top_level(repo, runner):
 
     Raises _GitCommandFailed for any other git failure, such as a bare repository or a corrupt one."""
     code, out, stderr = runner(["git", "-C", repo, "rev-parse", "--show-toplevel"])
-    if code == 0 and out.strip():
-        return out.strip()
+    # Only git's newline goes: a directory name may itself end in whitespace.
+    top_level = out[:-1] if out.endswith("\n") else out
+    if code == 0 and top_level:
+        return top_level
     if code != 0 and git_output.git_stderr_says_outside_a_repository(stderr):
         return None
     raise _GitCommandFailed("git -C %s rev-parse --show-toplevel exited %s — %s"
@@ -2550,8 +2555,9 @@ def main(argv=None, runner=run_command):
                         help="search nothing, and copy the file COPY, such as a copy whose path a search's "
                              "'copied to' line printed, to <path> on this machine, creating any missing parent "
                              "directories and replacing any file already there. A relative COPY is read from the "
-                             "current directory, and a relative <path> is placed under the top level of the "
-                             "repository --repo is in, or under --repo when that is in no repository, so give "
+                             "current directory. A <path> written from the current directory, with ./ or .., is placed from "
+                             "there, as a search reads it; any other relative <path> is placed under the top level "
+                             "of the repository --repo is in, or under --repo when that is in no repository, so give "
                              "the file's repo-relative or absolute path, not a fragment of it; a git blob id is "
                              "refused as a usage error. Exits 0 when the copy was made, and 1 when it was not, "
                              "printing what failed on stderr")
@@ -2566,9 +2572,12 @@ def main(argv=None, runner=run_command):
         if is_git_blob_id(args.path):
             parser.error("--restore needs the path the file was deleted from, not a git blob id")
         try:
-            named = _plain_path_from_cited_query(args.path)
+            named = _plain_path_from_cited_query(args.path, fragment_allowed=False)
         except CitedQueryCannotBePlaced as refusal:
             parser.error(str(refusal))
+        if named == "~" or named.startswith("~/"):
+            parser.error("--restore could not expand %r to a home directory, because HOME is unset and this user "
+                         "has no passwd entry; give the file's absolute path instead" % args.path)
         destination = named
         if not os.path.isabs(named):
             try:
@@ -2576,9 +2585,11 @@ def main(argv=None, runner=run_command):
             except _GitCommandFailed as failure:
                 print("%s: could NOT restore %s to %s — the path is relative, and git could not give the top "
                       "level of the repository it belongs under: %s"
-                      % (THIS_SCRIPT_NAME, args.restore, named, failure), file=sys.stderr, flush=True)
+                      % (THIS_SCRIPT_NAME, args.restore, args.path, failure), file=sys.stderr, flush=True)
                 return EXIT_NOT_RESTORED
-            destination = os.path.join(top_level or args.repo, named)
+            # realpath, not abspath: ".." must climb from the directory a symlink in --repo leads to, as the
+            # system does, not lexically from the link.
+            destination = os.path.join(top_level or os.path.realpath(args.repo), named)
         destination_existed = os.path.lexists(destination)
         try:
             restore_copy(args.restore, destination)

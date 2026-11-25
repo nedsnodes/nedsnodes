@@ -489,6 +489,17 @@ check("rule 5: a verdict not to send is logged with its reason, and no wait star
       [(event["send"], event["reason"]) for event in machine.events("judge_answer")]
       == [(False, "a subagent started 3 minutes ago is still running")]
       and not machine.events("wait_step"), machine.events())
+LONG_DONE_TEXT = f"Done. {LONG_TEXT * 3} Done."
+machine = Machine()
+machine.seat("alpha", [user("go"), assistant(LONG_DONE_TEXT), turn_end()])
+machine.task("alpha", "1")
+machine.script(judged(False, reason="it is waiting"))
+machine.run(0)
+calls = machine.claude_calls()
+check("rule 5: a last message longer than the judge is handed reaches it as its end only, as the "
+      "design says",
+      len(calls) == 1 and json.dumps(LONG_DONE_TEXT[-4000:])[1:-1] in calls[0]["prompt"]
+      and "[...]" not in calls[0]["prompt"], calls)
 walk_item_machine = Machine()
 walk_item_machine.seat("alpha", DONE_TURN)
 walk_item_machine.task("alpha", "1")
@@ -971,14 +982,24 @@ def promise_sent_on_rule_five_wait(promise_sender):
     return machine
 
 
+def failed_send_sentences(machine):
+    """The sentences of each failed promise message, read through the records its event names, as
+    the program reads them."""
+    on_wait = {tuple(record) for event in machine.events("rule_2_sentences_on_wait")
+               for record in event["records"]}
+    return [[record[1] for record in event.get("records", []) if tuple(record) in on_wait]
+            for event in machine.events("promise_message_send_failed")]
+
+
 PROMISE_SEND_FAILS = {"sends": [send_to("alpha", is_error=True)],
                       "answer": {"sent": False, "reason": "r"}}
 machine = promise_sent_on_rule_five_wait(PROMISE_SEND_FAILS)
 check("rule 2: a promise message on an open wait whose send failed logs the promise step and the "
       "failed message's sentences, but no promise_message event",
       [event["step"] for event in machine.events("wait_step")] == ["nudge", "promise"]
-      and [event["sentences"] for event in machine.events("promise_message_send_failed")]
-      == [[PROMISE]]
+      and failed_send_sentences(machine) == [[PROMISE]]
+      and set(machine.events("promise_message_send_failed")[0]) >= {"records", "text"}
+      and "sentences" not in machine.events("promise_message_send_failed")[0]
       and not machine.events("promise_message") and len(machine.events("headless_failed")) == 1,
       machine.events())
 machine.script()
@@ -1002,6 +1023,36 @@ check("rule 2: after a promise message on an open wait failed to send, the wait 
               for alert in machine.alerts()),
       (machine.events("wait_step"), machine.alerts()))
 
+# A rule 5 wait whose only rule 2 group is a failed message's: a task call after the failure still
+# ends it, though no promise_message event is on the wait.
+machine = promise_sent_on_rule_five_wait(PROMISE_SEND_FAILS)
+machine.append("alpha", user("go on", at(7.5)),
+               assistant(tool=("TaskCreate", {"subject": "report on PR 927", "metadata": {
+                   "prerequisites": [{"pr_merged": 927}]}}), when=at(7.6), tool_id="t-after"),
+               task_result("t-after", "Task #1 created successfully: report on PR 927", at(7.61)),
+               assistant("Recorded.", at(8)), turn_end(at(8)))
+machine.script()
+machine.run(14)
+check("rule 2: a task call after the failed send of a rule 5 wait's only promise message ends the "
+      "wait",
+      [event["why"] for event in machine.events("wait_ended")]
+      == ["it recorded what a task waits on after the promise message"], machine.events())
+
+# The same, but the task call falls while the failing send was still being tried: it cannot answer
+# a message the agent-seat never got, so it does not end the wait.
+machine = promise_sent_on_rule_five_wait(dict(PROMISE_SEND_FAILS, sleep=2.5))
+machine.append("alpha", user("go on", at(7.005)),
+               assistant(tool=("TaskCreate", {"subject": "report on PR 927", "metadata": {
+                   "prerequisites": [{"pr_merged": 927}]}}), when=at(7.02), tool_id="t-during"),
+               task_result("t-during", "Task #1 created successfully: report on PR 927", at(7.021)),
+               assistant("Recorded.", at(8)), turn_end(at(8)))
+machine.script()
+machine.run(14)
+check("rule 2: a task call made while a promise message's failing send was tried does not end the "
+      "wait",
+      machine.events("promise_message_send_failed")[0]["at"] > at(7.02)
+      and not machine.events("wait_ended"), machine.events())
+
 # A wait that already has a delivered promise message, then a second whose send failed: a task call
 # backing the first promise alone does not end the wait before the failed one is reported.
 OTHER_PROMISE = "I'll report when PR 928 merges."
@@ -1022,8 +1073,7 @@ machine.script()
 machine.run(14)
 check("rule 2: a task call backing a delivered promise does not end a wait whose later promise "
       "message failed to send",
-      [event["sentences"] for event in machine.events("promise_message_send_failed")]
-      == [[OTHER_PROMISE]] and not machine.events("wait_ended"), machine.events())
+      failed_send_sentences(machine) == [[OTHER_PROMISE]] and not machine.events("wait_ended"), machine.events())
 machine.append("alpha", user("and the other", at(14.5)),
                assistant(tool=("TaskCreate", {"subject": "report on PR 928", "metadata": {
                    "prerequisites": [{"pr_merged": 928}]}}), when=at(14.6), tool_id="t-second"),
@@ -1445,6 +1495,30 @@ for case, answer, subject in (
     check(f"the re-check judge {case}: the next invocation asks no re-check again",
           not machine.claude_calls(), machine.claude_calls())
 
+# The transcript turns unreadable between the verdict pass and the re-check: here the first judge,
+# a headless agent-session that runs before the due step, breaks it.
+machine = Machine()
+machine.seat("alpha", [user("go"), assistant(OPENING_PULL_REQUEST), turn_end()])
+machine.script(rechecked(False), sent_ok())
+machine.run(0)
+machine.append("alpha", cross_session(machine.events("message_sent")[-1]["text"], at(1)),
+               assistant(ANNOUNCED, at(2)), turn_end(at(2.3)))
+machine.seat("beta", [user("go"), assistant(ANNOUNCED, when=at(2)), turn_end(at(2.3))])
+machine.script(dict(rechecked(True), overwrite=[str(machine.transcripts["alpha"]), "not json\n"]),
+               sent_ok(), rechecked(True))
+code, _ = machine.run(16)
+calls = machine.claude_calls()
+check("re-check: a transcript unreadable at the re-check is a read failure for that agent-seat; "
+      "its escalation is sent, and the next agent-seat is still swept",
+      [event["agent_seat"] for event in machine.events("read_failure")] == ["alpha"]
+      and [event["step"] for event in machine.events("wait_step")] == ["nudge", "escalate"]
+      and len(calls) == 3 and "please check" in calls[1]["prompt"]
+      and '"agent_seat": "beta"' in calls[2]["prompt"]
+      and any(event["step"] == "escalate" and event["agent_seat"] == "alpha"
+              for event in machine.events("message_sent")),
+      (code, machine.events("read_failure"), machine.events("wait_step"),
+       machine.events("message_sent"), calls))
+
 # An agent-seat that promised a report and gave it in a text-only reply, after its turn ended and
 # before the nudge.
 REPORT_SENTENCE = "I'll tell you what it finds."
@@ -1816,6 +1890,21 @@ calls = machine.claude_calls()
 check("rule 2 judged unbacked: a second headless agent-session sends the announced-action line",
       len(calls) == 2 and 'You said "I\'m starting the PR 1633 work now." 12 minutes ago and have '
       "not done it. Do it now, or tell the user why not." in calls[1]["prompt"], calls)
+TOLD_AT_START = "I told the user the PR 1633 work is starting."
+LONG_TURN_TEXT = f"{TOLD_AT_START} {LONG_TEXT * 3} {ANNOUNCED}"
+machine = Machine()
+machine.seat("alpha", [user("go"), assistant(LONG_TURN_TEXT), turn_end()])
+machine.script({"answer": {"sentences": [{"index": 0, "backed": True, "reason": "told"}]}})
+machine.run(0)
+calls = machine.claude_calls()
+prompt = calls[0]["prompt"] if calls else "\n{}"
+judge_facts = json.loads(prompt[prompt.rindex("\n{") + 1:])
+handed = [item["text"] for item in judge_facts.get(
+    "assistant_text_messages_since_start_of_earliest_turn_with_sentence_to_judge", [])]
+check("rule 2: a text longer than the judge is handed reaches it with its start and its end",
+      len(handed) == 1 and handed[0].startswith(TOLD_AT_START) and handed[0].endswith(ANNOUNCED)
+      and "\n[...]\n" in handed[0] and len(handed[0]) < len(LONG_TURN_TEXT)
+      and judge_facts["last_turn_ending_message"]["text"] == handed[0], handed)
 machine = Machine()
 machine.seat("alpha", [user("go"), assistant(f"{PROMISE} {ANNOUNCED}"), turn_end()])
 machine.script({"answer": {"sentences": [{"index": 0, "backed": True, "reason": "a test runs"}]}},
@@ -2516,6 +2605,12 @@ check("after the reset, the promise message the escalation's pause held back is 
       code == 0 and [event["step"] for event in machine.events("message_sent")] == ["nudge", "nudge"]
       and "after lunch" in machine.events("message_sent")[-1]["text"],
       (code, machine.events("message_sent"), machine.claude_calls()))
+groups = machine.events("rule_2_sentences_on_wait")
+check("after the reset, the promise judged again is not logged on the wait a second time, and "
+      "its message takes it off the wait",
+      [group["sentences"] for group in groups] == [[SECOND_PROMISE]]
+      and [event.get("records") for event in machine.events("promise_message")][-1:]
+      == [groups[0]["records"]], (groups, machine.events("promise_message")))
 
 machine = Machine()
 machine.seat("alpha", [user("go"), assistant(PROMISE), turn_end()])
@@ -2835,13 +2930,40 @@ machine.script(sent_ok())
 machine.run(7)
 machine.append("alpha", cross_session("You promised", at(7.5)), assistant(THIRD_PROMISE, at(8)),
                turn_end(at(8)))
-machine.script(rechecked(False, False), sent_ok(), sent_ok())
+machine.script(rechecked(False, False, False), sent_ok())
 machine.run(16)
 calls = machine.claude_calls()
-check("a fresh promise at every run does not put off the escalation 15 minutes after the nudge",
-      len(calls) == 3 and "please check" in calls[1]["prompt"] and THIRD_PROMISE in calls[2]["prompt"]
-      and [event["step"] for event in machine.events("wait_step")] == ["nudge", "escalate"],
+check("a fresh promise at every run does not put off the escalation 15 minutes after the nudge: "
+      "the re-check judges the promise found in the escalation's own run, and the escalation "
+      "names it in place of a message of its own",
+      len(calls) == 2 and THIRD_PROMISE in calls[0]["prompt"] and '"index": 2' in calls[0]["prompt"]
+      and "please check" in calls[1]["prompt"] and THIRD_PROMISE in calls[1]["prompt"]
+      and [event["step"] for event in machine.events("wait_step")] == ["nudge", "escalate"]
+      and len(machine.events("promise_message")) == 2,
       (calls, machine.events("wait_step")))
+machine.script()
+machine.run(32)
+check("the user-alert names the sentence the escalation named, which no message of its own named",
+      any(THIRD_PROMISE in alert["alert_text"] and "sent it no message of their own" in alert["alert_text"]
+          for alert in machine.alerts()), machine.alerts())
+
+# The re-check finds every sentence backed, the one found in its own run included: the wait ends,
+# and no message about that sentence opens a wait of its own.
+machine = Machine()
+machine.seat("alpha", [user("go"), assistant(PROMISE), turn_end()])
+machine.script(sent_ok())
+machine.run(0)
+machine.append("alpha", cross_session("You promised", at(0.5)), assistant(SECOND_PROMISE, at(8)),
+               turn_end(at(8)))
+machine.script(rechecked(True, True))
+machine.run(16)
+check("a promise found in the escalation's own run, which the re-check finds backed with the rest, "
+      "ends the wait and opens no new one",
+      [event["why"] for event in machine.events("wait_ended")]
+      == ["the judge found every sentence its promise messages named backed"]
+      and [event["step"] for event in machine.events("wait_step")] == ["nudge"]
+      and len(machine.events("message_sent")) == 1 and len(machine.claude_calls()) == 1,
+      (machine.events(), machine.claude_calls()))
 
 # --- delivery counts only a record that shows the agent-seat received the message -------------------
 for received, record_of in (
@@ -3124,6 +3246,175 @@ check("the account notice is logged for each agent-seat as sent, with the do-not
       len(machine.events("message_sent")) == 2
       and all(event["text"] == wake_texts[-1][1] for event in machine.events("message_sent")),
       machine.events("message_sent"))
+
+# --- rule 5: an open pull-request events task wakes merge-lane-2 in code ------------------------
+EVENTS_SEAT = "merge-lane-2"
+EVENTS_TASK_SUBJECT = "Read the new pull-request events in the watcher's event file"
+FAKE_GITHUB = """#!{python}
+import os, sys
+sys.stdout.write(open(os.environ["FAKE_GITHUB_ANSWER"]).read())
+"""
+
+
+def github_answer(*numbers):
+    return json.dumps({"data": {"repository": {"pullRequests": {
+        "nodes": [{"number": number, "title": "t", "isDraft": False, "headRefOid": "a" * 40,
+                   "author": {"login": "nedlern"}, "createdAt": "2026-11-02T00:00:00Z",
+                   "baseRefName": "main", "headRefName": f"branch-{number}",
+                   "reviews": {"nodes": []}, "macClaudeReviews": {"nodes": []}} for number in numbers],
+        "pageInfo": {"hasNextPage": False, "endCursor": None}}}}})
+
+
+class RealWatcher:
+    """merge-lane-open-prs-watch-and-reviewer-assign.py itself, run as cron runs it, against a fake gh."""
+
+    def __init__(self, machine):
+        self.root = machine.root / "watcher"
+        (self.root / "bin").mkdir(parents=True)
+        fake_gh = self.root / "bin" / "gh"
+        fake_gh.write_text(FAKE_GITHUB.format(python=sys.executable))
+        fake_gh.chmod(0o755)
+        self.answer = self.root / "answer.json"
+        self.token = self.root / "token"
+        self.token.write_text("fixture-token-never-a-real-credential")
+        self.tasks = machine.tasks / f"nedsnodes-{EVENTS_SEAT}-tasks"
+        self.tasks.mkdir(exist_ok=True)
+        # Every number assigned already, so no REVIEW-ASSIGNED line; the default file is
+        # merge-lane-2's real one.
+        self.assignments = self.root / "assignments.txt"
+        self.assignments.write_text("1 merge-lane-1\n2 merge-lane-3\n")
+
+    def run(self, flag, *numbers):
+        self.answer.write_text(github_answer(*numbers))
+        environment = dict(os.environ, FAKE_GITHUB_ANSWER=str(self.answer),
+                           PATH=f"{self.root / 'bin'}{os.pathsep}{os.environ['PATH']}")
+        return subprocess.run(
+            [sys.executable, str(PROGRAM.with_name("merge-lane-open-prs-watch-and-reviewer-assign.py")), flag,
+             "--token-file", str(self.token), "--poll-once-directory", str(self.root / "state"),
+             "--task-list-directory", str(self.tasks),
+             "--needs-a-look-directory", str(self.root / "notices"),
+             "--merge-lane-pr-review-assignments-file", str(self.assignments)],
+            env=environment, capture_output=True, text=True, check=False).returncode
+
+    def complete_tasks(self):
+        for path in self.tasks.glob("*.json"):
+            task = json.loads(path.read_text())
+            path.write_text(json.dumps(dict(task, status="completed")))
+
+
+machine = Machine()
+machine.seat(EVENTS_SEAT, DONE_TURN)
+watcher = RealWatcher(machine)
+baseline_code = watcher.run("--poll-once-write-baseline", 1)
+quiet_code = watcher.run("--poll-once", 1)
+machine.script()
+machine.run(0)
+check("a watcher run that detects nothing new opens no task, and the sweep starts no agent-session "
+      "and sends merge-lane-2 nothing",
+      (baseline_code, quiet_code) == (0, 0) and not list(watcher.tasks.glob("*.json"))
+      and not machine.claude_calls() and not machine.events("message_sent"),
+      (baseline_code, quiet_code, machine.claude_calls()))
+new_code = watcher.run("--poll-once", 1, 2)
+task_id = next(watcher.tasks.glob("*.json")).stem
+machine.script(sent_ok(EVENTS_SEAT))
+machine.run(1)
+calls = machine.claude_calls()
+check("the watcher's events task wakes idle merge-lane-2: one sender and no judge, with code's text",
+      new_code == 0 and len(calls) == 1 and "SendMessage" in calls[0]["argv"][calls[0]["argv"].index("--tools") + 1]
+      and machine.events("message_sent")[-1]["agent_seat"] == EVENTS_SEAT
+      and machine.events("message_sent")[-1]["text"].startswith(f"Task {task_id} on your task list holds new "
+                                                               "pull-request events.")
+      and machine.events("wait_step")[-1]["step"] == "nudge", (calls, machine.events()))
+machine.script()
+machine.run(2)
+check("the open wait sends no second wake", not machine.claude_calls(), machine.claude_calls())
+machine.append(EVENTS_SEAT, assistant(None, at(3), tool=("Read", {"file_path": "/x"}), tool_id="r1"),
+               task_result("r1", "ok", at(3)), assistant("Done again.", at(4)), turn_end(at(4)))
+machine.script()
+machine.run(10)
+check("a tool call ends the wait, and the same task wakes no one again within 15 minutes",
+      not machine.claude_calls()
+      and machine.events("wait_ended")[-1]["why"] == "it made a tool call after the nudge",
+      (machine.claude_calls(), machine.events("wait_ended")))
+machine.script(sent_ok(EVENTS_SEAT))
+machine.run(17)
+check("the task still open 15 minutes after the wake wakes merge-lane-2 once more",
+      len(machine.claude_calls()) == 1 and len(machine.events("message_sent")) == 2, machine.events())
+watcher.complete_tasks()
+machine.append(EVENTS_SEAT, assistant("Handled.", at(18)), turn_end(at(18)))
+machine.script()
+machine.run(24)
+check("with the events task completed, the sweep wakes no one",
+      not machine.claude_calls() and len(machine.events("message_sent")) == 2
+      and machine.events("checked")[-1]["rule"] == 4, machine.claude_calls())
+
+machine = Machine()
+machine.seat("alpha", DONE_TURN)
+directory = machine.tasks / "nedsnodes-alpha-tasks"
+directory.mkdir()
+(directory / "1.json").write_text(json.dumps({"id": "1", "subject": EVENTS_TASK_SUBJECT,
+                                              "status": "pending", "blocks": [], "blockedBy": []}))
+machine.script(judged(False, reason="not its work"))
+machine.run(0)
+calls = machine.claude_calls()
+check("the same task subject on another agent-seat's list still goes to the judge",
+      len(calls) == 1 and calls[0]["argv"][calls[0]["argv"].index("--tools") + 1] == ""
+      and not machine.events("message_sent"), calls)
+
+machine = Machine()
+machine.seat(EVENTS_SEAT, DONE_TURN)
+directory = machine.tasks / f"nedsnodes-{EVENTS_SEAT}-tasks"
+directory.mkdir()
+(directory / "1.json").write_text(json.dumps({"id": "1", "subject": "task 1", "status": "pending",
+                                              "blocks": [], "blockedBy": []}))
+machine.script(judged(False, reason="busy"))
+machine.run(0)
+check("another task on merge-lane-2's list still goes to the judge",
+      len(machine.claude_calls()) == 1 and not machine.events("message_sent"), machine.claude_calls())
+
+machine = Machine()
+machine.seat(EVENTS_SEAT, DONE_TURN)
+directory = machine.tasks / f"nedsnodes-{EVENTS_SEAT}-tasks"
+directory.mkdir()
+(directory / "1.json").write_text(json.dumps({"id": "1", "subject": EVENTS_TASK_SUBJECT,
+                                              "status": "pending", "blocks": [], "blockedBy": []}))
+running_machine = Machine()
+running_machine.seat(EVENTS_SEAT, [
+    user("go"), *background_bash_launch("bk1", "python3 scripts/x-test.py", at(-20), "tb1"),
+    assistant("Waiting on the check."), turn_end()])
+running_directory = running_machine.tasks / f"nedsnodes-{EVENTS_SEAT}-tasks"
+running_directory.mkdir()
+(running_directory / "7.json").write_text(json.dumps({"id": "7", "subject": EVENTS_TASK_SUBJECT,
+                                                      "status": "pending", "blocks": [],
+                                                      "blockedBy": []}))
+running_machine.script(sent_ok(EVENTS_SEAT))
+running_machine.run(0)
+calls = running_machine.claude_calls()
+check("an idle merge-lane-2 with a background command running is still woken for its events task, "
+      "with no judge",
+      len(calls) == 1 and "SendMessage" in calls[0]["argv"][calls[0]["argv"].index("--tools") + 1]
+      and running_machine.events("message_sent")[-1]["text"].startswith("Task 7 on your task list"),
+      (calls, running_machine.events()))
+
+machine.script({"exit": 3})
+machine.run(0)
+check("a wake whose send fails is reported to the sweep's owner, and its wait stays open to escalate",
+      not machine.events("message_sent") and machine.events("wait_step")[-1]["step"] == "nudge"
+      and machine.owner_tasks() != [], machine.events())
+check("a wake whose send fails is logged as not sent",
+      [event["send"] for event in machine.events("judge_answer")] == [False],
+      machine.events("judge_answer"))
+machine = Machine()
+machine.seat(EVENTS_SEAT, DONE_TURN)
+directory = machine.tasks / f"nedsnodes-{EVENTS_SEAT}-tasks"
+directory.mkdir()
+(directory / "1.json").write_text(json.dumps({"id": "1", "subject": EVENTS_TASK_SUBJECT,
+                                              "status": "pending", "blocks": [], "blockedBy": []}))
+machine.script(sent_ok(EVENTS_SEAT))
+machine.run(0)
+check("a wake whose send succeeds is logged as sent",
+      [event["send"] for event in machine.events("judge_answer")] == [True],
+      machine.events("judge_answer"))
 
 # --- no reminder of a wait on the user, and no repeat until the user types ----------------------
 def typed_by_the_user(text, when):
@@ -3433,6 +3724,202 @@ check("before the delivery check, typing before the send was logged has not answ
       reminded([REMINDER], typed=at(0.05)) == {"open task: 1"})
 check("before the delivery check, typing after the send was logged answers the reminder",
       reminded([REMINDER], typed=at(0.2)) == set())
+
+
+# --- sentence groups on an open wait are matched by sentence, and the escalation sent names them ------
+def rule_five_wait_with_promises(*records):
+    """A machine whose agent-seat answered a rule 5 message, sent at minute 0, with records."""
+    machine = Machine()
+    machine.seat("alpha", DONE_TURN)
+    machine.task("alpha", "1")
+    machine.script(judged(True, "What's going on?", "nothing runs"), sent_ok())
+    machine.run(0)
+    (machine.tasks / "nedsnodes-alpha-tasks" / "1.json").unlink()
+    machine.append("alpha", cross_session(machine.events("message_sent")[-1]["text"], at(0.5)),
+                   *records)
+    return machine
+
+
+without_uuid = assistant(OTHER_PROMISE, at(1.1))
+del without_uuid["uuid"]
+machine = rule_five_wait_with_promises(assistant(PROMISE, at(1)), turn_end(at(1)), user("go on", at(1.05)),
+                                       without_uuid, turn_end(at(1.1)))
+machine.script(sent_ok())
+code, output = machine.run(7)
+check("a batch holding a sentence whose record has no uuid beside one that has a uuid: one group "
+      "of both, and no traceback",
+      "Traceback" not in output
+      and [sorted(event["sentences"]) for event in machine.events("rule_2_sentences_on_wait")]
+      == [sorted([PROMISE, OTHER_PROMISE])], (code, output, machine.events()))
+
+# An invocation stopped after logging promise A's group, and promise B made before the next one.
+machine = rule_five_wait_with_promises(assistant(PROMISE, at(1)), turn_end(at(1)))
+machine.script(sent_ok())
+machine.run(7)
+log_lines = machine.log.read_text().splitlines(keepends=True)
+group_line = next(number for number, line in enumerate(log_lines)
+                  if json.loads(line)["event"] == "rule_2_sentences_on_wait")
+machine.log.write_text("".join(log_lines[:group_line + 1]))
+machine.append("alpha", user("go on", at(7.5)), assistant(OTHER_PROMISE, at(7.6)),
+               turn_end(at(7.6)))
+machine.script(sent_ok())
+machine.run(14)
+groups = machine.events("rule_2_sentences_on_wait")
+check("a batch judged again with one sentence already on the wait and one new: only the new one is "
+      "logged on the wait, and the message takes both off it",
+      [group["sentences"] for group in groups] == [[PROMISE], [OTHER_PROMISE]]
+      and [sorted(map(tuple, event.get("records", []))) for event in machine.events("promise_message")][-1:]
+      == [sorted(tuple(record) for group in groups for record in group["records"])],
+      (groups, machine.events("promise_message")))
+
+# A promise found in the run the escalation falls due in, which only the escalation names.
+def promise_named_only_by_escalation(escalation_sender, recheck_sleep=0):
+    machine = rule_five_wait_with_promises(user("go on", at(8)), assistant(PROMISE, at(8.1)),
+                                           turn_end(at(8.1)))
+    machine.script(dict(rechecked(False), sleep=recheck_sleep), escalation_sender, sent_ok())
+    machine.run(16)
+    return machine
+
+
+machine = promise_named_only_by_escalation(
+    {"sends": [send_to("alpha", "You have been idle; please check your work.")],
+     "answer": {"sent": True, "reason": "r"}})
+escalation = next(event for event in machine.events("message_sent") if event["step"] == "escalate")
+check("an escalation sender that drops the promise from the text it sends: the escalation is logged "
+      "as naming the promise code's text names, and the different text is reported as this "
+      "program's defect",
+      [record[1] for record in escalation.get("escalation_named_records", [])] == [PROMISE]
+      and [event["step"] for event in machine.events("sent_text_differs_from_code_text")]
+      == ["escalate"],
+      (machine.events("message_sent"), machine.events("sent_text_differs_from_code_text")))
+
+machine = promise_named_only_by_escalation(sent_ok(), recheck_sleep=2)
+named = [event for event in machine.events("message_sent") if event.get("escalation_named_records")]
+check("an escalation that names a promise no message named: the sentence's time moves to the "
+      "escalation's send, recorded in the escalation's own message_sent event",
+      len(named) == 1 and named[0]["send_started_at"] > machine.events("rule_2_sentences_on_wait")[0]["at"]
+      and [event["step"] for event in machine.events("message_sent")][-1] == "escalate",
+      (named, machine.events("rule_2_sentences_on_wait")))
+machine.append("alpha", user("go on", "2026-11-02T12:16:01Z"),
+               assistant(tool=("TaskCreate", {"subject": "report on PR 927", "metadata": {
+                   "prerequisites": [{"pr_merged": 927}]}}), when="2026-11-02T12:16:01Z",
+                   tool_id="t-during-recheck"),
+               task_result("t-during-recheck", "Task #1 created successfully: report on PR 927",
+                           "2026-11-02T12:16:01Z"),
+               assistant("Recorded.", at(16.5)), turn_end(at(16.5)))
+machine.script()
+machine.run(23)
+check("a task call made while the re-check ran, before the escalation named the promise, does not "
+      "end the wait", not machine.events("wait_ended"), machine.events("wait_ended"))
+
+# An invocation stopped after the escalation named the promise and before its sentence was logged
+# as checked.
+machine = promise_named_only_by_escalation(sent_ok())
+machine.log.write_text("".join(
+    line for line in machine.log.read_text().splitlines(keepends=True)
+    if not (json.loads(line).get("agent_seat_idle_sweep_invocation_started_at") == at(16)
+            and json.loads(line)["event"] in ("sentence_checked", "checked"))))
+machine.script(sent_ok())
+machine.run(17)
+check("the promise judged again after the escalation named it gets no message of its own",
+      [event["step"] for event in machine.events("message_sent")][-1] == "escalate"
+      and len(machine.events("rule_2_sentences_on_wait")) == 1,
+      (machine.events("message_sent"), machine.events("rule_2_sentences_on_wait")))
+
+# --- the wait tracks each sentence it answers for, not whole groups ---------------------------------
+def on_wait_sentences(machine):
+    wait = idle_sweep_program.SweepLog(machine.log).open_wait("alpha")
+    return [sentence for entry in wait[idle_sweep_program.SENTENCES_WITH_NO_MESSAGE_EVENT]
+            for sentence in entry["sentences"]]
+
+
+def stopped_after_sentences_on_wait(machine):
+    """Cut the log just after its last rule_2_sentences_on_wait event, as an invocation stopped
+    there leaves it."""
+    lines = machine.log.read_text().splitlines(keepends=True)
+    last = max(number for number, line in enumerate(lines)
+               if json.loads(line)["event"] == "rule_2_sentences_on_wait")
+    machine.log.write_text("".join(lines[:last + 1]))
+
+
+def logged_as_checked(machine, sentence, minutes):
+    record_uuid = next(record[0] for event in machine.events("rule_2_sentences_on_wait")
+                       for record in event["records"] if record[1] == sentence)
+    with machine.log.open("a") as log:
+        log.write(json.dumps({"event": "sentence_checked", "agent_seat": "alpha", "at": at(minutes),
+                              "record_uuid": record_uuid, "sentence": sentence}) + "\n")
+
+
+machine = rule_five_wait_with_promises(assistant(PROMISE, at(1)), turn_end(at(1)), user("go on", at(1.05)),
+                                       assistant(OTHER_PROMISE, at(1.1)), turn_end(at(1.1)))
+machine.script(sent_ok())
+machine.run(7)
+stopped_after_sentences_on_wait(machine)
+logged_as_checked(machine, OTHER_PROMISE, 7.5)
+machine.script(sent_ok())
+machine.run(14)
+check("a message for part of the sentences logged on the wait together takes only that part off "
+      "the wait, and the rest stay owed",
+      [event["step"] for event in machine.events("message_sent")][-1] == "nudge"
+      and on_wait_sentences(machine) == [OTHER_PROMISE],
+      (machine.events("promise_message"), on_wait_sentences(machine)))
+
+machine = rule_five_wait_with_promises(assistant(PROMISE, at(1)), turn_end(at(1)), user("go on", at(1.05)),
+                                       assistant(OTHER_PROMISE, at(1.1)), turn_end(at(1.1)))
+machine.script({"sends": [send_to("alpha", f'You promised "{PROMISE}". Record it as a task.')],
+                "answer": {"sent": True, "reason": "r"}})
+machine.run(7)
+check("a promise message on an open wait whose sender drops one sentence: the message is logged "
+      "with the sentences code's text names, and the different text is reported as this program's "
+      "defect",
+      on_wait_sentences(machine) == []
+      and sorted(machine.events("promise_message")[-1]["sentences"]) == sorted([PROMISE, OTHER_PROMISE])
+      and machine.events("sent_text_differs_from_code_text"),
+      (machine.events("promise_message"), on_wait_sentences(machine)))
+
+machine = promise_named_only_by_escalation(sent_ok())
+machine.log.write_text("".join(
+    line for line in machine.log.read_text().splitlines(keepends=True)
+    if not (json.loads(line).get("agent_seat_idle_sweep_invocation_started_at") == at(16)
+            and json.loads(line)["event"] in ("sentence_checked", "checked"))))
+machine.append("alpha", user("go on", at(16.5)), assistant(OTHER_PROMISE, at(16.6)),
+               turn_end(at(16.6)))
+machine.script(sent_ok())
+machine.run(23)
+last = machine.events("message_sent")[-1]
+check("a promise the escalation named, judged again beside a fresh promise: the message names only "
+      "the fresh one",
+      last["step"] == "nudge" and OTHER_PROMISE in last["text"] and PROMISE not in last["text"],
+      machine.events("message_sent"))
+
+machine = promise_named_only_by_escalation(sent_ok())
+machine.log.write_text("".join(
+    line for line in machine.log.read_text().splitlines(keepends=True)
+    if json.loads(line)["event"] == "message_sent"
+    or not (json.loads(line).get("agent_seat_idle_sweep_invocation_started_at") == at(16)
+            and json.loads(line)["event"] not in ("wait_step", "rule_2_sentences_on_wait",
+                                                  "judge_answer"))))
+machine.script(sent_ok())
+machine.run(17)
+check("an invocation stopped right after the escalation's send: the sentences it named are read "
+      "from its message_sent event, and get no message of their own",
+      [event["step"] for event in machine.events("message_sent")][-1] == "escalate",
+      machine.events("message_sent"))
+
+machine = rule_five_wait_with_promises(assistant(OTHER_PROMISE, at(1)), turn_end(at(1)))
+machine.script(sent_ok())
+machine.run(7)
+stopped_after_sentences_on_wait(machine)
+logged_as_checked(machine, OTHER_PROMISE, 7.5)
+machine.append("alpha", user("go on", at(8)), assistant(PROMISE, at(8.1)), turn_end(at(8.1)))
+machine.script(rechecked(False, False),
+               {"sends": [send_to("alpha", f"You have been idle. You said: {PROMISE}")],
+                "answer": {"sent": True, "reason": "r"}}, sent_ok())
+machine.run(16)
+check("an escalation sender that drops an older owed sentence: the fresh promise gets no second "
+      "message",
+      [event["step"] for event in machine.events("message_sent")][-1] == "escalate",
+      machine.events("message_sent"))
 
 if failures:
     print(f"{len(failures)} case(s) failed")
