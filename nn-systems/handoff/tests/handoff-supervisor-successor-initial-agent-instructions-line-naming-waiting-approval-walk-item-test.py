@@ -293,13 +293,49 @@ def run_walk_minutes_cases(workspace):
     root = workspace / "several-items-no-total-first-named-one-repeated"
     walk_in(root, "#next_to_present items 1 and 2\n",
             document="# Fixture\n\n## Item 1 of 3: Named first\n\nRecommendation: one.\n\n"
-                     "## Item 1 of 4: Named first again\n\nRecommendation: one again.\n\n"
+                     "## Item 1 of 2: Named first again\n\nRecommendation: one again.\n\n"
                      "## Item 2 of 3: Named second\n\nRecommendation: two.\n")
     with contextlib.redirect_stdout(io.StringIO()):
         first_repeated = lines_for(root)
-    check("several waiting items, no total, the first-named one's heading repeated: the `#item_page` line still has `of M`",
-          len(first_repeated) == 1 and first_repeated[0].startswith(without_link_line(WALK, "1 of 2", "1 of 2")),
-          repr(first_repeated))
+    check("several waiting items, no total, the first-named one's heading repeated, one giving the counted M: "
+          "the `#item_page` line still has `of M`, and the counted M does not settle the repeated heading",
+          len(first_repeated) == 1 and first_repeated[0].startswith(without_link_line(WALK, "1 of 2", "1 of 2"))
+          and "more than one heading for `Item 1`" in first_repeated[0], repr(first_repeated))
+
+    root = workspace / "several-items-first-repeated-later-missing"
+    walk_in(root, "#next_to_present items 1 and 2\n",
+            document="# Fixture\n\n## Item 1 of 3: Named first\n\nRecommendation: one.\n\n"
+                     "## Item 1 of 4: Named first again\n\nRecommendation: one again.\n\n"
+                     "## Item 3 of 3: Last\n\nRecommendation: three.\n")
+    with contextlib.redirect_stdout(io.StringIO()):
+        both_problems = lines_for(root)
+    check("several waiting items, the first-named one's heading repeated and a later one's missing: one error names both",
+          len(both_problems) == 1 and "no heading `Item 2`" in both_problems[0]
+          and "more than one heading for `Item 1`" in both_problems[0], repr(both_problems))
+
+    root = workspace / "no-total-no-item-heading"
+    walk_in(root, "#next_to_present item 1\n", document="# Fixture\n\nNo item headings here.\n")
+    with contextlib.redirect_stdout(io.StringIO()):
+        no_headings = lines_for(root)
+    check("no total and no item heading: the `#item_page` line has no `of 0`, and the error says why",
+          len(no_headings) == 1 and no_headings[0].startswith(without_link_line(WALK, "1", "1"))
+          and "of 0" not in no_headings[0] and "no heading with a running count" in no_headings[0],
+          repr(no_headings))
+
+    root = workspace / "no-total-hook-fails-to-load"
+    walk_in(root, "#next_to_present item 1\n",
+            document="# Fixture\n\n## Item 1 of 2: First\n\nRecommendation: one.\n\n"
+                     "## Item 2 of 2: Second\n\nRecommendation: two.\n")
+    hook_path = supervisor.WALK_SHORT_ANSWER_HOOK_PATH
+    supervisor.WALK_SHORT_ANSWER_HOOK_PATH = root / "no-such-hook.py"
+    try:
+        with contextlib.redirect_stdout(io.StringIO()):
+            hook_unloadable = lines_for(root)
+    finally:
+        supervisor.WALK_SHORT_ANSWER_HOOK_PATH = hook_path
+    check("no total and a short-answer hook that fails to load: the `#item_page` line still has `of M`, then the error",
+          len(hook_unloadable) == 1 and hook_unloadable[0].startswith(without_link_line(WALK, "1 of 2", "1 of 2"))
+          and "could not read the item's text" in hook_unloadable[0], repr(hook_unloadable))
 
     root = workspace / "open-and-paused"
     paused = walk_in(root, "#next_to_present item 1 of 3\n#approval_walk_paused away\n", name="fixture-paused-walk")

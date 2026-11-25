@@ -1294,22 +1294,24 @@ def successor_initial_agent_instructions_line_naming_waiting_approval_walk_item(
             walk_directory=walk_directory, error=f"{type(error).__name__}: {error}"),)
     point, document_problem = None, ""
     try:
-        walk_short_answer_hook = load_module_from_path(
-            "walk_me_through_user_short_answer_to_approval_walk_item_expanded_into_instructions_user_prompt_submit_hook",
-            WALK_SHORT_ANSWER_HOOK_PATH)
         document = minutes.with_name(name + ".md")
         text = document.read_text(encoding="utf-8")
         spans = walk_finder.item_unit_spans(text, parser)
-        # The total is counted before any heading is looked up, so that a missing or repeated heading leaves the
-        # count its `of M`: an `#item_page` line without it is not read. Every named item is checked, against the
-        # total the walk-minutes gave, so that a missing or repeated heading is reported; the point is read from
-        # the first-named item's unit alone, because units come back in walk-document order, and a later waiting
-        # item's heading may name the first item too.
+        # The total is counted before any heading is looked up or the hook loaded, so that a missing or repeated
+        # heading, or a hook that fails to load, leaves the count its `of M`: an `#item_page` line without it is
+        # not read. A count of 0 means no heading was recognised, and the finder reports that. Every named item is
+        # checked against the total the walk-minutes gave, so that each missing or repeated heading is reported;
+        # the point is read from the first-named item's unit alone, because a later waiting item's heading may
+        # name the first item too.
         total_in_walk_minutes = total
         if total is None:
             total = walk_finder.approval_walk_item_total_shown_and_waiting_counted_from_walk_document(spans)
+            total = None if total == "0" else total
         walk_finder.waiting_item_units(document, value, numbers, total_in_walk_minutes, parser, spans)
         _, units = walk_finder.waiting_item_units(document, value, [number], total_in_walk_minutes, parser, spans)
+        walk_short_answer_hook = load_module_from_path(
+            "walk_me_through_user_short_answer_to_approval_walk_item_expanded_into_instructions_user_prompt_submit_hook",
+            WALK_SHORT_ANSWER_HOOK_PATH)
         point = walk_short_answer_hook.heading_points(text.split("\n"), units, parser).get(number)
     except Exception as error:
         print(f"handoff-supervisor: waiting approval-walk item's walk-document unreadable: "
