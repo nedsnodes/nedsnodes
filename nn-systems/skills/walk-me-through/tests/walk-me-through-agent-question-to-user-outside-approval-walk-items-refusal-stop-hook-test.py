@@ -15,6 +15,7 @@ printed. That run makes real model calls and asserts nothing; it exits 1 only
 when `claude` is not on PATH.
 """
 
+import ast
 import importlib.machinery
 import importlib.util
 import json
@@ -824,11 +825,13 @@ def modules_loaded_with_the_walk_finder_list_or_quotation_mark_rule_replaced(rul
     holds rule in place of its list or quotation mark rule, so a pattern that spells the rule out by hand, rather
     than building from the finder's constant, still reads the real marks and not rule."""
     finder_file = hook.WALK_FINDER_FILE.resolve()
-    source = finder_file.read_text(encoding="utf-8")
-    assignment = re.compile(r"^(MARKDOWN_LINE_OPENING_LIST_OR_QUOTATION_MARK_PATTERN_TEXT = ).*$", re.M)
-    check("the walk finder assigns its list or quotation mark rule on one line this test can replace",
-          len(assignment.findall(source)) == 1, assignment.findall(source))
-    replaced = assignment.sub(lambda match: match.group(1) + repr(rule), source)
+    replaced = ast.parse(finder_file.read_text(encoding="utf-8"), str(finder_file))
+    assignments = [node for node in replaced.body if isinstance(node, ast.Assign)
+                   and [getattr(target, "id", None) for target in node.targets]
+                   == ["MARKDOWN_LINE_OPENING_LIST_OR_QUOTATION_MARK_PATTERN_TEXT"]]
+    check("the walk finder assigns its list or quotation mark rule once, at module level",
+          len(assignments) == 1, len(assignments))
+    assignments[0].value = ast.copy_location(ast.Constant(rule), assignments[0].value)
 
     class ReplacedFinderLoader(importlib.machinery.SourceFileLoader):
         def get_code(self, fullname):

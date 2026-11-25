@@ -617,7 +617,8 @@ ANSWER_LINE = re.compile(r"^(?P<item>items? .+?): (?P<settled>the user answered|
                          re.I)
 MARKER_END = r"(?=[*_`]*(?:[:\s]|$))"
 # Any list or quotation marks, then any emphasis or code marks, ahead of a marker; the list and quotation mark rule is
-# the walk finder's, which the `#new` mark pattern is built from too, so every marker line opens alike.
+# the walk finder's, which the `#new` mark pattern is built from too, so every marker line takes the same list and
+# quotation marks; only that rule is shared, and each marker keeps its own emphasis rule.
 LINE_OPENING_MARKERS = rf"^\s*{load_walk_finder().MARKDOWN_LINE_OPENING_LIST_OR_QUOTATION_MARK_PATTERN_TEXT}*[*_`]*"
 CASE_AGAINST_LINE = re.compile(rf"{LINE_OPENING_MARKERS}#case_against{MARKER_END}[*_`]*[:\s]*(.*)$")
 CASE_AGAINST_RATING = re.compile(r"(very strong|none|weak|medium|strong)\b", re.I)
