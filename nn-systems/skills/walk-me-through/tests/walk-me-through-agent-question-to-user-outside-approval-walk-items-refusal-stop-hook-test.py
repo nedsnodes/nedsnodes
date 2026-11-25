@@ -807,6 +807,25 @@ def test_a_question_held_in_an_interruption_item_is_not_checked():
                  headed.run(model="yes"))
 
 
+def test_line_marks_and_the_new_text_mark_pattern_take_the_same_line_opening_marks_from_the_walk_finder():
+    finder = hook.walk_finder
+    shared = finder.APPROVAL_WALK_ITEM_NEW_TEXT_MARK_LINE_PATTERN
+    mark_text = getattr(finder, "MARKDOWN_LINE_OPENING_LIST_OR_QUOTATION_MARK_PATTERN_TEXT", None)
+    check("LINE_MARKS and the walk finder's `#new` mark pattern are both built from the finder's one list or "
+          "quotation mark rule",
+          mark_text is not None and mark_text in hook.LINE_MARKS.pattern and mark_text in shared.pattern,
+          f"rule {mark_text!r}, LINE_MARKS {hook.LINE_MARKS.pattern!r}, shared {shared.pattern!r}")
+    # The spellings of the short-answer hook test's agreement loop on what is a `#new` mark.
+    for spelled in ("#newé Show every row.", "#NEW Show every row.", "#New: Show every row.", "- #new Show every row.",
+                    "#new_if_d Show every row.", "#NEW_IF_D Show every row.", "#newer Show every row."):
+        for opening in ("", "- ", "* ", "+ ", "> ", "1. ", "2) ", "> - ", "  - ", "-\t"):
+            line = opening + spelled
+            whole, stripped = shared.match(line), shared.match(hook.LINE_MARKS.sub("", line))
+            check(f"the `#new` mark pattern reads {line!r} alike before and after LINE_MARKS strips its marks",
+                  (whole and whole.groups()) == (stripped and stripped.groups()),
+                  f"whole {whole and whole.groups()}, stripped {stripped and stripped.groups()}")
+
+
 def test_the_final_message_from_the_payload_is_checked():
     case = Case()
     case.records(USER_PROMPT, tool_record("Bash", {"command": "ls"}))

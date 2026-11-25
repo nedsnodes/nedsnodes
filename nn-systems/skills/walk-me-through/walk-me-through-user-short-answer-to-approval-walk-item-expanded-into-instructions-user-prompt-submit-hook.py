@@ -580,8 +580,6 @@ LEAD_INS_BEFORE_A_LINE_SHOWN_WITHOUT_ITS_MARK = {"`#new` line": "If you approve,
 # A `The new text:` just after a `#new` or `#new_if_d` mark labels the text that follows; it is not part of it. In a
 # source line the label may be bold or italic, as `**The new text:**`.
 NEW_TEXT_LABEL = re.compile(r"^[*_]*the\s+new\s+text[*_]*:[*_]*\s*", re.I)
-# The list and quotation marks that can open a Markdown source line.
-LINE_MARKS = re.compile(r"^\s*(?:(?:[-+*>]|\d+[.)])\s+)+")
 TRANSCRIPT_UNREADABLE_LINES = (
     ANSWER_DISCARDED + ": it could not read this agent-session's transcript, {path}, which it reads to check that "
     "a message showed {item}. The error: {error}.",
