@@ -799,10 +799,11 @@ def main(argv=None) -> int:
                   "findings.\n"
                   "Run the command that ran this cell once more: codex writes its review as JSON "
                   "only on some runs.\n"
-                  "If the second run prints this message again, cite each finding of the text "
-                  "codex wrote, below, in a comment of your review of this commit, with the "
-                  "category you give it; and send merge-lane-2, with the SendMessage tool, this "
-                  "whole message, so that the cell learns to convert this form.\n"
+                  "If the second run prints this message again, give each finding of the text "
+                  "codex wrote, below, its own comment in your review of this commit, with the "
+                  "finding_category you give it; and, unless you are merge-lane-2, send "
+                  "merge-lane-2, with the SendMessage tool, this whole message, so that the "
+                  "cell's code is changed to convert this form.\n"
                   "The text codex wrote:\n" + report, file=sys.stderr)
             return 1
     report = codex_priority_labels_spelled_out(report)
