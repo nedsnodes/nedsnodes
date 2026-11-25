@@ -7669,6 +7669,15 @@ def test_a_kept_version_that_cannot_be_recorded_is_reported_naming_the_command_t
           "kept in the walk-document",
           result.returncode == 1 and "could not be written to record that" in result.stderr
           and walk.read_text().count("#### Withdrawn version 1 of item 3") == 1, described(result))
+    rerun = case.run(WAITING_ITEM_READ)
+    recorded = [json.loads(path.read_text()).get("kept_as_withdrawn_version")
+                for path in sorted(reads.glob("*-outcome.json"))]
+    check("the rerun the failure names, with the reads writable, records the text found already kept under its heading",
+          rerun.returncode == 0 and "#### Withdrawn version 1 of item 3" in recorded, described(rerun) + repr(recorded))
+    walk.write_text(walk.read_text().replace("\n\n## Item 4 of 5", "\n\nNote: kept after the read.\n\n## Item 4 of 5"))
+    again = case.run(WAITING_ITEM_READ)
+    check("after that rerun, a note written after the kept text keeps no second copy",
+          again.returncode == 0 and walk.read_text().count("#### Withdrawn") == 1, described(again) + walk.read_text())
 
 
 def test_the_count_of_proposed_text_revisions_takes_only_item_3_s_lines_from_a_heading_shared_with_item_4():
@@ -7713,6 +7722,21 @@ def test_a_rerun_after_an_over_limit_rewrite_whose_count_write_failed_starts_the
           failed.returncode == 1 and "could not be written" in failed.stderr
           and again.returncode == 1 and "over the limit" in again.stderr and revised_item_revisions(case) == 0,
           described(failed) + described(again))
+
+
+def test_a_fresh_agent_rewrite_read_from_the_whole_item_is_refused_when_another_sub_step_is_over_the_limit():
+    case, _, _ = revised_item_case_revised_three_times_across_a_split()
+    document = revised_item_document(case)
+    document.write_text(document.read_text().rstrip("\n") + "\n\n### Item 3.2 of 9: the long half\n\n"
+                        + "word " * 600 + "\n")
+    case.minutes.write_text(case.minutes.read_text() + "#next_to_present item 3 of 9\n")
+    rewrite = case.reads() / "item-3.1-fresh-agent-rewrite.md"
+    rewrite.write_text(f'The page lists each job once.\n\n#new "{REVISED_ITEM_TEXTS[4]}"\n\n'
+                       "#case_against weak: the page grows.\n\nThe alternative: leave it.\n\nRecommendation: do it.\n")
+    result = case.run(WAITING_ITEM_READ_STEP_NAME, FRESH_AGENT_REWRITE_FLAG, str(rewrite))
+    check("a rewrite read from the whole item 3 is refused when its sibling sub-step 3.2 is over the word limit, as "
+          "the read without a rewrite is", result.returncode == 1 and "over the limit" in result.stderr
+          and "the long half" in result.stderr, described(result))
 
 
 def main():
