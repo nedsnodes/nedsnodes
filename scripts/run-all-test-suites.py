@@ -4836,10 +4836,9 @@ def selective_test_run_selection_without_no_sandbox_suites(
     [(suite, why) left out]); differs holds files_that_differ_since's answer for each commit
     the run compares with.
 
-    A selected no-sandbox suite stays when, in every one of differs, its own file or a file
-    its recording read differs, and then waits for the lock all such suites share; every
-    other selected one is left out. The one place a run for one change leaves those suites
-    out."""
+    A selected no-sandbox suite stays when, in differs[0], its own file or a file its
+    recording read differs, and then waits for the lock all such suites share; every other
+    selected one is left out. The one place a run for one change leaves those suites out."""
     if not applies:
         return selection, []
     kept, left_out = [], []
@@ -4847,16 +4846,16 @@ def selective_test_run_selection_without_no_sandbox_suites(
         if not (selected and suite in SUITES_RUN_WITHOUT_ANY_SANDBOX):
             kept.append((suite, selected, why))
             continue
-        edited = [no_sandbox_suite_file_it_read_that_differs_or_none(
-            suite, recordings.get(suite), files_only_strace_saw_by_suite.get(suite), differ)
-            for differ in differs]
-        if None in edited:
+        # Judged by the first commit alone, as suites_selected_since_every_commit judges it:
+        # a later commit, a head test run's, never ran the suite, and holds the pull
+        # request's own change, so no file the change edits differs from it.
+        edited = no_sandbox_suite_file_it_read_that_differs_or_none(
+            suite, recordings.get(suite), files_only_strace_saw_by_suite.get(suite), differs[0])
+        if edited is None:
             left_out.append((suite, why))
         else:
-            files = list(dict.fromkeys(edited))
             kept.append((suite, True, f"{why}; it runs without a sandbox and reads "
-                                      f"{' and '.join(files)}, which "
-                                      f"{'differs' if len(files) == 1 else 'differ'}, so it "
+                                      f"{edited}, which differs, so it "
                                       f"runs once it holds the lock all such suites share"))
     return kept, left_out
 

@@ -1420,15 +1420,22 @@ with tempfile.TemporaryDirectory() as scratch_name:
         kept, left_out = kept_and_left_out(
             recording_reading("scripts/tested.py", "scripts/other.py"),
             differs=(("scripts/tested.py",), ("scripts/other.py",)))
-        check("given two comparisons, a no-sandbox suite stays when each finds a file it read "
-              "that differs, and names both files",
+        check("given two comparisons, a no-sandbox suite is judged by the first, and names the "
+              "file that comparison found",
               left_out == [] and len(kept) == 1
-              and "reads scripts/tested.py and scripts/other.py, which differ" in kept[0][2],
+              and "reads scripts/tested.py, which differs" in kept[0][2],
               (kept, left_out))
         kept, left_out = kept_and_left_out(
             recording_reading("scripts/tested.py"),
             differs=(("scripts/tested.py",), ("scripts/unread.py",)))
-        check("given two comparisons, a no-sandbox suite is left out when one of them finds no "
+        check("given two comparisons, a no-sandbox suite stays when the first finds a file it "
+              "read that differs, though the second, a head test run's commit holding the same "
+              "change, finds none",
+              left_out == [] and len(kept) == 1, (kept, left_out))
+        kept, left_out = kept_and_left_out(
+            recording_reading("scripts/tested.py"),
+            differs=(("scripts/unread.py",), ("scripts/tested.py",)))
+        check("given two comparisons, a no-sandbox suite is left out when the first finds no "
               "file it read that differs",
               kept == [] and [suite for suite, _ in left_out] == ["outside-test.py"],
               (kept, left_out))
