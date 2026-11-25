@@ -183,6 +183,63 @@ class BenchmarkTest(unittest.TestCase):
         [row] = self.rows_written()
         self.assertEqual((row["state"], row["found"]), (BENCHMARK.BENCHMARK_ROW_STATE_MODEL_ANSWERED, True))
 
+    def agy_cell_stub_refusing(self, refused_case_ids, exit_code=64, stderr=None):
+        """A stand-in for the agy cell launcher that refuses the prompts of refused_case_ids as it refuses one longer
+        than agy reads whole, and answers the rest; it records the case ids it was run on."""
+        stderr = stderr if stderr is not None else (
+            f"cold-read-agy-cell: refused before agy started (marker for calling programs: "
+            f"{BENCHMARK.AGY_CELL_PROMPT_TOO_LONG_REFUSAL_MARKER}): "
+            f"the prompt is 300,000 bytes of UTF-8, over 191,985\n")
+        calls = []
+
+        def stub(runtime, model, effort, prompt_file, report_file):
+            case_id = prompt_file.name.removesuffix("-prompt.md")
+            calls.append(case_id)
+            if case_id in refused_case_ids:
+                code = f"import sys; sys.stderr.write({stderr!r}); sys.exit({exit_code})"
+            else:
+                code = f"open({str(report_file)!r}, 'w').write('m1: DECIDES\\nm2: NO\\nm3: NO\\n')"
+            return [sys.executable, "-c", code], None, None, report_file
+        return stub, calls
+
+    def run_agy(self, stub, case_set, repeats="1"):
+        BENCHMARK.agent_binary_model_run_argv_stdin_working_directory_and_answer_stdout_or_report_file = stub
+        return self.main("run", "--case-set", str(case_set), "--runtime", "agy", "--model", "gemini-x", "--effort", "low",
+                         "--hits-from", "grep:hits_newest_first", "--first-n", "3", "--rows", str(self.rows),
+                         "--repeats", repeats, "--instructions-checkout", str(self.root / "checkout"))
+
+    def test_a_prompt_the_agy_cell_refuses_as_too_large_gets_its_row_and_the_run_goes_on(self):
+        write_case_set(self.root / "two-cases", cases=("case-a", "case-b"))
+        stub, calls = self.agy_cell_stub_refusing({"case-a"})
+        code, _, _ = self.run_agy(stub, self.root / "two-cases", repeats="2")
+        self.assertEqual(code, BENCHMARK.EXIT_OK)
+        self.assertEqual(calls, ["case-a", "case-b", "case-a", "case-b"])
+        states = [(row["case_id"], row["state"], row.get("found")) for row in self.rows_written()]
+        self.assertEqual(states, [("case-a", "prompt too large for agy", None),
+                                  ("case-b", BENCHMARK.BENCHMARK_ROW_STATE_MODEL_ANSWERED, True)] * 2)
+
+    def test_an_exit_64_without_the_marker_or_from_another_runtime_still_stops_the_run(self):
+        stub, _ = self.agy_cell_stub_refusing({"case-a"}, stderr="cold-read-agy-cell: --cell must be one of ...\n")
+        code, _, err = self.run_agy(stub, self.root / "case-set")
+        self.assertEqual(code, BENCHMARK.EXIT_COULD_NOT_RUN)
+        self.assertIn("exited 64, so that case has no row", err)
+        self.rows.unlink(missing_ok=True)
+        stub, _ = self.agy_cell_stub_refusing({"case-a"})
+        code, _, err = self.run_benchmark(stub)
+        self.assertEqual(code, BENCHMARK.EXIT_COULD_NOT_RUN)
+        self.assertIn("the claude run of claude-sonnet-5-5 at effort low on case case-a exited 64", err)
+
+    def test_the_marker_is_the_agy_cell_launchers_own(self):
+        spec = importlib.util.spec_from_file_location(
+            "cold_read_agy_cell", HERE.parent / "nn-systems" / "cold-read" / "cold-read-agy-cell.py")
+        cell = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(cell)
+        if not hasattr(cell, "AGY_PROMPT_TOO_LONG_FOR_AGY_TO_READ_WHOLE_REFUSAL_MARKER"):
+            self.skipTest("this checkout's agy cell launcher does not refuse a prompt too long for agy yet")
+        self.assertEqual(BENCHMARK.AGY_CELL_PROMPT_TOO_LONG_REFUSAL_MARKER,
+                         cell.AGY_PROMPT_TOO_LONG_FOR_AGY_TO_READ_WHOLE_REFUSAL_MARKER)
+        self.assertEqual(BENCHMARK.AGY_CELL_PROMPT_TOO_LONG_REFUSAL_EXIT_CODE, cell.common.EXIT_BAD_INVOCATION)
+
     def test_bad_arguments_and_case_sets_could_not_run(self):
         stub = StubModel("m1: NO\n")
         for argv_change, message in [
@@ -246,6 +303,29 @@ class BenchmarkTest(unittest.TestCase):
         self.assertEqual(flagging["out"], ["answered DECIDES on 3 of 20 other messages, more than 1 in 10"])
         _, [incomplete], _ = self.score([self.row("a", 1, 5, True), self.row("b", 1, 5, True), self.row("a", 2, 5, True)])
         self.assertEqual(incomplete["out"], ["has 3 rows, fewer than its 2 cases times 2 repeats"])
+
+    def test_score_leaves_cases_too_large_for_agy_out_of_found_seconds_and_score(self):
+        too_large = BENCHMARK.BENCHMARK_ROW_STATE_PROMPT_TOO_LARGE_FOR_AGY
+        rows = [row for repeat in (1, 2, 3) for row in (
+            self.row("a", repeat, 0.5, None, other=0, state=too_large),
+            self.row("b", repeat, 4, True), self.row("c", repeat, 8, repeat != 2))]
+        code, [result], _ = self.score(rows)
+        self.assertEqual(code, BENCHMARK.EXIT_OK)
+        self.assertEqual((result["cases"], result["cases_it_could_take"], result["cases_prompt_too_large_for_agy"]),
+                         (3, 2, ["a"]))
+        self.assertEqual(result["found_of_cases_it_could_take"], "2 of 2")
+        self.assertEqual(result["mean_seconds_per_case_middle_of_repeats"], 6)
+        self.assertEqual(result["score"], round(100 * 2 / 2 / 6, 4))
+        self.assertEqual(result["out"], [])
+
+    def test_score_of_a_combination_whose_every_case_was_too_large_for_agy(self):
+        too_large = BENCHMARK.BENCHMARK_ROW_STATE_PROMPT_TOO_LARGE_FOR_AGY
+        code, [result], _ = self.score([self.row("a", 1, 0.5, None, state=too_large),
+                                        self.row("b", 1, 0.4, None, state=too_large)])
+        self.assertEqual(code, BENCHMARK.EXIT_OK)
+        self.assertEqual((result["found_of_cases_it_could_take"], result["mean_seconds_per_case_middle_of_repeats"],
+                          result["score"]), ("0 of 0", None, None))
+        self.assertEqual(result["out"], ["its prompt was too large for agy on every case"])
 
     def test_score_without_rows_could_not_run(self):
         self.assertIn("hold no rows, so there is nothing to score.\nRun score again with --rows naming the files that "

@@ -19,7 +19,9 @@ list inside a case file, such as grep:hits_newest_first, so a search by meaning 
 cases is run the same way. One JSON row per case and repeat is appended to --rows; a case and repeat --rows already
 holds for the same model, effort, list and N is skipped, so a rerun goes on where a failed run stopped. A case whose
 model run passes 120 seconds drops the whole model and effort: its row says so, the run stops, and a later run of
-that model and effort runs nothing. Every case's --hits-from list is checked before the first model run.
+that model and effort runs nothing. Every case's --hits-from list is checked before the first model run. A case
+whose prompt the agy cell launcher refuses as longer than agy reads whole gets a row whose state is "prompt too large
+for agy", and the run goes on with the next case.
 
 claude runs `claude -p` with no tools in an empty directory. agy and codex run through their cold-read cell
 launchers (nn-systems/cold-read/), which sandbox them; codex in the launcher's "deep" tier, its fast mode. Those
@@ -30,9 +32,11 @@ Messages to agents follow docs/nedsnodes-wiki/nedsnodes-how-to-write-a-tool-mess
 
 score reads each rows file once, even when --rows names it twice. For each model, effort, list and N in the rows, the middle of the repeats' found-out-of-cases and of their
 mean seconds per case, the score (percent of cases whose known ruling was answered DECIDES, divided by that mean
-seconds; highest wins), and the wrong-DECIDES count on the other messages. A combination is out when it was
-dropped, when more than 1 in 10 of its other messages across all its rows were answered DECIDES, or when it has
-fewer rows than its cases times its repeats.
+seconds; highest wins), and the wrong-DECIDES count on the other messages. The cases are those the combination
+could take: a "prompt too large for agy" row counts in no found count, seconds or score, and the found count is
+given over the cases it could take, such as "3 of 7". A combination is out when it was dropped, when more than 1 in
+10 of its other messages across all its rows were answered DECIDES, when it has fewer rows than its cases times its
+repeats, or when its prompt was too large for agy on every case.
 
 EXIT. 0 when every run finished, or every row was scored. 1 when a combination was dropped at 120 seconds.
 2 when the run or score could not be done: bad arguments or case set, or a model run that failed; a line opening
@@ -74,6 +78,12 @@ ANSWER_LINE = re.compile(r"^(m\d+):\s*(\S+)\s*$")
 BENCHMARK_ROW_STATE_MODEL_ANSWERED = "answered"
 BENCHMARK_ROW_STATE_MODEL_ANSWER_UNPARSABLE = "answer-unparsable"
 BENCHMARK_ROW_STATE_MODEL_AND_EFFORT_DROPPED_PAST_TIME_LIMIT = "dropped-past-time-limit"
+BENCHMARK_ROW_STATE_PROMPT_TOO_LARGE_FOR_AGY = "prompt too large for agy"
+# The agy cell launcher refuses, with exit 64 and this token on stderr, a prompt longer than agy reads whole, which
+# agy would otherwise cut and still exit 0. It is AGY_PROMPT_TOO_LONG_FOR_AGY_TO_READ_WHOLE_REFUSAL_MARKER in
+# nn-systems/cold-read/cold-read-agy-cell.py; a launcher without it never refuses, and every row stands as before.
+AGY_CELL_PROMPT_TOO_LONG_REFUSAL_EXIT_CODE = 64
+AGY_CELL_PROMPT_TOO_LONG_REFUSAL_MARKER = "agy-prompt-too-long-for-agy-to-read-whole-refusal"
 
 # The cold-read cell launchers already run agy and codex inside the credential sandbox the project requires, and
 # write the model's answer to the report file. Codex's fast mode is that launcher's "deep" tier, whose
@@ -261,6 +271,9 @@ def run_one_case(case, entries, arguments, files, repeat, work):
            "known_rulings_in_messages": sorted(known & set(message_ids)), "exit_code": exit_code}
     if exit_code is None:
         return {**row, "state": BENCHMARK_ROW_STATE_MODEL_AND_EFFORT_DROPPED_PAST_TIME_LIMIT}, stdout
+    if (arguments.runtime == "agy" and exit_code == AGY_CELL_PROMPT_TOO_LONG_REFUSAL_EXIT_CODE
+            and AGY_CELL_PROMPT_TOO_LONG_REFUSAL_MARKER in stderr):
+        return {**row, "state": BENCHMARK_ROW_STATE_PROMPT_TOO_LARGE_FOR_AGY}, stderr
     answer = stdout if answer_place == "stdout" else CELL_REPORT_PROVENANCE_STAMP.sub(
         "", report_file.read_text(encoding="utf-8") if report_file.is_file() else "")
     if exit_code != 0:
@@ -399,17 +412,25 @@ def score(arguments):
     for key, rows in sorted(groups.items()):
         case_ids = sorted({row["case_id"] for row in rows})
         repeats = sorted({row["repeat"] for row in rows})
+        # A case agy could not take is no miss: it stays out of the found count, the seconds and the score.
+        taken = [row for row in rows if row["state"] != BENCHMARK_ROW_STATE_PROMPT_TOO_LARGE_FOR_AGY]
+        taken_case_ids = sorted({row["case_id"] for row in taken})
+        too_large_case_ids = sorted({row["case_id"] for row in rows} - set(taken_case_ids))
         answered = [row for row in rows if row["state"] == BENCHMARK_ROW_STATE_MODEL_ANSWERED]
         other = sum(row["other_messages"] for row in answered)
         other_decided = sum(row["other_messages_decided"] for row in answered)
         per_repeat = []
         for repeat in repeats:
-            repeat_rows = [row for row in rows if row["repeat"] == repeat]
+            repeat_rows = [row for row in taken if row["repeat"] == repeat]
             per_repeat.append({"repeat": repeat, "found": sum(bool(row.get("found")) for row in repeat_rows),
-                               "mean_seconds_per_case": statistics.mean(row["seconds"] for row in repeat_rows)})
+                               "mean_seconds_per_case": (statistics.mean(row["seconds"] for row in repeat_rows)
+                                                         if repeat_rows else None)})
         found = statistics.median_low([r["found"] for r in per_repeat])
-        seconds = statistics.median([r["mean_seconds_per_case"] for r in per_repeat])
+        repeat_seconds = [r["mean_seconds_per_case"] for r in per_repeat if r["mean_seconds_per_case"] is not None]
+        seconds = statistics.median(repeat_seconds) if repeat_seconds else None
         out = []
+        if not taken_case_ids:
+            out.append("its prompt was too large for agy on every case")
         if any(row["state"] == BENCHMARK_ROW_STATE_MODEL_AND_EFFORT_DROPPED_PAST_TIME_LIMIT for row in rows):
             out.append(f"took over {BENCHMARK_MODEL_RUN_SECONDS_LIMIT_THAT_DROPS_THE_MODEL_AND_EFFORT} seconds on a case")
         if other and other_decided / other > OVER_FLAG_LIMIT:
@@ -420,8 +441,11 @@ def score(arguments):
         print(json.dumps({
             "runtime": runtime, "model": model, "effort": effort, "hits_from": hits_from, "first_n": first_n,
             "cases": len(case_ids), "repeats": len(repeats),
-            "found_middle_of_repeats": found, "mean_seconds_per_case_middle_of_repeats": round(seconds, 2),
-            "score": round(100 * found / len(case_ids) / seconds, 4) if seconds else None,
+            "cases_it_could_take": len(taken_case_ids), "cases_prompt_too_large_for_agy": too_large_case_ids,
+            "found_of_cases_it_could_take": f"{found} of {len(taken_case_ids)}",
+            "found_middle_of_repeats": found,
+            "mean_seconds_per_case_middle_of_repeats": round(seconds, 2) if seconds is not None else None,
+            "score": round(100 * found / len(taken_case_ids) / seconds, 4) if seconds and taken_case_ids else None,
             "other_messages": other, "other_messages_decided": other_decided,
             "answers_unparsable": sum(row["state"] == BENCHMARK_ROW_STATE_MODEL_ANSWER_UNPARSABLE for row in rows),
             "out": out, "per_repeat": per_repeat}))
