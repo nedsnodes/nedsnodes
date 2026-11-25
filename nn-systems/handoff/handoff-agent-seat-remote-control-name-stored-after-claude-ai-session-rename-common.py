@@ -116,12 +116,13 @@ def handoff_remote_control_name_save_when_transcript_custom_title_changed_and_re
     path = remote_control_name_file_path(agent_seat)
     path.parent.mkdir(parents=True, exist_ok=True)
     # The Stop hook and the handoff-supervisor can both store; a reader must never see half a name.
+    # Whoever stores it is told to announce it, so the others may know the agent-seat by it from now on.
+    # Recorded before the store: a failed append then leaves the name unstored, and the next try redoes both.
+    with open(handoff_agent_seat_remote_control_names_it_was_announced_under_since_its_launch_file_path_build(agent_seat), "a", encoding="utf-8") as record:
+        record.write(title + "\n")
     temporary_path = path.with_name(f"{path.name}.{os.getpid()}.tmp")
     temporary_path.write_text(title + "\n", encoding="utf-8")
     os.replace(temporary_path, path)
-    # Whoever stored it is told to announce it, so the others may know the agent-seat by it from now on.
-    with open(handoff_agent_seat_remote_control_names_it_was_announced_under_since_its_launch_file_path_build(agent_seat), "a", encoding="utf-8") as record:
-        record.write(title + "\n")
     return RemoteControlRename(old_name, title)
 
 

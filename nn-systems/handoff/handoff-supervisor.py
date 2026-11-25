@@ -2796,13 +2796,15 @@ def supervise_sessions(settings: SupervisorSettings) -> int:
         state.update({LAUNCHED_SESSION_ID_STATE_KEY: session_id,
                       LAUNCHED_REMOTE_CONTROL_NAME_STATE_KEY: remote_control_name,
                       "generation": generation})
-        try:
-            remote_control_name_common.handoff_agent_seat_remote_control_names_it_was_announced_under_since_its_launch_reset_to_launched_name(
-                settings.agent, remote_control_name)
-        except OSError as error:
-            print(f"handoff-supervisor: the record of the names agent-seat {settings.agent} is announced "
-                  f"under could not be started, so its next handoff may announce a rename from a name "
-                  f"the others no longer use: {error}", file=sys.stderr)
+        # A resume continues the agent-session whose names the others may know, so its record is kept.
+        if not next_launch_resumes_the_session:
+            try:
+                remote_control_name_common.handoff_agent_seat_remote_control_names_it_was_announced_under_since_its_launch_reset_to_launched_name(
+                    settings.agent, remote_control_name)
+            except OSError as error:
+                print(f"handoff-supervisor: the record of the names agent-seat {settings.agent} is announced "
+                      f"under could not be started, so its next handoff may announce a rename from a name "
+                      f"the others no longer use: {error}", file=sys.stderr)
         clear_agent_exit_record_from_supervisor_state(state)
         write_supervisor_state(settings.state_path, state)
 

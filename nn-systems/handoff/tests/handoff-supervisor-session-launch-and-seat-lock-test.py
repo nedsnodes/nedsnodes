@@ -1507,6 +1507,15 @@ with tempfile.TemporaryDirectory() as rename_directory:
               "could not be read" in errors.getvalue()
               and "The agent-seat seat-a is now --fourth in Remote Control" in notice,
               notice + " | " + errors.getvalue())
+        try:
+            stop_hook_stores("--fifth")
+            append_failure = ""
+        except OSError as error:
+            append_failure = str(error)
+        check("when the record of announced names cannot be appended to, the rename is not stored, "
+              "so the hook's report that it was not stored holds and the next turn's end tries again",
+              append_failure and name_file.read_text(encoding="utf-8").strip() == "--fourth",
+              append_failure + " | " + name_file.read_text(encoding="utf-8"))
         common.handoff_agent_seat_remote_control_names_it_was_announced_under_since_its_launch_file_path_build("seat-a").rmdir()
     finally:
         os.environ["HOME"] = real_home
