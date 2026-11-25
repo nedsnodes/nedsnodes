@@ -1639,8 +1639,8 @@ def cases(scratch):
           "A file that failed is in one of two states. Either it is unchanged, still holding the "
           "version the user declined; or it was put back, or deleted when it has no approved "
           "version, but no line in the store's log records that it was." in result.stderr
-          and "a file whose name begins with the file's name and ends in .restore"
-          in result.stderr
+          and "When a failed write could not remove its temporary file, that file's Failed on "
+          "line names the temporary file; delete the temporary file with rm." in result.stderr
           and "giving the error on each file's Failed on line" in result.stderr
           and "For a file that failed, do not run git commit --only -m \"Put back the approved "
           "<file name>\" -- <path>, the command this hook's message asking about the change "
