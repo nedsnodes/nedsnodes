@@ -3,7 +3,7 @@
 
 Usage:
   scripts/merge-lane-code-review-codex-cell-run-on-pull-request-head.py <pull request number>
-      <base commit> [--merge-lane-worktrees-and-outputs-directory DIR] [--merge-lane-review-worktrees-directory DIR] [--review-tools-worktree-at-main DIR]
+      <base commit> [--expected-head-commit COMMIT] [--merge-lane-worktrees-and-outputs-directory DIR] [--merge-lane-review-worktrees-directory DIR] [--review-tools-worktree-at-main DIR]
 
 The base commit is the merge base for a first review, or the nn-head-commit
 reviewed before for a fix-round, unless that fix-round merged main or rewrote
@@ -20,9 +20,14 @@ and stderr go to the same directory.
 The same directory also gets codex-review-run-record.json, holding
 "pull_request", "head_commit", "base_commit", "exit_code" and "report_file".
 It is removed before the run and written after it, so a run that was killed
-leaves none. A second run for the same pull request and base replaces the
-first run's record and report, so after a rerun that fails the posting
-program no longer sees the first run's findings and asks no grade for them.
+leaves none. A second run for the same pull request and base always replaces
+the first run's record, so after a rerun that fails the posting program no
+longer sees the first run's findings and asks no grade for them; it replaces
+the report only when Codex ran, so a rerun stopped before Codex starts, by a
+missing review tool or an unreadable token, leaves the earlier report beside
+a record that names the failed run.
+With --expected-head-commit, the run refuses before the review when pr<n>-head
+holds another commit, since the review would record the wrong one.
 merge-lane-pull-request-reviewer-review-post-and-read-back.py
 reads it to tell a Codex run that found nothing from one that failed.
 gh reads the description with the merge account's token, the one file every
@@ -31,8 +36,8 @@ merge-lane helper and merge-gate.sh read.
 Exit codes: the review's exit code; 2 when the token, the description,
 --review-tools-worktree-at-main's scripts/code-review-codex-cell.py or its
 docs/agents/pr-reviewer-instructions.md could not be read, before the review
-runs, or when the pull request's head commit could not be read or the run
-record could not be removed or written.
+runs, or when the pull request's head commit could not be read or is not
+--expected-head-commit, or the run record could not be removed or written.
 """
 
 import argparse
@@ -63,6 +68,8 @@ def parse_arguments(argv):
     parser.add_argument("base_commit",
                         help="the merge base, or for a fix-round that neither merged main nor "
                              "rewrote history, the nn-head-commit reviewed before")
+    parser.add_argument("--expected-head-commit",
+                        help="refuse unless pr<n>-head holds this commit")
     common.add_directory_options(parser, "cx/")
     return common.resolve_path_options(parser.parse_args(argv))
 
@@ -88,6 +95,13 @@ def main(argv=None):
         print(f"PR {number}: Codex review not run: could not read the head commit of "
               f"{common.pull_request_head_worktree(arguments, number)}: {head.stderr.strip()}\n"
               f"Rebuild the pull request's worktrees, then run this again.")
+        return 2
+    if arguments.expected_head_commit and head.stdout.strip() != arguments.expected_head_commit:
+        print(f"PR {number}: Codex review not run: "
+              f"{common.pull_request_head_worktree(arguments, number)} holds commit "
+              f"{head.stdout.strip()}, not {arguments.expected_head_commit}, so the review would "
+              f"record the wrong commit.\nRebuild the pull request's worktrees at "
+              f"{arguments.expected_head_commit}, then run this again.")
         return 2
     exit_code = codex_review_exit_code(arguments, outputs, environment)
     temporary = record.with_name(f"{record.name}.{os.getpid()}.tmp")
