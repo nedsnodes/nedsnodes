@@ -90,6 +90,14 @@ checkout, no task is opened and the STOP message says to ask the user. A
 merge whose only failures are tests already recorded, with every suite run
 to the end and every step done, prints a notice and exits 0, because their
 repair task is already open; a new failed test in a recorded suite exits 3.
+A merge into a branch other than main leaves the record as it was, reruns no
+suite and opens no repair task, because the record and its repair tasks cover
+main alone. A branch cut from main fails what main fails, so a failed test the
+record holds is treated as above: with every suite run to the end and every
+step done, a notice and exit 0. A failed test the record does not hold is a
+STOP, exit 3, that names the branch and tells the pull request's author and
+the user, since only that author can fix it before the branch merges into
+main.
 
 The merge command deletes the pull request's branch, and GitHub closes every
 open pull request whose base branch is deleted. The retarget is here, not in
@@ -131,7 +139,7 @@ before any merge; 3 merged, but a step after the merge was not done: a review
 worktree or the pr<n>-merge-commit-on-main-worktree worktree could not be removed, the
 pull request's branch could not be read or deleted after a merge command that exited
 nonzero, the after-merge test run did not pass, because a test not already on the failed
-suites record failed, a suite did not run to the end, the runner gave no full verdict, or the
+suites record failed, on main or on the branch merged into, a suite did not run to the end, the runner gave no full verdict, or the
 merge commit could not be read or its worktree made, or recordings could not be adopted, or
 hr/pr<n>/recorded-inputs could not be removed, or the failed suites record could not be read
 or written, its suites could not be run again, a repair task could not be opened, or the
@@ -852,12 +860,71 @@ def failed_suites_kept_in_view(arguments, merge_commit, worktree, log_dir, envir
     return kept
 
 
+def failed_tests_main_does_not_fail_named(arguments, base_branch, log_dir, lines):
+    """For a merge into base_branch, not main: name this run's failed tests that the failed
+    suites record does not hold, and leave the record as it was.
+
+    Return a dict of the form failed_suites_kept_in_view returns, with no repair task: the
+    record and its repair tasks cover main alone. A branch cut from main fails what main fails,
+    so only a failed test the record does not hold is the merge's own. Each step that did not
+    work prints its own STOP line."""
+    runner = common.run_all_test_suites
+    path = failed_suites_record.failed_suites_record_file()
+    kept = {"complete": True, "new_tests": {}, "seat": None, "task_id": None,
+            "why_none": (f"pull request {arguments.pull_request} merged into {base_branch!r}, "
+                         f"not main, and repair tasks are opened only for tests that fail on "
+                         f"main"),
+            "record_empty": True}
+    print(f"the record of tests failing on main, {path}, was left as it was: pull request "
+          f"{arguments.pull_request} merged into {base_branch!r}, not main, and the record "
+          f"holds main's failures alone. A failed test of this run that the record holds fails "
+          f"on main too; the last message below says what to do about any other.")
+    if not any(line.startswith(runner.FAILED_SUITE_LINE_PREFIX) for line in lines):
+        return kept
+    verdicts, junit_error = run_verdicts_by_suite(lines, log_dir / runner.JUNIT_XML_FILE_NAME)
+    if junit_error:
+        print(f"STOP: merged into {base_branch!r}, but this test run's failed tests could not "
+              f"be named: {junit_error}\n{TELL_AUTHOR_AND_USER_THE_STOP_MESSAGE}")
+        kept["complete"] = False
+        return kept
+    try:
+        recorded = failed_suites_record.failed_after_merge_test_suites_on_main_record_read()
+    except failed_suites_record.FailedAfterMergeTestSuitesOnMainRecordFileUnreadableOrUnwritable as error:
+        print(f"STOP: merged into {base_branch!r}, but {path} could not be read, so every "
+              f"failed test of this run is taken as failing on {base_branch!r} alone: {error}\n"
+              f"{TELL_AUTHOR_AND_USER_THE_STOP_MESSAGE}")
+        kept["complete"] = False
+        recorded = {}
+    for suite, verdict in sorted(verdicts.items()):
+        if not verdict["ran_to_the_end"]:
+            print(f"STOP: merged into {base_branch!r}, but {suite} did not run to the end: it "
+                  f"was killed, passed its time limit, or stopped after a case line with no "
+                  f"verdict, so its later cases have none.\n"
+                  f"{TELL_AUTHOR_AND_USER_THE_STOP_MESSAGE}")
+            kept["complete"] = False
+        on_record = recorded.get(suite, {}).get("failed_tests", {})
+        for test, log in verdict["failed"].items():
+            if test not in on_record:
+                kept["new_tests"].setdefault(suite, {})[test] = log
+    return kept
+
+
 def after_merge_test_run_closing_message_printed_returning_whether_stop(arguments, merge_commit, run_exit_code, summaries,
                                  failed_suites_were_the_only_problem, kept, every_step_complete,
-                                 by_hand):
+                                 by_hand, base_branch):
     """Print the after-merge test run's closing message; return whether it is a STOP."""
     runner = common.run_all_test_suites
+    tested = "main" if base_branch == "main" else repr(base_branch)
     new_tests = kept["new_tests"]
+    if new_tests and base_branch != "main":
+        print(f"STOP: merged, but the test run of {tested} at {merge_commit} exited "
+              f"{run_exit_code} and failed tests that the record of tests failing on main does "
+              f"not hold, so they fail on {tested} and not, as far as that record shows, on "
+              f"main; the failed suites are listed above, each with its log.\n"
+              f"No repair task was opened: {kept['why_none']}. The pull request's author fixes "
+              f"these tests on {tested} before it merges into main.\n"
+              f"{TELL_AUTHOR_AND_USER_THE_STOP_MESSAGE}")
+        return True
     if new_tests:
         if run_exit_code == 0:
             print(f"STOP: merged, and the test run of main at {merge_commit} passed, but the "
@@ -890,19 +957,19 @@ def after_merge_test_run_closing_message_printed_returning_whether_stop(argument
                   f"dispatched you instead.")
         return True
     if failed_suites_were_the_only_problem and every_step_complete:
-        print(f"the test run of main at {merge_commit} failed only suites already on the failed "
-              f"suites record. The merge that first failed each one opened its repair task or "
-              f"said to ask the user, so nothing is needed for them here. Go on with the next "
-              f"merge, if there is one.")
+        print(f"the test run of {tested} at {merge_commit} failed only suites already on the "
+              f"failed suites record. The merge into main that first failed each one opened its "
+              f"repair task or said to ask the user, so nothing is needed for them here. Go on "
+              f"with the next merge, if there is one.")
         return False
     if run_exit_code != 0:
-        print(f"STOP: merged, but the test run of main at {merge_commit} exited "
-              f"{run_exit_code}, so main may be broken; the failed suites, if any, are "
+        print(f"STOP: merged, but the test run of {tested} at {merge_commit} exited "
+              f"{run_exit_code}, so {tested} may be broken; the failed suites, if any, are "
               f"listed above, each with its log.\n{TELL_AUTHOR_AND_USER_THE_STOP_MESSAGE}")
         return True
     if not summaries:
-        print(f"STOP: merged, but the test run of main at {merge_commit} exited 0 and printed "
-              f"no {runner.SUMMARY_LINE_PREFIX} line, so it gave no verdict on main.\n"
+        print(f"STOP: merged, but the test run of {tested} at {merge_commit} exited 0 and "
+              f"printed no {runner.SUMMARY_LINE_PREFIX} line, so it gave no verdict on {tested}.\n"
               f"In a detached worktree at {merge_commit}, run: {by_hand}\n"
               f"If that run also prints no {runner.SUMMARY_LINE_PREFIX} line, tell the user "
               f"this message.")
@@ -1144,14 +1211,7 @@ def after_merge_test_run(arguments, merge_commit, base_branch):
         kept = failed_suites_kept_in_view(arguments, merge_commit, worktree, log_dir,
                                           environment, lines)
     else:
-        print(f"main's failed suites record, {failed_suites_record.failed_suites_record_file()}, "
-              f"was left as it was: pull request {arguments.pull_request} merged into "
-              f"{base_branch!r}, not main, and that record lists only the tests main fails. "
-              f"Nothing to do about the record; this program's closing message, printed after "
-              f"the test run's other steps, says what to do about this test run's result.")
-        kept = {"complete": True, "new_tests": {}, "seat": None, "task_id": None,
-                "why_none": None, "record_empty": True}
-        failed_suites_were_the_only_problem = False
+        kept = failed_tests_main_does_not_fail_named(arguments, base_branch, log_dir, lines)
     every_step_complete = done_before_the_run and kept["complete"] and (
         failed_suites_were_the_only_problem or (run_all.returncode == 0 and bool(summaries)))
     # A run that failed only tests already on the record exits 0, yet main still fails them,
@@ -1190,7 +1250,7 @@ def after_merge_test_run(arguments, merge_commit, base_branch):
     # that did not work.
     stop = after_merge_test_run_closing_message_printed_returning_whether_stop(
         arguments, merge_commit, run_all.returncode, summaries,
-        failed_suites_were_the_only_problem, kept, every_step_complete, by_hand)
+        failed_suites_were_the_only_problem, kept, every_step_complete, by_hand, base_branch)
     return EXIT_MERGED_BUT_A_STEP_AFTER_THE_MERGE_NOT_DONE if stop else EXIT_MERGED
 
 

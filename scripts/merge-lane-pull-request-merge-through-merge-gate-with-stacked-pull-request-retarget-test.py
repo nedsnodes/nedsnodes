@@ -210,6 +210,7 @@ RUNNER_FAILED = ("PASS scripts/some-test.py (1s)\n"
                  "\n1 failed:\n"
                  "FAIL scripts/broken-test.py exit 1 — log /logs/broken-test.py.log\n"
                  "SUMMARY: 1 passed, 1 failed, 2 total; fake runner\n")
+TELL_AUTHOR_AND_USER = "Tell the pull request's author, and the user, this message as printed"
 RUNNER_COULD_NOT_RUN = "run-all-test-suites.py: git cannot resolve the COMMIT given\n"
 
 failures = []
@@ -791,14 +792,15 @@ def newest_main_commit_left_no_test_failing_cases(scratch):
             raise OSError(16, "Device or resource busy")
         return real_unlink(self, *arguments, **options)
 
+    # The space makes the quoted and the unquoted rm differ, so the case sees an unquoted one.
+    spaced = "no-test-failing-replace-and-cleanup-both-fail with a space"
     os.replace, Path.unlink = replace_failing_for_the_record, unlink_failing_for_the_record
     try:
-        exit_code, output, calls, parent, merge_commit, recorded = case(
-            "no-test-failing-replace-and-cleanup-both-fail", "PARENT\n")
+        exit_code, output, calls, parent, merge_commit, recorded = case(spaced, "PARENT\n")
     finally:
         os.replace, Path.unlink = real_replace, real_unlink
-    path = newest_main_commit_left_no_test_failing_file(
-        scratch / "no-test-failing-replace-and-cleanup-both-fail")
+    path = newest_main_commit_left_no_test_failing_file(scratch / spaced)
+    rm_lines = [line[line.index("rm "):] for line in output.splitlines() if "delete the temporary file: rm " in line]
     temporaries = sorted(item.name for item in path.parent.glob(f"{path.name}.*.tmp"))
     check("a record whose rename and cleanup both fail: the STOP names the temporary file left "
           "behind and the cleanup's error, and the record keeps its commit",
@@ -806,7 +808,8 @@ def newest_main_commit_left_no_test_failing_cases(scratch):
           and f"The temporary file {path.parent / temporaries[0]} could not be removed either: "
               f"[Errno 16] Device or resource busy." in output
           and f"was not recorded in {path}: [Errno 30] Read-only file system" in output
-          and f"rm {shlex.quote(str(path.parent / temporaries[0]))}" in output,
+          and len(rm_lines) == 1
+          and shlex.split(rm_lines[0]) == ["rm", str(path.parent / temporaries[0])],
           f"exit {exit_code}\n{output}\n{temporaries}")
 
     into_another_branch = default_routes([])
@@ -833,8 +836,76 @@ def newest_main_commit_left_no_test_failing_cases(scratch):
           exit_code == 0 and newest_main_commit_left_no_test_failing_of(directory) == parent
           and [failed_suites_record_of(directory)] == failed_suites_as_written
           and "merged into 'stacked-topic-branch', not main" in output
-          and f"{failed_suites_record_file(directory)}, was left as it was: pull request " in output,
+          and f"the record of tests failing on main, {failed_suites_record_file(directory)}, was "
+              f"left as it was: pull request " in output,
           f"exit {exit_code}\n{output}\n{failed_suites_record_of(directory)}")
+
+    def recorded_failure_only(directory):
+        failed_suites_record_written(directory)
+        failed_suites_as_written.append(failed_suites_record_of(directory))
+
+    for name, runner_output, expected_exit, expected_lines, unexpected in (
+            ("failed-into-another-branch-only-what-main-fails", RUNNER_FAILED, 0,
+             ["the test run of 'stacked-topic-branch' at ",
+              "failed only suites already on the failed suites record"],
+             ["STOP", "main may be broken"]),
+            ("failed-into-another-branch-what-main-does-not-fail",
+             RUNNER_FAILED.replace("broken-test.py", "new-broken-test.py"), 3,
+             ["STOP: merged, but the test run of 'stacked-topic-branch' at ",
+              "failed tests that the record of tests failing on main does not hold",
+              "No repair task was opened: pull request 10 merged into 'stacked-topic-branch', "
+              "not main", TELL_AUTHOR_AND_USER],
+             ["main may be broken", "Ask the user: \"Main fails"])):
+        failed_suites_as_written.clear()
+        exit_code, output, _, _, _ = run_case(
+            scratch, name, [(GATE_PASSED, 0)], into_another_branch,
+            merge_commit_new_to_the_clone=True, runner_answer=(runner_output, 1),
+            before_the_program_runs=recorded_failure_only)
+        directory = scratch / name
+        check(f"{name.replace('-', ' ')}: a failed after-merge test run of a merge into a branch "
+              f"other than main is judged against the record of tests failing on main, which it "
+              f"leaves as it was, opens no repair task, and names the branch, not main",
+              exit_code == expected_exit
+              and [failed_suites_record_of(directory)] == failed_suites_as_written
+              and not (directory / "home" / ".claude" / "tasks").exists()
+              and all(line in output for line in expected_lines)
+              and not any(line in output for line in unexpected),
+              f"exit {exit_code}\n{output}")
+
+    def record_unreadable(directory):
+        record = failed_suites_record_file(directory)
+        record.parent.mkdir(parents=True, exist_ok=True)
+        record.write_text("not json")
+
+    def no_junit(directory):
+        recorded_failure_only(directory)
+        (directory / "runner-writes-no-junit").write_text("")
+
+    def suite_cut_short(directory):
+        recorded_failure_only(directory)
+        (directory / "runner.junit").write_text(
+            junit_of_broken_suite(["scripts/broken-test.py"], [], ran_to_the_end=False))
+
+    for name, prepare, expected in (
+            ("failed-into-another-branch-record-unreadable", record_unreadable,
+             "could not be read, so every failed test of this run is taken as failing on "
+             "'stacked-topic-branch' alone"),
+            ("failed-into-another-branch-junit-missing", no_junit,
+             "STOP: merged into 'stacked-topic-branch', but this test run's failed tests could "
+             "not be named"),
+            ("failed-into-another-branch-suite-cut-short", suite_cut_short,
+             "STOP: merged into 'stacked-topic-branch', but scripts/broken-test.py did not run "
+             "to the end")):
+        failed_suites_as_written.clear()
+        exit_code, output, _, _, _ = run_case(
+            scratch, name, [(GATE_PASSED, 0)], into_another_branch,
+            merge_commit_new_to_the_clone=True, runner_answer=(RUNNER_FAILED, 1),
+            before_the_program_runs=prepare)
+        check(f"{name.replace('-', ' ')}: a merge into a branch other than main whose failed "
+              f"tests cannot be judged against the record of tests failing on main is a STOP "
+              f"that names the branch",
+              exit_code == 3 and expected in output and "main may be broken" not in output,
+              f"exit {exit_code}\n{output}")
 
     exit_code, output, calls, parent, merge_commit, recorded = case(
         "no-test-failing-record-not-usable-and-run-prints-no-summary", "c" * 40 + "\n",
@@ -1417,7 +1488,7 @@ def failed_suites_kept_in_view_cases(scratch):
         stop = program.after_merge_test_run_closing_message_printed_returning_whether_stop(
             argparse.Namespace(pull_request="10"), newer, 1, ["SUMMARY: 0 passed, 1 failed"], True,
             {"complete": worked, "new_tests": {"scripts/x-test.py": {"case n": None}},
-             "seat": "author-seat", "task_id": 7, "why_none": None}, worked, "by hand")
+             "seat": "author-seat", "task_id": 7, "why_none": None}, worked, "by hand", "main")
     check("a new failure with a repair task, when git cannot judge a recorded commit, never says "
           "nothing needs sending",
           not worked and stop and "STOP: merged, but scripts/x-test.py stays" in output
