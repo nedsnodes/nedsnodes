@@ -2775,6 +2775,18 @@ def main():
     finally:
         shutil.rmtree(scratch, ignore_errors=True)
 
+    printed = io.StringIO()
+    with contextlib.redirect_stdout(printed):
+        try:
+            program.failed_suites_record.main(iter(["--help"]))
+            help_exit = None
+        except SystemExit as stop:
+            help_exit = stop.code
+    check("the failed suites record program reads arguments given as a one-shot iterator: "
+          "--help prints help and exits 0",
+          help_exit == 0 and "--print-merge-gate-notice" in printed.getvalue(),
+          f"exit {help_exit}\n{printed.getvalue()}")
+
     if failures:
         print(f"\n{len(failures)} case(s) failed")
         return 1

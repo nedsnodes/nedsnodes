@@ -672,10 +672,10 @@ def parse_arguments(argv):
 def main(argv=None):
     argv = sys.argv[1:] if argv is None else list(argv)
     # merge-gate.sh's own call, read without argparse; any other form goes to parse_arguments.
-    if (argv[:1] == ["--print-merge-gate-notice-of-last-failed-or-stopped-run"]
-            and (len(argv) == 1 or (len(argv) == 3 and argv[1] == "--clone"
-                                    and not argv[2].startswith("-")))):
-        state_file, clone = DEFAULT_STATE_FILE, argv[2] if len(argv) == 3 else REPOSITORY_ROOT
+    if (len(argv) == 3 and argv[:2] == ["--print-merge-gate-notice-of-last-failed-or-stopped-run",
+                                         "--clone"]
+            and not argv[2].startswith("-")):
+        state_file, clone = DEFAULT_STATE_FILE, argv[2]
     else:
         arguments = parse_arguments(argv)
         # Absolute, so every message names the file wherever the reader's directory is.
