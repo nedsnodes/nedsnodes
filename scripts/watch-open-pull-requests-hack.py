@@ -75,10 +75,11 @@ the last poll's.
 --merge-lane-pr-review-assignments-file-write-from-seed-and-reviewed-prs-then-exit
 makes the file once, and --merge-lane-pr-review-assignments-list-for lists
 one agent-seat's pull requests.
-The default assignment file numbers the pull requests of DEFAULT_REPO only.
-With another --repo and no --merge-lane-pr-review-assignments-file, the
-watch assigns no review and prints no line saying so, and the seed and the
-listing exit 2.
+Without --merge-lane-pr-review-assignments-file, the default assignment file
+is used for DEFAULT_REPO only, its owner and name read in any case, as GitHub
+reads them; each other repository needs its own file, named with that option.
+With another --repo and no file named, the watch assigns no review and
+prints no line saying so, and the seed and the listing exit 2.
 
 With --batch-events-for-seconds N, every OPENED, NEW-HEAD, READY, REVIEW-ASSIGNED and NEEDS A
 LOOK line is held in the process instead of printed. The watcher prints them
@@ -872,10 +873,12 @@ def main(argv=None):
         sys.stdout.reconfigure(errors="replace")
 
     assignments_file = arguments.merge_lane_pr_review_assignments_file
+    # GitHub reads an owner and name in any case.
+    repo_is_default = arguments.repo.lower() == DEFAULT_REPO.lower()
     # The default file holds the default repository's pull request numbers only.
-    if assignments_file is None and arguments.repo == DEFAULT_REPO:
+    if assignments_file is None and repo_is_default:
         assignments_file = MERGE_LANE_PULL_REQUEST_REVIEW_ASSIGNMENTS_DEFAULT_FILE
-    options_in_use = [*(["--repo", arguments.repo] if arguments.repo != DEFAULT_REPO else []),
+    options_in_use = [*(["--repo", arguments.repo] if not repo_is_default else []),
                       *(["--token-file", arguments.token_file]
                         if arguments.token_file != DEFAULT_TOKEN_FILE else [])]
     seed_file = arguments.merge_lane_pr_review_assignments_file_write_from_seed_and_reviewed_prs_then_exit
