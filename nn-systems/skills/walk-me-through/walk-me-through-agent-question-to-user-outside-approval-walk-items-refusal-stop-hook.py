@@ -652,9 +652,10 @@ def closing_lines(pages, name, document_text, units, waiting_units, parser, numb
     points = answer_hook.heading_points(document_text.split("\n"), units, parser)
     no_decision_numbers = walk_finder.approval_walk_waiting_sub_step_numbers_whose_text_ends_with_no_decision_closing_line(
         document_text, parser, waiting_units, numbers, units)
+    choices = answer_hook.approval_walk_item_recommendation_and_alternative_for_closing_line_from_walk_document(
+        document_text, parser, units)
     walk = answer_hook.WalkState(name, None, numbers, new_total, {}, None, pages=pages, points=points,
-                                 no_decision_numbers=no_decision_numbers,
-                                 choices=answer_hook.closing_line_choices_from_walk_document(document_text, parser, units))
+                                 no_decision_numbers=no_decision_numbers, choices=choices)
     return [answer_hook.closing_line(number, walk) for number in numbers], without_page
 
 
@@ -666,7 +667,7 @@ def no_walk_in_checkout_refusal(payload, environment, top, walk_directory):
         texts = turn_assistant_texts(current_item_hook.transcript_records(Path(payload["transcript_path"]).expanduser()))
         message = texts[-1] if texts else ""
     # Every closing line holds the answer letters, so a message without them needs no parser, and most lack them.
-    if not answer_hook.answer_choices().search(message):
+    if not answer_hook.approval_walk_closing_line_answer_letters_with_named_choices_regex().search(message):
         return None
     lines = [line for line in walk_finder.prose_lines(message, closing_line_parser()) if line.strip()]
     if not lines or walk_finder.approval_walk_closing_line_read(

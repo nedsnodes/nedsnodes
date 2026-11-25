@@ -156,7 +156,7 @@ from pathlib import Path
 
 HTML_COMMENT = re.compile(r"<!--.*?(?:-->|\Z)", re.S)
 RECOMMENDATION = re.compile(r"Recommendation:(.*)$", re.I | re.M)
-ALTERNATIVE = re.compile(r"The alternative:(.*)$", re.I | re.M)
+APPROVAL_WALK_ITEM_ALTERNATIVE_TO_RECOMMENDATION_LINE_PATTERN = re.compile(r"The alternative:(.*)$", re.I | re.M)
 
 REPOSITORY_TOP = Path(__file__).resolve().parents[3]
 SUITE_RUNNER_FILE = REPOSITORY_TOP / "scripts" / "run-all-test-suites.py"
@@ -276,16 +276,17 @@ def markdown_parser():
                        MARKDOWN_PARSER_MODULE_FILE).markdown_parser()
 
 
-def approval_walk_item_last_recommendation_text_from_item_lines(lines, label=RECOMMENDATION):
+def approval_walk_item_last_recommendation_or_alternative_text_from_item_lines(lines, label=RECOMMENDATION):
     """The last recommendation in an item's prose_lines, the text after `Recommendation:` as written, without
     emphasis or one trailing period; or None when there is none, or the last one has no text after it. With
-    label ALTERNATIVE, the same for the item's last `The alternative:` line."""
+    label APPROVAL_WALK_ITEM_ALTERNATIVE_TO_RECOMMENDATION_LINE_PATTERN, the same for the item's last
+    `The alternative:` line."""
     found = [match[1].strip(" *_") for match in label.finditer("\n".join(lines))]
     found = [text[:-1].rstrip(" *_") if text.endswith(".") else text for text in found]
     return found[-1] if found and found[-1] else None
 
 
-def approval_walk_closing_line_answer_choices_pattern(answer_letters):
+def approval_walk_closing_line_answer_letters_with_named_choices_pattern_source(answer_letters):
     """The regular expression source for the answer letters after a closing line's link, answer_letters being the
     answer hook's ANSWER_LETTERS_TEXT, `A approve · D disapprove · M more responses`, where each response may
     name what it does after a colon, as `A approve: leave the filter out`."""
@@ -452,7 +453,7 @@ def approval_walk_closing_line_read(line, parser, answer_letters):
     default and reads as text."""
     line = line.strip()
     tokens = parser.parseInline(line)[0].children
-    choices = approval_walk_closing_line_answer_choices_pattern(answer_letters)
+    choices = approval_walk_closing_line_answer_letters_with_named_choices_pattern_source(answer_letters)
     link = None
     if tokens and tokens[0].type == "link_open":
         close = next((index for index, token in enumerate(tokens) if token.type == "link_close"), None)
@@ -509,7 +510,7 @@ def approval_walk_waiting_sub_step_numbers_whose_text_ends_with_no_decision_clos
         shown = approval_walk_item_text_as_shown_to_user(text, parser, all_units, unit, number)
         lines = [line for line in prose_lines(shown, parser) if line.strip()]
         if (approval_walk_sub_step_no_decision_closing_line_page_link_or_none(lines[-1]) is not None
-                and approval_walk_item_last_recommendation_text_from_item_lines(lines) is None):
+                and approval_walk_item_last_recommendation_or_alternative_text_from_item_lines(lines) is None):
             found.add(number)
     return found
 

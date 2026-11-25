@@ -907,7 +907,7 @@ def closing_line_choices(recommendations, alternatives, parser):
             for number in recommendations.keys() | alternatives.keys()}
 
 
-def closing_line_choices_from_walk_document(text, parser, spans):
+def approval_walk_item_recommendation_and_alternative_for_closing_line_from_walk_document(text, parser, spans):
     """closing_line_choices for every item of the walk-document text, whose item_unit_spans are spans; for the
     Stop hooks, which build closing lines without read_walk."""
     walk_finder = load_walk_finder()
@@ -919,10 +919,11 @@ def closing_line_choices_from_walk_document(text, parser, spans):
 
 
 @functools.cache
-def answer_choices():
+def approval_walk_closing_line_answer_letters_with_named_choices_regex():
     """The answer letters after a closing line's link, as a compiled pattern that also matches them when A and
     D name the item's recommendation and alternative; search it, since the named choices vary by item."""
-    return re.compile(load_walk_finder().approval_walk_closing_line_answer_choices_pattern(ANSWER_LETTERS_TEXT))
+    pattern_source = load_walk_finder().approval_walk_closing_line_answer_letters_with_named_choices_pattern_source
+    return re.compile(pattern_source(ANSWER_LETTERS_TEXT))
 
 
 def heading_points(lines, spans, parser):
@@ -1035,9 +1036,10 @@ def recommendations_in(lines, openings, spans, walk_finder, starts):
                 continue
         for number in numbers:
             part = lines[ranges[number][0]:ranges[number][1]]
-            found[number] = walk_finder.approval_walk_item_last_recommendation_text_from_item_lines(part)
-            alternatives[number] = walk_finder.approval_walk_item_last_recommendation_text_from_item_lines(
-                part, walk_finder.ALTERNATIVE)
+            last_text = walk_finder.approval_walk_item_last_recommendation_or_alternative_text_from_item_lines
+            found[number] = last_text(part)
+            alternatives[number] = last_text(
+                part, walk_finder.APPROVAL_WALK_ITEM_ALTERNATIVE_TO_RECOMMENDATION_LINE_PATTERN)
             numbered = part_numbers(starts, *ranges[number])
             if numbered:
                 parts[number] = numbered
@@ -1342,7 +1344,8 @@ def shown_units(markdown, parser, env, blocks, found):
     units += [(*token.map, shown_words("\n".join(source_lines[slice(*token.map)]), parser, env))
               for token in parser.parse(text, env) if token.map and token.type in CONTAINER_BLOCK_TYPES]
     units = [(first, last, with_lead_ins(first, last, found, words)) for first, last, words in units]
-    return sorted(unit for unit in units if not answer_choices().search(unit[2]) and comparable_words(unit[2]))
+    closing_line = approval_walk_closing_line_answer_letters_with_named_choices_regex()
+    return sorted(unit for unit in units if not closing_line.search(unit[2]) and comparable_words(unit[2]))
 
 
 def marked_text(mark):
@@ -1519,7 +1522,8 @@ def last_showing_message(transcript_path, heading, parser, references):
             lines = text.split("\n")
             for index, line in enumerate(lines):
                 # A closing line opens with the heading's words when the heading has no point, as `## Item 4 of 9`.
-                if not mentions_number.search(line) or answer_choices().search(line):
+                if (not mentions_number.search(line)
+                        or approval_walk_closing_line_answer_letters_with_named_choices_regex().search(line)):
                     continue
                 if f"{shown_words(line, parser, env)} ".startswith(f"{heading} "):
                     end = next((start for start, words in item_openings_as_shown(tokens, parser, env)
@@ -1567,13 +1571,14 @@ def message_copy_of_item(heading_line, message_heading_line, after_heading, numb
     env = {}
     lines = copy.split("\n")
     closing = next((start for start, words in item_openings_as_shown(parser.parse(copy, env), parser, env)
-                    if answer_choices().search(words)), None)
+                    if approval_walk_closing_line_answer_letters_with_named_choices_regex().search(words)), None)
     if closing is None:
         return copy
     # With no blank line before it, the closing line shares a paragraph with the item's last line, so the cut is at
     # the closing line's own line, not the paragraph's first.
     closing = next((index for index in range(closing, len(lines))
-                    if answer_choices().search(shown_words(lines[index], parser, env))), closing)
+                    if approval_walk_closing_line_answer_letters_with_named_choices_regex().search(
+                        shown_words(lines[index], parser, env))), closing)
     # Below the item's closing line come the agent's own words, which are no line of the item's.
     return "\n".join(lines[:closing])
 
@@ -1586,7 +1591,8 @@ def item_openings_as_shown(tokens, parser, env):
         if not token.map or token.type not in ("heading_open", "paragraph_open") or token.level != 0:
             continue
         words = shown_words(tokens[position + 1].content, parser, env)
-        if token.type == "heading_open" or answer_choices().search(words):
+        if (token.type == "heading_open"
+                or approval_walk_closing_line_answer_letters_with_named_choices_regex().search(words)):
             yield token.map[0], words
 
 

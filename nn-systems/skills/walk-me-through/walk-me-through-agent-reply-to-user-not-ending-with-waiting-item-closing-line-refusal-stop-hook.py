@@ -469,7 +469,8 @@ def output_for(payload, environment):
     letters = answer_hook.ANSWER_LETTERS_TEXT
     document_text = document.read_text(encoding="utf-8")
     points = answer_hook.heading_points(document_text.split("\n"), units, parser)
-    choices = answer_hook.closing_line_choices_from_walk_document(document_text, parser, units)
+    choices = answer_hook.approval_walk_item_recommendation_and_alternative_for_closing_line_from_walk_document(
+        document_text, parser, units)
     no_decision_numbers = walk_finder.approval_walk_waiting_sub_step_numbers_whose_text_ends_with_no_decision_closing_line(
         document_text, parser, units, numbers)
 
