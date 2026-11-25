@@ -230,10 +230,13 @@ def session_lines(root, dialog, title_lines, failures):
 
 def walk_directories(root, agent_homes, failures):
     """The log-store's walk/ and each agent-home's docs/walk/ that exist; one that cannot be looked at, or an
-    agent-homes directory that cannot be listed, is a failure, so its walk-minutes are never left out unseen."""
+    agent-homes directory that is missing or cannot be listed, is a failure, so its walk-minutes are never left out
+    unseen. An agent-home without docs/walk/ is the ordinary case and is skipped."""
     try:
         homes = sorted(entry.path for entry in os.scandir(agent_homes))
-    except FileNotFoundError:
+    except (FileNotFoundError, NotADirectoryError):
+        failures.append(f"there is no agent-homes directory at {agent_homes}, so no agent-home's walk-minutes "
+                        f"were searched")
         homes = []
     except OSError as error:
         failures.append(f"could not list the agent-homes directory {agent_homes}, so no agent-home's walk-minutes "

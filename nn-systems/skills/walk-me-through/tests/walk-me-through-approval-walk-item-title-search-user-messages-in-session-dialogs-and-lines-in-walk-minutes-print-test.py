@@ -291,6 +291,33 @@ def test_an_agent_home_that_cannot_be_looked_into_is_a_failure(root):
           result.stdout + result.stderr)
 
 
+def test_an_agent_home_without_docs_walk_is_skipped_without_a_failure(root):
+    store, _, _ = item_6_store(root)
+    (store.agent_homes / "seat-without-walks").mkdir()
+    result = store.run("--title", ITEM_6_TITLE, "--item-number", "6")
+    check("an agent-home without docs/walk/ is skipped with no FAILED line, and the other walk-minutes are still "
+          "searched",
+          result.returncode == 0 and "FAILED" not in result.stderr
+          and "Walk-minutes lines naming the title: 1." in result.stdout,
+          result.stdout + result.stderr)
+
+
+def test_a_missing_agent_homes_directory_is_a_failure(root):
+    store, _, _ = item_6_store(root)
+    shutil.rmtree(store.agent_homes)
+    result = store.run("--title", ITEM_6_TITLE, "--item-number", "6")
+    check("a missing agent-homes directory prints a FAILED line naming it and exits 2",
+          result.returncode == 2
+          and f"FAILED: there is no agent-homes directory at {store.agent_homes}" in result.stderr,
+          result.stdout + result.stderr)
+    store.agent_homes.symlink_to(root / "gone")
+    result = store.run("--title", ITEM_6_TITLE, "--item-number", "6")
+    check("an agent-homes symlink whose target is gone prints a FAILED line naming it and exits 2",
+          result.returncode == 2
+          and f"FAILED: there is no agent-homes directory at {store.agent_homes}" in result.stderr,
+          result.stdout + result.stderr)
+
+
 def test_a_missing_session_dialogs_directory_is_a_failure(root):
     store = Store(root)
     shutil.rmtree(store.log_store / "session-dialogs")
