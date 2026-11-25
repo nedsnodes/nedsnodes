@@ -285,7 +285,7 @@ STOPPED_CELL_WRITE_CHECK_LINE = (
     "The {cell} cell was stopped before it could check for files it wrote outside its "
     "report, and the grid could not check for it, because {reason}; that is "
     + cell_common.COLD_READ_CELL_STRAY_WRITE_CHECK_SKIPPED_IS_NOT_A_CLEAN_RESULT_PHRASE
-    + ". Before "
+    + ".\nBefore "
     "you do anything else, read `git status` against the edits you know are your own. "
     "Undo a change git status lists, by running `rm -r -- <path>` if it is untracked or "
     f"`git --literal-pathspecs {STRAY_WRITE_RESTORE_ARGUMENTS} <path>` if it is tracked, with <path> "
@@ -294,10 +294,12 @@ STOPPED_CELL_WRITE_CHECK_LINE = (
     "change you did not make, and whenever you are unsure.")
 
 # A stopped cell never reaches its own stray-write check, so the grid runs one for it
-# against the snapshot it took before launching the cells.
+# against the snapshot it took before launching the cells. What to do goes on the next
+# line, as after every other STRAY WRITE and WRITE CHECK DID NOT RUN line, because the
+# cold-read skill arms the Monitor tool to show the line after each.
 STOPPED_CELLS_STRAY_WRITE_LINE = (
     "STRAY WRITE: {path} changed after the cells launched. The grid checked for the stopped "
-    "cells {cells}, whose own check never runs, and cannot tell who changed it. {undo}")
+    "cells {cells}, whose own check never runs, and cannot tell who changed it.\n{undo}")
 STRAY_WRITE_UNDO_UNTRACKED = (
     "If its content shows a reviewer wrote it, delete it: `rm -r -- {absolute_path}`. "
     "Ask the user about it if you did not make it and are unsure.")

@@ -944,6 +944,12 @@ try:
     def lines_opening(result, prefix):
         return [line for line in result.stdout.splitlines() if line.startswith(prefix)]
 
+    def lines_opening_with_their_next_step(result, prefix):
+        """Each line opening prefix, joined to the line after it, which says what to do."""
+        lines = result.stdout.splitlines()
+        return [f"{line}\n{lines[index + 1] if index + 1 < len(lines) else ''}"
+                for index, line in enumerate(lines) if line.startswith(prefix)]
+
     def markers_in(record_directory, prefix):
         """The .md files of the set carrying a marker that opens `prefix`."""
         return [path.name for path in sorted(record_directory.glob("*.md"))
@@ -1244,12 +1250,18 @@ try:
         "COLD_READ_GRID_CELL_ATTEMPT_TIMEOUT_SECONDS": "2",
         "COLD_READ_GRID_TEST_STUB_WRITE_PATHS_BEFORE_SLEEPING": ",".join(
             str(repository / name) for name in (new_file, TARGET_RELATIVE_PATH))})
-    stray_lines = lines_opening(result, "STRAY WRITE:")
+    stray_lines = lines_opening_with_their_next_step(result, "STRAY WRITE:")
     check("each path the stopped cells changed is listed once, and nothing says the check did not run",
           sorted(line.split(" ", 3)[2] for line in stray_lines)
           == sorted([new_file, TARGET_RELATIVE_PATH])
           and lines_opening(result, "WRITE CHECK DID NOT RUN:") == [],
           repr(result.stdout))
+    check("a stopped cell's STRAY WRITE line ends at its finding, and what to do is on the next "
+          "line, where the Monitor tool filter the cold-read skill sets shows it",
+          stray_lines != [] and all(
+              line.split("\n")[0].endswith("cannot tell who changed it.")
+              and "If its content shows a reviewer wrote it" in line.split("\n")[1]
+              for line in stray_lines), repr(stray_lines))
     # The commands name the repository in full, so they hit the same file from any directory.
     resolved_repository = repository.resolve()
     check("a new file gets a delete command naming its absolute path",
@@ -1271,6 +1283,11 @@ try:
         "COLD_READ_GRID_TEST_STUB_SLEEP_SECONDS": str(stub_reading_seconds),
         "COLD_READ_GRID_CELL_ATTEMPT_TIMEOUT_SECONDS": "2"})
     unchecked_lines = lines_opening(result, "WRITE CHECK DID NOT RUN:")
+    unchecked_lines_with_next_step = lines_opening_with_their_next_step(result, "WRITE CHECK DID NOT RUN:")
+    check("a stopped cell's WRITE CHECK DID NOT RUN line has what to do on the next line",
+          unchecked_lines_with_next_step != [] and all(
+              line.split("\n")[1].startswith("Before you do anything else")
+              for line in unchecked_lines_with_next_step), repr(unchecked_lines_with_next_step))
     check("with no snapshot, every stopped cell says no check ran, why, and that it is not a clean result",
           len(unchecked_lines) == 8 and all(
               "its snapshot of the working tree before the cells launched failed" in line
