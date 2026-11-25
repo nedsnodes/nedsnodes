@@ -1020,6 +1020,13 @@ def print_follow_up_request_block_from_merge_lane_2_reviews(number):
     replaced_comments = []
     for replaced in replaced_pull_request_numbers(number, description):
         replaced_comments += merge_lane_2_reviews_and_their_comments(replaced, posting, account)[1]
+    write_block_by_hand = (
+        "If merge-lane-2's reviews of the pull request hold a fix-next, fix-in-maintenance or file-for-later "
+        f"finding, write the block by hand at the end of {MERGE_LANE_2_MERGED_MESSAGE_TO_AUTHOR}: "
+        "the line "
+        f"{FOLLOW_UP_REQUEST_LINE_START} pull request {number}, then one line for each such finding, numbered "
+        "from 1, such as: 1. fix-next: `<path>:<line>`: <the finding on one line>\n"
+        "If merge-lane-2's reviews hold no such finding, write no block.")
     findings = []
     for review, review_comments in itertools.groupby(replaced_comments + comments,
                                                      key=lambda comment: (comment["pull_request"], comment["review"])):
@@ -1031,13 +1038,7 @@ def print_follow_up_request_block_from_merge_lane_2_reviews(number):
                     f"{account}'s comment on {comment['path']}:{comment['line']} of pull request {comment['pull_request']} does not open "
                     f"with a category mark, such as **fix-next**, so its category cannot be read and no "
                     f"{FOLLOW_UP_REQUEST_LINE_START} block was printed; reviews posted before "
-                    f"scripts/{POSTING_PROGRAM_FILE_NAME} wrote category marks have none.\n"
-                    "If merge-lane-2's reviews of the pull request hold a fix-next, fix-in-maintenance or file-for-later "
-                    f"finding, write the block by hand at the end of {MERGE_LANE_2_MERGED_MESSAGE_TO_AUTHOR}: "
-                    "the line "
-                    f"{FOLLOW_UP_REQUEST_LINE_START} pull request {number}, then one line for each such finding, numbered "
-                    "from 1, such as: 1. fix-next: `<path>:<line>`: <the finding on one line>\n"
-                    "If merge-lane-2's reviews hold no such finding, write no block.")
+                    f"scripts/{POSTING_PROGRAM_FILE_NAME} wrote category marks have none.\n" + write_block_by_hand)
             category, text, _nit = marked
             parsed.append({
                 "finding": (category, comment["path"], " ".join(text.split())), "line": comment["line"],
@@ -1047,29 +1048,49 @@ def print_follow_up_request_block_from_merge_lane_2_reviews(number):
         earlier = [found for found in findings if found["review"] != review]
         restates = [None] * len(parsed)
 
-        # A later review restates each earlier finding at most once. Its comments are paired with earlier
-        # findings in passes, so that the order GitHub numbered them in cannot pair a new finding with an
-        # earlier one and leave the earlier one's real restatement unpaired: first the restatements that keep
-        # the earlier text or Codex finding id, then those alike but for a new Codex finding id, which a moved
-        # line range gives, each with the free earlier finding nearest by line.
-        def pair(matches):
-            candidates = sorted(((abs((found["line"] or 0) - (comment["line"] or 0)), index, position)
-                                 for index, comment in enumerate(parsed) if restates[index] is None
-                                 for position, found in enumerate(earlier) if matches(comment, found)))
-            for _distance, index, position in candidates:
-                if restates[index] is None and not any(paired is earlier[position] for paired in restates):
-                    restates[index] = earlier[position]
-        pair(lambda comment, found: found["compared"] == comment["compared"] and (
-            found["finding"] == comment["finding"] or bool(found["codex_finding_ids"] & comment["codex_finding_ids"])))
-        pair(lambda comment, found: found["compared"] == comment["compared"])
+        def same_finding(one, other):
+            return one["compared"] == other["compared"] and (
+                one["finding"] == other["finding"] or bool(one["codex_finding_ids"] & other["codex_finding_ids"]))
+
+        # A later review restates each earlier finding at most once. A restatement that keeps the earlier
+        # text or Codex finding id is paired first, so that the order GitHub numbered the comments in cannot
+        # pair a new finding with the earlier one.
+        for index, comment in enumerate(parsed):
+            restates[index] = next((found for found in earlier if same_finding(comment, found)
+                                    and not any(paired is found for paired in restates)), None)
+        # A moved line range gives a restatement a new Codex finding id, and then nothing tells it from a new
+        # finding worded alike: pair it only when one earlier finding and one finding of this review are left
+        # with that text, and otherwise refuse rather than guess.
+        for compared in {comment["compared"] for index, comment in enumerate(parsed) if restates[index] is None}:
+            free = [found for found in earlier if found["compared"] == compared
+                    and not any(paired is found for paired in restates)]
+            unpaired = [(index, comment) for index, comment in enumerate(parsed)
+                        if restates[index] is None and comment["compared"] == compared
+                        and not any(restates[other] is not None and same_finding(comment, parsed[other])
+                                    for other in range(len(parsed)))]
+            distinct = []
+            for _index, comment in unpaired:
+                if not any(same_finding(comment, other) for other in distinct):
+                    distinct.append(comment)
+            if not free or not unpaired:
+                continue
+            if len(free) == 1 and len(distinct) == 1:
+                restates[unpaired[0][0]] = free[0]
+                continue
+            category, path, text = compared
+            raise Refused(
+                f"{account}'s review {review[1]} of pull request {review[0]} holds {len(distinct)} {category} "
+                f"finding(s) on {path} worded as {len(free)} earlier finding(s) but with new Codex finding ids, "
+                "so which are restatements and which are new cannot be told, and no "
+                f"{FOLLOW_UP_REQUEST_LINE_START} block was printed. The text: {text}\n"
+                f"Its comments are on lines {', '.join(str(comment['line']) for _index, comment in unpaired)}; "
+                f"the earlier findings are on lines {', '.join(str(found['line']) for found in free)}.\n"
+                + write_block_by_hand)
         # Within one review, a comment repeating another's text or naming one of its Codex finding ids is the
         # same finding; two comments alike but for their Codex finding ids are two findings.
         in_this_review = [found for found in restates if found is not None]
         for index, comment in enumerate(parsed):
-            found = restates[index] or next((
-                found for found in in_this_review if found["compared"] == comment["compared"] and (
-                    found["finding"] == comment["finding"] or found["codex_finding_ids"] & comment["codex_finding_ids"])),
-                None)
+            found = restates[index] or next((found for found in in_this_review if same_finding(comment, found)), None)
             if found is not None:
                 found["codex_finding_ids"] |= comment["codex_finding_ids"]
             elif comment["finding"][0] != posting.BLOCKING_CATEGORY:

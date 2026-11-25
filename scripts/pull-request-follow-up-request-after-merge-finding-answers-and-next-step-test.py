@@ -1591,13 +1591,11 @@ def test_print_block():
                                   merge_lane_comment(11, 2, "**fix-next** Rename it (Codex finding ba9876543210)."),
                                   merge_lane_comment(12, 2, "**fix-next** Rename it (Codex finding 5555aaaa5555).",
                                                      line=7)])
-    check(f"{PRINT_BLOCK} matches an earlier finding to only one comment of a later review, printing a second "
-          "comment alike but for its Codex finding id",
-          code == 0 and err == "" and out == (f"#follow_up_request pull request {NUMBER}\n"
-                                               "1. fix-next: `scripts/thing.py:3`: Rename it (Codex finding "
-                                               "0123456789ab).\n"
-                                               "2. fix-next: `scripts/thing.py:7`: Rename it (Codex finding "
-                                               "5555aaaa5555).\n"), out + err)
+    check(f"{PRINT_BLOCK} refuses, printing nothing, when a later review has two comments alike but for their "
+          "Codex finding ids and one earlier finding alike, naming the lines and saying how to write the block by hand",
+          code == 1 and out == "" and "holds 2 fix-next finding(s) on scripts/thing.py worded as 1 earlier finding(s)"
+          in err and "Its comments are on lines 3, 7; the earlier findings are on lines 3." in err
+          and f"the line #follow_up_request pull request {NUMBER}, then one line" in err, out + err)
     code, out, err = print_block([merge_lane_review(2), merge_lane_review(1)],
                                  [merge_lane_comment(10, 1, "**fix-next** Rename it (Codex finding 0123456789ab)."),
                                   merge_lane_comment(11, 2, "**fix-next** Rename it (Codex finding 5555aaaa5555).",
@@ -1616,13 +1614,49 @@ def test_print_block():
                                                      line=9),
                                   merge_lane_comment(12, 2, "**fix-next** Rename it (Codex finding ba9876543210).",
                                                      line=5)])
-    check(f"{PRINT_BLOCK} pairs an earlier finding with the later review's comment nearest its line when both "
-          "differ only in their Codex finding ids, and prints the other as a new finding",
+    check(f"{PRINT_BLOCK} refuses rather than guess by line which of two later comments, both alike but for new "
+          "Codex finding ids, restates the earlier finding",
+          code == 1 and out == "" and "worded as 1 earlier finding(s) but with new Codex finding ids" in err
+          and "Its comments are on lines 9, 5" in err, out + err)
+    code, out, err = print_block([merge_lane_review(2), merge_lane_review(1)],
+                                 [merge_lane_comment(10, 1, "**fix-next** Rename it (Codex finding aaaaaaaaaaaa).",
+                                                     line=10),
+                                  merge_lane_comment(11, 1, "**fix-next** Rename it (Codex finding bbbbbbbbbbbb).",
+                                                     line=15),
+                                  merge_lane_comment(12, 2, "**fix-next** Rename it (Codex finding cccccccccccc).",
+                                                     line=6),
+                                  merge_lane_comment(13, 2, "**fix-next** Rename it (Codex finding eeeeeeeeeeee).",
+                                                     line=11),
+                                  merge_lane_comment(14, 2, "**fix-next** Rename it (Codex finding dddddddddddd).",
+                                                     line=23)])
+    check(f"{PRINT_BLOCK} refuses when two earlier findings alike but for their Codex finding ids are restated "
+          "with new ids beside a new finding worded alike, rather than drop the new finding",
+          code == 1 and out == "" and "holds 3 fix-next finding(s) on scripts/thing.py worded as 2 earlier "
+          "finding(s)" in err and "Its comments are on lines 6, 11, 23; the earlier findings are on lines 10, 15." in err,
+          out + err)
+    code, out, err = print_block([merge_lane_review(3), merge_lane_review(2), merge_lane_review(1)],
+                                 [merge_lane_comment(10, 1, "**fix-next** Rename it (Codex finding aaaaaaaaaaaa).",
+                                                     line=10),
+                                  merge_lane_comment(11, 2, "**fix-next** Rename it (Codex finding bbbbbbbbbbbb).",
+                                                     line=110),
+                                  merge_lane_comment(12, 3, "**fix-next** Rename it (Codex finding cccccccccccc).",
+                                                     line=112),
+                                  merge_lane_comment(13, 3, "**fix-next** Rename it (Codex finding dddddddddddd).",
+                                                     line=12)])
+    check(f"{PRINT_BLOCK} refuses when a third review restates a moved finding with a new id beside a new finding "
+          "worded alike near the finding's first line, rather than drop the new finding",
+          code == 1 and out == "" and "Its comments are on lines 112, 12; the earlier findings are on lines 10." in err,
+          out + err)
+    code, out, err = print_block([merge_lane_review(2), merge_lane_review(1)],
+                                 [merge_lane_comment(10, 1, "**fix-next** Rename it (Codex finding aaaaaaaaaaaa).",
+                                                     line=10),
+                                  merge_lane_comment(11, 2, "**fix-next** Rename it (Codex finding bbbbbbbbbbbb).",
+                                                     line=110)])
+    check(f"{PRINT_BLOCK} pairs a later review's one comment alike but for a new Codex finding id with the one "
+          "earlier finding alike, and prints the finding once",
           code == 0 and err == "" and out == (f"#follow_up_request pull request {NUMBER}\n"
-                                               "1. fix-next: `scripts/thing.py:3`: Rename it (Codex finding "
-                                               "0123456789ab).\n"
-                                               "2. fix-next: `scripts/thing.py:9`: Rename it (Codex finding "
-                                               "5555aaaa5555).\n"), out + err)
+                                               "1. fix-next: `scripts/thing.py:10`: Rename it (Codex finding "
+                                               "aaaaaaaaaaaa).\n"), out + err)
     code, out, err = print_block([merge_lane_review(2), merge_lane_review(1)],
                                  [merge_lane_comment(10, 1, "**fix-next** Rename it (Codex finding 0123456789ab)."),
                                   merge_lane_comment(11, 2, "**fix-next** Rename it (Codex finding ba9876543210).",
