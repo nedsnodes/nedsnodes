@@ -3,6 +3,7 @@
 item's title, and every walk-minutes line naming it. Each case runs the program as a subprocess over a fixture
 log-store and fixture agent-homes this suite writes; the exit code is asserted on every case."""
 
+import importlib.util
 import json
 import os
 import shutil
@@ -21,6 +22,7 @@ LOG_STORE_PAST_DISCUSSIONS_SEARCH_SSH_OVERRIDE_ENVIRONMENT_VARIABLE = "LOG_STORE
 ITEM_6_TITLE = "How long the successor looks for a speed-up"
 RULING = ("I had a discussion on this topic - check the session dialogs. I thought we agree to split tasks into "
           "those that could and should be backgrounded and others that should not")
+EXTRACTOR_PATH = Path(__file__).resolve().parents[4] / "scripts" / "handoff-extract-conversation.py"
 PROJECT_KEY = "-home-nedlern-agents-MD-skills"
 PROGRAM_PROJECT_KEY = "-home-nedlern--local-state-nedsnodes-agent-seat-idle-sweep"
 
@@ -45,14 +47,32 @@ def agent_record(text):
             "message": {"role": "assistant", "content": [{"type": "text", "text": text}]}}
 
 
+def extracted_dialog_text(transcript):
+    """The session dialog the log-store's refresher writes for transcript, by the session dialog extractor."""
+    spec = importlib.util.spec_from_file_location("handoff_extract_conversation", EXTRACTOR_PATH)
+    extractor = importlib.util.module_from_spec(spec)
+    sys.modules[spec.name] = extractor
+    spec.loader.exec_module(extractor)
+    turns, report = extractor.complete_dialog_turns_and_report(transcript)
+    return extractor.render_companion(turns, report) + "\n\n<!-- written by the session dialog extractor -->\n"
+
+
 def dialog_text(records):
-    """A session dialog as the extractor writes one: a "## User" or "## Agent" heading, a blank line, the text."""
+    """A session dialog shaped as the extractor writes one, for a dialog whose transcript is gone: a "## User" or
+    "## Agent" heading, a blank line, the text."""
     lines = ["# Complete session dialog", "", "---", ""]
     for record in records:
         content = record["message"]["content"]
         text = content if isinstance(content, str) else content[0]["text"]
         lines += ["## User" if record["type"] == "user" else "## Agent", "", text, ""]
     return "\n".join(lines) + "\n"
+
+
+def line_in(dialog, opening, occurrence=1, whole=False):
+    """The line number of the occurrence-th line of dialog that opens as opening does, or, with whole, is it."""
+    numbers = [number for number, line in enumerate(dialog.read_text().split("\n"), 1)
+               if (line == opening if whole else line.startswith(opening))]
+    return numbers[occurrence - 1]
 
 
 class Store:
@@ -76,6 +96,7 @@ class Store:
                           / f"{session_id}.jsonl")
             transcript.parent.mkdir(parents=True, exist_ok=True)
             transcript.write_text("".join(json.dumps(record) + "\n" for record in records))
+            dialog.write_text(extracted_dialog_text(transcript))
         return dialog
 
     def run(self, *words, environment=None):
@@ -116,10 +137,11 @@ def test_the_user_ruling_in_an_agent_session_naming_the_title_is_printed_after_t
     ruling = next((index for index, line in enumerate(lines) if RULING in line), None)
     check("the user's ruling is printed, with the dialog's file and line, after the agent message it answers",
           result.returncode == 0 and ruling is not None
-          and lines[ruling].startswith(f"  user   {dialog}:11  ")
-          and lines[ruling - 1].startswith(f"  agent  {dialog}:7  [Item 67 of 158")
-          and lines[ruling + 1].startswith(f"  user   {dialog}:15  in fact")
-          and "Agent-session 77caebaf (MD-skills, ned-box), its dialog naming the title at line(s) 23:" in lines,
+          and lines[ruling].startswith(f"  user   {dialog}:{line_in(dialog, RULING)}  ")
+          and lines[ruling - 1].startswith(f"  agent  {dialog}:{line_in(dialog, '[Item 67 of 158')}  [Item 67 of 158")
+          and lines[ruling + 1].startswith(f"  user   {dialog}:{line_in(dialog, 'in fact')}  in fact")
+          and (f"Agent-session 77caebaf (MD-skills, ned-box), its dialog naming the title at line(s) "
+               f"{line_in(dialog, '## ' + ITEM_6_TITLE)}:") in lines,
           result.stdout + result.stderr)
     check("an agent-session a program started is left out, and counted",
           "sweep0001" not in result.stdout and "the idle sweep's prompt" not in result.stdout
@@ -139,8 +161,49 @@ def test_a_short_title_names_the_item_only_right_after_one_of_its_numbers(root):
     store.session("other-number", [agent_record("### Item 9.25 of 35: The fix"), user_record("nor this one")])
     result = store.run("--title", "The fix", "--item-number", "9.2")
     check("a title of fewer than four words is matched only after \"Item\" and one of the item's numbers",
-          result.returncode == 0 and f"  user   {named}:13  a" in result.stdout
+          result.returncode == 0 and f"  user   {named}:{line_in(named, 'a', whole=True)}  a\n" in result.stdout
           and "not this one" not in result.stdout and "nor this one" not in result.stdout,
+          result.stdout + result.stderr)
+
+
+def test_a_short_title_names_the_item_after_every_running_count_the_walk_finder_reads_and_only_as_a_whole(root):
+    store = Store(root)
+    listed = store.session("listed", [agent_record("Items 9.1, 9.2 of 35: The fix"), user_record("listed answer")])
+    bold = store.session("bold", [agent_record("**Item 9.2 of 35**: The fix"), user_record("bold answer")])
+    ranged = store.session("ranged", [agent_record("Items 9.1 to 9.3 of 35: The fix"), user_record("ranged answer")])
+    store.session("longer", [agent_record("Item 9.2 of 35: The fixture"), user_record("fixture answer")])
+    result = store.run("--title", "The fix", "--item-number", "9.2")
+    check("a short title is named after a list, a range or a bolded running count holding one of the item's "
+          "numbers, and not where a longer word only opens with it",
+          result.returncode == 0
+          and all(f"{dialog}:{line_in(dialog, answer)}  {answer}" in result.stdout
+                  for dialog, answer in [(listed, "listed answer"), (bold, "bold answer"),
+                                         (ranged, "ranged answer")])
+          and "fixture answer" not in result.stdout,
+          result.stdout + result.stderr)
+
+
+def test_a_turn_the_dialog_leaves_out_is_cited_by_its_transcript_line_and_moves_no_other_citation(root):
+    store = Store(root)
+    # The extractor leaves out a short agent reply to a notification, which opens as a later agent message does.
+    dialog = store.session("acknowledged", [
+        agent_record(f"## {ITEM_6_TITLE}\n\nThe successor looks for a speed-up first."),
+        user_record("<task-notification>a background task finished</task-notification>"),
+        agent_record("Noted."),
+        user_record("approve item 6"),
+        agent_record("Noted.\n\nItem 6 is approved, and its page is updated."),
+        user_record("thanks"),
+    ])
+    result = store.run("--title", ITEM_6_TITLE, "--item-number", "6")
+    transcript = (store.log_store / "agent-session-files-by-machine" / "ned-box" / "projects" / PROJECT_KEY
+                  / "acknowledged.jsonl")
+    check("a turn the dialog leaves out is cited by its transcript line, and the turns after it by their own "
+          "dialog lines",
+          result.returncode == 0
+          and f"  agent  {transcript}:3  Noted.\n" in result.stdout
+          and f"  user   {dialog}:{line_in(dialog, 'approve item 6')}  approve item 6\n" in result.stdout
+          and f"  agent  {dialog}:{line_in(dialog, 'Noted.', whole=True)}  Noted. Item 6 is approved" in result.stdout
+          and f"  user   {dialog}:{line_in(dialog, 'thanks')}  thanks\n" in result.stdout,
           result.stdout + result.stderr)
 
 
