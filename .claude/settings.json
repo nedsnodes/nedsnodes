@@ -35,6 +35,16 @@
         ]
       }
     ],
+    "MessageDisplay": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "python3 \"$CLAUDE_PROJECT_DIR\"/nn-systems/handoff/handoff-successor-conversation-tail-last-lines-first-message-display-hook.py"
+          }
+        ]
+      }
+    ],
     "UserPromptSubmit": [
       {
         "hooks": [
