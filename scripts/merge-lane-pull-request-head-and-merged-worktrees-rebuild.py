@@ -8,8 +8,10 @@ Usage:
 Fetches the pull request's head from origin unless the nn-head-commit is already
 local, then makes pr<n>-head at the nn-head-commit and pr<n>-merged at the main commit with the nn-head-commit merged
 in, as merge-lane-2, always with a merge commit. A worktree already at either
-path is removed first, with any changes in it; a directory there whose .git is
-gone is deleted, and git's record of it pruned. --merged-worktree-only makes
+path is removed first, with any changes in it, unless git records it as locked; a
+worktree there whose .git is gone is removed the same way once its .git is written
+back from git's record of it, and a directory there that git records no worktree
+at is left as it is, and the run stops. --merged-worktree-only makes
 pr<n>-merged alone and leaves pr<n>-head as it is, because reviewers may be
 reading it.
 
@@ -17,13 +19,13 @@ Git runs in --review-tools-worktree-at-main. Every worktree of one repository sh
 objects, so the fetched nn-head-commit is visible to the new worktrees.
 
 Exit codes: 0 both worktrees made, or pr<n>-merged alone with
---merged-worktree-only; 1 a git step failed, or the head conflicts
-with main, named on stdout.
+--merged-worktree-only; 1 a git step failed, the head conflicts
+with main, or a directory at a worktree's path is not a recorded worktree, named on
+stdout.
 """
 
 import argparse
 import importlib.util
-import shutil
 import subprocess
 import sys
 from pathlib import Path
@@ -52,6 +54,10 @@ class HeadConflictsWithMain(Exception):
     pass
 
 
+class WorktreeNotRecorded(Exception):
+    pass
+
+
 def parse_arguments(argv):
     parser = argparse.ArgumentParser(
         description="Make pr<n>-head at a pull request's nn-head-commit and pr<n>-merged "
@@ -76,6 +82,22 @@ def git(directory, *arguments):
     return completed.stdout.strip()
 
 
+def git_file_of_recorded_worktree_restore(checkout, worktree):
+    """Write the .git file of a worktree that lost it, from git's record of that worktree.
+
+    git worktree remove refuses a worktree whose .git is gone, even with --force;
+    with the file back, it removes the directory and only this worktree's record,
+    and still refuses a locked worktree.
+    """
+    common_directory = Path(git(checkout, "rev-parse", "--path-format=absolute",
+                                "--git-common-dir"))
+    for record in sorted((common_directory / "worktrees").glob("*/gitdir")):
+        if Path(record.read_text().strip()).parent.resolve() == worktree.resolve():
+            (worktree / ".git").write_text(f"gitdir: {record.parent}\n")
+            return
+    raise WorktreeNotRecorded(worktree)
+
+
 def main(argv=None):
     arguments = parse_arguments(argv)
     number = arguments.pull_request
@@ -92,12 +114,10 @@ def main(argv=None):
         rebuilt =((merged_worktree,) if arguments.merged_worktree_only
                    else (head_worktree, merged_worktree))
         for worktree in rebuilt:
+            if worktree.exists() and not (worktree / ".git").exists():
+                git_file_of_recorded_worktree_restore(checkout, worktree)
             if (worktree / ".git").exists():
                 git(checkout, "worktree", "remove", "--force", str(worktree))
-            elif worktree.exists():
-                # git worktree remove refuses a worktree whose .git is gone, even with --force.
-                shutil.rmtree(worktree)
-                git(checkout, "worktree", "prune")
         if not arguments.merged_worktree_only:
             git(checkout, "worktree", "add", "-q", "--detach", str(head_worktree),
                 arguments.head_commit)
@@ -128,6 +148,14 @@ def main(argv=None):
               f"If that reports VERDICT: CONFLICT, send pull request {number} back to its "
               f"author to do what that report says.\n"
               f"If it reports no conflict, run this again with the current main commit.")
+        return 1
+    except WorktreeNotRecorded as unrecorded:
+        print(f"PR {number}: worktrees not rebuilt: {unrecorded.args[0]} has no .git, and the "
+              f"checkout {checkout} records no worktree at that path, so it may not be a "
+              f"worktree at all. Nothing was deleted.\n"
+              f"Look at what the directory holds. When nothing in it is needed, delete it and "
+              f"run this again.\n"
+              f"When something in it is needed, or you cannot tell, tell the user this message.")
         return 1
     except GitStepFailed as failure:
         print(f"PR {number}: worktrees not rebuilt: {failure}\n"
