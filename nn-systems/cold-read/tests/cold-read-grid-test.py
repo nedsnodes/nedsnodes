@@ -1912,6 +1912,41 @@ try:
           not (newline_repository / "stray\nwrite's.md").exists()
           and (newline_repository / "seed.md").exists(), repr(newline_commands))
 
+    # A path that names a checkout may hold two spaces in a row; joining the error's lines
+    # must not collapse them, or the printed safe.directory command names another path.
+    def failing_working_tree_state_with_a_doubled_space():
+        raise grid_module.cell_common.WriteDetectorUnavailable(
+            "fatal: detected dubious ownership in repository at '/x/two  spaces'\n"
+            "\tgit config --global --add safe.directory '/x/two  spaces'")
+
+    grid_module.cell_common.working_tree_state = failing_working_tree_state_with_a_doubled_space
+    try:
+        doubled_space_lines = grid_module.stopped_cells_write_check_lines(
+            [scratch / "claude-hunt-deep.md"], set(), None, set())
+    finally:
+        grid_module.cell_common.working_tree_state = real_working_tree_state
+    check("a doubled space inside one line of a git error is kept",
+          len(doubled_space_lines) == 1
+          and "safe.directory '/x/two  spaces'" in doubled_space_lines[0], repr(doubled_space_lines))
+
+    # str.splitlines also splits at U+2028, U+2029 and U+0085; such a path is escaped like a newline.
+    with mock.patch.object(grid_module.cell_common, "REPO_ROOT", newline_repository):
+        separator_baseline = grid_module.cell_common.working_tree_state()
+        (newline_repository / "stray write.md").write_text("Stray.\n", encoding="utf-8")
+        separator_lines = grid_module.stopped_cells_write_check_lines(
+            [scratch / "claude-hunt-deep.md"], separator_baseline, None, set())
+    separator_printed = "\n".join(separator_lines).splitlines()
+    separator_commands = re.findall(r"`(rm -r -- [^`]*)`", separator_printed[-1]) if separator_printed else []
+    check("a path holding U+2028 gives a STRAY WRITE line and an undo line, one line each",
+          len(separator_printed) == 2
+          and separator_printed[0].startswith("STRAY WRITE: $'stray\\u2028write.md' changed")
+          and len(separator_commands) == 1, repr(separator_printed))
+    if separator_commands:
+        subprocess.run(["bash", "-c", separator_commands[0]], check=True)
+    check("the one-line undo command deletes the file whose path holds U+2028",
+          not (newline_repository / "stray write.md").exists()
+          and (newline_repository / "seed.md").exists(), repr(separator_commands))
+
     # A stopped cell that moves a file the agent had already edited: restoring or deleting the
     # destination would delete it, and the agent's edits with it. Git pairs the move as a
     # rename only for a `git mv` of similar content, and a cell may re-create the old name,

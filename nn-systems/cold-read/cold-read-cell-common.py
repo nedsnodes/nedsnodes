@@ -10,6 +10,7 @@ import json
 import os
 import pathlib
 import re
+import shlex
 import shutil
 import signal
 import subprocess
@@ -1127,6 +1128,39 @@ def move_staged_report(program: str, staged: pathlib.Path, report: pathlib.Path)
     return 0
 
 
+def breaks_a_line(character: str) -> bool:
+    """A control character, or a character str.splitlines splits a line at, such as U+2028."""
+    return ord(character) < 32 or ord(character) == 127 or len(f"a{character}a".splitlines()) > 1
+
+
+def holds_a_line_breaking_character(text: str) -> bool:
+    return any(breaks_a_line(character) for character in text)
+
+
+def shell_quoted_on_one_line(text: str) -> str:
+    """`text` as one shell argument on one line: git's `-z` output keeps a newline in a
+    path, and shlex.quote would carry it into the command, splitting the printed line."""
+    if not holds_a_line_breaking_character(text):
+        return shlex.quote(text)
+    escaped = "".join(
+        "\\\\" if character == "\\" else "\\'" if character == "'"
+        else (f"\\x{ord(character):02x}" if ord(character) < 128 else f"\\u{ord(character):04x}")
+        if breaks_a_line(character) else character for character in text)
+    return f"$'{escaped}'"
+
+
+def path_shown_on_one_line(path: str) -> str:
+    """`path` as written, or, when it holds a line-breaking character such as a newline,
+    its one-line shell-quoted form, so the line it is printed in stays one line."""
+    return shell_quoted_on_one_line(path) if holds_a_line_breaking_character(path) else path
+
+
+def join_error_text_lines_with_one_space(text) -> str:
+    """`text`'s lines joined by one space, each line's own spaces kept: a path in a git
+    message may hold two spaces in a row."""
+    return " ".join(line.strip() for line in str(text).splitlines() if line.strip())
+
+
 def report_stray_writes(program: str, baseline, own_report_path=None) -> None:
     """Report changes outside the requested report without raising."""
     # Check every agent-binary and every exit path: a failed reviewer may still have edited the target.
@@ -1139,13 +1173,13 @@ def report_stray_writes(program: str, baseline, own_report_path=None) -> None:
         stray = stray_writes_since(baseline, own_report_path)
     except WriteDetectorUnavailable as error:
         print(f"{program}: {STRAY_WRITE_CHECK_SKIPPED_PHRASE} — git status "
-              f"failed ({error}). This is {COLD_READ_CELL_STRAY_WRITE_CHECK_SKIPPED_IS_NOT_A_CLEAN_RESULT_PHRASE}.",
+              f"failed ({join_error_text_lines_with_one_space(error)}). This is {COLD_READ_CELL_STRAY_WRITE_CHECK_SKIPPED_IS_NOT_A_CLEAN_RESULT_PHRASE}.",
               file=sys.stderr)
         return
     if stray:
         # Snapshots detect changed content, not authorship; another worker may have made the edit.
         print(
-            f"{program}: {STRAY_WRITE_PHRASE} — {', '.join(stray)}. This cell "
+            f"{program}: {STRAY_WRITE_PHRASE} — {', '.join(map(path_shown_on_one_line, stray))}. This cell "
             "cannot tell whether the reviewer wrote them or someone else working "
             "in the checkout did. Inspect before triage and revert only what is "
             "the reviewer's; any report still stands on its own.",
