@@ -706,9 +706,15 @@ def round_facts(number, reviewer_login):
         carried_blocking, carried_nits = unanswered_round_findings_of_replaced_pull_requests(replaced, reviewer_login)
         findings = without_reposts(findings + carried_blocking)
         nits = without_reposts(nits + carried_nits)
+    # A second changes-requested review on the same frozen-head before the round is answered stays in the round,
+    # so the round's first one names its copies directory, which that second review leaves as it was.
+    first_requesting = next((review for review in reviews
+                             if (review.get("user") or {}).get("login") == reviewer_login
+                             and does_merge_lane_review_ask_for_fix_round(review, author, reviewer_login)), anchor)
     return (url, head, branch, review_links(latest_first(anchor, reviews)), frozen_head,
             findings, nits, fix_round_number,
-            None if recorded else [review.get("id") for review in reviews], anchor.get("submitted_at"))
+            None if recorded else [review.get("id") for review in reviews], anchor.get("submitted_at"),
+            first_requesting.get("id"))
 
 
 def conflict_check_report(number):
@@ -833,11 +839,13 @@ def answers_file_answers_every_finding_of_round(path, finding_count, review_subm
     return set(range(1, finding_count + 1)) <= entries.keys()
 
 
-def pull_request_fix_round_answers_kept_copies_directory_path_for_frozen_head(worktree, number, frozen_head):
+def pull_request_fix_round_answers_kept_copies_directory_path_named_by_changes_requested_review(worktree, number, round_review_id):
     """Where this round's copies of the answers file go: in the common git directory, because removing a linked
-    worktree deletes its own git directory; one directory per round, so that a brief names only this round's copies."""
+    worktree deletes its own git directory; one directory per round, named by the round's first changes-requested
+    review, which a rerun shares and a later round on the same frozen-head does not, so that a brief names only
+    this round's copies."""
     common = git(["-C", str(worktree), "rev-parse", "--path-format=absolute", "--git-common-dir"]).strip()
-    return Path(common) / ANSWERS_KEPT_COPIES_DIRECTORY_NAME / f"pr-{number}-frozen-head-{frozen_head}"
+    return Path(common) / ANSWERS_KEPT_COPIES_DIRECTORY_NAME / f"pr-{number}-review-{round_review_id}"
 
 
 def answers_kept_copies_oldest_first(kept_copies_directory):
@@ -877,6 +885,16 @@ def answers_file_text_kept_in_new_copy(path, kept_copies_directory):
         os.unlink(incomplete)
         raise
     return kept
+
+
+def fix_round_answers_file_placeholder_line_per_finding_write_and_earlier_files_kept_copies_list_oldest_first(path, finding_count, kept_copies_directory):
+    """Write the answers file as answers_file_with_one_line_per_finding_write does, and return every whole copy
+    of the round, oldest first."""
+    # Listed before the write, so that a directory that cannot be listed stops the brief with nothing changed, and
+    # again after it, so that a copy an overlapping brief run made meanwhile is named too.
+    answers_kept_copies_oldest_first(kept_copies_directory)
+    answers_file_with_one_line_per_finding_write(path, finding_count, kept_copies_directory)
+    return answers_kept_copies_oldest_first(kept_copies_directory)
 
 
 def answers_file_with_one_line_per_finding_write(path, finding_count, kept_copies_directory):
@@ -924,10 +942,15 @@ def topic_worktree_at_frozen_head(number, reviewer_login, branch, frozen_head, f
                       "If a fix-round subagent is still working there, wait for it to finish.\n"
                       "If they are your own work, finish it elsewhere or set it aside first; the fix-round waits.\n"
                       "If an earlier fix-round subagent left them, read them, keep what the next subagent "
-                      "should know, then remove them with these two commands, which leave the ignored answers "
-                      "file in place:\n"
-                      f"git -C {quoted} restore --staged --worktree .\n"
-                      f"git -C {quoted} clean -d --force\n"
+                      "should know, then remove them with these two commands, which leave the answers file "
+                      f"{answers_name} in place:\n"
+                      # The exclude keeps an answers file git add -A staged, which restoring "." would delete,
+                      # because HEAD does not hold it.
+                      f"git -C {quoted} restore --staged --worktree -- . "
+                      f"{shlex.quote(':(exclude)' + answers_name)}\n"
+                      # --exclude, because a branch whose .gitignore does not name the answers file would
+                      # otherwise lose it to clean, along with a temporary file a killed brief run left beside it.
+                      f"git -C {quoted} clean -d --force --exclude={shlex.quote('/' + answers_name)}\n"
                       "Then run this again.")
     head = git([*in_worktree, "rev-parse", "HEAD"]).strip()
     answers = worktree / answers_name
@@ -968,7 +991,8 @@ def topic_worktree_at_frozen_head(number, reviewer_login, branch, frozen_head, f
 
 def print_brief(number, reviewer_login):
     (url, head, branch, review_link, frozen_head, findings, nits,
-     fix_round_number, _unrecorded_review_ids, review_submitted_at) = round_facts(number, reviewer_login)
+     fix_round_number, _unrecorded_review_ids, review_submitted_at, round_review_id) = round_facts(number,
+                                                                                                   reviewer_login)
     if head != frozen_head:
         pushed_from = topic_worktree_of_branch(branch)
         wait = ("Wait for merge-lane-2's review of the new head, and run this again if it "
@@ -989,14 +1013,11 @@ def print_brief(number, reviewer_login):
     worktree = topic_worktree_at_frozen_head(number, reviewer_login, branch, frozen_head, len(findings) + len(nits),
                                              review_submitted_at)
     answers_path = worktree / ANSWERS_FILE_NAME_FORMAT.format(number=number)
-    kept_copies_directory = pull_request_fix_round_answers_kept_copies_directory_path_for_frozen_head(
-        worktree, number, frozen_head
+    kept_copies_directory = pull_request_fix_round_answers_kept_copies_directory_path_named_by_changes_requested_review(
+        worktree, number, round_review_id
     )
-    # Listed before the write, so that a directory that cannot be listed stops the brief with nothing changed.
-    kept_copies = answers_kept_copies_oldest_first(kept_copies_directory)
-    kept = answers_file_with_one_line_per_finding_write(answers_path, len(findings) + len(nits), kept_copies_directory)
-    if kept is not None:
-        kept_copies.append(kept)
+    kept_copies = fix_round_answers_file_placeholder_line_per_finding_write_and_earlier_files_kept_copies_list_oldest_first(answers_path, len(findings) + len(nits),
+                                                                     kept_copies_directory)
     lines = [
         f"Fix-round brief for pull request {url}",
         f"Frozen-head: {frozen_head}",
@@ -1476,7 +1497,8 @@ def check_round(number, reviewer_login, answers_path, commit_name,
                 confirm_dispatching_agent_checked_new_shared_names,
                 overview_claim_check_report_directory):
     (url, _github_head, branch, review_link, frozen_head, blocking, nits,
-     _fix_round_number, unrecorded_review_ids, review_submitted_at) = round_facts(number, reviewer_login)
+     _fix_round_number, unrecorded_review_ids, review_submitted_at, _round_review_id) = round_facts(number,
+                                                                                                     reviewer_login)
     findings = blocking + nits
     answers_path = answers_path or default_answers_path(number)
     refuse_outside_topic_worktree(number, reviewer_login, branch)
@@ -1586,7 +1608,8 @@ def local_branch_exists(branch):
 
 def move_start(number, reviewer_login, new_branch, whole_file_paths):
     (_url, _head, pull_request_branch, _review_link, frozen_head, _findings, _nits,
-     _fix_round_number, _unrecorded_review_ids, _review_submitted_at) = round_facts(number, reviewer_login)
+     _fix_round_number, _unrecorded_review_ids, _review_submitted_at, _round_review_id) = round_facts(
+        number, reviewer_login)
     state_path = move_state_path()
     if state_path.exists():
         state = json.loads(state_path.read_text())

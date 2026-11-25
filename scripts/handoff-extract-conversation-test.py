@@ -232,6 +232,28 @@ with tempfile.TemporaryDirectory() as workspace:
         f"{kept} skips={skips}",
     )
 
+    # A prompt the user typed that opens with a pasted interrupt notice is his, and so is the
+    # agent's short answer to it; only a message that is wholly a notice is the harness's.
+    pasted_notice_prompt = "[Request interrupted by user] was all I saw; please carry on."
+    pasted_notice = [
+        user_record("first prompt"),
+        assistant_record("working"),
+        user_record(pasted_notice_prompt),
+        assistant_record("Carrying on."),
+        user_record("[Request interrupted by user for tool use]"),
+        assistant_record("Stopped."),
+    ]
+    path = write_transcript(workspace, "pasted-interrupt-notice.jsonl", pasted_notice)
+    turns, skips = extractor.read_dialog_turns(path)
+    kept = [turn["text"] for turn in turns]
+    check(
+        "a prompt that opens with a pasted interrupt notice, and the short answer to it, are kept; "
+        "a whole notice and its acknowledgement are still dropped",
+        kept == ["first prompt", "working", pasted_notice_prompt, "Carrying on."]
+        and skips["injected"] == 1 and skips["acknowledgement"] == 1,
+        f"{kept} skips={skips}",
+    )
+
     # Scope guard (passes with or without the de-duplication): the same short
     # answer twice with NO interrupt between is two replies — field shape
     # 2026-08-24, "y" approving item 1 of a walk, then "y" approving item 2,
