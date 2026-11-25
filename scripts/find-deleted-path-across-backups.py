@@ -108,18 +108,20 @@ A surface that cannot be read must never render as "not found". That distinction
 is the whole point: an agent told "not in Time Machine" stops looking, and an
 agent told "Time Machine needs your password, here is the command" asks for it.
 
-READ-ONLY BY CONSTRUCTION, APART FROM ONE FOLDER. This script lists and reads,
+READ-ONLY BY CONSTRUCTION, APART FROM ONE FOLDER. A search lists and reads,
 and it writes in one place only: each version it finds is copied into
 ~/Downloads/nedschorus-found-copies/<time of the search>/ (--found-copies-root
 or FIND_DELETED_PATH_FOUND_COPIES_ROOT moves the folder), named for where it
-came from and when, so an agent opens a copy and never runs a command that
-writes a backup over a file where it stands. A copy
+came from and when, so an agent opens and compares the copies before it puts
+one back, and no search writes over a file where it stands. A copy
 never replaces a file already in that folder. A version this run can only
 reach through a mount it did not make, a Time Machine snapshot or an unmounted
 local snapshot, gets a printed command that copies it into the same folder.
 It never writes backup state, which
 agents are forbidden to do (.claude/guard-hooks/backup-and-snapshot-write-guard.py
-holds the tool path; the rule binds shell commands too). Two calls it makes
+holds the tool path; the rule binds shell commands too). Restoring is not a
+search: `--restore <copy>` searches nothing, and copies the one copy the agent
+chose to <path>, which is the only write outside that folder. Two calls a search makes
 change mount state and nothing else. `diskutil mount` on the Time Machine
 destination mounts a disk the user already attached, which is how you read a
 backup, not a modification of one; it is attempted only when the destination is
@@ -262,10 +264,16 @@ Usage:
   python3 scripts/find-deleted-path-across-backups.py <path> --log-store-root /home/nedlern/nedsnodes-logs
   python3 scripts/find-deleted-path-across-backups.py <path> --repo ~/Projects/nedsnodes
   python3 scripts/find-deleted-path-across-backups.py <path> --prompt-for-root
+  python3 scripts/find-deleted-path-across-backups.py <path> --restore <copy>
 
 Each FOUND surface says where this run copied what it found, under
 ~/Downloads/nedschorus-found-copies/<time of the search>/, or prints the command
-that copies it there when the copy needs a mount.
+that copies it there when the copy needs a mount. Once you have chosen a copy,
+`--restore <copy>` copies it to <path>, creating any missing parent directories
+and replacing any file already there. A relative <path> is placed under the
+top level of the repository --repo is in, as the search reads it, or under
+--repo itself when that is in no repository; so give the file's repo-relative
+or absolute path, not a fragment of it.
 
 <path> may be repo-relative ("docs/issues/46-x.md"), absolute, or any trailing
 fragment of a path ("dispositions.md"). A fragment matches whole trailing
@@ -328,6 +336,11 @@ version returned 1 for the third case too, so a wrapper branching on $? was
 told "not found" by a run that had searched nothing. Log-store candidates
 never count toward 0: the summary names them on a line of their own instead,
 because counting them told a wrapper "found" for a path that never existed.
+
+With --restore, which searches nothing: 0 when the copy was copied to <path>,
+1 when it was not, with what failed on stderr, such as a git failure that
+left a relative <path> with no top level to place it under, and 2 on a usage
+error.
 """
 
 # Deferred annotations support the Mac's system Python 3.9.
@@ -340,6 +353,7 @@ import importlib.util
 import os
 import re
 import shlex
+import shutil
 import socket
 import subprocess
 import sys
@@ -381,6 +395,9 @@ EXIT_USAGE = 2
 EXIT_INCOMPLETE = 3
 EXIT_FOUND_BUT_NOT_COPIED = 4
 EXIT_FOUND_COPY_COMMAND_PRINTED = 5
+
+EXIT_RESTORED = 0
+EXIT_NOT_RESTORED = 1
 
 FOUND_COPIES_ROOT_ENVIRONMENT_VARIABLE = "FIND_DELETED_PATH_FOUND_COPIES_ROOT"
 DEFAULT_FOUND_COPIES_ROOT = "~/Downloads/nedschorus-found-copies"
@@ -2529,12 +2546,50 @@ def main(argv=None, runner=run_command):
                         default=os.environ.get(FOUND_COPIES_ROOT_ENVIRONMENT_VARIABLE, DEFAULT_FOUND_COPIES_ROOT),
                         help="the folder each found version is copied into, under a subfolder named for the time "
                              "of the search (default: %s)" % DEFAULT_FOUND_COPIES_ROOT)
+    parser.add_argument("--restore", metavar="COPY",
+                        help="search nothing, and copy the file COPY, such as a copy whose path a search's "
+                             "'copied to' line printed, to <path> on this machine, creating any missing parent "
+                             "directories and replacing any file already there. A relative COPY is read from the "
+                             "current directory, and a relative <path> is placed under the top level of the "
+                             "repository --repo is in, or under --repo when that is in no repository, so give "
+                             "the file's repo-relative or absolute path, not a fragment of it; a git blob id is "
+                             "refused as a usage error. Exits 0 when the copy was made, and 1 when it was not, "
+                             "printing what failed on stderr")
     parser.add_argument("--prompt-for-root", action="store_true",
                         help="mount the Time Machine snapshot from here, letting sudo ask for your "
                              "password in this terminal, instead of printing the command. Only ever "
                              "pass this by hand: a hook has no terminal to answer a prompt in")
     args = parser.parse_args(argv)
     rerun = rerun_command(sys.argv[1:] if argv is None else argv)
+
+    if args.restore is not None:
+        if is_git_blob_id(args.path):
+            parser.error("--restore needs the path the file was deleted from, not a git blob id")
+        try:
+            named = _plain_path_from_cited_query(args.path)
+        except CitedQueryCannotBePlaced as refusal:
+            parser.error(str(refusal))
+        destination = named
+        if not os.path.isabs(named):
+            try:
+                top_level = _git_top_level(args.repo, runner)
+            except _GitCommandFailed as failure:
+                print("%s: could NOT restore %s to %s — the path is relative, and git could not give the top "
+                      "level of the repository it belongs under: %s"
+                      % (THIS_SCRIPT_NAME, args.restore, named, failure), file=sys.stderr, flush=True)
+                return EXIT_NOT_RESTORED
+            destination = os.path.join(top_level or args.repo, named)
+        destination_existed = os.path.lexists(destination)
+        try:
+            restore_copy(args.restore, destination)
+        except OSError as error:
+            print("%s: could NOT restore %s to %s — %s: %s; %s"
+                  % (THIS_SCRIPT_NAME, args.restore, destination, type(error).__name__, error,
+                     "the file already there was left as it was" if destination_existed
+                     else "nothing was written there"), file=sys.stderr, flush=True)
+            return EXIT_NOT_RESTORED
+        print("restored %s to %s" % (args.restore, destination), flush=True)
+        return EXIT_RESTORED
 
     use_found_copies_folder(FoundCopiesFolder(args.found_copies_root))
     if is_git_blob_id(args.path):
@@ -2577,6 +2632,39 @@ def main(argv=None, runner=run_command):
     )
     print(render_summary(reports), flush=True)
     return exit_status(reports)
+
+
+def restore_copy(copy, destination):
+    """Copy the file copy to destination, creating its missing parent directories; raise OSError when it
+    cannot, with any file already at destination left as it was."""
+    # Opened first, so a copy that cannot be read leaves no new directories behind.
+    with open(copy, "rb") as source:
+        if os.path.exists(destination) and os.path.samefile(copy, destination):
+            raise shutil.SameFileError("%s and %s are the same file, so there is nothing to restore"
+                                       % (copy, destination))
+        directory = os.path.dirname(destination) or "."
+        os.makedirs(directory, exist_ok=True)
+        # Staged beside destination, so a write that fails partway never touches the file already there,
+        # and os.replace swaps the whole file in at once.
+        descriptor, staged = tempfile.mkstemp(dir=directory, prefix=".%s." % os.path.basename(destination),
+                                              suffix=".restoring")
+        try:
+            with os.fdopen(descriptor, "wb") as target:
+                shutil.copyfileobj(source, target)
+            if os.path.exists(destination):
+                shutil.copymode(destination, staged)
+            else:
+                # mkstemp makes the file 0600; a file open() creates gets 0666 less the umask.
+                umask = os.umask(0)
+                os.umask(umask)
+                os.chmod(staged, 0o666 & ~umask)
+            os.replace(staged, destination)
+        except BaseException:
+            try:
+                os.unlink(staged)
+            except OSError:
+                pass
+            raise
 
 
 def exit_status(reports):
