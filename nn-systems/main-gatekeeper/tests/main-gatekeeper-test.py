@@ -220,6 +220,33 @@ PAIRED_OVERLAP_PARTICIPANTS = int(os.environ.get(
     "MAIN_GATEKEEPER_TEST_PAIRED_OVERLAP_PARTICIPANTS", "0") or 0)
 
 
+def t7_status_then_release_worker_held_after_push_and_wait_for_sweep(digest, work, state_home):
+    """Return (last status payload, worker held after push, workspace seen while held, swept).
+
+    The worker is released whenever it announced after-push, whatever status
+    answered, so a failed status poll leaves no worker parked; a worker refused
+    before after-push never announced it and has swept its workspace, so nothing
+    is written into it. Not handled: the worker's own 120 s after-push timeout
+    expiring between the checks below and the release write, which needs a stall
+    longer than the 60 s status poll.
+    """
+    status_payload = {}
+    deadline = time.time() + 60
+    while time.time() < deadline:
+        code, status_payload = run_gatekeeper(
+            ["status", digest, "--repo", str(work)], state_home)
+        if status_payload.get("outcome") != "in-progress":
+            break
+        time.sleep(0.3)
+    workspace = state_home / "nedschorus-gatekeeper" / digest
+    held_after_push = (workspace / ".main-gatekeeper-test-worker-reached-after-push").exists()
+    workspace_seen_while_held = held_after_push and workspace.is_dir()
+    if held_after_push:
+        (workspace / ".main-gatekeeper-test-worker-paused-at-after-push-release-signal-from-test").write_text("", encoding="utf-8")
+    swept = held_after_push and wait_for(lambda: not workspace.exists())
+    return status_payload, held_after_push, workspace_seen_while_held, swept
+
+
 def wait_at_paired_overlap_barrier():
     """Hold until every copy started by the paired-overlap test reaches this point.
 
@@ -681,29 +708,16 @@ with tempfile.TemporaryDirectory() as workspace_name:
           socket.gethostname() in payload.get("summary", "")
           and socket.gethostname() in payload.get("next_action", ""), payload)
     nowait_digest = payload.get("digest", "")
-    status_payload = {}
-    deadline = time.time() + 60
-    while time.time() < deadline:
-        code, status_payload = run_gatekeeper(
-            ["status", nowait_digest, "--repo", str(work)], state_home)
-        if status_payload.get("outcome") == "checked-in":
-            break
-        time.sleep(0.3)
+    status_payload, held_after_push, workspace_seen_while_held, swept = (
+        t7_status_then_release_worker_held_after_push_and_wait_for_sweep(
+            nowait_digest, work, state_home))
     check("T7 status reaches checked-in after a no-wait submission",
           status_payload.get("outcome") == "checked-in", status_payload)
     check("T7 the async change is on main",
           git(["show", "main:README.md"], remote).stdout == "seed\nasync change\n")
-    nowait_workspace = state_home / "nedschorus-gatekeeper" / nowait_digest
-    # A worker refused before after-push has already swept its workspace, so
-    # it is released only once status says checked-in; the workspace is seen
-    # while the worker is held, so a one-shot absence check cannot pass early.
-    worker_held_at_checked_in = status_payload.get("outcome") == "checked-in"
     check("T7 the workspace exists while the worker is held after its push",
-          worker_held_at_checked_in and nowait_workspace.is_dir(), str(nowait_workspace))
-    if worker_held_at_checked_in and nowait_workspace.is_dir():
-        (nowait_workspace / ".main-gatekeeper-test-worker-paused-at-after-push-release-signal-from-test").write_text("", encoding="utf-8")
-    check("T7 the worker swept its workspace on success",
-          worker_held_at_checked_in and wait_for(lambda: not nowait_workspace.exists()))
+          workspace_seen_while_held, nowait_digest)
+    check("T7 the worker swept its workspace on success", swept)
     code, payload = run_gatekeeper(["cancel", nowait_digest, "--repo", str(work)],
                                    state_home)
     check("T8 cancel after the push answers too-late",
@@ -714,6 +728,42 @@ with tempfile.TemporaryDirectory() as workspace_name:
     code, payload = run_gatekeeper(["status", "0" * 64, "--repo", str(work)], state_home)
     check("T7 status on an unknown digest answers unknown",
           payload.get("outcome") == "unknown", payload)
+
+    # T7's release step on a push refused before after-push: the worker never
+    # announced after-push and has swept its workspace, so the step must write
+    # nothing into it and report failed cases, not stop the suite.
+    remote, work, base = make_fixture(workspace, "t7-refused")
+    rival = workspace / "t7-refused-rival"
+    git(["clone", "--quiet", str(remote), str(rival)], workspace)
+    git(["config", "user.name", "rival"], rival)
+    git(["config", "user.email", "rival@nedschorus.invalid"], rival)
+    (work / "README.md").write_text("seed\nours\n", encoding="utf-8")
+    code, payload = run_gatekeeper(
+        base_request(work, remote, base, ["README.md"], "will be refused") + ["--no-wait"],
+        state_home, {"GATEKEEPER_TEST_WORKER_PAUSE_AT": "before-git"})
+    refused_digest = payload.get("digest", "")
+    refused_workspace = state_home / "nedschorus-gatekeeper" / refused_digest
+    check("T7 refused: the worker is held before git",
+          wait_for(lambda: (refused_workspace / ".main-gatekeeper-test-worker-reached-before-git").exists()))
+    (rival / "README.md").write_text("seed\ntheirs\n", encoding="utf-8")
+    git(["add", "-A"], rival)
+    git(["commit", "--quiet", "-m", "rival changes the very same path"], rival)
+    git(["push", "--quiet", "origin", "main"], rival)
+    (refused_workspace / ".main-gatekeeper-test-worker-paused-at-before-git-release-signal-from-test").write_text("", encoding="utf-8")
+    try:
+        status_payload, held_after_push, workspace_seen_while_held, swept = (
+            t7_status_then_release_worker_held_after_push_and_wait_for_sweep(
+                refused_digest, work, state_home))
+        raised = ""
+    except OSError as error:
+        status_payload, held_after_push, workspace_seen_while_held, swept = {}, True, True, True
+        raised = repr(error)
+    check("T7 refused: the release step raises nothing", not raised, raised)
+    check("T7 refused: status answers the conflict refusal",
+          status_payload.get("error") == "conflict", status_payload)
+    check("T7 refused: the release step finds no worker held after push and reports no sweep",
+          not held_after_push and not workspace_seen_while_held and not swept,
+          (held_after_push, workspace_seen_while_held, swept))
 
     # B4d + liveness: a paused worker holds WORKING open; a rival then makes
     # its eventual push a real conflict, retained as the refusal record.
