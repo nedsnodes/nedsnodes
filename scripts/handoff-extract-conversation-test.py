@@ -847,7 +847,25 @@ with tempfile.TemporaryDirectory() as workspace:
     check("each dequeue whose delivery shows no queued text takes its own delivery record's sender",
           never_read(path) == [], never_read(path))
 
-    # Excerpts of the three ned-box transcripts that GHI 4425 names, under
+    path = write_transcript(workspace, "fallback-skips-a-later-enqueued-delivery.jsonl", [
+        *ordinary_records(), enqueue_record("/clear"), enqueue_record("unread reply"), dequeue_record(),
+        enqueue_record("delivered prompt"), dequeue_record(), user_record("delivered prompt"), assistant_record("handled"),
+    ])
+    check("a dequeue's fallback does not claim the delivery of a message enqueued after it",
+          never_read(path) == ["unread reply"], never_read(path))
+
+    path = write_transcript(workspace, "fallback-skips-skill-context-record.jsonl", [
+        *ordinary_records(), enqueue_record("unread reply"), enqueue_record("/explain item 3"), enqueue_record(hop_chain_peer),
+        dequeue_record(), dequeue_record(),
+        user_record("<command-message>explain</command-message>\n<command-name>/explain</command-name>\n"
+                    "<command-args>item 3</command-args>", origin={"kind": "human"}),
+        user_record([{"type": "text", "text": "Base directory for this skill: /home/nedlern/.claude/skills/explain"}]),
+        user_record(delivered_peer), assistant_record("handled"),
+    ])
+    check("a dequeue's fallback takes its sender from the delivery, not from a skill's context record",
+          never_read(path) == ["unread reply"], never_read(path))
+
+    # Excerpts of three ned-box transcripts that lost or misreported a queued message, under
     # nedlern@ned-box:/home/nedlern/nedsnodes-logs/agent-session-files-by-machine/ned-box/projects/, each record cut to
     # the fields queue recovery reads and each message body to its first line; the comment gives the record's line.
     path = write_transcript(workspace, "merge-lane-2-8fe60f28-reply-dropped-by-hook.jsonl", [
@@ -881,7 +899,7 @@ with tempfile.TemporaryDirectory() as workspace:
           never_read(path) == ["repeat 5.1"], never_read(path))
 
     path = write_transcript(workspace, "cold-read-improvement-608ae0eb-explain-run.jsonl", [
-        # Stands in for the older queued notification that no record shows, which the review of PR 4415 names.
+        # Stands in for an older queued notification that no record shows.
         enqueue_record("<task-notification>\n<task-id>stale</task-id>\n</task-notification>"),
         enqueue_record("/explain"),  # 5433
         dequeue_record(),  # 5434

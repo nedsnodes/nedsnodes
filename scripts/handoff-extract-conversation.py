@@ -478,6 +478,16 @@ def claim_delivery_record(events: list, operation_index: int, claimed: set, queu
     return None
 
 
+# Openings of records Claude Code writes as context around a delivery rather than as one.
+CONTEXT_RECORD_TEXT_OPENINGS = (
+    "Base directory for this skill:",
+    "<local-command-caveat>",
+    "<local-command-stdout>",
+    "<local-command-stderr>",
+    "<system-reminder>",
+)
+
+
 def queued_text_sender_kind(text: str) -> str:
     """Return who sent a queued text, or the record delivering one: a peer, a background task, or the user."""
     peer_first_line = f"{DELIVERED_PEER_MESSAGE_FIRST_LINE}\n"
@@ -492,20 +502,29 @@ def queued_text_sender_kind(text: str) -> str:
 
 def oldest_position_from_sender_of_first_delivery_record(events: list, operation_index: int, claimed: set, pending: list):
     """For a dequeue whose delivery shows no queued text, claim the first unclaimed user record before the next agent record
-    and return the oldest pending position from its sender; with no such record, the oldest position.
+    that delivers a message, and return the oldest pending position from its sender; with no such record, the oldest position.
 
     Claude Code delivers some messages in another form than it queued them, such as a peer message without its hop-chain
     attribute or a slash command without arguments, but never from another sender, so a stale message from another sender
-    is not taken in their place.
+    is not taken in their place. A record of context Claude Code adds, such as a skill's base directory, delivers nothing,
+    and a record showing a message enqueued after this dequeue delivers that later message, so neither is claimed.
     """
+    enqueued_later = []
     for index in range(operation_index + 1, len(events)):
         event = events[index]
         if event is None:
             break
-        if type(event) is list and index not in claimed:
-            claimed.add(index)
-            sender = queued_text_sender_kind(event[0])
-            return next((position for position, queued in enumerate(pending) if queued_text_sender_kind(queued) == sender), None)
+        if isinstance(event, dict):
+            if event["operation"] == "enqueue" and isinstance(event["content"], str):
+                enqueued_later.append(event["content"].strip())
+            continue
+        if type(event) is not list or index in claimed:
+            continue
+        if event[0].startswith(CONTEXT_RECORD_TEXT_OPENINGS) or first_pending_position_shown(enqueued_later, event) is not None:
+            continue
+        claimed.add(index)
+        sender = queued_text_sender_kind(event[0])
+        return next((position for position, queued in enumerate(pending) if queued_text_sender_kind(queued) == sender), None)
     return 0
 
 
