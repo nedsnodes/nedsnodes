@@ -5781,6 +5781,13 @@ def test_two_earlier_texts_kept_in_one_run_both_land_below_the_item_and_the_next
     text = document.read_text()
     document.write_text(text.replace("\n\n#### Withdrawn version 1 of item 3\n\n" + ITEM_3_BODY.format("leave it."), "",
                                      1))
+    # The first read's text is recorded as kept, so a copy removed by hand is not kept again; drop the record too, so
+    # that two earlier texts wait to be kept.
+    program = load_program()
+    for path in case.reads().glob("*-outcome.json"):
+        outcome = json.loads(path.read_text())
+        outcome.pop(program.KEPT_AS_WITHDRAWN_VERSION, None)
+        program.write_json(path, outcome)
     rewritten_item_3(case, "keep it.")
     result = case.run(WAITING_ITEM_READ)
     finder = load_program().load_walk_finder()
