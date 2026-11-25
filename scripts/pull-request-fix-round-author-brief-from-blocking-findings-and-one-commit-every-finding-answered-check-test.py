@@ -1139,7 +1139,7 @@ def topic_worktree_cases(root, repository, base, frozen_head):
     check("topic-worktree: an untracked file refuses the brief with exit 1, naming it and how to remove it",
           code == 1 and out == "" and "stray.txt" in err and "uncommitted changes or untracked files" in err
           and f"git -C {made} clean -d --force --exclude=/{ANSWERS_NAME}" in err
-          and f"Then run this command again:\ncd {made} && python3 scripts/{PROGRAM.name} {NUMBER}" in err, err + out)
+          and f"Then run this command again:\ncd {made} && python3 {PROGRAM.resolve()} {NUMBER}" in err, err + out)
     clean_line = next((line for line in err.splitlines() if " clean -d --force" in line), "")
     unstage_line = next((line for line in err.splitlines() if " reset --quiet -- " in line), "")
     unignored = root / "branch-whose-gitignore-lacks-the-answers-file"
