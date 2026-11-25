@@ -227,6 +227,8 @@ def status_answer_shows_worker_stopped_before_after_push(status_payload, workspa
     workspace when it returns the worker's retained refusal record, such as a
     push conflict, but a refusal of the status query itself, such as
     network-down from its fetch, leaves the worker's workspace in place.
+    Not handled: status returning the retained refusal while its sweep of the
+    workspace fails, which leaves the wait polling until a later answer.
     """
     outcome = status_payload.get("outcome")
     if outcome in ("unknown", "abandoned"):
@@ -267,8 +269,10 @@ def t7_status_then_release_worker_held_after_push_and_wait_for_sweep(
     workspace_seen_while_held = held_after_push and workspace.is_dir()
     status_payload_while_held = {}
     if held_after_push:
-        _, status_payload_while_held = status_answer()
-        (workspace / ".main-gatekeeper-test-worker-paused-at-after-push-release-signal-from-test").write_text("", encoding="utf-8")
+        try:
+            _, status_payload_while_held = status_answer()
+        finally:
+            (workspace / ".main-gatekeeper-test-worker-paused-at-after-push-release-signal-from-test").write_text("", encoding="utf-8")
     swept = held_after_push and wait_for(lambda: not workspace.exists())
     if held_after_push:
         code, status_payload = status_answer()
@@ -783,6 +787,32 @@ with tempfile.TemporaryDirectory() as workspace_name:
     check("T7 status fails: the failed answer was given while the worker was held",
           status_payload_while_held.get("error") == "workspace-io-error", status_payload_while_held)
     check("T7 status fails: the worker held after push is still released and sweeps",
+          held_after_push and swept, (held_after_push, swept, status_payload))
+
+    # T7's wait when the status query itself is refused before the worker
+    # announces after-push: the wait must go on, not end on that refusal.
+    remote, work, base = make_fixture(workspace, "t7-status-refused-before-after-push")
+    (work / "README.md").write_text("seed\nstatus refused early\n", encoding="utf-8")
+    code, payload = run_gatekeeper(
+        base_request(work, remote, base, ["README.md"], "status refused early") + ["--no-wait"],
+        state_home, {"GATEKEEPER_TEST_WORKER_PAUSE_AT": "after-push"})
+    refused_digest = payload.get("digest", "")
+    refused_reached = (state_home / "nedschorus-gatekeeper" / refused_digest
+                       / ".main-gatekeeper-test-worker-reached-after-push")
+    refused_while_absent = []
+
+    def status_refused_until_the_worker_is_held_after_push():
+        if not refused_reached.exists():
+            refused_while_absent.append(True)
+            return 1, {"outcome": "refused", "error": "network-down"}
+        return run_gatekeeper(["status", refused_digest, "--repo", str(work)], state_home)
+
+    (code, status_payload, held_after_push, workspace_seen_while_held, swept,
+     status_payload_while_held) = t7_status_then_release_worker_held_after_push_and_wait_for_sweep(
+        refused_digest, work, state_home, status_refused_until_the_worker_is_held_after_push)
+    check("T7 status refused early: the wait saw a refused answer before after-push",
+          bool(refused_while_absent), refused_digest)
+    check("T7 status refused early: the worker is still held after push, released and swept",
           held_after_push and swept, (held_after_push, swept, status_payload))
 
     # Which status answers end T7's wait for the after-push file early: only
