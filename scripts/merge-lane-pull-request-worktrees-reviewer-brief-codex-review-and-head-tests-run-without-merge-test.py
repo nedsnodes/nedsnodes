@@ -818,6 +818,42 @@ def main():
               completed.returncode == 0 and ran_in_order_then_together(calls, STEPS)
               and head_of(checkout) == main_with_step,
               f"exit {completed.returncode}\n{completed.stdout}{completed.stderr}\n{calls}")
+
+        # The author merges main into the reviewed head, then commits a fix.
+        git(author, "checkout", "-q", "topic")
+        git(author, "merge", "-q", "--no-ff", "-m", "merge main", "main")
+        merged_main_head = commit_file(author, "topic-round-3-fix.txt")
+        git(author, "push", "-q", str(scratch / "origin.git"), "topic:refs/pull/7/head")
+        completed, calls, _ = run_program(
+            scratch, checkout, helpers, [fix_round | {"reviewed_before": head_commit}],
+            "--head-commit-reviewed-before", head_commit)
+        codex_base = (argv_of(calls, STEPS[2]) or [None, None])[1]
+        codex_files = (git(checkout, "diff", "--name-only", codex_base, merged_main_head).split()
+                       if codex_base else [])
+        check("a fix-round whose head merged main gets the merge base with main as its Codex "
+              "base, so the Codex diff holds none of main's changes",
+              completed.returncode == 0 and codex_base == main_with_step
+              and codex_files == ["topic-round-1.txt", "topic-round-2.txt",
+                                  "topic-round-3-fix.txt"]
+              and "(merge base, because the commits since the nn-head-commit reviewed before "
+                  "hold merge commit(s) " in completed.stdout,
+              f"exit {completed.returncode}\n{completed.stdout}{completed.stderr}\n"
+              f"Codex base {codex_base}, files {codex_files}")
+
+        git(author, "checkout", "-q", "-B", "rewritten", merge_base)
+        commit_file(author, "topic-rewritten.txt")
+        git(author, "push", "-q", "--force", str(scratch / "origin.git"),
+            "rewritten:refs/pull/7/head")
+        completed, calls, _ = run_program(
+            scratch, checkout, helpers, [fix_round | {"reviewed_before": merged_main_head}],
+            "--head-commit-reviewed-before", merged_main_head)
+        check("a fix-round whose head does not descend from the nn-head-commit reviewed before "
+              "gets the merge base with main as its Codex base",
+              completed.returncode == 0
+              and argv_of(calls, STEPS[2]) == ["7", merge_base, *directory_options]
+              and "(merge base, because the head does not descend from the nn-head-commit "
+                  "reviewed before)" in completed.stdout,
+              f"exit {completed.returncode}\n{completed.stdout}{completed.stderr}\n{calls}")
     finally:
         shutil.rmtree(scratch, ignore_errors=True)
 

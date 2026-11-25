@@ -156,6 +156,24 @@ with tempfile.TemporaryDirectory() as workspace:
           result.returncode == 0 and shown_notice(result) == expected_named("seat-a"),
           f"code {result.returncode}, stdout {result.stdout!r}, stderr {result.stderr!r}")
 
+    (handoffs / "seat-a-remote-control-name").write_text("seat-a-renamed\n", encoding="utf-8")
+    marker("s-stored").write_text("40.0\n", encoding="utf-8")
+    result = run_hook({"session_id": "s-stored", "transcript_path": str(untitled)}, home,
+                      agent_seat_name="seat-a")
+    check("no title record and a stored Remote Control name: the line names the stored name",
+          result.returncode == 0 and shown_notice(result) == expected_named("seat-a-renamed"),
+          f"code {result.returncode}, stdout {result.stdout!r}, stderr {result.stderr!r}")
+    (handoffs / "seat-a-remote-control-name").unlink()
+    (handoffs / "seat-a-remote-control-name").mkdir()
+    marker("s-stored-unreadable").write_text("40.0\n", encoding="utf-8")
+    result = run_hook({"session_id": "s-stored-unreadable", "transcript_path": str(untitled)}, home,
+                      agent_seat_name="seat-a")
+    check("no title record and an unreadable stored name: the line names the agent-seat, "
+          "as the handoff-supervisor launches under it then",
+          result.returncode == 0 and shown_notice(result) == expected_named("seat-a"),
+          f"code {result.returncode}, stdout {result.stdout!r}, stderr {result.stderr!r}")
+    (handoffs / "seat-a-remote-control-name").rmdir()
+
     marker("s-unnamed").write_text("40.0\n", encoding="utf-8")
     result = run_hook({"session_id": "s-unnamed", "transcript_path": str(untitled)}, home)
     check("no title record and no agent-seat name: the line says this agent-seat's new session",

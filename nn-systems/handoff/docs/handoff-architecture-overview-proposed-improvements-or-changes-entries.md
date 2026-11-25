@@ -1107,3 +1107,16 @@ Goes wrong when: a reader takes the assertion as exact.
 The claim check's evidence:
 > `nn-systems/handoff/handoff-asked-stop-typing-user-notice-user-prompt-submit-hook.py:94` `return os.environ.get(supervisor.HANDOFF_SUPERVISOR_AGENT_NAME_ENVIRONMENT_VARIABLE, "").strip()`. This hook also reads the first variable. It takes the name from the supervisor's constant, so a rename would not break it.
 State: open
+
+## E95 — possible problem: an assertion of the overview is contradicted
+
+Claim: `<seat>-supervisor-state.json`, holding the heartbeat, the exit record and the consumed `session-handoff-sequence-number`: written only by `handoff-supervisor.py`; read by the writer script, `resupervise-seat.py`, `recover-crashed-seats.py`, `restart-live-seats-at-login.py`, the agent-crash-watcher, the restart program and `scripts/agent-seat-idle-sweep-verdicts-print.py`.
+Found by: the overview claim check of 2026-11-25 against commit da0fad270c5dae7d5cf5f7d8f571ad1cfe525e38; its report is /home/nedlern/nedsnodes-logs/overview-write-architecture-overview-claim-check-reports/nedsnodes-handoff-architecture-overview/bb9a9e87cc03b3871cb4651a5a7190164b132c0e-2026-11-25T00-42-47-556044Z.md.
+Fixed by: regular maintenance, in the overview.
+Goes wrong when: a reader takes the assertion as exact.
+The claim check's evidence:
+> - scripts/agent-seat-idle-sweep-headless-judge-wake-messages-send-and-user-alerts-write.py:700 `path = verdicts_print.supervisor.supervisor_state_path(Path(handoff_directory).expanduser(), seat)`
+> - scripts/merge-lane-open-prs-not-changes-requested-count-then-next-agent-seat-go-ahead-to-open-surviving-mutant-test-prs.py:275 `state_path = idle_sweep.verdicts_print.supervisor.supervisor_state_path(HANDOFF_DIRECTORY,`
+> - scripts/save-uncommitted-scratch-worktrees-before-reboot.py:40 `whose ~/.claude/handoffs/<seat>-supervisor-state.json is still on this`
+> - The reader list leaves out these three programs. The writer half ("written only by handoff-supervisor.py") is supported by handoff-supervisor.py:705-714. The list is incomplete, and no agent would open a wrong file on it.
+State: open
