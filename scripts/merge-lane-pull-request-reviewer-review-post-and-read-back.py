@@ -75,7 +75,11 @@ the older "- [Pn] ...", of the report of each run that exited 0. A report that
 is Codex's review object, which a Codex cell older than its conversion wrote, is
 read through scripts/code-review-codex-cell.py's conversion first, so its
 findings get the ids they would have had in prose; one the conversion refuses is
-refused here, with the command that runs the cell again:
+refused here, with the command that runs the cell again. A report with no finding
+heading is refused the same way when some JSON value in it decodes to an object
+with a non-empty "findings" list, whatever text wraps it. Not handled: a clean
+report that quotes such a whole object is refused too; the agent then asks
+merge-lane-2. Then:
 - the file's optional "merge_lane_codex_review_finding_grades" lists one
   {"finding": <the id the refusal prints>, "grade": <grade>} per finding, the grade one
   of FINDING_CATEGORIES or "does-not-hold", which alone also takes a one-line "reason".
@@ -190,9 +194,6 @@ CODEX_FINDING_HEADING = re.compile(r"^- \[(?:Codex priority )?(P[0-3])(?: \(P0 h
 # The review worktree's own path differs between runs on the same commit.
 CODEX_FINDING_WORKTREE_PATH = re.compile(r"\S*/pr\d+-head/")
 CODEX_REPORT_PROVENANCE_COMMENT = re.compile(r"\A<!--.*?-->\n?", re.DOTALL)
-# A report with no finding line that holds a non-empty "findings" list of objects is Codex's review
-# object in a wrapper the converter does not take, so it is not posted as a clean review.
-CODEX_REVIEW_OBJECT_NON_EMPTY_FINDINGS_LIST_REGEX = re.compile(r'"findings"\s*:\s*\[\s*\{')
 CODEX_GRADES_BODY_HEADING = "**Codex findings graded:**"
 # docs/agents/pr-reviewer-instructions.md asks a reviewer to end each finding on code with these labelled lines.
 FINDING_FACT_LINE_LABELS = ("Main has it:", "This pull request makes it happen:", "Reports success on failure:",
@@ -481,6 +482,22 @@ def codex_cell_command(number, base, head, outputs_directory):
             f"--expected-head-commit {head}{directory_option}")
 
 
+def report_holds_json_object_with_non_empty_findings_list(report):
+    """Whether a JSON value in the report that starts at a "{" decodes to an object whose "findings" is a
+    non-empty list: Codex's review object in a wrapper the converter does not take, whatever text surrounds
+    it and however its keys are escaped. Decoding, not matching text, lets through a clean report that only
+    quotes part of such an object, or quotes one whose findings list is empty."""
+    decoder = json.JSONDecoder()
+    for start in (index for index, character in enumerate(report) if character == "{"):
+        try:
+            value, _ = decoder.raw_decode(report, start)
+        except ValueError:
+            continue
+        if isinstance(value, dict) and isinstance(value.get("findings"), list) and value["findings"]:
+            return True
+    return False
+
+
 def codex_findings_on_commit(outputs_directory, number, head):
     """Return the findings of the Codex runs recorded for this commit, {} when they found nothing or
     failed, or None when no run record names it; raise CodexRunRecordUnusable when one cannot be read, or
@@ -530,7 +547,7 @@ def codex_findings_on_commit(outputs_directory, number, head):
                     f"is Codex's review as a JSON object, which this program cannot turn into finding lines, "
                     f"the \"- [Pn] <title> — <path>:<lines>\" lines it reads findings from: {error}")
         report_findings = codex_findings_in_report(report)
-        if not report_findings and CODEX_REVIEW_OBJECT_NON_EMPTY_FINDINGS_LIST_REGEX.search(report):
+        if not report_findings and report_holds_json_object_with_non_empty_findings_list(report):
             raise unusable(
                 "has no finding line, the \"- [Pn] <title> — <path>:<lines>\" lines this program reads "
                 "findings from, but holds a JSON \"findings\" list that is not empty: it is likely Codex's "

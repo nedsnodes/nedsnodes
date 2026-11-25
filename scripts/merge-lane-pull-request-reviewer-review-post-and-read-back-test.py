@@ -555,6 +555,22 @@ def codex_finding_grade_cases(scratch):
               "converter takes, is refused before GitHub, not posted as a review with no Codex finding",
               result.code == 2 and not result.calls and "holds a JSON \"findings\" list" in result.stderr
               and "Keep the error" in result.stderr, result.detail)
+    escaped_key = "Here is the review:\n" + json.dumps(review_object).replace('"findings"', '"\\u0066indings"')
+    result = run_program(scratch, graded(), arguments=MERGE_LANE_ARGUMENTS,
+                         codex_runs=((HEAD, 0, "<!-- provenance: runtime=codex-exec-review -->\n" + escaped_key),))
+    check("a successful run whose wrapped review object writes its \"findings\" key with a JSON escape is "
+          "refused before GitHub, not posted as a review with no Codex finding",
+          result.code == 2 and not result.calls and "holds a JSON \"findings\" list" in result.stderr,
+          result.detail)
+    for quoted, report_text in (
+            ("only a fragment of a review object",
+             'No issues found. The converter now reads text such as `"findings": [{` before it posts.'),
+            ("a whole review object whose findings list is empty",
+             'No issues found. An empty review is `{"findings": [], "overall_explanation": "E"}`.')):
+        result = run_program(scratch, graded(), arguments=MERGE_LANE_ARGUMENTS,
+                             codex_runs=((HEAD, 0, "<!-- provenance: runtime=codex-exec-review -->\n" + report_text),))
+        check(f"a successful run whose clean prose report quotes {quoted} is posted, not refused",
+              result.code == 0 and "holds a JSON \"findings\" list" not in result.stderr, result.detail)
     surrogate_title = "<!-- provenance: runtime=codex-exec-review -->\n" + json.dumps(review_object).replace(
         "Keep the error", "Keep \\ud800 the error")
     result = run_program(scratch, graded(), arguments=MERGE_LANE_ARGUMENTS, codex_runs=((HEAD, 0, surrogate_title),))
