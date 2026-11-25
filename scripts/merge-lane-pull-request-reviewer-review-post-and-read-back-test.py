@@ -478,6 +478,21 @@ def codex_finding_grade_cases(scratch):
     result = run_program(scratch, graded(), arguments=MERGE_LANE_ARGUMENTS, codex_runs=((HEAD, "0", report),))
     check("a run record with a field of the wrong type is refused",
           result.code == 2 and "wrong type" in result.stderr, result.detail)
+    json_report = ("<!-- provenance: runtime=codex-exec-review -->\n"
+                   + json.dumps({"findings": [{"title": "[P2] Keep the error", "body": "B", "priority": 2,
+                                               "code_location": {"absolute_file_path": "/cache/pr7-head/a.py",
+                                                                 "line_range": {"start": 2, "end": 2}}}],
+                                 "overall_correctness": "patch is incorrect", "overall_explanation": "E"},
+                                indent=2))
+    result = run_program(scratch, graded(), arguments=MERGE_LANE_ARGUMENTS, codex_runs=((HEAD, 0, json_report),))
+    check("a successful run whose report is JSON after its provenance comment is refused before GitHub, "
+          "naming the report, not read as a review with no findings",
+          result.code == 2 and not result.calls and "codex-code-review-report.md" in result.stderr
+          and "is a JSON object" in result.stderr
+          and "merge-lane-code-review-codex-cell-run-on-pull-request-head.py 7 base0 "
+              "--merge-lane-worktrees-and-outputs-directory " in result.stderr
+          and "If the cell exits 0, run the posting command that printed this message again" in result.stderr,
+          result.detail)
     case = Path(tempfile.mkdtemp(dir=scratch))
     (case / "cx" / "pr7-base").mkdir(parents=True)
     (case / "cx" / "pr7-base" / "codex-review-run-record.json").write_text("{not json")

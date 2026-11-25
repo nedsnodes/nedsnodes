@@ -68,6 +68,10 @@ What is pinned here:
     to P3; a label in a finding's body or in quoted code is left as Codex
     wrote it.
 
+  - A report Codex wrote as its review object is written in the prose form
+    Codex writes from the same object, pinned on a real pair of the two
+    forms; a review object the cell cannot convert exits 1 with no report.
+
 Run: python3 scripts/code-review-codex-cell-test.py
 """
 
@@ -124,6 +128,97 @@ target = argv[argv.index("--output-last-message") + 1]
 open(target, "w", encoding="utf-8").write({CODEX_REPORT_WITH_FINDINGS!r})
 sys.exit(0)
 """
+
+# One review in both forms: the review object Codex's reviewer wrote for a
+# real pull request, and the report Codex wrote from it. Codex writes the
+# object itself as its report when the object lacks "overall_confidence_score",
+# as this copy does.
+CODEX_REVIEW_OBJECT = {'findings': [{'title': '[P2] Terminate flushed fragments before writing status lines',
+               'body': 'When Claude returns stderr without a trailing newline, `run_claude()` '
+                       'prints it with `end="", flush=True`. The new `flush()` writes that '
+                       "fragment verbatim, so the next sanity-check-cell's `WARNING:` can still be "
+                       'appended to the diagnostic in both stdout and the record log. I reproduced '
+                       "this with two threads: the Monitor's start-of-line filter would miss the "
+                       'warning. Complete the pending line under the lock before releasing it, so '
+                       'the original defect is fixed on the flush path too ([PR reviewer '
+                       'instructions, step 4](docs/agents/pr-reviewer-instructions.md#L22)).',
+               'confidence_score': 0.99,
+               'priority': 2,
+               'code_location': {'absolute_file_path': '/home/nedlern/.cache/merge-lane-review-worktrees/pr4704-head/scripts/sanity-check-adversarial-prompts.py',
+                                 'line_range': {'start': 1492, 'end': 1498}}},
+              {'title': '[P3] Close the record log even if flushing stdout fails',
+               'body': 'If a downstream pipe reader exits early, the new `self.flush()` can raise '
+                       '`BrokenPipeError` before `detach()` closes the record log. With a closed '
+                       'pipe, the base version closes the log, but the patch leaves it open. '
+                       'Because `main()` calls `detach()` before restoring stdout and the signal '
+                       "handlers, an in-process caller also retains the runner's global state "
+                       'after the error. Keep log closure and state restoration independent of the '
+                       'stdout flush.',
+               'confidence_score': 0.98,
+               'priority': 3,
+               'code_location': {'absolute_file_path': '/home/nedlern/.cache/merge-lane-review-worktrees/pr4704-head/scripts/sanity-check-adversarial-prompts.py',
+                                 'line_range': {'start': 1509, 'end': 1513}}},
+              {'title': '[P3] Fail the regression test if the thread handoff times out',
+               'body': 'If the warning thread is delayed past the five-second wait, the saved-line '
+                       'thread can write its newline first. The output then passes the test even '
+                       'on the old wrapper, because the assertions check the line contents and '
+                       'warning adjacency but not whether the intended interleaving happened. Make '
+                       'a timed-out handoff fail the test rather than letting it validate a '
+                       'different ordering.',
+               'confidence_score': 0.98,
+               'priority': 3,
+               'code_location': {'absolute_file_path': '/home/nedlern/.cache/merge-lane-review-worktrees/pr4704-head/scripts/sanity-check-adversarial-prompts-test.py',
+                                 'line_range': {'start': 258, 'end': 266}}}],
+ 'overall_correctness': 'patch is incorrect',
+ 'overall_explanation': 'The patch fixes the tested split-print interleaving, but flushing a '
+                        'diagnostic without a trailing newline can still hide the next warning '
+                        'from the Monitor. The new teardown path also skips log closure when '
+                        'stdout flushing fails.'}
+CODEX_REVIEW_PROSE_OF_THE_SAME_REVIEW = (
+    ('The patch fixes the tested split-print interleaving, but flushing a diagnostic without a '
+    'trailing newline can still hide the next warning from the Monitor. The new teardown path '
+    'also skips log closure when stdout flushing fails.\n'
+    '\n'
+    'Full review comments:\n'
+    '\n'
+    '- [Codex priority P2 (P0 highest)] Terminate flushed fragments before writing status lines — '
+    '/home/nedlern/.cache/merge-lane-review-worktrees/pr4704-head/scripts/sanity-check-adversarial-prompts.py:1492-1498\n'
+    '  When Claude returns stderr without a trailing newline, `run_claude()` prints it with '
+    '`end="", flush=True`. The new `flush()` writes that fragment verbatim, so the next '
+    "sanity-check-cell's `WARNING:` can still be appended to the diagnostic in both stdout and "
+    "the record log. I reproduced this with two threads: the Monitor's start-of-line filter would "
+    'miss the warning. Complete the pending line under the lock before releasing it, so the '
+    'original defect is fixed on the flush path too ([PR reviewer instructions, step '
+    '4](docs/agents/pr-reviewer-instructions.md#L22)).\n'
+    '\n'
+    '- [Codex priority P3 (P0 highest)] Close the record log even if flushing stdout fails — '
+    '/home/nedlern/.cache/merge-lane-review-worktrees/pr4704-head/scripts/sanity-check-adversarial-prompts.py:1509-1513\n'
+    '  If a downstream pipe reader exits early, the new `self.flush()` can raise '
+    '`BrokenPipeError` before `detach()` closes the record log. With a closed pipe, the base '
+    'version closes the log, but the patch leaves it open. Because `main()` calls `detach()` '
+    'before restoring stdout and the signal handlers, an in-process caller also retains the '
+    "runner's global state after the error. Keep log closure and state restoration independent of "
+    'the stdout flush.\n'
+    '\n'
+    '- [Codex priority P3 (P0 highest)] Fail the regression test if the thread handoff times out '
+    '— '
+    '/home/nedlern/.cache/merge-lane-review-worktrees/pr4704-head/scripts/sanity-check-adversarial-prompts-test.py:258-266\n'
+    '  If the warning thread is delayed past the five-second wait, the saved-line thread can '
+    'write its newline first. The output then passes the test even on the old wrapper, because '
+    'the assertions check the line contents and warning adjacency but not whether the intended '
+    'interleaving happened. Make a timed-out handoff fail the test rather than letting it '
+    'validate a different ordering.'))
+
+
+def stub_codex_writes(report_text):
+    """A stub codex that writes report_text as its report and exits 0."""
+    return ("#!/usr/bin/env python3\n"
+            "import sys\n"
+            "argv = sys.argv\n"
+            'target = argv[argv.index("--output-last-message") + 1]\n'
+            f'open(target, "w", encoding="utf-8").write({report_text!r})\n'
+            "sys.exit(0)\n")
+
 
 # A stub codex that exits 0 having written nothing — the silent-absence path
 # the cell must treat as a failure rather than as a clean review.
@@ -334,6 +429,62 @@ with tempfile.TemporaryDirectory() as scratch:
     check("each finding heading's priority label is spelled out, and nothing else is changed",
           result.returncode == 0 and text.partition("\n")[2] == expected_body,
           f"exit {result.returncode}; report={text!r}")
+
+    # --- A report Codex wrote as its review object -------------------------
+    # The cell writes it in Codex's prose form, so a finding has the same
+    # heading, and the same id for the posting program, in either form.
+    object_report = scratch / "object-report.md"
+    result = run_cell(stubs, stub_codex_writes(json.dumps(CODEX_REVIEW_OBJECT, indent=2)),
+                      "--commit", head_sha, "--repo", str(checkout), "--output", str(object_report))
+    text = object_report.read_text(encoding="utf-8") if object_report.is_file() else ""
+    check("a report Codex wrote as its review object is written as the report Codex writes from "
+          "the same object",
+          result.returncode == 0 and text.startswith("<!-- provenance:")
+          and text.partition("\n")[2] == CODEX_REVIEW_PROSE_OF_THE_SAME_REVIEW,
+          f"exit {result.returncode}; stderr={result.stderr!r}; report={text!r}")
+    no_findings_report = scratch / "no-findings-object-report.md"
+    result = run_cell(stubs, stub_codex_writes(json.dumps(
+                          {"findings": [], "overall_correctness": "patch is correct",
+                           "overall_explanation": "No defects found."})),
+                      "--commit", head_sha, "--repo", str(checkout), "--output", str(no_findings_report))
+    text = no_findings_report.read_text(encoding="utf-8") if no_findings_report.is_file() else ""
+    check("a review object with an empty findings list is written as its explanation alone",
+          result.returncode == 0 and text.partition("\n")[2] == "No defects found.",
+          f"exit {result.returncode}; stderr={result.stderr!r}; report={text!r}")
+
+    def object_with_first_finding(**changes):
+        review = json.loads(json.dumps(CODEX_REVIEW_OBJECT))
+        for key, value in changes.items():
+            if value is None:
+                review["findings"][0].pop(key)
+            else:
+                review["findings"][0][key] = value
+        return json.dumps(review)
+
+    for number, (case, report_text) in enumerate((
+            ("text that starts with { but is not JSON", "{ findings: none"),
+            ("an object with no findings list", json.dumps({"overall_explanation": "x"})),
+            ("an object with no explanation", json.dumps({"findings": []})),
+            ("a finding with no priority", object_with_first_finding(priority=None)),
+            ("a finding whose priority is a string", object_with_first_finding(priority="2")),
+            ("a finding whose priority is true", object_with_first_finding(priority=True)),
+            ("a finding whose priority is P4", object_with_first_finding(priority=4)),
+            ("a finding with no title", object_with_first_finding(title=None)),
+            ("a finding whose title has two lines", object_with_first_finding(title="[P2] a\nb")),
+            ("a finding with no body", object_with_first_finding(body=None)),
+            ("a finding with no code location", object_with_first_finding(code_location=None)),
+            ("a finding with no line range end", object_with_first_finding(
+                code_location={"absolute_file_path": "/a.py", "line_range": {"start": 1}})))):
+        refused_report = scratch / f"unconvertible-object-report-{number}.md"
+        result = run_cell(stubs, stub_codex_writes(report_text),
+                          "--commit", head_sha, "--repo", str(checkout),
+                          "--output", str(refused_report))
+        check(f"a report Codex wrote as {case} exits 1, naming the report, leaving no report "
+              "and the text Codex wrote on stderr",
+              result.returncode == 1 and str(refused_report.resolve()) in result.stderr
+              and report_text in result.stderr and "Traceback" not in result.stderr
+              and not refused_report.exists(),
+              f"exit {result.returncode}; stderr={result.stderr!r}")
 
     # An --output that already holds a file is still accepted, and the file
     # is replaced rather than appended to.
