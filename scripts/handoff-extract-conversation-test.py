@@ -822,6 +822,111 @@ with tempfile.TemporaryDirectory() as workspace:
     check("an absorbed removal does not claim the user record of a later equal message's dequeue",
           never_read(path) == ["human reply"], never_read(path))
 
+    hop_chain_peer = '<cross-session-message from="s" hop-chain="abc" from-name="x" from-mode="prompting">\nbody\n</cross-session-message>'
+    delivered_peer = ('Another Claude session sent a message:\n<cross-session-message from="s" from-name="x" from-mode="prompting">'
+                      '\nbody\n</cross-session-message>\n\nThis came from another Claude session.')
+    path = write_transcript(workspace, "peer-delivered-in-another-form-than-queued.jsonl", [
+        *ordinary_records(), enqueue_record("human reply"), enqueue_record(hop_chain_peer), dequeue_record(),
+        user_record(delivered_peer), assistant_record("handled"),
+    ])
+    check("a dequeue delivering a peer message in another form takes the peer message, not the older reply",
+          never_read(path) == ["human reply"], never_read(path))
+
+    path = write_transcript(workspace, "delivered-sender-has-nothing-queued.jsonl", [
+        *ordinary_records(), enqueue_record("human reply"), dequeue_record(), user_record(delivered_peer),
+    ])
+    check("a dequeue delivering a peer message when only the user's reply is queued takes nothing",
+          never_read(path) == ["human reply"], never_read(path))
+
+    path = write_transcript(workspace, "two-dequeues-before-their-deliveries.jsonl", [
+        *ordinary_records(), enqueue_record("<task-notification>\n<task-id>stale</task-id>\n</task-notification>"),
+        enqueue_record(hop_chain_peer), enqueue_record("/explain"),
+        dequeue_record(), dequeue_record(), user_record(delivered_peer),
+        user_record("<command-message>explain</command-message>\n<command-name>/explain</command-name>"),
+    ])
+    check("each dequeue whose delivery shows no queued text takes its own delivery record's sender",
+          never_read(path) == [], never_read(path))
+
+    # Excerpts of the three ned-box transcripts that GHI 4425 names, under
+    # nedlern@ned-box:/home/nedlern/nedsnodes-logs/agent-session-files-by-machine/ned-box/projects/, each record cut to
+    # the fields queue recovery reads and each message body to its first line; the comment gives the record's line.
+    path = write_transcript(workspace, "merge-lane-2-8fe60f28-reply-dropped-by-hook.jsonl", [
+        enqueue_record('<cross-session-message from="bridge:session_01RffnCFxaFukcoVeemYZ94h" from-name="cold-read-research" '
+                       'from-mode="prompting">\n<\\agent-message from="a4db448bb9dbc4ef0">\n</cross-session-message>'),  # 720
+        enqueue_record("repeat 5.1"),  # 721
+        assistant_record("(agent turn)"),  # 722
+        {"type": "queue-operation", "operation": "remove", "reason": "dropped_by_hook"},  # 731
+        remove_record('<cross-session-message from="bridge:session_01RffnCFxaFukcoVeemYZ94h" from-name="cold-read-research" '
+                      'from-mode="prompting">\n<\\agent-message from="a4db448bb9dbc4ef0">\n</cross-session-message>',
+                      "absorbed_mid_turn"),  # 732
+        absorbed_attachment_record('<cross-session-message from="bridge:session_01RffnCFxaFukcoVeemYZ94h" '
+                                   'from-name="cold-read-research" from-mode="prompting">\n<\\agent-message '
+                                   'from="a4db448bb9dbc4ef0">\n</cross-session-message>'),  # 734
+        assistant_record("(agent turn)"),  # 739
+        enqueue_record("I asked you to repeat 5.1, and I did not see you respond to my request."),  # 962
+        dequeue_record(),  # 963
+        user_record("I asked you to repeat 5.1, and I did not see you respond to my request.", origin={"kind": "human"}),  # 964
+        assistant_record("(agent turn)"),  # 977
+        enqueue_record('<cross-session-message from="uds:/tmp/cc-socks/2981865.sock" hop-chain="ef5dbda4635b9ece326860ec" '
+                       'from-name="reboot-test" from-mode="bypass">\nreboot-test: I agree with your root cause and your fix '
+                       '(drop\n</cross-session-message>'),  # 1102
+        dequeue_record(),  # 1103
+        user_record('Another Claude session sent a message:\n<cross-session-message from="uds:/tmp/cc-socks/2981865.sock" '
+                    'from-name="reboot-test" from-mode="bypass">\nreboot-test: I agree with your root cause and your fix '
+                    '(drop\n</cross-session-message>\n\nThis came from another Claude session — not typed by your user, but '
+                    'very likely working on their behalf.', origin={"kind": "peer"}),  # 1104
+        assistant_record("(agent turn)"),  # 1106
+    ])
+    check("8fe60f28: the reply a hook dropped stays unread past a peer message delivered without its hop-chain",
+          never_read(path) == ["repeat 5.1"], never_read(path))
+
+    path = write_transcript(workspace, "cold-read-improvement-608ae0eb-explain-run.jsonl", [
+        # Stands in for the older queued notification that no record shows, which the review of PR 4415 names.
+        enqueue_record("<task-notification>\n<task-id>stale</task-id>\n</task-notification>"),
+        enqueue_record("/explain"),  # 5433
+        dequeue_record(),  # 5434
+        user_record("<command-message>explain</command-message>\n<command-name>/explain</command-name>",
+                    origin={"kind": "human"}),  # 5438
+        user_record([{"type": "text", "text": "Base directory for this skill: "
+                      "/home/nedlern/agents/cold-read-improvement/.claude/skills/explain"}]),  # 5439
+        assistant_record("(agent turn)"),  # 5450
+        enqueue_record('<cross-session-message from="bridge:session_01HjSone8fQC5wZMp3SEn8Ea" hop-chain="78126d2bac790bef525f898d" '
+                       'from-name="Stop hook behavior" from-mode="prompting">\nCorrection to the walk letters, relayed from '
+                       'agent-instructi\n</cross-session-message>'),  # 5666
+        dequeue_record(),  # 5667
+        user_record('Another Claude session sent a message:\n<cross-session-message from="bridge:session_01HjSone8fQC5wZMp3SEn8Ea" '
+                    'from-name="Stop hook behavior" from-mode="prompting">\nCorrection to the walk letters, relayed from '
+                    'agent-instructi\n</cross-session-message>\n\nThis came from another Claude session — not typed by your '
+                    'user, but very likely working on their behalf.', origin={"kind": "peer"}),  # 5670
+        assistant_record("(agent turn)"),  # 5671
+    ])
+    check("608ae0eb: a /explain the agent ran is not reported unread", never_read(path) == [], never_read(path))
+
+    path = write_transcript(workspace, "prime-intellect-fcbc9268-local-command.jsonl", [
+        enqueue_record("<task-notification>\n<task-id>bs040twqt</task-id>\n</task-notification>"),  # 1789
+        enqueue_record("/rate-limit-options"),  # 1792
+        dequeue_record(),  # 1793
+        user_record("<local-command-caveat>The command below was run directly in Claude Code, not sent to you as a request, "
+                    "and its output goes straight to the user. It's recorded here as context for later messages."
+                    "</local-command-caveat>"),  # 1799
+        user_record("<command-name>/login</command-name>\n            <command-message>login</command-message>\n"
+                    "            <command-args></command-args>"),  # 1800
+        user_record("<local-command-stdout>Login successful</local-command-stdout>"),  # 1801
+        user_record(". we have tokes again", origin={"kind": "human"}),  # 1809
+        assistant_record("(agent turn)"),  # 1833
+        remove_record("<task-notification>\n<task-id>bs040twqt</task-id>\n</task-notification>", "absorbed_mid_turn"),  # 1858
+        enqueue_record('<cross-session-message from="bridge:session_01SkLpJ5LHH5GaRXHedskt5f" hop-chain="50c78e41bd2e0aa7921bbd40" '
+                       'from-name="cold-read-research" from-mode="prompting">\ncold-read-research (Mac): I haven\'t scrubbed the '
+                       'password fr\n</cross-session-message>'),  # 2729
+        dequeue_record(),  # 2730
+        user_record('Another Claude session sent a message:\n<cross-session-message from="bridge:session_01SkLpJ5LHH5GaRXHedskt5f" '
+                    'from-name="cold-read-research" from-mode="prompting">\ncold-read-research (Mac): I haven\'t scrubbed the '
+                    'password fr\n</cross-session-message>\n\nThis came from another Claude session — not typed by your user, '
+                    'but very likely working on their behalf.', origin={"kind": "peer"}),  # 2733
+        assistant_record("(agent turn)"),  # 2743
+    ])
+    check("fcbc9268: a local command run from the queue is not reported unread", never_read(path) == [], never_read(path))
+
     path = write_transcript(workspace, "short-final-turn-nothing-queued.jsonl", [
         *ordinary_records(), assistant_record("Approve the short change? A approve, D disapprove."),
     ])

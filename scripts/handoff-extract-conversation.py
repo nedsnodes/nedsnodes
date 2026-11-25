@@ -478,6 +478,37 @@ def claim_delivery_record(events: list, operation_index: int, claimed: set, queu
     return None
 
 
+def queued_text_sender_kind(text: str) -> str:
+    """Return who sent a queued text, or the record delivering one: a peer, a background task, or the user."""
+    peer_first_line = f"{DELIVERED_PEER_MESSAGE_FIRST_LINE}\n"
+    if text.startswith(peer_first_line):
+        text = text[len(peer_first_line):]
+    if text.startswith(PEER_MESSAGE_TAG_OPENINGS):
+        return "peer"
+    if text.startswith(QUEUED_TEXT_OF_ANOTHER_SENDER_TAG_OPENINGS):
+        return "task-notification"
+    return "user"
+
+
+def oldest_position_from_sender_of_first_delivery_record(events: list, operation_index: int, claimed: set, pending: list):
+    """For a dequeue whose delivery shows no queued text, claim the first unclaimed user record before the next agent record
+    and return the oldest pending position from its sender; with no such record, the oldest position.
+
+    Claude Code delivers some messages in another form than it queued them, such as a peer message without its hop-chain
+    attribute or a slash command without arguments, but never from another sender, so a stale message from another sender
+    is not taken in their place.
+    """
+    for index in range(operation_index + 1, len(events)):
+        event = events[index]
+        if event is None:
+            break
+        if type(event) is list and index not in claimed:
+            claimed.add(index)
+            sender = queued_text_sender_kind(event[0])
+            return next((position for position, queued in enumerate(pending) if queued_text_sender_kind(queued) == sender), None)
+    return 0
+
+
 def claude_code_session_transcript_queued_user_messages_never_read_by_agent(transcript_path: Path) -> list:
     """Return, in the order typed, the text of each message unread_queued_user_messages_with_enqueue_lines returns."""
     return [message["text"] for message in unread_queued_user_messages_with_enqueue_lines(transcript_path)]
@@ -488,7 +519,8 @@ def unread_queued_user_messages_with_enqueue_lines(transcript_path: Path) -> lis
 
     A queue-operation "enqueue" adds a message; "remove" takes the first with its content away; "popAll"
     returns every message to the input box; "dequeue", which names no content, takes the message that a
-    user record before the next agent record shows, or else the oldest. A queued_command attachment delivers
+    user record before the next agent record shows, or else the oldest from that record's sender, or, when no
+    record follows before the next agent record, the oldest. A queued_command attachment delivers
     an absorbed remove. The record that delivers either removes no second copy; any other record showing a
     message removes one copy.
     Messages from another sender's known tag are left out. Each is a dict of its text and its enqueue's
@@ -520,8 +552,11 @@ def unread_queued_user_messages_with_enqueue_lines(transcript_path: Path) -> lis
         elif operation == "popAll":
             pending, enqueue_lines = [], []
         elif operation == "dequeue" and pending:
-            position = claim_delivery_record(events, index, claimed, pending) or 0
-            del pending[position], enqueue_lines[position]
+            position = claim_delivery_record(events, index, claimed, pending)
+            if position is None:
+                position = oldest_position_from_sender_of_first_delivery_record(events, index, claimed, pending)
+            if position is not None:
+                del pending[position], enqueue_lines[position]
     return [{"text": text, "enqueue_line": line} for text, line in zip(pending, enqueue_lines)
             if not text.startswith(QUEUED_TEXT_OF_ANOTHER_SENDER_TAG_OPENINGS)]
 
