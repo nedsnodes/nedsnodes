@@ -160,9 +160,9 @@ def run_unreadable_pending_cases(root):
         alerts.user_alerts_claim_every_pending_for_agent_seat_by_rename_into_claimed("seat-y", now=NOW)
     except ValueError as error:
         raised = error
-    check("a pending file that is not a JSON object raises ValueError, even in an agent-seat it would not go to, "
-          "and is moved into claimed/", raised is not None
-          and (directory / "claimed" / "0-not-an-object.json").is_file(), repr(raised))
+    check("a pending file that is not a JSON object raises ValueError naming unreadable/, even in an agent-seat it "
+          "would not go to, and is moved into unreadable/", raised is not None and "unreadable" in str(raised)
+          and (directory / "unreadable" / "0-not-an-object.json").is_file(), repr(raised))
     claimed = alerts.user_alerts_claim_every_pending_for_agent_seat_by_rename_into_claimed(DEFAULT_SEAT, now=NOW)
     check("after a pending file that is not a JSON object, the next claim takes the alerts sorted after it",
           [alert["id"] for alert in claimed] == [after], repr(claimed))
@@ -175,12 +175,49 @@ def run_unreadable_pending_cases(root):
         alerts.user_alerts_claim_every_pending_for_agent_seat_by_rename_into_claimed("seat-y", now=NOW)
     except IsADirectoryError as error:
         raised = error
-    check("a pending entry that cannot be read, a directory, raises its OSError and is moved into claimed/",
-          raised is not None and (directory / "claimed" / "0-a-directory.json").is_dir()
+    check("a pending entry that cannot be read, a directory, raises its OSError naming unreadable/ and is moved there",
+          raised is not None and "unreadable" in str(raised)
+          and (directory / "unreadable" / "0-a-directory.json").is_dir()
           and not (directory / "pending" / "0-a-directory.json").exists(), repr(raised))
-    claimed = alerts.user_alerts_claim_every_pending_for_agent_seat_by_rename_into_claimed(DEFAULT_SEAT, now=NOW)
-    check("after a pending entry that cannot be read, the next claim takes the alerts sorted after it",
-          [alert["id"] for alert in claimed] == [after], repr(claimed))
+    later = NOW + timedelta(minutes=31)
+    alerts.user_alerts_claimed_delete_if_recorded_in_approval_walk_minutes_else_release_to_pending_after_30_minutes(
+        now=later)
+    claimed = alerts.user_alerts_claim_every_pending_for_agent_seat_by_rename_into_claimed(DEFAULT_SEAT, now=later)
+    check("after a pending entry that cannot be read, a release then a claim 31 minutes later takes the alerts "
+          "sorted after it, and the entry stays in unreadable/",
+          [alert["id"] for alert in claimed] == [after]
+          and (directory / "unreadable" / "0-a-directory.json").is_dir(), repr(claimed))
+
+
+class UtimeFindsNothing:
+    """os, except that setting a modification time finds no file, as for a dangling link moved into claimed/."""
+
+    def __getattr__(self, name):
+        return getattr(os, name)
+
+    @staticmethod
+    def utime(path, times):
+        raise FileNotFoundError(2, "No such file or directory", str(path))
+
+
+def run_unreadable_pending_dangling_link_case(root):
+    directory = fresh_home(root, "unreadable-pending-dangling-link")
+    (directory / "pending" / "a-directory").mkdir(parents=True)
+    # Resolves from pending/ only, so once moved it dangles.
+    (directory / "pending" / "0-dangling.json").symlink_to("a-directory")
+    real_os, alerts.os = alerts.os, UtimeFindsNothing()
+    raised = None
+    try:
+        alerts.user_alerts_claim_every_pending_for_agent_seat_by_rename_into_claimed(DEFAULT_SEAT, now=NOW)
+    except OSError as error:
+        raised = error
+    finally:
+        alerts.os = real_os
+    unreadable_entry = directory / "unreadable" / "0-dangling.json"
+    check("a pending link to a directory that dangles once moved is reported, not read as another agent-session's "
+          "claim, even when setting a modification time would find nothing, and is moved into unreadable/",
+          isinstance(raised, IsADirectoryError) and "unreadable" in str(raised) and unreadable_entry.is_symlink()
+          and not (directory / "claimed" / "0-dangling.json").is_symlink(), repr(raised))
 
 
 def run_claim_cases(root):
@@ -355,6 +392,7 @@ with tempfile.TemporaryDirectory() as temporary_directory:
     run_write_cases(scratch)
     run_agent_seat_cases(scratch)
     run_unreadable_pending_cases(scratch)
+    run_unreadable_pending_dangling_link_case(scratch)
     run_claim_cases(scratch)
     run_concurrent_claim_cases(scratch)
     run_release_cases(scratch)
