@@ -117,8 +117,8 @@ names each glossary term the change puts in, in backquotes when it holds a space
 `#not_asked_hashtag_marker` names each hashtag marker the change adds;
 `#not_asked_search` gives the first and last day of the search for the problem a
 dropped proposal guarded against, the count of cases found and the places
-searched, as in `#not_asked_search YYYY-MM-DD to YYYY-MM-DD, 0 cases, in the
-log-store's session dialogs and user messages and the commits on main`. An unused or old name is searched for as written and,
+searched, after `places:`, as in `#not_asked_search YYYY-MM-DD to YYYY-MM-DD, 0 cases,
+places: the log-store's session dialogs and user messages and the commits on main`. An unused or old name is searched for as written and,
 when it has two or more words, with its words joined by hyphens, by underscores
 and by nothing, a run of digits both kept with the letters before it and
 split off as a word of its own; every
@@ -742,9 +742,8 @@ def system_glossary_problems(found):
 
 def dropped_proposal_search_problems(found):
     """Return why an item that drops a proposed check cannot settle on its `#not_asked_search` line: the line must
-    give a window of at least SEARCH_WINDOW_DAYS ending yesterday or today, one count, of 0 cases, and after it `in`,
-    with at most a comma and `found` before it, and the places searched;
-    and a dropped proposal adds no `#new` text."""
+    be the SEARCH_LINE fields, with a window of at least SEARCH_WINDOW_DAYS ending yesterday or today and a count
+    of 0 cases; and a dropped proposal adds no `#new` text."""
     problems = [NOT_ASKED_DROPPED_PROPOSAL_NEW_TEXT_PROBLEM] if proposed_texts(found.marks, {NEW_MARK}) else []
     values = found.found[SEARCH]
     if not values:
@@ -752,15 +751,12 @@ def dropped_proposal_search_problems(found):
     today = datetime.datetime.now(datetime.timezone.utc).date()
     yesterday = today - datetime.timedelta(days=1)
     for value in values:
-        days = SEARCH_DAY.findall(value)
-        counts = list(SEARCH_COUNT.finditer(value))
-        count = counts[0] if len(counts) == 1 else None
-        places = SEARCH_PLACES.match(value[count.end():]) if count else None
-        if len(days) != 2 or count is None or not places or not SEARCH_PLACE_WORD.search(places[1]):
+        fields = SEARCH_LINE.fullmatch(value.strip())
+        if not fields:
             problems.append(MalformedEvidenceLine(NOT_ASKED_SEARCH_SHAPE_PROBLEM.format(marker=SEARCH, value=value)))
             continue
         try:
-            first, last = (datetime.date.fromisoformat(day) for day in days)
+            first, last = (datetime.date.fromisoformat(day) for day in fields.group(1, 2))
         except ValueError:
             problems.append(MalformedEvidenceLine(NOT_ASKED_SEARCH_SHAPE_PROBLEM.format(marker=SEARCH, value=value)))
             continue
@@ -771,8 +767,8 @@ def dropped_proposal_search_problems(found):
             problems.append(NOT_ASKED_SEARCH_WINDOW_OLD_PROBLEM.format(marker=SEARCH, last=last))
         if last > today:
             problems.append(NOT_ASKED_SEARCH_WINDOW_FUTURE_PROBLEM.format(marker=SEARCH, last=last))
-        if int(count[1]):
-            problems.append(NOT_ASKED_SEARCH_FOUND_CASES_PROBLEM.format(marker=SEARCH, count=count[1]))
+        if int(fields[3]):
+            problems.append(NOT_ASKED_SEARCH_FOUND_CASES_PROBLEM.format(marker=SEARCH, count=fields[3]))
     return problems
 
 
@@ -1392,8 +1388,9 @@ NOT_ASKED_MARKER_SHAPE_PROBLEM = ("- `{value}` on its `{marker}` line is not a h
                                   "digits, `_` or `-`.")
 NOT_ASKED_MARKER_READ_PROBLEM = ("- the marker `{value}` is in {files}, which are not Markdown; a marker a program, "
                                  "a test or a setting reads changes what the program does, so the user sees it.")
-NOT_ASKED_SEARCH_SHAPE_PROBLEM = ("- its `{marker}` line `{value}` does not give the search's first and last day, as "
-                                  "YYYY-MM-DD, the count of cases found, as in `0 cases`, and the places searched.")
+NOT_ASKED_SEARCH_SHAPE_PROBLEM = ("- its `{marker}` line `{value}` is not the search's first and last day, as "
+                                  "YYYY-MM-DD, the count of cases found, as in `0 cases`, and the places searched "
+                                  "after `places:`, in the form `YYYY-MM-DD to YYYY-MM-DD, 0 cases, places: ...`.")
 NOT_ASKED_SEARCH_WINDOW_SHORT_PROBLEM = ("- its `{marker}` line searched {first} to {last}, shorter than the {days} "
                                          "days the guard rule in CLAUDE.md asks for.")
 NOT_ASKED_SEARCH_WINDOW_OLD_PROBLEM = ("- its `{marker}` line's search ended on {last}, before yesterday; search again "
@@ -1404,13 +1401,10 @@ NOT_ASKED_SEARCH_FOUND_CASES_PROBLEM = ("- its `{marker}` line found {count} cas
                                         "has happened, so the proposal is shown to the user with those cases cited.")
 NOT_ASKED_DROPPED_PROPOSAL_NEW_TEXT_PROBLEM = ("- it has a `#new` line, which A would add; an item that drops a "
                                                "proposal adds no text, so it recommends something else and is shown.")
-SEARCH_DAY = re.compile(r"\b\d{4}-\d{2}-\d{2}\b")
-SEARCH_COUNT = re.compile(r"\b(\d+)\s+cases?\b", re.I)
-# The places are the text after the `in` that follows the single count, with at most a comma and the word `found`
-# between them, as in `0 cases, in` or `0 cases found in`; any other word there, as in `0 cases, will look in`, may
-# begin a clause that has not been searched, so its `in` is not taken as the places.
-SEARCH_PLACES = re.compile(r"\s*,?\s*(?:found\s+)?in\b(.*)", re.I | re.S)
-SEARCH_PLACE_WORD = re.compile(r"\b(?!(?:to|in|and|of|the|from|through)\b)[A-Za-z][\w'.-]*")
+# Fixed fields, not prose: a tally phrase such as `0 cases in total; will look in ...` holds an `in` that names no
+# place searched, so the places are only what follows `places:`.
+SEARCH_LINE = re.compile(r"(\d{4}-\d{2}-\d{2}) to (\d{4}-\d{2}-\d{2}), (\d+) cases?, places: *(.*[A-Za-z].*)",
+                         re.I | re.S)
 SEARCH_WINDOW_DAYS = 30
 NOT_ASKED_WHY = {
     TOUCHES: "list on it every file the change edits or deletes, separated by spaces.",
@@ -1418,7 +1412,7 @@ NOT_ASKED_WHY = {
     SOURCE: "cite on it the ruling, the merged code or the command that shows the fact.",
     RENAME: "give on it the old name, then the new name, each in backquotes when it holds a space.",
     SEARCH: ("give on it the search's first and last day, the count of cases found and the places searched, as in "
-             "`#not_asked_search 2026-10-26 to 2026-11-25, 0 cases, in the log-store's session dialogs and user "
+             "`#not_asked_search 2026-10-26 to 2026-11-25, 0 cases, places: the log-store's session dialogs and user "
              "messages and the commits on main`."),
 }
 NOT_ASKED_JUDGEMENT_LINES = (

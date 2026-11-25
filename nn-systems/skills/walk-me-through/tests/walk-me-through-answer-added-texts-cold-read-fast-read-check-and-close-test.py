@@ -4240,8 +4240,8 @@ def test_an_item_of_no_kind_rated_weak_settles_when_it_touches_guarded_code_but_
 DROPPED = "proposed-check-dropped-search-found-no-case"
 
 
-def search_line(first_days_ago=31, last_days_ago=0, count=0, places="in the log-store's session dialogs and user "
-                "messages and the commits on main"):
+def search_line(first_days_ago=31, last_days_ago=0, count=0, places="places: the log-store's session dialogs and "
+                "user messages and the commits on main"):
     today = datetime.datetime.now(datetime.timezone.utc).date()
     first, last = (today - datetime.timedelta(days=days) for days in (first_days_ago, last_days_ago))
     return f"#not_asked_search {first} to {last}, {count} cases, {places}\n\n"
@@ -4282,17 +4282,15 @@ def test_an_item_dropping_a_proposed_check_settles_at_any_rating_when_its_search
                             r"makes its change\. Fast reads:\n", minutes) is not None
               and "Judge also whether item 1 of 3 proposes a check, test, guard, refusal or hook and recommends "
                   "dropping it" in result.stdout, described(result) + minutes)
-    found_in = dropped_proposal_case(search=search_line(places="found in the session dialogs and the commits on main"))
-    result = found_in.run("check", "--not-asked", DROPPED)
-    check("a search line with a word between the count and `in`, as in `0 cases found in ...`, settles",
-          result.returncode == 0, described(result))
-    later_clause = dropped_proposal_case(search=search_line(places="found so far; will look in the session "
-                                                                   "dialogs tomorrow"))
-    check("a search line whose `in` comes in a later clause, as in `0 cases found so far; will look in ...`, is "
-          "refused", *refused_as_dropped(later_clause, "and the places searched."))
-    for places in ("will look in the session dialogs tomorrow", "found so far and will look in the session dialogs"):
-        check(f"a search line whose `in` follows other words than `found`, as in `0 cases, {places}`, is refused",
-              *refused_as_dropped(dropped_proposal_case(search=search_line(places=places)), "and the places searched."))
+    for places in ("in the session dialogs", "found so far; will look in the session dialogs tomorrow",
+                   "will look in the session dialogs tomorrow", "found so far and will look in the session dialogs"):
+        check(f"a search line that names its places in tally prose, as in `0 cases, {places}`, not after "
+              "`places:`, is refused",
+              *refused_as_dropped(dropped_proposal_case(search=search_line(places=places)), "after `places:`"))
+    in_total = dropped_proposal_case(search=f"{search_line().split(', 0 cases')[0]}, 0 cases in total; will look "
+                                            "in the session dialogs tomorrow\n\n")
+    check("a search line whose count is followed by `in total; will look in ...` is refused",
+          *refused_as_dropped(in_total, "after `places:`"))
     closed = case.run("close")
     check("close records the dropped proposal as accepted, and moves `#next_to_present` past it",
           closed.returncode == 0
@@ -4307,10 +4305,10 @@ def test_an_item_dropping_a_proposed_check_is_refused_without_a_full_recent_sear
                               "search's first and last day, the count of cases found and the places searched"))
     check("a search line without a count is refused",
           *refused_as_dropped(dropped_proposal_case(search="#not_asked_search 2026-10-01 to 2026-11-25 in the "
-                                                    "commits on main\n\n"), "does not give the search's first and "
+                                                    "commits on main\n\n"), "is not the search's first and "
                               "last day, as YYYY-MM-DD, the count of cases found"))
     check("a search line that names no place is refused",
-          *refused_as_dropped(dropped_proposal_case(search=search_line(places="")), "and the places searched."))
+          *refused_as_dropped(dropped_proposal_case(search=search_line(places="places: ")), "after `places:`"))
     check("a search shorter than 30 days is refused",
           *refused_as_dropped(dropped_proposal_case(search=search_line(first_days_ago=10)),
                               "shorter than the 30 days the guard rule in CLAUDE.md asks for"))
@@ -4320,11 +4318,9 @@ def test_an_item_dropping_a_proposed_check_is_refused_without_a_full_recent_sear
     check("a search that ends after today is refused",
           *refused_as_dropped(dropped_proposal_case(search=search_line(first_days_ago=5, last_days_ago=-25)),
                               "after today (UTC)"))
-    check("a search line with two counts is refused",
-          *refused_as_dropped(dropped_proposal_case(search=search_line(places="in the session dialogs but 2 cases on "
-                                                                              "main")), "the count of cases found"))
-    check("a search line whose only text after the count is not `in` and the places is refused",
-          *refused_as_dropped(dropped_proposal_case(search=search_line(places="found")), "and the places searched."))
+    check("a search line with no comma between the count and `places:` is refused",
+          *refused_as_dropped(dropped_proposal_case(search=search_line().replace("cases, places", "cases places")),
+                              "after `places:`"))
     check("a search that found cases is refused, since a case is the failure that has happened",
           *refused_as_dropped(dropped_proposal_case(search=search_line(count=2)), "found 2 cases; a case found is "
                               "the failure that has happened"))
@@ -4334,10 +4330,11 @@ def test_an_item_dropping_a_proposed_check_is_refused_without_a_full_recent_sear
 
 
 def test_read_step_tells_the_agent_to_correct_a_malformed_search_line_not_to_add_one():
-    two_counts = dropped_proposal_case(search=search_line(places="in the session dialogs but 2 cases on main"))
-    rows = no_answer_rows_printed(result := two_counts.run(WAITING_ITEM_READ))
+    prose_places = dropped_proposal_case(search=search_line(places="in the session dialogs"))
+    rows = no_answer_rows_printed(result := prose_places.run(WAITING_ITEM_READ))
     dropped = [row for row in rows if row.startswith("- proposed check dropped, search found no case:")]
-    check("an item whose search line has two counts is told to correct that line, not to add an evidence line",
+    check("an item whose search line names its places without `places:` is told to correct that line, not to add an "
+          "evidence line",
           len(dropped) == 1 and "needs correcting" in dropped[0] and "rather than adding another" in dropped[0]
           and "Only evidence is missing" not in dropped[0], described(result))
     program = load_program()
