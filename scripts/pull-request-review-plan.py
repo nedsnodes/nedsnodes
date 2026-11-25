@@ -6,7 +6,9 @@ limited to docstrings, comments and tool-message-to-agent strings get codex-revi
 A tool-message-to-agent string is one that tool_message_to_agent_string_nodes_in_source,
 in nn-systems/general-tools/python-source-tool-message-to-agent-string-collector-common.py, finds;
 any other string, such as a regular expression, a command's argument or a path,
-carries behaviour, so a change to it is a behaviour change.
+carries behaviour, so a change to it is a behaviour change; so does a module constant's value
+the collector marks module_constant_also_steers_the_program, such as MODE in print(MODE) and
+if requested_mode == MODE:.
 Python behaviour changes and other code get claude-and-codex-review-and-head-tests-tier. Prose gets
 no-reviewer-tier. Settings, Bash guards and registered hooks always get
 claude-and-codex-review-and-head-tests-tier; all of .claude/guard-hooks/ does too,
@@ -187,6 +189,7 @@ tool_message_to_agent_string_nodes_in_source = _tool_message_to_agent_string_col
 addition_chain_operands = _tool_message_to_agent_string_collector.addition_chain_operands
 helper_printers_in_tree = _tool_message_to_agent_string_collector.helper_printers_in_tree
 PRINTING_CALL_NAMES = _tool_message_to_agent_string_collector.PRINTING_CALL_NAMES
+STR_METHODS_THAT_RETURN_THE_TEXT = _tool_message_to_agent_string_collector.STR_METHODS_THAT_RETURN_THE_TEXT
 _message_reminder_hook_spec = importlib.util.spec_from_file_location(
     "python_edit_changed_tool_message_to_agent_strings_check_reminder_hook",
     Path(__file__).resolve().parent.parent / "nn-systems" / "general-tools"
@@ -477,11 +480,6 @@ def passes_its_text_up(child, parent):
             or (isinstance(parent, ast.IfExp) and child is not parent.test))
 
 
-STR_METHODS_THAT_RETURN_THE_TEXT = frozenset({
-    "format", "strip", "lstrip", "rstrip", "upper", "lower", "casefold", "title", "capitalize",
-    "replace", "center", "ljust", "rjust", "removeprefix", "removesuffix"})
-
-
 def nearest_call_prints_its_argument(node, parents, helper_printers):
     """True when node's text reaches, unchanged, a statement or the argument of a printing call or
     helper printer, or the exception a raise statement builds. A str method that returns the text,
@@ -512,8 +510,12 @@ def nearest_call_prints_its_argument(node, parents, helper_printers):
 
 
 def tool_message_to_agent_string_literal_positions(tree, source):
+    """The positions of the literal pieces of each tool-message-to-agent string whose change is graded
+    as a message change; a module constant's value that also steers the program, as
+    module_constant_also_steers_the_program says, is left out, so a change to it is a behaviour change."""
     entry_positions = {(entry["line"], entry["column"], entry["end_line"], entry["end_column"])
-                       for entry in tool_message_to_agent_string_nodes_in_source(source)}
+                       for entry in tool_message_to_agent_string_nodes_in_source(source)
+                       if not entry["module_constant_also_steers_the_program"]}
     parents = {child: parent for parent in ast.walk(tree) for child in ast.iter_child_nodes(parent)}
     helper_printers = helper_printers_in_tree(tree)
     return set().union(*(literal_piece_positions(node) for node in ast.walk(tree)

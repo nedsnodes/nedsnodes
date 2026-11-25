@@ -206,8 +206,8 @@ check("the returned local that holds the recovery note is found too, with each +
 check("a list the recovery note's f-string reads through a join call is not text", not any(
     entry[2].startswith("paths =") for entry in found), found)
 compose_kinds = {(entry["label"].split(" ")[0], entry["kind"]) for entry in entries(COMPOSE_SOURCE)}
-check("the recovery note and the prompt it is returned in are prompts, and the module instruction is a message",
-      compose_kinds == {("recovery_note", "prompt"), ("prompt", "prompt"), ("ITEMS_INSTRUCTION", "message")},
+check("the recovery note, the prompt it is returned in and the module instruction that prompt is built from are prompts",
+      compose_kinds == {("recovery_note", "prompt"), ("prompt", "prompt"), ("ITEMS_INSTRUCTION", "prompt")},
       compose_kinds)
 
 KINDS = (
@@ -760,16 +760,43 @@ MODULE_CONSTANT_NAMED_AT_A_FORM = (
     ("in a print", 'NOTE = "nothing to do"\ndef main():\n    print(NOTE)\n', "nothing to do"),
     ("as a helper printer's argument",
      'WARNING = "check the log"\ndef say(text):\n    print(text)\ndef main():\n    say(WARNING)\n', "check the log"),
-    ("in a followed return statement",
-     'REFUSED = "refused: {problem}"\nEMPTY = "is empty"\n'
+    ("in a followed return statement, as an argument of an exception class the file defines",
+     'REFUSED = "refused: {problem}"\nEMPTY = "is empty"\nclass Failure(Exception):\n    pass\n'
      'def main():\n    def refused(problem):\n        return Failure(REFUSED.format(problem=problem))\n'
      '    raise refused(EMPTY)\n', "refused: {problem}"),
+    ("in a followed return statement, as an argument of a subclass of such a class",
+     'REFUSED = "refused"\nclass Failure(Exception):\n    pass\nclass Refused(Failure):\n    pass\n'
+     'def refused():\n    return Refused(REFUSED)\ndef main():\n    raise refused()\n', "refused"),
+    ("in a followed return statement, as an argument of a built-in exception",
+     'GONE = "the file is gone"\ndef gone():\n    return ValueError(GONE)\ndef main():\n    raise gone()\n',
+     "the file is gone"),
+    ("bare in a raise of a dotted exception class",
+     'import argparse\nPROBLEM = "no answer"\ndef parse(value):\n    raise argparse.ArgumentTypeError(PROBLEM)\n',
+     "no answer"),
+    ("bare as the argument of a function that returns it in a hook output value",
+     'NOTE = "the hook failed"\nimport json\ndef context_output(event, text):\n'
+     '    return json.dumps({"hookSpecificOutput": {"hookEventName": event, "additionalContext": text}})\n'
+     'def main(event):\n    print(context_output(event, NOTE))\n', "the hook failed"),
+    ("as the argument of a function that returns it in a string, through another such function",
+     'CAUSE = "timed out"\ndef cause_line(program, cause):\n    return program + ": " + cause\n'
+     'def line(program, cause):\n    return cause_line(program, cause)\n'
+     'def main(program):\n    print(line(program, CAUSE))\n', "timed out"),
+    ("as a + operand in a print",
+     'ENDING = " Run it again."\ndef main(text):\n    print(text + ENDING)\n', " Run it again."),
+    ("as an element of a list joined by a string literal",
+     'START = "--- start ---"\nEND = "--- end ---"\ndef main(brief):\n'
+     '    print("\\n".join(["first"] + [START, *brief, END]))\n', "--- end ---"),
+    ("in a followed local name's binding",
+     'ENDING = " Run it again."\ndef main(text):\n    message = "failed: " + text + ENDING\n    print(message)\n',
+     " Run it again."),
     ("with .format in a raise of a dotted exception class",
      'import argparse\nPROBLEM = "{value} is no answer"\ndef parse(value):\n'
      '    raise argparse.ArgumentTypeError(PROBLEM.format(value=value))\n', "{value} is no answer"),
-    ("with .format among a printed call's arguments",
-     'NOTE = "the hook failed: {error}"\ndef main(event, error):\n'
-     '    print(context_output(event, NOTE.format(error=error)))\n', "the hook failed: {error}"),
+    ("with .format as the argument of a function that returns it in a hook output value",
+     'NOTE = "the hook failed: {error}"\nimport json\ndef context_output(event, text):\n'
+     '    return json.dumps({"hookSpecificOutput": {"hookEventName": event, "additionalContext": text}})\n'
+     'def main(event, error):\n    print(context_output(event, NOTE.format(error=error)))\n',
+     "the hook failed: {error}"),
     ("in a print outside any function", 'text = "module text"\nprint(text)\n', "module text"),
 )
 for case_name, source, expected in MODULE_CONSTANT_NAMED_AT_A_FORM:
@@ -790,10 +817,49 @@ for case_name, source in (
          'CAUSE = "timed-out"\ndef main(program):\n    print(cause_line(program, CAUSE))\n'),
         ("bare among a dotted call's arguments in a followed return",
          'PROGRAM = "stale-check"\ndef lines(rerun):\n    return helpers.next_lines(rerun, PROGRAM)\n'
-         'def main(rerun):\n    print(lines(rerun))\n')):
+         'def main(rerun):\n    print(lines(rerun))\n'),
+        ("with .format as a pattern of re.sub in a print",
+         'import re\nPATTERN = "^{prefix}"\ndef main(prefix, text):\n'
+         '    print(re.sub(PATTERN.format(prefix=prefix), "", text))\n'),
+        ("bare among a bare-named call's arguments in a followed return",
+         'CAUSE = "timed-out"\ndef line(program):\n    return cause_line(program, CAUSE)\n'
+         'def main(program):\n    print(line(program))\n'),
+        ("as the argument a module function steers with, not returns",
+         'import re\nPATTERN = "stale-check"\ndef cleaned(pattern, text):\n    return re.sub(pattern, "", text)\n'
+         'def main(text):\n    print(cleaned(PATTERN, text))\n'),
+        ("bare in an f-string's field", 'FLAG = "--force"\ndef main():\n    print(f"run with {FLAG}")\n'),
+        ("bare in a comparison that is printed", 'MODE = "first"\ndef main(mode):\n    print(mode == MODE)\n')):
     found = texts(source)
     check(f"not recognized: a module string constant named {case_name}",
-          not ({"--force", "first", "second", "module text", "timed-out", "stale-check"} & set(found)), found)
+          not ({"--force", "first", "second", "module text", "timed-out", "stale-check", "^{prefix}"} & set(found)), found)
+
+found = entries('NOTE = "nothing to do"\nimport json\n'
+                'def main():\n    print(NOTE)\n    print(json.dumps({"reason": NOTE}))\n')
+check("a module string constant printed and given as a hook output value is one entry, labelled with its name",
+      [(entry["text"], entry["label"]) for entry in found] == [("nothing to do", "NOTE =")], found)
+
+for case_name, source in (
+        ("compared", 'MODE = "fast"\ndef main(requested_mode):\n    print(MODE)\n    if requested_mode == MODE:\n        return 1\n'),
+        ("tested for in a text", 'REFUSED_MESSAGE = "refused"\ndef main(output):\n    print(REFUSED_MESSAGE)\n'
+                                 '    return REFUSED_MESSAGE.strip() in output\n'),
+        ("looked up with a str method", 'HEADING = "## Words"\ndef main(lines):\n    print("no " + HEADING)\n'
+                                        '    return lines.index(HEADING)\n'),
+        ("used as a dict key", 'KIND_MESSAGE = "kind"\ndef main(record):\n    print(KIND_MESSAGE)\n'
+                               '    return {KIND_MESSAGE: record}\n'),
+        ("used as a subscript's index", 'KIND_MESSAGE = "kind"\ndef main(record):\n    print(KIND_MESSAGE)\n'
+                                        '    return record[KIND_MESSAGE]\n'),
+        ("given to a function of the re module", 'PATTERN_LINE = "^x"\nimport re\ndef main(text):\n'
+                                                 '    print(PATTERN_LINE)\n    return re.match(PATTERN_LINE, text)\n')):
+    found = entries(source)
+    check(f"a module string constant also {case_name} is marked as steering the program",
+          [entry["module_constant_also_steers_the_program"] for entry in found if entry["label"].endswith(" =")]
+          == [True], found)
+
+found = entries('MODE = "fast"\nNOTE_LINE = "a line"\ndef main(text):\n    print(MODE)\n'
+                '    print(f"{NOTE_LINE} {MODE}")\n    print(text.replace(NOTE_LINE, ""))\n')
+check("a module string constant only shown, in a print, an f-string field or a str method's argument, is not marked",
+      [entry["module_constant_also_steers_the_program"] for entry in found
+       if entry["label"] in ("MODE =", "NOTE_LINE =")] == [False, False], found)
 
 WALK_ME_THROUGH_CLOSE_PATH = (Path(__file__).resolve().parents[2] / "skills" / "walk-me-through"
                               / "walk-me-through-answer-added-texts-cold-read-fast-read-check-and-close.py")
