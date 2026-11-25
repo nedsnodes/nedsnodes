@@ -1562,6 +1562,26 @@ def test_print_block():
                                                "0123456789ab).\n"
                                                "2. fix-next: `scripts/thing.py:7`: Rename it (Codex finding "
                                                "ba9876543210).\n"), out + err)
+    code, out, err = print_block([merge_lane_review(2), merge_lane_review(1)],
+                                 [merge_lane_comment(10, 1, "**fix-next** Rename it (Codex finding 0123456789ab)."),
+                                  merge_lane_comment(11, 2, "**fix-next** Rename it (Codex finding ba9876543210)."),
+                                  merge_lane_comment(12, 2, "**fix-next** Rename it (Codex finding 5555aaaa5555).",
+                                                     line=7)])
+    check(f"{PRINT_BLOCK} matches an earlier finding to only one comment of a later review, printing a second "
+          "comment alike but for its Codex finding id",
+          code == 0 and err == "" and out == (f"#follow_up_request pull request {NUMBER}\n"
+                                               "1. fix-next: `scripts/thing.py:3`: Rename it (Codex finding "
+                                               "0123456789ab).\n"
+                                               "2. fix-next: `scripts/thing.py:7`: Rename it (Codex finding "
+                                               "5555aaaa5555).\n"), out + err)
+    code, out, err = print_block([merge_lane_review(1)],
+                                 [merge_lane_comment(10, 1, "**fix-next** Rename it (Codex finding 0123456789ab)."),
+                                  merge_lane_comment(11, 1, "**fix-next** Rename it Codex finding 0123456789ab.",
+                                                     line=7)])
+    check(f"{PRINT_BLOCK} prints once one review's two comments naming the same Codex finding id in two forms",
+          code == 0 and err == "" and out == (f"#follow_up_request pull request {NUMBER}\n"
+                                               "1. fix-next: `scripts/thing.py:3`: Rename it (Codex finding "
+                                               "0123456789ab).\n"), out + err)
     code, out, err = print_block([merge_lane_review(1)], [merge_lane_comment(10, 1, "**fix-next** Rename it.")],
                                  read_back=lambda text: [])
     check(f"{PRINT_BLOCK} prints nothing and fails with exit 2 when its block does not read back as itself",
