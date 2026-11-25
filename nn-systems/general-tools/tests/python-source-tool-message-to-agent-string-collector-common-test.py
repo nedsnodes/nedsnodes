@@ -849,17 +849,46 @@ for case_name, source in (
         ("used as a subscript's index", 'KIND_MESSAGE = "kind"\ndef main(record):\n    print(KIND_MESSAGE)\n'
                                         '    return record[KIND_MESSAGE]\n'),
         ("given to a function of the re module", 'PATTERN_LINE = "^x"\nimport re\ndef main(text):\n'
-                                                 '    print(PATTERN_LINE)\n    return re.match(PATTERN_LINE, text)\n')):
+                                                 '    print(PATTERN_LINE)\n    return re.match(PATTERN_LINE, text)\n'),
+        ("given only to calls that are not forms, as a state table's verdict",
+         'V_GATEKEEPER_REFUSAL = "gatekeeper-refusal"\ndef _row(state, verdict):\n    return (state, verdict)\n'
+         'ROWS = (_row("start", V_GATEKEEPER_REFUSAL), _row("end", V_GATEKEEPER_REFUSAL))\n'
+         'VERDICTS = (V_GATEKEEPER_REFUSAL,)\n'),
+        ("written to a file", 'from pathlib import Path\nMARKER = "done"\ndef main(path):\n    print(MARKER)\n'
+                              '    Path(path).write_text(MARKER)\n'),
+        ("given to a helper that compares its parameter",
+         'MODE = "fast"\ndef is_mode(requested, wanted):\n    return requested == wanted\n'
+         'def main(requested):\n    print(MODE)\n    return is_mode(requested, MODE)\n'),
+        ("the receiver of a lookup method", 'TEMPLATE = "a {x} b"\ndef main():\n    print(TEMPLATE.format(x=1))\n'
+                                             'START = TEMPLATE.index("{x}")\n'),
+        ("compared through a local alias", 'MODE = "fast"\ndef main(requested_mode):\n    print(MODE)\n'
+                                           '    mode = MODE\n    return requested_mode == mode\n'),
+        ("the text a str method replaces", 'NOTE_LINE = "a line"\ndef main(text):\n    print(NOTE_LINE)\n'
+                                           '    return text.replace(NOTE_LINE, "")\n')):
     found = entries(source)
     check(f"a module string constant also {case_name} is marked as steering the program",
-          [entry["module_constant_also_steers_the_program"] for entry in found if entry["label"].endswith(" =")]
+          [entry["collected_string_is_module_constant_whose_value_also_steers_the_program"] for entry in found if entry["label"].endswith(" =")]
           == [True], found)
 
 found = entries('MODE = "fast"\nNOTE_LINE = "a line"\ndef main(text):\n    print(MODE)\n'
-                '    print(f"{NOTE_LINE} {MODE}")\n    print(text.replace(NOTE_LINE, ""))\n')
-check("a module string constant only shown, in a print, an f-string field or a str method's argument, is not marked",
-      [entry["module_constant_also_steers_the_program"] for entry in found
+                '    print(f"{NOTE_LINE} {MODE}")\n    line = NOTE_LINE + " " + MODE\n    print(line)\n')
+check("a module string constant only shown, in a print, a printed f-string's field or a followed binding, is not marked",
+      [entry["collected_string_is_module_constant_whose_value_also_steers_the_program"] for entry in found
        if entry["label"] in ("MODE =", "NOTE_LINE =")] == [False, False], found)
+
+found = texts('START = "first part"\nEND = "second part"\ndef main():\n    line = START + END\n    print(line)\n')
+check("recognized: module string constants joined with + in a local binding that is printed",
+      {"first part", "second part"} <= set(found), found)
+
+found = texts('FLAG = "--check"\ndef command(target):\n    words = ["python3", FLAG, target]\n'
+              '    return " ".join(words)\ndef main(target):\n    print(command(target))\n')
+check("not recognized: a local list of a command's words that holds a module string constant",
+      not ({"python3", "--check"} & set(found)), found)
+
+found = entries('NOTE = "try again"\nFINAL_MESSAGE = "Hint: " + NOTE\n')
+check("recognized: a module string constant in the value of a name ending in a suffix, unmarked",
+      [(entry["text"], entry["label"], entry["collected_string_is_module_constant_whose_value_also_steers_the_program"])
+       for entry in found if entry["label"] == "NOTE ="] == [("try again", "NOTE =", False)], found)
 
 WALK_ME_THROUGH_CLOSE_PATH = (Path(__file__).resolve().parents[2] / "skills" / "walk-me-through"
                               / "walk-me-through-answer-added-texts-cold-read-fast-read-check-and-close.py")

@@ -7,7 +7,7 @@ A tool-message-to-agent string is one that tool_message_to_agent_string_nodes_in
 in nn-systems/general-tools/python-source-tool-message-to-agent-string-collector-common.py, finds;
 any other string, such as a regular expression, a command's argument or a path,
 carries behaviour, so a change to it is a behaviour change; so does a module constant's value
-the collector marks module_constant_also_steers_the_program, such as MODE in print(MODE) and
+the collector marks collected_string_is_module_constant_whose_value_also_steers_the_program, such as MODE in print(MODE) and
 if requested_mode == MODE:.
 Python behaviour changes and other code get claude-and-codex-review-and-head-tests-tier. Prose gets
 no-reviewer-tier. Settings, Bash guards and registered hooks always get
@@ -512,10 +512,10 @@ def nearest_call_prints_its_argument(node, parents, helper_printers):
 def tool_message_to_agent_string_literal_positions(tree, source):
     """The positions of the literal pieces of each tool-message-to-agent string whose change is graded
     as a message change; a module constant's value that also steers the program, as
-    module_constant_also_steers_the_program says, is left out, so a change to it is a behaviour change."""
+    collected_string_is_module_constant_whose_value_also_steers_the_program says, is left out, so a change to it is a behaviour change."""
     entry_positions = {(entry["line"], entry["column"], entry["end_line"], entry["end_column"])
                        for entry in tool_message_to_agent_string_nodes_in_source(source)
-                       if not entry["module_constant_also_steers_the_program"]}
+                       if not entry["collected_string_is_module_constant_whose_value_also_steers_the_program"]}
     parents = {child: parent for parent in ast.walk(tree) for child in ast.iter_child_nodes(parent)}
     helper_printers = helper_printers_in_tree(tree)
     return set().union(*(literal_piece_positions(node) for node in ast.walk(tree)

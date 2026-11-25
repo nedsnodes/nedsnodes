@@ -26,8 +26,8 @@ name as text, as name_nodes_given_as_text says: bare, as print(NOTE) and raise a
 with .format, as raise refused(MISSING.format(error=error)) does, as a piece of a + chain or a join, or as the
 argument of a function that hands that parameter back as text, as text_carrying_parameters_in_tree says, so
 print(context_output(event, NOTE)) gives NOTE and print(re.sub(PATTERN.format(prefix), "", text)) does not give
-PATTERN. Its entries are marked module_constant_also_steers_the_program when the program also tests or looks up
-its value, as module_constant_names_that_steer_the_program says. A dict literal's keys, a subscript's index and a comprehension's
+PATTERN. Its entries are marked collected_string_is_module_constant_whose_value_also_steers_the_program when the
+program reads its name anywhere a form does not give it as text, as module_constant_names_that_steer_the_program says. A dict literal's keys, a subscript's index and a comprehension's
 if-conditions are not text, so in raise Answer(400, {"error": text}) only text is a message; nor is
 a name a comprehension binds as its target, so " ".join(note for note in items) carries items, not
 a local note. In a string literal's join, the literal is only the separator, so it is not a
@@ -44,8 +44,9 @@ agent reads it, with each placeholder shown as <filled in: its source>, or as it
 name anywhere in the file, as module_level_string_values_whose_name_the_file_binds_only_once says.
 A message held in a local name is found when its own function's body binds the name, with =, an annotation or +=, to a
 non-empty string literal, an f-string, a + chain holding a string literal, a string literal
-% something or a string literal's join, or to a conditional expression with such a branch,
-and the name reaches one of the forms above, or a return statement that returns the name or
+% something or a string literal's join, or a + chain, a % or a .format call that gives a module string
+constant's name as text, as START + END does, as text_building_parts says, or to a conditional expression with
+such a branch, and the name reaches one of the forms above, or a return statement that returns the name or
 a string built from it, directly or through another such local name; each binding is then
 an entry at its own lines, labelled with the name, and only the binding's string-building
 branches are read. A conditional expression's condition is not read, in a binding or at a
@@ -276,10 +277,6 @@ PRINT_KEYWORDS_NOT_PRINTED = ("file", "flush")
 STR_METHODS_THAT_RETURN_THE_TEXT = frozenset({
     "format", "strip", "lstrip", "rstrip", "upper", "lower", "casefold", "title", "capitalize",
     "replace", "center", "ljust", "rjust", "removeprefix", "removesuffix"})
-# Methods that look a text up in another, or another in it, so that the text steers the result.
-STR_LOOKUP_METHOD_NAMES = frozenset({
-    "index", "rindex", "find", "rfind", "count", "startswith", "endswith", "split", "rsplit",
-    "partition", "rpartition"})
 # A class whose object is made of every argument's text, as str(...) and ValueError(...) are.
 EVERY_ARGUMENT = "every argument"
 TEXT_MADE_BUILT_IN_CLASS_NAMES = frozenset(
@@ -418,6 +415,8 @@ class AgentFacingStringNodeCollector(ast.NodeVisitor):
                                               else rendered_module_string_values)
         # Function name -> (positions, names) of the parameters it hands back as text.
         self.text_carrying_parameters = text_carrying_parameters or {}
+        # The ids of the Name nodes a form gives as text; any other read of a constant steers the program.
+        self.name_node_ids_given_as_text = set()
 
     def collect_module_constants_named(self, expression, kind="message", builds_an_object=False):
         """Collect, at its assignment and labelled with its name alone, so that a constant named at
@@ -426,6 +425,7 @@ class AgentFacingStringNodeCollector(ast.NodeVisitor):
         if expression is None:
             return
         for name in name_nodes_given_as_text(expression, self.text_carrying_parameters, builds_an_object):
+            self.name_node_ids_given_as_text.add(id(name))
             if name.id in self.rendered_module_string_values:
                 self.collect_expression_strings(self.rendered_module_string_values[name.id], f"{name.id} =", kind,
                                                 label_names_enclosing_function=False)
@@ -436,6 +436,10 @@ class AgentFacingStringNodeCollector(ast.NodeVisitor):
         if self.enclosing_names and label_names_enclosing_function:
             label += f" in {'.'.join(self.enclosing_names)}()"
         for node in string_nodes_without_f_string_parts(expression):
+            if isinstance(node, ast.JoinedStr):
+                self.name_node_ids_given_as_text.update(
+                    id(part.value) for part in node.values
+                    if isinstance(part, ast.FormattedValue) and isinstance(part.value, ast.Name))
             identity = (id(node), label)
             if identity in self.entries_by_node_context:
                 if kind == "prompt":
@@ -448,7 +452,7 @@ class AgentFacingStringNodeCollector(ast.NodeVisitor):
                      "text_as_agent_reads_it_with_placeholder_stand_ins":
                          render_string_node_text_as_agent_reads_it_with_placeholder_stand_ins(
                              node, self.rendered_module_string_values),
-                     "kind": kind, "module_constant_also_steers_the_program": False}
+                     "kind": kind, "collected_string_is_module_constant_whose_value_also_steers_the_program": False}
             self.entries_by_node_context[identity] = entry
             self.string_entries.append(entry)
 
@@ -475,7 +479,7 @@ class AgentFacingStringNodeCollector(ast.NodeVisitor):
             bindings = {name: values for name, values in outer.items() if name not in assigned}
         else:
             parameters = function_parameter_names(node)
-            bindings = local_string_bindings(node)
+            bindings = local_string_bindings(node, self.rendered_module_string_values, self.text_carrying_parameters)
         self.enclosing_parameter_names.append(parameters)
         self.enclosing_local_string_bindings.append(bindings)
         # A function's body has names of its own; a lambda or class body still sees the names hidden around it.
@@ -577,6 +581,7 @@ class AgentFacingStringNodeCollector(ast.NodeVisitor):
         for target in targets:
             if isinstance(target, ast.Name) and variable_name_has_tool_message_to_agent_suffix(target.id):
                 self.collect_sink_expression(node.value, f"{target.id} =")
+                self.collect_module_constants_named(node.value)
         self.generic_visit(node)
 
     visit_Assign = visit_assignment_value
@@ -727,48 +732,14 @@ def name_nodes_given_as_text(expression, text_carrying_parameters, builds_an_obj
             yield from given(argument)
 
 
-def module_constant_names_that_steer_the_program(tree, module_string_values):
-    """The module string constants whose value the program also tests or looks up, not only
-    shows: a name that, through the parents passes_its_text_up_unchanged names, stands in a
-    comparison, as in if requested_mode == MODE:, in the test of an if, while, assert or conditional
-    expression, in a subscript's index or a dict literal's key, or among the arguments of a call of
-    a method in STR_LOOKUP_METHOD_NAMES or of a function of the re module, as in
-    lines.index(HEADING) or re.sub(PATTERN, "", text)."""
-    parents = {child: parent for parent in ast.walk(tree) for child in ast.iter_child_nodes(parent)}
-    steering = set()
-    for node in ast.walk(tree):
-        if not (isinstance(node, ast.Name) and isinstance(node.ctx, ast.Load) and node.id in module_string_values):
-            continue
-        child, parent = node, parents.get(node)
-        while parent is not None and passes_its_text_up_unchanged(child, parent):
-            child, parent = parent, parents.get(parent)
-            if isinstance(child, ast.Attribute) and isinstance(parent, ast.Call) and parent.func is child:
-                child, parent = parent, parents.get(parent)
-        if isinstance(parent, ast.keyword):
-            child, parent = parent, parents.get(parent)
-        called = parent.func if isinstance(parent, ast.Call) and child is not parent.func else None
-        if (isinstance(parent, ast.Compare)
-                or (isinstance(parent, (ast.If, ast.While, ast.Assert, ast.IfExp)) and child is parent.test)
-                or (isinstance(parent, ast.Subscript) and child is parent.slice)
-                or (isinstance(parent, ast.Dict) and child in parent.keys)
-                or (isinstance(called, ast.Attribute) and (called.attr in STR_LOOKUP_METHOD_NAMES
-                                                           or ast.unparse(called.value) == "re"))):
-            steering.add(node.id)
-    return steering
-
-
-def passes_its_text_up_unchanged(child, parent):
-    """True when parent's value holds child's text as it is: an f-string part, an operand of a +
-    chain, a branch of a conditional expression, or the receiver of a str method in
-    STR_METHODS_THAT_RETURN_THE_TEXT, as NOTE is in NOTE.strip()."""
-    if isinstance(parent, (ast.JoinedStr, ast.FormattedValue)):
-        return True
-    if isinstance(parent, ast.BinOp) and isinstance(parent.op, ast.Add):
-        return True
-    if isinstance(parent, ast.IfExp):
-        return child is not parent.test
-    return (isinstance(parent, ast.Attribute) and parent.value is child
-            and parent.attr in STR_METHODS_THAT_RETURN_THE_TEXT)
+def module_constant_names_that_steer_the_program(tree, module_string_values, name_node_ids_given_as_text):
+    """The module string constants the program reads anywhere other than where a form gives the
+    name as text, as name_nodes_given_as_text says, or shows it in a collected f-string's field:
+    such a read, as in if requested_mode == MODE:, lines.index(HEADING), _row(V_REFUSAL) or
+    mode = MODE, may steer what the program does, so a change to the value is a behaviour change."""
+    return {node.id for node in ast.walk(tree)
+            if isinstance(node, ast.Name) and isinstance(node.ctx, ast.Load) and node.id in module_string_values
+            and id(node) not in name_node_ids_given_as_text}
 
 
 def text_carrying_parameters_in_tree(tree):
@@ -974,9 +945,28 @@ def nodes_in_own_scope(function):
         pending.extend(ast.iter_child_nodes(node))
 
 
-def local_string_bindings(function):
+def text_building_parts(expression, module_string_values, text_carrying_parameters):
+    """The parts of the expression that build text: those string_building_parts names, and a +
+    chain, a % or a .format call that name_nodes_given_as_text finds giving a module string
+    constant's name, as START + END does; among a conditional expression's branches, its condition
+    left out. A bare name is an alias, such as mode = MODE, which may be compared later, and a list
+    or tuple is data, such as a command's words."""
+    if isinstance(expression, ast.IfExp):
+        return [*text_building_parts(expression.body, module_string_values, text_carrying_parameters),
+                *text_building_parts(expression.orelse, module_string_values, text_carrying_parameters)]
+    if string_building_parts(expression):
+        return [expression]
+    if not ((isinstance(expression, ast.BinOp) and isinstance(expression.op, (ast.Add, ast.Mod)))
+            or format_receiver_name(expression) is not None):
+        return []
+    return [expression] if any(name.id in module_string_values for name in
+                               name_nodes_given_as_text(expression, text_carrying_parameters)) else []
+
+
+def local_string_bindings(function, module_string_values=(), text_carrying_parameters=None):
     """Each plain name the function's own body assigns, with =, an annotation or +=, a
-    string-building expression, mapped to every such expression, in every branch."""
+    text-building expression, as text_building_parts says, mapped to every such expression, in
+    every branch."""
     bindings = {}
     for node in nodes_in_own_scope(function):
         if isinstance(node, ast.Assign):
@@ -986,7 +976,8 @@ def local_string_bindings(function):
             targets = [node.target]
         else:
             continue
-        parts = string_building_parts(node.value) if node.value is not None else []
+        parts = (text_building_parts(node.value, module_string_values, text_carrying_parameters or {})
+                 if node.value is not None else [])
         for target in targets:
             if parts and isinstance(target, ast.Name):
                 bindings.setdefault(target.id, []).extend(parts)
@@ -1051,9 +1042,9 @@ def tool_message_to_agent_string_nodes_in_source(source):
     """Each entry holds line and end_line, counted from 1, column and end_column, counted from 0 as
     ast counts them, label, text, literal_text,
     placeholder_value_source_code_texts, text_as_agent_reads_it_with_placeholder_stand_ins, kind,
-    "prompt" or "message", and module_constant_also_steers_the_program, true when the entry is a module
-    constant's assignment, labelled with its name alone, whose value module_constant_names_that_steer_the_program
-    finds tested or looked up.
+    "prompt" or "message", and collected_string_is_module_constant_whose_value_also_steers_the_program, true when
+    the entry is a module constant's assignment, labelled with its name alone, that
+    module_constant_names_that_steer_the_program finds read where no form gives it as text.
     Source that is None or does not parse yields no entries."""
     if source is None:
         return []
@@ -1080,8 +1071,9 @@ def tool_message_to_agent_string_nodes_in_source(source):
         if collector.function_names_called_for_text <= followed:
             break
         followed |= collector.function_names_called_for_text
-    steering = module_constant_names_that_steer_the_program(tree, rendered_module_string_values)
+    steering = module_constant_names_that_steer_the_program(tree, rendered_module_string_values,
+                                                            collector.name_node_ids_given_as_text)
     for entry in collector.string_entries:
         if entry["label"].endswith(" =") and entry["label"][:-len(" =")] in steering:
-            entry["module_constant_also_steers_the_program"] = True
+            entry["collected_string_is_module_constant_whose_value_also_steers_the_program"] = True
     return sorted(collector.string_entries, key=lambda entry: (entry["line"], entry["label"]))
