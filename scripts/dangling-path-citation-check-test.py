@@ -1233,6 +1233,10 @@ with tempfile.TemporaryDirectory() as workspace:
     root = workspace / "repo"
     root.mkdir()
     build_repository(root)
+    (root / Path(_start_and_end_lines_spec.origin).relative_to(Path(__file__).resolve().parents[1])).parent.mkdir(
+        parents=True, exist_ok=True)
+    (root / Path(_start_and_end_lines_spec.origin).relative_to(Path(__file__).resolve().parents[1])).write_text(
+        Path(_start_and_end_lines_spec.origin).read_text(encoding="utf-8"), encoding="utf-8")
     (root / "scripts" / REMOVED_PATH_CITATION_SUITE.name).write_text(
         REMOVED_PATH_CITATION_SUITE.read_text(encoding="utf-8"), encoding="utf-8")
     commit_change(root, "scripts/tool-that-moves.py", "VALUE = 1\n")

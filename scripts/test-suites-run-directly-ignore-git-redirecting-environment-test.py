@@ -281,6 +281,7 @@ runs += [(SUITE_RUN_WITH_EVERY_VARIABLE, variable)
 files_to_copy = [RUNNER_PATH,
                  str(runner.ONE_SUITE_CHILD_SUBREAPER_LAUNCHER_PATH.relative_to(REPO_ROOT)),
                  FIXTURE_PATH, REMOVAL_MODULE_PATH, ATTENDANCE_CHECK_MODULE_PATH,
+                 _start_and_end_lines_spec.origin.split(str(REPO_ROOT) + "/", 1)[1],
                  PROJECT_RENAME_PATH_NAMES_MODULE_PATH,
                  SUITE_RUN_WITH_EVERY_VARIABLE,
                  *FILES_THE_SUITE_RUN_WITH_EVERY_VARIABLE_READS]

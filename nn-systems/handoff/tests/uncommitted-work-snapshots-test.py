@@ -182,7 +182,8 @@ def new_clone():
                      LOG_STORE_WRITER_MODULE_RELATIVE, NED_BOX_HOME_CONSTANTS_MODULE_RELATIVE,
                      MERGE_LANE_COMMON_MODULE_RELATIVE, REPOSITORY_NAME_MODULE_RELATIVE, TEST_RUNNER_RELATIVE,
                      GIT_REDIRECTING_REMOVAL_MODULE_RELATIVE, ATTENDANCE_CHECK_MODULE_RELATIVE,
-                     PROJECT_RENAME_PATH_NAMES_MODULE_RELATIVE):
+                     PROJECT_RENAME_PATH_NAMES_MODULE_RELATIVE,
+                     Path(_start_and_end_lines_spec.origin).relative_to(REPOSITORY_ROOT)):
         (main / relative).parent.mkdir(parents=True, exist_ok=True)
         shutil.copy2(REPOSITORY_ROOT / relative, main / relative)
     (main / "tracked.txt").write_text("one\n")
