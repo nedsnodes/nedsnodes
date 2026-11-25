@@ -130,6 +130,7 @@ takes, which argparse says on stderr, followed by what to do.
 import argparse
 import functools
 import importlib.util
+import itertools
 import json
 import math
 import os
@@ -1019,38 +1020,83 @@ def print_follow_up_request_block_from_merge_lane_2_reviews(number):
     replaced_comments = []
     for replaced in replaced_pull_request_numbers(number, description):
         replaced_comments += merge_lane_2_reviews_and_their_comments(replaced, posting, account)[1]
+    write_block_by_hand = (
+        "If merge-lane-2's reviews of the pull request hold a fix-next, fix-in-maintenance or file-for-later "
+        f"finding, write the block by hand at the end of {MERGE_LANE_2_MERGED_MESSAGE_TO_AUTHOR}: "
+        "the line "
+        f"{FOLLOW_UP_REQUEST_LINE_START} pull request {number}, then one line for each such finding, numbered "
+        "from 1, such as: 1. fix-next: `<path>:<line>`: <the finding on one line>\n"
+        "If merge-lane-2's reviews hold no such finding, write no block.")
     findings = []
-    for comment in replaced_comments + comments:
-        marked = posting.finding_category_and_text_read_from_review_comment_opening_mark(comment["body"])
-        if marked is None:
+    for review, review_comments in itertools.groupby(replaced_comments + comments,
+                                                     key=lambda comment: (comment["pull_request"], comment["review"])):
+        parsed = []
+        for comment in review_comments:
+            marked = posting.finding_category_and_text_read_from_review_comment_opening_mark(comment["body"])
+            if marked is None:
+                raise Refused(
+                    f"{account}'s comment on {comment['path']}:{comment['line']} of pull request {comment['pull_request']} does not open "
+                    f"with a category mark, such as **fix-next**, so its category cannot be read and no "
+                    f"{FOLLOW_UP_REQUEST_LINE_START} block was printed; reviews posted before "
+                    f"scripts/{POSTING_PROGRAM_FILE_NAME} wrote category marks have none.\n" + write_block_by_hand)
+            category, text, _nit = marked
+            parsed.append({
+                "finding": (category, comment["path"], " ".join(text.split())), "line": comment["line"],
+                "compared": (category, comment["path"],
+                             " ".join(posting.CODEX_FINDING_ID_MARK_IN_REVIEW_COMMENT_PATTERN.sub("", text).split())),
+                "codex_finding_ids": frozenset(posting.CODEX_FINDING_ID_MARK_IN_REVIEW_COMMENT_PATTERN.findall(text))})
+        earlier = [found for found in findings if found["review"] != review]
+        restates = [None] * len(parsed)
+
+        def same_finding(one, other):
+            return one["compared"] == other["compared"] and (
+                one["finding"] == other["finding"] or bool(one["codex_finding_ids"] & other["codex_finding_ids"]))
+
+        # A later review restates each earlier finding at most once. A restatement that keeps the earlier
+        # text or Codex finding id is paired first, so that the order GitHub numbered the comments in cannot
+        # pair a new finding with the earlier one.
+        for index, comment in enumerate(parsed):
+            restates[index] = next((found for found in earlier if same_finding(comment, found)
+                                    and not any(paired is found for paired in restates)), None)
+        # A moved line range gives a restatement a new Codex finding id, and then nothing tells it from a new
+        # finding worded alike: pair it only when one earlier finding and one finding of this review are left
+        # with that text, and otherwise refuse rather than guess.
+        for compared in {comment["compared"] for index, comment in enumerate(parsed) if restates[index] is None}:
+            free = [found for found in earlier if found["compared"] == compared
+                    and not any(paired is found for paired in restates)]
+            unpaired = [(index, comment) for index, comment in enumerate(parsed)
+                        if restates[index] is None and comment["compared"] == compared
+                        and not any(restates[other] is not None and same_finding(comment, parsed[other])
+                                    for other in range(len(parsed)))]
+            distinct = []
+            for _index, comment in unpaired:
+                if not any(same_finding(comment, other) for other in distinct):
+                    distinct.append(comment)
+            if not free or not unpaired:
+                continue
+            if len(free) == 1 and len(distinct) == 1:
+                restates[unpaired[0][0]] = free[0]
+                continue
+            category, path, text = compared
             raise Refused(
-                f"{account}'s comment on {comment['path']}:{comment['line']} of pull request {comment['pull_request']} does not open "
-                f"with a category mark, such as **fix-next**, so its category cannot be read and no "
-                f"{FOLLOW_UP_REQUEST_LINE_START} block was printed; reviews posted before "
-                f"scripts/{POSTING_PROGRAM_FILE_NAME} wrote category marks have none.\n"
-                "If merge-lane-2's reviews of the pull request hold a fix-next, fix-in-maintenance or file-for-later "
-                f"finding, write the block by hand at the end of {MERGE_LANE_2_MERGED_MESSAGE_TO_AUTHOR}: "
-                "the line "
-                f"{FOLLOW_UP_REQUEST_LINE_START} pull request {number}, then one line for each such finding, numbered "
-                "from 1, such as: 1. fix-next: `<path>:<line>`: <the finding on one line>\n"
-                "If merge-lane-2's reviews hold no such finding, write no block.")
-        category, text, _nit = marked
-        finding = (category, comment["path"], " ".join(text.split()))
-        review = (comment["pull_request"], comment["review"])
-        compared = (category, comment["path"], " ".join(posting.CODEX_FINDING_ID_MARK_IN_REVIEW_COMMENT_PATTERN.sub("", text).split()))
-        codex_finding_ids = frozenset(posting.CODEX_FINDING_ID_MARK_IN_REVIEW_COMMENT_PATTERN.findall(text))
-        # A later review restates an earlier finding with a new Codex finding id when its line range moved,
-        # but restates each earlier finding at most once: within one review, two comments alike but for
-        # their Codex finding ids are two findings.
-        restated = next((found for found in findings if found["finding"] == finding or (
-            found["compared"] == compared and (found["codex_finding_ids"] == codex_finding_ids or (
-                found["review"] != review and review not in found["restated_in_reviews"])))), None)
-        if restated is not None:
-            restated["restated_in_reviews"].add(review)
-        elif category != posting.BLOCKING_CATEGORY:
-            findings.append({"finding": finding, "line": comment["line"], "compared": compared,
-                             "codex_finding_ids": codex_finding_ids, "review": review,
-                             "restated_in_reviews": set()})
+                f"{account}'s review {review[1]} of pull request {review[0]} holds {len(distinct)} {category} "
+                f"finding(s) on {path} worded as {len(free)} earlier finding(s) but with new Codex finding ids, "
+                "so which are restatements and which are new cannot be told, and no "
+                f"{FOLLOW_UP_REQUEST_LINE_START} block was printed. The text: {text}\n"
+                f"Its comments are on lines {', '.join(str(comment['line']) for _index, comment in unpaired)}; "
+                f"the earlier findings are on lines {', '.join(str(found['line']) for found in free)}.\n"
+                + write_block_by_hand)
+        # Within one review, a comment repeating another's text or naming one of its Codex finding ids is the
+        # same finding; two comments alike but for their Codex finding ids are two findings.
+        in_this_review = [found for found in restates if found is not None]
+        for index, comment in enumerate(parsed):
+            found = restates[index] or next((found for found in in_this_review if same_finding(comment, found)), None)
+            if found is not None:
+                found["codex_finding_ids"] |= comment["codex_finding_ids"]
+            elif comment["finding"][0] != posting.BLOCKING_CATEGORY:
+                found = {**comment, "review": review}
+                findings.append(found)
+                in_this_review.append(found)
     if not findings:
         return
     lines = [f"{FOLLOW_UP_REQUEST_LINE_START} pull request {number}"] + [
