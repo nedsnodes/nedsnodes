@@ -1077,6 +1077,14 @@ def test_an_items_title_is_the_same_from_every_form_of_its_heading_or_opening():
     kept = program.item_title(finder, "**Item 3 of 9 revised:** New text.", with_text_after_title=True)
     check("a bold opening closing after its `revised` label keeps its text after the title with no stray delimiter",
           kept == "New text.", repr(kept))
+    kept = program.item_title(finder, "**Item 3 of 9 (revised):** Revised estimates are due Friday.",
+                              with_text_after_title=True)
+    check("a bold opening's `revised` label is taken off once, so a text opening with the word Revised keeps it",
+          kept == "Revised estimates are due Friday.", repr(kept))
+    earlier = program.heading_body(finder, "**Item 3 of 9 (revised):** estimates are due Friday.")
+    later = program.heading_body(finder, "**Item 3 of 9 (revised):** Revised estimates are due Friday.")
+    check("two versions of a bold-paragraph item differing only by an opening word Revised are different texts, so "
+          "the earlier one is kept as a withdrawn version", earlier != later, repr((earlier, later)))
 
 
 def test_the_waiting_item_read_step_searches_a_bold_list_opening_by_its_title_alone():
