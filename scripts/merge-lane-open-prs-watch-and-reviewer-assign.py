@@ -538,11 +538,14 @@ def merge_lane_pull_request_review_assignments_file_text_and_assignments_read(pa
     return text, assignments
 
 
-def merge_lane_pull_request_review_assignments_file_write(path, text, replace_existing):
+def merge_lane_pull_request_review_assignments_file_write(path, text):
     """Write text as the file at path, through a temporary file of its own beside the file a
     symbolic link at path names, so that a write that fails leaves the old file whole and the
-    link in place. The new file keeps the old one's mode, or takes the mode a new file gets. With
-    replace_existing false, raise FileExistsError rather than replace a file that exists."""
+    link in place. The new file keeps the old one's mode, or takes the mode a new file gets. The
+    caller holds merge_lane_pull_request_review_assignments_file_lock. Raises OSError.
+    Not handled: a symbolic link at path repointed between the caller's read and this write,
+    which sends the text read from the old file to the new one; and a directory with a default
+    ACL, whose mode for a new file 0o666 & ~umask overrides."""
     target = path.resolve()
     descriptor, partial_name = tempfile.mkstemp(dir=target.parent, prefix=target.name + ".",
                                                 suffix=".partial")
@@ -557,11 +560,7 @@ def merge_lane_pull_request_review_assignments_file_write(path, text, replace_ex
             os.umask(umask)
             mode = 0o666 & ~umask
         os.chmod(partial, mode)
-        if replace_existing:
-            os.replace(partial, target)
-        else:
-            # A link, unlike a rename, refuses a name that exists.
-            os.link(partial, target)
+        os.replace(partial, target)
     finally:
         partial.unlink(missing_ok=True)
 
@@ -707,8 +706,7 @@ def merge_lane_pull_request_review_assignment_lines(path, pull_requests, state, 
         try:
             merge_lane_pull_request_review_assignments_file_write(
                 path, text + separator + "".join(f"{pull_request['number']} {lane}\n"
-                                                 for pull_request, lane in dealt),
-                replace_existing=True)
+                                                 for pull_request, lane in dealt))
         except OSError as error:
             stop("write",
                  f"WATCH: review assignment stopped: the assignment file {path} cannot be "
@@ -773,14 +771,7 @@ def merge_lane_pull_request_review_assignments_seed(path, seed_path, repo, token
                 assignments[pull_request["number"]] = lane
         try:
             merge_lane_pull_request_review_assignments_file_write(
-                path, "".join(f"{number} {lane}\n" for number, lane in assignments.items()),
-                replace_existing=False)
-        except FileExistsError:
-            warn(f"merge-lane-open-prs-watch-and-reviewer-assign: nothing was seeded, because the "
-                 f"assignment file {path} was made while this run read GitHub, by another seed run "
-                 f"or by hand.\n"
-                 f"  Run the same command again: it reports whether that file reads correctly.")
-            return 1
+                path, "".join(f"{number} {lane}\n" for number, lane in assignments.items()))
         except OSError as error:
             warn(f"merge-lane-open-prs-watch-and-reviewer-assign: nothing was seeded, because the "
                  f"assignment file {path} could not be written: {error}. No assignment file was made.\n"

@@ -1033,21 +1033,6 @@ def run_merge_lane_pull_request_review_assignment_watcher_cases():
               and seeded.read_text(encoding="utf-8") == "4028 merge-lane-1\n4028 merge-lane-3\n",
               errors)
         seeded.unlink()
-
-        class FileMadeWhileGitHubIsRead(list):
-            """One poll, during which another run makes the assignment file."""
-
-            def __getitem__(self, index):
-                seeded.write_text("4028 merge-lane-3\n", encoding="utf-8")
-                return list.__getitem__(self, index)
-
-        exit_code, lines, errors = seed_with(FileMadeWhileGitHubIsRead([open_at_seed]))
-        check("a seed run whose assignment file another run makes while it reads GitHub exits 1 "
-              "and leaves that file as the other run made it",
-              exit_code == 1 and "was made while this run read GitHub" in errors
-              and seeded.read_text(encoding="utf-8") == "4028 merge-lane-3\n",
-              f"exit {exit_code!r} {errors}")
-        seeded.unlink()
         scratch.chmod(0o500)
         try:
             exit_code, lines, errors = seed_with([open_at_seed])
@@ -1824,7 +1809,7 @@ class PollOnceMachine:
     def time(self):
         return self.now
 
-    def run(self, flag="--poll-once"):
+    def run(self, flag="--poll-once", assignment_options=None):
         saved = (watcher_module.time, watcher_module.fetch_open_pull_requests,
                  list(watcher_module.SECRETS_TO_REDACT))
         watcher_module.time = self
@@ -1838,7 +1823,8 @@ class PollOnceMachine:
                     "--poll-once-directory", str(self.directory),
                     "--task-list-directory", str(self.tasks),
                     "--needs-a-look-directory", str(self.notices),
-                    "--merge-lane-pr-review-assignments-file", str(self.assignments)])
+                    *(["--merge-lane-pr-review-assignments-file", str(self.assignments)]
+                      if assignment_options is None else assignment_options)])
         finally:
             (watcher_module.time, watcher_module.fetch_open_pull_requests,
              watcher_module.SECRETS_TO_REDACT[:]) = saved
@@ -2069,6 +2055,24 @@ def run_poll_once_cases(scratch_root, token_file):
     check("a failed poll assigns nothing",
           machine.assignments.read_text(encoding="utf-8") == "1 merge-lane-1\n2 merge-lane-3\n"
           and len(machine.event_lines()) == 2, machine.event_lines())
+
+    machine = machine_for("another-repository")
+    machine.assignments.write_text("1 merge-lane-1\n", encoding="utf-8")
+    other_repository = ["--repo", "someone/elsewhere"]
+    machine.poll = [poll_once_pull_request(1)]
+    machine.run("--poll-once-write-baseline", other_repository)
+    machine.poll = [poll_once_pull_request(1), poll_once_pull_request(2)]
+    saved_default = watcher_module.MERGE_LANE_PULL_REQUEST_REVIEW_ASSIGNMENTS_DEFAULT_FILE
+    watcher_module.MERGE_LANE_PULL_REQUEST_REVIEW_ASSIGNMENTS_DEFAULT_FILE = machine.assignments
+    try:
+        code = machine.run("--poll-once", other_repository)
+    finally:
+        watcher_module.MERGE_LANE_PULL_REQUEST_REVIEW_ASSIGNMENTS_DEFAULT_FILE = saved_default
+    check("a run with another --repo and no assignment file named reports the opening, assigns "
+          "no review and leaves the default file alone",
+          code == 0 and machine.assignments.read_text(encoding="utf-8") == "1 merge-lane-1\n"
+          and len(machine.event_lines()) == 1 and "PR #2 OPENED" in machine.event_lines()[0],
+          f"{code} {machine.event_lines()} {machine.errors}")
 
     machine = machine_for("assignment-file-missing")
     machine.assignments.unlink()
