@@ -1467,6 +1467,164 @@ def failed_suites_kept_in_view_cases(scratch):
               and record["scripts/broken-test.py"]["failed_tests"]["scripts/broken-test.py"][
                   "repair_task_id"] is None,
               f"exit {exit_code}\n{output}\n{record}")
+
+        known_failure_runs_that_are_not_only_known_failures = (
+            ("exit-2", "FAIL scripts/broken-test.py exit 1 (2s)\nSUMMARY: 0 passed, 1 failed, "
+                       "1 total; fake runner\n", 2, False),
+            ("no-summary", "FAIL scripts/broken-test.py exit 1 (2s)\n", 1, False),
+            ("record-not-written", RUNNER_FAILED, 1, True),
+            ("no-fail-line", "PASS scripts/some-test.py (1s)\nSUMMARY: 1 passed, 0 failed, "
+                             "1 total; fake runner\n", 1, False))
+        for label, runner_output, runner_exit, blocked in known_failure_runs_that_are_not_only_known_failures:
+            def recorded_known_failure(directory, blocked=blocked):
+                task_list = author_seat_made(directory)
+                failed_suites_record_written(directory)
+                (task_list / "3.json").write_text('{"status": "pending"}')
+                if blocked:
+                    record = failed_suites_record_file(directory)
+                    record.with_name(record.name + ".lock").mkdir()
+
+            exit_code, output, _, _, _ = run_case(
+                scratch, f"known-failure-{label}", [(GATE_PASSED, 0)], default_routes([]),
+                runner_answer=(runner_output, runner_exit),
+                before_the_program_runs=recorded_known_failure)
+            check(f"a run failing a recorded suite that is not only known failures ({label}) "
+                  f"exits 3 with a STOP, never saying nothing is needed",
+                  exit_code == 3 and "STOP" in output
+                  and "nothing is needed for them here" not in output,
+                  f"exit {exit_code}\n{output}")
+
+        exit_code, output, _, _, _ = run_case(
+            scratch, "failed-suite-rerun-cut-short", [(GATE_PASSED, 0)], default_routes([]),
+            origin_files=broken_on_origin, before_the_program_runs=recorded_and_rerun(
+                "FAIL scripts/broken-test.py exit 1 (1s)\n"
+                "run-all-test-suites.py: not run to the end — the run passed its run time limit\n",
+                1))
+        check("a rerun that exits 1 with no SUMMARY gave no verdict: exit 3, and the suite stays",
+              exit_code == 3 and "could not all be run again" in output
+              and "scripts/broken-test.py" in failed_suites_record_of(
+                  scratch / "failed-suite-rerun-cut-short"),
+              f"exit {exit_code}\n{output}")
+
+        def task_list_without_checkout(directory):
+            (directory / "home" / ".claude" / "tasks" / "nedsnodes-author-seat-tasks").mkdir(
+                parents=True)
+
+        exit_code, output, _, _, _ = run_case(
+            scratch, "failed-suite-author-without-checkout", [(GATE_PASSED, 0)],
+            default_routes([]), runner_answer=(RUNNER_FAILED, 1),
+            before_the_program_runs=task_list_without_checkout)
+        check("an author with a task list but no checkout gets no repair task, and the STOP asks "
+              "the user",
+              exit_code == 3 and tasks_of_author(scratch / "failed-suite-author-without-checkout") == []
+              and "no task list or no checkout" in output and "Ask the user:" in output,
+              f"exit {exit_code}\n{output}")
+
+        record_module = program.failed_suites_record
+        saved_apply = record_module.failed_after_merge_test_suites_on_main_record_change_apply_under_lock
+
+        def record_write_fails_at(failing_call):
+            calls = []
+
+            def apply(change):
+                calls.append(change)
+                if len(calls) == failing_call:
+                    # As when os.replace fails: the change has run, but nothing is saved.
+                    change(record_module.failed_after_merge_test_suites_on_main_record_read())
+                    raise record_module.FailedAfterMergeTestSuitesOnMainRecordFileUnreadableOrUnwritable(
+                        "could not write the record: disk full")
+                return saved_apply(change)
+            return apply
+
+        for failing_call, label in ((1, "first"), (2, "second")):
+            record_module.failed_after_merge_test_suites_on_main_record_change_apply_under_lock = (
+                record_write_fails_at(failing_call))
+            try:
+                exit_code, output, _, _, _ = run_case(
+                    scratch, f"failed-suite-record-write-{label}-fails", [(GATE_PASSED, 0)],
+                    default_routes([]), runner_answer=(RUNNER_FAILED, 1),
+                    before_the_program_runs=author_seat_made)
+            finally:
+                record_module.failed_after_merge_test_suites_on_main_record_change_apply_under_lock = saved_apply
+            directory = scratch / f"failed-suite-record-write-{label}-fails"
+            if failing_call == 1:
+                check("a record write that fails opens no repair task, so the next merge that "
+                      "fails the suite opens the only one",
+                      exit_code == 3 and tasks_of_author(directory) == []
+                      and "No repair task was opened: the failed suites record could not be "
+                          "written" in output, f"exit {exit_code}\n{output}")
+            else:
+                fields = failed_suites_record_of(directory)["scripts/broken-test.py"][
+                    "failed_tests"]["scripts/broken-test.py"]
+                check("a repair task the record cannot name is a STOP, and the record holds no "
+                      "task id, so no later merge opens it again",
+                      exit_code == 3 and len(tasks_of_author(directory)) == 1
+                      and fields["repair_task_id"] is None
+                      and "does not name the repair tasks just opened" in output,
+                      f"exit {exit_code}\n{output}\n{fields}")
+
+        record_module.failed_after_merge_test_suites_on_main_record_change_apply_under_lock = (
+            record_write_fails_at(2))
+        try:
+            exit_code, output, _, _, _ = run_case(
+                scratch, "task-completed-second-save-fails", [(GATE_PASSED, 0)],
+                default_routes([]), runner_answer=(RUNNER_FAILED, 1),
+                before_the_program_runs=recorded_tests_with_task(
+                    ["case a"], ["case a"], [], task_text='{"status": "completed"}'))
+        finally:
+            record_module.failed_after_merge_test_suites_on_main_record_change_apply_under_lock = saved_apply
+        directory = scratch / "task-completed-second-save-fails"
+        fields = failed_suites_record_of(directory)["scripts/broken-test.py"]["failed_tests"][
+            "case a"]
+        new_tasks = [path for path in tasks_of_author(directory) if path.name != "3.json"]
+        check("a test reopened under a closed repair task whose new task the record cannot name "
+              "keeps no task id, so the next merge does not open a second task beside it",
+              exit_code == 3 and len(new_tasks) == 1 and fields["repair_task_id"] is None
+              and "does not name the repair tasks just opened" in output,
+              f"exit {exit_code}\n{output}\n{fields}")
+
+        def another_run_records_it_anew_before_the_second_save():
+            calls = []
+
+            def apply(change):
+                calls.append(change)
+                if len(calls) == 2:
+                    def recorded_anew(suites):
+                        fields = suites["scripts/broken-test.py"]["failed_tests"]["case a"]
+                        fields.update(commit="0" * 40, failed_at="2026-11-25T23:59:59Z",
+                                      pull_request="77")
+                    saved_apply(recorded_anew)
+                return saved_apply(change)
+            return apply
+
+        for name, task_text in (("new", None), ("reopened", '{"status": "completed"}')):
+            record_module.failed_after_merge_test_suites_on_main_record_change_apply_under_lock = (
+                another_run_records_it_anew_before_the_second_save())
+            directory_name = f"{name}-test-recorded-anew-before-second-save"
+
+            def prepare(directory, task_text=task_text):
+                if task_text is None:
+                    author_seat_made(directory)
+                    (directory / "runner.junit").write_text(
+                        junit_of_broken_suite(["case a"], []))
+                else:
+                    recorded_tests_with_task(["case a"], ["case a"], [],
+                                             task_text=task_text)(directory)
+            try:
+                exit_code, output, _, _, _ = run_case(
+                    scratch, directory_name, [(GATE_PASSED, 0)], default_routes([]),
+                    runner_answer=(RUNNER_FAILED, 1), before_the_program_runs=prepare)
+            finally:
+                record_module.failed_after_merge_test_suites_on_main_record_change_apply_under_lock = saved_apply
+            fields = failed_suites_record_of(scratch / directory_name)["scripts/broken-test.py"][
+                "failed_tests"]["case a"]
+            check(f"a {name} test another run records anew between this run's two saves keeps "
+                  f"that run's entry, and the task this run opened is a STOP",
+                  exit_code == 3 and fields["pull_request"] == "77"
+                  and fields["repair_task_id"] is None
+                  and "changed scripts/broken-test.py: case a on the failed suites record" in output
+                  and "is not needed" in output,
+                  f"exit {exit_code}\n{output}\n{fields}")
     finally:
         program.merged_branch_last_commit_author_name_read = saved_author
 
@@ -1590,6 +1748,13 @@ def failed_suites_kept_in_view_cases(scratch):
                               '<skipped/></testcase>'), test="case a")
     check("a recorded test that is skipped stays on the record",
           worked and "case a" in left["scripts/x-test.py"]["failed_tests"], f"{left}\n{output}")
+    worked, left, output = kept_in_view_directly(
+        older, newer, x_suite('<testcase name="case b"/><testcase name="group: no systemd-tmpfiles">'
+                              '<skipped/></testcase>'), test="case a")
+    check("a recorded test that leaves while its suite skipped other cases is printed with those "
+          "SKIP lines, since one of them may cover it",
+          worked and left == {} and "printed SKIP lines naming other cases (group: no "
+          "systemd-tmpfiles)" in output, f"{left}\n{output}")
     worked, left, output = kept_in_view_directly(
         older, newer, x_suite('<testcase name="case a"/>'), test="scripts/x-test.py")
     check("a test named for its suite, recorded when the suite failed with no case line, leaves "
