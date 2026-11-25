@@ -451,7 +451,8 @@ def codex_findings_on_commit(outputs_directory, number, head):
                 f"as finding lines, or exits nonzero and says what to do:\n"
                 f"  scripts/merge-lane-code-review-codex-cell-run-on-pull-request-head.py {number} "
                 f"{base}{directory_option}\n"
-                f"Then run the posting command that printed this message again.")
+                f"If the cell exits 0, run the posting command that printed this message again; otherwise "
+                f"follow the cell's own message.")
         findings.update(codex_findings_in_report(report))
     return findings if recorded else None
 
