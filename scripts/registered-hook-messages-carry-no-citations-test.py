@@ -15,7 +15,8 @@ pattern also matches dates and issue numbers that are data, while in hook
 constants every match so far was a citation.
 
 A hook that declares no constant whose name ends in one of the collector's
-suffixes fails too, so a message built inline cannot escape the check. A
+suffixes fails too, so a message built inline cannot escape the check, unless
+HOOKS_THAT_SPEAK_NO_MESSAGE lists it with the reason. A
 constant that needs one of these forms as data goes in EXEMPTIONS, named by
 hook and constant.
 """
@@ -57,6 +58,11 @@ CITATION_PATTERNS = {
 
 # (hook path, constant name) pairs whose citation-shaped text is data.
 EXEMPTIONS = set()
+
+# Hook path: why the hook writes no message of its own, to the agent or the user.
+HOOKS_THAT_SPEAK_NO_MESSAGE = {
+    "nn-systems/handoff/handoff-successor-conversation-tail-last-lines-first-message-display-hook.py": "it shows the user only text the handoff-supervisor wrote, which the supervisor's own checks cover",
+}
 
 failures = []
 
@@ -148,8 +154,8 @@ for relative_path in hook_paths:
         check(f"{relative_path} loads", False, f"{type(error).__name__}: {error}")
         continue
     texts = constant_texts(module)
-    check(f"{relative_path} declares its messages as named constants",
-          declares_message_constants(texts),
+    check(f"{relative_path} declares its messages as named constants, or is listed as speaking none",
+          declares_message_constants(texts) != (relative_path in HOOKS_THAT_SPEAK_NO_MESSAGE),
           f"no module-level constant ending in one of {collector.AGENT_STRING_NAME_SUFFIXES}")
     for name, text in sorted(texts.items()):
         if (relative_path, name) in EXEMPTIONS:
@@ -158,6 +164,9 @@ for relative_path in hook_paths:
         check(f"{relative_path} {name} carries no citation", found == [],
               f"citations found: {found}")
 
+for relative_path in sorted(HOOKS_THAT_SPEAK_NO_MESSAGE):
+    check(f"hook listed as speaking no message {relative_path} is a registered hook",
+          relative_path in hook_paths, relative_path)
 for relative_path, name in sorted(EXEMPTIONS):
     check(f"exemption {relative_path} {name} names a registered hook",
           relative_path in hook_paths, hook_paths)

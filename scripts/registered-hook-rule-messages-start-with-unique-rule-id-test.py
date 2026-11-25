@@ -282,6 +282,7 @@ CONSTANTS_THAT_OPEN_NO_RULE_MESSAGE = {
 # Hook path: why the hook prints no message for a rule.
 HOOKS_THAT_PRINT_NO_RULE_MESSAGE = {
     "nn-systems/general-tools/agent-seat-worktree-create-with-owner-file-claude-code-worktree-create-hook.py": "prints only the worktree path Claude Code reads, or its own failure",
+    "nn-systems/handoff/handoff-successor-conversation-tail-last-lines-first-message-display-hook.py": "it only puts the conversation-tail's last lines, written by the handoff-supervisor, above the successor's first message on the user's screen, which the agent does not see",
     "nn-systems/handoff/handoff-asked-stop-typing-user-notice-user-prompt-submit-hook.py": "it shows the user a systemMessage, which the agent does not see, and otherwise reports only its own failure",
     "scripts/uncommitted-work-snapshot-hook.py": "it speaks only when it could not keep a work-snapshot or write a worktree's owner file, which reports its own failure",
 }
