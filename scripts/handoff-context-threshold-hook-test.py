@@ -913,6 +913,10 @@ with tempfile.TemporaryDirectory() as workspace:
             ("gh run watch 12345", 0),
             ("python3 -u scripts/merge-lane-open-prs-watch-and-reviewer-assign.py --exit-after-first-poll-with-events", 0),
             ("python3 scripts/merge-lane-open-prs-watch-and-reviewer-assign.py --poll-once-write-baseline", 75),
+            ("python3 scripts/merge-lane-open-prs-watch-and-reviewer-assign.py --poll-once", 75),
+            # --poll-once counts only as an argument of its own.
+            ("python3 scripts/merge-lane-open-prs-watch-and-reviewer-assign.py --batch-events-for-seconds 1200 --token-file /x/--poll-once-token", 0),
+            ("python3 scripts/merge-lane-open-prs-watch-and-reviewer-assign.py --repo 'a;b' --poll-once", 75),
             ("cd /home/nedlern/x && until grep -q done out.txt; do sleep 5; done", 0),
             ("while kill -0 4242; do sleep 30; done", 0),
             ("sleep 120; echo finished", 75),
