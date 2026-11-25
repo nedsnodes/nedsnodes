@@ -18,7 +18,7 @@ The reviewer writes its findings to --report. This program prints progress
 to stderr and nothing to stdout.
 
 Exit codes: 0 a model produced a report; 1 every model in the cold-read-tier's
-chain failed to produce one, including the case where `agy` never started
+chain, TIER_TO_AGY_MODEL_CHAIN, failed to produce one, including the case where `agy` never started
 because the binary is not on PATH (the common module names that on stderr
 and lets the chain advance, so a 1 always means "no review was produced");
 64 this program refused the invocation and never launched agy, naming its
@@ -26,8 +26,10 @@ own fix -- including when this machine has no sandbox to run agy in. 64 rather t
 EXIT_BAD_INVOCATION in nn-systems/cold-read/cold-read-cell-common.py, which every
 cold-read-cell shares.
 
-WHAT THIS LEG IS FOR: the cold-read-fast-read runs on gemini-4-neon-low at
-effort low. It is the one cold-read-tier this launcher pins. The `deep` and
+WHAT THIS LEG IS FOR: the cold-read-fast-read, on the models and effort that
+TIER_TO_AGY_MODEL_CHAIN and TIER_TO_REASONING_EFFORT, in this file, give the
+`fast` cold-read-tier; --effort's help below names that effort. It is the one
+cold-read-tier this launcher pins. The `deep` and
 `second-strongest-model` (the agent-binary's second-strongest model)
 cold-read-tiers stay on the Claude and Codex launchers, and this
 launcher refuses them (exit 64 from argparse) rather than running a Gemini
