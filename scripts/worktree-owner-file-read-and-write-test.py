@@ -107,12 +107,17 @@ with tempfile.TemporaryDirectory() as scratch:
     for owner_kind, agent_seat, owner_key, why in (
             ("agent-seat", "", None, "an empty agent-seat name"),
             ("agent-seat", "two words", None, "an agent-seat name with a space"),
+            ("agent-seat", "a.b", None, "an agent-seat name with a dot, which launch-claude-ubuntu refuses"),
+            ("agent-seat", "seat-one\n", None, "an agent-seat name ending in a newline"),
             ("agent-seat", "seat-one", "1-2-3", "an agent-seat with an owner key"),
             ("agent-session", "seat-one", None, "an agent-session without an owner key"),
             ("someone", "seat-one", None, "an owner kind that is neither")):
         error = raised(lambda: module.worktree_owner_file_record_validate_and_build(owner_kind, agent_seat, owner_key))
         check(f"an owner record with {why} is refused",
               isinstance(error, module.WorktreeOwnerFileError), repr(error))
+    check("an owner record for an agent-seat whose name starts with _, which launch-claude-ubuntu accepts, is built",
+          module.worktree_owner_file_record_validate_and_build("agent-seat", "_x")
+          == {"owner_kind": "agent-seat", "agent_seat": "_x"})
 
     other = checkout / ".claude" / "worktrees" / "other"
     git(checkout, "worktree", "add", "-b", "other", str(other))

@@ -1859,7 +1859,7 @@ try:
     printed_lines = printed.getvalue().splitlines()
     check("a failed snapshot's git reason holding U+2028, U+2029 and U+0085 is lifted whole on one line",
           len(printed_lines) == 2 and printed_lines[0].startswith("WRITE CHECK DID NOT RUN:")
-          and "$'/x/a\\xe2\\x80\\xa8b\\xe2\\x80\\xa9c\\xc2\\x85d' To add an exception, run:" in printed_lines[0],
+          and "'/x/a\\u2028b\\u2029c\\x85d' To add an exception, run:" in printed_lines[0],
           repr(printed_lines))
     check("the FELL BACK instruction is the text item 24 of the approval-walk approved",
           grid_module.COLD_READ_CELL_FELL_BACK_TO_ANOTHER_MODEL_STATUS_LINE_NEXT_STEP_INSTRUCTION

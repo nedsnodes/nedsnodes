@@ -20,12 +20,9 @@ nn-systems/general-tools/scheduled-jobs-on-each-machine.json.
 
 WHAT ONE RUN DOES, in order.
 
-  1. Makes a scratch clone holding the hook and the three modules it needs:
-     nn-systems/handoff/uncommitted-work-snapshots.py, which the hook loads, and
-     nn-systems/general-tools/git-machine-readable-output-runner-and-parser-common.py
-     and nn-systems/general-tools/agent-seat-task-list-new-pending-task-write-common.py,
-     which that module loads. The clone has one commit and sits in a
-     temporary directory.
+  1. Makes a scratch clone holding every file tracked under scripts/ and
+     nn-systems/, as the working tree has it, so it cannot miss a module the hook
+     loads. The clone has one commit and sits in a temporary directory.
   2. Runs `claude -p` on Haiku from that clone, with the hook registered for
      Bash calls through --settings, and asks it to run one shell command that
      writes the file LIVE_CHECK_FILE_NAME.
@@ -83,10 +80,7 @@ SYSTEM_DIRECTORY = Path(__file__).resolve().parent
 REPOSITORY_ROOT = SYSTEM_DIRECTORY.parent.parent
 MODULE_RELATIVE = Path("nn-systems/handoff/uncommitted-work-snapshots.py")
 HOOK_RELATIVE = Path("scripts/uncommitted-work-snapshot-hook.py")
-GIT_OUTPUT_MODULE_RELATIVE = Path(
-    "nn-systems/general-tools/git-machine-readable-output-runner-and-parser-common.py")
-TASK_WRITE_MODULE_RELATIVE = Path(
-    "nn-systems/general-tools/agent-seat-task-list-new-pending-task-write-common.py")
+SCRATCH_CLONE_REPOSITORY_DIRECTORIES_TO_COPY = ("scripts", "nn-systems")
 LIVE_CHECK_FILE_NAME = "uncommitted-work-snapshot-hook-scheduled-check-that-real-claude-session-is-recorded-as-owner-marker-file-created-by-real-claude-session.txt"
 LIVE_CHECK_PROMPT = (f"Run this one shell command and nothing else: "
                      f"echo live > {LIVE_CHECK_FILE_NAME}")
@@ -136,8 +130,12 @@ def default_claude_program():
 
 def make_scratch_clone(clone):
     git(clone.parent, "init", "-q", str(clone))
-    for relative in (MODULE_RELATIVE, HOOK_RELATIVE, GIT_OUTPUT_MODULE_RELATIVE,
-                     TASK_WRITE_MODULE_RELATIVE):
+    # Only the code directories: the repository's .claude/settings.json and CLAUDE.md would
+    # load the project's own hooks and instructions into the live claude run.
+    # Copied from the working tree, not HEAD: the mutation runner and an agent testing an edit
+    # run the suite on uncommitted code.
+    tracked = git(REPOSITORY_ROOT, "ls-files", "-z", *SCRATCH_CLONE_REPOSITORY_DIRECTORIES_TO_COPY)
+    for relative in filter(None, tracked.split("\0")):
         (clone / relative).parent.mkdir(parents=True, exist_ok=True)
         shutil.copy2(REPOSITORY_ROOT / relative, clone / relative)
     (clone / ".gitignore").write_text("__pycache__/\n")

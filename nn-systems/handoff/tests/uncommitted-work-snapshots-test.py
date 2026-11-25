@@ -48,6 +48,8 @@ MODULE_RELATIVE = Path("nn-systems/handoff/uncommitted-work-snapshots.py")
 HOOK_RELATIVE = Path("scripts/uncommitted-work-snapshot-hook.py")
 POST_CHECKOUT_HOOK_RELATIVE = Path("scripts/git-client-side-hooks/post-checkout")
 OWNER_FILE_MODULE_RELATIVE = Path("scripts/worktree-owner-file-read-and-write.py")
+AGENT_SEAT_NAME_MODULE_RELATIVE = Path(
+    "nn-systems/general-tools/agent-seat-name-regular-expression-constant-same-as-launch-claude-ubuntu-check-common.py")
 CLEANER_RELATIVE = Path("scripts/clean-worktrees.py")
 GIT_OUTPUT_MODULE_RELATIVE = Path(
     "nn-systems/general-tools/git-machine-readable-output-runner-and-parser-common.py")
@@ -164,6 +166,7 @@ def new_clone():
     main = base / "main"
     git(SCRATCH, "clone", "-q", str(origin), str(main))
     for relative in (MODULE_RELATIVE, HOOK_RELATIVE, CLEANER_RELATIVE, OWNER_FILE_MODULE_RELATIVE,
+                     AGENT_SEAT_NAME_MODULE_RELATIVE,
                      GIT_OUTPUT_MODULE_RELATIVE, TASK_WRITE_MODULE_RELATIVE, TASK_FILE_REWRITE_MODULE_RELATIVE,
                      NEXT_STEP_LINES_MODULE_RELATIVE,
                      LOG_STORE_WRITER_MODULE_RELATIVE, NED_BOX_HOME_CONSTANTS_MODULE_RELATIVE,

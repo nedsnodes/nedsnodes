@@ -456,7 +456,7 @@ def test_a_question_like_line_goes_to_the_model():
           and "--no-session-persistence" in argv, calls)
     check("the model is given the labelling prompt and, as JSON, the question-like line, the message, the waiting "
           "item's text and the message that started the turn with who sent it",
-          calls and calls[0]["stdin"].startswith(hook.MODEL_PROMPT)
+          calls and calls[0]["stdin"].startswith(hook.QUESTION_LIKE_LINE_ASK_LABELLING_MODEL_PROMPT)
           and judged_entry(calls[0]) == {
               "id": "L1", "line": "The fix has a second part, and I recommend building it next.",
               "turn_started_by": "human", "message_that_started_the_turn": "A",
@@ -474,7 +474,7 @@ def test_a_question_like_line_goes_to_the_model():
 
 
 def judged_entry(call):
-    return json.loads(call["stdin"][len(hook.MODEL_PROMPT):])[0]
+    return json.loads(call["stdin"][len(hook.QUESTION_LIKE_LINE_ASK_LABELLING_MODEL_PROMPT):])[0]
 
 
 def judged_line(call):
@@ -903,6 +903,32 @@ def test_the_final_message_from_the_payload_is_checked():
     check_silent("a turn with no text in the transcript or the payload passes", case.run())
 
 
+def test_the_final_message_already_in_the_transcript_is_checked_once():
+    case = Case()
+    case.reply("Should I merge it?")
+    check_blocked("a question in the final message blocks", case.run(last_assistant_message="Should I merge it?"),
+                  '"Should I merge it?"')
+    check("the payload's final message, already the transcript's last assistant text, is judged once, not twice",
+          [judged_line(call) for call in case.model_calls()] == ["Should I merge it?"], case.model_calls())
+
+
+def test_a_long_message_is_cut_around_the_line_as_the_benchmark_cut_it():
+    case = Case()
+    before = "\n".join(f"Report line {number} is done." for number in range(400))
+    after = "\n".join(f"Closing note {number} is filed." for number in range(200))
+    line = "I recommend building the second part next."
+    case.reply(f"{before}\n{line}\n{after}")
+    case.run(model="no")
+    calls = case.model_calls()
+    message = judged_entry(calls[0])["agent_message_holding_the_line"] if calls else ""
+    at = message.find(line)
+    check("a long message's entry holds only the window around the line, marked as cut on both sides",
+          len(calls) == 1 and message.startswith("[...] ") and message.endswith(" [...]")
+          and at == len("[...] ") + hook.AGENT_MESSAGE_CHARACTERS_KEPT_BEFORE_THE_LINE
+          and len(message) - at - len(line) == hook.AGENT_MESSAGE_CHARACTERS_KEPT_AFTER_THE_LINE + len(" [...]"),
+          (len(message), at))
+
+
 def test_the_shown_item_and_quotes_from_it_are_not_checked():
     case = Case()
     case.reply("Recorded your answer to item 1.\n\n" + ITEM_2_SHOWN)
@@ -1095,6 +1121,18 @@ def test_every_turn_is_checked_whoever_started_it():
                  text_record("Noted.\n\nItem 2 of 10 is waiting for your answer."))
     check_silent("a question from an earlier turn is not checked again when the newer turn's start has no "
                  "turnOrigin", case.run())
+    scheduled_prompt = opening_prompt("scheduled", "Hourly stall check.", isMeta=True, promptSource="system")
+    case.records(USER_PROMPT, text_record("Should I open the pull request?"), scheduled_prompt,
+                 text_record("The stall check found nothing. I recommend merging PR 1922 next."))
+    check_blocked("a scheduled turn after the user's turn is checked", case.run(model="yes"),
+                  "I recommend merging PR 1922 next.")
+    calls = case.model_calls()[-1:]
+    check("a scheduled turn's own opening prompt, not the user's earlier one, starts the turn the model is given, "
+          "and the earlier turn's question is not judged again",
+          [(judged_entry(call)["turn_started_by"], judged_entry(call)["message_that_started_the_turn"],
+            judged_line(call)) for call in calls]
+          == [("scheduled", "Hourly stall check.",
+               "The stall check found nothing. I recommend merging PR 1922 next.")], calls)
 
 
 def test_when_the_hook_stays_silent():

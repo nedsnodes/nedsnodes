@@ -86,8 +86,6 @@ def worktree_is_claude_code_subagent_worktree_by_location_and_directory_name(wor
             and CLAUDE_CODE_SUBAGENT_WORKTREE_DIRECTORY_NAME.fullmatch(worktree.name) is not None)
 
 
-AGENT_SEAT_NAME = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]*$")
-
 HANDOFF_DIRECTORY = Path.home() / ".claude" / "handoffs"
 
 WORKTREE_OWNER_FILE_COMMAND_FAILED_NEXT_STEP_LINES = (
@@ -121,6 +119,12 @@ def load_module(name, path):
     module = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(module)
     return module
+
+
+AGENT_SEAT_NAME_PATTERN = load_module(
+    "agent_seat_name_regular_expression_constant_same_as_launch_claude_ubuntu_check_common",
+    Path(__file__).resolve().parents[1] / "nn-systems" / "general-tools"
+    / "agent-seat-name-regular-expression-constant-same-as-launch-claude-ubuntu-check-common.py").AGENT_SEAT_NAME_PATTERN
 
 
 def load_uncommitted_work_snapshots_module_once():
@@ -174,7 +178,7 @@ def worktree_owner_file_path_find(worktree):
 
 def worktree_owner_file_record_validate_and_build(owner_kind, agent_seat, owner_key=None):
     """The owner file's object, or raise WorktreeOwnerFileError when a field is wrong."""
-    if not isinstance(agent_seat, str) or not AGENT_SEAT_NAME.match(agent_seat):
+    if not isinstance(agent_seat, str) or not AGENT_SEAT_NAME_PATTERN.fullmatch(agent_seat):
         raise WorktreeOwnerFileError(f"agent_seat {agent_seat!r} is not an agent-seat's name")
     if owner_kind == OWNER_AGENT_SEAT and owner_key is None:
         return {"owner_kind": owner_kind, "agent_seat": agent_seat}

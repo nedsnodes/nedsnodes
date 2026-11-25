@@ -2965,7 +2965,7 @@ def heading_body(walk_finder, text):
     first, _, rest = text.partition("\n")
     if first.lstrip().startswith("#"):
         return blank_lines_stripped(rest)
-    return blank_lines_stripped(item_title(walk_finder, first) + "\n" + rest)
+    return blank_lines_stripped(item_title(walk_finder, first, with_text_after_title=True) + "\n" + rest)
 
 
 def blank_lines_stripped(text):
@@ -2979,26 +2979,58 @@ def blank_lines_stripped(text):
     return "\n".join(lines)
 
 
-def item_title(walk_finder, line):
-    """The text of an item's heading line without its `#` marks, running count, deferred note and the emphasis
-    delimiters around the count, which renumbering the item does not change; every other character stays."""
-    line = walk_finder.approval_walk_item_heading_with_deferred_note_removed(line).lstrip("#").strip()
+def item_title(walk_finder, line, with_text_after_title=False):
+    """The title an item's heading or opening line gives it: without its indentation, list or quotation mark, `#`
+    marks, running count, deferred note, `revised` label and the emphasis delimiters around the count, which
+    renumbering or revising the item does not change. A bold opening's title ends where its emphasis closes, as in
+    `**Item 3 of 9: the first** More detail.`; with_text_after_title keeps the text after it, without the closing
+    delimiter."""
+    line = walk_finder.approval_walk_item_heading_with_deferred_note_removed(line)
+    line = re.sub(rf"^\s*{walk_finder.MARKDOWN_LINE_OPENING_LIST_OR_QUOTATION_MARK_PATTERN_TEXT}*", "", line)
+    line = line.lstrip("#").strip()
     count = walk_finder.HEADING_COUNT.match(line)
     if not count:
         return line
     opener = re.match(r"[*_]*", line)[0]
-    title = line[count.end():].lstrip(" :,.;")
-    if opener and title.startswith(opener):
-        return title[len(opener):].lstrip(" :,.;").rstrip()
+    # One match reads the label at most once; the emphasis can close before the label, as in `**Item 3 of 9**:
+    # (revised) x`, or after it, as in `**Item 3 of 9 (revised):** x`. The label is only `(revised)` or `revised:`,
+    # so a title opening with the word, as in `**Item 3 of 9:** Revised estimates`, keeps it.
+    separators = r"[ :,.;]*"
+    label = r"(?:[\s,:;.\-\u2013\u2014]*(?:\(revised\)|revised:)[ :,.;]*)?"
+    closer = re.escape(opener)
+    opening = re.match(rf"{separators}(?:(?P<before>{closer}){separators}{label}|{label}(?P<after>{closer})"
+                       rf"{separators}|{label})", line[count.end():], re.I)
+    title = line[count.end() + opening.end():]
+    closed = opening["before"] is not None or opening["after"] is not None
+    if closed or not opener:
+        return title.rstrip()
     # The emphasis that opened before the count closes after the title; a delimiter inside a code span, or with
     # a space before it, as in `x ** 2`, closes nothing.
     code = [span.span() for span in walk_finder.CODE_SPAN.finditer(title)]
-    closer = next((found.start() for found in re.finditer(re.escape(opener), title) if opener
-                   and found.start() > 0 and not title[found.start() - 1].isspace()  # pragma: no mutate, the return above leaves no opener at position 0, so > 0, > -1 and >= 0 agree
+    closer = next((found.start() for found in re.finditer(re.escape(opener), title)
+                   if found.start() > 0 and not title[found.start() - 1].isspace()  # pragma: no mutate, the opener was taken off position 0 above, so > 0, > -1 and >= 0 agree
                    and not any(start <= found.start() < end for start, end in code)), None)
     if closer is not None:
-        title = title[:closer] + title[closer + len(opener):]
+        after = title[closer + len(opener):]
+        title = title[:closer] + (after if with_text_after_title else "")
     return title.rstrip()
+
+
+def markdown_with_link_syntax_dropped(markdown, parser):
+    """The inline Markdown with each link's text kept, its link syntax gone and the rest's emphasis and code spans as
+    written, as an earlier message quoting the title would give it; unlike the closing line's point, nothing is
+    escaped."""
+    pieces = []
+    for token in parser.parseInline(markdown)[0].children:
+        if token.type in ("link_open", "link_close"):
+            continue
+        if token.type == "code_inline":
+            pieces.append(token.markup + token.content + token.markup)
+        elif token.type in ("softbreak", "hardbreak"):
+            pieces.append(" ")
+        else:
+            pieces.append(token.markup or token.content)
+    return "".join(pieces)
 
 
 def earlier_read_texts_of_item(walk_finder, minutes, value, numbers, total, parser, reads, command):
@@ -3534,12 +3566,15 @@ def approval_walk_item_system_status_claims_not_rechecked_refused(text, item, do
 
 
 def approval_walk_item_title_search_groups(walk_finder, document, value, numbers, total, parser, earlier):
-    """Return [(titles, item numbers)] for each heading in document that names waiting items, in its order: its
-    title, in the closing line's form too when that differs, as when the title holds a link, with the numbers of
-    the waiting items it names, so that a short title is matched only after its own numbers. A lone waiting item's
-    titles also hold the title of each earlier read text of it, as earlier_read_texts_of_item returns them; a
-    Withdrawn version heading carries no title, so those read texts are its only earlier titles the program can
-    know."""
+    """Return [(titles, item numbers)], one group for each distinct set of waiting item numbers that a heading in
+    document names or that a waiting item's own titled opening under a shared heading names, such as [3] and [4] for
+    items 3 and 4 under one heading: the titles of those headings and openings, each in the closing line's form too
+    when that differs, as when the title holds a link, so that a short title is matched only after its own numbers.
+    Groups come in the order the `#next_to_present` line names the items, a heading's group before the groups of the
+    openings under it, so items 4 and 3, named in that order, give [4] before [3] whichever opening comes first. A
+    lone waiting item's titles also hold the title of each earlier read text of it, as earlier_read_texts_of_item
+    returns them; a Withdrawn version heading carries no title, so those read texts are its only earlier titles the
+    program can know."""
     text = document.read_text(encoding="utf-8")
     lines = text.split("\n")
     _, units = walk_finder.waiting_item_units(document, value, numbers, total, parser)
@@ -3547,15 +3582,15 @@ def approval_walk_item_title_search_groups(walk_finder, document, value, numbers
     openings = walk_finder.item_opening_lines(text, parser)
 
     def search_forms(line):
-        # An indented heading is still a heading, and item_title strips `#` only from the line's start.
-        line = line.strip()
         title = item_title(walk_finder, line)
         if not title:
             return []
-        # The closing line's point, as the hook reads it, so that `## Item 4 of 9 (revised): a [filter](url)` is
-        # also searched as `a filter`; and the title with only its links dropped, which keeps its emphasis.
-        unlinked = hook.without_links(title, parser)
-        return [title, hook.approval_walk_item_heading_point_without_links(line, parser) or unlinked, unlinked]
+        # The closing line's point, as the hook shows it, so that `## Item 4 of 9 (revised): a [filter](url)` is
+        # also searched as `a filter`; and the title with only its link syntax dropped, as an earlier message
+        # quoting it would write it.
+        forms = [title, hook.approval_walk_item_heading_point_without_links(line.strip(), parser),
+                 markdown_with_link_syntax_dropped(title, parser)]
+        return list(dict.fromkeys(form for form in forms if form))
 
     groups = []
     for unit in units:
@@ -3575,8 +3610,14 @@ def approval_walk_item_title_search_groups(walk_finder, document, value, numbers
                 openings, unit[3], unit[4], number, unit[0], unit[1])
             own = [form for form in search_forms(lines[start]) if form not in titles] if start != unit[3] else []
             if own:
-                groups.append((list(dict.fromkeys(own)), [number]))
-    return groups
+                groups.append((own, [number]))
+    # Groups with the same numbers search the same records, so each is searched once, with every title, or a
+    # message naming two of its titles is printed twice.
+    merged = {}
+    for titles, waiting in groups:
+        kept = merged.setdefault(tuple(waiting), [])
+        kept.extend(title for title in titles if title not in kept)
+    return [(titles, list(waiting)) for waiting, titles in merged.items()]
 
 
 def approval_walk_item_title_user_messages_in_earlier_agent_sessions_lines(walk_finder, minutes, groups, numbers,
