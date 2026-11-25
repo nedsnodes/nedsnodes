@@ -891,6 +891,37 @@ def run_merge_lane_pull_request_review_assignment_watcher_cases():
               exit_code == 1 and "line 1 of the seed file" in errors and not seeded.exists(),
               errors)
 
+        # Another repository.
+        stand_in_default = scratch / "default-assignments.txt"
+        stand_in_default.write_text("1 merge-lane-1\n", encoding="utf-8")
+        saved_default = watcher_module.MERGE_LANE_PULL_REQUEST_REVIEW_ASSIGNMENTS_DEFAULT_FILE
+        watcher_module.MERGE_LANE_PULL_REQUEST_REVIEW_ASSIGNMENTS_DEFAULT_FILE = stand_in_default
+        try:
+            _, lines, _ = run_watcher_in_process(
+                ["--repo", "someone/elsewhere", "--needs-a-look-directory", str(scratch / "no-notices")],
+                [[assignable(1), assignable(70)]], token_file)
+            check("with another --repo and no assignment file named, no review is assigned and the "
+                  "default file is left alone",
+                  not any(" REVIEW-ASSIGNED " in line for line in lines)
+                  and stand_in_default.read_text(encoding="utf-8") == "1 merge-lane-1\n",
+                  "\n".join(lines))
+            exit_code, _, errors = run_watcher_in_process(
+                ["--repo", "someone/elsewhere", "--merge-lane-pr-review-assignments-list-for",
+                 "merge-lane-1"], [[assignable(1)]], token_file)
+            check("the lookup with another --repo and no assignment file named exits 2 and asks "
+                  "for the file",
+                  exit_code == 2 and "--merge-lane-pr-review-assignments-file" in errors, errors)
+        finally:
+            watcher_module.MERGE_LANE_PULL_REQUEST_REVIEW_ASSIGNMENTS_DEFAULT_FILE = saved_default
+
+        spaced = scratch / "an assignment file.txt"
+        steps = watcher_module.merge_lane_pull_request_review_assignments_file_repair_steps(
+            spaced, "missing", ["--repo", "someone/elsewhere", "--token-file", "/tokens/a token"])
+        check("the seed command the repair steps print repeats --repo and --token-file and quotes "
+              "each path",
+              "--repo someone/elsewhere --token-file '/tokens/a token' " in steps
+              and f"--merge-lane-pr-review-assignments-file '{spaced}' " in steps, steps)
+
         # The lookup.
         assignments.write_text("50 merge-lane-1\n51 merge-lane-1\n52 merge-lane-1\n53 merge-lane-3\n",
                                encoding="utf-8")
