@@ -1369,48 +1369,76 @@ for resume in (False, True):
               str(arguments))
 
 with tempfile.TemporaryDirectory() as rename_directory:
-    handoffs = Path(rename_directory) / "handoffs"
-    projects = Path(rename_directory) / "project"
-    handoffs.mkdir()
-    projects.mkdir()
-    rename_settings = types.SimpleNamespace(agent="seat-a", handoff_directory=handoffs,
-                                            working_directory=Path(rename_directory))
-    real_project_directory = supervisor.project_directory_for_working_directory
-    supervisor.project_directory_for_working_directory = lambda _: projects
+    # The name file lives under HOME; the transcript is found by session id under PROJECTS_ROOT,
+    # in a project directory other than the working directory's, as after a worktree takeover.
+    handoffs = Path(rename_directory) / ".claude" / "handoffs"
+    projects = Path(rename_directory) / "projects"
+    other_project = projects / "-some-other-worktree"
+    handoffs.mkdir(parents=True)
+    other_project.mkdir(parents=True)
+    name_file = handoffs / "seat-a-remote-control-name"
+    rename_settings = types.SimpleNamespace(agent="seat-a", working_directory=Path(rename_directory) / "seat-a")
+    real_home, real_projects_root = os.environ.get("HOME"), supervisor.PROJECTS_ROOT
+    os.environ["HOME"] = rename_directory
+    supervisor.PROJECTS_ROOT = projects
+
+    def carry(notice, launched_name):
+        return supervisor.handoff_supervisor_claude_ai_rename_save_as_remote_control_name_and_add_instruction_to_successor_notice(
+            rename_settings, notice, "retiring", launched_name)
+
     try:
-        (projects / "retiring.jsonl").write_text(
+        (other_project / "retiring.jsonl").write_text(
             '{"type":"custom-title","customTitle":"seat-a"}\n', encoding="utf-8")
         check("an unchanged title leaves the successor's notice as it is",
-              supervisor.handoff_supervisor_claude_ai_rename_save_as_remote_control_name_and_add_instruction_to_successor_notice(
-                  rename_settings, "earlier notice", "retiring") == "earlier notice")
+              carry("earlier notice", "seat-a") == "earlier notice")
         check("a launch with no stored name uses the agent-seat name",
-              supervisor.handoff_supervisor_remote_control_name_choose_for_agent_session_launch("seat-a", handoffs) == "seat-a")
-        (projects / "retiring.jsonl").write_text(
+              supervisor.handoff_supervisor_remote_control_name_choose_for_agent_session_launch("seat-a") == "seat-a")
+        (other_project / "retiring.jsonl").write_text(
             '{"type":"custom-title","customTitle":"--renamed"}\n', encoding="utf-8")
-        notice = supervisor.handoff_supervisor_claude_ai_rename_save_as_remote_control_name_and_add_instruction_to_successor_notice(
-            rename_settings, "earlier notice", "retiring")
-        check("a rename found at stop keeps the earlier notice and has the successor send the line",
+        notice = carry("earlier notice", "seat-a")
+        check("a rename found at stop, in a transcript outside the working directory's project "
+              "directory, keeps the earlier notice and has the successor send the line",
               notice.startswith("earlier notice ")
-              and "seat-a is now --renamed in Remote Control; message it there." in notice, notice)
+              and "The agent-seat seat-a is now --renamed in Remote Control; send it messages under that name." in notice, notice)
         check("the successor launches under the stored name",
-              supervisor.handoff_supervisor_remote_control_name_choose_for_agent_session_launch("seat-a", handoffs) == "--renamed")
-        check("a second read of the same title sends nothing again",
-              supervisor.handoff_supervisor_claude_ai_rename_save_as_remote_control_name_and_add_instruction_to_successor_notice(
-                  rename_settings, "", "retiring") == "")
-        (handoffs / "seat-a-remote-control-name").unlink()
-        (handoffs / "seat-a-remote-control-name").mkdir()
+              supervisor.handoff_supervisor_remote_control_name_choose_for_agent_session_launch("seat-a") == "--renamed")
+        notice = carry("", "seat-a")
+        check("a rename the Stop hook already stored, before the retiring session sent its line, "
+              "still has the successor send the line",
+              "The agent-seat seat-a is now --renamed in Remote Control; send it messages under that name." in notice, notice)
+        check("a successor launched under the stored name sends nothing at its own handoff",
+              carry("", "--renamed") == "")
+        check("a state file with no launched name sends nothing for a rename already stored",
+              carry("", None) == "")
+        name_file.unlink()
+        notice = carry("", None)
+        check("a state file with no launched name still sends the line for a rename found at stop",
+              "seat-a is now --renamed in Remote Control" in notice, notice)
+        name_file.unlink()
+        name_file.mkdir()
         errors = io.StringIO()
         with contextlib.redirect_stderr(errors):
-            name = supervisor.handoff_supervisor_remote_control_name_choose_for_agent_session_launch("seat-a", handoffs)
-            kept = supervisor.handoff_supervisor_claude_ai_rename_save_as_remote_control_name_and_add_instruction_to_successor_notice(
-                rename_settings, "earlier notice", "retiring")
+            name = supervisor.handoff_supervisor_remote_control_name_choose_for_agent_session_launch("seat-a")
+            kept = carry("earlier notice", "seat-a")
         check("an unreadable stored name launches under the agent-seat name and reports it",
               name == "seat-a" and "could not be read" in errors.getvalue(), errors.getvalue())
         check("a rename that cannot be stored keeps the notice and reports it",
               kept == "earlier notice" and "not carried to the successor" in errors.getvalue(),
               errors.getvalue())
+        name_file.rmdir()
+        second_project = projects / "-a-third-worktree"
+        second_project.mkdir()
+        (second_project / "retiring.jsonl").write_text(
+            '{"type":"custom-title","customTitle":"--other"}\n', encoding="utf-8")
+        errors = io.StringIO()
+        with contextlib.redirect_stderr(errors):
+            kept = carry("earlier notice", "seat-a")
+        check("a session id found in two project directories keeps the notice and reports it",
+              kept == "earlier notice" and "several project directories" in errors.getvalue(),
+              errors.getvalue())
     finally:
-        supervisor.project_directory_for_working_directory = real_project_directory
+        os.environ["HOME"] = real_home
+        supervisor.PROJECTS_ROOT = real_projects_root
 
 with tempfile.TemporaryDirectory() as naming_workspace:
     agent = an_agent_recording_its_invocations(naming_workspace)

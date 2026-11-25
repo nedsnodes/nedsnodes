@@ -694,9 +694,16 @@ with tempfile.TemporaryDirectory() as workspace_name:
     check("T7 the async change is on main",
           git(["show", "main:README.md"], remote).stdout == "seed\nasync change\n")
     nowait_workspace = state_home / "nedschorus-gatekeeper" / nowait_digest
-    (nowait_workspace / ".main-gatekeeper-test-worker-paused-at-after-push-release-signal-from-test").write_text("", encoding="utf-8")
+    # A worker refused before after-push has already swept its workspace, so
+    # it is released only once status says checked-in; the workspace is seen
+    # while the worker is held, so a one-shot absence check cannot pass early.
+    worker_held_at_checked_in = status_payload.get("outcome") == "checked-in"
+    check("T7 the workspace exists while the worker is held after its push",
+          worker_held_at_checked_in and nowait_workspace.is_dir(), str(nowait_workspace))
+    if worker_held_at_checked_in and nowait_workspace.is_dir():
+        (nowait_workspace / ".main-gatekeeper-test-worker-paused-at-after-push-release-signal-from-test").write_text("", encoding="utf-8")
     check("T7 the worker swept its workspace on success",
-          wait_for(lambda: not nowait_workspace.exists()))
+          worker_held_at_checked_in and wait_for(lambda: not nowait_workspace.exists()))
     code, payload = run_gatekeeper(["cancel", nowait_digest, "--repo", str(work)],
                                    state_home)
     check("T8 cancel after the push answers too-late",

@@ -2,8 +2,10 @@
 """The Remote Control name an agent-seat keeps across session-handoffs after a claude.ai rename.
 
 A rename in claude.ai reaches an agent-session as a custom-title record in its transcript. The
-name is stored in ~/.claude/handoffs/<agent-seat>-remote-control-name; an agent-seat with no such
-file answers to its agent-seat name. A transcript with no custom-title record changes nothing.
+name is stored in ~/.claude/handoffs/<agent-seat>-remote-control-name, whatever --handoff-dir the
+handoff-supervisor was given, because the Stop hook and the Remote Control watcher, which read and
+store it too, are not told that flag. An agent-seat with no such file answers to its agent-seat
+name. A transcript with no custom-title record changes nothing.
 """
 
 import json
@@ -15,10 +17,10 @@ REMOTE_CONTROL_NAME_FILE_SUFFIX = "-remote-control-name"
 CUSTOM_TITLE_RECORD_TYPE = "custom-title"
 
 # Messages below follow docs/nedsnodes-wiki/nedsnodes-how-to-write-a-tool-message-to-agent-such-as-a-hook-refusal-or-script-error.md.
-REMOTE_CONTROL_RENAME_LINE_TEMPLATE = "{old_name} is now {new_name} in Remote Control; message it there."
+REMOTE_CONTROL_RENAME_LINE_TEMPLATE = "The agent-seat {old_name} is now {new_name} in Remote Control; send it messages under that name."
 REMOTE_CONTROL_RENAME_INSTRUCTION_TEMPLATE = (
-    "The user renamed this agent-seat in claude.ai from {old_name} to {new_name}. Its sessions "
-    "now start under the new name, so a message sent to the old name may reach no one.\n"
+    "The user renamed this agent-seat in claude.ai from {old_name} to {new_name}. This "
+    "agent-seat's sessions now start under the new name, so a message sent to the old name may reach no one.\n"
     "With SendMessage, send this line, word for word, to each other session ListAgents lists "
     "that is not offline:\n"
     "{line}\n"
@@ -32,14 +34,15 @@ class RemoteControlRename(NamedTuple):
     new_name: str
 
 
-def remote_control_name_file_path(handoff_directory: Path, agent_seat: str) -> Path:
-    return handoff_directory / f"{agent_seat}{REMOTE_CONTROL_NAME_FILE_SUFFIX}"
+def remote_control_name_file_path(agent_seat: str) -> Path:
+    # Path.home() at each call, so a test's HOME decides the directory.
+    return Path.home() / ".claude" / "handoffs" / f"{agent_seat}{REMOTE_CONTROL_NAME_FILE_SUFFIX}"
 
 
-def handoff_remote_control_name_read_stored_or_default_to_agent_seat_name(handoff_directory: Path, agent_seat: str) -> str:
+def handoff_remote_control_name_read_stored_or_default_to_agent_seat_name(agent_seat: str) -> str:
     """Return the stored name, or the agent-seat name when none is stored; raise OSError if unreadable."""
     try:
-        stored = remote_control_name_file_path(handoff_directory, agent_seat).read_text(
+        stored = remote_control_name_file_path(agent_seat).read_text(
             encoding="utf-8").strip()
     except FileNotFoundError:
         return agent_seat
@@ -66,7 +69,7 @@ def session_title_from_transcript(transcript_path) -> str:
 
 
 def handoff_remote_control_name_save_when_transcript_custom_title_changed_and_return_rename(
-        handoff_directory: Path, agent_seat: str, transcript_path) -> Optional[RemoteControlRename]:
+        agent_seat: str, transcript_path) -> Optional[RemoteControlRename]:
     """Store a title that differs from the stored name and return the rename, else return None.
 
     Raise OSError when the transcript exists but cannot be read, or the name cannot be stored."""
@@ -76,10 +79,11 @@ def handoff_remote_control_name_save_when_transcript_custom_title_changed_and_re
         return None
     if not title:
         return None
-    old_name = handoff_remote_control_name_read_stored_or_default_to_agent_seat_name(handoff_directory, agent_seat)
+    old_name = handoff_remote_control_name_read_stored_or_default_to_agent_seat_name(agent_seat)
     if title == old_name:
         return None
-    path = remote_control_name_file_path(handoff_directory, agent_seat)
+    path = remote_control_name_file_path(agent_seat)
+    path.parent.mkdir(parents=True, exist_ok=True)
     # The Stop hook and the handoff-supervisor can both store; a reader must never see half a name.
     temporary_path = path.with_name(f"{path.name}.{os.getpid()}.tmp")
     temporary_path.write_text(title + "\n", encoding="utf-8")

@@ -297,6 +297,18 @@ import typing
 
 REPO_ROOT = pathlib.Path(__file__).resolve().parent.parent
 RECORDS_DIRECTORY_NAME = "sanity-check-records"
+SANITY_CHECK_CELL_MODEL_RUN_FAILED_WARNING_NEXT_STEP_INSTRUCTION = (
+    "Note this failed model in sanity-check-finding-dispositions.md; the runner has already "
+    "recorded it.")
+SANITY_CHECK_CELL_REPORT_QUOTE_FOUND_IN_NO_TRACKED_FILE_WARNING_NEXT_STEP_INSTRUCTION = (
+    "Before you trust this quote, look for it in git history or on the web, and record what "
+    "you found in sanity-check-finding-dispositions.md.")
+SANITY_CHECK_REVIEW_COPY_MODIFIED_OUTSIDE_CELL_SCRATCH_WARNING_NEXT_STEP_INSTRUCTION = (
+    "The runner discards these writes with the review copy; note this warning in "
+    "sanity-check-finding-dispositions.md.")
+SANITY_CHECK_STRAY_FILE_AT_CELL_REPORT_PATH_REPLACED_BY_REPORT_WARNING_NEXT_STEP_INSTRUCTION = (
+    "Set this warning aside in sanity-check-finding-dispositions.md as needing no action: the "
+    "runner wrote the cell's report over the stray file.")
 RECORDS_ROOT = REPO_ROOT / RECORDS_DIRECTORY_NAME
 # The record reaches the log-store by program, not by an agent remembering to
 # run one, the way nn-systems/cold-read/cold-read-grid.py ships its own.
@@ -670,6 +682,7 @@ def run_claude(prompt: str, checkout: pathlib.Path = None) -> tuple:
             # agent-binary, which has no chain to advance.
             failed_attempts.append(f"{model}({type(error).__name__})")
             print(f"WARNING: {model} could not be run: {error}", flush=True)
+            print(SANITY_CHECK_CELL_MODEL_RUN_FAILED_WARNING_NEXT_STEP_INSTRUCTION, flush=True)
             last_cause = common.classify_failed_attempt(
                 stdout="", stderr="", exit_code=None, recognised_texts=(),
                 start_error=str(error))
@@ -699,6 +712,7 @@ def run_claude(prompt: str, checkout: pathlib.Path = None) -> tuple:
             if completed.stdout:
                 print(completed.stdout, flush=True)
             print(f"WARNING: {model} failed (exit {completed.returncode})", flush=True)
+            print(SANITY_CHECK_CELL_MODEL_RUN_FAILED_WARNING_NEXT_STEP_INSTRUCTION, flush=True)
             last_cause = common.classify_failed_attempt(
                 stdout=completed.stdout or "", stderr=completed.stderr or "",
                 exit_code=completed.returncode, recognised_texts=recognised_texts)
@@ -709,6 +723,7 @@ def run_claude(prompt: str, checkout: pathlib.Path = None) -> tuple:
             # would save is an empty review carrying a provenance stamp.
             failed_attempts.append(f"{model}(no-report)")
             print(f"WARNING: {model} exited 0 but produced no review", flush=True)
+            print(SANITY_CHECK_CELL_MODEL_RUN_FAILED_WARNING_NEXT_STEP_INSTRUCTION, flush=True)
             last_cause = common.classify_failed_attempt(
                 stdout="", stderr=completed.stderr or "", exit_code=0,
                 recognised_texts=recognised_texts)
@@ -983,6 +998,7 @@ def quote_scan(corpus: tuple, report: str, cell: str) -> None:
             if not any(normalized in file_text for file_text in corpus):
                 print(f'WARNING: {cell} quote found in no tracked file: '
                       f'"{fragment[:60]}"', flush=True)
+                print(SANITY_CHECK_CELL_REPORT_QUOTE_FOUND_IN_NO_TRACKED_FILE_WARNING_NEXT_STEP_INSTRUCTION, flush=True)
 
 
 def missing_report_phrases(adversarial_prompt: str, text: str) -> list:
@@ -1601,6 +1617,7 @@ def launch_cell_once(cell: str, adversarial_prompt: str, runtime: str, prompt: s
         print(f"WARNING: the review copy was modified outside the cells' scratch "
               f"directories, seen when {cell} finished: {', '.join(stray)}",
               flush=True)
+        print(SANITY_CHECK_REVIEW_COPY_MODIFIED_OUTSIDE_CELL_SCRATCH_WARNING_NEXT_STEP_INSTRUCTION, flush=True)
     # After the worktree check, so a cell that ran to the end has its writes
     # compared whatever it returned; before the quote scan and the write, so a
     # text that is not a report raises no warnings to triage, never lands as a
@@ -1628,6 +1645,7 @@ def launch_cell_once(cell: str, adversarial_prompt: str, runtime: str, prompt: s
     if overwrote_stray_write:
         print(f"WARNING: {cell} found a stray write at its own report path and "
               f"overwrote it: {out_path}", flush=True)
+        print(SANITY_CHECK_STRAY_FILE_AT_CELL_REPORT_PATH_REPLACED_BY_REPORT_WARNING_NEXT_STEP_INSTRUCTION, flush=True)
     print(f"saved: {out_path}", flush=True)
     return None
 
