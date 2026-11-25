@@ -48,7 +48,10 @@ bottom of its stack: the open pull request whose head branch is its base,
 followed down to the one whose base is main; that bottom one, draft or not,
 is assigned first when it has no line. When a lookup on the way down finds
 no open pull request, or more than one, or comes back to a pull request
-already passed, the pull request is taken as not stacked. Every other one
+already passed, the pull request is taken as not stacked. The lookup goes by
+branch name alone, so a fork's pull request whose head branch shares a base
+branch's name is not handled: it can be taken as the pull request below, or
+make the stack read as not stacked. Every other one
 goes to whichever agent-seat of
 MERGE_LANE_PULL_REQUEST_REVIEW_ASSIGNEE_AGENT_SEATS_IN_TIE_ORDER has fewer
 pull requests waiting, ties to the first; each assignment counts at once. A
@@ -58,7 +61,9 @@ the fix-round program reads one: the state APPROVED or CHANGES_REQUESTED,
 or, on a pull request ned-review-merge opened, a COMMENTED review whose body
 opens with the line APPROVE or REQUEST_CHANGES. Only the newest
 REVIEWS_READ_PER_PULL_REQUEST reviews by ned-review-merge on each pull
-request are read. A missing, unreadable or malformed assignment file stops
+request are read, so a pull request with more reviews than that after its
+verdict on its newest commit, none carrying a verdict, is not handled: it
+counts as waiting. A missing, unreadable or malformed assignment file stops
 all assignment, so that no pull request it names is assigned again; so does
 a file that cannot be rewritten, until it can. The watcher writes the whole
 new file beside it and renames it over the old one, so a failed write leaves
