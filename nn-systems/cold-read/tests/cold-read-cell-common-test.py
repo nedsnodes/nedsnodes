@@ -144,8 +144,10 @@ WHAT IS PINNED HERE.
 Run: python3 nn-systems/cold-read/tests/cold-read-cell-common-test.py
 """
 
+import contextlib
 import hashlib
 import importlib.util
+import io
 import json
 import os
 import re
@@ -850,6 +852,59 @@ with tempfile.TemporaryDirectory() as scratch:
           unavailable_detail is not None and "could not start git" in unavailable_detail,
           repr(unavailable_detail))
 
+    # The grid lifts only the cell-log line holding the phrase, so a path or git error of
+    # several lines must reach the log as one line, or the rest of it is dropped.
+    real_stray_writes_since = common_module.stray_writes_since
+
+    def stray_write_check_printed(stray_writes_since_stand_in):
+        common_module.stray_writes_since = stray_writes_since_stand_in
+        captured = io.StringIO()
+        try:
+            with contextlib.redirect_stderr(captured):
+                common_module.report_stray_writes("cell", set())
+        finally:
+            common_module.stray_writes_since = real_stray_writes_since
+        return captured.getvalue().splitlines()
+
+    stray_lines = stray_write_check_printed(lambda baseline, own: ["stray\nwrite.md", "plain.md"])
+    check("a stray-write path holding a newline stays on the STRAY WRITE line",
+          len(stray_lines) == 1 and "$'stray\\x0awrite.md', plain.md" in stray_lines[0], repr(stray_lines))
+
+    def git_status_failing_with_several_lines(baseline, own):
+        raise common_module.WriteDetectorUnavailable(
+            "fatal: detected dubious ownership in repository at '/x/two  spaces'\nTo add an exception, run:")
+
+    skipped_lines = stray_write_check_printed(git_status_failing_with_several_lines)
+    check("a git error of several lines stays on the check-skipped line, with its doubled space",
+          len(skipped_lines) == 1 and "'/x/two  spaces' To add an exception, run:" in skipped_lines[0],
+          repr(skipped_lines))
+
+    separator_path = "/x/a\u2028b\u0085c"
+    joined_remedy = common_module.join_error_text_lines_with_one_space(
+        f"fatal: dubious ownership at '{separator_path}'\nTo add an exception, run:\n\n"
+        f"\tgit config --global --add safe.directory '{separator_path}'")
+    copied_remedy = joined_remedy.split("To add an exception, run: ", 1)[1]
+    check("a U+2028 inside a quoted path in a git error leaves the line one line",
+          len(joined_remedy.splitlines()) == 1, repr(joined_remedy))
+    check("git's remedy, copied from the joined line, still names the original path",
+          subprocess.run(["bash", "-c", copied_remedy.replace("git config", "printf %s", 1)
+                          .replace(" --global --add safe.directory", "", 1)],
+                         capture_output=True, text=True).stdout == separator_path,
+          repr(copied_remedy))
+    check("a U+2028 outside any quoted span is written as its escape",
+          common_module.join_error_text_lines_with_one_space("fatal: a\u2028b") == "fatal: a\\u2028b")
+
+    # A cell whose pre-run snapshot failed passes git's reason, so the line the grid lifts carries it.
+    captured = io.StringIO()
+    with contextlib.redirect_stderr(captured):
+        common_module.report_stray_writes("cell", common_module.WriteDetectorUnavailable(
+            "fatal: not a git repository\nhint: run git init"))
+    not_taken_lines = captured.getvalue().splitlines()
+    check("a failed pre-run snapshot's git reason is on the check-skipped line",
+          len(not_taken_lines) == 1 and STRAY_WRITE_CHECK_SKIPPED_PHRASE in not_taken_lines[0]
+          and "git status failed: fatal: not a git repository hint: run git init" in not_taken_lines[0],
+          repr(not_taken_lines))
+
     # A stamp whose reviewed file cannot be read says so instead of failing the report.
     with tempfile.TemporaryDirectory() as stamp_scratch:
         stamped_report = Path(stamp_scratch) / "report.md"
@@ -1138,6 +1193,9 @@ with tempfile.TemporaryDirectory() as scratch:
     )
     check("a cell that could not take a baseline says the check did not run",
           STRAY_WRITE_CHECK_SKIPPED_PHRASE in result.stderr, repr(result.stderr))
+    check("...giving git's reason on that line",
+          any(STRAY_WRITE_CHECK_SKIPPED_PHRASE in line and "git status failed:" in line
+              for line in result.stderr.splitlines()), repr(result.stderr))
     check("...and says a missing check is not a clean result",
           "failure to look, not a clean result" in result.stderr, repr(result.stderr))
 
@@ -2254,6 +2312,27 @@ with tempfile.TemporaryDirectory() as instrument_scratch:
         check(f"a record directory holding only {file_name} "
               f"{'is' if built else 'is not'} taken as instrument-built",
               _instrument_common.instrument_built_record_directory(directory) is built)
+
+# Each launcher's --effort help states the efforts its own tier map pins, so
+# the help cannot name a launcher's effort the map no longer holds.
+for launcher_file in ("cold-read-agy-cell.py", "cold-read-claude-cell.py",
+                      "cold-read-codex-cell.py"):
+    launcher_help = subprocess.run(
+        [sys.executable, str(SYSTEM_DIRECTORY / launcher_file), "--help"],
+        capture_output=True, text=True, timeout=60).stdout
+    launcher_help_words = " ".join(launcher_help.split())
+    # argparse wraps after a hyphen, so compare with every space removed.
+    launcher_help_unspaced = "".join(launcher_help.split())
+    _launcher_spec = importlib.util.spec_from_file_location(
+        "cold_read_launcher_" + launcher_file.replace("-", "_").replace(".py", ""),
+        SYSTEM_DIRECTORY / launcher_file)
+    _launcher = importlib.util.module_from_spec(_launcher_spec)
+    _launcher_spec.loader.exec_module(_launcher)
+    for tier, effort in _launcher.TIER_TO_REASONING_EFFORT.items():
+        check(f"{launcher_file}'s --effort help says its {tier} tier runs at {effort}",
+              f"{tier}runsat{effort}" in launcher_help_unspaced, launcher_help_words[-600:])
+    check(f"{launcher_file}'s --effort help names no other launcher's pinned effort",
+          "pins medium" not in launcher_help_words, launcher_help_words[-600:])
 
 print()
 if failures:

@@ -576,6 +576,33 @@ with tempfile.TemporaryDirectory() as directory:
           code == program.EXIT_RUN_STOPPED_BY_A_FAILED_STEP and calls == []
           and state["last_run"]["result"] == "stopped"
           and "git fetch origin failed" in state["last_run"]["reason"], (code, printed, state))
+    gate_call = ["--print-merge-gate-notice-of-last-failed-or-stopped-run", "--clone", str(s.clone)]
+    gate_out = io.StringIO()
+
+    def parse_arguments_refused(argv):
+        raise AssertionError(f"merge-gate.sh's call went to parse_arguments: {argv}")
+
+    with constants(DEFAULT_STATE_FILE=s.state_file, parse_arguments=parse_arguments_refused), \
+            contextlib.redirect_stdout(gate_out):
+        gate_code = program.main(gate_call)
+    check("merge-gate.sh's call, read without argparse, prints what the full parse prints",
+          gate_code == program.EXIT_DONE and "git fetch origin failed" in gate_out.getvalue()
+          and gate_out.getvalue() == s.notice(), (gate_code, gate_out.getvalue()))
+    bare_flag_parsed, full_parse = [], program.parse_arguments
+    with constants(DEFAULT_STATE_FILE=s.state_file,
+                   parse_arguments=lambda argv: bare_flag_parsed.append(argv) or full_parse(argv)), \
+            contextlib.redirect_stdout(io.StringIO()):
+        program.main(gate_call[:1])
+    check("the notice flag alone goes to parse_arguments; only merge-gate.sh's exact call skips it",
+          bare_flag_parsed == [gate_call[:1]], bare_flag_parsed)
+    with contextlib.redirect_stderr(io.StringIO()):
+        try:
+            program.main(gate_call[:2])
+            missing_value_exit = None
+        except SystemExit as stop:
+            missing_value_exit = stop.code
+    check("--clone with no value still goes to argparse, which refuses it with exit 2",
+          missing_value_exit == 2, missing_value_exit)
     s.state_file.unlink()
     check("with no state file the notice is empty", s.notice() == "")
     real_state_file = s.state_file

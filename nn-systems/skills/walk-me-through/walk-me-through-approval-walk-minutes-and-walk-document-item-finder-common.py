@@ -103,12 +103,11 @@ answer.
 AN ITEM'S TEXT. approval_walk_item_heading_and_item_page_body_lines gives the
 lines of an item that the item page builder puts on its page.
 approval_walk_item_text_as_shown_to_user gives the item's text as the user is
-shown it, from which the short-answer hook reads the decision-bearing lines
-the user must have been shown before his answer to the item counts: the same
-lines without the `#approval_walk_item_` lines, which the check program writes
-for agents. The
-short-answer hook drops each running count's `of M` only when it compares,
-because M changes when items are added to the walk.
+shown it, whose heading the short-answer hook looks for in the agent's messages
+before his answer to the item counts: the same lines without the
+`#approval_walk_item_` lines, which the check program writes for agents. The
+short-answer hook drops each running count's `of M` only when it looks for the
+heading, because M changes when items are added to the walk.
 
 ITEM PAGES. The walk-me-through skill publishes each item as a page before
 any message shows it, and records the page's link in the walk-minutes as a
@@ -154,6 +153,15 @@ from pathlib import Path
 
 HTML_COMMENT = re.compile(r"<!--.*?(?:-->|\Z)", re.S)
 RECOMMENDATION = re.compile(r"Recommendation:(.*)$", re.I | re.M)
+# One list or quotation mark that can open a Markdown source line, with the spacing after it, as regular-expression
+# text to repeat after `^\s*`.
+MARKDOWN_LINE_OPENING_LIST_OR_QUOTATION_MARK_PATTERN_TEXT = r"(?:(?:[-*+]|\d+[.)]|>)\s+)"
+# Recognises `#new` and `#new_if_d` mark lines, the walk-document lines holding a text an answer adds: after any list
+# or quotation marks, the mark `#new` or `#new_if_d`, spelled exactly, then the text. The walk check program and the
+# short-answer hook both read marks with this one pattern, so that a line one of them takes for a mark the other
+# cannot skip.
+APPROVAL_WALK_ITEM_NEW_TEXT_MARK_LINE_PATTERN = re.compile(
+    rf"^\s*{MARKDOWN_LINE_OPENING_LIST_OR_QUOTATION_MARK_PATTERN_TEXT}*(#new(?:_if_d)?)\b[:\s]*(.*)$")
 
 REPOSITORY_TOP = Path(__file__).resolve().parents[3]
 SUITE_RUNNER_FILE = REPOSITORY_TOP / "scripts" / "run-all-test-suites.py"
@@ -215,8 +223,10 @@ NUMBER_OR_JOINER = re.compile(rf"{NUMBER}|\bto\b|-|\u2013", re.I)
 # A link is one run of non-space characters, so `publish failed: <reason>` can never be read as a link. Spaces
 # only, never a newline, so a line that ends short is not completed by the line below it. Groups: the item number,
 # the failed publish's text, the version written before the link, the link, the note in parentheses after it.
+# `of M` is optional because only the item number is read, and the handoff-supervisor asks for a line without it
+# when no total is known.
 ITEM_PAGE_LINE_PATTERN = re.compile(
-    rf"^#item_page[ \t]+item[ \t]+({NUMBER})[ \t]+of[ \t]+\d+[ \t]+"
+    rf"^#item_page[ \t]+item[ \t]+({NUMBER})[ \t]+(?:of[ \t]+\d+[ \t]+)?"
     rf"(?:(publish failed:[ \t]*\S.*?)|(?:version[ \t]+(\d+)[ \t]+)?(\S+)(?:[ \t]+\(([^\n]*)\))?)[ \t]*$",
     re.I | re.M)
 ITEM_PAGE_NOTE_VERSION = re.compile(r"\bversion[ \t]+(\d+)", re.I)
@@ -399,6 +409,24 @@ def next_to_present(minutes_text, parser):
         return None
     hashtag, value = markers[last]
     return value, not hashtag, last < len(markers) - 1
+
+
+def append_to_minutes(minutes, lines, paragraph_of_its_own=False):
+    """Append lines to the walk-minutes file minutes, each on a line of its own.
+
+    It appends and never rewrites the file, because hooks that run in parallel on one prompt each add lines, and a
+    whole-file rewrite would drop a line another wrote between its read and its write. paragraph_of_its_own puts a
+    blank line before the lines, so that an unclosed inline mark, such as `<!--`, in the paragraph above cannot
+    join them."""
+    existing = minutes.read_text(encoding="utf-8") if minutes.exists() else ""
+    if not existing:
+        separator = ""
+    elif paragraph_of_its_own:
+        separator = "" if existing.endswith("\n\n") else "\n" if existing.endswith("\n") else "\n\n"
+    else:
+        separator = "" if existing.endswith("\n") else "\n"
+    with open(minutes, "a", encoding="utf-8") as file:
+        file.write(separator + "\n".join(lines) + "\n")
 
 
 def text_wrapped_as_markdown_code_span(text):
@@ -801,13 +829,7 @@ def own_lines_of_unit(text, parser, lines, unit, openings, own=None, keep_setext
     item_opening_lines' result once one call has needed it, so that the walk-document is read once. Below a setext
     heading, the heading's further lines come first, whatever own is, since the heading names every number in unit,
     as a paragraph, and a blank line stands where its underline was; with keep_setext_underline, for a caller that
-    puts the heading line back above them, the underline stays, so that the heading is still a heading.
-
-    Not handled: a further line of a setext heading indented four spaces or more, such as `    #new Hide rows.`, is
-    heading text in the walk-document but becomes an indented code block once the underline is replaced, so a
-    message that leaves that line out is not caught. Nor, with keep_setext_underline, is a further line such as
-    `#new Hide rows.`: it stays heading text, and the short-answer hook, which skips headings, does not check that
-    the message showed it."""
+    puts the heading line back above them, the underline stays, so that the heading is still a heading."""
     heading_end, ranges = approval_walk_unit_heading_end_and_item_line_ranges_below_heading_line(
         text, parser, lines, unit, openings, own)
     if heading_end > unit[3] + 1 and not keep_setext_underline:
@@ -866,7 +888,7 @@ def approval_walk_text_with_running_count_totals_removed(text):
 
 def approval_walk_item_text_as_shown_to_user(text, parser, all_units, unit, number):
     """Return the Markdown the user is shown for item number of the walk-document text, from which the short-answer
-    hook reads the heading and the decision-bearing lines it looks for in the agent's message:
+    hook reads the heading it looks for in the agent's messages:
     approval_walk_item_heading_and_item_page_body_lines' heading and lines, without the `#approval_walk_item_` lines."""
     heading, body = approval_walk_item_heading_and_item_page_body_lines(text, parser, all_units, unit, number)
     shown = heading + "\n" + "\n".join(body)
@@ -936,9 +958,10 @@ def waiting_item_units(document, value, numbers, total, parser, all_units=None):
     Each waiting item's unit is the one heading that names it, whatever M the heading gives; total is read only
     to choose between two headings that name the same item and are not revisions, as in a walk-document
     renumbered before numbers were never reused. Raise UnusableRange, saying what is wrong, when the
-    walk-document does not exist, when a waiting item has no heading, or when it has more than one and total
-    does not pick exactly one of them. all_units are item_unit_spans of the walk-document when the caller has
-    them already."""
+    walk-document does not exist, or when a waiting item has no heading, or more than one that total does not
+    narrow to one; one message names every such item, so that fixing one problem does not reveal another, except
+    when the walk-document has no heading with a running count at all, whose message names none. all_units are
+    item_unit_spans of the walk-document when the caller has them already."""
     if all_units is None:
         if not document.is_file():
             raise UnusableRange(f"its walk-document {document} does not exist.")
@@ -962,24 +985,26 @@ def waiting_item_units(document, value, numbers, total, parser, all_units=None):
             repeated.append(number)
         else:
             chosen.append(naming[0])
+    problems = []
     if missing:
         named = ", ".join(f"`Item {number}`" for number in missing)
         unreadable = [unit[2] for unit in all_units if unit[2]]
-        raise UnusableRange(
-            f"its walk-document has no heading {named}, which the minutes name"
-            + "".join(f"; {each}" for each in unreadable) + ".")
+        problems.append(f"no heading {named}, which the minutes name" + "".join(f"; {each}" for each in unreadable))
     if repeated:
         named = ", ".join(f"`Item {number}`" for number in repeated)
-        raise UnusableRange(
-            f"its walk-document has more than one heading for {named}, so the hook cannot tell "
-            f"which one the minutes name: if no other of those headings gives the same total as the heading you mean, "
-            f"as `of 10` beside two `of 9` headings, add the line `#next_to_present item N of M` as the new last line of "
-            f"the minutes, below the earlier `#next_to_present` lines, which stay as they are, N and M copied from the "
-            f"heading you mean, as in `#next_to_present item 4 of 10` for `## Item 4 of 10: <the point>`; otherwise, in "
+        problems.append(
+            f"more than one heading for {named}, so the hook cannot tell "
+            f"which one the minutes name: if one total is given, for every item the last `#next_to_present` line names, "
+            f"by the heading you mean and by no other heading for that item, as `of 10` beside two `of 9` headings, add a `#next_to_present` line naming every item the last one names, "
+            f"with M copied from the heading you mean, as the new last line of the minutes, below the earlier "
+            f"`#next_to_present` lines, which stay as they are, as in `#next_to_present item 4 of 10` for "
+            f"`## Item 4 of 10: <the point>`, or `#next_to_present items 4 and 5 of 10`; otherwise, in "
             f"the walk-document, put `Withdrawn: ` just before `Item` in each heading you do not mean, as in "
             f"`## Withdrawn: Item 4 of 9: <the point>`, or, only when the heading you mean comes after every other "
             f"heading for that item, write `revised` right after its `of M` instead of marking any heading `Withdrawn: `, "
             f"with the colon after or before `revised`, as in `## Item 4 of 9 revised: <the point>` or "
-            f"`## Item 4 of 9: revised <the point>`.")
+            f"`## Item 4 of 9: revised <the point>`")
+    if problems:
+        raise UnusableRange("its walk-document has " + "; and it has ".join(problems) + ".")
     shown_total = total if total is not None else approval_walk_item_total_shown_and_waiting_counted_from_walk_document(all_units)
     return shown_total, [unit for unit in all_units if unit in chosen]

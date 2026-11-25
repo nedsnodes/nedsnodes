@@ -15,13 +15,18 @@ printed. That run makes real model calls and asserts nothing; it exits 1 only
 when `claude` is not on PATH.
 """
 
+import ast
+import contextlib
+import importlib.machinery
 import importlib.util
+import io
 import json
 import os
 import shutil
 import subprocess
 import sys
 import tempfile
+import time
 from pathlib import Path
 
 # Before anything runs git: a GIT_DIR or similar variable inherited from the
@@ -128,33 +133,31 @@ UNRELATED_ASK_CASE = ("item 1's reply with an unrelated ask added, which must bl
 REAL_ITEM_3_1_PROPOSED_LINE =next(line for line in REAL_ITEM_3_1_REPLY.split("\n") if line.startswith("**Proposed:**"))
 
 
-# The fake answers for the prompt's numbered lines: `no` answers each as ASKS_NOTHING, `yes:N` (N 1 by default)
-# answers line N as ASKS_ELSE and the rest as ASKS_NOTHING, `waiting` answers each as WAITING_ITEM, `labels:<json
-# list>` answers each line as the label given, and `verdict:<json>` gives the whole structured output as written. A
-# label is turned into the two answers that make it; main fills the label and answer names in.
+# The fake answers each call for the one line it is given, the N-th question-like line by its id `L<N>`: `no` calls
+# it no ask; `yes:N` (N 1 by default) calls line N an ask and the rest none; `asks:<json list>` gives line N the
+# list's N-th true or false; `verdict:<json>` gives the whole structured output as written; `fail:N` fails line N's
+# call only; `sleep:S` waits S seconds, then calls the line no ask; the other modes fail every call each its own way.
 FAKE_CLAUDE = """#!/usr/bin/env python3
-import json, os, re, sys, time
+import json, os, sys, time
 prompt = sys.stdin.read()
 with open(os.environ["FAKE_CLAUDE_CALLS"], "a") as calls:
     calls.write(json.dumps({"argv": sys.argv[1:], "stdin": prompt}) + "\\n")
 mode = os.environ.get("FAKE_CLAUDE_MODE", "no")
-count = len(re.findall(r"(?m)^\\d+\\. ", prompt.split("The numbered lines:\\n", 1)[-1]))
+entry = json.loads(prompt.split("The lines, as JSON:\\n", 1)[1])[0]
+number = int(entry["id"][1:])
 if mode.startswith("verdict:"):
     print(json.dumps({"type": "result", "is_error": False, "structured_output": json.loads(mode[len("verdict:"):])}))
     sys.exit(0)
-if mode.startswith("labels:"):
-    labels = json.loads(mode[len("labels:"):])
-elif mode == "waiting":
-    labels = ["WAITING_ITEM"] * count
+if mode.startswith("asks:"):
+    ask = json.loads(mode[len("asks:"):])[number - 1]
 else:
-    labels = ["ASKS_NOTHING"] * count
-    if mode.startswith("yes"):
-        labels[int(mode.split(":")[1]) - 1 if ":" in mode else 0] = "ASKS_ELSE"
-verdict = {"lines": [{"line_number": number, "CONCERNS_ANSWER": label == "WAITING_ITEM",
-                       "ASKS_ELSE_ANSWER": label == "ASKS_ELSE"} for number, label in enumerate(labels, 1)]}
+    ask = mode.startswith("yes") and number == (int(mode.split(":")[1]) if ":" in mode else 1)
+verdict = {"labels": [{"id": entry["id"], "ask": ask, "reason": "the fake's answer"}]}
 if mode == "sleep":
     time.sleep(30)
-if mode == "fail":
+if mode.startswith("sleep:"):
+    time.sleep(float(mode.split(":")[1]))
+if mode == "fail" or mode == f"fail:{number}":
     print(json.dumps({"type": "result", "is_error": True, "result": "Not logged in"}))
     sys.exit(1)
 if mode == "garbage":
@@ -174,7 +177,6 @@ if mode == "verdict-then-killed":
     import signal
     os.kill(os.getpid(), signal.SIGKILL)
 """
-
 
 def check(case_name, condition, detail=""):
     if condition:
@@ -283,8 +285,8 @@ def test_a_question_mark_or_an_ask_phrase_sends_the_line_to_the_model_and_a_bloc
     check_blocked("a sentence ending in a question mark blocks when the model says it asks the user something", result,
                   '"Should I merge the pull request now?"', "the model judged that it asks him something")
     calls = case.model_calls()
-    check("a sentence ending in a question mark goes to the model, numbered",
-          len(calls) == 1 and numbered_lines(calls[0]) == "1. Should I merge the pull request now?", calls)
+    check("a sentence ending in a question mark goes to the model",
+          len(calls) == 1 and judged_line(calls[0]) == "Should I merge the pull request now?", calls)
     entries = case.logged()
     check("the refusal is logged with its time, session, walk, sentence and what decided",
           len(entries) == 1 and entries[0]["session"] == "test-session"
@@ -345,7 +347,7 @@ def test_each_kind_of_logged_line_that_asks_nothing_passes_once_the_model_says_s
         case.reply("PR 1922 merged.\n\n" + line)
         check_silent(f"{case_name} passes when the model says it asks nothing", case.run(model="no"))
         calls = case.model_calls()
-        check(f"{case_name} goes to the model", len(calls) == 1 and numbered_lines(calls[0]).startswith("1. "), calls)
+        check(f"{case_name} goes to the model", len(calls) == 1 and judged_line(calls[0]), calls)
 
 
 def test_the_item_the_block_message_asks_for_is_one_the_close_step_can_place():
@@ -379,8 +381,7 @@ def test_the_block_message_says_what_to_do():
     for case_name, phrase in (
             ("the message says the hook refused on purpose", "this hook refused to end your turn on purpose"),
             ("the message names the walk and quotes the flagged text",
-             "the open approval-walk poem-page-2026-10-12 (the model judged that it asks him something other than a "
-             "waiting item's decision). "
+             "the open approval-walk poem-page-2026-10-12 (the model judged that it asks him something). "
              "The flagged text: \"Should I merge the pull request now?\""),
             ("the message names the waiting item", "goes to the waiting item, item 2,"),
             ("the message gives the interruption item a heading with no number, and names the script whose close "
@@ -453,41 +454,49 @@ def test_a_question_like_line_goes_to_the_model():
           len(calls) == 1 and argv[argv.index("--model") + 1] == hook.MODEL == "claude-haiku-5-5"
           and json.loads(argv[argv.index("--settings") + 1]) == {"disableAllHooks": True, "advisorModel": ""}
           and "--no-session-persistence" in argv, calls)
-    check("the model is given the question-like line, numbered, and the walk's total and waiting item",
-          calls and "1. The fix has a second part, and I recommend building it next." in calls[0]["stdin"]
-          and "`Item N of 10`, or `item N` for short, and item 2 waits for his answer" in calls[0]["stdin"], calls)
+    check("the model is given the labelling prompt and, as JSON, the question-like line, the message, the waiting "
+          "item's text and the message that started the turn with who sent it",
+          calls and calls[0]["stdin"].startswith(hook.MODEL_PROMPT)
+          and judged_entry(calls[0]) == {
+              "id": "L1", "line": "The fix has a second part, and I recommend building it next.",
+              "turn_started_by": "human", "message_that_started_the_turn": "A",
+              "agent_message_holding_the_line": "The fix has a second part, and I recommend building it next.",
+              "waiting_walk_item_text": judged_entry(calls[0])["waiting_walk_item_text"]}
+          and judged_entry(calls[0])["waiting_walk_item_text"].startswith("## Item 2 of 10"), calls)
     check("a block the model decided is logged as the model's",
           [entry["decided_by"] for entry in case.logged()] == ["model"], case.logged())
     check_silent("a question-like line the model says asks nothing passes", case.run(model="no"))
     case.reply("Waiting on you: should line 34 change, as item 2 of 10 asks?")
     check_silent("a question on a line naming an item goes to the model too", case.run(model="no"))
     case.reply("I recommend building it next.\n\nThat also fixes the second part, if you agree with the plan.")
-    check_blocked("the model's line number picks the sentence named", case.run(model="yes:2"),
+    check_blocked("the line the model calls an ask is the sentence named", case.run(model="yes:2"),
                   '"That also fixes the second part, if you agree with the plan."')
 
 
-def numbered_lines(call):
-    return call["stdin"].split("The numbered lines:\n", 1)[1]
+def judged_entry(call):
+    return json.loads(call["stdin"][len(hook.MODEL_PROMPT):])[0]
+
+
+def judged_line(call):
+    return judged_entry(call)["line"]
 
 
 def test_a_line_about_only_the_waiting_items_decision_passes():
     for case_name, reply, item_text, minutes, reworded in REAL_CASES:
         case = Case(document=f"# A walk\n\n{item_text}\n", minutes=minutes)
         case.reply(reply)
-        check_silent(f"{case_name} passes when the model labels its lines as about the waiting item",
-                     case.run(model="waiting"))
+        check_silent(f"{case_name} passes when the model calls none of its lines an ask", case.run(model="no"))
         calls = case.model_calls()
         if reworded is None:
             check(f"{case_name}: the model is not given the `#new Proposed:` line",
-                  all(REAL_ITEM_3_1_PROPOSED_LINE.replace("**", "") not in numbered_lines(call) for call in calls),
+                  all(REAL_ITEM_3_1_PROPOSED_LINE.replace("**", "") not in judged_line(call) for call in calls),
                   calls)
             continue
-        check(f"{case_name}: the model is given the waiting item's text and the reworded line, numbered",
-              len(calls) == 1 and item_text.split("\n")[0] in calls[0]["stdin"]
-              and any(reworded in line.split(". ", 1)[1]
-                      for line in numbered_lines(calls[0]).split("\n") if ". " in line), calls)
-        check_blocked(f"{case_name} still blocks when the model labels a line as asking something else",
-                      case.run(model="yes"), "the model judged that it asks him something other than a waiting item's decision")
+        check(f"{case_name}: the model is given the waiting item's text and the reworded line",
+              calls and all(item_text.split("\n")[0] in judged_entry(call)["waiting_walk_item_text"] for call in calls)
+              and any(reworded in judged_line(call) for call in calls), calls)
+        check_blocked(f"{case_name} still blocks when the model calls a line an ask",
+                      case.run(model="yes"), "the model judged that it asks him something")
     case = Case(document=f"# A walk\n\n{REAL_ITEM_3_1_DOCUMENT_TEXT}\n", minutes="#next_to_present item 3.1 of 6")
     heading = REAL_ITEM_3_1_DOCUMENT_TEXT.split("\n")[0]
     closing = REAL_ITEM_3_1_REPLY.rstrip().split("\n")[-1]
@@ -516,23 +525,26 @@ def test_a_question_about_something_other_than_the_waiting_item_still_blocks():
     case = Case(document=f"# A walk\n\n{item_text}\n", minutes=minutes)
     unrelated = UNRELATED_ASK
     case.reply(reply)
-    result = case.run(model=f'labels:["{hook.AGENT_REPLY_LINE_MODEL_LABEL_ONLY_ABOUT_WAITING_ITEM_DECISION}", '
-                            f'"{hook.AGENT_REPLY_LINE_MODEL_LABEL_ASKS_USER_SOMETHING_ELSE}"]')
-    check_blocked("an unrelated ask without a question mark, labelled as asking something else, blocks", result,
-                  f'"{unrelated}"', "the model judged that it asks him something other than a waiting item's decision")
+    result = case.run(model="asks:[false, true]")
+    check_blocked("an unrelated ask without a question mark, called an ask, blocks", result,
+                  f'"{unrelated}"', "the model judged that it asks him something")
     case.reply(REAL_ITEM_1_REPLY.replace("**Recommendation:** close task #9",
                                          "**Recommendation:** shall I close task #9"))
     calls_before = len(case.model_calls())
-    check_silent("a reworded recommendation holding an ask phrase passes when the model says it concerns the waiting "
-                 "item", case.run(model="waiting"))
+    check_silent("a reworded recommendation holding an ask phrase passes when the model calls it no ask",
+                 case.run(model="no"))
     calls = case.model_calls()[calls_before:]
     check("a reworded recommendation holding an ask phrase goes to the model",
-          len(calls) == 1 and "shall I close task #9" in numbered_lines(calls[0]), calls)
+          any("shall I close task #9" in judged_line(call) for call in calls), calls)
     case.reply(REAL_ITEM_1_REPLY.replace("Also close task #10, which only prepared the scoring checks.",
                                          "Do you approve closing task #10 too?"))
     check_blocked("a reworded recommendation ending in a question mark blocks when the model says it asks something "
                   "else", case.run(model="yes"), 'Do you approve closing task #10 too?"',
                   "the model judged that it asks him something")
+
+
+def judgement(lines, **keywords):
+    return hook.model_judgement(lines, lines, "## Item 2 of 10", "human", "A", **keywords)
 
 
 def test_a_failed_model_check_blocks():
@@ -550,8 +562,8 @@ def test_a_failed_model_check_blocks():
              "claude exited 1 reporting an error"),
             ("a model call killed by a signal after printing a verdict blocks", "verdict-then-killed",
              "claude exited -9 reporting an error"),
-            ("a model verdict that answers for no line blocks", 'verdict:{"lines": []}',
-             "claude's verdict does not give each of the 1 numbered lines exactly one entry with a true or false")):
+            ("a model verdict that labels no line blocks", 'verdict:{"labels": []}',
+             "claude's verdict does not give the line exactly one label with a true or false ask")):
         check_blocked(case_name, case.run(model=mode), "the hook's `claude -p` call that has the model judge this question-like text failed", phrase,
                       '"The fix has a second part, and I recommend building it next."')
     check("a block after a failed model check is logged as such",
@@ -560,81 +572,55 @@ def test_a_failed_model_check_blocks():
     os.environ["FAKE_CLAUDE_CALLS"] = str(case.calls)
     try:
         os.environ["PATH"] = str(SUITE_ROOT / "no-such-directory")
-        line, failure = hook.model_judgement(["x"], ["x"], "10", "2", "## Item 2 of 10")
-        check("a model that cannot be run is a failure", line is None and "could not be run" in (failure or ""),
+        line, failure = judgement(["x"])
+        check("a model that cannot be run is a failure, naming its line", line == "x" and "could not be run" in (failure or ""),
               failure)
         os.environ["PATH"] = f"{FAKE_BIN}{os.pathsep}{saved_path}"
         os.environ["FAKE_CLAUDE_MODE"] = "sleep"
-        line, failure = hook.model_judgement(["x"], ["x"], "10", "2", "## Item 2 of 10", timeout_seconds=1)
+        line, failure = judgement(["x"], timeout_seconds=1)
         check("a model call past its time limit is a failure",
-              line is None and "no answer within 1 seconds" in (failure or ""), failure)
-        for mode, expected in (("yes:3", "c"), ("yes:2", "b"), ("no", None), ("waiting", None),
-                               (f'labels:["{hook.AGENT_REPLY_LINE_MODEL_LABEL_ASKS_USER_NO_QUESTION}", "{hook.AGENT_REPLY_LINE_MODEL_LABEL_ONLY_ABOUT_WAITING_ITEM_DECISION}", '
-                                f'"{hook.AGENT_REPLY_LINE_MODEL_LABEL_ASKS_USER_SOMETHING_ELSE}"]', "c")):
+              line == "x" and "no answer within 1 seconds" in (failure or ""), failure)
+        for mode, expected in (("yes:3", "c"), ("yes:2", "b"), ("no", None), ("asks:[false, false, true]", "c"),
+                               ("asks:[false, true, true]", "b")):
             os.environ["FAKE_CLAUDE_MODE"] = mode
-            line, failure = hook.model_judgement(["a", "b", "c"], ["a", "b", "c"], "10", "2", "## Item 2 of 10")
+            line, failure = judgement(["a", "b", "c"])
             check(f"the model's answer {mode} picks question-like line {expected}", (line, failure) == (expected, None),
                   (line, failure))
-        concerns = hook.AGENT_REPLY_LINE_CONCERNS_WAITING_APPROVAL_WALK_ITEM_DECISION_MODEL_TRUE_OR_FALSE_ANSWER
-        asks_else = hook.AGENT_REPLY_LINE_ASKS_USER_SOMETHING_ELSE_MODEL_TRUE_OR_FALSE_ANSWER
-
-        def entry(number, concerns_answer, asks_else_answer):
-            return {"line_number": number, concerns: concerns_answer, asks_else: asks_else_answer}
-        os.environ["FAKE_CLAUDE_MODE"] = "verdict:" + json.dumps({"lines": [entry(2, False, True), entry(1, False, True)]})
-        line, failure = hook.model_judgement(["a", "b"], ["a", "b"], "10", "2", "## Item 2 of 10")
-        check("answers given out of order are read by line number, and the first line asking something else is named",
-              (line, failure) == ("a", None), (line, failure))
-        for case_name, answers, expected in (
-                ("a line that concerns the waiting item and also asks something else is named: asking else wins",
-                 [entry(1, False, False), entry(2, True, True)], "b"),
-                ("a line that only concerns the waiting item, or asks nothing, is not named",
-                 [entry(1, True, False), entry(2, False, False)], None)):
-            os.environ["FAKE_CLAUDE_MODE"] = "verdict:" + json.dumps({"lines": answers})
-            line, failure = hook.model_judgement(["a", "b"], ["a", "b"], "10", "2", "## Item 2 of 10")
-            check(case_name, (line, failure) == (expected, None), (line, failure))
-        check("code turns the two answers into the three labels",
-              hook.agent_reply_line_model_labels_from_true_or_false_model_answers([entry(1, True, True), entry(2, True, False), entry(3, False, False)], 3)
-              == [hook.AGENT_REPLY_LINE_MODEL_LABEL_ASKS_USER_SOMETHING_ELSE,
-                  hook.AGENT_REPLY_LINE_MODEL_LABEL_ONLY_ABOUT_WAITING_ITEM_DECISION,
-                  hook.AGENT_REPLY_LINE_MODEL_LABEL_ASKS_USER_NO_QUESTION])
-        for case_name, verdict in (
-                ("a verdict with no lines is a failure", {"asks_user": False}),
-                ("a verdict whose lines are not a list is a failure", {"lines": "asks_nothing"}),
-                ("a verdict whose lines are not objects is a failure", {"lines": [False, False]}),
-                ("a verdict with an entry for too few lines is a failure", {"lines": [entry(1, False, False)]}),
-                ("a verdict with an entry for a line not given is a failure",
-                 {"lines": [entry(1, False, False), entry(2, False, False), entry(3, False, True)]}),
-                ("a verdict answering for one line twice is a failure",
-                 {"lines": [entry(1, False, False), entry(1, False, False)]}),
-                ("a verdict answering for every line but one of them twice is a failure",
-                 {"lines": [entry(1, False, False), entry(2, False, False), entry(2, False, True)]}),
-                ("a verdict with an answer that is not true or false is a failure",
-                 {"lines": [entry(1, False, False), entry(2, False, "maybe")]}),
-                ("a verdict whose concerns answer is not true or false is a failure",
-                 {"lines": [entry(1, False, False), entry(2, 1, False)]}),
-                ("a verdict with a missing answer is a failure",
-                 {"lines": [entry(1, False, False), {"line_number": 2, concerns: False}]}),
-                ("a verdict whose line number is not a whole number is a failure",
-                 {"lines": [entry(1, False, False), entry("2", False, True)]})):
-            os.environ["FAKE_CLAUDE_MODE"] = "verdict:" + json.dumps(verdict)
-            line, failure = hook.model_judgement(["a", "b"], ["a", "b"], "10", "2", "## Item 2 of 10")
-            expected = "without a verdict (KeyError('lines'))" if "lines" not in verdict else \
-                "claude's verdict does not give each of the 2 numbered lines exactly one"
-            check(case_name, line is None and expected in (failure or ""), (line, failure))
+        os.environ["FAKE_CLAUDE_MODE"] = "fail:2"
+        line, failure = judgement(["a", "b", "c"])
+        check("a failed call for the second line names that line", line == "b" and "claude exited 1" in (failure or ""),
+              (line, failure))
         calls_before = len(case.model_calls())
         os.environ["FAKE_CLAUDE_MODE"] = "no"
-        hook.model_judgement(["a"], ["a"], "10", "2", "## Item 2 of 10")
-        hook.model_judgement(["a"], ["a"], "10", "2 and 2.1", "## Item 2 of 10\n\n## Item 2.1 of 10")
-        one, two = (call["stdin"] for call in case.model_calls()[calls_before:])
-        check("the prompt names one waiting item as `item N waits` and two as `items N and P wait`",
-              "and item 2 waits for his answer" in one and "and items 2 and 2.1 wait for his answer" in two,
-              (one[:600], two[:600]))
-        argv = case.model_calls()[-1]["argv"]
-        schema = json.loads(argv[argv.index("--json-schema") + 1])["properties"]["lines"]
-        fields = schema["items"]["properties"]
-        check("each field of the schema the model is sent holds its meaning, and the prompt names no field",
-              all(spec.get("description") for spec in [schema, *fields.values()])
-              and not any(name in two for name in fields), (schema, two))
+        judgement(["a", "b", "c"])
+        calls = case.model_calls()[calls_before:]
+        check("each question-like line is judged in a call of its own, numbered by its place",
+              sorted((judged_entry(call)["id"], judged_line(call)) for call in calls)
+              == [("L1", "a"), ("L2", "b"), ("L3", "c")], calls)
+        argv = calls[-1]["argv"] if calls else []
+        check("each call is sent the labelling schema and system prompt",
+              json.loads(argv[argv.index("--json-schema") + 1]) == hook.MODEL_SCHEMA
+              and argv[argv.index("--system-prompt") + 1] == hook.MODEL_SYSTEM_PROMPT, argv)
+        os.environ["FAKE_CLAUDE_MODE"] = "sleep:3"
+        started = time.monotonic()
+        line, failure = judgement(["a", "b", "c"], timeout_seconds=20)
+        took = time.monotonic() - started
+        check("the calls run at the same time: three calls of 3 seconds take less than 9",
+              (line, failure) == (None, None) and took < 7.5, (line, failure, took))
+        for case_name, verdict in (
+                ("a verdict with no labels is a failure", {"lines": []}),
+                ("a verdict whose labels are not a list is a failure", {"labels": "ask"}),
+                ("a verdict with no label is a failure", {"labels": []}),
+                ("a verdict with two labels is a failure",
+                 {"labels": [{"id": "L1", "ask": False}, {"id": "L1", "ask": True}]}),
+                ("a verdict whose label is not an object is a failure", {"labels": [True]}),
+                ("a verdict whose ask is not true or false is a failure", {"labels": [{"id": "L1", "ask": "maybe"}]}),
+                ("a verdict whose label has no ask is a failure", {"labels": [{"id": "L1"}]})):
+            os.environ["FAKE_CLAUDE_MODE"] = "verdict:" + json.dumps(verdict)
+            line, failure = judgement(["a"])
+            expected = "without a verdict (KeyError('labels'))" if "labels" not in verdict else \
+                "claude's verdict does not give the line exactly one label with a true or false ask"
+            check(case_name, line == "a" and expected in (failure or ""), (line, failure))
     finally:
         os.environ["PATH"] = saved_path
         os.environ.pop("FAKE_CLAUDE_MODE", None)
@@ -805,6 +791,108 @@ def test_a_question_held_in_an_interruption_item_is_not_checked():
                  "now be made.\n\n" + closing)
     check_silent("the lines the walk-me-through skill and its check and close programs have the agent write pass",
                  headed.run(model="yes"))
+
+
+def test_line_marks_strips_the_list_and_quotation_marks_and_keeps_a_mark_only_spacing_opens():
+    for line, stripped in (("> - text", "text"), ("- text", "text"), ("1. text", "text"), ("2) text", "text"),
+                           ("+ > text", "text"), ("  * #new x", "#new x"), (" #new x", " #new x"),
+                           ("-text", "-text"), ("text", "text")):
+        check(f"LINE_MARKS turns {line!r} into {stripped!r}", hook.LINE_MARKS.sub("", line) == stripped,
+              repr(hook.LINE_MARKS.sub("", line)))
+    check("an indented `#new` line with no list mark keeps its mark through normalized()",
+          hook.normalized(" #new x") == "new x", repr(hook.normalized(" #new x")))
+
+
+def walk_finder_rule_replaced_in(tree, rule):
+    """Sets the value of the module-level assignment that binds the walk finder's list or quotation mark rule to
+    rule, whether the assignment is plain, annotated or chained; fails this case and returns False unless exactly
+    one such assignment exists."""
+    assignments = [node for node in tree.body
+                   if (isinstance(node, ast.Assign) and any(getattr(target, "id", None)
+                       == "MARKDOWN_LINE_OPENING_LIST_OR_QUOTATION_MARK_PATTERN_TEXT" for target in node.targets))
+                   or (isinstance(node, ast.AnnAssign) and node.value is not None and getattr(node.target, "id", None)
+                       == "MARKDOWN_LINE_OPENING_LIST_OR_QUOTATION_MARK_PATTERN_TEXT")]
+    check("the walk finder assigns its list or quotation mark rule once, at module level",
+          len(assignments) == 1, len(assignments))
+    if len(assignments) != 1:
+        return False
+    assignments[0].value = ast.copy_location(ast.Constant(rule), assignments[0].value)
+    return True
+
+
+def test_the_rule_replacement_finds_the_finder_constant_however_it_is_assigned():
+    name = "MARKDOWN_LINE_OPENING_LIST_OR_QUOTATION_MARK_PATTERN_TEXT"
+    for form, source in (("plain", f"{name} = 'old'"), ("annotated", f"{name}: str = 'old'"),
+                         ("chained", f"OTHER = {name} = 'old'")):
+        tree = ast.parse(source)
+        replaced = walk_finder_rule_replaced_in(tree, "new")
+        namespace = {}
+        exec(compile(ast.fix_missing_locations(tree), "<finder variant>", "exec"), namespace)
+        check(f"the rule replacement sets the {form} assignment's value", replaced and namespace[name] == "new",
+              namespace.get(name))
+    failures_before = len(failures)
+    with contextlib.redirect_stdout(io.StringIO()):
+        replaced = walk_finder_rule_replaced_in(ast.parse("OTHER = 'old'"), "new")
+    recorded = failures[failures_before:]
+    del failures[failures_before:]
+    check("a finder with no assignment of the rule makes the replacement report False", replaced is False, replaced)
+    check("a finder with no assignment of the rule fails the once-at-module-level case",
+          recorded == ["the walk finder assigns its list or quotation mark rule once, at module level"], recorded)
+
+
+def modules_loaded_with_the_walk_finder_list_or_quotation_mark_rule_replaced(rule):
+    """The walk finder, this hook and the walk check program, each loaded afresh while the walk finder's source
+    holds rule in place of its list or quotation mark rule, so a pattern that spells the rule out by hand, rather
+    than building from the finder's constant, still reads the real marks and not rule; None when the finder's
+    rule assignment cannot be found, which has already failed a case."""
+    finder_file = hook.WALK_FINDER_FILE.resolve()
+    replaced = ast.parse(finder_file.read_text(encoding="utf-8"), str(finder_file))
+    if not walk_finder_rule_replaced_in(replaced, rule):
+        return None
+
+    class ReplacedFinderLoader(importlib.machinery.SourceFileLoader):
+        def get_code(self, fullname):
+            return compile(replaced, self.path, "exec")
+
+    real = importlib.util.spec_from_file_location
+
+    def redirected(name, location=None, *arguments, **keywords):
+        if location is not None and Path(location).resolve() == finder_file:
+            return real(name, location, loader=ReplacedFinderLoader(name, str(location)))
+        return real(name, location, *arguments, **keywords)
+
+    def load(name, path):
+        specification = importlib.util.spec_from_file_location(name, path)
+        module = importlib.util.module_from_spec(specification)
+        specification.loader.exec_module(module)
+        return module
+
+    importlib.util.spec_from_file_location = redirected
+    try:
+        return (load("walk_finder_with_replaced_rule", finder_file),
+                load("question_refusal_stop_hook_with_replaced_rule", HOOK_SCRIPT),
+                load("check_and_close_with_replaced_rule", hook.WALK_CHECK_PROGRAM))
+    finally:
+        importlib.util.spec_from_file_location = real
+
+
+def test_every_pattern_reading_list_or_quotation_marks_follows_the_walk_finder_rule():
+    modules = modules_loaded_with_the_walk_finder_list_or_quotation_mark_rule_replaced(r"(?:Q\s+)")
+    if modules is None:
+        return
+    finder, replaced_hook, close = modules
+    patterns = (("the `#new` mark pattern", finder.APPROVAL_WALK_ITEM_NEW_TEXT_MARK_LINE_PATTERN, "#new x"),
+                ("the walk check program's `#case_against` line", close.CASE_AGAINST_LINE, "#case_against weak"),
+                ("the walk check program's evidence line", close.EVIDENCE_LINE, "#not_asked_test x"),
+                ("the walk check program's category line", close.WALK_CATEGORY_LINE,
+                 "#approval_walk_item_in_category_fix_next"))
+    for name, pattern, marker in patterns:
+        check(f"{name} reads the replaced rule's mark", bool(pattern.match("Q " + marker)), pattern.pattern)
+        check(f"{name} no longer reads a mark the replaced rule drops", not pattern.match("- " + marker),
+              pattern.pattern)
+    check("LINE_MARKS strips the replaced rule's mark and no other",
+          (replaced_hook.LINE_MARKS.sub("", "Q text"), replaced_hook.LINE_MARKS.sub("", "- text")) == ("text", "- text"),
+          replaced_hook.LINE_MARKS.pattern)
 
 
 def test_the_final_message_from_the_payload_is_checked():
@@ -1056,11 +1144,12 @@ def test_which_line_is_flagged_and_how_lines_are_joined():
     check_blocked("after a failed model check, the first question-like line is flagged", case.run(model="fail"),
                   '"I recommend merging it."')
     case.reply("Still waiting for you:\n- the cleanup of the old directories;\n- the naming change.\n\nDone.")
+    calls_before = len(case.model_calls())
     case.run(model="no")
-    calls = case.model_calls()
-    check("a list is judged with the line ending in `:` that introduces it",
-          calls and "1. Still waiting for you: - the cleanup of the old directories; - the naming change.\n"
-          in calls[-1]["stdin"] + "\n" and "2." not in calls[-1]["stdin"].split("The numbered lines:")[1], calls)
+    calls = case.model_calls()[calls_before:]
+    check("a list is judged with the line ending in `:` that introduces it, in one call",
+          [judged_line(call) for call in calls]
+          == ["Still waiting for you: - the cleanup of the old directories; - the naming change."], calls)
     case.reply("Should I run one of these:\n- `delete-all.py`\n- **keep.py**")
     check_blocked("a flagged list is named as written, line by line, marks included", case.run(),
                   '"Should I run one of these:\n- `delete-all.py`\n- **keep.py**"')
@@ -1468,15 +1557,12 @@ def print_live_model_labels():
             if not calls:
                 print("model: not called")
             for call in calls:
-                lines = dict(line.split(". ", 1) for line in numbered_lines(call).split("\n") if ". " in line)
                 try:
-                    entries = json.loads(call["stdout"])["structured_output"]["lines"]
-                    labels = hook.agent_reply_line_model_labels_from_true_or_false_model_answers(entries, len(entries)) or ["?"] * len(entries)
-                except (ValueError, TypeError, KeyError):
-                    print(f"model: no labels; exit {call['returncode']}: {call['stdout'][:300]}{call['stderr'][:300]}")
+                    label = json.loads(call["stdout"])["structured_output"]["labels"][0]
+                except (ValueError, TypeError, KeyError, IndexError):
+                    print(f"model: no label; exit {call['returncode']}: {call['stdout'][:300]}{call['stderr'][:300]}")
                     continue
-                for number, label in enumerate(labels, 1):
-                    print(f"model: {label} <- {lines.get(str(number), '?')[:160]}")
+                print(f"model: ask {label.get('ask')} ({label.get('reason')}) <- {judged_line(call)[:160]}")
     finally:
         shutil.rmtree(SUITE_ROOT, ignore_errors=True)
     return 0
@@ -1540,12 +1626,7 @@ def main():
         return print_live_model_labels()
     FAKE_BIN.mkdir(parents=True)
     fake = FAKE_BIN / "claude"
-    fake.write_text(FAKE_CLAUDE.replace("#!/usr/bin/env python3", f"#!{sys.executable}", 1)
-                    .replace('"WAITING_ITEM"', json.dumps(hook.AGENT_REPLY_LINE_MODEL_LABEL_ONLY_ABOUT_WAITING_ITEM_DECISION))
-                    .replace('"ASKS_ELSE"', json.dumps(hook.AGENT_REPLY_LINE_MODEL_LABEL_ASKS_USER_SOMETHING_ELSE))
-                    .replace('"ASKS_NOTHING"', json.dumps(hook.AGENT_REPLY_LINE_MODEL_LABEL_ASKS_USER_NO_QUESTION))
-                    .replace('"CONCERNS_ANSWER"', json.dumps(hook.AGENT_REPLY_LINE_CONCERNS_WAITING_APPROVAL_WALK_ITEM_DECISION_MODEL_TRUE_OR_FALSE_ANSWER))
-                    .replace('"ASKS_ELSE_ANSWER"', json.dumps(hook.AGENT_REPLY_LINE_ASKS_USER_SOMETHING_ELSE_MODEL_TRUE_OR_FALSE_ANSWER)))
+    fake.write_text(FAKE_CLAUDE.replace("#!/usr/bin/env python3", f"#!{sys.executable}", 1))
     fake.chmod(0o755)
     try:
         for name, function in sorted(globals().items()):

@@ -8,7 +8,8 @@ Usage:
 Fetches the pull request's head from origin unless the nn-head-commit is already
 local, then makes pr<n>-head at the nn-head-commit and pr<n>-merged at the main commit with the nn-head-commit merged
 in, as merge-lane-2, always with a merge commit. A worktree already at either
-path is removed first, with any changes in it. --merged-worktree-only makes
+path is removed first, with any changes in it; a directory there whose .git is
+gone is deleted, and git's record of it pruned. --merged-worktree-only makes
 pr<n>-merged alone and leaves pr<n>-head as it is, because reviewers may be
 reading it.
 
@@ -22,6 +23,7 @@ with main, named on stdout.
 
 import argparse
 import importlib.util
+import shutil
 import subprocess
 import sys
 from pathlib import Path
@@ -90,8 +92,12 @@ def main(argv=None):
         rebuilt =((merged_worktree,) if arguments.merged_worktree_only
                    else (head_worktree, merged_worktree))
         for worktree in rebuilt:
-            if worktree.exists():
+            if (worktree / ".git").exists():
                 git(checkout, "worktree", "remove", "--force", str(worktree))
+            elif worktree.exists():
+                # git worktree remove refuses a worktree whose .git is gone, even with --force.
+                shutil.rmtree(worktree)
+                git(checkout, "worktree", "prune")
         if not arguments.merged_worktree_only:
             git(checkout, "worktree", "add", "-q", "--detach", str(head_worktree),
                 arguments.head_commit)

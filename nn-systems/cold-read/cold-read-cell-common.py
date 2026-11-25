@@ -10,6 +10,7 @@ import json
 import os
 import pathlib
 import re
+import shlex
 import shutil
 import signal
 import subprocess
@@ -84,7 +85,10 @@ CREDENTIAL_FILES_ON_NED_BOX = tuple(pathlib.Path.home() / path for path in (
 # the patterns only find files to ask the user about: nn-systems/cold-read/
 # cold-read-cell-credential-files-outside-denied-directories-daily-check-user-alert-write.py reports each file so
 # named that CREDENTIAL_FILES_ON_NED_BOX leaves out. The keychain remains accessible because masking it logs the
-# agent-binaries out.
+# agent-binaries out. gh still fails inside the Mac sandbox, though its login is in the keychain: with GH_CONFIG_DIR
+# and XDG_CONFIG_HOME unset, gh reads its configuration directory ~/.config/gh, denied here, and exits with "failed to
+# read configuration" before it looks for a stored login. The launchers keep both variables, so when either points gh
+# at a readable directory, gh starts and can use the keychain login.
 CREDENTIAL_DIRECTORIES = (
     pathlib.Path.home() / ".config" / "nedsnodes",
     pathlib.Path.home() / ".config" / "gh",
@@ -164,6 +168,7 @@ class BadInvocationArgumentParser(argparse.ArgumentParser):
 def build_argument_parser(
     description: str, model_help: str, tier_choices=tuple(TIER_CHOICES),
     cold_read_cell_launcher_own_command_line_options_adder=None,
+    tier_to_effort=None,
 ) -> argparse.ArgumentParser:
     parser = BadInvocationArgumentParser(
         description=description, formatter_class=argparse.RawDescriptionHelpFormatter
@@ -201,9 +206,11 @@ def build_argument_parser(
              "with no fallback, the way --model is: a caller who names an "
              "effort is answering the question the tier map exists to answer, "
              "and quietly running the mapped level instead would defeat the "
-             "request. The fast tier's own launcher "
-             "(nn-systems/cold-read/cold-read-agy-cell.py) pins medium; on the Claude and "
-             "Codex launchers a low-effort run goes through this flag.",
+             "request."
+             + (" This launcher's tier mapping: "
+                + ", ".join(f"{tier} runs at {effort}"
+                            for tier, effort in tier_to_effort.items())
+                + "." if tier_to_effort else ""),
     )
     parser.add_argument(
         "--prompt-file", metavar="PATH",
@@ -694,7 +701,8 @@ def run_reviewer_program_in_own_process_group_until_timeout(
     """Run `command` in a session of its own and return its result; when it
     runs past `timeout_seconds`, kill its whole process group and return a
     result whose returncode is None. The group is also killed when this
-    process is interrupted or sent SIGTERM while waiting.
+    process is interrupted while waiting, or sent SIGTERM at any point from
+    the program's start on.
 
     With `parse_agent_binary_final_result_from_stdout_line`, a function given each
     stdout line that returns None or (exit code, response text), the first
@@ -714,14 +722,30 @@ def run_reviewer_program_in_own_process_group_until_timeout(
     holds them past that loses what it printed after, and stderr says so."""
     # The reviewer's own session puts it outside the group the grid stops, so
     # SIGTERM must reach the except BaseException handler below that stops
-    # the reviewer's group.
-    signal.signal(signal.SIGTERM, exit_on_sigterm)
-    process = subprocess.Popen(
-        command,
-        # communicate closes stdin after writing stdin_text, or at once when it is None.
-        stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
-        cwd=REPO_ROOT, env=child_environment, text=True, start_new_session=True, pass_fds=pass_fds)
+    # the reviewer's group. Until `process` is bound inside that try, SIGTERM
+    # is only recorded: raised inside Popen after the fork, it would leave the
+    # started reviewer running with nothing to stop it. A Python handler is
+    # reset at exec, unlike SIG_IGN or a blocked signal, so the reviewer still
+    # starts with SIGTERM's default action.
+    sigterm_during_launch = []
+    signal.signal(signal.SIGTERM, lambda number, _frame: sigterm_during_launch.append(number))
+
+    def exit_on_sigterm_from_now_and_now_if_one_came_during_launch():
+        signal.signal(signal.SIGTERM, exit_on_sigterm)
+        if sigterm_during_launch:
+            exit_on_sigterm(sigterm_during_launch[0], None)
+
     try:
+        process = subprocess.Popen(
+            command,
+            # communicate closes stdin after writing stdin_text, or at once when it is None.
+            stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
+            cwd=REPO_ROOT, env=child_environment, text=True, start_new_session=True, pass_fds=pass_fds)
+    except BaseException:
+        exit_on_sigterm_from_now_and_now_if_one_came_during_launch()
+        raise
+    try:
+        exit_on_sigterm_from_now_and_now_if_one_came_during_launch()
         if parse_agent_binary_final_result_from_stdout_line is not None:
             return run_reviewer_program_until_its_result_line(
                 process, command, stdin_text, timeout_seconds,
@@ -1016,14 +1040,15 @@ def run_cell(
     cell_started_at = time.time()
     parser = build_argument_parser(
         description, model_help, tier_choices=tuple(tier_to_model_chain),
-        cold_read_cell_launcher_own_command_line_options_adder=cold_read_cell_launcher_own_command_line_options_adder)
+        cold_read_cell_launcher_own_command_line_options_adder=cold_read_cell_launcher_own_command_line_options_adder,
+        tier_to_effort=tier_to_effort)
     args = parser.parse_args()
 
     # Snapshot before execution so pre-existing edits are not reported as changes from this run.
     try:
         baseline = working_tree_state()
     except WriteDetectorUnavailable as error:
-        baseline = None
+        baseline = error
         print(f"{program}: could not snapshot the working tree ({error}); "
               "stray writes will not be checked for this run.", file=sys.stderr)
 
@@ -1107,25 +1132,75 @@ def move_staged_report(program: str, staged: pathlib.Path, report: pathlib.Path)
     return 0
 
 
+def splits_a_line(character: str) -> bool:
+    """A character str.splitlines splits a line at, such as a newline or U+2028."""
+    return len(f"a{character}a".splitlines()) > 1
+
+
+def breaks_a_line(character: str) -> bool:
+    """A control character, or a character str.splitlines splits a line at, such as U+2028."""
+    return ord(character) < 32 or ord(character) == 127 or splits_a_line(character)
+
+
+def holds_a_line_breaking_character(text: str) -> bool:
+    return any(breaks_a_line(character) for character in text)
+
+
+def shell_quoted_on_one_line(text: str) -> str:
+    """`text` as one shell argument on one line: git's `-z` output keeps a newline in a
+    path, and shlex.quote would carry it into the command, splitting the printed line."""
+    if not holds_a_line_breaking_character(text):
+        return shlex.quote(text)
+    escaped = "".join(
+        "\\\\" if character == "\\" else "\\'" if character == "'"
+        # \xHH bytes, not \u: bash 3.2 and bash under LC_ALL=C leave $'\u2028' unexpanded.
+        else "".join(f"\\x{byte:02x}" for byte in character.encode("utf-8"))
+        if breaks_a_line(character) else character for character in text)
+    return f"$'{escaped}'"
+
+
+def path_shown_on_one_line(path: str) -> str:
+    """`path` as written, or, when it holds a line-breaking character such as a newline,
+    its one-line shell-quoted form, so the line it is printed in stays one line."""
+    return shell_quoted_on_one_line(path) if holds_a_line_breaking_character(path) else path
+
+
+def join_error_text_lines_with_one_space(text) -> str:
+    """`text`'s lines joined by one space, each line's own spaces kept: a path in a git
+    message may hold two spaces in a row. Only a newline or carriage return ends a line
+    here; any other character str.splitlines splits at, such as a U+2028 inside a path in
+    the message, is escaped, so the printed line stays one line for the grid, which reads
+    the cell log with str.splitlines. Inside a single-quoted span, such as the path in git's
+    `safe.directory '<path>'` remedy, the span becomes its `$'...'` form, so a copied command
+    still names the same path; elsewhere the character is written as `\\u2028`."""
+    joined = " ".join(line.strip() for line in re.split(r"\r\n|\r|\n", str(text)) if line.strip())
+    joined = re.sub(r"'([^']*)'", lambda quoted: shell_quoted_on_one_line(quoted[1])
+                    if any(splits_a_line(character) for character in quoted[1]) else quoted[0], joined)
+    return "".join(
+        character.encode("unicode_escape").decode("ascii")
+        if splits_a_line(character) else character for character in joined)
+
+
 def report_stray_writes(program: str, baseline, own_report_path=None) -> None:
     """Report changes outside the requested report without raising."""
     # Check every agent-binary and every exit path: a failed reviewer may still have edited the target.
-    if baseline is None:
+    if isinstance(baseline, WriteDetectorUnavailable):
         print(f"{program}: {STRAY_WRITE_CHECK_SKIPPED_PHRASE} — no pre-run "
-              f"snapshot of the working tree was taken. This is "
+              f"snapshot of the working tree was taken (git status failed: "
+              f"{join_error_text_lines_with_one_space(baseline)}). This is "
               f"{COLD_READ_CELL_STRAY_WRITE_CHECK_SKIPPED_IS_NOT_A_CLEAN_RESULT_PHRASE}.", file=sys.stderr)
         return
     try:
         stray = stray_writes_since(baseline, own_report_path)
     except WriteDetectorUnavailable as error:
         print(f"{program}: {STRAY_WRITE_CHECK_SKIPPED_PHRASE} — git status "
-              f"failed ({error}). This is {COLD_READ_CELL_STRAY_WRITE_CHECK_SKIPPED_IS_NOT_A_CLEAN_RESULT_PHRASE}.",
+              f"failed ({join_error_text_lines_with_one_space(error)}). This is {COLD_READ_CELL_STRAY_WRITE_CHECK_SKIPPED_IS_NOT_A_CLEAN_RESULT_PHRASE}.",
               file=sys.stderr)
         return
     if stray:
         # Snapshots detect changed content, not authorship; another worker may have made the edit.
         print(
-            f"{program}: {STRAY_WRITE_PHRASE} — {', '.join(stray)}. This cell "
+            f"{program}: {STRAY_WRITE_PHRASE} — {', '.join(map(path_shown_on_one_line, stray))}. This cell "
             "cannot tell whether the reviewer wrote them or someone else working "
             "in the checkout did. Inspect before triage and revert only what is "
             "the reviewer's; any report still stands on its own.",

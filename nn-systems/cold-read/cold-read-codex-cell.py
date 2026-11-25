@@ -132,11 +132,10 @@ and GITHUB_TOKEN from the environment it starts codex with; an agent-seat's
 supervisor sets GH_TOKEN to the agent-seat's own GitHub token. On ned-box,
 with both gone and the gh login file denied, the reviewer reaches GitHub as an
 anonymous visitor: it can read public pages, within GitHub's limits on
-unauthenticated requests, and cannot read a private repository. On the Mac the
-sandbox leaves the keychain readable but denies gh's configuration directory,
-~/.config/gh, and gh exits with "failed to read configuration" when it cannot
-read that directory, before it looks for a stored login; so gh fails inside the
-sandbox there. This program has no fallback for either.
+unauthenticated requests, and cannot read a private repository. How gh behaves
+inside the Mac sandbox is said once, beside CREDENTIAL_DIRECTORIES in
+nn-systems/cold-read/cold-read-cell-common.py. This program has no fallback for
+either machine.
 
 WHY THE CODEX MEMORY STORE IS OFF FOR REVIEW CELLS: written once, in
 scripts/code-review-codex-cell.py's docstring, under that heading.

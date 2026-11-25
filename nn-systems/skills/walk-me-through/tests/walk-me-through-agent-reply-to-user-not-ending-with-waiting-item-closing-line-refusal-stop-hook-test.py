@@ -1003,7 +1003,7 @@ def test_where_the_minutes_line_sits():
                     document=WALK_DOCUMENT + "\n## Item 2 of 10: a re-planned copy\n\nText.\n")
     case.reply("Recorded.")
     check_blocked("a line without `of M` over two headings for its item, of different M, is sent back", case.run(),
-                  "more than one heading for `Item 2`", "add the line `#next_to_present item N of M` as the new last line")
+                  "more than one heading for `Item 2`", "naming every item the last one names, with M copied from the heading you mean")
     case = Case()
     case.walk_files(minutes="#next_to_present item 2.",
                     document="# A walk\n\n## The poem page\n\nText.\n\n## The summary\n\nText.\n")
