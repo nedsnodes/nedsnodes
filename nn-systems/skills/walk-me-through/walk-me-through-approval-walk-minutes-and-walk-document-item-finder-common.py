@@ -52,8 +52,8 @@ headings are parts or sections. A dotted count, as in a `### Item 1.1 of 3`
 sub-step, does not decide this. The answer program's close step numbers an
 unnumbered item when it is shown. M is display only: approval_walk_item_total_shown_and_waiting_counted_from_walk_document counts it from the
 walk-document, the whole numbers its item headings hold, a dotted number
-counting as the item before its first dot, plus its unnumbered items, so an
-item added changes no other heading. The close step writes it into the
+counting as the item before its first dot, or the highest of them when that is
+more, plus its unnumbered items, so an item added changes no other heading. The close step writes it into the
 `#next_to_present` line, and the hooks show the M that line gives; no M is
 compared, and an `of M` a heading or the minutes give is read only to choose
 between two headings that name the same item. A
@@ -916,9 +916,10 @@ def approval_walk_document_new_item_insert_line_number_past_whole_item_sub_steps
 
 def approval_walk_item_total_shown_and_waiting_counted_from_walk_document(units):
     """M, as a string: the whole numbers the numbered items of units hold, a dotted number such as 6.1 counting
-    as its item 6, plus the unnumbered items; so it counts the items shown and the items waiting."""
-    whole = {number.split(".")[0] for unit in units for number in unit[0]}
-    return str(len(whole) + sum(map(approval_walk_unit_is_unnumbered_item, units)))
+    as its item 6, or the highest of them when that is more, because a number can leave the walk-document; plus
+    the unnumbered items. So every item, numbered or still unnumbered, fits under M."""
+    whole = {int(number.split(".")[0]) for unit in units for number in unit[0]}
+    return str(max(len(whole), max(whole, default=0)) + sum(map(approval_walk_unit_is_unnumbered_item, units)))
 
 
 def approval_walk_next_unnumbered_item_number(units):
@@ -926,14 +927,6 @@ def approval_walk_next_unnumbered_item_number(units):
     any item heading of units holds, so no number is used twice even where waiting items carry numbers."""
     return str(max((int(number.split(".")[0]) for unit in units for number in unit[0]), default=0) + 1)
 
-
-def approval_walk_item_total_once_next_unnumbered_item_is_numbered(units):
-    """M, as a string, for the next unnumbered item: the counted M, raised when a number has left the walk-document,
-    because the next number then runs past the count, so that every item still unnumbered fits under M."""
-    next_number = int(approval_walk_next_unnumbered_item_number(units))
-    unnumbered = sum(map(approval_walk_unit_is_unnumbered_item, units))
-    return str(max(int(approval_walk_item_total_shown_and_waiting_counted_from_walk_document(units)),
-                   next_number + unnumbered - 1))
 
 
 def waiting_item_units(document, value, numbers, total, parser, all_units=None):
