@@ -273,6 +273,38 @@ def codex_finding_id(priority, text):
     return hashlib.sha256(f"{priority}\0{text}".encode("utf-8")).hexdigest()[:12]
 
 
+FACT_LINES = ("- `Main has it:` `no`\n- `This pull request makes it happen:` `yes`\n"
+              "- `Reports success on failure:` `no`\n- `Shown by:` `judged from the code only`")
+
+
+def finding_fact_line_count_cases(scratch):
+    whole = {"path": "scripts/thing.py", "line": 2, "body": f"A finding.\n\n{FACT_LINES}"}
+    short = {"path": "scripts/thing.py", "line": 3,
+             "body": "Another finding.\nMain has it: no\nThis pull request makes it happen: yes\n"
+                     "Reports success on failure: no\nShown by is missing."}
+    result = run_program(scratch, review("APPROVE", comments=[whole, short]))
+    check("the success line counts the Claude reviewer's comments that lack a fact line, reading labels "
+          "with or without list and code marks",
+          result.code == 0 and "; 1 of 2 finding(s) lack one of the lines Main has it:" in result.stdout,
+          result.detail)
+    result = run_program(scratch, review("APPROVE"))
+    check("a review with no findings says nothing of fact lines", result.code == 0
+          and "lack one of the lines" not in result.stdout, result.detail)
+    first, second = "With lines \u2014 scripts/thing.py:2-2", "Without lines \u2014 scripts/thing.py:3-3"
+    indented = "\n".join("  " + line for line in FACT_LINES.splitlines())
+    report = (f"<!-- provenance -->\n\n- [Codex priority P2 (P0 highest)] {first}\n  Body.\n{indented}\n\n"
+              f"- [Codex priority P3 (P0 highest)] {second}\n  Body with only\n  Shown by: reproduction\n")
+    grades = [{"finding": codex_finding_id("P2", first), "grade": "does-not-hold", "reason": "Unreachable."},
+              {"finding": codex_finding_id("P3", second), "grade": "does-not-hold", "reason": "Unreachable."}]
+    result = run_program(scratch, json.dumps({"verdict": "APPROVE", "body": "The review body.", "comments": [
+        finding(2, "fix-next", "merge-lane-2's own restatement, without fact lines.")],
+        "merge_lane_codex_review_finding_grades": grades}),
+        arguments=MERGE_LANE_ARGUMENTS, codex_runs=((HEAD, 0, report),))
+    check("merge-lane-2's verdict review counts the Codex findings that lack a fact line, each finding's text "
+          "running to the next heading, and not merge-lane-2's own comments",
+          result.code == 0 and "; 1 of 2 Codex finding(s) lack one of the lines" in result.stdout, result.detail)
+
+
 def codex_finding_grade_cases(scratch):
     first, second = "Keep the error \u2014 scripts/thing.py:2-2", "Old format \u2014 scripts/thing.py:3-3"
     report = (f"<!-- provenance -->\nSummary.\n\n- [Codex priority P2 (P0 highest)] Keep the error \u2014 "
@@ -1005,6 +1037,7 @@ def main():
     try:
         merge_lane_cases(scratch)
         codex_finding_grade_cases(scratch)
+        finding_fact_line_count_cases(scratch)
         merge_account_comment_review_cases(scratch)
         verdict_review_marks_cases(scratch)
         comment = {"path": "scripts/thing.py", "line": 3, "body": "A finding."}
