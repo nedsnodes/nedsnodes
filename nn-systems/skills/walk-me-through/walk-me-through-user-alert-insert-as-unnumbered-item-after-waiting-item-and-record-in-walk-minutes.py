@@ -75,8 +75,9 @@ UNUSABLE_WALK_MESSAGE = (
 ALERT_UNREADABLE_MESSAGE = (
     "the alert {alert_id} cannot be read from {path}, so no file was changed: {error}.\n"
     "{rerun_line}"
-    "Then, if {path} no longer exists, nothing more is needed for {alert_id}: it is either offered again on the "
-    "user's next prompt or already recorded in walk-minutes.\n"
+    "Then, if {path} no longer exists, nothing more is needed for {alert_id}: it is either already recorded in "
+    "walk-minutes or offered again on the user's next prompt in the agent-session of the agent-seat the alert names "
+    "(merge-lane-1's, when the alert names none).\n"
     "If {path} still exists, it holds no readable alert: tell the user its path, because nobody else will see "
     "it.")
 ALERT_UNREADABLE_RERUN_LINE = "Run again with the other alerts, leaving out {alert_id}: {rerun}\n"

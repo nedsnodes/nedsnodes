@@ -18,7 +18,10 @@ hook runs, and the newest record is then the previous turn's, or there is none. 
 decides: one that opens as NOT_TYPED_PROMPT_OPENINGS lists is not his.
 
 ON A TYPED PROMPT the hook calls, from ALERTS_MODULE_FILE, user_alerts_claimed_delete_if_recorded_in_approval_walk_minutes_else_release_to_pending_after_30_minutes,
-then user_alerts_claim_every_pending_by_rename_into_claimed, whose docstrings say what each moves. When it claimed nothing it prints nothing.
+then user_alerts_claim_every_pending_for_agent_seat_by_rename_into_claimed, whose docstrings say what each moves.
+The agent-seat it claims for is the one the handoff-supervisor that started this agent-session names in the
+environment variable HANDOFF_SUPERVISOR_FILE defines; with none named, it claims nothing. When it claimed nothing
+it prints nothing.
 Otherwise it finds the open approval-walk of the checkout the payload's cwd names with WALK_FINDER_FILE, the
 module the other walk-me-through hooks use, and its additionalContext tells the agent what it did or what to do:
 - with an approval-walk open: the hook runs INSERT_PROGRAM with the claimed ids itself, so each alert becomes
@@ -52,6 +55,7 @@ WALK_FINDER_FILE = HERE / "walk-me-through-approval-walk-minutes-and-walk-docume
 INSERT_PROGRAM = HERE / "walk-me-through-user-alert-insert-as-unnumbered-item-after-waiting-item-and-record-in-walk-minutes.py"
 ALERTS_MODULE_FILE = (CHECKOUT / "nn-systems" / "general-tools"
                       / "user-alerts-pending-and-claimed-files-write-claim-release-and-delete-common.py")
+HANDOFF_SUPERVISOR_FILE = CHECKOUT / "nn-systems" / "handoff" / "handoff-supervisor.py"
 TRANSCRIPT_READER_FILE = CHECKOUT / "scripts" / "claude-code-session-transcript-records-read-backward-common.py"
 # At most half this hook's timeout in .claude/settings.json, so a stalled insert is reported, not killed with
 # the hook after the alerts are claimed; a test checks.
@@ -79,7 +83,8 @@ INSERT_FAILED_LINES = (
     "Before you act on the user's prompt, fix the cause that message names, if you can, then run: {command}",
     "Then do what that command prints, and act on the user's prompt.",
     "If you cannot fix the cause now, act on the user's prompt: an alert no walk-minutes name is offered again "
-    "on the user's first prompt 30 minutes or more after this one.",
+    "on the user's first prompt, 30 minutes or more after this one, in the agent-session of the agent-seat the "
+    "alert names, or of merge-lane-1 when it names none.",
 )
 WALK_OPEN_LINES = (
     "Before you act on the user's prompt, add the alerts to approval-walk {walk} as items placed after the whole of "
@@ -95,7 +100,8 @@ NO_WALK_LINES = (
     "the walk-me-through skill says, whose items are these alerts alone, one each, its point the alert's title "
     "and its text from the alert's file.",
     "As soon as you create its walk-minutes, write these lines into them, one per alert; an alert that no "
-    "walk-minutes name 30 minutes after this prompt is offered again on the user's next prompt:",
+    "walk-minutes name 30 minutes after this prompt is offered again on the user's next prompt in the "
+    "agent-session of the agent-seat the alert names, or of merge-lane-1 when it names none:",
 )
 USER_ALERT_LINE = "  #user_alert {id}"
 WALK_UNKNOWN_LINE = ("The hook could not tell whether an approval-walk is open in this checkout, because reading "
@@ -202,6 +208,11 @@ def headless(environment):
                        ATTENDANCE_CHECK_FILE).agent_session_unattended_by_user(environment)
 
 
+def agent_seat_of_agent_session(environment):
+    supervisor = load_module("handoff_supervisor", HANDOFF_SUPERVISOR_FILE)
+    return environment.get(supervisor.HANDOFF_SUPERVISOR_AGENT_NAME_ENVIRONMENT_VARIABLE, "").strip() or None
+
+
 def output_for(payload, environment, user_alerts=None):
     """Return the hook's output for the payload as a dict, or None."""
     if sys.platform != "linux" or headless(environment):
@@ -218,7 +229,8 @@ def output_for(payload, environment, user_alerts=None):
     directory = user_alerts.user_alerts_directory()
     try:
         user_alerts.user_alerts_claimed_delete_if_recorded_in_approval_walk_minutes_else_release_to_pending_after_30_minutes()
-        alerts = user_alerts.user_alerts_claim_every_pending_by_rename_into_claimed()
+        alerts = user_alerts.user_alerts_claim_every_pending_for_agent_seat_by_rename_into_claimed(
+            agent_seat_of_agent_session(environment))
     except Exception as error:  # noqa: BLE001 - a failed claim must reach the user
         user_sentence = CLAIM_FAILED_USER_SENTENCE.format(directory=directory, error=repr(error))
         context = "\n".join(line.format(directory=directory, error=repr(error), user_sentence=user_sentence)
