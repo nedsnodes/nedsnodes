@@ -11,7 +11,7 @@ HANDOFF_SUPERVISOR_WORKING_DIRECTORY_ENVIRONMENT_VARIABLE = "NEDSNODES_HANDOFF_S
 HANDOFF_SUPERVISOR_SESSION_ID_ENVIRONMENT_VARIABLE = "NEDSNODES_HANDOFF_SUPERVISOR_SESSION_ID"
 
 
-def handoff_supervisor_launched_agent_seat_name(environment, session_id):
+def handoff_supervisor_launched_agent_session_agent_seat_name_or_empty_for_another_session(environment, session_id):
     """The agent-seat the handoff-supervisor launched this agent-session under, or "" when none did, or when
     session_id, the Claude Code session id of the agent-session asking, is not the launched agent-session's."""
     if not session_id or session_id != environment.get(HANDOFF_SUPERVISOR_SESSION_ID_ENVIRONMENT_VARIABLE, ""):

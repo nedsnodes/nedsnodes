@@ -213,7 +213,7 @@ def headless(environment):
 def agent_seat_of_agent_session(environment, session_id):
     launched = load_module("handoff_supervisor_launched_agent_session_environment_variable_names_common",
                            LAUNCHED_AGENT_SESSION_ENVIRONMENT_FILE)
-    return launched.handoff_supervisor_launched_agent_seat_name(environment, session_id) or None
+    return launched.handoff_supervisor_launched_agent_session_agent_seat_name_or_empty_for_another_session(environment, session_id) or None
 
 
 def output_for(payload, environment, user_alerts=None):
