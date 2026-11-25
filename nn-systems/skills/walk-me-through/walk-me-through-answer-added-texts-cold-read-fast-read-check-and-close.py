@@ -1407,7 +1407,7 @@ NOT_ASKED_DROPPED_PROPOSAL_NEW_TEXT_PROBLEM = ("- it has a `#new` line, which A 
 # Fixed fields, not prose: a tally phrase such as `0 cases in total; will look in ...` holds an `in` that names no
 # place searched, so the places are only what follows `places:`.
 SEARCH_LINE = re.compile(r"(\d{4}-\d{2}-\d{2}) to (\d{4}-\d{2}-\d{2}), (\d+) cases?, places: *(.*[A-Za-z].*)",
-                         re.I | re.S)
+                         re.I)
 SEARCH_WINDOW_DAYS = 30
 NOT_ASKED_WHY = {
     TOUCHES: "list on it every file the change edits or deletes, separated by spaces.",
