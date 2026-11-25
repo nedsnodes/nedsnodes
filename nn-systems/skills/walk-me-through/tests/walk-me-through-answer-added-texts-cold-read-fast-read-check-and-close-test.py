@@ -1069,9 +1069,14 @@ def test_an_items_title_is_the_same_from_every_form_of_its_heading_or_opening():
     program = load_program()
     finder = program.load_walk_finder()
     for line in (" ## Item 3 of 9: the first", "- **Item 3 of 9**: the first", "**Item 3 of 9: the first** More detail.",
-                 "## Item 3 of 9 (revised): the first", "> ## Item 3 of 9 revised: the first"):
+                 "## Item 3 of 9 (revised): the first", "> ## Item 3 of 9 revised: the first",
+                 "**Item 3 of 9 (revised):** the first", "**Item 3 of 9 revised:** the first",
+                 "**Item 3 of 9**: (revised) the first"):
         title = program.item_title(finder, line)
         check(f"`{line}` gives its item the title `the first`", title == "the first", repr(title))
+    kept = program.item_title(finder, "**Item 3 of 9 revised:** New text.", with_text_after_title=True)
+    check("a bold opening closing after its `revised` label keeps its text after the title with no stray delimiter",
+          kept == "New text.", repr(kept))
 
 
 def test_the_waiting_item_read_step_searches_a_bold_list_opening_by_its_title_alone():

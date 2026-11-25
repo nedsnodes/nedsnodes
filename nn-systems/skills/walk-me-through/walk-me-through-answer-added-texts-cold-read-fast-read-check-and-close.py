@@ -2991,12 +2991,17 @@ def item_title(walk_finder, line, with_text_after_title=False):
         return line
     opener = re.match(r"[*_]*", line)[0]
     title = line[count.end():].lstrip(" :,.;")
-    closed = bool(opener) and title.startswith(opener)
-    if closed:
-        title = title[len(opener):].lstrip(" :,.;")
     revised = walk_finder.REVISED.match(title)
     if revised and not (opener and opener in title[:revised.end()]):
         title = title[revised.end():].lstrip(" :,.;)")
+    # The emphasis can close before the label, as in `**Item 3 of 9**: (revised) x`, or after it, as in
+    # `**Item 3 of 9 (revised):** x`, so the opener is looked for once the label is gone.
+    closed = bool(opener) and title.startswith(opener)
+    if closed:
+        title = title[len(opener):].lstrip(" :,.;")
+        revised = walk_finder.REVISED.match(title)
+        if revised:
+            title = title[revised.end():].lstrip(" :,.;)")
     if closed or not opener:
         return title.rstrip()
     # The emphasis that opened before the count closes after the title; a delimiter inside a code span, or with
@@ -3552,9 +3557,10 @@ def approval_walk_item_system_status_claims_not_rechecked_refused(text, item, do
 
 
 def approval_walk_item_title_search_groups(walk_finder, document, value, numbers, total, parser, earlier):
-    """Return [(titles, item numbers)] for each heading in document that names waiting items, in its order: its
-    title, in the closing line's form too when that differs, as when the title holds a link, with the numbers of
-    the waiting items it names, so that a short title is matched only after its own numbers. A lone waiting item's
+    """Return [(titles, item numbers)], one group for each distinct set of waiting item numbers that headings in
+    document name, in the order the first such heading comes: the titles of those headings, each in the closing
+    line's form too when that differs, as when the title holds a link, so that a short title is matched only after
+    its own numbers. A lone waiting item's
     titles also hold the title of each earlier read text of it, as earlier_read_texts_of_item returns them; a
     Withdrawn version heading carries no title, so those read texts are its only earlier titles the program can
     know."""
