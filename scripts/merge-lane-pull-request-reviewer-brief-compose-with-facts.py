@@ -104,7 +104,7 @@ def parse_arguments(argv):
                              f"(default: {DEFAULT_NED_BOX_REVIEWER_BRIEF_ENVIRONMENT_ADDENDUM_FILE})")
     parser.add_argument("--instructions-file", type=Path,
                         help="the reviewing instructions inserted into the standing text "
-                             "(default: <review-tools-worktree-at-main>/docs/agents/pr-reviewer-instructions.md)")
+                             "(default: <review-tools-worktree-at-main>/docs/agents/pr-reviewer.prompt.md)")
     parser.add_argument("--merge-lane-pull-request-reviewer-scratch-directories-parent-directory", type=Path,
                         default=DEFAULT_MERGE_LANE_PULL_REQUEST_REVIEWER_SCRATCH_DIRECTORIES_PARENT_DIRECTORY,
                         help=f"the directory in which each reviewer's scratch directory rv<tag>/ is made, "
@@ -291,7 +291,7 @@ def main(argv=None):
     arguments = parse_arguments(argv)
     review_tools_worktree = arguments.review_tools_worktree_at_main
     instructions_file = (arguments.instructions_file
-                         or review_tools_worktree / "docs" / "agents" / "pr-reviewer-instructions.md")
+                         or review_tools_worktree / "docs" / "agents" / "pr-reviewer.prompt.md")
     try:
         merged_pull_requests = MergedPullRequests(common.read_merge_account_token())
         specs = json.loads(arguments.brief_specifications_file.read_text())

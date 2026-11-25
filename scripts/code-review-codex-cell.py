@@ -26,7 +26,7 @@ must not drift are pinned:
   - the output, captured to a file the caller names;
   - Codex's own memory store, OFF for this process (`--disable memories`) --
     see WHY THE CODEX MEMORY STORE IS OFF FOR REVIEW CELLS below;
-  - the PR reviewer instructions, docs/agents/pr-reviewer-instructions.md,
+  - the PR reviewer instructions, docs/agents/pr-reviewer.prompt.md,
     from main, never from the reviewed checkout -- see THE PR REVIEWER
     INSTRUCTIONS below;
   - the pull request's description, when the caller passes
@@ -69,7 +69,7 @@ component (nedschorus#105).
 
 THE PR REVIEWER INSTRUCTIONS. The rules a pull request reviewer applies,
 such as which findings block the merge and that a markdown file gets none,
-live in docs/agents/pr-reviewer-instructions.md, the file pasted into every
+live in docs/agents/pr-reviewer.prompt.md, the file pasted into every
 Claude reviewer's prompt. The cell passes that file's text, under a framing
 that says a rule in the reviewed checkout that differs from one of these
 rules gives way to it, as the first part of the `developer_instructions`
@@ -497,7 +497,7 @@ REVIEW_TIMEOUT_SECONDS = 1800
 # script; see THE PR REVIEWER INSTRUCTIONS in the docstring.
 PULL_REQUEST_REVIEWER_INSTRUCTIONS_FILE = (
     pathlib.Path(__file__).resolve().parent.parent
-    / "docs" / "agents" / "pr-reviewer-instructions.md")
+    / "docs" / "agents" / "pr-reviewer.prompt.md")
 
 # The framings label the texts they precede and state no review rule of
 # their own, so the rules keep one home, the instructions file.
@@ -696,7 +696,7 @@ def main(argv=None) -> int:
     parser.add_argument("--model", default=CODEX_MODEL, help="explicit Codex model id override")
     parser.add_argument("--instructions-file",
                         default=str(PULL_REQUEST_REVIEWER_INSTRUCTIONS_FILE),
-                        help="main's docs/agents/pr-reviewer-instructions.md, whose rules the "
+                        help="main's docs/agents/pr-reviewer.prompt.md, whose rules the "
                              "review applies (default: the copy in this script's own checkout)")
     parser.add_argument("--pull-request-description-file",
                         help="file holding the pull request's description, handed to the review as context")
@@ -727,13 +727,13 @@ def main(argv=None) -> int:
         print(f"code-review-codex-cell: cannot read --instructions-file: "
               f"{type(error).__name__}: {error}\n"
               "The review does not run without the PR reviewer instructions. Pass main's "
-              "docs/agents/pr-reviewer-instructions.md.", file=sys.stderr)
+              "docs/agents/pr-reviewer.prompt.md.", file=sys.stderr)
         return EXIT_BAD_INVOCATION
     if not instructions:
         print(f"code-review-codex-cell: --instructions-file "
               f"{arguments.instructions_file} is empty.\n"
               "The review does not run without the PR reviewer instructions. Pass main's "
-              "docs/agents/pr-reviewer-instructions.md.", file=sys.stderr)
+              "docs/agents/pr-reviewer.prompt.md.", file=sys.stderr)
         return EXIT_BAD_INVOCATION
     instructions_digest = hashlib.sha256(instructions_bytes).hexdigest()[:12]
 

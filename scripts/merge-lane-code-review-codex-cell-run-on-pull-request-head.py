@@ -13,7 +13,7 @@ cx/pr<n>-<first 8 characters of the base>/pull-request-description.md under
 the worktrees and outputs directory, then runs
 --review-tools-worktree-at-main's scripts/code-review-codex-cell.py, not the
 pull request's, on pr<n>-head from the base commit, with
---review-tools-worktree-at-main's docs/agents/pr-reviewer-instructions.md as
+--review-tools-worktree-at-main's docs/agents/pr-reviewer.prompt.md as
 the rules the review applies, so a pull request cannot change the rules its
 own review is held to. The report, codex-code-review-report.md, and stdout
 and stderr go to the same directory.
@@ -40,7 +40,7 @@ merge-lane helper and merge-gate.sh read.
 
 Exit codes: the review's exit code; 2 when the token, the description,
 --review-tools-worktree-at-main's scripts/code-review-codex-cell.py or its
-docs/agents/pr-reviewer-instructions.md could not be read, before the review
+docs/agents/pr-reviewer.prompt.md could not be read, before the review
 runs, or when the pull request's head commit could not be read or is not
 --expected-head-commit, or the run record could not be removed or written,
 or pr<n>-head's commit could not be read after the review or had changed.
@@ -56,7 +56,7 @@ import sys
 from pathlib import Path
 
 CODEX_CELL = Path("scripts") / "code-review-codex-cell.py"
-PULL_REQUEST_REVIEWER_INSTRUCTIONS = Path("docs") / "agents" / "pr-reviewer-instructions.md"
+PULL_REQUEST_REVIEWER_INSTRUCTIONS = Path("docs") / "agents" / "pr-reviewer.prompt.md"
 
 _common_spec = importlib.util.spec_from_file_location(
     "merge_lane_pull_request_helpers_common", Path(__file__).resolve().with_name(

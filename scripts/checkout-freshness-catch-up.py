@@ -60,7 +60,8 @@ Wired as a Stop hook, so it runs at every turn boundary. Each run:
      only when main changed a standing instruction the agent may hold in its
      context: a CLAUDE.md, whose changed lines the note carries; a skill's
      SKILL.md, whose skill the agent is told to invoke again; or an
-     -instructions.md or -prompt.md file that is not a numbered GHI-MD, whose
+     -instructions.md, -prompt.md, .prompt.md or .prompt-template.md file
+     that is not a numbered GHI-MD, whose
      name comes from its issue's title. Claude Code reloads skills' list,
      hooks and subagent definitions by itself, and reads CLAUDE.md only at an
      agent-session's start and after a compaction, so nothing else needs

@@ -141,7 +141,7 @@ CODEX_REVIEW_OBJECT = {'findings': [{'title': '[P2] Terminate flushed fragments 
                        "this with two threads: the Monitor's start-of-line filter would miss the "
                        'warning. Complete the pending line under the lock before releasing it, so '
                        'the original defect is fixed on the flush path too ([PR reviewer '
-                       'instructions, step 4](docs/agents/pr-reviewer-instructions.md#L22)).',
+                       'instructions, step 4](docs/agents/pr-reviewer.prompt.md#L22)).',
                'confidence_score': 0.99,
                'priority': 2,
                'code_location': {'absolute_file_path': '/home/nedlern/.cache/merge-lane-review-worktrees/pr4704-head/scripts/sanity-check-adversarial-prompts.py',
@@ -189,7 +189,7 @@ CODEX_REVIEW_PROSE_OF_THE_SAME_REVIEW = (
     "the record log. I reproduced this with two threads: the Monitor's start-of-line filter would "
     'miss the warning. Complete the pending line under the lock before releasing it, so the '
     'original defect is fixed on the flush path too ([PR reviewer instructions, step '
-    '4](docs/agents/pr-reviewer-instructions.md#L22)).\n'
+    '4](docs/agents/pr-reviewer.prompt.md#L22)).\n'
     '\n'
     '- [Codex priority P3 (P0 highest)] Close the record log even if flushing stdout fails — '
     '/home/nedlern/.cache/merge-lane-review-worktrees/pr4704-head/scripts/sanity-check-adversarial-prompts.py:1509-1513\n'
@@ -723,7 +723,7 @@ with tempfile.TemporaryDirectory() as scratch:
             return f"TOML refused the override: {error}"
 
     default_instructions = (CELL_SCRIPT.resolve().parent.parent / "docs" / "agents"
-                            / "pr-reviewer-instructions.md").read_text(encoding="utf-8").strip()
+                            / "pr-reviewer.prompt.md").read_text(encoding="utf-8").strip()
     default_overrides = developer_instruction_overrides(launched_command[review_index + 1:])
     check("without options, one developer_instructions override after `review` carries "
           "the instructions in the cell's own checkout",
@@ -738,16 +738,16 @@ with tempfile.TemporaryDirectory() as scratch:
     # The file's own bytes, so `sha256sum` on the file gives the same prefix.
     default_digest = hashlib.sha256(
         (CELL_SCRIPT.resolve().parent.parent / "docs" / "agents"
-         / "pr-reviewer-instructions.md").read_bytes()).hexdigest()[:12]
+         / "pr-reviewer.prompt.md").read_bytes()).hexdigest()[:12]
     check("the provenance header carries the SHA-256 prefix of the instructions file's bytes",
           f"pull-request-reviewer-instructions-sha256={default_digest}"
           in argv_report_text.splitlines()[0], repr(argv_report_text[:300]))
 
-    # Run from a directory holding its own docs/agents/pr-reviewer-instructions.md,
+    # Run from a directory holding its own docs/agents/pr-reviewer.prompt.md,
     # as a head worktree does: the default must still be the cell checkout's copy.
     elsewhere = scratch / "elsewhere"
     (elsewhere / "docs" / "agents").mkdir(parents=True)
-    (elsewhere / "docs" / "agents" / "pr-reviewer-instructions.md").write_text(
+    (elsewhere / "docs" / "agents" / "pr-reviewer.prompt.md").write_text(
         "ELSEWHERE-COPY-OF-THE-RULES\n", encoding="utf-8")
     elsewhere_report = scratch / "elsewhere-report.md"
     elsewhere_result = run_cell(stubs, STUB_CODEX_RECORDS_ARGV,
@@ -764,7 +764,7 @@ with tempfile.TemporaryDirectory() as scratch:
           and json.dumps(default_instructions, ensure_ascii=False)[1:-1] in elsewhere_overrides[0],
           f"exit {elsewhere_result.returncode}; stderr={elsewhere_result.stderr!r}")
 
-    instructions_file = scratch / "pr-reviewer-instructions.md"
+    instructions_file = scratch / "pr-reviewer.prompt.md"
     instructions_file.write_text("# Stand-in reviewer rules\n\nA markdown file gets no finding.\n",
                                  encoding="utf-8")
 
