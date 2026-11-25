@@ -23,7 +23,7 @@ of its file name:
 import importlib.util
 from pathlib import Path
 
-REUSABLE_PROMPT_SUFFIXES = ("-prompt.md", "-instructions.md")
+REUSABLE_PROMPT_SUFFIXES = ("-prompt.md", ".prompt.md", ".prompt-template.md", "-instructions.md")
 
 GHI_ISSUE_WRITE_SCRIPT = Path(__file__).resolve().parents[2] / "scripts" / "ghi-issue-write.py"
 

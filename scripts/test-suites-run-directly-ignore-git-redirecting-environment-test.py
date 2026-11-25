@@ -137,7 +137,7 @@ SUITES_RUN_WITH_GIT_DIR = {
 SUITE_RUN_WITH_EVERY_VARIABLE = "scripts/code-review-codex-cell-test.py"
 FILES_THE_SUITE_RUN_WITH_EVERY_VARIABLE_READS = (
     "scripts/code-review-codex-cell.py",
-    "docs/agents/pr-reviewer-instructions.md",
+    "docs/agents/pr-reviewer.prompt.md",
     "nn-systems/cold-read/cold-read-cell-common.py",
     "nn-systems/cold-read/cold-read-record-names-common.py",
     "nn-systems/general-tools/ned-box-home-directory-and-its-mac-mount-point-path-constants-common.py",

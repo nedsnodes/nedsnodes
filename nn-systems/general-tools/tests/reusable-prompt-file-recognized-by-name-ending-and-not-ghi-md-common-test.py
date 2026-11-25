@@ -45,6 +45,9 @@ GHI_MD_ENDING_IN_INSTRUCTIONS = (
 check("a -instructions.md and a -prompt.md at any depth are reusable-prompts",
       recognized("x/y-instructions.md") and recognized("a-prompt.md")
       and recognized("nn-systems/cold-read/cold-read-fast-clarify-prompt.md"))
+check("a .prompt.md and a .prompt-template.md are reusable-prompts",
+      recognized("docs/agents/pr-reviewer.prompt.md")
+      and recognized("x/defect-hunt.prompt-template.md"))
 check("a GHI-MD whose name ends in -instructions.md or -prompt.md is not a reusable-prompt, "
       "in docs/issues/ or in a system's directory",
       not recognized(GHI_MD_ENDING_IN_INSTRUCTIONS) and not recognized("docs/issues/7-a-prompt.md")
