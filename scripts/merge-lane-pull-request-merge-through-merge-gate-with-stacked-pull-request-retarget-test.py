@@ -1560,6 +1560,12 @@ def failed_suites_kept_in_view_cases(scratch):
           worked and left == {}
           and "scripts/x-test.py: case a left the failed suites record: its suite ran to the end "
               "and reported nothing for it" in output, f"{worked} {left}\n{output}")
+    worked, left, output = kept_in_view_directly(older, newer, still_failing, test="case a")
+    check("a recorded test stays when its suite, at a later commit, failed before its first "
+          "case line, and the suite's own failure is recorded beside it",
+          worked and set(left["scripts/x-test.py"]["failed_tests"]) == {"case a", "scripts/x-test.py"}
+          and left["scripts/x-test.py"]["failed_tests"]["case a"]["pull_request"] == "9"
+          and "left the failed suites record" not in output, f"{worked} {left}\n{output}")
     worked, left, output = kept_in_view_directly(newer, newer, other_case, test="case a")
     check("a recorded test not reported at the commit where it last failed stays",
           worked and "case a" in left["scripts/x-test.py"]["failed_tests"], f"{left}\n{output}")

@@ -786,6 +786,11 @@ def failed_suites_kept_in_view(arguments, merge_commit, worktree, log_dir, envir
             return None
         if test_skipped(test, verdict) or not verdict["ran_to_the_end"]:
             return None
+        # A suite that failed with no case line, such as by a crash at import, a shell suite's
+        # set -e or a sys.exit(1), ran none of its cases, though the runner counts it as run to
+        # the end so that a suite that only ever reports by its exit code gets no STOP.
+        if set(verdict["failed"]) == {suite} and not verdict["passed"]:
+            return None
         return ("its suite ran to the end and reported nothing for it"
                 if observed_at(suite, test, fields, True) else None)
 
