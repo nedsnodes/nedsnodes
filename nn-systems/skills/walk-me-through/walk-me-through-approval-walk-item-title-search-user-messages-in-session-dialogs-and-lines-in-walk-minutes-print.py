@@ -5,6 +5,12 @@ walk-minutes line that names it.
 Usage:
   walk-me-through-approval-walk-item-title-search-user-messages-in-session-dialogs-and-lines-in-walk-minutes-print.py
       --title TITLE [--title TITLE]... --item-number N [--item-number N]...
+  walk-me-through-approval-walk-item-title-search-user-messages-in-session-dialogs-and-lines-in-walk-minutes-print.py
+      --title-of-items N[,N]...:TITLE [--title-of-items N[,N]...:TITLE]...
+
+--title-of-items gives one title with the item numbers a short title must be named after, so that titles with
+different numbers, such as a shared heading's and one of its items' own, are searched in one run and each agent-session
+or walk-minutes line is printed once.
 
 The walk check program's pre-show step, approval-walk-waiting-item-cold-read-fast-read of
 walk-me-through-answer-added-texts-cold-read-fast-read-check-and-close.py beside this program, runs this before each
@@ -258,9 +264,10 @@ def walk_directories(root, agent_homes, failures):
     return found
 
 
-def found_lines(root, agent_homes, titles, numbers, failures):
-    """(lines to print, whether anything was found)."""
-    matchers = [title_matcher(title, numbers) for title in titles]
+def found_lines(root, agent_homes, titled, failures):
+    """(lines to print, whether anything was found), for titled, [(title, its item numbers)]."""
+    matchers = [title_matcher(title, numbers) for title, numbers in titled]
+    titles = list(dict.fromkeys(title for title, _ in titled))
     dialogs_directory = root / search.SESSION_DIALOGS
     if not dialogs_directory.is_dir():
         failures.append(f"the log-store has no {dialogs_directory}, so no session dialog was searched")
@@ -300,15 +307,31 @@ def found_lines(root, agent_homes, titles, numbers, failures):
 
 def argument_parser():
     parser = argparse.ArgumentParser(description=__doc__.split("\n\n")[0])
-    parser.add_argument("--title", action="append", required=True, help="a title the item has or had; repeatable")
-    parser.add_argument("--item-number", action="append", required=True,
-                        help="one of the item's numbers, such as 9.2; repeatable")
+    parser.add_argument("--title", action="append", default=[], help="a title the item has or had; repeatable")
+    parser.add_argument("--item-number", action="append", default=[],
+                        help="one of the item's numbers, such as 9.2, for every --title; repeatable")
+    parser.add_argument("--title-of-items", action="append", default=[], type=title_of_items,
+                        help="N[,N]...:TITLE, a title with its own item numbers; repeatable")
     return parser
+
+
+def title_of_items(value):
+    """(title, [item numbers]) from --title-of-items' N[,N]...:TITLE; an item number holds no colon."""
+    numbers, separator, title = value.partition(":")
+    if not separator or not numbers.strip():
+        raise argparse.ArgumentTypeError(f"{value!r} is not N[,N]...:TITLE")
+    return title, [number.strip() for number in numbers.split(",")]
 
 
 def main(argv=None):
     arguments = sys.argv[1:] if argv is None else argv
-    parsed = argument_parser().parse_args(arguments)
+    parser = argument_parser()
+    parsed = parser.parse_args(arguments)
+    titled = [(title.strip(), parsed.item_number) for title in parsed.title] + [
+        (title.strip(), numbers) for title, numbers in parsed.title_of_items]
+    titled = [(title, numbers) for title, numbers in titled if title]
+    if not (parsed.title or parsed.title_of_items) or (parsed.title and not parsed.item_number):
+        parser.error("give --title with --item-number, or --title-of-items")
     root_override = os.environ.get(search.ROOT_OVERRIDE)
     root = Path(root_override) if root_override else search.DEFAULT_LOG_STORE_ROOT
     if not root.is_dir():
@@ -322,8 +345,7 @@ def main(argv=None):
     agent_homes = Path(os.environ.get(AGENT_HOMES_DIRECTORY_OVERRIDE_ENVIRONMENT_VARIABLE) or DEFAULT_AGENT_HOMES_DIRECTORY)
     failures = []
     try:
-        lines, found = found_lines(root, agent_homes, [title.strip() for title in parsed.title if title.strip()],
-                                   parsed.item_number, failures)
+        lines, found = found_lines(root, agent_homes, titled, failures)
     except search.RipgrepMissing as missing:
         print(f"FAILED: ripgrep ({missing}) is not installed on {search.this_machine()}, so no session dialog or "
               f"walk-minutes file was searched for the item's title.\n"

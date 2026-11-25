@@ -203,8 +203,15 @@ APPROVAL_WALK_SUB_STEP_ASKING_FOR_NO_DECISION_CLOSING_LINE_WORDS_WITHOUT_LINK = 
 SUB_STEP_NO_DECISION_CLOSING_LINE = re.compile(
     rf"^\s*(?:\[{re.escape(APPROVAL_WALK_SUB_STEP_ASKING_FOR_NO_DECISION_CLOSING_LINE_WORDS_WITHOUT_LINK)}\]\((\S+)\)|{re.escape(APPROVAL_WALK_SUB_STEP_ASKING_FOR_NO_DECISION_CLOSING_LINE_WORDS_WITHOUT_LINK)})\s*$")
 CLOSING_LINE_LABEL = re.compile(rf"Items?\s+({NUMBER_LIST})\s+of\s+(\d+)(?:,\s.*)?", re.S)
-# Only right after the count, as in `(revised)` or `, revised:`, so a title that uses the word drops nothing.
-REVISED = re.compile(r"^[*_\s(,:;.\-\u2013\u2014]*revised\b", re.I)
+# The `revised` label: `(revised)`, or the word followed by a separator or the line's end, as in `, revised:`; so a
+# title opening with the word, as in `: revised the first`, keeps it. Every reader of the label reads it through
+# these two pieces.
+REVISED_LABEL = r"(?:\(revised\)|revised(?=\s*(?:[:,.;\-\u2013\u2014]|$)))"
+# Right after the count, the word may also end where the emphasis around the count closes, as in
+# `__Item 3 of 9 revised__: the first`, where `_` is a word character and `\b` finds no end.
+REVISED_LABEL_BEFORE_CLOSING_EMPHASIS = r"\s+revised(?=[*_])"
+# Only right after the count, so a title that uses the word drops nothing.
+REVISED = re.compile(rf"^(?:[*_\s(,:;.\-\u2013\u2014]*{REVISED_LABEL}|{REVISED_LABEL_BEFORE_CLOSING_EMPHASIS})", re.I)
 WITHDRAWN_HEADING = re.compile(r"^[*_\s(]*withdrawn\b", re.I)
 APPROVAL_WALK_ITEM_TAG_LINE = re.compile(r"^\s*#approval_walk_item_", re.I)
 RUNNING_COUNT_TOTAL = re.compile(rf"\b(items?\s+{NUMBER_LIST})\s+of\s+\d+\b", re.I)
@@ -1002,8 +1009,8 @@ def waiting_item_units(document, value, numbers, total, parser, all_units=None):
             f"the walk-document, put `Withdrawn: ` just before `Item` in each heading you do not mean, as in "
             f"`## Withdrawn: Item 4 of 9: <the point>`, or, only when the heading you mean comes after every other "
             f"heading for that item, write `revised` right after its `of M` instead of marking any heading `Withdrawn: `, "
-            f"with the colon after or before `revised`, as in `## Item 4 of 9 revised: <the point>` or "
-            f"`## Item 4 of 9: revised <the point>`")
+            f"with a colon after it or in parentheses, as in `## Item 4 of 9 revised: <the point>` or "
+            f"`## Item 4 of 9 (revised): <the point>`")
     if problems:
         raise UnusableRange("its walk-document has " + "; and it has ".join(problems) + ".")
     shown_total = total if total is not None else approval_walk_item_total_shown_and_waiting_counted_from_walk_document(all_units)

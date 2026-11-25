@@ -3002,51 +3002,65 @@ def blank_lines_stripped(text):
 
 def item_title(walk_finder, line, with_text_after_title=False):
     """The title an item's heading or opening line gives it: without its indentation, list or quotation mark, `#`
-    marks, running count, deferred note, `revised` label and the emphasis delimiters around the count, which
-    renumbering or revising the item does not change. A bold opening's title ends where its emphasis closes, as in
-    `**Item 3 of 9: the first** More detail.`; with_text_after_title keeps the text after it, without the closing
-    delimiter."""
+    marks, running count or the label item_opening_lines reads under a shared heading, deferred note, `revised`
+    label and the emphasis delimiters around the count, which renumbering or revising the item does not change. A
+    bold paragraph or list opening's title ends where its emphasis closes, as in `**Item 3 of 9: the first** More
+    detail.`; with_text_after_title keeps the text after it, without the closing delimiter. A heading's text after
+    the emphasis closes is its title's too, as in `## **Item 3 of 9: Keep this** (but not that)`."""
     line = walk_finder.approval_walk_item_heading_with_deferred_note_removed(line)
     line = re.sub(rf"^\s*{walk_finder.MARKDOWN_LINE_OPENING_LIST_OR_QUOTATION_MARK_PATTERN_TEXT}*", "", line)
+    heading = line.startswith("#")
     line = line.lstrip("#").strip()
-    count = walk_finder.HEADING_COUNT.match(line)
+    count = walk_finder.HEADING_COUNT.match(line) or walk_finder.ITEM_LABEL.match(line)
     if not count:
         return line
     opener = re.match(r"[*_]*", line)[0]
-    # One match reads the label at most once; the emphasis can close before the label, as in `**Item 3 of 9**:
-    # (revised) x`, or after it, as in `**Item 3 of 9 (revised):** x`. The label is only `(revised)` or `revised:`,
-    # so a title opening with the word, as in `**Item 3 of 9:** Revised estimates`, keeps it.
+    # One match reads the label at most once, through the finder's own label pieces; the emphasis can close before
+    # the label, as in `**Item 3 of 9**: (revised) x`, or after it, as in `**Item 3 of 9 (revised):** x`.
     separators = r"[ :,.;]*"
-    label = r"(?:[\s,:;.\-\u2013\u2014]*(?:\(revised\)|revised:)[ :,.;]*)?"
+    label = rf"(?:[\s,:;.\-\u2013\u2014]*{walk_finder.REVISED_LABEL}[ :,.;\-\u2013\u2014]*)?"
     closer = re.escape(opener)
-    opening = re.match(rf"{separators}(?:(?P<before>{closer}){separators}{label}|{label}(?P<after>{closer})"
+    # The bare word may end at the closing emphasis only straight after the count, as the finder's REVISED reads it.
+    word = rf"{walk_finder.REVISED_LABEL_BEFORE_CLOSING_EMPHASIS}(?P<after_word>{closer}){separators}|" if opener else ""
+    opening = re.match(rf"{word}{separators}(?:(?P<before>{closer}){separators}{label}|{label}(?P<after>{closer})"
                        rf"{separators}|{label})", line[count.end():], re.I)
     title = line[count.end() + opening.end():]
-    closed = opening["before"] is not None or opening["after"] is not None
+    closed = any(opening.groupdict().get(group) is not None for group in ("before", "after", "after_word"))
     if closed or not opener:
         return title.rstrip()
-    # The emphasis that opened before the count closes after the title; a delimiter inside a code span, or with
-    # a space before it, as in `x ** 2`, closes nothing.
-    code = [span.span() for span in walk_finder.CODE_SPAN.finditer(title)]
-    closer = next((found.start() for found in re.finditer(re.escape(opener), title)
-                   if found.start() > 0 and not title[found.start() - 1].isspace()  # pragma: no mutate, the opener was taken off position 0 above, so > 0, > -1 and >= 0 agree
-                   and not any(start <= found.start() < end for start, end in code)), None)
-    if closer is not None:
-        after = title[closer + len(opener):]
-        title = title[:closer] + (after if with_text_after_title else "")
+    found = emphasis_closer(walk_finder, title, opener)
+    if found is not None:
+        after = title[found + len(opener):]
+        title = title[:found] + (after if heading or with_text_after_title else "")
     return title.rstrip()
 
 
-def markdown_with_link_syntax_dropped(markdown, parser):
+def emphasis_closer(walk_finder, text, opener):
+    """The position in text of the delimiter that closes the emphasis opener opened before it, or None: never one
+    inside a code span, or with a space before it, as in `x ** 2`; and, for `_` emphasis, never one with a letter or
+    digit after it, as in `foo__bar`, which CommonMark reads as literal text."""
+    code = [span.span() for span in walk_finder.CODE_SPAN.finditer(text)]
+    for found in re.finditer(re.escape(opener), text):
+        at = found.start()
+        if at == 0 or text[at - 1].isspace() or any(start <= at < end for start, end in code):
+            continue
+        following = text[found.end():found.end() + 1]
+        if opener[0] == "_" and (following.isalnum() or following == "_"):
+            continue
+        return at
+    return None
+
+
+def markdown_with_link_syntax_dropped(markdown, parser, hook):
     """The inline Markdown with each link's text kept, its link syntax gone and the rest's emphasis and code spans as
     written, as an earlier message quoting the title would give it; unlike the closing line's point, nothing is
-    escaped."""
+    escaped. hook is the short-answer hook's module, whose code_span_markdown rebuilds a code span."""
     pieces = []
     for token in parser.parseInline(markdown)[0].children:
         if token.type in ("link_open", "link_close"):
             continue
         if token.type == "code_inline":
-            pieces.append(token.markup + token.content + token.markup)
+            pieces.append(hook.code_span_markdown(token))
         elif token.type in ("softbreak", "hardbreak"):
             pieces.append(" ")
         else:
@@ -3610,7 +3624,7 @@ def approval_walk_item_title_search_groups(walk_finder, document, value, numbers
         # also searched as `a filter`; and the title with only its link syntax dropped, as an earlier message
         # quoting it would write it.
         forms = [title, hook.approval_walk_item_heading_point_without_links(line.strip(), parser),
-                 markdown_with_link_syntax_dropped(title, parser)]
+                 markdown_with_link_syntax_dropped(title, parser, hook)]
         return list(dict.fromkeys(form for form in forms if form))
 
     groups = []
@@ -3644,7 +3658,7 @@ def approval_walk_item_title_search_groups(walk_finder, document, value, numbers
 def approval_walk_item_title_user_messages_in_earlier_agent_sessions_lines(walk_finder, minutes, groups, numbers,
                                                                          item, command):
     """Return (the lines TITLE_SEARCH_PROGRAM prints for each of groups, as approval_walk_item_title_search_groups
-    returns them, one search per group, a function that saves them and returns the lines to print after them);
+    returns them, in one search, a function that saves them and returns the lines to print after them);
     raise Failure when a search failed.
 
     Print them with lines_printed_with_title_search_saved_after, which saves them only once they are printed: the
@@ -3663,10 +3677,10 @@ def approval_walk_item_title_user_messages_in_earlier_agent_sessions_lines(walk_
     if session_id and title_search_cache_titles(cache) == titles:
         return [TITLE_SEARCH_CACHE_PRINTED_BEFORE.format(item=item, path=cache)], lambda: []
     lines = []
-    for group_titles, group_numbers in groups:
-        # In the `=` form, so that a title opening with `-` is not read as an option.
-        words = ([f"--title={title}" for title in group_titles]
-                 + [f"--item-number={number}" for number in group_numbers])
+    # One search for every group, each title with its own numbers, so an agent-session or walk-minutes line naming
+    # titles of two groups is printed once; in the `=` form, so that a title opening with `-` is not read as an option.
+    for words in [[f"--title-of-items={','.join(group_numbers)}:{title}"
+                   for group_titles, group_numbers in groups for title in group_titles]]:
         result = subprocess.run([sys.executable, str(TITLE_SEARCH_PROGRAM), *words], capture_output=True, text=True,
                                 stdin=subprocess.DEVNULL)
         try:
