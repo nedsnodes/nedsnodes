@@ -1153,3 +1153,17 @@ The claim check's evidence:
 > - The stop-typing hook also reads the file through that module: nn-systems/handoff/handoff-asked-stop-typing-user-notice-user-prompt-submit-hook.py:96 `return remote_control_name_common.handoff_remote_control_name_read_stored_or_default_to_agent_seat_name(agent_seat)`
 > - The handoff-supervisor also reads it at the session-handoff, not only at launch: handoff-supervisor.py:2591. The list of readers is incomplete.
 State: open
+
+## E99 — possible problem: an assertion of the overview is contradicted
+
+Claim: Hooks inside the agent-session ask for the session-handoff, keep work-snapshots, tell the user to stop typing once a session-handoff is asked for, and store the title the user gives the agent-session in claude.ai, which Claude Code records in the transcript, and reach the handoff-supervisor only through files on the machine.
+Found by: the overview claim check of 2026-11-25 against commit d284cb2683fa3800b4600bf974fa22a8ab7fe053; its report is /home/nedlern/nedsnodes-logs/overview-write-architecture-overview-claim-check-reports/nedsnodes-handoff-architecture-overview/4f24f2854d9d2ae9f5c84459183522eab1b103ee-2026-11-25T23-15-13-997309Z.md.
+Fixed by: regular maintenance, in the overview.
+Goes wrong when: a reader takes the assertion as exact.
+The claim check's evidence:
+> - The list of what the system's hooks do is incomplete. A MessageDisplay hook of this system shows the user the last lines of the conversation-tail above the successor's first message. Neither this sentence nor the rest of the overview names it, and Shared state leaves out the file it reads.
+> - `.claude/settings.json:38-43` `"MessageDisplay": [ ... nn-systems/handoff/handoff-successor-conversation-tail-last-lines-first-message-display-hook.py"`
+> - `nn-systems/handoff/handoff-successor-conversation-tail-last-lines-first-message-display-hook.py:2` `"""Show the user the end of the last session's dialog above a session-handoff successor's first message.`
+> - `nn-systems/handoff/handoff-supervisor.py:2932-2933` `conversation_tail_last_lines_display_file_write(settings.handoff_directory, session_id, conversation_tail_path_for_next_launch)`. This file is `<session id>-conversation-tail-last-lines-for-first-message-display.md` in `~/.claude/handoffs/` (hook docstring, line 7).
+> - The post-compaction hook, which the Components section does list, is also missing from this sentence.
+State: open
