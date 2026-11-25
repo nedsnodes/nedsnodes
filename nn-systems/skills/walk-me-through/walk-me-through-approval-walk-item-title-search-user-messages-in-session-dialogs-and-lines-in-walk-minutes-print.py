@@ -89,8 +89,9 @@ walk_finder = load_module("walk_me_through_approval_walk_minutes_and_walk_docume
 def title_matcher(title, numbers):
     """A function telling whether a line names title as a title; see the module's WHAT IT SEARCHES."""
     # Not \b, which needs a word character before it, so that a title ending in punctuation still ends here; and
-    # not (?!\w), which counts `_` as a letter and so rejects a title closed by underscore emphasis, as `_The fix_`.
-    escaped = re.escape(title) + r"(?![^\W_])"
+    # not (?!\w), which rejects a title closed by underscore emphasis, as `_The fix_`. Underscores end the title only
+    # when no letter or digit follows them, so `Fix foo` does not match in `Fix foo_bar`.
+    escaped = re.escape(title) + r"(?!_*[^\W_])"
     # The running count as the walk finder reads one, its bold closing before or after the count's `:`.
     item_form = re.compile(rf"\bitems?\s+(?P<numbers>{walk_finder.NUMBER_LIST})(?:\s+of\s+\d+)?[*_]*\s*[:,.]?\s*"
                            rf"[*_\"“]*\s*" + escaped, re.IGNORECASE)
