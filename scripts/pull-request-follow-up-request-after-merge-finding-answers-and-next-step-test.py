@@ -1598,6 +1598,42 @@ def test_print_block():
                                                "0123456789ab).\n"
                                                "2. fix-next: `scripts/thing.py:7`: Rename it (Codex finding "
                                                "5555aaaa5555).\n"), out + err)
+    code, out, err = print_block([merge_lane_review(2), merge_lane_review(1)],
+                                 [merge_lane_comment(10, 1, "**fix-next** Rename it (Codex finding 0123456789ab)."),
+                                  merge_lane_comment(11, 2, "**fix-next** Rename it (Codex finding 5555aaaa5555).",
+                                                     line=9),
+                                  merge_lane_comment(12, 2, "**fix-next** Rename it (Codex finding 0123456789ab).")])
+    check(f"{PRINT_BLOCK} pairs an earlier finding with its unchanged restatement, not with a new finding alike "
+          "but for its Codex finding id that GitHub numbered first, and prints the new finding",
+          code == 0 and err == "" and out == (f"#follow_up_request pull request {NUMBER}\n"
+                                               "1. fix-next: `scripts/thing.py:3`: Rename it (Codex finding "
+                                               "0123456789ab).\n"
+                                               "2. fix-next: `scripts/thing.py:9`: Rename it (Codex finding "
+                                               "5555aaaa5555).\n"), out + err)
+    code, out, err = print_block([merge_lane_review(2), merge_lane_review(1)],
+                                 [merge_lane_comment(10, 1, "**fix-next** Rename it (Codex finding 0123456789ab)."),
+                                  merge_lane_comment(11, 2, "**fix-next** Rename it (Codex finding 5555aaaa5555).",
+                                                     line=9),
+                                  merge_lane_comment(12, 2, "**fix-next** Rename it (Codex finding ba9876543210).",
+                                                     line=5)])
+    check(f"{PRINT_BLOCK} pairs an earlier finding with the later review's comment nearest its line when both "
+          "differ only in their Codex finding ids, and prints the other as a new finding",
+          code == 0 and err == "" and out == (f"#follow_up_request pull request {NUMBER}\n"
+                                               "1. fix-next: `scripts/thing.py:3`: Rename it (Codex finding "
+                                               "0123456789ab).\n"
+                                               "2. fix-next: `scripts/thing.py:9`: Rename it (Codex finding "
+                                               "5555aaaa5555).\n"), out + err)
+    code, out, err = print_block([merge_lane_review(2), merge_lane_review(1)],
+                                 [merge_lane_comment(10, 1, "**fix-next** Rename it (Codex finding 0123456789ab)."),
+                                  merge_lane_comment(11, 2, "**fix-next** Rename it (Codex finding ba9876543210).",
+                                                     line=5),
+                                  merge_lane_comment(12, 2, "**fix-next** Rename it (Codex finding ba9876543210).",
+                                                     line=5)])
+    check(f"{PRINT_BLOCK} prints an earlier finding once when a later review restates it twice under one new "
+          "Codex finding id",
+          code == 0 and err == "" and out == (f"#follow_up_request pull request {NUMBER}\n"
+                                               "1. fix-next: `scripts/thing.py:3`: Rename it (Codex finding "
+                                               "0123456789ab).\n"), out + err)
     code, out, err = print_block([merge_lane_review(1)],
                                  [merge_lane_comment(10, 1, "**fix-next** Rename it (Codex finding 0123456789ab)."),
                                   merge_lane_comment(11, 1, "**fix-next** Rename it Codex finding 0123456789ab.",
