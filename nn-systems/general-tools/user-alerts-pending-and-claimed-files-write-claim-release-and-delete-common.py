@@ -21,6 +21,7 @@ object, or that cannot be read, such as a directory, is moved into claimed/ and 
 so the next prompt claims the alerts after it; a claimed file that is not a JSON object raises ValueError, and any
 other OSError is raised; the caller reports each.
 """
+import importlib.util
 import json
 import os
 import re
@@ -28,13 +29,18 @@ import uuid
 from datetime import datetime, timezone
 from pathlib import Path
 
+_agent_seat_name_specification = importlib.util.spec_from_file_location(
+    "agent_seat_name_regular_expression_constant_same_as_launch_claude_ubuntu_check_common",
+    Path(__file__).resolve().with_name("agent-seat-name-regular-expression-constant-same-as-launch-claude-ubuntu-check-common.py"))
+_agent_seat_name = importlib.util.module_from_spec(_agent_seat_name_specification)
+_agent_seat_name_specification.loader.exec_module(_agent_seat_name)
+AGENT_SEAT_NAME_PATTERN = _agent_seat_name.AGENT_SEAT_NAME_PATTERN
+
 USER_ALERTS_RELATIVE_TO_HOME = Path(".local") / "state" / "nedsnodes" / "user-alerts"
 CLAIM_LIMIT_SECONDS = 30 * 60
 # An agent-seat the user seldom types in, so an approval-walk there holds only these alerts and is easy to spot.
 USER_ALERT_AGENT_SEAT_WHEN_ALERT_NAMES_NONE = "merge-lane-1"
 AGENTS_RELATIVE_TO_HOME = Path("agents")
-# The names scripts/launch-claude-ubuntu accepts for an agent-seat.
-AGENT_SEAT_NAME = re.compile(r"^[A-Za-z0-9_][A-Za-z0-9_-]*$")
 USER_ALERT_LINE = re.compile(r"#user_alert\s+(\S+)")
 # Walk-minutes on ned-box, relative to the home directory: closed ones in the log-store, open ones under
 # docs/walk/ of each checkout, which are agent-homes, the worktrees beside or inside them, and the
@@ -55,7 +61,7 @@ def user_alerts_directory():
 
 def agent_home_on_ned_box_found(agent_seat):
     """Whether ~/agents/<agent_seat> is a git checkout, as an agent-home is."""
-    return (isinstance(agent_seat, str) and bool(AGENT_SEAT_NAME.match(agent_seat))
+    return (isinstance(agent_seat, str) and bool(AGENT_SEAT_NAME_PATTERN.fullmatch(agent_seat))
             and (Path.home() / AGENTS_RELATIVE_TO_HOME / agent_seat / ".git").exists())
 
 
