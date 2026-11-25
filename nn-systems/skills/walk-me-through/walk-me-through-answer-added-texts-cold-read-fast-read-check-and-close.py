@@ -617,7 +617,8 @@ ANSWER_LINE = re.compile(r"^(?P<item>items? .+?): (?P<settled>the user answered|
                          re.I)
 MARKER_END = r"(?=[*_`]*(?:[:\s]|$))"
 # Any list or quotation marks, then any emphasis or code marks, ahead of a marker; the list and quotation mark rule is
-# the walk finder's, which the `#new` mark pattern is built from too, so every marker line opens alike.
+# the walk finder's, which the `#new` mark pattern is built from too, so every marker line takes the same list and
+# quotation marks; only that rule is shared, and each marker keeps its own emphasis rule.
 LINE_OPENING_MARKERS = rf"^\s*{load_walk_finder().MARKDOWN_LINE_OPENING_LIST_OR_QUOTATION_MARK_PATTERN_TEXT}*[*_`]*"
 CASE_AGAINST_LINE = re.compile(rf"{LINE_OPENING_MARKERS}#case_against{MARKER_END}[*_`]*[:\s]*(.*)$")
 CASE_AGAINST_RATING = re.compile(r"(very strong|none|weak|medium|strong)\b", re.I)
@@ -1406,7 +1407,7 @@ NOT_ASKED_DROPPED_PROPOSAL_NEW_TEXT_PROBLEM = ("- it has a `#new` line, which A 
 # Fixed fields, not prose: a tally phrase such as `0 cases in total; will look in ...` holds an `in` that names no
 # place searched, so the places are only what follows `places:`.
 SEARCH_LINE = re.compile(r"(\d{4}-\d{2}-\d{2}) to (\d{4}-\d{2}-\d{2}), (\d+) cases?, places: *(.*[A-Za-z].*)",
-                         re.I | re.S)
+                         re.I)
 SEARCH_WINDOW_DAYS = 30
 NOT_ASKED_WHY = {
     TOUCHES: "list on it every file the change edits or deletes, separated by spaces.",
@@ -1640,7 +1641,8 @@ FRESH_AGENT_REWRITE_BRIEF_LINES = (
     "{minutes} that hold them:",
 )
 FRESH_AGENT_REWRITE_NO_USER_WORDS = ("- none: no line of the walk-minutes holds his words and names item {whole_number}, one of "
-                                     "its sub-steps, its title or an item whose held answer raised it.")
+                                     "its sub-steps, its title, an item whose held answer raised it, or the item that waited when it "
+                                     "was bumped.")
 FRESH_AGENT_REWRITE_FILES_HEADER = "The files and pages the item links:"
 FRESH_AGENT_REWRITE_NO_FILES = "- none."
 FRESH_AGENT_REWRITE_ON_NED_BOX = "{link} (on ned-box: {path})"
@@ -3244,26 +3246,35 @@ def approval_walk_item_linked_files(text, ned_box_home, mac_mount):
 
 
 def approval_walk_item_user_words_in_minutes(walk_finder, parser, minutes_text, whole_number, titles):
-    """Return each line of the walk-minutes that holds the user's words and names item whole_number, one of its
-    sub-steps, one of titles, or an item whose held answer raised item whole_number, or raised an item that did,
-    with its sub-steps: the user's reply on that item is what the raised item is about."""
+    """Return each line of the walk-minutes that holds the user's words and names, before his words, item whole_number, one of its sub-steps, one of titles, or an
+    item whose held answer raised item whole_number, or that waited when the user bumped it, or that raised an item
+    that did, with its sub-steps: the user's reply on that item is what the raised item is about."""
     wholes = {whole_number}
-    holds = [({number.split(".")[0] for number in held}, {number.split(".")[0] for number in raised})
-             for _, held, _, raised in held_answers(walk_finder, minutes_text, parser)]
+    raisers = [({number.split(".")[0] for number in held}, {number.split(".")[0] for number in raised})
+               for _, held, _, raised in held_answers(walk_finder, minutes_text, parser)]
+    for line in walk_finder.prose_lines(minutes_text, parser):
+        match = BUMP_MINUTES_LINE.match(line)
+        with contextlib.suppress(walk_finder.UnusableRange):
+            if match:
+                raisers.append(({number.split(".")[0] for number in walk_finder.parse_items(match["waiting"])[0]},
+                                {number.split(".")[0] for number in walk_finder.parse_items(match["bumped"])[0]}))
     while True:
-        raising = {number for held, raised in holds if raised & wholes for number in held} - wholes
+        raising = {number for held, raised in raisers if raised & wholes for number in held} - wholes
         if not raising:
             break
         wholes |= raising
     found = []
     for line in minutes_text.split("\n"):
-        if USER_WORDS_IN_MINUTES_PHRASE not in line:
+        # Only the item named ahead of his words counts: his words, or an agent's note quoting another walk, can
+        # name any item number.
+        naming = line.split(USER_WORDS_IN_MINUTES_PHRASE, 1)[0]
+        if naming == line:
             continue
         named = set()
-        for numbers in walk_finder.WITHDRAWN_HEADING_ITEMS.finditer(line):
+        for numbers in walk_finder.WITHDRAWN_HEADING_ITEMS.finditer(naming):
             with contextlib.suppress(walk_finder.UnusableRange):
                 named.update(number.split(".")[0] for number in walk_finder.expand_numbers(numbers[1]))
-        if named & wholes or any(title and title.lower() in line.lower() for title in titles):
+        if named & wholes or any(title and title.lower() in naming.lower() for title in titles):
             found.append(line)
     return found
 

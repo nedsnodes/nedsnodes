@@ -201,6 +201,18 @@ def main():
               and f"holds commit {head}, not {head[:8]}" in completed.stdout,
               f"exit {completed.returncode}\n{completed.stdout}{completed.stderr}")
 
+        merged_worktree = review_worktrees_directory(helpers) / "pr7-merged"
+        merged_worktree.mkdir()
+        identity = ["-c", "user.name=t", "-c", "user.email=t@example.invalid"]
+        for command in (["init", "-q", "-b", "main"], [*identity, "commit", "-q", "--allow-empty", "-m", "main"],
+                        ["checkout", "-q", "-b", "side"], [*identity, "commit", "-q", "--allow-empty", "-m", "side"],
+                        ["checkout", "-q", "main"]):
+            subprocess.run(["git", "-C", str(merged_worktree), *command], check=True)
+        merged_on_main = subprocess.run(["git", "-C", str(merged_worktree), "rev-parse", "HEAD"], check=True,
+                                        capture_output=True, text=True).stdout.strip()
+        subprocess.run(["git", "-C", str(merged_worktree), *identity, "merge", "-q", "--no-ff", "--no-edit", "side"],
+                       check=True)
+
         completed, _, cell_calls = run_program(scratch, helpers, {"MERGE_LANE_CODEX_TEST_CELL_MOVES_HEAD": "1"},
                                                extra_arguments=("--expected-head-commit", head))
         moved_to = subprocess.run(["git", "-C", str(head_worktree), "rev-parse", "HEAD"], check=True,
@@ -214,13 +226,36 @@ def main():
               f"exit {completed.returncode}\n{completed.stdout}{completed.stderr}")
         rerun_lines = [line for line in completed.stdout.splitlines() if line.startswith("2. Then review again: ")]
         rerun = shlex.split(rerun_lines[0].removeprefix("2. Then review again: ")) if rerun_lines else []
-        check("that run prints the rebuild command for the commit it was to review, and a rerun command with "
-              "the same base and directories that names that commit as --expected-head-commit",
-              f"merge-lane-pull-request-head-and-merged-worktrees-rebuild.py 7 {head} " in completed.stdout
+        check("that run prints the rebuild command for the commit it was to review on the main commit pr<n>-merged "
+              "was built on, and a rerun command with the same base and directories that names that commit as "
+              "--expected-head-commit",
+              f"merge-lane-pull-request-head-and-merged-worktrees-rebuild.py 7 {head} {merged_on_main} "
+              in completed.stdout
               and rerun[1:3] == ["7", BASE]
               and rerun[rerun.index("--expected-head-commit") + 1] == head
               and rerun[rerun.index("--merge-lane-review-worktrees-directory") + 1]
               == str(review_worktrees_directory(helpers)),
+              completed.stdout)
+        check("that run says a newer head goes to the review program, not into the printed commands, and "
+              "prints no gh command",
+              "never put a newer head of the pull request into them" in completed.stdout
+              and "A newer head is reviewed as a new round, by scripts/merge-lane-pull-request-worktrees-reviewer-brief" in completed.stdout
+              and "gh pr view" not in completed.stdout,
+              completed.stdout)
+        head = moved_to
+
+        merged_worktree.rename(merged_worktree.with_name("pr7-merged-away"))
+        completed, _, _ = run_program(scratch, helpers, {"MERGE_LANE_CODEX_TEST_CELL_MOVES_HEAD": "1"},
+                                      extra_arguments=("--expected-head-commit", head))
+        merged_worktree.with_name("pr7-merged-away").rename(merged_worktree)
+        moved_to = subprocess.run(["git", "-C", str(head_worktree), "rev-parse", "HEAD"], check=True,
+                                  capture_output=True, text=True).stdout.strip()
+        check("a run whose pr<n>-head moves while pr<n>-merged's main commit cannot be read prints no rebuild "
+              "command, says why, and sends the pull request to the review program",
+              completed.returncode == 2 and "rebuild.py" not in completed.stdout.replace(
+                  "another run of merge-lane-pull-request-head-and-merged-worktrees-rebuild.py", "")
+              and "could not be read, so no rebuild command is printed" in completed.stdout
+              and "Review the pull request again with the review program" in completed.stdout,
               completed.stdout)
         head = moved_to
 

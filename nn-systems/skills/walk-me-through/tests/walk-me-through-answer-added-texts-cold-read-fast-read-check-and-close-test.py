@@ -18,6 +18,7 @@ program's own output. The exit code is asserted on every case.
 import argparse
 import contextlib
 import datetime
+import errno
 import importlib.util
 import io
 import json
@@ -356,60 +357,77 @@ class Case:
     forked_runs = 0
 
     def run_forked(self, command, environment, stop_signal_dispositions):
-        """Run command's main() in a forked child of a copy of the program loaded once, ending the child as the
+        """Run command's main() in a forked child of the program at command[1], loaded once, ending the child as the
         interpreter would end it. Starting the interpreter, compiling the program and running its imports cost most
         of what a launch costs; a case about the process itself still launches it."""
-        global PROGRAM_LOADED_ONCE_FOR_FORKED_RUNS
-        if PROGRAM_LOADED_ONCE_FOR_FORKED_RUNS is None:
-            PROGRAM_LOADED_ONCE_FOR_FORKED_RUNS = load_program()
+        program_path = command[1]
+        program = PROGRAMS_LOADED_ONCE_FOR_FORKED_RUNS.get(program_path)
+        if program is None:
+            program = PROGRAMS_LOADED_ONCE_FOR_FORKED_RUNS[program_path] = load_program(program_path)
         Case.forked_runs += 1
         output_paths = [self.root / f"forked-run-{Case.forked_runs}-{stream}" for stream in ("stdout", "stderr")]
+        # Opened here, not in the child, so that a failure to make them reaches the suite.
+        output_descriptors = [os.open(path, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600) for path in output_paths]
         sys.stdout.flush()
         sys.stderr.flush()
-        child = os.fork()
-        if child == 0:
-            exit_code = 1
-            try:
-                for descriptor, path in zip((1, 2), output_paths):
-                    opened = os.open(path, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
-                    os.dup2(opened, descriptor)
-                    os.close(opened)
-                sys.stdout = io.TextIOWrapper(io.FileIO(1, "w", closefd=False), encoding="utf-8")
-                sys.stderr = io.TextIOWrapper(io.FileIO(2, "w", closefd=False), encoding="utf-8",
-                                              errors="backslashreplace", line_buffering=True)
-                os.chdir(self.checkout)
-                os.environ.clear()
-                os.environ.update(environment)
-                # This process cached its own temporary directory; the program must take the case's TMPDIR.
-                tempfile.tempdir = None
-                stop_signal_dispositions()
-                sys.argv = command[1:]
+        try:
+            child = os.fork()
+            if child == 0:
+                exit_code = 1
                 try:
+                    for descriptor, opened in zip((1, 2), output_descriptors):
+                        os.dup2(opened, descriptor)
+                    sys.stdout = io.TextIOWrapper(io.FileIO(1, "w", closefd=False), encoding="utf-8")
+                    sys.stderr = io.TextIOWrapper(io.FileIO(2, "w", closefd=False), encoding="utf-8",
+                                                  errors="backslashreplace", line_buffering=True)
+                    os.chdir(self.checkout)
+                    os.environ.clear()
+                    os.environ.update(environment)
+                    # A launched interpreter reads TZ as it starts; this one cached the parent's zone.
+                    time.tzset()
+                    # This process cached its own temporary directory; the program must take the case's TMPDIR.
+                    tempfile.tempdir = None
+                    stop_signal_dispositions()
+                    sys.argv = command[1:]
                     try:
-                        exit_code = PROGRAM_LOADED_ONCE_FOR_FORKED_RUNS.main()
-                    except SystemExit as stopped:
-                        exit_code = stopped.code
-                    if exit_code is None:
-                        exit_code = 0
-                    elif not isinstance(exit_code, int):
-                        print(exit_code, file=sys.stderr)
+                        try:
+                            exit_code = program.main()
+                        except SystemExit as stopped:
+                            exit_code = stopped.code
+                        if exit_code is None:
+                            exit_code = 0
+                        elif not isinstance(exit_code, int):
+                            print(exit_code, file=sys.stderr)
+                            exit_code = 1
+                        sys.stdout.flush()
+                    except BaseException:
+                        traceback.print_exc()
                         exit_code = 1
-                    sys.stdout.flush()
-                except BaseException:
-                    traceback.print_exc()
-                    exit_code = 1
-                sys.stderr.flush()
-            finally:
-                # Never return: the child would run the rest of the suite and remove its scratch directory.
-                os._exit(exit_code & 0xFF if isinstance(exit_code, int) else 1)
-        _, status = os.waitpid(child, 0)
+                        # An interpreter flushes stdout on its way out; os._exit below would drop it.
+                        with contextlib.suppress(Exception):
+                            sys.stdout.flush()
+                    sys.stderr.flush()
+                finally:
+                    # Never return: the child would run the rest of the suite and remove its scratch directory.
+                    os._exit(exit_code & 0xFF if isinstance(exit_code, int) else 1)
+        finally:
+            for opened in output_descriptors:
+                os.close(opened)
+        try:
+            _, status = os.waitpid(child, 0)
+        except BaseException:
+            # Such as the suite's SIGTERM handler: the child must not go on in the scratch directory the suite removes.
+            os.kill(child, signal.SIGKILL)
+            os.waitpid(child, 0)
+            raise
         stdout, stderr = (path.read_text(encoding="utf-8") for path in output_paths)
         for path in output_paths:
             path.unlink()
         return subprocess.CompletedProcess(command, os.waitstatus_to_exitcode(status), stdout, stderr)
 
 
-PROGRAM_LOADED_ONCE_FOR_FORKED_RUNS = None
+# Keyed by program path: a case may point PROGRAM at a copy, whose own __file__ the program prints.
+PROGRAMS_LOADED_ONCE_FOR_FORKED_RUNS = {}
 
 
 def check_command_for(case, *words):
@@ -2239,8 +2257,8 @@ def test_a_fast_read_whose_record_was_not_shipped_is_reported():
           and case.minutes.read_text().count(f"The fast read also said: {note}") == 2, described(result))
 
 
-def load_program():
-    spec = importlib.util.spec_from_file_location("check_and_close", PROGRAM)
+def load_program(path=None):
+    spec = importlib.util.spec_from_file_location("check_and_close", path or PROGRAM)
     module = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(module)
     return module
@@ -3950,7 +3968,7 @@ def test_following_the_repeated_heading_refusal_clears_it_when_two_headings_shar
     a, b = "## Item 2 of 9: a", "## Item 2 of 9: b"
     refused = Case(next_to_present="item 2 of 9", document=layout.format(a=a, b=b)).run("check")
     check("the `of M` in the minutes does not pick between two headings that share it, and the refusal says so",
-          refused.returncode == 1 and "if no other of those headings gives the same total as the heading you mean"
+          refused.returncode == 1 and "by the heading you mean and by no other heading for that item"
           in refused.stderr, described(refused))
     for meant, next_to_present, first, second, read in (
             ("the one `of 10` heading, named by its total", "item 2 of 10", a, b, "C.\n"),
@@ -7529,6 +7547,82 @@ def test_every_printed_command_runs_from_a_checkout_path_holding_a_space():
         PROGRAM, SUITE_ROOT = program, suite_root
 
 
+def forked_run_of(case, name, source, environment=None):
+    """Write source as a program named name in case.root and run it through Case.run_forked."""
+    program = case.root / f"{name}.py"
+    program.write_text(source)
+    return case.run_forked([sys.executable, str(program)], dict(environment or os.environ), lambda: None)
+
+
+def test_a_forked_run_runs_the_program_its_command_names_as_a_launch_would():
+    case = Case()
+    first = forked_run_of(case, "names-itself-first", "def main():\n    print(__file__)\n")
+    second = forked_run_of(case, "names-itself-second", "def main():\n    print(__file__)\n")
+    check("a forked run of a second program path runs that program, not the first one loaded",
+          (first.stdout.strip(), second.stdout.strip())
+          == (str(case.root / "names-itself-first.py"), str(case.root / "names-itself-second.py")),
+          described(second))
+    zone = forked_run_of(case, "prints-its-zone", "import time\ndef main():\n    print(time.strftime('%z'))\n",
+                         {**os.environ, "TZ": "Pacific/Kiritimati"})
+    check("a forked run takes the case's TZ, as a launched interpreter does", zone.stdout.strip() == "+1400",
+          described(zone))
+    raised = forked_run_of(case, "prints-then-raises", "def main():\n    print('printed first')\n    raise ValueError\n")
+    check("a forked run that raises keeps what it printed on stdout",
+          raised.returncode == 1 and raised.stdout == "printed first\n" and "ValueError" in raised.stderr,
+          described(raised))
+
+
+def test_a_forked_run_that_cannot_make_its_output_files_raises_the_error_that_stopped_it():
+    case = Case()
+    program = case.root / "never-runs.py"
+    program.write_text("def main():\n    pass\n")
+    real_open = os.open
+
+    def disk_full(path, *arguments):
+        if "forked-run-" in str(path):
+            raise OSError(errno.ENOSPC, "No space left on device", str(path))
+        return real_open(path, *arguments)
+
+    os.open = disk_full
+    try:
+        case.run_forked([sys.executable, str(program)], dict(os.environ), lambda: None)
+    except OSError as error:
+        check("a forked run whose output file cannot be made raises the error that stopped it",
+              error.errno == errno.ENOSPC, repr(error))
+    else:
+        check("a forked run whose output file cannot be made raises", False)
+    finally:
+        os.open = real_open
+
+
+def test_a_forked_run_stopped_while_waiting_kills_and_reaps_its_child():
+    case = Case()
+    pid_file = case.root / "forked-child-pid"
+    source = (f"import os, time\ndef main():\n    open({str(pid_file)!r}, 'w').write(str(os.getpid()))\n"
+              "    time.sleep(60)\n")
+
+    def stopped(*_):
+        raise SystemExit(1)
+
+    previous = signal.signal(signal.SIGALRM, stopped)
+    signal.setitimer(signal.ITIMER_REAL, 1.0)
+    try:
+        forked_run_of(case, "sleeps", source)
+    except SystemExit:
+        pid = int(pid_file.read_text())
+        try:
+            os.kill(pid, 0)
+            gone = False
+        except ProcessLookupError:
+            gone = True
+        check("a forked run stopped while it waits kills and reaps its child before the error goes on", gone)
+    else:
+        check("a forked run stopped while it waits lets the stop go on", False)
+    finally:
+        signal.setitimer(signal.ITIMER_REAL, 0)
+        signal.signal(signal.SIGALRM, previous)
+
+
 def stopped_by_sigterm(*_):
     raise SystemExit(1)  # So main()'s finally removes the suite's scratch directory.
 
@@ -7933,6 +8027,47 @@ def test_the_fresh_agent_brief_holds_the_raising_item_s_answer_words_and_the_hoo
           f"- {own_words}" in brief, brief)
     check("the brief leaves out the words on item 5, whose held answer raised another item",
           "a word on item 5" not in brief, brief)
+
+
+def test_the_fresh_agent_brief_holds_the_bumped_item_s_raising_reply_and_not_a_note_naming_another_walk_s_item():
+    """Item 3 was added and bumped while item 2 waited, from the user's own-words reply to item 2; an agent's note
+    in the walk-minutes quotes his words on item 3 of another walk."""
+    spec = importlib.util.spec_from_file_location("walk_short_answer_hook_for_bump_brief_test", SHORT_ANSWER_HOOK_FILE)
+    hook = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(hook)
+    reply = hook.APPROVAL_WALK_WAITING_ITEM_USER_OWN_WORDS_REPLY_WALK_MINUTES_LINE.format(
+        date_and_time="2026-11-25 16:32Z", item="item 2 of 8", words="`I thought file types were dots`")
+    other_reply = hook.APPROVAL_WALK_WAITING_ITEM_USER_OWN_WORDS_REPLY_WALK_MINUTES_LINE.format(
+        date_and_time="2026-11-25 16:40Z", item="item 5 of 9", words="`a word on item 5`")
+    note = ('- 2026-11-24 ruling relayed by another agent-seat: the user named it "guide-book" (his words, its walk, '
+            'item 3 of 47: "spell it GUIDE-book")')
+    agent_record = "2026-11-25T16:35Z, the user on item 3 of 9 (the dots item), in his words: `an agent's record`"
+    bump = "Bumped by the user: item 3 of 9 is shown next, before item 2 of 9, which waits again after it."
+    original = revised_item_case
+
+    def bumped_item_case():
+        case = original()
+        case.minutes.write_text("# Minutes\n\n" + "\n".join((note, reply, agent_record, bump, other_reply,
+                                                              "#next_to_present item 3 of 9", "")))
+        return case
+    globals()["revised_item_case"] = bumped_item_case
+    try:
+        case, results, _ = revised_item_case_revised_three_times_across_a_split()
+    finally:
+        globals()["revised_item_case"] = original
+    last = results[4]
+    brief = last.stdout.split("----- brief for the fresh-agent: start -----\n")[-1].split(
+        "----- brief for the fresh-agent: end -----")[0]
+    check("at the third revision the read step prints the brief", last.returncode == 1 and "has been revised three "
+          "times" in last.stdout, "".join(described(result) for result in results))
+    check("the brief holds the user's reply on item 2, which waited when he bumped item 3", f"- {reply}" in brief,
+          brief)
+    check("the brief leaves out an agent's note that says his words and names item 3 of another walk",
+          "GUIDE-book" not in brief, brief)
+    check("the brief holds his words on item 3 as an agent recorded them, in its own wording",
+          f"- {agent_record}" in brief, brief)
+    check("the brief leaves out his reply on item 5, which raised no bumped item", "a word on item 5" not in brief,
+          brief)
 
 
 def test_the_fresh_agent_rewrite_takes_the_place_of_the_item_s_text_and_starts_the_count_again():

@@ -2313,6 +2313,27 @@ with tempfile.TemporaryDirectory() as instrument_scratch:
               f"{'is' if built else 'is not'} taken as instrument-built",
               _instrument_common.instrument_built_record_directory(directory) is built)
 
+# Each launcher's --effort help states the efforts its own tier map pins, so
+# the help cannot name a launcher's effort the map no longer holds.
+for launcher_file in ("cold-read-agy-cell.py", "cold-read-claude-cell.py",
+                      "cold-read-codex-cell.py"):
+    launcher_help = subprocess.run(
+        [sys.executable, str(SYSTEM_DIRECTORY / launcher_file), "--help"],
+        capture_output=True, text=True, timeout=60).stdout
+    launcher_help_words = " ".join(launcher_help.split())
+    # argparse wraps after a hyphen, so compare with every space removed.
+    launcher_help_unspaced = "".join(launcher_help.split())
+    _launcher_spec = importlib.util.spec_from_file_location(
+        "cold_read_launcher_" + launcher_file.replace("-", "_").replace(".py", ""),
+        SYSTEM_DIRECTORY / launcher_file)
+    _launcher = importlib.util.module_from_spec(_launcher_spec)
+    _launcher_spec.loader.exec_module(_launcher)
+    for tier, effort in _launcher.TIER_TO_REASONING_EFFORT.items():
+        check(f"{launcher_file}'s --effort help says its {tier} tier runs at {effort}",
+              f"{tier}runsat{effort}" in launcher_help_unspaced, launcher_help_words[-600:])
+    check(f"{launcher_file}'s --effort help names no other launcher's pinned effort",
+          "pins medium" not in launcher_help_words, launcher_help_words[-600:])
+
 print()
 if failures:
     print(f"{len(failures)} case(s) failed: {', '.join(failures)}")

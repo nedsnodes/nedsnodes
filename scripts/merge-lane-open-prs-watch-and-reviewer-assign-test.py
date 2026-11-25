@@ -1062,6 +1062,31 @@ def run_merge_lane_pull_request_review_assignment_watcher_cases():
             scratch.chmod(0o700)
         check("a seed run that cannot write the assignment file exits 1, says so, and makes none",
               exit_code == 1 and "could not be written" in errors and not seeded.exists(), errors)
+        seeded.with_name(seeded.name + ".lock").unlink()
+        scratch.chmod(0o500)
+        try:
+            exit_code, lines, errors = seed_with([open_at_seed])
+        finally:
+            scratch.chmod(0o700)
+        check("a first seed run that cannot make the lock file exits 1, says so with no traceback, "
+              "and makes no assignment file",
+              exit_code == 1 and "lock file beside the assignment file" in errors
+              and "Traceback" not in errors and not seeded.exists(), errors)
+
+        class PutBackByHandWhileGitHubIsRead:
+            def __len__(self):
+                return 1
+
+            def __getitem__(self, _index):
+                seeded.write_text("4028 merge-lane-3\n", encoding="utf-8")
+                return open_at_seed
+
+        exit_code, lines, errors = seed_with(PutBackByHandWhileGitHubIsRead())
+        check("a seed run whose assignment file is put back while GitHub is read exits 1 and keeps "
+              "that file",
+              exit_code == 1 and "appeared while the open pull requests were read" in errors
+              and seeded.read_text(encoding="utf-8") == "4028 merge-lane-3\n", errors)
+        seeded.unlink()
         seed.write_text("4028 lane-one\n", encoding="utf-8")
         exit_code, lines, errors = seed_with([open_at_seed])
         check("a malformed seed file exits 1, naming it as the seed file, and writes no assignment "
@@ -1846,9 +1871,9 @@ class PollOnceMachine:
         watcher_module.time = self
         watcher_module.fetch_open_pull_requests = lambda _repo, _token: (
             (None, self.poll) if isinstance(self.poll, str) else (self.poll, None))
-        errors = io.StringIO()
+        errors, output = io.StringIO(), io.StringIO()
         try:
-            with contextlib.redirect_stdout(io.StringIO()), contextlib.redirect_stderr(errors):
+            with contextlib.redirect_stdout(output), contextlib.redirect_stderr(errors):
                 code = watcher_module.main([
                     flag, "--token-file", str(self.token_file),
                     "--poll-once-directory", str(self.directory),
@@ -1859,7 +1884,7 @@ class PollOnceMachine:
         finally:
             (watcher_module.time, watcher_module.fetch_open_pull_requests,
              watcher_module.SECRETS_TO_REDACT[:]) = saved
-        self.errors = errors.getvalue()
+        self.errors, self.output = errors.getvalue(), output.getvalue()
         return code
 
     def task_files(self):
@@ -1920,12 +1945,25 @@ def run_poll_once_cases(scratch_root, token_file):
                                               "last_events_task_opened_at": None}), encoding="utf-8")
     check("a state file with a field of the wrong type exits 1",
           machine.run() == 1 and "wrong type" in machine.errors, machine.errors)
+    machine.state_path.write_text(json.dumps({"pull_requests": {}, "notices": {"reported": None},
+                                              "failed_polls": 0, "event_lines_delivered": 0,
+                                              "last_events_task_opened_at": None}), encoding="utf-8")
+    code = machine.run()
+    check("a state file whose notices hold a record of the wrong type exits 1 with the repair "
+          "step, not a traceback",
+          code == 1 and "wrong type" in machine.errors and "Traceback" not in machine.errors,
+          f"{code} {machine.errors}")
 
     machine = machine_for("quiet")
     machine.poll = [poll_once_pull_request(1), poll_once_pull_request(2, draft=True)]
     check("the baseline run exits 0 and raises no event",
           machine.run("--poll-once-write-baseline") == 0 and not machine.event_lines(),
           machine.errors)
+    check("the baseline says to list the open pull requests by hand once, and to read the event "
+          "lines no task named",
+          "list the open pull requests by hand once" in machine.output
+          and f"every line of {machine.events_path} as delivered" in machine.output,
+          machine.output)
     machine.run()
     before = machine.state_path.read_text(encoding="utf-8")
     for _ in range(3):
@@ -2010,6 +2048,34 @@ def run_poll_once_cases(scratch_root, token_file):
           code == 1 and machine.state_path.read_text(encoding="utf-8") == before
           and "could not record" in machine.tasks_read()[0]["subject"] + machine.errors,
           f"{code} {machine.errors}")
+
+    machine = machine_for("another-repository-default-directory")
+    # Should these cases regress into a poll, it must not touch merge-lane-2's real state or tasks.
+    saved_default = watcher_module.OPEN_PRS_WATCH_POLL_ONCE_STATE_EVENTS_AND_LOCK_DEFAULT_DIRECTORY
+    watcher_module.OPEN_PRS_WATCH_POLL_ONCE_STATE_EVENTS_AND_LOCK_DEFAULT_DIRECTORY = machine.directory
+    safe = ["--task-list-directory", str(machine.tasks), "--needs-a-look-directory",
+            str(machine.notices), "--token-file", str(token_file)]
+    errors = io.StringIO()
+    try:
+        with contextlib.redirect_stderr(errors):
+            code = watcher_module.main(["--poll-once", "--repo", "someone/elsewhere", *safe])
+    finally:
+        watcher_module.OPEN_PRS_WATCH_POLL_ONCE_STATE_EVENTS_AND_LOCK_DEFAULT_DIRECTORY = saved_default
+    check("--poll-once with another --repo and no --poll-once-directory exits 2 and names the "
+          "option, before any poll",
+          code == 2 and "--poll-once-directory" in errors.getvalue()
+          and not machine.state_path.exists(), errors.getvalue())
+
+    errors = io.StringIO()
+    with contextlib.redirect_stderr(errors):
+        try:
+            code = watcher_module.main(["--poll-once", "--merge-lane-pr-review-assignments-list-for",
+                                        "merge-lane-1", "--poll-once-directory",
+                                        str(machine.directory), *safe])
+        except SystemExit as stop:
+            code = stop.code
+    check("--poll-once with an assignment listing is refused with exit 2", code == 2,
+          f"{code} {errors.getvalue()}")
 
     machine = machine_for("truncated-events")
     machine.poll = []
