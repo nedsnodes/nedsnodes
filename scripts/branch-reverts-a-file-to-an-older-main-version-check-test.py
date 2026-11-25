@@ -137,6 +137,11 @@ def run_cases(scratch):
           "`git checkout main -- <path>`" in done.stdout
           and "name the commit, by at least its first 12 characters" in done.stdout,
           done.stdout)
+    save_at = done.stdout.find(
+        "save it with `git diff HEAD -- <path> > <a file outside this checkout>`")
+    check("it says to save the file's uncommitted changes before the git checkout that "
+          "overwrites them",
+          0 <= save_at < done.stdout.find("`git checkout main -- <path>`"), done.stdout)
 
     repository.git("commit", "--quiet", "--allow-empty", "-m",
                    "Undo %s on purpose" % replaced[:12])
