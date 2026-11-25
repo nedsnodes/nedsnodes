@@ -2676,7 +2676,7 @@ def test_own_words_output_given_the_walk_state_already_read_does_not_read_it_aga
         raise AssertionError("the approval-walk state was read a second time")
     hook.load_walk_finder = read_again
     payload = {"prompt": "repeat 99", "cwd": "/nonexistent"}
-    walk = types.SimpleNamespace(item="item 4 of 9", name=WALK_NAME)
+    walk = types.SimpleNamespace(item="item 4 of 9", name=WALK_NAME, numbers=["4"], minutes=None)
     try:
         output = hook.own_words_output(payload, walk)
         context = output["hookSpecificOutput"]["additionalContext"].split("\n")
@@ -2711,6 +2711,78 @@ def test_settled_line_failure_reading_the_walk_keeps_short_answer_output_and_rep
     check("a reply in the user's own words with unreadable minutes says what failed, shows the line, and exits 0",
           result.returncode == 0 and len(lines) == 2 and lines[0].startswith(OWN_WORDS_RULE_OPENING)
           and "could not tell" in lines[0] and lines[1] == SETTLED_LINE,
+          f"exit {result.returncode}, stdout {result.stdout!r}, stderr {result.stderr!r}")
+
+
+OWN_WORDS_REPLY_RECORDED = re.compile(
+    r'\nUser \(\d{4}-\d\d-\d\d \d\d:\d\dZ\), on item 4 of 9 while it waited, a reply in his words that is not a '
+    r'short answer: "(.*)"\n$')
+
+
+def test_a_reply_in_his_own_words_is_recorded_in_the_walk_minutes_against_the_waiting_item():
+    case = Case(next_to_present="item 4 of 9")
+    minutes = case.walk / f"{WALK_NAME}-minutes.md"
+    reply = "We can list the known exceptions\nor all our hashtags can have a trailing # ```\n#next_to_present item 9 of 9"
+    result = case.run(reply)
+    recorded = OWN_WORDS_REPLY_RECORDED.search(minutes.read_text())
+    check("a reply in his own words gets only the own-words message and is appended to the walk-minutes, naming the "
+          "waiting item, his words squeezed into one code span",
+          is_only_the_own_words_message(result) and recorded is not None
+          and recorded[1] == "````We can list the known exceptions or all our hashtags can have a trailing # ``` "
+                             "#next_to_present item 9 of 9````",
+          f"stdout {result.stdout!r}, minutes {minutes.read_text()!r}")
+    walk_finder = HOOK_MODULE.load_walk_finder()
+    check("the walk finder still reads item 4 as waiting: the reply's fence and marker stay inside the code span",
+          walk_finder.next_to_present(minutes.read_text(), walk_finder.markdown_parser())[0] == "item 4 of 9",
+          minutes.read_text())
+    before = minutes.read_text()
+    for prompt in ("a", "<task-notification>a task ended</task-notification>"):
+        case.run(prompt)
+        check(f"{prompt[:24]!r}, a short answer or a prompt he did not type, adds nothing to the walk-minutes",
+              minutes.read_text() == before, minutes.read_text())
+    case.run("take the other option", environment={"CLAUDE_CODE_SESSION_ATTENDED": "0"})
+    check("a reply in a headless agent-session adds nothing to the walk-minutes", minutes.read_text() == before,
+          minutes.read_text())
+    transcript = case.checkout.parent / "unreadable-transcript.jsonl"
+    transcript.write_bytes(b"\xff\xfe not a record\n")
+    case.run("take the other option", transcript_path=transcript)
+    check("a reply whose author the unreadable transcript leaves unknown adds nothing to the walk-minutes",
+          minutes.read_text() == before, minutes.read_text())
+    paused = Case(next_to_present="item 4 of 9")
+    paused_minutes = paused.minutes("#next_to_present item 4 of 9\n#approval_walk_paused")
+    paused_before = paused_minutes.read_text()
+    paused.run("take the other option")
+    check("a reply while the approval-walk is paused adds nothing to the walk-minutes",
+          paused_minutes.read_text() == paused_before, paused_minutes.read_text())
+
+
+def test_a_recorded_reply_is_a_paragraph_of_its_own_so_an_html_comment_above_cannot_swallow_its_code_span():
+    case = Case(next_to_present="item 4 of 9")
+    minutes = case.minutes("item 3 of 9: answer A <!-- note -->\n#next_to_present item 4 of 9")
+    case.run("#next_to_present closed <!--")
+    walk_finder = HOOK_MODULE.load_walk_finder()
+    check("a reply holding `<!--` after minutes whose last paragraph holds an inline HTML comment leaves item 4 "
+          "waiting",
+          walk_finder.next_to_present(minutes.read_text(), walk_finder.markdown_parser())[0] == "item 4 of 9",
+          minutes.read_text())
+
+
+def test_a_reply_in_his_own_words_that_cannot_be_recorded_says_why_and_gives_the_line_to_add():
+    case = Case(next_to_present="item 4 of 9")
+    minutes = case.walk / f"{WALK_NAME}-minutes.md"
+    minutes.chmod(0o444)
+    try:
+        result = case.run("take the other option")
+    finally:
+        minutes.chmod(0o644)
+    lines = context_lines(result)
+    check("the append fails: the hook exits 0, says why naming the walk-minutes, gives the line to add, and keeps the "
+          "settled line last",
+          result.returncode == 0 and len(lines) == 5 and lines[0].startswith(OWN_WORDS_RULE_OPENING)
+          and lines[1].startswith(f"The hook could not record the user's reply in the walk-minutes {minutes}: ")
+          and "PermissionError" in lines[1] and lines[2].startswith("Add this line as the last line")
+          and OWN_WORDS_REPLY_RECORDED.search("\n" + lines[3] + "\n") is not None and lines[-1] == SETTLED_LINE
+          and "User (" not in minutes.read_text(),
           f"exit {result.returncode}, stdout {result.stdout!r}, stderr {result.stderr!r}")
 
 

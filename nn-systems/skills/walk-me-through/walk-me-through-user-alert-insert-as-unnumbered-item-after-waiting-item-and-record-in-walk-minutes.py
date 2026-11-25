@@ -215,9 +215,7 @@ def insert(cwd, alert_ids, now=None):
         date=date, count=len(alerts), whole=whole,
         titles="; ".join(map(walk_finder.text_wrapped_as_markdown_code_span, titles)))]
     minutes_lines += [f"#user_alert {alert.get('id')}" for alert in alerts]
-    existing = minutes.read_text(encoding="utf-8")
-    separator = "" if existing.endswith("\n") or not existing else "\n"
-    minutes.write_text(existing + separator + "\n".join(minutes_lines) + "\n", encoding="utf-8")
+    walk_finder.append_to_minutes(minutes, minutes_lines)
     output = [ADDED_LINE.format(title=title, document=document, whole=whole) for title in titles]
     category_tags = ", ".join(f"`{check_program.WALK_CATEGORY_TAG}{category}`"
                               for category in check_program.WALK_CATEGORIES)
