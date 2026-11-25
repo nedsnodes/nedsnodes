@@ -141,6 +141,15 @@ def main() -> int:
                   fleet.git(iota, "rev-parse", "HEAD"))
         kappa = fleet.seat_home("kappa", own_commits=0, recorded=True)
         fleet.git(kappa, "bisect", "start")
+        # Already-detached agent-homes made before the launchers marked them, holding
+        # uncommitted work: git keeps lambda's change across the move, and refuses mu's move
+        # because main adds a file mu holds untracked.
+        lam = fleet.seat_home("lambda", own_commits=0, recorded=True)
+        fleet.git(lam, "checkout", "--quiet", "--detach")
+        (lam / "base.txt").write_text("changed, not committed\n")
+        mu = fleet.seat_home("mu", own_commits=0, recorded=True)
+        fleet.git(mu, "checkout", "--quiet", "--detach")
+        (mu / "main-moves.txt").write_text("mu's own copy\n")
         topic = fleet.agents_root / "alpha-topic-worktree"
         fleet.git(fleet.clone, "worktree", "add", "--quiet", "-b", "some-topic", str(topic),
                   "origin/main")
@@ -185,6 +194,20 @@ def main() -> int:
         check("a detached HEAD holding commits on no branch is left",
               not fleet.is_moved_and_marked(epsilon)
               and "commit(s) no branch holds" in report, report)
+        check("a detached agent-home with an uncommitted change git keeps is marked and moved, "
+              "the change kept",
+              fleet.is_moved_and_marked(lam)
+              and (lam / "base.txt").read_text() == "changed, not committed\n"
+              and f"{lam}: now detached at origin/main and marked" in report, report)
+        mu_marker = Path(fleet.git(mu, "rev-parse", "--absolute-git-dir")) / "agent-home-marker"
+        check("a detached agent-home whose move git refuses is marked, not moved, its file kept, "
+              "and the line names git's error and the Stop hook that moves it later",
+              mu_marker.is_file() and not fleet.is_moved_and_marked(mu)
+              and (mu / "main-moves.txt").read_text() == "mu's own copy\n"
+              and f"{mu}: marked as an agent-home but not moved: " in report
+              and "main-moves.txt" in report
+              and "scripts/checkout-freshness-catch-up.py moves it at the end of a turn" in report,
+              report)
         check("a worktree under the agents root that is not an agent-home is not touched",
               fleet.git(topic, "symbolic-ref", "--short", "HEAD") == "some-topic"
               and str(topic) not in report, report)
@@ -197,6 +220,7 @@ def main() -> int:
         (hooks / "pre-receive").unlink()
         fleet.git(epsilon, "branch", "epsilon-kept-work")
         fleet.git(kappa, "bisect", "reset")
+        (mu / "main-moves.txt").unlink()
         second = fleet.run()
         branches_after = fleet.origin_branches()
         check("a second run pushes no seat-branch twice",
@@ -206,7 +230,8 @@ def main() -> int:
         check("a second run, with nothing left in the way, moves every agent-home and exits 0",
               second.returncode == 0
               and all(fleet.is_moved_and_marked(home)
-                      for home in (alpha, beta, gamma, delta, epsilon, theta, iota, kappa)),
+                      for home in (alpha, beta, gamma, delta, epsilon, theta, iota, kappa,
+                                   lam, mu)),
               f"exit {second.returncode}: {second.stdout}{second.stderr}")
 
         empty_root = Path(temporary) / "no-agents"
