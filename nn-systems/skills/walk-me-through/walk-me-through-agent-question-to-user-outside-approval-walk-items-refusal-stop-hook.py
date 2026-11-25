@@ -21,9 +21,10 @@ the category and waits-on tags the refusal's step 1 names, which that
 program's close step reads to choose when the new item is shown.
 
 EVERY TURN is checked, whoever started it: the user, another agent-seat, a
-background-task notice. THE REPLY is the text of every assistant message
-since the turn's start, a prompt the user typed into the turn included, plus
-the Stop payload's `last_assistant_message`, because Claude Code can start
+background-task notice, a scheduled prompt. THE REPLY is the text of every
+assistant message since the turn's start, a prompt the user typed into the
+turn included, plus the Stop payload's `last_assistant_message` unless it
+equals the transcript's last assistant text, because Claude Code can start
 the Stop hook before it has written the final message to the transcript.
 
 THE TEXT CHECKED is the reply, line by line, without:
@@ -92,11 +93,12 @@ Every other line passes, and a reply with no question-like line never waits
 for the model.
 When some lines are question-like, each goes to the model MODEL in a headless
 `claude -p` call of its own, the calls running at the same time, with
-MODEL_PROMPT: the line, the reply's text checked, the text of every waiting
-item as its unit of the walk-document holds it, and the message that started
-the turn with who sent it. The model answers whether the line is an ask, as
-MODEL_PROMPT defines one. The hook blocks on the first question-like line, in
-the reply's order, that the model calls an ask or whose call fails. The
+QUESTION_LIKE_LINE_ASK_LABELLING_MODEL_PROMPT: the line, the reply's text
+checked cut around the line, the text of every waiting item as its unit of
+the walk-document holds it, and the message that started the turn with who
+sent it. The model answers whether the line is an ask, as that prompt
+defines one. The hook blocks on the first question-like line, in the reply's
+order, that the model calls an ask or whose call fails. The
 children run with every hook disabled, so this hook cannot run inside them,
 no session file, no tools, and a cwd outside any checkout. A call fails when
 it cannot run, runs past MODEL_TIMEOUT_SECONDS, or answers without exactly
@@ -248,7 +250,8 @@ MODEL_SCHEMA = {"type": "object", "required": ["labels"], "properties": {"labels
     "type": "object", "required": ["id", "ask", "reason"],
     "properties": {"id": {"type": "string"}, "ask": {"type": "boolean"}, "reason": {"type": "string"}}}}}}
 MODEL_SYSTEM_PROMPT = "You classify text. Answer only through the structured output."
-MODEL_PROMPT = (
+AGENT_MESSAGE_CHARACTERS_KEPT_BEFORE_THE_LINE, AGENT_MESSAGE_CHARACTERS_KEPT_AFTER_THE_LINE = 5000, 2500
+QUESTION_LIKE_LINE_ASK_LABELLING_MODEL_PROMPT = (
     'You are judging lines that AI coding agents wrote to their user, a software developer who directs '
     'several agents at once. While these lines were written the agent was often running an approval-walk:'
     ' it puts decisions to the user one item at a time, each with a recommendation and a closing line '
@@ -401,9 +404,18 @@ def answer_sentence(line):
     return SENTENCE_END.split(LINE_MARKS.sub("", line.strip()))[0]
 
 
+def turn_opening_index(records):
+    """The index of the record that opened the transcript's last turn, or None: the later of the current-item Stop
+    hook's turn start and the last record carrying a `turnOrigin`, because a scheduled turn's opening record is
+    marked isMeta with no `origin`, so that turn start skips it."""
+    starts = [current_item_hook.turn_start(records)] + [
+        next((index for index in range(len(records) - 1, -1, -1) if "turnOrigin" in records[index]), None)]
+    return max((start for start in starts if start is not None), default=None)
+
+
 def turn_assistant_texts(records):
     """Every assistant text since the transcript's last turn start."""
-    start = current_item_hook.turn_start(records)
+    start = turn_opening_index(records)
     texts = []
     for record in records[0 if start is None else start + 1:]:
         content = record.get("message", {}).get("content") if record.get("type") == "assistant" else None
@@ -527,14 +539,15 @@ def checked_lines(reply, document_text, units, parser, waiting_numbers, pages):
 
 
 def turn_opening(records):
-    """(who started the transcript's last turn, as its origin's kind, or the user's own when it names none; the text
+    """(who started the transcript's last turn, as its origin's kind, else its `turnOrigin`, else the user; the text
     of the message that started it)."""
-    start = current_item_hook.turn_start(records)
+    start = turn_opening_index(records)
     record = {} if start is None else records[start]
     content = record.get("message", {}).get("content", "")
     text = content if isinstance(content, str) else "\n".join(
         block.get("text", "") for block in content if isinstance(block, dict) and block.get("type") == "text")
-    return (record.get("origin") or {}).get("kind") or current_item_hook.USER_TURN_ORIGIN, text
+    return ((record.get("origin") or {}).get("kind") or record.get("turnOrigin")
+            or current_item_hook.USER_TURN_ORIGIN), text
 
 
 def is_question_like(line):
@@ -557,14 +570,23 @@ def model_judgement(message_lines, question_like_lines, waiting_items_text, turn
     return None, None
 
 
+def message_window(message_lines, line):
+    """The message cut around line, as the benchmark the user approved cut it."""
+    message = "\n".join(message_lines)
+    at = max(message.find(line[:60]), 0)
+    start = max(at - AGENT_MESSAGE_CHARACTERS_KEPT_BEFORE_THE_LINE, 0)
+    end = min(at + len(line) + AGENT_MESSAGE_CHARACTERS_KEPT_AFTER_THE_LINE, len(message))
+    return ("[...] " if start else "") + message[start:end] + (" [...]" if end < len(message) else "")
+
+
 def line_is_ask(number, line, message_lines, waiting_items_text, turn_started_by, turn_start_text, timeout_seconds):
     """Return (whether the model calls line, the number-th question-like line, an ask, None), or (None, why the call
     failed)."""
     entry = {"id": f"L{number}", "line": line, "turn_started_by": turn_started_by,
              "message_that_started_the_turn": turn_start_text,
-             "agent_message_holding_the_line": "\n".join(message_lines),
+             "agent_message_holding_the_line": message_window(message_lines, line),
              "waiting_walk_item_text": waiting_items_text}
-    prompt = MODEL_PROMPT + json.dumps([entry], ensure_ascii=False, indent=1) + "\n"
+    prompt = QUESTION_LIKE_LINE_ASK_LABELLING_MODEL_PROMPT + json.dumps([entry], ensure_ascii=False, indent=1) + "\n"
     command = [*command_line_prefix.claude_code_headless_run_command_line_prefix_build(
                    "dontAsk", caller_claude_code_session_settings={"disableAllHooks": True}),
                "--model", MODEL, "--output-format", "json",
@@ -707,7 +729,8 @@ def output_for(payload, environment, model=model_judgement):
         return None
     records = current_item_hook.transcript_records(Path(transcript_path).expanduser())
     texts = turn_assistant_texts(records)
-    reply = "\n".join(texts + [payload.get("last_assistant_message") or ""])
+    final_message = payload.get("last_assistant_message") or ""
+    reply = "\n".join(texts + ([] if texts and texts[-1] == final_message else [final_message]))
     if not reply.strip():
         return None
     name = minutes.name[:-len(walk_finder.MINUTES_SUFFIX)]
