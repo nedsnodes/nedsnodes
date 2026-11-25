@@ -1607,9 +1607,33 @@ def test_condition_and_rider():
         lines = case.lines(prompt)
         check(f"{prompt!r} applies the answer, then the rest",
               lines is not None and lines[1] == f"The user added to the answer: \"{rest}\"."
-              and lines[2] == "Act on the answer as the lines below say, then act on what he added."
+              and lines[2] == ("Act on the answer as the lines below say, then make what he added the next item, as the "
+                               "walk-me-through skill says.")
+              and lines[3] == "If what he added contradicts or limits the answer, ask him which he means before acting on either."
+              and lines[4] == "The answer itself means:"
               and any(line.startswith(meaning) for line in lines), f"lines {lines!r}")
 
+
+def test_added_words_with_no_walk_or_an_unknown_walk_are_not_made_a_walk_item():
+    next_item = ("Act on the answer as the lines below say, then make what he added the next item, as the "
+                 "walk-me-through skill says.")
+    lines = Case().lines("A, and also rename the flag")
+    check("with no approval-walk open, added words are acted on or recorded as a task, not made a walk item",
+          lines is not None and lines[0].endswith("no approval-walk is open.")
+          and lines[1] == "The user added to the answer: \"and also rename the flag\"."
+          and lines[2] == "Act on the answer as the lines below say, then act on what he added."
+          and "If what he added cannot be done this turn, record it as a task." in lines
+          and next_item not in lines, f"lines {lines!r}")
+    case = Case(next_to_present="item 3 of 9")
+    (case.walk / f"{WALK_NAME}-minutes.md").write_bytes(b"#next_to_present item 3 of 9 \xff\xfe\n")
+    lines = case.lines("A, and also rename the flag")
+    walk_open, no_walk = (lines.index("If an approval-walk is open:"), lines.index("If no approval-walk is open:")) \
+        if lines is not None and "If an approval-walk is open:" in lines and "If no approval-walk is open:" in lines else (None, None)
+    check("when the walk state cannot be read, the next-item line is only under the open-walk branch",
+          walk_open is not None and walk_open < no_walk
+          and next_item in lines[walk_open:no_walk] and next_item not in lines[:walk_open] + lines[no_walk:]
+          and "Act on the answer as the lines below say, then act on what he added." in lines[no_walk:]
+          and "If what he added cannot be done this turn, record it as a task." in lines[no_walk:], f"lines {lines!r}")
 
 def test_e_points_at_the_explain_skill():
     lines = Case(next_to_present="item 3 of 9").lines("e")

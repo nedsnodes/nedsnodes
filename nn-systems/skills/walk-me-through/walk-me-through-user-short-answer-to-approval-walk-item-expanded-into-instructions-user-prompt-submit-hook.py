@@ -608,6 +608,13 @@ CONDITION_LINES = (
 )
 RIDER_LINES = (
     "The user added to the answer: \"{rest}\".",
+    "Act on the answer as the lines below say, then make what he added the next item, as the walk-me-through skill says.",
+    "If what he added contradicts or limits the answer, ask him which he means before acting on either.",
+    "The answer itself means:",
+)
+# With no approval-walk open there is no item to make the added words into.
+WALK_ME_THROUGH_USER_SHORT_ANSWER_WITH_USER_ADDED_WORDS_WHEN_NO_APPROVAL_WALK_IS_OPEN_AGENT_INSTRUCTION_LINES = (
+    "The user added to the answer: \"{rest}\".",
     "Act on the answer as the lines below say, then act on what he added.",
     "If what he added contradicts or limits the answer, ask him which he means before acting on either.",
     "If what he added cannot be done this turn, record it as a task.",
@@ -1870,22 +1877,24 @@ def named_item_missing(answer, walk, walk_error):
 def context_lines_for(answer, walk, walk_error):
     """Return the additionalContext lines for the answer, opening line first, given the open approval-walk as
     read_walk read it, or the error reading it raised. An answer the user typed on several lines stays in one entry."""
-    prefix = []
+    prefix, walk_prefix, no_walk_prefix = [], [], []
     if answer["form"] == "condition":
         prefix = [line.format(condition=answer["condition"]) for line in CONDITION_LINES]
     elif answer["form"] == "rider":
-        prefix = [line.format(rest=answer["rest"]) for line in RIDER_LINES]
+        walk_prefix = [line.format(rest=answer["rest"]) for line in RIDER_LINES]
+        no_walk_prefix = [line.format(rest=answer["rest"]) for line in WALK_ME_THROUGH_USER_SHORT_ANSWER_WITH_USER_ADDED_WORDS_WHEN_NO_APPROVAL_WALK_IS_OPEN_AGENT_INSTRUCTION_LINES]
     if walk_error is not None:
         lines = [WALK_UNKNOWN_OPENING_LINE.format(answer=answer["answer"], error=repr(walk_error)), WALK_UNKNOWN_FIND]
-        lines += prefix + [IF_WALK_OPEN]
+        lines += prefix + [IF_WALK_OPEN] + walk_prefix
         lines += meaning_lines(answer, WalkState("", "the waiting item", [], None, {}, None), True)
-        lines += [IF_NO_WALK] + meaning_lines(answer, None, False)
+        lines += [IF_NO_WALK] + no_walk_prefix + meaning_lines(answer, None, False)
     else:
         if walk is None:
-            lines = [NO_WALK_OPENING_LINE.format(answer=answer["answer"])] + prefix + meaning_lines(answer, None, False)
+            lines = ([NO_WALK_OPENING_LINE.format(answer=answer["answer"])] + prefix + no_walk_prefix
+                     + meaning_lines(answer, None, False))
         else:
             lines = ([OPEN_WALK_OPENING_LINE.format(answer=answer["answer"], item=walk.item, walk=walk.name)]
-                     + prefix + meaning_lines(answer, walk, True))
+                     + prefix + walk_prefix + meaning_lines(answer, walk, True))
     return lines
 
 

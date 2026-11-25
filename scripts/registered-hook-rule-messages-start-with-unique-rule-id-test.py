@@ -169,6 +169,7 @@ CONSTANTS_THAT_OPEN_NO_RULE_MESSAGE = {
     ("nn-systems/skills/walk-me-through/walk-me-through-user-short-answer-to-approval-walk-item-expanded-into-instructions-user-prompt-submit-hook.py", "REPEAT_PAGE_LINE"): LATER_PART,
     ("nn-systems/skills/walk-me-through/walk-me-through-user-short-answer-to-approval-walk-item-expanded-into-instructions-user-prompt-submit-hook.py", "REPEAT_UNPUBLISHED_LINES"): LATER_PART,
     ("nn-systems/skills/walk-me-through/walk-me-through-user-short-answer-to-approval-walk-item-expanded-into-instructions-user-prompt-submit-hook.py", "RIDER_LINES"): LATER_PART,
+    ("nn-systems/skills/walk-me-through/walk-me-through-user-short-answer-to-approval-walk-item-expanded-into-instructions-user-prompt-submit-hook.py", "WALK_ME_THROUGH_USER_SHORT_ANSWER_WITH_USER_ADDED_WORDS_WHEN_NO_APPROVAL_WALK_IS_OPEN_AGENT_INSTRUCTION_LINES"): LATER_PART,
     ("nn-systems/skills/walk-me-through/walk-me-through-user-short-answer-to-approval-walk-item-expanded-into-instructions-user-prompt-submit-hook.py", "TRANSCRIPT_UNREADABLE_LINES"): LATER_PART,
     ("nn-systems/skills/walk-me-through/walk-me-through-user-short-answer-to-approval-walk-item-expanded-into-instructions-user-prompt-submit-hook.py", "USER_REPLY_LINE"): LATER_PART,
     ("scripts/agent-seat-due-task-prerequisites-recording-reminder-after-task-create-hook.py", "FAULT_LINE_TEMPLATE"): HOOK_FAILED,
