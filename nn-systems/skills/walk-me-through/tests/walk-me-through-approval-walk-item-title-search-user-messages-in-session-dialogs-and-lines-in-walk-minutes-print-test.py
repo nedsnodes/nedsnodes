@@ -144,13 +144,26 @@ def test_a_short_title_names_the_item_only_right_after_one_of_its_numbers(root):
           result.stdout + result.stderr)
 
 
-def test_nothing_found_exits_1(root):
+def test_nothing_found_exits_3(root):
     store = Store(root)
     store.session("unrelated", [agent_record("Something else."), user_record("ok")])
     result = store.run("--title", ITEM_6_TITLE, "--item-number", "6")
-    check("nothing found exits 1 and says so",
-          result.returncode == 1 and "was named before: 0 agent-session(s)" in result.stdout
+    check("nothing found exits 3, not 1, which an uncaught exception exits with, and says so",
+          result.returncode == 3 and "was named before: 0 agent-session(s)" in result.stdout
           and "Walk-minutes lines naming the title: 0." in result.stdout and result.stderr == "",
+          result.stdout + result.stderr)
+
+
+def test_a_walk_minutes_line_that_is_not_valid_utf_8_is_printed(root):
+    store = Store(root)
+    minutes = store.agent_homes / "MD-skills-2" / "docs" / "walk" / "some-walk-2026-11-21-minutes.md"
+    minutes.parent.mkdir(parents=True)
+    # ripgrep's JSON gives such a line as base64 "bytes", not "text".
+    minutes.write_bytes(f"item 6 of 27, \"{ITEM_6_TITLE}\": answered \xff later.\n".encode("latin-1"))
+    result = store.run("--title", ITEM_6_TITLE, "--item-number", "6")
+    check("a walk-minutes line that is not valid UTF-8 is printed, its bad byte replaced",
+          result.returncode == 0
+          and f"  {minutes}:1  item 6 of 27, \"{ITEM_6_TITLE}\": answered \ufffd later." in result.stdout,
           result.stdout + result.stderr)
 
 

@@ -864,6 +864,35 @@ def test_the_waiting_item_read_step_refuses_when_the_search_for_the_user_earlier
           described(result))
 
 
+def test_the_waiting_item_read_step_saves_the_title_search_only_once_it_is_printed():
+    case, dialog = case_with_a_session_dialog_naming_the_item_title()
+    failed = case.run(WAITING_ITEM_READ_STEP_NAME, mode="failed")
+    check("a read that fails after the search ran prints none of the search and saves none of it",
+          failed.returncode == 1 and str(dialog) not in failed.stdout and not title_search_cache_file(case).exists(),
+          described(failed))
+    result = case.run(WAITING_ITEM_READ_STEP_NAME)
+    check("the rerun after a failed read prints the search in full and saves it",
+          result.returncode == 0 and f"  user   {dialog}:11  Keep one poem per job, as we agreed." in result.stdout
+          and title_search_cache_file(case).is_file(), described(result))
+
+
+def test_the_waiting_item_read_step_refuses_when_the_search_for_the_user_earlier_words_crashes():
+    case, _ = case_with_a_session_dialog_naming_the_item_title()
+    crashing_rg = case.root / "crashing-rg"
+    # A match with no "data" makes the search raise KeyError, so Python exits it with 1.
+    crashing_rg.write_text("#!/bin/sh\necho '{\"type\": \"match\"}'\n")
+    crashing_rg.chmod(0o755)
+    minutes_before = case.minutes.read_text()
+    result = case.run(WAITING_ITEM_READ_STEP_NAME, environment=dict(
+        os.environ, LOG_STORE_PAST_DISCUSSIONS_SEARCH_RIPGREP_PROGRAM_OVERRIDE=str(crashing_rg)))
+    check("a search that crashes is refused as a failure, not read as nothing found, and nothing is saved",
+          result.returncode == 1
+          and "the search for what the user said in earlier agent-sessions that named its title failed (exit 1)"
+          in result.stderr and "KeyError" in result.stderr
+          and case.calls.read_text() == "" and case.minutes.read_text() == minutes_before
+          and not title_search_cache_file(case).exists(), described(result))
+
+
 def test_the_waiting_item_read_step_does_not_refuse_a_status_claim_in_an_item_settled_without_being_shown():
     case = Case(document=marks_document("cold-read-research is offline.\n#not_asked_touches\n")
                 .replace("#case_against weak: the page grows.", "#case_against none."))

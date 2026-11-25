@@ -31,7 +31,7 @@ FROM THE MAC. When the log-store is not on this machine and this machine is not 
 program runs over ssh, as scripts/log-store-past-discussions-regex-search-newest-first.py does.
 
 Exit 2 when anything could not be searched, even when something was found, each failure named on stderr by a line
-opening FAILED; otherwise 0 when something was found and 1 when nothing was.
+opening FAILED; otherwise 0 when something was found and 3 when nothing was.
 
 Environment, for the tests:
   LOG_STORE_PAST_DISCUSSIONS_SEARCH_LOG_STORE_ROOT_OVERRIDE  the log-store's root
@@ -40,6 +40,7 @@ Environment, for the tests:
 """
 
 import argparse
+import base64
 import importlib.util
 import json
 import os
@@ -57,7 +58,8 @@ SHORT_TITLE_WORDS = 4
 AGENT_EXCERPT_CHARACTERS = 300
 
 EXIT_FOUND = 0
-EXIT_NOTHING_FOUND = 1
+# Not 1, which Python exits with on an uncaught exception, so that a crash is never read as nothing found.
+EXIT_NOTHING_FOUND = 3
 EXIT_FAILED = 2
 FAILURES_CLOSING_LINE = (
     "The user's messages printed on stdout are real, but those in the records the FAILED lines name are missing, and "
@@ -99,7 +101,6 @@ def ripgrep_lines(titles, paths, glob, failures):
     found = []
     for title in titles:
         command = search.ripgrep_command(["--json", "--fixed-strings", "--glob", glob], title, paths)
-        command[0] = os.environ.get(search.RIPGREP_OVERRIDE) or "rg"
         for raw in search.run_ripgrep(command, failures).splitlines():
             try:
                 message = json.loads(raw)
@@ -108,8 +109,17 @@ def ripgrep_lines(titles, paths, glob, failures):
             if message.get("type") != "match":
                 continue
             data = message["data"]
-            found.append((data["path"]["text"], data["line_number"], data["lines"]["text"].rstrip("\n")))
+            found.append((ripgrep_json_text(data["path"]), data["line_number"],
+                          ripgrep_json_text(data["lines"]).rstrip("\n")))
     return sorted(set(found))
+
+
+def ripgrep_json_text(field):
+    """The text of a field of ripgrep's JSON output, which holds base64 "bytes" instead of "text" when the file's
+    name or line is not valid UTF-8."""
+    if "text" in field:
+        return field["text"]
+    return base64.b64decode(field["bytes"]).decode("utf-8", "replace")
 
 
 def transcript_turns(transcript):

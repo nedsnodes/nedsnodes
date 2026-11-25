@@ -456,8 +456,9 @@ names the read's report: each message the user typed
 in an agent-session whose saved dialog names a title, after the agent message
 it answers, and each walk-minutes line naming one, each with its file and line.
 When the search fails, the step refuses, before any read, printing what the
-search said, and exits 1. The step saves what the search prints, a search with
-no hits too, in
+search said, and exits 1; any exit of the search but its found and nothing-found
+exits is a failure. The step saves what the search prints, a search with no
+hits too, as it prints it, in
 `docs/walk/title-search-cache/<walk name>-item-<N>-<agent-session id>.md`, the
 titles searched for as a JSON list on its first line, the agent-session id
 being $CLAUDE_CODE_SESSION_ID. A later run for the item in the same
@@ -571,8 +572,7 @@ RECORD_SHIPPER_FILE = REPOSITORY_TOP / "nn-systems" / "cold-read" / "cold-read-r
 RECORD_NAMES_FILE = REPOSITORY_TOP / "nn-systems" / "cold-read" / "cold-read-record-names-common.py"
 FINDING_OUTCOMES_COMMON_FILE = (REPOSITORY_TOP / "nn-systems" / "cold-read"
                                 / "cold-read-fast-read-report-findings-parse-and-finding-outcomes-check-common.py")
-TITLE_SEARCH_PROGRAM = HERE / ("walk-me-through-approval-walk-item-title-search-user-messages-in-session-dialogs-"
-                               "and-lines-in-walk-minutes-print.py")
+TITLE_SEARCH_PROGRAM = HERE / "walk-me-through-approval-walk-item-title-search-user-messages-in-session-dialogs-and-lines-in-walk-minutes-print.py"
 PATH_CONSTANTS_FILE = (REPOSITORY_TOP / "nn-systems" / "general-tools"
                        / "ned-box-home-directory-and-its-mac-mount-point-path-constants-common.py")
 COUNTS_LOG_FILE_NAME = "walk-me-through-answer-added-texts-cold-read-fast-read-already-done-or-had-to-run-counts-per-check.tsv"
@@ -3299,46 +3299,52 @@ def approval_walk_item_system_status_claims_not_rechecked_refused(text, item, do
 
 def approval_walk_item_title_user_messages_in_earlier_agent_sessions_lines(walk_finder, minutes, text, earlier,
                                                                          numbers, item, command):
-    """Return the lines TITLE_SEARCH_PROGRAM prints for the item's title and the title of each earlier read text of
-    it, as earlier_read_texts_of_item returns them; raise Failure when the search failed. A Withdrawn version
-    heading carries no title, so those read texts are the item's only earlier titles the program can know.
+    """Return a function that saves and returns the lines TITLE_SEARCH_PROGRAM prints for the item's title and the
+    title of each earlier read text of it, as earlier_read_texts_of_item returns them; raise Failure when the search
+    failed. A Withdrawn version heading carries no title, so those read texts are the item's only earlier titles the
+    program can know.
 
-    The lines are saved in the title search cache file for the item and this agent-session; a later call for the
-    same titles in the same agent-session returns only a line naming that file, since fix rounds rerun the step."""
+    Call the function only in the statement that prints its lines: the lines are saved in the title search cache
+    file for the item and this agent-session, and a later run for the same titles in the same agent-session prints
+    only a line naming that file, since fix rounds rerun the step, so lines saved but never printed are never read."""
     titles = []
     for heading in [text] + [copied for _, _, copied in earlier]:
         title = item_title(walk_finder, heading.split("\n", 1)[0])
         if title and title not in titles:
             titles.append(title)
     if not titles:
-        return []
+        return lambda: []
     variable = load_module("cold_read_record_names", RECORD_NAMES_FILE).AGENT_SESSION_ID_ENVIRONMENT_VARIABLE
     session_id = os.environ.get(variable)
     cache = (minutes.parent / TITLE_SEARCH_CACHE_DIRECTORY_NAME
              / TITLE_SEARCH_CACHE_FILE_NAME.format(walk=minutes.name[:-len(walk_finder.MINUTES_SUFFIX)],
                                                    numbers="-and-".join(numbers), session=session_id))
     if session_id and title_search_cache_titles(cache) == titles:
-        return [TITLE_SEARCH_CACHE_PRINTED_BEFORE.format(item=item, path=cache)]
+        return lambda: [TITLE_SEARCH_CACHE_PRINTED_BEFORE.format(item=item, path=cache)]
     words = [word for title in titles for word in ("--title", title)]
     words += [word for number in numbers for word in ("--item-number", number)]
     result = subprocess.run([sys.executable, str(TITLE_SEARCH_PROGRAM), *words], capture_output=True, text=True,
                             stdin=subprocess.DEVNULL)
-    if result.returncode not in (0, 1):
+    exits = load_module("title_search", TITLE_SEARCH_PROGRAM)
+    if result.returncode not in (exits.EXIT_FOUND, exits.EXIT_NOTHING_FOUND):
         raise Failure(APPROVAL_WALK_ITEM_TITLE_SEARCH_FAILED.format(
             item=item, exit=result.returncode, said=result.stderr.strip() or "nothing", command=command))
     lines = result.stdout.rstrip("\n").split("\n") if result.stdout.strip() else []
     if not session_id:
-        return lines + [TITLE_SEARCH_CACHE_NOT_SAVED.format(
+        return lambda: lines + [TITLE_SEARCH_CACHE_NOT_SAVED.format(
             path=minutes.parent / TITLE_SEARCH_CACHE_DIRECTORY_NAME,
             why=TITLE_SEARCH_CACHE_NO_AGENT_SESSION.format(variable=variable))]
-    try:
-        cache.parent.mkdir(parents=True, exist_ok=True)
-        temporary = cache.with_name(cache.name + ".writing")
-        temporary.write_text("\n".join([json.dumps(titles)] + lines) + "\n", encoding="utf-8")
-        os.replace(temporary, cache)
-    except OSError as error:
-        return lines + [TITLE_SEARCH_CACHE_NOT_SAVED.format(path=cache, why=error)]
-    return lines
+
+    def saved_lines():
+        try:
+            cache.parent.mkdir(parents=True, exist_ok=True)
+            temporary = cache.with_name(cache.name + ".writing")
+            temporary.write_text("\n".join([json.dumps(titles)] + lines) + "\n", encoding="utf-8")
+            os.replace(temporary, cache)
+        except OSError as error:
+            return lines + [TITLE_SEARCH_CACHE_NOT_SAVED.format(path=cache, why=error)]
+        return lines
+    return saved_lines
 
 
 def title_search_cache_titles(cache):
@@ -3413,7 +3419,7 @@ def waiting_item_read(arguments, sub_step_of=None):
                                                         command)
     # Before anything is written, so a refused item leaves the walk-minutes and the walk-document as they were; an
     # item settled without being shown is not refused, since no status in it reaches the user.
-    recheck_line, past_words = None, []
+    recheck_line, past_words = None, lambda: []
     if rated_none_item_not_to_be_shown(walk_finder, top, minutes, value, numbers, total, parser, named) is None:
         recheck_line = approval_walk_item_system_status_claims_not_rechecked_refused(
             text, item, document, rerun, rechecked)
@@ -3485,12 +3491,11 @@ def waiting_item_read(arguments, sub_step_of=None):
                 withheld = item_read_findings_without_outcomes_lines(
                     item, latest[1]["report"], reads / f"{latest[0]}-outcome.json", arguments.fast_read_program,
                     command, command_reading_again)
-                print("\n".join([ITEM_READ_NOT_RUN.format(item=item, report=latest[1]["report"])] + past_words
-                                 + no_answer_rows
-                                 + (withheld or [ITEM_READ_NOT_RUN_NEXT.format(
-                                     item=item, now_over_later_command=check_command_with_cwd(top, NOW_OVER_LATER_FLAG))]
-                                    + waiting_on_item_prerequisite_lines(walk_finder, minutes, numbers, total,
-                                                                         parser))))
+                rest = no_answer_rows + (withheld or [ITEM_READ_NOT_RUN_NEXT.format(
+                    item=item, now_over_later_command=check_command_with_cwd(top, NOW_OVER_LATER_FLAG))]
+                    + waiting_on_item_prerequisite_lines(walk_finder, minutes, numbers, total, parser))
+                print("\n".join([ITEM_READ_NOT_RUN.format(item=item, report=latest[1]["report"])] + past_words()
+                                 + rest))
                 return 1 if withheld else 0
             why = ITEM_READ_RUN_FACTS.format(report=latest[1]["report"], facts=", ".join(facts[:FACTS_LISTED]))
         walk_name = minutes.name[:-len(walk_finder.MINUTES_SUFFIX)]
@@ -3512,12 +3517,13 @@ def waiting_item_read(arguments, sub_step_of=None):
     withheld = item_read_findings_without_outcomes_lines(item, outcome["report"], reads / f"{key}-outcome.json",
                                                          arguments.fast_read_program, command,
                                                          command_reading_again)
-    print("\n".join([ITEM_READ_USED.format(item=item, how=how, report=outcome["report"], notes=notes)] + past_words
-                     + no_answer_rows
-                    + [line.format(item=item, document=document, command=command,
-                                   now_over_later_command=check_command_with_cwd(top, NOW_OVER_LATER_FLAG))
-                       for line in (ITEM_READ_LINES[:1] if withheld else ITEM_READ_LINES)]
-                    + (withheld or waiting_on_item_prerequisite_lines(walk_finder, minutes, numbers, total, parser))))
+    rest = (no_answer_rows
+            + [line.format(item=item, document=document, command=command,
+                           now_over_later_command=check_command_with_cwd(top, NOW_OVER_LATER_FLAG))
+               for line in (ITEM_READ_LINES[:1] if withheld else ITEM_READ_LINES)]
+            + (withheld or waiting_on_item_prerequisite_lines(walk_finder, minutes, numbers, total, parser)))
+    print("\n".join([ITEM_READ_USED.format(item=item, how=how, report=outcome["report"], notes=notes)] + past_words()
+                     + rest))
     return 1 if withheld else 0
 
 
