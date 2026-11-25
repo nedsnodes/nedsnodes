@@ -1085,6 +1085,19 @@ def test_an_items_title_is_the_same_from_every_form_of_its_heading_or_opening():
     later = program.heading_body(finder, "**Item 3 of 9 (revised):** Revised estimates are due Friday.")
     check("two versions of a bold-paragraph item differing only by an opening word Revised are different texts, so "
           "the earlier one is kept as a withdrawn version", earlier != later, repr((earlier, later)))
+    earlier = program.heading_body(finder, "**Item 3 of 9:** estimates are due Friday.")
+    later = program.heading_body(finder, "**Item 3 of 9:** Revised estimates are due Friday.")
+    check("after a closed bold count, an opening word Revised is the item's text, not a `revised` label, so the "
+          "earlier version is kept as a withdrawn version", earlier != later, repr((earlier, later)))
+    for line, title in (("**Item 3 of 9:** Revised estimates", "Revised estimates"),
+                        ("**Item 3 of 9: Revised** More detail.", "Revised"),
+                        ("**Item 3 of 9: Revised estimates** More.", "Revised estimates"),
+                        ("## Item 3 of 9: Revised estimates", "Revised estimates"),
+                        ("**Item 3 of 9**: revised: the first", "the first"),
+                        ("## Item 3 of 9 revised: the first", "the first")):
+        found = program.item_title(finder, line)
+        check(f"`{line}` gives its item the title `{title}`: only `(revised)` and `revised:` are a label",
+              found == title, repr(found))
 
 
 def test_the_waiting_item_read_step_searches_a_bold_list_opening_by_its_title_alone():

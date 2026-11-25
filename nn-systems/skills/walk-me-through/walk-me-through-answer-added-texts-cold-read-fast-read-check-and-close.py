@@ -2990,11 +2990,11 @@ def item_title(walk_finder, line, with_text_after_title=False):
     if not count:
         return line
     opener = re.match(r"[*_]*", line)[0]
-    # One match reads the label at most once, so a title opening with the word, as in `**Item 3 of 9 (revised):**
-    # Revised estimates`, keeps it; the emphasis can close before the label, as in `**Item 3 of 9**: (revised) x`,
-    # or after it, as in `**Item 3 of 9 (revised):** x`.
+    # One match reads the label at most once; the emphasis can close before the label, as in `**Item 3 of 9**:
+    # (revised) x`, or after it, as in `**Item 3 of 9 (revised):** x`. The label is only `(revised)` or `revised:`,
+    # so a title opening with the word, as in `**Item 3 of 9:** Revised estimates`, keeps it.
     separators = r"[ :,.;]*"
-    label = r"(?:[\s(,:;.\-\u2013\u2014]*revised\b[ :,.;)]*)?"
+    label = r"(?:[\s,:;.\-\u2013\u2014]*(?:\(revised\)|revised:)[ :,.;]*)?"
     closer = re.escape(opener)
     opening = re.match(rf"{separators}(?:(?P<before>{closer}){separators}{label}|{label}(?P<after>{closer})"
                        rf"{separators}|{label})", line[count.end():], re.I)
@@ -3557,11 +3557,13 @@ def approval_walk_item_system_status_claims_not_rechecked_refused(text, item, do
 def approval_walk_item_title_search_groups(walk_finder, document, value, numbers, total, parser, earlier):
     """Return [(titles, item numbers)], one group for each distinct set of waiting item numbers that a heading in
     document names or that a waiting item's own titled opening under a shared heading names, such as [3] and [4] for
-    items 3 and 4 under one heading, in the order the first of them comes: the titles of those headings and openings,
-    each in the closing line's form too when that differs, as when the title holds a link, so that a short title is
-    matched only after its own numbers. A lone waiting item's titles also hold the title of each earlier read text of it, as earlier_read_texts_of_item returns them; a
-    Withdrawn version heading carries no title, so those read texts are its only earlier titles the program can
-    know."""
+    items 3 and 4 under one heading: the titles of those headings and openings, each in the closing line's form too
+    when that differs, as when the title holds a link, so that a short title is matched only after its own numbers.
+    Groups come in the order the `#next_to_present` line names the items, a heading's group before the groups of the
+    openings under it, so items 4 and 3, named in that order, give [4] before [3] whichever opening comes first. A
+    lone waiting item's titles also hold the title of each earlier read text of it, as earlier_read_texts_of_item
+    returns them; a Withdrawn version heading carries no title, so those read texts are its only earlier titles the
+    program can know."""
     text = document.read_text(encoding="utf-8")
     lines = text.split("\n")
     _, units = walk_finder.waiting_item_units(document, value, numbers, total, parser)
