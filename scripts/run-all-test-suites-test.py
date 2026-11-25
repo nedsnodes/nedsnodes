@@ -1073,6 +1073,22 @@ with tempfile.TemporaryDirectory() as scratch:
                                   f"comparison with {head_tested[:12]} leaves it out")
                   for line in out),
           (ran(root), result.stdout, result.stderr))
+
+    # A head test run runs main's test runner, so the after-merge test run of a pull request
+    # that changes the runner is the first to run any suite under the changed runner.
+    selective_run(root, head_tested)
+    main_passed = head_tested
+    head_tested = commit_files(repo, {"scripts/run-all-test-suites.py": "# a changed runner\n"
+                                      + runner_copy_lists}, "change the test runner")
+    result = selective_run(root, main_passed, head_tested)
+    out = lines(result.stdout)
+    check("given two commits, when the test runner differs from the first, every suite runs, "
+          "though the second commit already holds the changed runner",
+          ran(root) == sorted(RECORDING_SUITES)
+          and any(line.startswith("SELECTED loads-a-program-by-path-test.py: judged by the "
+                                  f"comparison with the first commit alone, {main_passed[:12]}")
+                  and "scripts/run-all-test-suites.py differs" in line for line in out),
+          (ran(root), result.stdout, result.stderr))
     base = head_tested
 
     result = run(root, CHANGED_SINCE, "no-such-commit")
