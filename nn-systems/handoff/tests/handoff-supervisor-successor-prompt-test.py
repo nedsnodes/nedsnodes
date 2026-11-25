@@ -2852,14 +2852,14 @@ def run_conversation_tail_last_lines_cases(workspace: Path):
         return writing_extract_dialog
 
     def display_file(handoff_directory, session_id):
-        return supervisor.successor_conversation_tail_display_hook.conversation_tail_last_lines_display_file_path(
+        return supervisor.successor_conversation_tail_display_hook.conversation_tail_last_lines_display_file_path_for_session_id(
             handoff_directory, session_id)
 
     def expected_display_text(extract_path, first, last):
         return (supervisor.CONVERSATION_TAIL_LAST_LINES_HEADING_TEMPLATE.format(
                     line_count=last - first + 1, conversation_tail_path=extract_path)
                 + "\n".join(f"turn {number}" for number in range(first, last + 1))
-                + supervisor.CONVERSATION_TAIL_LAST_LINES_END)
+                + supervisor.CONVERSATION_TAIL_LAST_LINES_FOOTER)
 
     handoff_directory, launched = handoff_launch("tailedsuccessor", extract_dialog_writing(150))
     extract_path = handoff_directory / "tailedsuccessor-dialog-0002.md"

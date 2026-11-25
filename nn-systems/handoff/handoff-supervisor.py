@@ -1383,7 +1383,7 @@ CONVERSATION_TAIL_LAST_LINE_COUNT_SHOWN_ABOVE_FIRST_MESSAGE = 100
 CONVERSATION_TAIL_LAST_LINES_HEADING_TEMPLATE = (
     "The end of the last session: the last {line_count} lines of {conversation_tail_path}, "
     "shown to you and not to the new session's agent.\n\n")
-CONVERSATION_TAIL_LAST_LINES_END = "\n\nThe new session's first message:\n\n"
+CONVERSATION_TAIL_LAST_LINES_FOOTER = "\n\nThe new session's first message:\n\n"
 
 
 def conversation_tail_last_lines_display_file_write(
@@ -1392,11 +1392,11 @@ def conversation_tail_last_lines_display_file_write(
     the user above the successor's first message."""
     lines = conversation_tail_path.read_text(encoding="utf-8").splitlines()[
         -CONVERSATION_TAIL_LAST_LINE_COUNT_SHOWN_ABOVE_FIRST_MESSAGE:]
-    successor_conversation_tail_display_hook.conversation_tail_last_lines_display_file_path(
+    successor_conversation_tail_display_hook.conversation_tail_last_lines_display_file_path_for_session_id(
         handoff_directory, session_id).write_text(
             CONVERSATION_TAIL_LAST_LINES_HEADING_TEMPLATE.format(
                 line_count=len(lines), conversation_tail_path=conversation_tail_path)
-            + "\n".join(lines) + CONVERSATION_TAIL_LAST_LINES_END,
+            + "\n".join(lines) + CONVERSATION_TAIL_LAST_LINES_FOOTER,
             encoding="utf-8")
 
 
