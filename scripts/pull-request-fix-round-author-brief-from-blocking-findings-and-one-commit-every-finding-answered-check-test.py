@@ -323,7 +323,7 @@ def run_printed_command(root, routes, text, line_start, directory=None):
         return None
     change_directory, _, command = line.rpartition(" && ")
     words = shlex.split(command)
-    if words[:3] != ["python3", f"scripts/{PROGRAM.name}", str(NUMBER)]:
+    if words[:3] != ["python3", f"{PROGRAM.resolve()}", str(NUMBER)]:
         return None
     where = Path(change_directory.removeprefix("cd ")) if change_directory else directory
     return (*run(root, where, routes, *words[3:]), line)
@@ -387,7 +387,7 @@ def brief_cases(root, repository, base, frozen_head):
     check("brief: names no path in git's directory, where the write guard refuses the answers file",
           "/.git/" not in out, out)
     check("brief: the check command has no --answers, and starts in the topic-worktree",
-          f"6. Run the check: {in_worktree}python3 scripts/{PROGRAM.name} {NUMBER} --check\n" in out
+          f"6. Run the check: {in_worktree}python3 {PROGRAM.resolve()} {NUMBER} --check\n" in out
           and "--answers" not in out, out)
     check("brief: names the conflict check and then the check command, and no test run of its own, since "
           "the check runs the suites",
@@ -408,8 +408,8 @@ def brief_cases(root, repository, base, frozen_head):
           and f"puts you back on {BRANCH}." in out
           and "only partly moved; do not stage or commit it: the finish step does both, and refuses when the new "
               "topic branch already holds a commit." in out
-          and f"run: {in_worktree}python3 scripts/{PROGRAM.name} {NUMBER} --move-change-to-own-pull-request-cut" in out
-          and f"run: {in_worktree}python3 scripts/{PROGRAM.name} {NUMBER} --move-change-to-own-pull-request-finish" in out
+          and f"run: {in_worktree}python3 {PROGRAM.resolve()} {NUMBER} --move-change-to-own-pull-request-cut" in out
+          and f"run: {in_worktree}python3 {PROGRAM.resolve()} {NUMBER} --move-change-to-own-pull-request-finish" in out
           and "git switch" not in out.split("3. Change nothing else")[1].split("4. Put every change")[0], out)
     # This test and the program it runs have the same parent processes, apart from the program's own.
     marker_path = load_program().instruction_file_guard_walk_approved_marker_file_path_for_nearest_claude_parent_process()
@@ -420,7 +420,7 @@ def brief_cases(root, repository, base, frozen_head):
           and out.index("2. Check each finding") < out.index(paragraph), out)
     check("brief: a replace answer found during the round stops the subagent, which hands it back to the author",
           "If it reports VERDICT: CONFLICT with ANSWER: replace, stop and tell the agent that dispatched you what "
-          f"it printed: that agent runs python3 scripts/{PROGRAM.name} {NUMBER} again" in out
+          f"it printed: that agent runs python3 {PROGRAM.resolve()} {NUMBER} again" in out
           and out.index("ANSWER: replace") < out.index("2. Check each finding")
           and "take none of steps 2 to 8" not in out, out)
     check("brief: a conflict defers to the conflict check's report, and asks for no merge itself",
@@ -728,7 +728,7 @@ def brief_cases(root, repository, base, frozen_head):
           code == 2 and f"gh {PR_VIEW} printed JSON in which these fields are missing or empty: "
           "headRefOid, headRefName. Run " in err
           and f"Run gh {PR_VIEW} yourself: if it now prints an object with all three fields filled in, "
-          f"run python3 {PROGRAM} {NUMBER} again.\n" in err
+          f"run python3 {PROGRAM.resolve()} {NUMBER} again.\n" in err
           and "This program stopped at the step named above." in err, err)
 
     routes = routes_for(frozen_head, [review(commit_id=frozen_head)])
@@ -858,7 +858,7 @@ def stopped_round_cases(root, repository, made, frozen_head, dated_routes, submi
     fix = commit_file(made, "hook.py", "fixed\n", "the round's fix")
     write_answers(GOOD_ANSWERS, 60)
     code, out, err = run(root, repository, dated_routes)
-    check_line = f"cd {made} && python3 scripts/{PROGRAM.name} {NUMBER} --check"
+    check_line = f"cd {made} && python3 {PROGRAM.resolve()} {NUMBER} --check"
     finish = f"Otherwise finish the round with this command, and do what it says:\n{check_line}\n"
     check("stopped round: an unpushed commit on the frozen-head with every answer written refuses the brief, "
           "exit 1, saying to finish the round with --check, and leaves the answers file as it was",
@@ -924,7 +924,7 @@ def stopped_round_cases(root, repository, made, frozen_head, dated_routes, submi
           "If that subagent is still working there, wait for it to finish.\n"
           "If the answers describe fixes, which means the fix-round commit was reset away, or if you mean to start the "
           f"round again: delete {answers}, then run this command:\n"
-          f"cd {made} && python3 scripts/{PROGRAM.name} {NUMBER}\n"
+          f"cd {made} && python3 {PROGRAM.resolve()} {NUMBER}\n"
           + finish in err
           and answers.read_text() == GOOD_ANSWERS, err + out)
     refusal = err
@@ -934,10 +934,10 @@ def stopped_round_cases(root, repository, made, frozen_head, dated_routes, submi
           code == 0 and "Send merge-lane-2 this message with SendMessage" in check_out, check_out + check_err)
     answers.unlink()
     code, out, err, line = run_printed_command(
-        root, dated_routes, refusal, f"cd {made} && python3 scripts/{PROGRAM.name} {NUMBER}") or (1, "", "", "")
+        root, dated_routes, refusal, f"cd {made} && python3 {PROGRAM.resolve()} {NUMBER}") or (1, "", "", "")
     check("stopped round: with no fix-round commit, deleting the answers file and running the command that refusal "
           "names, its arguments copied from its line, where its cd goes, prints the brief",
-          line == f"cd {made} && python3 scripts/{PROGRAM.name} {NUMBER}" and code == 0
+          line == f"cd {made} && python3 {PROGRAM.resolve()} {NUMBER}" and code == 0
           and answers.read_text() == "1. \n2. \n", line + err + out)
     kept_directory = (Path(git(made, "rev-parse", "--path-format=absolute", "--git-common-dir"))
                       / "fix-round-answers-kept-copies" / f"pr-{NUMBER}-review-11")
@@ -1062,13 +1062,13 @@ def other_reviewer_cases(root, repository, made, frozen_head):
     routes = routes_for(frozen_head, [dict(review(commit_id=frozen_head, login=other),
                                            submitted_at="2026-11-11T12:00:00Z")])
     code, out, err = run(root, repository, routes, "--reviewer-login", other)
-    check_line = f"cd {made} && python3 scripts/{PROGRAM.name} {NUMBER} --reviewer-login {other} --check"
+    check_line = f"cd {made} && python3 {PROGRAM.resolve()} {NUMBER} --reviewer-login {other} --check"
     check("other reviewer: the brief's check command and rerun commands carry --reviewer-login",
           code == 0 and f"6. Run the check: {check_line}\n" in out
-          and f"run python3 scripts/{PROGRAM.name} {NUMBER} --reviewer-login {other} again" in out, err + out)
+          and f"run python3 {PROGRAM.resolve()} {NUMBER} --reviewer-login {other} again" in out, err + out)
     (made / ANSWERS_NAME).write_text(GOOD_ANSWERS)
     code, out, err = run(root, repository, routes, "--reviewer-login", other)
-    rerun = f"cd {made} && python3 scripts/{PROGRAM.name} {NUMBER} --reviewer-login {other}"
+    rerun = f"cd {made} && python3 {PROGRAM.resolve()} {NUMBER} --reviewer-login {other}"
     check("other reviewer: the refusal for a stopped round names both commands with --reviewer-login",
           code == 1 and f"\n{rerun}\n" in err and f"\n{check_line}" in err, err + out)
     (made / ANSWERS_NAME).unlink()
@@ -1093,7 +1093,7 @@ def topic_worktree_cases(root, repository, base, frozen_head):
           code == 0 and creator_calls.read_text() == json.dumps([BRANCH]) + "\n"
           and git(made, "rev-parse", "HEAD") == frozen_head, err + out)
     check("topic-worktree: the brief names the worktree the creator made in its commands",
-          f"6. Run the check: cd {made} && python3 scripts/{PROGRAM.name} {NUMBER} --check\n" in out, out)
+          f"6. Run the check: cd {made} && python3 {PROGRAM.resolve()} {NUMBER} --check\n" in out, out)
     creator_calls.write_text("")
     code, out, err = run(root, repository, routes, environment_extra=calls)
     check("topic-worktree: a later brief finds the worktree on the branch and makes none",
@@ -1126,7 +1126,7 @@ def topic_worktree_cases(root, repository, base, frozen_head):
     code, out, err = run(root, agent_home, routes, "--check", "--answers", str(made / ANSWERS_NAME))
     check("topic-worktree: --check run outside the topic-worktree refuses with exit 1, naming the command to run there",
           code == 1 and f"runs only in pull request {NUMBER}'s topic-worktree" in err and "on a detached HEAD" in err
-          and f"Run it there:\ncd {made} && python3 scripts/{PROGRAM.name} {NUMBER} --check" in err, err)
+          and f"Run it there:\ncd {made} && python3 {PROGRAM.resolve()} {NUMBER} --check" in err, err)
     git(made, "add", "-A")
     check("topic-worktree: git add -A there leaves the answers file out of the commit",
           git(made, "diff", "--cached", "--name-only") == "" and git(made, "status", "--porcelain") == "",
@@ -1139,7 +1139,7 @@ def topic_worktree_cases(root, repository, base, frozen_head):
     check("topic-worktree: an untracked file refuses the brief with exit 1, naming it and how to remove it",
           code == 1 and out == "" and "stray.txt" in err and "uncommitted changes or untracked files" in err
           and f"git -C {made} clean -d --force --exclude=/{ANSWERS_NAME}" in err
-          and f"Then run this command again:\ncd {made} && python3 scripts/{PROGRAM.name} {NUMBER}" in err, err + out)
+          and f"Then run this command again:\ncd {made} && python3 {PROGRAM.resolve()} {NUMBER}" in err, err + out)
     clean_line = next((line for line in err.splitlines() if " clean -d --force" in line), "")
     unstage_line = next((line for line in err.splitlines() if " reset --quiet -- " in line), "")
     unignored = root / "branch-whose-gitignore-lacks-the-answers-file"
@@ -1216,7 +1216,7 @@ def topic_worktree_cases(root, repository, base, frozen_head):
           code == 1 and out == "" and "holds commits that the frozen-head" in err
           and f"reset --keep {frozen_head}" in err
           and f"finish the round instead with this command, and do what it says:\ncd {made} && python3 "
-              f"scripts/{PROGRAM.name} {NUMBER} --check\n" in err,
+              f"{PROGRAM.resolve()} {NUMBER} --check\n" in err,
           err + out)
     git(made, "reset", "-q", "--hard", frozen_head)
 
@@ -1252,7 +1252,7 @@ def topic_worktree_cases(root, repository, base, frozen_head):
     code, out, err = run(root, agent_home, routes, "--check", "--answers", answers_file(root, GOOD_ANSWERS))
     check("topic-worktree: --check with no worktree on the branch refuses, saying to run the brief program",
           code == 1 and f"No worktree of this clone has {BRANCH} checked out: run this command, which makes one and "
-          f"prints the fix-round brief:\npython3 scripts/{PROGRAM.name} {NUMBER}" in err, err)
+          f"prints the fix-round brief:\npython3 {PROGRAM.resolve()} {NUMBER}" in err, err)
     git(repository, "worktree", "remove", "--force", str(agent_home))
     git(repository, "checkout", "-q", BRANCH)
 
@@ -1362,7 +1362,7 @@ def check_cases(root, repository, base, frozen_head):
           code == 1 and "entry 2" in err and "pull request 41" in err and "no such pull request" in err
           and "open it as CLAUDE.md says" in err and "correct it so that the entry starts" in err
           and "If the change did not move after all" in err and "carries it, or" in err
-          and f"The check is: python3 {PROGRAM} {NUMBER} --check --answers {moved_answers}" in err, out + err)
+          and f"The check is: python3 {PROGRAM.resolve()} {NUMBER} --check --answers {moved_answers}" in err, out + err)
     failing_routes = routes_for(frozen_head, reviews)
     failing_routes["pr view 41 --json number"] = {"exit": 1, "stderr": "error connecting to api.github.com\n"}
     code, out, err = run(root, repository, failing_routes, "--check", "--answers", moved_answers)
@@ -1376,7 +1376,7 @@ def check_cases(root, repository, base, frozen_head):
         check(f"check: a moved entry with no pull request number or URL refuses with exit 1: {text!r}",
               code == 1 and "entry 2" in err and "no pull request number or URL follows" in err
               and "open it as CLAUDE.md says" in err and "If the change did not move after all" in err
-              and f"The check is: python3 {PROGRAM} {NUMBER} --check --answers {prefix_only}" in err,
+              and f"The check is: python3 {PROGRAM.resolve()} {NUMBER} --check --answers {prefix_only}" in err,
               out + err)
 
     code, out, err = run(root, repository, routes_for(frozen_head, reviews),

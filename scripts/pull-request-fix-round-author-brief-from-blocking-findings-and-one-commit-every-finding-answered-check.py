@@ -280,7 +280,9 @@ ANSWERS_KEPT_COPIES_DIRECTORY_NAME = "fix-round-answers-kept-copies"
 # What gh pr view prints on stderr for a number or URL that names no pull request.
 PULL_REQUEST_NOT_FOUND_MARKER = "Could not resolve to a PullRequest"
 GH_TIMEOUT_SECONDS = 60
-PROGRAM = "scripts/" + Path(__file__).name
+# Absolute, so a command run from the topic-worktree runs this copy, whose lane and refusals match the brief it
+# printed, not the worktree's own older copy.
+PROGRAM = str(Path(__file__).resolve())
 
 
 def program_command(number, reviewer_login, *options):
