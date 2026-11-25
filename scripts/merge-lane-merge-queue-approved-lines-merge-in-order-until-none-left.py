@@ -98,9 +98,9 @@ FOLLOW_UP_PROGRAM = SCRIPTS / "pull-request-follow-up-request-after-merge-findin
 MERGE_BATCH_LOCK_FILE_NAME = "merge-batch.lock"
 MERGE_BATCH_LOG_FILE_NAME = "merge-batch.log"
 MERGE_IN_PROGRESS_FILE_NAME = "merge-batch-merge-in-progress.txt"
-NOTICE_DIRECTORY_NAME = "notices-for-merge-lane-2"
+MERGE_BATCH_OUTCOME_NOTICES_FOR_MERGE_LANE_2_DIRECTORY_NAME = "merge-batch-outcome-notices-for-merge-lane-2"
 NEXT_MERGE_STARTS, NEXT_MERGE_WAITS, NEXT_MERGE_STOPS = "STARTS", "WAITS", "STOPS"
-SECONDS_BETWEEN_NEXT_MERGE_CHECKS = 15
+SECONDS_BETWEEN_NEXT_MERGE_MAY_START_CHECKS = 15
 MERGE_PROGRAM_EXIT_MEANINGS = {
     0: "it reported a merge that GitHub does not show",
     1: "it refused, yet GitHub shows the pull request merged",
@@ -148,7 +148,7 @@ def parse_arguments(argv):
     return parser.parse_args(argv)
 
 
-class MergeQueue:
+class MergeQueuePullRequestMergeBatchRunner:
     def __init__(self, arguments, wait=time.sleep):
         self.arguments = arguments
         self.wait = wait
@@ -156,7 +156,7 @@ class MergeQueue:
         self.stop_file = (arguments.merge_program_outputs_directory
                           / merge_program.MERGE_QUEUE_STOP_FILE_NAME)
         self.in_progress_file = self.directory / MERGE_IN_PROGRESS_FILE_NAME
-        self.notices = self.directory / NOTICE_DIRECTORY_NAME
+        self.notices = self.directory / MERGE_BATCH_OUTCOME_NOTICES_FOR_MERGE_LANE_2_DIRECTORY_NAME
 
     # The merge queue file
 
@@ -310,7 +310,7 @@ class MergeQueue:
         for line in waiting:
             while (decision := self.next_merge_may_start())[0] == NEXT_MERGE_WAITS:
                 self.log(f"waiting: {decision[1]}")
-                self.wait(SECONDS_BETWEEN_NEXT_MERGE_CHECKS)
+                self.wait(SECONDS_BETWEEN_NEXT_MERGE_MAY_START_CHECKS)
             if decision[0] == NEXT_MERGE_STOPS:
                 raise StopFileFound(decision[1])
             appended |= self.one_pull_request(line)
@@ -512,7 +512,7 @@ class MergeQueue:
 
 def main(argv=None):
     arguments = parse_arguments(argv)
-    queue = MergeQueue(arguments)
+    queue = MergeQueuePullRequestMergeBatchRunner(arguments)
     try:
         if arguments.subcommand == "merge-batch-run-in-queue-order":
             return queue.run_in_queue_order(arguments.merge_only)

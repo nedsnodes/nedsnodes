@@ -156,7 +156,7 @@ class Case:
         return [json.loads(line) for line in log.read_text().splitlines()] if log.exists() else []
 
     def notices(self):
-        directory = self.batches / program.NOTICE_DIRECTORY_NAME
+        directory = self.batches / program.MERGE_BATCH_OUTCOME_NOTICES_FOR_MERGE_LANE_2_DIRECTORY_NAME
         return ({path.name: path.read_text() for path in sorted(directory.iterdir())}
                 if directory.is_dir() else {})
 
@@ -252,7 +252,7 @@ def merging_cases(scratch):
 
     case = Case(scratch, "appended-after-the-last-pass", [approved(10, A)],
                 {"10": pr(A), "11": pr(B)})
-    real_one_pass = program.MergeQueue.one_pass
+    real_one_pass = program.MergeQueuePullRequestMergeBatchRunner.one_pass
     passes = []
 
     def one_pass_then_another_seat_appends(self, merge_only):
@@ -262,11 +262,11 @@ def merging_cases(scratch):
             with open(self.arguments.merge_queue_file, "a") as queue:
                 queue.write(approved(11, B) + "\n")
         return appended
-    program.MergeQueue.one_pass = one_pass_then_another_seat_appends
+    program.MergeQueuePullRequestMergeBatchRunner.one_pass = one_pass_then_another_seat_appends
     try:
         case.run("merge-batch-run-in-queue-order")
     finally:
-        program.MergeQueue.one_pass = real_one_pass
+        program.MergeQueuePullRequestMergeBatchRunner.one_pass = real_one_pass
     check("a line appended after the last pass read the file, before the lock is released, is "
           "merged by another pass",
           [call[0] for call in case.merge_calls()] == ["10", "11"], (passes, case.merge_calls()))
@@ -382,7 +382,7 @@ def stopping_cases(scratch):
 
     case = Case(scratch, "notice-unwritable", [approved(10, A)], {"10": pr(A)})
     case.batches.mkdir()
-    (case.batches / program.NOTICE_DIRECTORY_NAME).write_text("a file, not a directory\n")
+    (case.batches / program.MERGE_BATCH_OUTCOME_NOTICES_FOR_MERGE_LANE_2_DIRECTORY_NAME).write_text("a file, not a directory\n")
     exit_code, output = case.run("merge-batch-run-in-queue-order")
     check("a notice that cannot be written stops the batch, and the log says why",
           "could not write the notice" in output and "could not write the notice" in (
@@ -401,7 +401,7 @@ def stopping_cases(scratch):
 
 def next_merge_decision_cases(scratch):
     case = Case(scratch, "next-merge-decision", [approved(10, A)], {"10": pr(A)})
-    queue = program.MergeQueue(program.parse_arguments(case.argv("merge-batch-list-waiting")))
+    queue = program.MergeQueuePullRequestMergeBatchRunner(program.parse_arguments(case.argv("merge-batch-list-waiting")))
     check("the next merge starts when there is no stop file and no merge program holds its lock",
           queue.next_merge_may_start()[0] == program.NEXT_MERGE_STARTS)
     lock_path = case.outputs / program.merge_program.MERGE_PROGRAM_RUN_LOCK_FILE_NAME
@@ -428,7 +428,7 @@ def next_merge_decision_cases(scratch):
     def wait_then_release(seconds):
         waits.append(seconds)
         fcntl.flock(holder, fcntl.LOCK_UN)
-    queue = program.MergeQueue(
+    queue = program.MergeQueuePullRequestMergeBatchRunner(
         program.parse_arguments(case.argv("merge-batch-run-in-queue-order")),
         wait=wait_then_release)
     saved = dict(os.environ)
@@ -442,7 +442,7 @@ def next_merge_decision_cases(scratch):
         holder.close()
     check("a merge batch waits while another merge program's test run holds the lock, then "
           "merges",
-          waits == [program.SECONDS_BETWEEN_NEXT_MERGE_CHECKS]
+          waits == [program.SECONDS_BETWEEN_NEXT_MERGE_MAY_START_CHECKS]
           and [call[0] for call in case.merge_calls()] == ["10"], (waits, case.merge_calls()))
 
 
