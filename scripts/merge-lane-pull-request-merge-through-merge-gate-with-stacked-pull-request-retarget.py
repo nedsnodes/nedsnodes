@@ -753,6 +753,10 @@ def failed_suites_kept_in_view(arguments, merge_commit, worktree, log_dir, envir
             f"covers this test, the test was not run" if skips else ""))
 
     to_open = {"new_tests": {}, "again": {}}
+    # What the first save left on each test whose repair task opens after it; the second save
+    # names the task only on an entry still holding that, since another run may have changed it.
+    left_by_first_save = {}
+    closed_task_of_test = {}
 
     def change(suites):
         for suite in list(suites):
@@ -776,6 +780,12 @@ def failed_suites_kept_in_view(arguments, merge_commit, worktree, log_dir, envir
                         fields["repair_task_agent_seat"], fields["repair_task_id"])):
                     to_open_again.setdefault(fields["repair_task_agent_seat"], {}).setdefault(
                         suite, {})[test] = log
+                    closed_task_of_test[(suite, test)] = (fields["repair_task_agent_seat"],
+                                                          fields["repair_task_id"])
+                    # As for a new test: if the second save fails, the closed task's id must
+                    # not stay, or the next merge opens a second task beside this one.
+                    fields["repair_task_agent_seat"] = fields["repair_task_id"] = None
+                    left_by_first_save[(suite, test)] = (fields["commit"], fields["failed_at"])
 
         # Repair tasks open only once the record is saved, so a failed write cannot leave a
         # task whose tests the next merge, finding them unrecorded, gives a second task.
@@ -786,6 +796,7 @@ def failed_suites_kept_in_view(arguments, merge_commit, worktree, log_dir, envir
                                    "pull_request": arguments.pull_request, "log": log,
                                    "failed_at": now, "repair_task_agent_seat": None,
                                    "repair_task_id": None}
+                left_by_first_save[(suite, test)] = (merge_commit, now)
         to_open.update(new_tests=new_tests, again=to_open_again)
 
     try:
@@ -802,6 +813,8 @@ def failed_suites_kept_in_view(arguments, merge_commit, worktree, log_dir, envir
         _, task_id, why_none = repair_task_opened(arguments, merge_commit, seat, tests_of_seat)
         if task_id is None:
             could_not_open_again.append((seat, tests_of_seat, why_none))
+            task_of_test.update({(suite, test): closed_task_of_test[(suite, test)]
+                                 for suite, tests in tests_of_seat.items() for test in tests})
             continue
         opened_again.append((seat, task_id, tests_of_seat))
         task_of_test.update({(suite, test): (seat, task_id)
@@ -817,11 +830,17 @@ def failed_suites_kept_in_view(arguments, merge_commit, worktree, log_dir, envir
                                  for suite, tests in to_open["new_tests"].items()
                                  for test in tests})
 
+    changed_since_first_save = {}
+
     def tasks_named(suites):
+        changed_since_first_save.clear()
         for (suite, test), (seat, task_id) in task_of_test.items():
             fields = suites.get(suite, {}).get("failed_tests", {}).get(test)
-            if fields is not None:
-                fields["repair_task_agent_seat"], fields["repair_task_id"] = seat, task_id
+            if (fields is None or fields["repair_task_id"] is not None
+                    or (fields["commit"], fields["failed_at"]) != left_by_first_save[(suite, test)]):
+                changed_since_first_save[(suite, test)] = (seat, task_id)
+                continue
+            fields["repair_task_agent_seat"], fields["repair_task_id"] = seat, task_id
 
     if task_of_test:
         try:
@@ -832,6 +851,19 @@ def failed_suites_kept_in_view(arguments, merge_commit, worktree, log_dir, envir
                   f"just opened, so merge-gate.sh shows those tests with no repair task: "
                   f"{error}\n{tell_the_user}")
             kept["complete"] = False
+            changed_since_first_save.clear()
+    for (suite, test), (seat, task_id) in sorted(changed_since_first_save.items()):
+        if closed_task_of_test.get((suite, test)) == (seat, task_id):
+            continue
+        print(f"STOP: merged, but another merge's test run changed {test_named(suite, test)} on "
+              f"the failed suites record after this run saved it, so the record does not name "
+              f"repair task #{task_id} on {seat}'s task list, opened for it by this run. The run "
+              f"that changed it either took the test off the record or recorded it anew and "
+              f"opened its own repair task, so task #{task_id} is not needed.\n"
+              f"Complete task #{task_id} on {seat}'s task list, with a note that the run of the "
+              f"merge after pull request {arguments.pull_request} handles the test. If you are a "
+              f"subagent, tell the agent that dispatched you instead.")
+        kept["complete"] = False
     for name, error in sorted(undecided.items()):
         print(f"STOP: merged, but {name} stays on the failed suites record: git could not say "
               f"whether the commit it last failed at is an ancestor of {merge_commit}: {error}\n"
