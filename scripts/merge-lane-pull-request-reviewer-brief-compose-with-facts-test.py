@@ -282,12 +282,37 @@ def main():
 
         completed = run_program(scratch, helpers, [{**first_round, "tag": "13"}], gh_routes=follow_up_gh_routes,
                                 follow_up_routes={"4": {"stdout": ""}, "31": {
-                                    "exit": 1, "stderr": "ned-review-merge has no approving review of pull request 31\n"}})
-        check("the follow-up request program failing exits 1, naming its error, and writes no brief",
+                                    "exit": 2, "stderr": "FAILED: gh pr view 31 exited 1\n"}})
+        check("the follow-up request program failing (exit 2) exits 1, naming its error, and writes no brief",
               completed.returncode == 1 and "brief not composed: StepFailed" in completed.stderr
-              and "has no approving review of pull request 31" in completed.stderr
+              and "gh pr view 31 exited 1" in completed.stderr
               and not (helpers / "briefs" / "brief-13-mac-claude.md").exists(),
               f"exit {completed.returncode}\n{completed.stdout}{completed.stderr}")
+
+        completed = run_program(scratch, helpers, [{**first_round, "tag": "14"}], gh_routes=follow_up_gh_routes,
+                                follow_up_routes={"4": {"stdout": ""}, "31": {
+                                    "exit": 1, "stderr": "REFUSED: a comment of review 9 has no category mark\n"}})
+        brief_file = helpers / "briefs" / "brief-14-mac-claude.md"
+        brief = brief_file.read_text() if brief_file.exists() else ""
+        expected_refusal_fact = (
+            "- merge-lane-2's follow-up request for pull request #31, which the description names: "
+            "`scripts/pull-request-follow-up-request-after-merge-finding-answers-and-next-step.py 31 "
+            "print-follow-up-request-block-from-merge-lane-2-reviews` refused to print it, so this brief holds no "
+            "follow-up request block for that pull request. Its refusal:\n\n"
+            "> REFUSED: a comment of review 9 has no category mark\n\n"
+            "- Hazards: Check the thing.\n")
+        check("the follow-up request program refusing (exit 1) is a fact quoting its refusal, and the brief is written",
+              completed.returncode == 0 and expected_refusal_fact in brief,
+              f"exit {completed.returncode}\n{completed.stdout}{completed.stderr}\n--- brief ---\n{brief}")
+
+        completed = run_program(scratch, helpers, [{**first_round, "tag": "15", "claude_reviewer": False}],
+                                gh_routes=follow_up_gh_routes, follow_up_routes={"4": {"exit": 2}, "31": {"exit": 2}})
+        brief_file = helpers / "briefs" / "brief-15-mac-claude.md"
+        brief = brief_file.read_text() if brief_file.exists() else ""
+        check("an entry whose claude_reviewer is false runs no follow-up request program and gets no such fact",
+              completed.returncode == 0 and not follow_up_calls(scratch)
+              and "follow-up request for pull request" not in brief,
+              f"exit {completed.returncode}\n{completed.stdout}{completed.stderr}\n--- brief ---\n{brief}")
 
         completed = run_program(scratch, helpers, [first_round, {**first_round, "tag": "7b"}],
                                 gh_routes=FOLLOW_UP_GH_ROUTES)
