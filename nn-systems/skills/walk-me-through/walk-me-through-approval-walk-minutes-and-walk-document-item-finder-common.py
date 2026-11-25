@@ -935,9 +935,9 @@ def waiting_item_units(document, value, numbers, total, parser, all_units=None):
     Each waiting item's unit is the one heading that names it, whatever M the heading gives; total is read only
     to choose between two headings that name the same item and are not revisions, as in a walk-document
     renumbered before numbers were never reused. Raise UnusableRange, saying what is wrong, when the
-    walk-document does not exist, when a waiting item has no heading, or when it has more than one and total
-    does not pick exactly one of them. all_units are item_unit_spans of the walk-document when the caller has
-    them already."""
+    walk-document does not exist, or when a waiting item has no heading, or more than one that total does not
+    narrow to one; one message names every such item, so that fixing one problem does not reveal another. all_units are
+    item_unit_spans of the walk-document when the caller has them already."""
     if all_units is None:
         if not document.is_file():
             raise UnusableRange(f"its walk-document {document} does not exist.")
@@ -961,16 +961,15 @@ def waiting_item_units(document, value, numbers, total, parser, all_units=None):
             repeated.append(number)
         else:
             chosen.append(naming[0])
+    problems = []
     if missing:
         named = ", ".join(f"`Item {number}`" for number in missing)
         unreadable = [unit[2] for unit in all_units if unit[2]]
-        raise UnusableRange(
-            f"its walk-document has no heading {named}, which the minutes name"
-            + "".join(f"; {each}" for each in unreadable) + ".")
+        problems.append(f"no heading {named}, which the minutes name" + "".join(f"; {each}" for each in unreadable))
     if repeated:
         named = ", ".join(f"`Item {number}`" for number in repeated)
-        raise UnusableRange(
-            f"its walk-document has more than one heading for {named}, so the hook cannot tell "
+        problems.append(
+            f"more than one heading for {named}, so the hook cannot tell "
             f"which one the minutes name: if no other of those headings gives the same total as the heading you mean, "
             f"as `of 10` beside two `of 9` headings, add the line `#next_to_present item N of M` as the new last line of "
             f"the minutes, below the earlier `#next_to_present` lines, which stay as they are, N and M copied from the "
@@ -979,6 +978,8 @@ def waiting_item_units(document, value, numbers, total, parser, all_units=None):
             f"`## Withdrawn: Item 4 of 9: <the point>`, or, only when the heading you mean comes after every other "
             f"heading for that item, write `revised` right after its `of M` instead of marking any heading `Withdrawn: `, "
             f"with the colon after or before `revised`, as in `## Item 4 of 9 revised: <the point>` or "
-            f"`## Item 4 of 9: revised <the point>`.")
+            f"`## Item 4 of 9: revised <the point>`")
+    if problems:
+        raise UnusableRange("its walk-document has " + "; and it has ".join(problems) + ".")
     shown_total = total if total is not None else approval_walk_item_total_shown_and_waiting_counted_from_walk_document(all_units)
     return shown_total, [unit for unit in all_units if unit in chosen]
