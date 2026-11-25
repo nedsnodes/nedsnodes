@@ -402,7 +402,10 @@ For a waiting item that asks a decision and is rated none or weak, the step
 first prints the rows of the no-answer table the item could settle by: each row
 whose evidence passes, with its command, and each row that fails only because an
 evidence line is missing, naming the line to add and the command to run after
-adding it. A row whose check cannot run is reported and not offered.
+adding it, and each row that fails only because an evidence line it has is
+malformed, naming the line to correct, rather than to add, and the command to
+run after correcting it. A row whose check cannot run is reported and not
+offered.
 
 The step, in both forms, reads no item and does not say to present it when
 the waiting item is one item that asks a decision, a line holding
@@ -1399,8 +1402,10 @@ NOT_ASKED_DROPPED_PROPOSAL_NEW_TEXT_PROBLEM = ("- it has a `#new` line, which A 
                                                "proposal adds no text, so it recommends something else and is shown.")
 SEARCH_DAY = re.compile(r"\b\d{4}-\d{2}-\d{2}\b")
 SEARCH_COUNT = re.compile(r"\b(\d+)\s+cases?\b", re.I)
-# The places are the text after the single count's `in`, which may follow a word or two, as in `0 cases found in`.
-SEARCH_PLACES = re.compile(r"\W*(?:[A-Za-z]+\W+)*?in\b(.*)", re.I | re.S)
+# The places are the text after the single count's `in`, which may follow a comma and words of the count's own
+# phrase, as in `0 cases found in`; a `;`, `.` or comma between those words ends the phrase, so the `in` of a later
+# clause, as in `0 cases found so far; will look in`, is not taken as the places.
+SEARCH_PLACES = re.compile(r"\s*,?\s*(?:[A-Za-z]+\s+)*?in\b(.*)", re.I | re.S)
 SEARCH_PLACE_WORD = re.compile(r"\b(?!(?:to|in|and|of|the|from|through)\b)[A-Za-z][\w'.-]*")
 SEARCH_WINDOW_DAYS = 30
 NOT_ASKED_WHY = {
@@ -3442,18 +3447,24 @@ def no_answer_rows_for_waiting_item_lines(walk_finder, top, minutes, value, numb
             rows.append(NO_ANSWER_ROW_NOT_CHECKED.format(label=case.label, item=item,
                                                          error=getattr(failure, "reason", failure)))
             continue
-        if not problems:
-            rows.append(NO_ANSWER_ROW_PASSES.format(label=case.label, meaning=case.meaning, command=command))
-        elif all(isinstance(problem, (MissingEvidenceLine, MalformedEvidenceLine)) for problem in problems) and any(
-                isinstance(problem, MalformedEvidenceLine) for problem in problems):
-            malformed = " ".join(problem.removeprefix("- ") for problem in problems)
-            rows.append(NO_ANSWER_ROW_LINE_MALFORMED.format(label=case.label, meaning=case.meaning,
-                                                            malformed=malformed, document=document, command=command))
-        elif all(isinstance(problem, MissingEvidenceLine) for problem in problems):
-            missing = " ".join(problem.removeprefix("- ") for problem in problems)
-            rows.append(NO_ANSWER_ROW_LINE_MISSING.format(label=case.label, meaning=case.meaning, missing=missing,
-                                                          document=document, command=command))
+        row = no_answer_table_row_text_or_none_from_evidence_check_problems(case, problems, document, command)
+        if row:
+            rows.append(row)
     return [NO_ANSWER_ROWS_HEADING.format(item=item), *rows] if rows else []
+
+
+def no_answer_table_row_text_or_none_from_evidence_check_problems(case, problems, document, command):
+    """The no-answer row offering `case` given its check's problems, or None when the row is not offered."""
+    joined = " ".join(problem.removeprefix("- ") for problem in problems)
+    if not problems:
+        return NO_ANSWER_ROW_PASSES.format(label=case.label, meaning=case.meaning, command=command)
+    if all(isinstance(problem, MalformedEvidenceLine) for problem in problems):
+        return NO_ANSWER_ROW_LINE_MALFORMED.format(label=case.label, meaning=case.meaning, malformed=joined,
+                                                   document=document, command=command)
+    if all(isinstance(problem, MissingEvidenceLine) for problem in problems):
+        return NO_ANSWER_ROW_LINE_MISSING.format(label=case.label, meaning=case.meaning, missing=joined,
+                                                 document=document, command=command)
+    return None
 
 
 def unclosed_last_answer(walk_finder, minutes, parser):
