@@ -4290,6 +4290,9 @@ def test_an_item_dropping_a_proposed_check_settles_at_any_rating_when_its_search
                                                                    "dialogs tomorrow"))
     check("a search line whose `in` comes in a later clause, as in `0 cases found so far; will look in ...`, is "
           "refused", *refused_as_dropped(later_clause, "and the places searched."))
+    for places in ("will look in the session dialogs tomorrow", "found so far and will look in the session dialogs"):
+        check(f"a search line whose `in` follows other words than `found`, as in `0 cases, {places}`, is refused",
+              *refused_as_dropped(dropped_proposal_case(search=search_line(places=places)), "and the places searched."))
     closed = case.run("close")
     check("close records the dropped proposal as accepted, and moves `#next_to_present` past it",
           closed.returncode == 0

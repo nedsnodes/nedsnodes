@@ -398,8 +398,9 @@ costs at most the wait for one more read, and never lets the item be shown
 unread. A read the step runs itself that fails prints its FAILED line, says not
 to present the item yet and how to run the step again, and exits 1.
 
-For a waiting item that asks a decision and is rated none or weak, the step
-first prints the rows of the no-answer table the item could settle by: each row
+For a waiting item that asks a decision, the step first prints the rows of the
+no-answer table the item could settle by, each offered only at the ratings of
+the case against that its row of the table allows: each row
 whose evidence passes, with its command, and each row that fails only because an
 evidence line is missing, naming the line to add and the command to run after
 adding it, and each row that fails only because an evidence line it has is
@@ -741,8 +742,8 @@ def system_glossary_problems(found):
 
 def dropped_proposal_search_problems(found):
     """Return why an item that drops a proposed check cannot settle on its `#not_asked_search` line: the line must
-    give a window of at least SEARCH_WINDOW_DAYS ending yesterday or today, one count, of 0 cases, and after it `in`
-    and the places searched;
+    give a window of at least SEARCH_WINDOW_DAYS ending yesterday or today, one count, of 0 cases, and after it `in`,
+    with at most a comma and `found` before it, and the places searched;
     and a dropped proposal adds no `#new` text."""
     problems = [NOT_ASKED_DROPPED_PROPOSAL_NEW_TEXT_PROBLEM] if proposed_texts(found.marks, {NEW_MARK}) else []
     values = found.found[SEARCH]
@@ -1405,10 +1406,10 @@ NOT_ASKED_DROPPED_PROPOSAL_NEW_TEXT_PROBLEM = ("- it has a `#new` line, which A 
                                                "proposal adds no text, so it recommends something else and is shown.")
 SEARCH_DAY = re.compile(r"\b\d{4}-\d{2}-\d{2}\b")
 SEARCH_COUNT = re.compile(r"\b(\d+)\s+cases?\b", re.I)
-# The places are the text after the single count's `in`, which may follow a comma and words of the count's own
-# phrase, as in `0 cases found in`; a `;`, `.` or comma between those words ends the phrase, so the `in` of a later
-# clause, as in `0 cases found so far; will look in`, is not taken as the places.
-SEARCH_PLACES = re.compile(r"\s*,?\s*(?:[A-Za-z]+\s+)*?in\b(.*)", re.I | re.S)
+# The places are the text after the `in` that follows the single count, with at most a comma and the word `found`
+# between them, as in `0 cases, in` or `0 cases found in`; any other word there, as in `0 cases, will look in`, may
+# begin a clause that has not been searched, so its `in` is not taken as the places.
+SEARCH_PLACES = re.compile(r"\s*,?\s*(?:found\s+)?in\b(.*)", re.I | re.S)
 SEARCH_PLACE_WORD = re.compile(r"\b(?!(?:to|in|and|of|the|from|through)\b)[A-Za-z][\w'.-]*")
 SEARCH_WINDOW_DAYS = 30
 NOT_ASKED_WHY = {
