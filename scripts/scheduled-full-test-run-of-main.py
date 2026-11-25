@@ -51,9 +51,11 @@ WHAT ONE RUN DOES, in order.
      jobs fetch in the same clone at the same minute, and two fetches that
      both update one ref can make one fail with "incorrect old value
      provided"; a hand run with another --temporary-directory holds another
-     lock, so it gets another ref too. The ref is deleted when the run
-     ends. A failed fetch stops the run and is written to the record.
-  2. Resolves that ref to its full commit hash and makes a
+     lock, so it gets another ref too. A failed fetch stops the run and is
+     written to the record.
+  2. Resolves that ref to its full commit hash and deletes the ref; a failed
+     delete is written to the record and makes the run exit 4, though the
+     suites still run. It then makes a
      detached worktree at that hash (`git worktree add --detach`), so no
      branch is made and nothing rests on FETCH_HEAD, which another agent's
      fetch can move. A worktree a killed run left at the same path is removed
@@ -487,8 +489,6 @@ def main(argv=None, now=None, monotonic=time.monotonic) -> int:
             arguments, now, monotonic, on_ned_box, machine, pacific_date, clone,
             directory)
     finally:
-        # A ref left by a failed delete is harmless: the next run with this directory overwrites it.
-        git(clone, "update-ref", "-d", scheduled_full_test_run_main_fetch_destination_git_ref_name_for_temporary_directory(directory))
         lock_handle.close()
 
 
@@ -521,6 +521,13 @@ def scheduled_full_test_run_under_lock(arguments, now, monotonic, on_ned_box, ma
                 "Fix the clone's origin remote, then run this again."))
         else:
             commit = resolved.stdout.strip()
+        deleted = git(clone, "update-ref", "-d", fetch_destination)
+        if deleted.returncode != 0:
+            steps_failed.append((
+                f"git update-ref -d {fetch_destination} failed in {clone}: "
+                f"{git_output.git_stderr_first_error_message_else_last_line(deleted.stderr)}",
+                f"Fix what git reports, then delete the ref with: "
+                f"git -C {shlex.quote(str(clone))} update-ref -d {fetch_destination}"))
     if commit is not None:
         remove_worktree_of_main(clone, worktree)
         added = git(clone, "worktree", "add", "--detach", str(worktree), commit)
