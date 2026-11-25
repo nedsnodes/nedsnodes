@@ -262,15 +262,11 @@ FAILED_PROMISE_MESSAGES = "failed_promise_messages"
 # sentence off it; a failed send leaves it, so the re-check and the user-alert read a failed
 # message's sentences from it, while the escalation quotes the failed message's own text.
 RULE_2_SENTENCES_ON_WAIT = "rule_2_sentences_on_wait"
-# Read only from logs written before the escalation's message_sent event carried
-# ESCALATION_NAMED_RECORDS: the group_ids of the groups whose every sentence the text sent named.
-ESCALATION_NAMED_SENTENCE_GROUPS = "escalation_named_sentence_groups"
 # On an escalation's message_sent event: the records of the sentences on the wait that the text
 # sent names, written in the same event as the send so that no stop between two writes loses them.
 ESCALATION_NAMED_RECORDS = "escalation_named_records"
-# What Sweep.due_step did, when it did either.
+# What Sweep.due_step returns when the re-check ended the wait.
 WAIT_ENDED_BY_RECHECK = "wait ended by the re-check"
-ESCALATED = "escalated"
 # On an open wait: the sentences no message event has taken off it, one entry per sentence,
 # [{"group_id", "record", "at", "kinds", "sentences", "earliest_sentence_at"}, and "failed" once a
 # send naming it failed, "named_by_escalation" once an escalation named it]. "record" is
@@ -496,7 +492,7 @@ class SweepLog:
         owed, owed_by = False, None
         for event in self.of_seat(seat, "wait_step", "wait_ended", PROMISE_MESSAGE,
                                   PROMISE_MESSAGE_SEND_FAILED, RULE_2_SENTENCES_ON_WAIT,
-                                  ESCALATION_NAMED_SENTENCE_GROUPS, "message_sent"):
+                                  "message_sent"):
             invocation = event.get("agent_seat_idle_sweep_invocation_started_at")
             if event["event"] == "wait_ended":
                 wait, owed = None, False
@@ -509,22 +505,20 @@ class SweepLog:
             elif event["event"] == PROMISE_MESSAGE_SEND_FAILED:
                 if wait is not None:
                     wait[FAILED_PROMISE_MESSAGES].append({"at": event["at"], "text": event["text"]})
+                    named = records_of(event)
                     for entry in wait[SENTENCES_WITH_NO_MESSAGE_EVENT]:
-                        if entry_named_by(entry, event):
+                        if entry["record"] in named:
                             entry["at"], entry["failed"] = event["at"], True
                 owed = False
-            elif event["event"] in (ESCALATION_NAMED_SENTENCE_GROUPS, "message_sent"):
-                if event["event"] == "message_sent":
-                    if ESCALATION_NAMED_RECORDS not in event:
-                        continue
-                    named = {"records": event[ESCALATION_NAMED_RECORDS]}
-                else:
-                    named = event
+            elif event["event"] == "message_sent":
+                if ESCALATION_NAMED_RECORDS not in event:
+                    continue
+                named = {tuple(record) for record in event[ESCALATION_NAMED_RECORDS]}
                 # The escalation is the first message that names these sentences, so a task call
                 # before its send cannot answer it.
                 if wait is not None:
                     for entry in wait[SENTENCES_WITH_NO_MESSAGE_EVENT]:
-                        if entry_named_by(entry, named):
+                        if entry["record"] in named:
                             entry["at"] = event["send_started_at"]
                             entry["named_by_escalation"] = True
             elif event["event"] == PROMISE_MESSAGE:
@@ -672,40 +666,26 @@ def quoted(text):
     return "\n".join(f"> {line}" for line in text.split("\n"))
 
 
-def event_group_ids(event):
-    """The ids of the sentence groups an event names; events logged before an event could name
-    several carry one "group_id"."""
-    if "group_ids" in event:
-        return set(event["group_ids"])
-    return {event["group_id"]} if event.get("group_id") else set()
-
-
 def sentences_on_wait_entries(event):
     """One entry of SENTENCES_WITH_NO_MESSAGE_EVENT per sentence a rule_2_sentences_on_wait event
     logged, so that a message, a failed send or an escalation that names some of its sentences
     leaves the others owed."""
     common = {"group_id": event["group_id"], "at": event["at"], "kinds": set(event["kinds"]),
               "earliest_sentence_at": event.get("earliest_sentence_at")}
-    records = [tuple(record) for record in event.get("records", [])]
-    if not records:
-        return [dict(common, record=None, sentences=event["sentences"])]
-    return [dict(common, record=record, sentences=[record[1]]) for record in records]
+    return [dict(common, record=tuple(record), sentences=[record[1]])
+            for record in event["records"]]
 
 
-def entry_named_by(entry, event):
-    """Whether a message event names the sentence of a SENTENCES_WITH_NO_MESSAGE_EVENT entry: by
-    its record when the event carries records, else, for an event logged before events did, by
-    the entry's group."""
-    if "records" in event:
-        return entry["record"] is not None and entry["record"] in {
-            tuple(record) for record in event["records"]}
-    return entry["group_id"] in event_group_ids(event)
+def records_of(event):
+    """The records an event names; a promise_message logged before events carried records names
+    none."""
+    return {tuple(record) for record in event.get("records", [])}
 
 
 def without_message_event_replaced(wait, message_event):
+    named = records_of(message_event)
     wait[SENTENCES_WITH_NO_MESSAGE_EVENT] = [
-        entry for entry in wait[SENTENCES_WITH_NO_MESSAGE_EVENT]
-        if not entry_named_by(entry, message_event)]
+        entry for entry in wait[SENTENCES_WITH_NO_MESSAGE_EVENT] if entry["record"] not in named]
 
 
 def whitespace_squeezed(text):
@@ -713,11 +693,19 @@ def whitespace_squeezed(text):
     return " ".join(text.split())
 
 
+def stands_whole_in(sentence, sent):
+    """Whether a sentence stands whole in a whitespace-squeezed text: it starts the text, follows a
+    quotation mark, or follows the end of a sentence, a colon or a "> " quote mark, so that a
+    sentence found only inside a longer one, after its comma, does not count as named."""
+    return re.search(r'(?:^|["\u201c]|[.!?:>] )' + re.escape(whitespace_squeezed(sentence))
+                     + r'(?=$|["\u201d ])', sent) is not None
+
+
 def records_named_in(text, entries):
-    """The records of the entries whose every sentence text names."""
+    """The records of the entries whose every sentence text quotes whole."""
     sent = whitespace_squeezed(text)
-    return [list(entry["record"]) for entry in entries if entry["record"] is not None
-            and all(whitespace_squeezed(sentence) in sent for sentence in entry["sentences"])]
+    return [list(entry["record"]) for entry in entries
+            if all(stands_whole_in(sentence, sent) for sentence in entry["sentences"])]
 
 
 def sentence_groups_wait_answers_for(wait):
@@ -1369,8 +1357,16 @@ class Sweep:
                 records = [[item["record_uuid"], item["sentence"]] for item in promise_records]
                 sent = self.send(seat, verdict, promise_text, NUDGE)
                 if sent:
+                    # A sender may send a text other than code's: a sentence it left out stays on
+                    # the wait, for the escalation and the user-alert to name.
+                    records = records_named_in(sent["text"], [
+                        {"record": tuple(record), "sentences": [record[1]]} for record in records])
+                    named = {tuple(record) for record in records}
                     self.record({"event": PROMISE_MESSAGE, "agent_seat": seat, "records": records,
-                                 "kinds": promise_kinds, "sentences": promise_sentences,
+                                 "kinds": sorted({item["kind"] for item in promise_records
+                                                  if (item["record_uuid"], item["sentence"])
+                                                  in named}),
+                                 "sentences": [record[1] for record in records],
                                  "send_started_at": sent["send_started_at"],
                                  "earliest_sentence_at": earliest_sentence_at})
                 else:
@@ -1462,7 +1458,7 @@ class Sweep:
         """The step of an open wait that is due: the escalation 15 minutes after the nudge, unless
         the re-check ends the wait, then the user-alert 15 minutes after the escalation; after
         that, none. The escalation is a send, so a headless usage-limit pause holds it. Returns
-        WAIT_ENDED_BY_RECHECK, ESCALATED when the escalation's send succeeded, or None.
+        WAIT_ENDED_BY_RECHECK when the re-check ended the wait, else None.
 
         The escalation quotes each message whose send failed and names every other sentence no
         message event holds, and the user-alert names all of those sentences, so that a sentence
@@ -1515,7 +1511,7 @@ class Sweep:
             self.record({"event": "wait_step", "agent_seat": seat, "step": ESCALATE, "text": text})
             # A failed send leaves a rule 2 message due in this step to be sent: a send stopped at
             # a usage limit holds it back until the reset.
-            return ESCALATED if self.send(seat, verdict, text, ESCALATE, unsent) else None
+            self.send(seat, verdict, text, ESCALATE, unsent)
         return None
 
     def nudge(self, seat, verdict, rule, text, stretch):
