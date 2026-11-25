@@ -442,6 +442,14 @@ with tempfile.TemporaryDirectory() as scratch:
           result.returncode == 0 and text.startswith("<!-- provenance:")
           and text.partition("\n")[2] == CODEX_REVIEW_PROSE_OF_THE_SAME_REVIEW,
           f"exit {result.returncode}; stderr={result.stderr!r}; report={text!r}")
+    fenced_object_report = scratch / "fenced-object-report.md"
+    result = run_cell(stubs, stub_codex_writes("```json\n" + json.dumps(CODEX_REVIEW_OBJECT) + "\n```\n"),
+                      "--commit", head_sha, "--repo", str(checkout), "--output", str(fenced_object_report))
+    text = fenced_object_report.read_text(encoding="utf-8") if fenced_object_report.is_file() else ""
+    check("a report Codex wrote as its review object inside a ```json fence is written as the report "
+          "Codex writes from the same object",
+          result.returncode == 0 and text.partition("\n")[2] == CODEX_REVIEW_PROSE_OF_THE_SAME_REVIEW,
+          f"exit {result.returncode}; stderr={result.stderr!r}; report={text!r}")
     no_findings_report = scratch / "no-findings-object-report.md"
     result = run_cell(stubs, stub_codex_writes(json.dumps(
                           {"findings": [], "overall_correctness": "patch is correct",
@@ -474,7 +482,14 @@ with tempfile.TemporaryDirectory() as scratch:
             ("a finding with no body", object_with_first_finding(body=None)),
             ("a finding with no code location", object_with_first_finding(code_location=None)),
             ("a finding with no line range end", object_with_first_finding(
-                code_location={"absolute_file_path": "/a.py", "line_range": {"start": 1}})))):
+                code_location={"absolute_file_path": "/a.py", "line_range": {"start": 1}})),
+            ("a finding that is not an object", json.dumps({"findings": ["x"], "overall_explanation": "e"})),
+            ("a finding whose line range is a list", object_with_first_finding(
+                code_location={"absolute_file_path": "/a.py", "line_range": [1, 2]})),
+            ("a finding whose title holds a carriage return",
+             object_with_first_finding(title="[P2] \rCheck the lookup")),
+            ("a finding whose path holds a Unicode line separator", object_with_first_finding(
+                code_location={"absolute_file_path": "/a\u2028.py", "line_range": {"start": 1, "end": 1}})))):
         refused_report = scratch / f"unconvertible-object-report-{number}.md"
         result = run_cell(stubs, stub_codex_writes(report_text),
                           "--commit", head_sha, "--repo", str(checkout),
@@ -482,7 +497,8 @@ with tempfile.TemporaryDirectory() as scratch:
         check(f"a report Codex wrote as {case} exits 1, naming the report, leaving no report "
               "and the text Codex wrote on stderr",
               result.returncode == 1 and str(refused_report.resolve()) in result.stderr
-              and report_text in result.stderr and "Traceback" not in result.stderr
+              # text=True reads a carriage return as a newline.
+              and report_text.replace("\r", "\n") in result.stderr and "Traceback" not in result.stderr
               and not refused_report.exists(),
               f"exit {result.returncode}; stderr={result.stderr!r}")
 

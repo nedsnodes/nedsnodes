@@ -466,20 +466,27 @@ def codex_finding_grade_cases(scratch):
     result = run_program(scratch, graded(), arguments=MERGE_LANE_ARGUMENTS, codex_runs=((HEAD, "0", report),))
     check("a run record with a field of the wrong type is refused",
           result.code == 2 and "wrong type" in result.stderr, result.detail)
-    json_report = ("<!-- provenance: runtime=codex-exec-review -->\n"
-                   + json.dumps({"findings": [{"title": "[P2] Keep the error", "body": "B", "priority": 2,
-                                               "code_location": {"absolute_file_path": "/cache/pr7-head/a.py",
-                                                                 "line_range": {"start": 2, "end": 2}}}],
-                                 "overall_correctness": "patch is incorrect", "overall_explanation": "E"},
-                                indent=2))
-    result = run_program(scratch, graded(), arguments=MERGE_LANE_ARGUMENTS, codex_runs=((HEAD, 0, json_report),))
-    check("a successful run whose report is JSON after its provenance comment is refused before GitHub, "
-          "naming the report, not read as a review with no findings",
+    review_object = {"findings": [{"title": "[P2] Keep the error", "body": "B", "priority": 2,
+                                   "code_location": {"absolute_file_path": "/cache/pr7-head/scripts/thing.py",
+                                                     "line_range": {"start": 2, "end": 2}}}],
+                     "overall_correctness": "patch is incorrect", "overall_explanation": "E"}
+    for form, report_text in (("bare", json.dumps(review_object, indent=2)),
+                              ("inside a ```json fence", "```json\n" + json.dumps(review_object) + "\n```\n")):
+        result = run_program(scratch, graded(), arguments=MERGE_LANE_ARGUMENTS,
+                             codex_runs=((HEAD, 0, "<!-- provenance: runtime=codex-exec-review -->\n" + report_text),))
+        check(f"a successful run whose report is Codex's review object, {form}, is read through the cell's "
+              "conversion, so its finding needs a grade under the id it has in prose",
+              result.code == 2 and not result.calls and "1 Codex finding(s)" in result.stderr
+              and f"- {first_id}: P2 {first}" in result.stderr, result.detail)
+    unconvertible = "<!-- provenance: runtime=codex-exec-review -->\n" + json.dumps({"findings": ["x"],
+                                                                                    "overall_explanation": "E"})
+    result = run_program(scratch, graded(), arguments=MERGE_LANE_ARGUMENTS, codex_runs=((HEAD, 0, unconvertible),))
+    check("a successful run whose report is a review object the conversion refuses is refused before GitHub, "
+          "naming the report, printing its text and the rerun command that names the head commit",
           result.code == 2 and not result.calls and "codex-code-review-report.md" in result.stderr
-          and "is a JSON object" in result.stderr
+          and "cannot turn into finding lines" in result.stderr and '"findings": ["x"]' in result.stderr
           and "merge-lane-code-review-codex-cell-run-on-pull-request-head.py 7 base0 "
-              "--merge-lane-worktrees-and-outputs-directory " in result.stderr
-          and "If the cell exits 0, run the posting command that printed this message again" in result.stderr,
+              f"--expected-head-commit {HEAD} --merge-lane-worktrees-and-outputs-directory " in result.stderr,
           result.detail)
     case = Path(tempfile.mkdtemp(dir=scratch))
     (case / "cx" / "pr7-base").mkdir(parents=True)
