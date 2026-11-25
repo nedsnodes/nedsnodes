@@ -2791,7 +2791,7 @@ def fix_commit_range_two_commit_round_cases(_root, repository, _base, _frozen_he
         original_directory = os.getcwd()
         os.chdir(repository)
         try:
-            return program.fix_commit_range(frozen_head, program.commits_since(frozen_head, head))
+            return program.fix_commit_range(frozen_head, program.commits_since(frozen_head, head), "merge-lane-2")
         except program.Refused as refusal:
             return refusal
         finally:
@@ -3187,7 +3187,53 @@ def conflict_check_cases(root, repository, _base, frozen_head):
     git(repository, "checkout", "-q", "--", "scripts/branch-conflict-check.py")
 
 
+def merge_lane_name_line_cases(root, repository, _base, frozen_head):
+    """The brief and --check send the author's messages to the merge-lane the round's changes-requested review
+    names on the line the posting program writes after the count, and to merge-lane-2 when it names none."""
+    lane_1_review = review(commit_id=frozen_head, body=(
+        "REQUEST_CHANGES\n\n**Blocking: 2**\n\n**Merge-lane: merge-lane-1**\n\nRound 1; merge-lane-2 merges."))
+    routes = routes_for(frozen_head, [lane_1_review])
+    code, out, err = run(root, repository, routes)
+    check("merge-lane name line: a merge-lane-1 review's brief sends every message to merge-lane-1",
+          code == 0 and "tell merge-lane-1 with SendMessage what failed" in out
+          and "send that message to merge-lane-1 with SendMessage" in out
+          and "tell merge-lane-1 with SendMessage what git printed" in out
+          and "merge-lane-2 with SendMessage" not in out and "to merge-lane-2" not in out, err + out)
+    check("merge-lane name line: the brief still says merge-lane-2 sends the non-blocking findings after the merge",
+          "merge-lane-2 sends them after the merge" in out, out)
+
+    answers = answers_file(root, GOOD_ANSWERS)
+    code, out, err = run(root, repository, routes, "--check", "--answers", answers)
+    check("merge-lane name line: --check on a merge-lane-1 round prints the message for merge-lane-1",
+          code == 0 and "Send merge-lane-1 this message with SendMessage:" in out
+          and "merge-lane-2" not in out, err + out)
+
+    for body in ["REQUEST_CHANGES\n\n**Blocking: 2**\n\nmerge-lane-1's review of round 1.",
+                 "REQUEST_CHANGES\n\n**Blocking: 2**\n\nQuoted: **Merge-lane: merge-lane-1**",
+                 "REQUEST_CHANGES\n\n**Blocking: 2**\n\n**Merge-lane: merge-lane-1** wrote this."]:
+        code, out, err = run(root, repository, routes_for(frozen_head, [review(commit_id=frozen_head, body=body)]))
+        check(f"merge-lane name line: a review with no name line where the posting program writes it is briefed, "
+              f"its messages sent to merge-lane-2: {body[34:70]!r}",
+              code == 0 and "send that message to merge-lane-2 with SendMessage" in out
+              and "merge-lane-1 with SendMessage" not in out, err + out)
+
+    program = load_program()
+    lane_3_unmarked = review(commit_id=frozen_head, body=(
+        "REQUEST_CHANGES\n\n**Blocking: 1**\n\n**Merge-lane: merge-lane-3**\n\nNo inline mark."))
+    program.gh_json_lines = lambda arguments: [comment("old.txt", "Unmarked.")]
+    try:
+        program.blocking_findings(NUMBER, lane_3_unmarked, [lane_3_unmarked])
+        refusal = ""
+    except program.Refused as refused:
+        refusal = str(refused)
+    check("merge-lane name line: a refusal about a review's findings, such as a replaced pull request's carried "
+          "review, tells the author to ask the merge-lane that review names",
+          "Ask merge-lane-3 with SendMessage which findings block" in refusal
+          and "merge-lane-2" not in refusal, refusal)
+
+
 gh_timeout_case()
+case("merge-lane name line", merge_lane_name_line_cases)
 case("suites", suite_cases)
 case("architecture overview", architecture_overview_cases)
 case("architecture overview check cannot read", architecture_overview_check_cannot_read_case)
