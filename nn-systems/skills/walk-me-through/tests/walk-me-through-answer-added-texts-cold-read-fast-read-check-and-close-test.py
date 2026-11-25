@@ -7935,6 +7935,47 @@ def test_the_fresh_agent_brief_holds_the_raising_item_s_answer_words_and_the_hoo
           "a word on item 5" not in brief, brief)
 
 
+def test_the_fresh_agent_brief_holds_the_bumped_item_s_raising_reply_and_not_a_note_naming_another_walk_s_item():
+    """Item 3 was added and bumped while item 2 waited, from the user's own-words reply to item 2; an agent's note
+    in the walk-minutes quotes his words on item 3 of another walk."""
+    spec = importlib.util.spec_from_file_location("walk_short_answer_hook_for_bump_brief_test", SHORT_ANSWER_HOOK_FILE)
+    hook = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(hook)
+    reply = hook.APPROVAL_WALK_WAITING_ITEM_USER_OWN_WORDS_REPLY_WALK_MINUTES_LINE.format(
+        date_and_time="2026-11-25 16:32Z", item="item 2 of 8", words="`I thought file types were dots`")
+    other_reply = hook.APPROVAL_WALK_WAITING_ITEM_USER_OWN_WORDS_REPLY_WALK_MINUTES_LINE.format(
+        date_and_time="2026-11-25 16:40Z", item="item 5 of 9", words="`a word on item 5`")
+    note = ('- 2026-11-24 ruling relayed by another agent-seat: the user named it "guide-book" (his words, its walk, '
+            'item 3 of 47: "spell it GUIDE-book")')
+    agent_record = "2026-11-25T16:35Z, the user on item 3 of 9 (the dots item), in his words: `an agent's record`"
+    bump = "Bumped by the user: item 3 of 9 is shown next, before item 2 of 9, which waits again after it."
+    original = revised_item_case
+
+    def bumped_item_case():
+        case = original()
+        case.minutes.write_text("# Minutes\n\n" + "\n".join((note, reply, agent_record, bump, other_reply,
+                                                              "#next_to_present item 3 of 9", "")))
+        return case
+    globals()["revised_item_case"] = bumped_item_case
+    try:
+        case, results, _ = revised_item_case_revised_three_times_across_a_split()
+    finally:
+        globals()["revised_item_case"] = original
+    last = results[4]
+    brief = last.stdout.split("----- brief for the fresh-agent: start -----\n")[-1].split(
+        "----- brief for the fresh-agent: end -----")[0]
+    check("at the third revision the read step prints the brief", last.returncode == 1 and "has been revised three "
+          "times" in last.stdout, "".join(described(result) for result in results))
+    check("the brief holds the user's reply on item 2, which waited when he bumped item 3", f"- {reply}" in brief,
+          brief)
+    check("the brief leaves out an agent's note that says his words and names item 3 of another walk",
+          "GUIDE-book" not in brief, brief)
+    check("the brief holds his words on item 3 as an agent recorded them, in its own wording",
+          f"- {agent_record}" in brief, brief)
+    check("the brief leaves out his reply on item 5, which raised no bumped item", "a word on item 5" not in brief,
+          brief)
+
+
 def test_the_fresh_agent_rewrite_takes_the_place_of_the_item_s_text_and_starts_the_count_again():
     case, _, _ = revised_item_case_revised_three_times_across_a_split()
     rewrite = case.reads() / "item-3.1-fresh-agent-rewrite.md"
