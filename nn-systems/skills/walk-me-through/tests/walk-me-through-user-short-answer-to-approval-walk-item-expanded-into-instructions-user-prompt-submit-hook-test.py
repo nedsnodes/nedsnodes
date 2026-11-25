@@ -675,10 +675,12 @@ def r_meaning_lines(word, item):
             "skill says."]
 
 
-def r_lines(word, item, point=None, minutes=" <minutes>", count=None):
+def r_lines(word, item, point=None, minutes=" <minutes>", count=None, letters=None):
     """The lines R gives for an item the walk-minutes record no page for: publish it first, then the closing line;
-    count is the item's running count in its `#item_page` and closing lines, item by default."""
+    count is the item's running count in its `#item_page` and closing lines, item by default; letters are the
+    closing line's, WALK_DOCUMENT's for the item by default."""
     count = count or item
+    letters = letters or WALK_DOCUMENT_LETTERS.get(item, LETTERS_AFTER_LINK)
     label = "Item " + count[len("item "):] + (f", {point}" if point else "")
     return [f"\"{word}\" asks to see {item} again, and the hook found no `#item_page` line for it in the "
             f"walk-minutes{minutes}.",
@@ -688,12 +690,11 @@ def r_lines(word, item, point=None, minutes=" <minutes>", count=None):
             "instead, and leave the link out of the closing line, keeping only its link text and what follows the "
             "link.",
             "Then reply with only the item's closing line, with the page's link in place of `<page link>`, or "
-            f"without the link if the publish failed, and wait for his answer: [{label}](<page link>) · "
-            f"{LETTERS_AFTER_LINK}"]
+            f"without the link if the publish failed, and wait for his answer: [{label}](<page link>) · {letters}"]
 
 
-def numbered_r_lines(number, item, point=None, minutes=" <minutes>", count=None):
-    return r_lines(f"{number} R", item, point, minutes, count)
+def numbered_r_lines(number, item, point=None, minutes=" <minutes>", count=None, letters=None):
+    return r_lines(f"{number} R", item, point, minutes, count, letters)
 
 
 def holds_in_order(lines, expected):
@@ -712,7 +713,7 @@ def test_r_on_an_open_walk_goes_to_the_agent_and_does_not_block():
               not_blocked(result) and lines is not None
               and lines[0] == EXPANDED_RULE_ID_OPENING + f"The user answered \"{prompt.rstrip('.')}\" to item 4 of 9 of approval-walk {WALK_NAME}."
               and lines[1:] == r_lines(word, "item 4 of 9", "a filter")
-              and not any("leave the filter out" in line or "old rows" in line for line in lines),
+              and not any("old rows" in line for line in lines),
               f"exit {result.returncode}, stdout {result.stdout!r}, stderr {result.stderr!r}")
     check("R records nothing in the minutes", (case.walk / f"{WALK_NAME}-minutes.md").read_text() == before)
     lines = Case(next_to_present="items 5 and 6 of 9").lines("r")
@@ -734,6 +735,12 @@ def test_r_on_an_open_walk_goes_to_the_agent_and_does_not_block():
 PAGE_1 = "https://claude.ai/artifact/PageOfItem4Old"
 PAGE_2 = "https://claude.ai/artifact/PageOfItem4New"
 LETTERS_AFTER_LINK = "A approve · D disapprove · M more responses"
+# The closing line's letters for the fixture's item 4, whose recommendation A names; it states no alternative.
+ITEM_4_LETTERS = "A approve: leave the filter out · D disapprove · M more responses"
+# The closing line's letters for each item of WALK_DOCUMENT that states a recommendation.
+WALK_DOCUMENT_LETTERS = {"item 4 of 9": ITEM_4_LETTERS,
+                         "item 5 of 9": "A approve: fix the path · D disapprove · M more responses",
+                         "item 6 of 9": "A approve: Y · D disapprove · M more responses"}
 
 
 def page_line(answer, item, closing_line):
@@ -746,7 +753,7 @@ def test_r_hands_the_agent_the_closing_line_of_the_items_newest_page():
     minutes = case.minutes(f"#item_page item 4 of 9 {PAGE_1}\n\n#item_page item 3 of 9 https://claude.ai/artifact/Three"
                            f"\n\n#item_page item 4 of 9 {PAGE_2}\n\n#next_to_present item 4 of 9")
     before = minutes.read_text()
-    closing = f"[Item 4 of 9, a filter]({PAGE_2}) · {LETTERS_AFTER_LINK}"
+    closing = f"[Item 4 of 9, a filter]({PAGE_2}) · {ITEM_4_LETTERS}"
     for prompt in ("r", "repeat"):
         result = case.run(prompt)
         lines = case.lines(prompt)
@@ -782,14 +789,14 @@ def test_r_on_an_item_whose_publish_failed_hands_the_closing_line_without_its_li
     lines = case.lines("r")
     check("R on an item whose newest `#item_page` line records a failed publish hands the closing line without a link",
           lines is not None
-          and lines[1:] == [page_line("R", "item 4 of 9", f"Item 4 of 9, a filter · {LETTERS_AFTER_LINK}")],
+          and lines[1:] == [page_line("R", "item 4 of 9", f"Item 4 of 9, a filter · {ITEM_4_LETTERS}")],
           f"lines {lines!r}")
     case.minutes("#item_page item 4 of 9 publish failed: the Artifact tool timed out\n\n"
                  f"#item_page item 4 of 9 {PAGE_2}\n\n#next_to_present item 4 of 9")
     lines = case.lines("r")
     check("a page recorded after a failed publish gives the closing line its link again",
           lines is not None and lines[1:] == [
-              page_line("R", "item 4 of 9", f"[Item 4 of 9, a filter]({PAGE_2}) · {LETTERS_AFTER_LINK}")],
+              page_line("R", "item 4 of 9", f"[Item 4 of 9, a filter]({PAGE_2}) · {ITEM_4_LETTERS}")],
           f"lines {lines!r}")
     case.minutes("#item_page item 4 of 9 publish failed:\n\n#next_to_present item 4 of 9")
     lines = case.lines("r")
@@ -801,7 +808,7 @@ def test_r_on_two_waiting_items_with_a_page_for_one_hands_its_closing_line_and_h
     case = Case(next_to_present="items 5 and 6 of 9")
     case.minutes(f"#item_page item 5 of 9 {PAGE_1}\n\n#next_to_present items 5 and 6 of 9")
     lines = case.lines("r")
-    closing = f"[Item 5 of 9, two small corrections]({PAGE_1}) · {LETTERS_AFTER_LINK}"
+    closing = f"[Item 5 of 9, two small corrections]({PAGE_1}) · {WALK_DOCUMENT_LETTERS['item 5 of 9']}"
     check("R on items 5 and 6 with a page for item 5 alone hands item 5's closing line and has item 6 published",
           lines is not None and lines[1:] == [page_line("R", "item 5 of 9", closing)]
           + r_lines("R", "item 6 of 9", "two small corrections"), f"lines {lines!r}")
@@ -815,7 +822,7 @@ def test_r_ignores_an_item_page_line_in_code_or_a_comment_of_the_minutes():
     lines = case.lines("r")
     check("R reads the item's page from the minutes' prose, not from a fenced example or an HTML comment after it",
           lines is not None
-          and lines[1] == page_line("R", "item 4 of 9", f"[Item 4 of 9, a filter]({PAGE_1}) · {LETTERS_AFTER_LINK}"),
+          and lines[1] == page_line("R", "item 4 of 9", f"[Item 4 of 9, a filter]({PAGE_1}) · {ITEM_4_LETTERS}"),
           f"lines {lines!r}")
 
 
@@ -826,7 +833,7 @@ def test_r_closing_line_label_keeps_the_text_of_a_link_in_the_heading_and_drops_
     case = Case(next_to_present="item 4 of 9", document=document)
     case.minutes(f"#item_page item 4 of 9 {PAGE_1}\n\n#next_to_present item 4 of 9")
     lines = case.lines("r")
-    closing = f"[Item 4 of 9, a filter for `old` rows \\[draft\\] https://example.com/x]({PAGE_1}) · {LETTERS_AFTER_LINK}"
+    closing = f"[Item 4 of 9, a filter for `old` rows \\[draft\\] https://example.com/x]({PAGE_1}) · {ITEM_4_LETTERS}"
     check("R's closing line holds no link inside its link, so the line stays clickable",
           lines is not None and lines[1] == page_line("R", "item 4 of 9", closing), f"lines {lines!r}")
 
@@ -839,7 +846,7 @@ def test_r_closing_line_point_leaves_out_a_deferred_items_heading_note():
     case = Case(next_to_present="item 4 of 9", document=document)
     case.minutes(f"#item_page item 4 of 9 {PAGE_1}\n\n#next_to_present item 4 of 9")
     lines = case.lines("r")
-    closing = f"[Item 4 of 9, a filter]({PAGE_1}) · {LETTERS_AFTER_LINK}"
+    closing = f"[Item 4 of 9, a filter]({PAGE_1}) · {ITEM_4_LETTERS}"
     check("R's closing line gives a deferred item's point without the note its heading carries, whose colon "
           "is not the count's",
           lines is not None and lines[1] == page_line("R", "item 4 of 9", closing), f"lines {lines!r}")
@@ -903,9 +910,9 @@ def check_closing_line_shows_the_point(name, point, expected_label):
     children = parser.parseInline(closing)[0].children if closing is not None else []
     types = [token.type for token in children]
     label = closing[1:closing.index(f"]({PAGE_1})")] if closing and f"]({PAGE_1})" in closing else ""
-    check(name, closing == f"[Item 4 of 9, {expected_label}]({PAGE_1}) · {LETTERS_AFTER_LINK}"
+    check(name, closing == f"[Item 4 of 9, {expected_label}]({PAGE_1}) · {ITEM_4_LETTERS}"
           and types.count("link_open") == 1 and types[0] == "link_open" and children[0].attrGet("href") == PAGE_1
-          and types.index("link_close") == len(types) - 2 and children[-1].content == f" · {LETTERS_AFTER_LINK}"
+          and types.index("link_close") == len(types) - 2 and children[-1].content == f" · {ITEM_4_LETTERS}"
           and shown_as(label, parser) == shown_as(f"Item 4 of 9, {point}", parser),
           f"closing line {closing!r}")
 
@@ -925,8 +932,53 @@ def test_r_closing_line_label_keeps_entities_and_escapes_as_the_heading_shows_th
 
 
 def test_the_closing_line_letters_are_the_walk_skills():
-    check("SKILL.md writes the closing line with the letters the hook hands the agent",
-          f"](<page link>) · {LETTERS_AFTER_LINK}" in SKILL_FILE.read_text())
+    check("SKILL.md writes the closing line with the letters the hook hands the agent, naming both choices",
+          "](<page link>) · A approve: <the recommendation> · D disapprove: <the alternative> · M more responses"
+          in SKILL_FILE.read_text())
+
+
+def test_the_closing_line_names_the_recommendation_and_the_alternative():
+    item = ("## Item 4 of 9: a filter\n\nA filter would hide old rows.\n\n"
+            "The alternative: **Add the [filter](https://example.com/f) to `rows.py`.**\n\n"
+            "Recommendation: GHI 12 keeps the rows.\n")
+    closing = closing_line_for_heading_point_in_document(WALK_DOCUMENT.replace(
+        "## Item 4 of 9: a filter\n\nA filter would hide old rows. The strongest case against: old rows confuse "
+        "readers.\n\n**Recommendation: leave the filter out.**\n", item))
+    expected = (f"[Item 4 of 9, a filter]({PAGE_1}) · A approve: GHI 12 keeps the rows · "
+                "D disapprove: add the filter to `rows.py` · M more responses")
+    check("the closing line names the alternative after D, its link cut to its text and its first letter lower-cased, "
+          "and keeps an initialism's case after A", closing == expected, f"closing line {closing!r}")
+    finder = load_finder()
+    parser = finder.markdown_parser()
+    check("the closing-line reader reads a line that names both choices, a code span among them",
+          finder.approval_walk_closing_line_read(expected, parser, LETTERS_AFTER_LINK) == (["4"], "9", PAGE_1),
+          repr(finder.approval_walk_closing_line_read(expected, parser, LETTERS_AFTER_LINK)))
+    check("the closing-line reader still reads a line that names no choice",
+          finder.approval_walk_closing_line_read(f"[Item 4 of 9, a filter]({PAGE_1}) · {LETTERS_AFTER_LINK}", parser,
+                                                 LETTERS_AFTER_LINK) == (["4"], "9", PAGE_1))
+    check("the closing-line reader reads a line without its link that names both choices",
+          finder.approval_walk_closing_line_read(expected.replace(f"[Item 4 of 9, a filter]({PAGE_1})",
+                                                                  "Item 4 of 9, a filter"), parser,
+                                                 LETTERS_AFTER_LINK) == (["4"], "9", None))
+    check("the closing-line reader refuses a line whose letters are out of order",
+          finder.approval_walk_closing_line_read(f"[Item 4 of 9]({PAGE_1}) · D disapprove: x · A approve: y · "
+                                                 "M more responses", parser, LETTERS_AFTER_LINK) is None)
+
+
+def load_finder():
+    specification = importlib.util.spec_from_file_location("item_finder", FINDER_MODULE_FILE)
+    finder = importlib.util.module_from_spec(specification)
+    specification.loader.exec_module(finder)
+    return finder
+
+
+def closing_line_for_heading_point_in_document(document):
+    """The closing line R hands the agent for item 4 of the given walk-document."""
+    case = Case(next_to_present="item 4 of 9", document=document)
+    case.minutes(f"#item_page item 4 of 9 {PAGE_1}\n\n#next_to_present item 4 of 9")
+    lines = case.lines("r")
+    prefix = page_line("R", "item 4 of 9", "")
+    return lines[1][len(prefix):] if lines is not None and lines[1].startswith(prefix) else None
 
 
 def test_r_on_a_next_to_present_line_that_names_no_item_tells_the_agent_to_show_what_it_names():
@@ -942,7 +994,8 @@ def test_r_whose_item_cannot_be_read_still_goes_to_the_agent():
         result = case.run("r")
         lines = case.lines("r")
         check(f"R on {item}, whose walk-document holds no such item or does not exist, tells the agent to publish it",
-              not_blocked(result) and lines is not None and lines[1:] == r_lines("R", item), f"lines {lines!r}")
+              not_blocked(result) and lines is not None and lines[1:] == r_lines("R", item, letters=LETTERS_AFTER_LINK),
+              f"lines {lines!r}")
 
 
 def test_numbered_answers():
@@ -988,6 +1041,8 @@ ITEM_38_SECTION = """## Item 38 of 9: a second numbered item
 
 Recommendation: show it too."""
 NUMBERED_R_DOCUMENT = WALK_DOCUMENT + "\n" + ITEM_37_4_SECTION + "\n\n" + ITEM_38_SECTION + "\n"
+ITEM_37_4_LETTERS = "A approve: let the hook expand it · D disapprove · M more responses"
+ITEM_38_LETTERS = "A approve: show it too · D disapprove · M more responses"
 
 
 def test_numbered_r_alone_tells_the_agent_to_show_the_items_it_names_and_records_nothing():
@@ -998,14 +1053,15 @@ def test_numbered_r_alone_tells_the_agent_to_show_the_items_it_names_and_records
         lines = case.lines(prompt)
         check(f"{prompt!r} tells the agent to show item 37.4, then name the waiting item, and nothing else",
               not_blocked(result) and lines is not None
-              and lines[1:] == numbered_r_lines("37.4", "item 37.4 of 9", "R with a number")
+              and lines[1:] == numbered_r_lines("37.4", "item 37.4 of 9", "R with a number", letters=ITEM_37_4_LETTERS)
               + ["Then end your message naming the item waiting for his answer, item 4 of 9."],
               f"lines {lines!r}")
     lines = case.lines("38 r, 37.4 r")
     check("'38 r, 37.4 r' tells the agent to show both items, and gives no line for recording an answer",
           lines is not None
-          and lines[1:9] == (numbered_r_lines("38", "item 38 of 9", "a second numbered item")
-                             + numbered_r_lines("37.4", "item 37.4 of 9", "R with a number"))
+          and lines[1:9] == (numbered_r_lines("38", "item 38 of 9", "a second numbered item",
+                                              letters=ITEM_38_LETTERS)
+                             + numbered_r_lines("37.4", "item 37.4 of 9", "R with a number", letters=ITEM_37_4_LETTERS))
           and not any("check step" in line or "`#next_to_present`" in line for line in lines), f"lines {lines!r}")
     check("numbered R records nothing in the minutes", (case.walk / f"{WALK_NAME}-minutes.md").read_text() == before)
 
@@ -1018,12 +1074,12 @@ Recommendation: show it."""
 def test_repeat_and_an_item_number_is_read_as_that_number_and_r():
     case = Case(next_to_present="item 4 of 9",
                 document=NUMBERED_R_DOCUMENT + "\n" + ITEM_37_53_SECTION + "\n")
-    for prompt, number, point in (("repeat 37.4", "37.4", "R with a number"),
-                                  ("Repeat 37.53.", "37.53", "an item numbered 37.53"),
-                                  ("REPEAT item 37.4", "37.4", "R with a number")):
+    for prompt, number, point, letters in (("repeat 37.4", "37.4", "R with a number", ITEM_37_4_LETTERS),
+                                           ("Repeat 37.53.", "37.53", "an item numbered 37.53", "A approve: show it · D disapprove · M more responses"),
+                                           ("REPEAT item 37.4", "37.4", "R with a number", ITEM_37_4_LETTERS)):
         lines = case.lines(prompt)
         check(f"{prompt!r} tells the agent to show that item, not the waiting item",
-              lines is not None and lines[1:5] == numbered_r_lines(number, f"item {number} of 9", point),
+              lines is not None and lines[1:5] == numbered_r_lines(number, f"item {number} of 9", point, letters=letters),
               f"lines {lines!r}")
     result = case.run("repeat 99")
     check("'repeat 99' with no item 99 is a reply in the user's own words",
@@ -1246,7 +1302,8 @@ def test_a_numbered_answer_within_the_waiting_items_parts_answers_the_parts():
     check("R on a part beside different letters for every part shows the item again and still gives the command",
           lines is not None and lines[1:] == [
               parts_read_line("part 1: A, part 2: D, part 3: A, part 2: R"),
-              *numbered_r_lines("2", "item 4 of 9", "three wording fixes in one file")]
+              *numbered_r_lines("2", "item 4 of 9", "three wording fixes in one file",
+                               letters="A approve: make all three changes · D disapprove · M more responses")]
           + parts_different_letters_lines("--part-answer 1=A --part-answer 2=D --part-answer 3=A"),
           f"lines {lines!r}")
     lines = case.lines("1 a 2 a")
@@ -1288,7 +1345,8 @@ def test_a_numbered_answer_within_the_waiting_items_parts_answers_the_parts():
     lines = case.lines("2 r")
     check("R on a part has the waiting item published and its closing line given, and records nothing",
           lines is not None and lines[1:] == [
-              parts_read_line("part 2: R"), *numbered_r_lines("2", "item 4 of 9", "three wording fixes in one file")],
+              parts_read_line("part 2: R"), *numbered_r_lines("2", "item 4 of 9", "three wording fixes in one file",
+                               letters="A approve: make all three changes · D disapprove · M more responses")],
           f"lines {lines!r}")
     lines = Case(next_to_present="item 7 of 9", document=PARTS_DOCUMENT).lines("1 a 2 d")
     check("a `Part 2.` line after a hard break, with nothing after its period, is read as a part",
@@ -1534,7 +1592,8 @@ def test_numbered_r_reads_the_walk_in_the_payloads_cwd_not_the_hooks_own():
     check("'37.4 r' run from outside the checkout still finds item 37.4 in the payload's cwd",
           context.startswith(EXPANDED_RULE_ID_OPENING + f"The user answered \"37.4 r\" to item 4 of 9 of approval-walk {WALK_NAME}.\n"
                              + "\n".join(numbered_r_lines("37.4", "item 37.4 of 9", "R with a number",
-                                                           f" {case.walk / (WALK_NAME + '-minutes.md')}"))),
+                                                           f" {case.walk / (WALK_NAME + '-minutes.md')}",
+                                                           letters=ITEM_37_4_LETTERS))),
           f"exit {result.returncode}, stdout {result.stdout!r}, stderr {result.stderr!r}")
 
 

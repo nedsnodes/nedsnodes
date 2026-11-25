@@ -96,7 +96,8 @@ closing line, with or without its link, is what WALK_FINDER_FILE's
 approval_walk_closing_line_read reads, as that module's docstring says, with
 the answer hook's ANSWER_LETTERS_TEXT after the link: `[Item 4 of 9, <the
 point>](<page link>) · A approve · ...`, or `Item 4 of 9, <the point> · A
-approve · ...` without its link. The point is not compared with the
+approve · ...` without its link, A and D each naming its choice after a
+colon or not. Neither the point nor the choices are compared with the
 walk-document, so a point written with or without escapes passes. A line
 that is one code span around a closing line is read as that closing line in
 a code span, which shows the user code whose link cannot be clicked.
@@ -468,12 +469,13 @@ def output_for(payload, environment):
     letters = answer_hook.ANSWER_LETTERS_TEXT
     document_text = document.read_text(encoding="utf-8")
     points = answer_hook.heading_points(document_text.split("\n"), units, parser)
+    choices = answer_hook.closing_line_choices_from_walk_document(document_text, parser, units)
     no_decision_numbers = walk_finder.approval_walk_waiting_sub_step_numbers_whose_text_ends_with_no_decision_closing_line(
         document_text, parser, units, numbers)
 
     def closing_lines(lines_pages):
         walk = answer_hook.WalkState(None, None, numbers, total, {}, None, pages=lines_pages, points=points,
-                                     no_decision_numbers=no_decision_numbers)
+                                     no_decision_numbers=no_decision_numbers, choices=choices)
         return "\n".join(answer_hook.closing_line(number, walk) for number in numbers)
 
     unpublished = [number for number in numbers if number not in pages]
