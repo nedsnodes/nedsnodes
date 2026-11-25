@@ -387,6 +387,32 @@ def test_the_scratch_clone_holds_every_tracked_file_of_the_code_directories():
           "cannot miss a module the hook loads", sorted(tracked ^ in_clone)[:10])
 
 
+def test_the_scratch_clone_holds_uncommitted_edits_of_tracked_files():
+    # The mutation runner and an agent testing an edit both run this suite on uncommitted code.
+    repository = SCRATCH / "repository-with-uncommitted-edit"
+    for directory in owner_check.SCRATCH_CLONE_REPOSITORY_DIRECTORIES_TO_COPY:
+        (repository / directory).mkdir(parents=True)
+        (repository / directory / "tracked.txt").write_text("tracked\n")
+    module = repository / "scripts" / "module.py"
+    module.write_text("committed = True\n")
+    for arguments in (["init", "-q"], ["add", "-A"], ["commit", "-q", "-m", "module"]):
+        subprocess.run(["git", "-C", str(repository), "-c", "user.name=test",
+                        "-c", "user.email=test@nedschorus.invalid", *arguments],
+                       capture_output=True, check=True)
+    module.write_text("committed = False\n")
+    clone = SCRATCH / "scratch-clone-of-uncommitted-edit"
+    real = owner_check.REPOSITORY_ROOT
+    try:
+        owner_check.REPOSITORY_ROOT = repository
+        owner_check.make_scratch_clone(clone)
+    finally:
+        owner_check.REPOSITORY_ROOT = real
+    copied = (clone / "scripts" / "module.py").read_text() if (clone / "scripts" / "module.py").exists() else None
+    check(copied == "committed = False\n",
+          "the scratch clone holds a tracked file's uncommitted edit, so the suite tests the "
+          "code under test, not the last commit", repr(copied))
+
+
 def test_an_owner_file_module_that_does_not_load_fails_the_check():
     completed, record = run_check("hook-without-owner-file-module-dependency")
     check(completed.returncode == 1 and "VERDICT: FAILED" in record
@@ -448,6 +474,7 @@ def main():
                      test_the_records_directory_is_the_kind_the_log_store_readme_names,
                      test_a_scratch_clone_that_cannot_be_made_fails,
                      test_the_scratch_clone_holds_every_tracked_file_of_the_code_directories,
+                     test_the_scratch_clone_holds_uncommitted_edits_of_tracked_files,
                      test_an_owner_file_module_that_does_not_load_fails_the_check,
                      test_a_check_that_cannot_run_fails,
                      test_an_error_after_claude_started_is_not_reported_as_a_failed_start,

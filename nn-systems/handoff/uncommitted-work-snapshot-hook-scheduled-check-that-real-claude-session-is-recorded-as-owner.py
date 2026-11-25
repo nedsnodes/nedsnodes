@@ -21,7 +21,7 @@ nn-systems/general-tools/scheduled-jobs-on-each-machine.json.
 WHAT ONE RUN DOES, in order.
 
   1. Makes a scratch clone holding every file tracked under scripts/ and
-     nn-systems/ at the repository's HEAD, so it cannot miss a module the hook
+     nn-systems/, as the working tree has it, so it cannot miss a module the hook
      loads. The clone has one commit and sits in a temporary directory.
   2. Runs `claude -p` on Haiku from that clone, with the hook registered for
      Bash calls through --settings, and asks it to run one shell command that
@@ -67,7 +67,6 @@ lines there.
 import argparse
 import contextlib
 import importlib.util
-import io
 import json
 import os
 import shlex
@@ -75,7 +74,6 @@ import shutil
 import signal
 import subprocess
 import sys
-import tarfile
 import tempfile
 from datetime import datetime, timezone
 from pathlib import Path
@@ -138,16 +136,12 @@ def make_scratch_clone(clone):
     git(clone.parent, "init", "-q", str(clone))
     # Only the code directories: the repository's .claude/settings.json and CLAUDE.md would
     # load the project's own hooks and instructions into the live claude run.
-    archive = subprocess.run(
-        ["git", "-C", str(REPOSITORY_ROOT), "archive", "--format=tar", "HEAD",
-         *SCRATCH_CLONE_REPOSITORY_DIRECTORIES_TO_COPY],
-        capture_output=True, check=False,
-        env=runner.environment_without_git_redirecting_variables())
-    if archive.returncode != 0:
-        raise RuntimeError(f"git archive HEAD exited {archive.returncode}: "
-                           f"{archive.stderr.decode(errors='replace').strip() or 'no detail'}")
-    with tarfile.open(fileobj=io.BytesIO(archive.stdout)) as tar:
-        tar.extractall(clone, filter="data")
+    # Copied from the working tree, not HEAD: the mutation runner and an agent testing an edit
+    # run the suite on uncommitted code.
+    tracked = git(REPOSITORY_ROOT, "ls-files", "-z", *SCRATCH_CLONE_REPOSITORY_DIRECTORIES_TO_COPY)
+    for relative in filter(None, tracked.split("\0")):
+        (clone / relative).parent.mkdir(parents=True, exist_ok=True)
+        shutil.copy2(REPOSITORY_ROOT / relative, clone / relative)
     (clone / ".gitignore").write_text("__pycache__/\n")
     git(clone, "add", "-A")
     git(clone, "commit", "-q", "-m", "scratch clone for the owner check")
