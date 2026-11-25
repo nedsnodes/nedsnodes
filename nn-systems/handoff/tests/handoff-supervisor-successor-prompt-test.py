@@ -2920,8 +2920,44 @@ def run_conversation_tail_last_lines_cases(workspace: Path):
             raised = error
     check("CONVERSATION-TAIL LAST LINES: a display file that cannot be written is reported, "
           "not raised, so the successor still launches",
-          raised is None and "nothing needs doing" in reported.getvalue()
-          and str(display_file(unwritable_directory, "unwritablesession")) in reported.getvalue(),
+          raised is None and "because writing " in reported.getvalue()
+          and str(display_file(unwritable_directory, "unwritablesession")) in reported.getvalue()
+          and f"stays whole at {unwritable_tail}" in reported.getvalue(),
+          repr((raised, reported.getvalue())))
+
+    carriage_return_directory = workspace / "carriage-return-tail"
+    carriage_return_directory.mkdir()
+    carriage_return_tail = carriage_return_directory / "carriage-return-dialog.md"
+    carriage_return_tail.write_bytes(
+        "".join(f"turn {number}\n" for number in range(1, 101)).replace("turn 1\n", "turn\r1\n", 1)
+        .encode("utf-8"))
+    supervisor.conversation_tail_last_lines_display_file_write(
+        carriage_return_directory, "carriagereturnsession", carriage_return_tail)
+    carriage_return_display = display_file(
+        carriage_return_directory, "carriagereturnsession").read_bytes().decode("utf-8")
+    check("CONVERSATION-TAIL LAST LINES: a bare carriage return inside the first of 100 file lines "
+          "does not split it, so all 100 lines are shown under a heading counting 100",
+          carriage_return_display.startswith(supervisor.CONVERSATION_TAIL_LAST_LINES_HEADING_TEMPLATE.format(
+              line_count=100, conversation_tail_path=carriage_return_tail) + "turn\r1\nturn 2\n")
+          and carriage_return_display.endswith("turn 100" + supervisor.CONVERSATION_TAIL_LAST_LINES_FOOTER),
+          repr(carriage_return_display[:300]))
+
+    unreadable_directory = workspace / "unreadable-tail"
+    unreadable_directory.mkdir()
+    missing_tail = unreadable_directory / "missing-dialog.md"
+    reported = io.StringIO()
+    raised = None
+    with contextlib.redirect_stderr(reported):
+        try:
+            supervisor.conversation_tail_last_lines_display_file_write(
+                unreadable_directory, "unreadablesession", missing_tail)
+        except OSError as error:
+            raised = error
+    check("CONVERSATION-TAIL LAST LINES: a conversation-tail that cannot be read is reported as a "
+          "read failure, not raised and not as a write failure, and no display file is left",
+          raised is None and f"because reading the conversation-tail {missing_tail} failed"
+          in reported.getvalue() and "stays whole" not in reported.getvalue()
+          and not display_file(unreadable_directory, "unreadablesession").exists(),
           repr((raised, reported.getvalue())))
 
 

@@ -1397,20 +1397,32 @@ def conversation_tail_last_lines_display_file_write(
     display_path = successor_conversation_tail_display_hook.conversation_tail_last_lines_display_file_path_for_session_id(
         handoff_directory, session_id)
     try:
-        # split("\n"), not splitlines(), which also splits at characters such as U+2028.
-        lines = conversation_tail_path.read_text(encoding="utf-8").removesuffix("\n").split("\n")[
-            -CONVERSATION_TAIL_LAST_LINE_COUNT_SHOWN_ABOVE_FIRST_MESSAGE:]
+        # newline="" keeps a bare "\r" inside a line, and split("\n") does not split at U+2028 as
+        # splitlines() would, so only the file's own "\n" delimiters count as lines.
+        with conversation_tail_path.open(encoding="utf-8", newline="") as conversation_tail:
+            text = conversation_tail.read()
+    except OSError as error:
+        print(f"handoff-supervisor: the user is not shown the last session's last lines above "
+              f"the successor's first message, because reading the conversation-tail "
+              f"{conversation_tail_path} failed: {error}. The successor launches as usual.\n"
+              f"When this repeats at later session-handoffs, fix the cause the error names; a "
+              f"single failure needs nothing, because no work is lost.", file=sys.stderr)
+        return
+    lines = text.removesuffix("\n").split("\n")[-CONVERSATION_TAIL_LAST_LINE_COUNT_SHOWN_ABOVE_FIRST_MESSAGE:]
+    try:
         display_path.write_text(
             CONVERSATION_TAIL_LAST_LINES_HEADING_TEMPLATE.format(
                 line_count=len(lines), conversation_tail_path=conversation_tail_path)
             + "\n".join(lines) + CONVERSATION_TAIL_LAST_LINES_FOOTER,
             encoding="utf-8")
     except OSError as error:
-        print(f"handoff-supervisor: the user is not shown the conversation-tail's last lines "
-              f"above the successor's first message, because writing the display file "
-              f"{display_path} failed: {error}. The successor launches as usual; the "
-              f"conversation-tail stays whole at {conversation_tail_path}, and nothing needs "
-              f"doing.", file=sys.stderr)
+        print(f"handoff-supervisor: the user is not shown the last session's last lines above "
+              f"the successor's first message, because writing {display_path}, the file the "
+              f"first-message display hook reads them from, failed: {error}. The successor "
+              f"launches as usual, and the conversation-tail stays whole at "
+              f"{conversation_tail_path}.\n"
+              f"When this repeats at later session-handoffs, fix the cause the error names; a "
+              f"single failure needs nothing, because no work is lost.", file=sys.stderr)
 
 
 @dataclass
