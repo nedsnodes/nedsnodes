@@ -3952,6 +3952,91 @@ def test_an_item_of_no_kind_rated_weak_settles_when_it_touches_guarded_code_but_
           and case.minutes.read_text() == before and case.calls.read_text() == "", described(result))
 
 
+DROPPED = "proposed-check-dropped-search-found-no-case"
+
+
+def search_line(first_days_ago=31, last_days_ago=0, count=0, places="in the log-store's session dialogs and user "
+                "messages and the commits on main"):
+    today = datetime.datetime.now(datetime.timezone.utc).date()
+    first, last = (today - datetime.timedelta(days=days) for days in (first_days_ago, last_days_ago))
+    return f"#not_asked_search {first} to {last}, {count} cases, {places}\n\n"
+
+
+def dropped_proposal_case(search=None, rating="medium: the counter could still print a wrong total some day.",
+                          new_text=""):
+    """Item 1 recommends dropping a proposed check; `search` is its search line, or the item has none."""
+    document = RATED_NONE_DOCUMENT.replace(
+        "## Item 1 of 3: print the poem count after the list\n\n#not_asked_touches tools/counter.py\n\n"
+        "#case_against none.\n\nRecommendation: print it.",
+        "## Item 1 of 3: drop the proposed check on the counter's total\n\n"
+        f"{search_line() if search is None else search}{new_text}#case_against {rating}\n\n"
+        "The alternative: add the check.\n\nRecommendation: drop the check.", 1)
+    return Case(next_to_present="item 1 of 3", document=document)
+
+
+def refused_as_dropped(case, *problems):
+    before = case.minutes.read_text()
+    result = case.run("check", "--not-asked", DROPPED)
+    return (result.returncode == 1
+            and "cannot be settled without asking the user as proposed check dropped, search found no case, because:"
+            in result.stderr and all(problem in result.stderr for problem in problems)
+            and case.minutes.read_text() == before and case.calls.read_text() == "", described(result))
+
+
+def test_an_item_dropping_a_proposed_check_settles_at_any_rating_when_its_search_found_no_case():
+    for rating in ("none.", "medium: the counter could still print a wrong total some day.",
+                   "very strong: the total feeds the bill."):
+        case = dropped_proposal_case(rating=rating)
+        result = case.run("check", "--not-asked", DROPPED)
+        minutes = case.minutes.read_text()
+        check(f"an item rated {rating.split(':')[0].rstrip('.')} that drops a proposed check after a search found "
+              "no case is settled, and the agent is told to judge the proposal and the places searched",
+              result.returncode == 0
+              and re.search(r"\nitem 1 of 3: settled without asking the user, not asked, proposed check dropped, "
+                            r"search found no case #case_against_[a-z_]+ \(\d{4}-\d\d-\d\d \d\d:\d\dZ\), which "
+                            r"makes its change\. Fast reads:\n", minutes) is not None
+              and "Judge also whether item 1 of 3 proposes a check, test, guard, refusal or hook and recommends "
+                  "dropping it" in result.stdout, described(result) + minutes)
+    closed = case.run("close")
+    check("close records the dropped proposal as accepted, and moves `#next_to_present` past it",
+          closed.returncode == 0
+          and "\nitem 1 of 3: not asked, proposed check dropped, search found no case; every text the change adds "
+              "has had a fast read. <accepted>\n" in case.minutes.read_text()
+          and marker(case).startswith("#next_to_present item 2 of "), described(closed) + case.minutes.read_text())
+
+
+def test_an_item_dropping_a_proposed_check_is_refused_without_a_full_recent_search_that_found_no_case():
+    check("an item with no search line is refused, and told what the line gives",
+          *refused_as_dropped(dropped_proposal_case(search=""), "it has no `#not_asked_search` line; give on it the "
+                              "search's first and last day, the count of cases found and the places searched"))
+    check("a search line without a count is refused",
+          *refused_as_dropped(dropped_proposal_case(search="#not_asked_search 2026-10-01 to 2026-11-25 in the "
+                                                    "commits on main\n\n"), "does not give the search's first and "
+                              "last day, as YYYY-MM-DD, the count of cases found"))
+    check("a search line that names no place is refused",
+          *refused_as_dropped(dropped_proposal_case(search=search_line(places="")), "and the places searched."))
+    check("a search shorter than 30 days is refused",
+          *refused_as_dropped(dropped_proposal_case(search=search_line(first_days_ago=10)),
+                              "shorter than the 30 days the guard rule in CLAUDE.md asks for"))
+    check("a search that ended before yesterday is refused",
+          *refused_as_dropped(dropped_proposal_case(search=search_line(first_days_ago=40, last_days_ago=5)),
+                              "before yesterday; search again up to today"))
+    check("a search that ends after today is refused",
+          *refused_as_dropped(dropped_proposal_case(search=search_line(first_days_ago=5, last_days_ago=-25)),
+                              "after today (UTC)"))
+    check("a search line with two counts is refused",
+          *refused_as_dropped(dropped_proposal_case(search=search_line(places="in the session dialogs but 2 cases on "
+                                                                              "main")), "the count of cases found"))
+    check("a search line whose only text after the count is not `in` and the places is refused",
+          *refused_as_dropped(dropped_proposal_case(search=search_line(places="found")), "and the places searched."))
+    check("a search that found cases is refused, since a case is the failure that has happened",
+          *refused_as_dropped(dropped_proposal_case(search=search_line(count=2)), "found 2 cases; a case found is "
+                              "the failure that has happened"))
+    check("an item with a `#new` text is refused, since a dropped proposal adds none",
+          *refused_as_dropped(dropped_proposal_case(new_text="#new The counter checks its total.\n\n"),
+                              "it has a `#new` line, which A would add"))
+
+
 def test_an_item_of_no_kind_with_an_empty_touches_line_settles_as_a_change_that_touches_no_file():
     case = rated_none_case(touches="#not_asked_touches\n\n")
     result = case.run("check", "--not-asked", "none")
@@ -4080,7 +4165,8 @@ def test_a_not_asked_value_other_than_a_kind_or_a_no_kind_value_is_refused_as_us
         check(f"`--not-asked {value}` is refused as usage, writing nothing",
               result.returncode == 2
               and f"`{value}` is not a kind: give 1, 2, 3, 4, 5, 6, 7, or, for an item of no kind, none, "
-                  "weak-cost-only or weak-alters-earlier-approved-text-only" in result.stderr
+                  "weak-cost-only, weak-alters-earlier-approved-text-only or "
+                  "proposed-check-dropped-search-found-no-case" in result.stderr
               and case.minutes.read_text().rstrip().endswith("#next_to_present item 1 of 3"), described(result))
 
 
@@ -4985,7 +5071,8 @@ def no_answer_rows_printed(result):
 
 def test_help_prints_every_row_of_the_no_answer_table():
     usage = subprocess.run([sys.executable, str(PROGRAM), "--help"], capture_output=True, text=True).stdout
-    for value in (1, 2, 3, 4, 5, 6, 7, "none", "weak-cost-only", "weak-alters-earlier-approved-text-only"):
+    for value in (1, 2, 3, 4, 5, 6, 7, "none", "weak-cost-only", "weak-alters-earlier-approved-text-only",
+                  "proposed-check-dropped-search-found-no-case"):
         check(f"--help lists the no-answer table's row --not-asked {value}",
               f"\n  --not-asked {value}: " in usage, usage[-3000:])
     check("--help lists the handoff row with its citation",
