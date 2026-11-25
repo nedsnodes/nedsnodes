@@ -7862,6 +7862,26 @@ def test_an_earlier_text_differing_from_a_kept_version_only_inside_a_code_span_i
           after)
 
 
+
+def test_an_earlier_text_differing_from_a_kept_version_by_a_backtick_moved_across_a_word_boundary_is_kept_too():
+    for kept_text, earlier_text in (("Set `x` 1.", "Set `x1`."), ("Use `x` ray.", "Use `x`ray.")):
+        document = ("# A walk\n\n## Item 3 of 9: three\n\nLive.\n\n#### Withdrawn version 1 of item 3\n\n"
+                    f"{kept_text}\n\n## Item 4 of 9: four\n\nFour.\n")
+        after = withdrawn_versions_inserted(document, "## Item 3 of 9: three", [earlier_text])
+        check(f"an earlier text {earlier_text!r} that differs from the kept {kept_text!r} only by a space or a "
+              "backtick next to a code span is kept as version 2",
+              f"#### Withdrawn version 2 of item 3\n\n{earlier_text}" in after, after)
+
+
+def test_an_escaped_backtick_does_not_open_a_code_span_when_an_earlier_text_is_compared_with_a_kept_version():
+    document = ("# A walk\n\n## Item 3 of 9: three\n\nLive.\n\n#### Withdrawn version 1 of item 3\n\n"
+                "Print \\` and run `a b`.\n\n## Item 4 of 9: four\n\nFour.\n")
+    after = withdrawn_versions_inserted(document, "## Item 3 of 9: three", ["Print \\` and run `a  b`."])
+    check("an earlier text whose code span after an escaped backtick differs from the kept version's only in its "
+          "spacing is kept as version 2", "#### Withdrawn version 2 of item 3\n\nPrint \\` and run `a  b`." in after,
+          after)
+
+
 def main():
     signal.signal(signal.SIGTERM, stopped_by_sigterm)
     try:
