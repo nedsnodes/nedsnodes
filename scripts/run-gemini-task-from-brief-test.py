@@ -39,7 +39,7 @@ if args == ["models"]:
     if mode == "models-fail":
         sys.exit(4)
     if mode != "models-sleep":
-        print("Available models:\n  gemini-4-argon-high\n  gemini-3.8-flash-medium", flush=True)
+        print("Available models:\n  gemini-4-neon-high\n  gemini-3.8-flash-medium", flush=True)
         sys.exit(0)
 if mode in ("sleep", "models-sleep"):
     child = os.fork()
@@ -137,7 +137,7 @@ class GeminiTaskTests(unittest.TestCase):
         with patch.dict(os.environ, self.env), contextlib.redirect_stdout(io.StringIO()), contextlib.redirect_stderr(io.StringIO()):
             self.assertEqual(runner.main(self.args), 0)
         args = json.loads(self.calls.read_text().splitlines()[1])[1]
-        self.assertEqual(args[args.index("--model") + 1], "gemini-4-argon-high")
+        self.assertEqual(args[args.index("--model") + 1], "gemini-4-neon-high")
         self.assertNotIn("--effort", args)
         self.assertTrue(self.report.with_name(self.report.name + ".run.log").is_file())
 
@@ -166,10 +166,10 @@ class GeminiTaskTests(unittest.TestCase):
         self.assertNotIn("test-key-from-caller", self.log.read_text())
 
     def test_unknown_model_stops_before_task(self):
-        result = self.run_cli(extra=("-m", "gemini-4-argon"))
+        result = self.run_cli(extra=("-m", "gemini-4-neon"))
         self.assertEqual(result.returncode, 1)
         self.assertIn("unknown model", result.stderr)
-        self.assertIn("gemini-4-argon-high", result.stderr)
+        self.assertIn("gemini-4-neon-high", result.stderr)
         self.assertIn("gemini-3.8-flash-medium", result.stderr)
         self.assertEqual(len(self.calls.read_text().splitlines()), 1)
 

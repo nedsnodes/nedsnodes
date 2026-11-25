@@ -152,6 +152,13 @@ def run_unit_cases(scratch):
     check("an item under a setext heading it shares keeps the heading's further line, which the hook must see",
           result.returncode == 0 and "to one file" in page and "drops a sentence" in page
           and "fixes a path" not in page, page)
+    indented_further_line_above_indented_code = ("# A walk\n\nItems 5 and 6 of 9: two small corrections\n"
+                                                 "    further line\n===\n    code line\n\n"
+                                                 "Item 6: drops a sentence.\n")
+    result, page = built(scratch, "5", document=indented_further_line_above_indented_code)
+    check("an item's page keeps two blank lines, the underline's and the one that opens each run of lines, between a "
+          "shared setext heading's indented further line and the indented code right below the underline",
+          result.returncode == 0 and "further line\n\n\ncode line" in page, page)
     result, page = built(scratch, "6")
     check("an item that shares a heading keeps its own lines under that heading",
           result.returncode == 0 and "<h1>Items 5 and 6 of 9: two small corrections</h1>" in page
@@ -541,6 +548,10 @@ def run_page_link_cases(scratch):
           result.returncode == 0 and page_links(page) == '<nav class="pages"><a href="https://claude.ai/artifact/Item4">'
           'Next: item 4</a></nav>' and "The page has no Previous link: no whole item numbered below 3 has an "
           "`#item_page` line with a link" in result.stdout and "python3 " not in result.stdout, result)
+    minutes.write_text("#item_page item 3 of 9 https://claude.ai/artifact/Item3\n", encoding="utf-8")
+    result, page = built(scratch, "5")
+    check("one line that states no version is version 1, so the next version is 2",
+          f"{scratch / 'item-3-version-2.html'} --version 2" in result.stdout, result.stdout)
     minutes.write_text("#item_page item 3 of 9 https://claude.ai/artifact/Item3\n"
                        "#item_page item 3 of 9 https://claude.ai/artifact/Item3 (version 4, count 9)\n"
                        "#item_page item 4.1 of 9 https://claude.ai/artifact/SubStep41\n", encoding="utf-8")

@@ -18,6 +18,10 @@ Two agent-arbitrators now have their procedure written as agent-instructions, an
 
 Skills on main: cold-read, ghi-write, handoff, walk-me-through; issues for the others the glossary names: GHI [Four small skills the user named on the vocabulary page: /save, /push, /save-MD, /save-MD-as-draft (name open)](https://github.com/nedsnodes/nedsnodes/issues/256) (save, push, save-MD), GHI [update-glossary skill: the editor rules for the nedschorus glossary, taken off the page (user-asked 2026-09-06)](https://github.com/nedsnodes/nedsnodes/issues/262) (update-glossary), GHI [sanity-check skill: wrap the sanity-checker instrument so any agent can run it on a design (the glossary lists it; user-asked 2026-09-06)](https://github.com/nedsnodes/nedsnodes/issues/263) (sanity-check). Search receipt: `gh issue list --repo nedschorus/nedschorus --state all --limit 100 --search "adjudicator"`, 2026-09-06: no issue; the same search for "arbitrator", 2026-11-12: no issue. Issue bodies here are links only, so these searches match titles.
 
+## What is decided
+
+The number of chances: the agent-arbitrator gets one or two tries, then the conflict comes to the user. The user's words, 2026-11-22 (2026-11-23T02:08Z), with his answer "A" to item 10 of 37 in overall-cleanup's approval-walk overall-cleanup-items-handed-over-from-long-approval-walks-2026-11-21 (minutes: `nedlern@ned-box:/home/nedlern/agents/overall-cleanup/docs/walk/overall-cleanup-items-handed-over-from-long-approval-walks-2026-11-21-minutes.md`): "I'll also point out with this 265 that typically we need to limit the amount of back and forth because we can burn an infinite number of tokens in time that way. So typically I've said 3 strikes and it's my turn. We can have an arbitrator take a shot or 2. And then if they fail, then it's my turn. But just be aware that we have to, there has to be a stopping point for everything."
+
 ## Next action
 
-The MD-skills seat writes the skill on its own topic branch, cold-read before it lands, one PR to merge-lane. Settle the name and the number of chances with the user first.
+The MD-skills-2 agent-seat writes the skill on its own topic branch, cold-read before it lands, one PR to merge-lane. Settle the name with the user first.

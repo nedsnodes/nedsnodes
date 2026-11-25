@@ -48,7 +48,7 @@ and the numbers are listed on stderr instead, each with its line
 (user-ruled 2026-09-17, item 5 of nedschorus#418: the walk-me-through skill
 forbids bare numbers, and walk files had carried 33 and 35 of them
 unchecked). Bare file names are deliberately not checked, by the same rulings;
-the walk's 300-word item limit is checked by the walk check program,
+the walk's word limit for an item is checked by the walk check program,
 nn-systems/skills/walk-me-through/walk-me-through-answer-added-texts-cold-read-fast-read-check-and-close.py,
 before it reads an item. Every cold-read-cell's own progress -- the
 launcher's stderr, the agent-binary's stderr, the stray-write and recovery lines --

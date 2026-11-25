@@ -44,13 +44,15 @@ runner's docstring calls the scheduled full run.
 
 WHAT ONE RUN DOES, in order.
 
-  1. Fetches origin's main into SCHEDULED_FULL_TEST_RUN_FETCHED_MAIN_REF, a
-     ref only this program writes, with an empty --refmap, so the fetch
-     leaves refs/remotes/origin/main and FETCH_HEAD alone. Other cron jobs
-     fetch in the same clone at the same minute, and two fetches that both
-     update refs/remotes/origin/main can make one fail with "incorrect old
-     value provided". A failed fetch stops the run and is written to the
-     record.
+  1. Fetches origin's main into a ref only this run writes, named by
+     scheduled_full_test_run_main_fetch_destination_git_ref_name_for_temporary_directory from the run's temporary
+     directory, with an empty --refmap and --no-tags, so the fetch leaves
+     refs/remotes/origin/main, the tags and FETCH_HEAD alone. Other cron
+     jobs fetch in the same clone at the same minute, and two fetches that
+     both update one ref can make one fail with "incorrect old value
+     provided"; a hand run with another --temporary-directory holds another
+     lock, so it gets another ref too. The ref is deleted when the run
+     ends. A failed fetch stops the run and is written to the record.
   2. Resolves that ref to its full commit hash and makes a
      detached worktree at that hash (`git worktree add --detach`), so no
      branch is made and nothing rests on FETCH_HEAD, which another agent's
@@ -170,6 +172,7 @@ run holds this program's lock.
 
 import argparse
 import fcntl
+import hashlib
 import importlib.util
 import os
 import re
@@ -219,7 +222,7 @@ SCHEDULED_FULL_TEST_RUN_RECORD_LOCAL_COPY_FILE_NAME_PREFIX = "scheduled-full-tes
 SCHEDULED_FULL_TEST_RUN_LOCK_FILE_NAME = "scheduled-full-test-run-of-main.lock"
 
 SCHEDULED_FULL_TEST_RUN_RUNNER_PATH_IN_WORKTREE = Path("scripts") / "run-all-test-suites.py"
-SCHEDULED_FULL_TEST_RUN_FETCHED_MAIN_REF = "refs/scheduled-full-test-run-of-main/main"
+SCHEDULED_FULL_TEST_RUN_MAIN_FETCH_DESTINATION_GIT_REF_NAME_PREFIX = "refs/scheduled-full-test-run-of-main/"
 
 # Read at runtime so tests can shorten it.
 SCHEDULED_FULL_TEST_RUN_LOCK_WAIT_BOUND_SECONDS = 3600
@@ -243,6 +246,14 @@ def git(clone: Path, *arguments):
 
 def first_stderr_line_or_no_detail(text: str) -> str:
     return (text.strip().splitlines() or ["no detail"])[0]
+
+
+def scheduled_full_test_run_main_fetch_destination_git_ref_name_for_temporary_directory(directory: Path) -> str:
+    """The ref a run whose temporary directory is `directory` fetches main into.
+
+    Runs that share a directory share its lock, so no two of them write one ref at once."""
+    digest = hashlib.sha256(str(directory).encode("utf-8")).hexdigest()[:16]
+    return f"{SCHEDULED_FULL_TEST_RUN_MAIN_FETCH_DESTINATION_GIT_REF_NAME_PREFIX}{digest}/main"
 
 
 def take_scheduled_full_test_run_lock(lock_file: Path):
@@ -476,6 +487,8 @@ def main(argv=None, now=None, monotonic=time.monotonic) -> int:
             arguments, now, monotonic, on_ned_box, machine, pacific_date, clone,
             directory)
     finally:
+        # A ref left by a failed delete is harmless: the next run with this directory overwrites it.
+        git(clone, "update-ref", "-d", scheduled_full_test_run_main_fetch_destination_git_ref_name_for_temporary_directory(directory))
         lock_handle.close()
 
 
@@ -490,8 +503,9 @@ def scheduled_full_test_run_under_lock(arguments, now, monotonic, on_ned_box, ma
     completed = None
     seconds_waiting_for_lock = 0
 
-    fetched = git(clone, "fetch", "--no-write-fetch-head", "--refmap=", "origin",
-                  f"+refs/heads/main:{SCHEDULED_FULL_TEST_RUN_FETCHED_MAIN_REF}")
+    fetch_destination = scheduled_full_test_run_main_fetch_destination_git_ref_name_for_temporary_directory(directory)
+    fetched = git(clone, "fetch", "--no-write-fetch-head", "--no-tags", "--refmap=", "origin",
+                  f"+refs/heads/main:{fetch_destination}")
     if fetched.returncode != 0:
         steps_failed.append((
             f"not run — git fetch origin failed in {clone}: "
@@ -499,10 +513,10 @@ def scheduled_full_test_run_under_lock(arguments, now, monotonic, on_ned_box, ma
             "Fix what git reports, then run this again."))
     else:
         resolved = git(clone, "rev-parse", "--verify", "--quiet",
-                       f"{SCHEDULED_FULL_TEST_RUN_FETCHED_MAIN_REF}^{{commit}}")
+                       f"{fetch_destination}^{{commit}}")
         if resolved.returncode != 0 or not resolved.stdout.strip():
             steps_failed.append((
-                f"not run — git cannot resolve {SCHEDULED_FULL_TEST_RUN_FETCHED_MAIN_REF}, "
+                f"not run — git cannot resolve {fetch_destination}, "
                 f"fetched from origin's main, in {clone}",
                 "Fix the clone's origin remote, then run this again."))
         else:

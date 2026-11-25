@@ -15,8 +15,8 @@ Run it from the pull request's own checkout, with its nn-head-commit checked out
    description has none;
 4. runs this checkout's test suites whose recorded inputs changed since the checkout's merge
    base with origin/main, so a change main made after the branch started selects no suite unless
-   a suite's recording no longer matches the checkout, as when it read main's copy of a file or
-   listed a directory where main has since added a file, with this checkout's own
+   a suite's recording no longer matches the checkout, as when a recording made on main read
+   main's copy of a file or listed a new file this checkout lacks, with this checkout's own
    scripts/run-all-test-suites.py, and refuses when any fails;
 5. marks the pull request ready for review with gh pr ready.
 
