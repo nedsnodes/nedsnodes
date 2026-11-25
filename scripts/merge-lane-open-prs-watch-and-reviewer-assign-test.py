@@ -1166,6 +1166,34 @@ def run_merge_lane_pull_request_review_assignment_watcher_cases():
               and "--merge-lane-pr-review-assignments-file-write-from-seed-and-reviewed-prs-then-exit"
               in errors, errors)
 
+        real_lock = watcher_module.merge_lane_pull_request_review_assignments_file_lock
+        locked = []
+
+        def lock_and_note(path):
+            lock = real_lock(path)
+            locked.append(path)
+            return lock
+
+        watcher_module.merge_lane_pull_request_review_assignments_file_lock = lock_and_note
+        try:
+            exit_code, lines, errors = look_up("merge-lane-1", [open_at_lookup])
+        finally:
+            watcher_module.merge_lane_pull_request_review_assignments_file_lock = real_lock
+        check("the lookup reads the assignment file under its lock, so it never sees a deal a "
+              "failed append is about to put back",
+              exit_code == 0 and locked == [assignments], f"{locked} {errors}")
+
+        def lock_fails(path):
+            raise OSError("injected: the lock file cannot be opened")
+
+        watcher_module.merge_lane_pull_request_review_assignments_file_lock = lock_fails
+        try:
+            exit_code, lines, errors = look_up("merge-lane-1", [open_at_lookup])
+        finally:
+            watcher_module.merge_lane_pull_request_review_assignments_file_lock = real_lock
+        check("the lookup exits 1 when the assignment file's lock cannot be taken, naming it",
+              exit_code == 1 and "cannot be opened or locked" in errors and not lines, errors)
+
 
 class PollsRanOut(Exception):
     """Raised by the scripted fetch when the watcher polls past the script."""
@@ -2070,6 +2098,38 @@ def run_poll_once_cases(scratch_root, token_file):
           and [line.split()[0] for line in
                machine.assignments.read_text(encoding="utf-8").splitlines()] == ["1", "2"],
           f"{(first, second, third)} {kept_while_failing!r} {assigned} {machine.errors}")
+
+    machine = machine_for("append-written-then-fsync-fails")
+    machine.assignments.write_text("", encoding="utf-8")
+    machine.poll = []
+    machine.run("--poll-once-write-baseline")
+    machine.poll = [poll_once_pull_request(1)]
+    real_fsync = watcher_module.os.fsync
+    fsyncs = []
+
+    def fsync_fails_once(descriptor):
+        fsyncs.append(descriptor)
+        if len(fsyncs) == 1:
+            raise OSError("injected: fsync failed after the write")
+        real_fsync(descriptor)
+
+    watcher_module.os.fsync = fsync_fails_once
+    try:
+        first = machine.run()
+    finally:
+        watcher_module.os.fsync = real_fsync
+    kept = machine.assignments.read_text(encoding="utf-8")
+    second = machine.run()
+    assigned = [line for line in machine.event_lines() if " REVIEW-ASSIGNED " in line]
+    check("when the append writes every line and then fsync fails, the run exits 1 but keeps the "
+          "deal, so the next run deals the pull request no second time",
+          (first, second) == (1, 0) and [line.split()[0] for line in kept.splitlines()] == ["1"]
+          and [line.split()[2] for line in assigned] == ["#1"],
+          f"{(first, second)} {kept!r} {assigned} {machine.errors}")
+
+    check("an event file that cannot be read back counts as not holding the lines, so the deal "
+          "is put back",
+          watcher_module.event_file_holds_at(machine.directory / "absent.log", 0, b"x\n") is False)
 
     machine = machine_for("append-and-put-back-fail")
     machine.assignments.write_text("", encoding="utf-8")
