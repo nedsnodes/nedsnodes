@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
-"""Tests for watch-open-pull-requests-hack.py.
+"""Tests for merge-lane-open-prs-watch-and-reviewer-assign.py.
 
-Run: python3 scripts/watch-open-pull-requests-hack-test.py
+Run: python3 scripts/merge-lane-open-prs-watch-and-reviewer-assign-test.py
 Prints one line per case and exits non-zero if any case fails.
 
 No case reaches GitHub. The subprocess cases put a fake `gh` first on the
@@ -41,7 +41,7 @@ import threading
 import time
 from pathlib import Path
 
-WATCH_SCRIPT = Path(__file__).with_name("watch-open-pull-requests-hack.py")
+WATCH_SCRIPT = Path(__file__).with_name("merge-lane-open-prs-watch-and-reviewer-assign.py")
 
 _spec = importlib.util.spec_from_file_location("watch_open_pull_requests",
                                                WATCH_SCRIPT)
@@ -906,6 +906,66 @@ def run_merge_lane_pull_request_review_assignment_watcher_cases():
               == "1 merge-lane-1\n40 merge-lane-3\n41 merge-lane-1\n",
               "\n".join(lines))
 
+        # Two writers at once, as a cron run and the loop watcher are during the cutover: the
+        # first pauses after its read, and the second runs while it waits.
+        assignments.write_text("1 merge-lane-1\n", encoding="utf-8")
+        first_has_read = threading.Event()
+        first_may_replace = threading.Event()
+        real_deal = watcher_module.merge_lane_pull_request_review_assignments_for_unassigned_pull_requests
+
+        def deal_then_wait_in_the_first_writer(pull_requests, file_assignments):
+            dealt = real_deal(pull_requests, file_assignments)
+            if threading.current_thread().name == "first-writer":
+                first_has_read.set()
+                first_may_replace.wait(EVENT_WAIT_BACKSTOP_SECONDS)
+            return dealt
+
+        returned = {}
+
+        # No redirect_stdout here: it swaps sys.stdout for the whole process, not one thread.
+        def writer(name, pull_requests):
+            returned[name] = appended(assignments, pull_requests, {}, report_stop=lambda _line: None)
+
+        watcher_module.merge_lane_pull_request_review_assignments_for_unassigned_pull_requests = (
+            deal_then_wait_in_the_first_writer)
+        try:
+            first = threading.Thread(target=writer, name="first-writer",
+                                     args=("first", [assignable(1), assignable(40)]))
+            first.start()
+            first_has_read.wait(EVENT_WAIT_BACKSTOP_SECONDS)
+            second = threading.Thread(target=writer, name="second-writer",
+                                      args=("second", [assignable(1), assignable(41)]))
+            second.start()
+            second.join(0.5)
+            second_waited = second.is_alive()
+            first_may_replace.set()
+            first.join(EVENT_WAIT_BACKSTOP_SECONDS)
+            second.join(EVENT_WAIT_BACKSTOP_SECONDS)
+        finally:
+            first_may_replace.set()
+            watcher_module.merge_lane_pull_request_review_assignments_for_unassigned_pull_requests = real_deal
+        final = assignments.read_text(encoding="utf-8")
+        check("a second writer waits for the first to replace the assignment file, so the file "
+              "keeps every line either writer reported as REVIEW-ASSIGNED",
+              second_waited and "40 merge-lane-" in final and "41 merge-lane-" in final
+              and len(returned.get("first", [])) == 1 and len(returned.get("second", [])) == 1,
+              f"second waited: {second_waited}\n{final}\n{returned}")
+
+        assignments.write_text("1 merge-lane-1\n", encoding="utf-8")
+        assignments.with_name(assignments.name + ".lock").unlink()
+        scratch.chmod(0o500)
+        output = io.StringIO()
+        try:
+            with contextlib.redirect_stdout(output):
+                events = appended(assignments, open_now, {})
+        finally:
+            scratch.chmod(0o700)
+        check("a lock file that cannot be made stops assignment with one WATCH line, and leaves "
+              "the assignment file as it was",
+              events == [] and "lock file beside the assignment file" in output.getvalue()
+              and assignments.read_text(encoding="utf-8") == "1 merge-lane-1\n",
+              output.getvalue())
+
         stray_partial = scratch / "assignments.txt.partial"
         stray_partial.write_text("someone else's file\n", encoding="utf-8")
         assignments.write_text("1 merge-lane-1\n", encoding="utf-8")
@@ -994,21 +1054,6 @@ def run_merge_lane_pull_request_review_assignment_watcher_cases():
               exit_code == 1 and "The file is damaged: line 2 of the assignment file" in errors
               and seeded.read_text(encoding="utf-8") == "4028 merge-lane-1\n4028 merge-lane-3\n",
               errors)
-        seeded.unlink()
-
-        class FileMadeWhileGitHubIsRead(list):
-            """One poll, during which another run makes the assignment file."""
-
-            def __getitem__(self, index):
-                seeded.write_text("4028 merge-lane-3\n", encoding="utf-8")
-                return list.__getitem__(self, index)
-
-        exit_code, lines, errors = seed_with(FileMadeWhileGitHubIsRead([open_at_seed]))
-        check("a seed run whose assignment file another run makes while it reads GitHub exits 1 "
-              "and leaves that file as the other run made it",
-              exit_code == 1 and "was made while this run read GitHub" in errors
-              and seeded.read_text(encoding="utf-8") == "4028 merge-lane-3\n",
-              f"exit {exit_code!r} {errors}")
         seeded.unlink()
         scratch.chmod(0o500)
         try:
@@ -1775,12 +1820,330 @@ def run_subprocess_cases():
               f"exit {exit_code}\n" + "\n".join(lines + watcher.error_lines))
 
 
+class PollOnceMachine:
+    """A scratch state directory, task list and scripted GitHub for --poll-once runs in-process."""
+
+    def __init__(self, scratch, token_file):
+        self.directory = scratch / "poll-once"
+        self.tasks = scratch / "tasks"
+        self.tasks.mkdir()
+        self.notices = scratch / "notices"
+        self.token_file = token_file
+        self.now = 1_800_000_000.0
+        self.poll = []
+        self.state_path = self.directory / watcher_module.WATCH_OPEN_PULL_REQUESTS_POLL_STATE_BETWEEN_CRON_RUNS_FILE_NAME
+        self.events_path = self.directory / watcher_module.WATCH_OPEN_PULL_REQUESTS_EVENTS_LOG_FILE_NAME
+        self.assignments = scratch / "assignments.txt"
+        self.assignments.write_text(EVERY_PULL_REQUEST_ASSIGNED_FILE.read_text(encoding="utf-8"),
+                                    encoding="utf-8")
+
+    def time(self):
+        return self.now
+
+    def run(self, flag="--poll-once", assignment_options=None):
+        saved = (watcher_module.time, watcher_module.fetch_open_pull_requests,
+                 list(watcher_module.SECRETS_TO_REDACT))
+        watcher_module.time = self
+        watcher_module.fetch_open_pull_requests = lambda _repo, _token: (
+            (None, self.poll) if isinstance(self.poll, str) else (self.poll, None))
+        errors = io.StringIO()
+        try:
+            with contextlib.redirect_stdout(io.StringIO()), contextlib.redirect_stderr(errors):
+                code = watcher_module.main([
+                    flag, "--token-file", str(self.token_file),
+                    "--poll-once-directory", str(self.directory),
+                    "--task-list-directory", str(self.tasks),
+                    "--needs-a-look-directory", str(self.notices),
+                    *(["--merge-lane-pr-review-assignments-file", str(self.assignments)]
+                      if assignment_options is None else assignment_options)])
+        finally:
+            (watcher_module.time, watcher_module.fetch_open_pull_requests,
+             watcher_module.SECRETS_TO_REDACT[:]) = saved
+        self.errors = errors.getvalue()
+        return code
+
+    def task_files(self):
+        return sorted(self.tasks.glob("*.json"), key=lambda path: int(path.stem))
+
+    def tasks_read(self):
+        return [json.loads(path.read_text(encoding="utf-8")) for path in self.task_files()]
+
+    def complete_tasks(self):
+        for path in self.task_files():
+            task = json.loads(path.read_text(encoding="utf-8"))
+            task["status"] = "completed"
+            path.write_text(json.dumps(task), encoding="utf-8")
+
+    def event_lines(self):
+        return (self.events_path.read_text(encoding="utf-8").splitlines()
+                if self.events_path.exists() else [])
+
+
+def poll_once_pull_request(number, head="a", draft=False):
+    return {"number": number, "head_sha": head * 40, "title": "t", "is_draft": draft,
+            "author": "nedlern", "created_at": f"2026-11-24T00:00:{number:02d}Z",
+            "base_branch": "main", "head_branch": f"branch-{number}", "reviews": []}
+
+
+def run_poll_once_cases(scratch_root, token_file):
+    def machine_for(name):
+        scratch = scratch_root / name
+        scratch.mkdir()
+        return PollOnceMachine(scratch, token_file)
+
+    machine = machine_for("missing-state")
+    machine.poll = [poll_once_pull_request(1)]
+    code = machine.run()
+    check("--poll-once with no state file exits 1, writes no state and opens one task saying how "
+          "to repair it",
+          code == 1 and not machine.state_path.exists() and len(machine.tasks_read()) == 1
+          and "--poll-once-write-baseline" in machine.tasks_read()[0]["description"],
+          f"{code} {machine.tasks_read()}")
+    machine.run()
+    check("a second run with the state still missing opens no second task",
+          len(machine.tasks_read()) == 1, machine.tasks_read())
+
+    machine = machine_for("unreadable-state")
+    machine.directory.mkdir()
+    machine.state_path.write_text("{ not json", encoding="utf-8")
+    machine.poll = [poll_once_pull_request(1)]
+    code = machine.run()
+    check("an unreadable state file exits 1, is left as it was, and is not re-baselined",
+          code == 1 and machine.state_path.read_text(encoding="utf-8") == "{ not json"
+          and not machine.event_lines() and "cannot be read" in machine.tasks_read()[0]["description"],
+          f"{code} {machine.tasks_read()}")
+    check("--poll-once-write-baseline refuses to replace an existing state file",
+          machine.run("--poll-once-write-baseline") == 1
+          and machine.state_path.read_text(encoding="utf-8") == "{ not json", machine.errors)
+    machine.state_path.write_text(json.dumps({"pull_requests": {}, "notices": {}, "failed_polls": "x",
+                                              "event_lines_delivered": 0,
+                                              "last_events_task_opened_at": None}), encoding="utf-8")
+    check("a state file with a field of the wrong type exits 1",
+          machine.run() == 1 and "wrong type" in machine.errors, machine.errors)
+
+    machine = machine_for("quiet")
+    machine.poll = [poll_once_pull_request(1), poll_once_pull_request(2, draft=True)]
+    check("the baseline run exits 0 and raises no event",
+          machine.run("--poll-once-write-baseline") == 0 and not machine.event_lines(),
+          machine.errors)
+    machine.run()
+    before = machine.state_path.read_text(encoding="utf-8")
+    for _ in range(3):
+        machine.now += 60
+        code = machine.run()
+    check("a run that detects nothing new exits 0, appends no event and opens no task",
+          code == 0 and not machine.event_lines() and machine.tasks_read() == []
+          and machine.state_path.read_text(encoding="utf-8") == before,
+          f"{code} {machine.tasks_read()}")
+
+    machine.poll = [poll_once_pull_request(1, "b"), poll_once_pull_request(2),
+                    poll_once_pull_request(3)]
+    machine.now += 60
+    code = machine.run()
+    lines = machine.event_lines()
+    check("a new head, a draft marked ready and an opening between runs are each one event, and "
+          "open one task naming the lines",
+          code == 0 and len(lines) == 3 and "#1 NEW-HEAD" in lines[0] and "#2 READY" in lines[1]
+          and "#3 OPENED" in lines[2] and len(machine.tasks_read()) == 1
+          and f"lines 1 to 3 of {machine.events_path}" in machine.tasks_read()[0]["description"],
+          f"{lines} {machine.tasks_read()}")
+    machine.now += 60
+    machine.run()
+    check("the next run with nothing new repeats no event and opens no task",
+          len(machine.event_lines()) == 3 and len(machine.tasks_read()) == 1, machine.event_lines())
+
+    machine.poll = machine.poll + [poll_once_pull_request(4)]
+    machine.now += 60
+    machine.run()
+    check("a later event waits while the events task is open",
+          len(machine.event_lines()) == 4 and len(machine.tasks_read()) == 1, machine.tasks_read())
+    machine.complete_tasks()
+    machine.now += 60
+    machine.run()
+    check("once that task is completed, the event still waits until 20 minutes after the last "
+          "task opened", len(machine.tasks_read()) == 1, machine.tasks_read())
+    machine.now += watcher_module.WATCH_OPEN_PULL_REQUESTS_MINIMUM_SECONDS_BETWEEN_EVENTS_TASKS
+    machine.run()
+    check("after 20 minutes one new task names only the line not yet delivered",
+          len(machine.tasks_read()) == 2
+          and "lines 4 to 4 of" in machine.tasks_read()[1]["description"], machine.tasks_read())
+
+    machine = machine_for("failed-polls")
+    machine.poll = [poll_once_pull_request(1)]
+    machine.run("--poll-once-write-baseline")
+    machine.poll = "GitHub is down"
+    codes = [machine.run() for _ in range(watcher_module.WATCH_OPEN_PULL_REQUESTS_FAILED_GITHUB_POLLS_IN_A_ROW_BEFORE_FAILURE_TASK - 1)]
+    check("failed polls below the limit exit 1 and open no task",
+          set(codes) == {1} and machine.tasks_read() == [], machine.tasks_read())
+    machine.run()
+    machine.run()
+    check("the failed poll at the limit opens one task, and the next opens no other",
+          len(machine.tasks_read()) == 1
+          and "GitHub is down" in machine.tasks_read()[0]["description"], machine.tasks_read())
+    machine.complete_tasks()
+    machine.poll = [poll_once_pull_request(1), poll_once_pull_request(5)]
+    check("after the outage the kept state reports what opened during it",
+          machine.run() == 0 and any("#5 OPENED" in line for line in machine.event_lines()),
+          machine.event_lines())
+
+    machine = machine_for("notices")
+    machine.poll = []
+    machine.run("--poll-once-write-baseline")
+    machine.notices.mkdir()
+    (machine.notices / "pr1-abc.txt").write_text("look at this\n", encoding="utf-8")
+    machine.run()
+    machine.now += 60
+    machine.run()
+    check("a GHI-MD edit job notice is one event across runs, and says to move it",
+          sum("NEEDS A LOOK pr1-abc.txt: look at this" in line for line in machine.event_lines()) == 1
+          and "then move it:" in machine.event_lines()[0], machine.event_lines())
+
+    machine = machine_for("append-fails")
+    machine.poll = []
+    machine.run("--poll-once-write-baseline")
+    before = machine.state_path.read_text(encoding="utf-8")
+    machine.events_path.mkdir()
+    machine.poll = [poll_once_pull_request(1)]
+    code = machine.run()
+    check("when the event file cannot be written, the run exits 1, keeps the state so the event "
+          "is seen again, and opens a task",
+          code == 1 and machine.state_path.read_text(encoding="utf-8") == before
+          and "could not record" in machine.tasks_read()[0]["subject"] + machine.errors,
+          f"{code} {machine.errors}")
+
+    machine = machine_for("truncated-events")
+    machine.poll = []
+    machine.run("--poll-once-write-baseline")
+    machine.poll = [poll_once_pull_request(1)]
+    machine.run()
+    machine.events_path.write_text("", encoding="utf-8")
+    machine.complete_tasks()
+    code = machine.run()
+    check("an event file shorter than the lines delivered exits 1 and says it was truncated",
+          code == 1 and "truncated" in machine.errors, machine.errors)
+
+    machine = machine_for("no-task-list")
+    machine.poll = []
+    machine.run("--poll-once-write-baseline")
+    machine.tasks.rmdir()
+    machine.poll = [poll_once_pull_request(1)]
+    code = machine.run()
+    delivered = json.loads(machine.state_path.read_text(encoding="utf-8"))["event_lines_delivered"]
+    check("when the task cannot be written, the run exits 1 and the event stays undelivered",
+          code == 1 and delivered == 0 and len(machine.event_lines()) == 1, machine.errors)
+    machine.tasks.mkdir()
+    machine.poll = [poll_once_pull_request(1)]
+    code = machine.run()
+    check("the next run delivers the event that waited",
+          code == 0 and "lines 1 to 1 of" in machine.tasks_read()[0]["description"],
+          machine.tasks_read())
+
+    machine = machine_for("locked")
+    machine.poll = []
+    machine.run("--poll-once-write-baseline")
+    machine.poll = [poll_once_pull_request(1)]
+    with (machine.directory / watcher_module.LOCK_FILE_NAME).open("w", encoding="utf-8") as held:
+        watcher_module.fcntl.flock(held, watcher_module.fcntl.LOCK_EX)
+        code = machine.run()
+    check("a run that finds the lock held exits 0 and does nothing",
+          code == 0 and not machine.event_lines() and machine.tasks_read() == [], machine.errors)
+
+    machine = machine_for("baseline-locked")
+    machine.poll = []
+    machine.directory.mkdir(parents=True, exist_ok=True)
+    with (machine.directory / watcher_module.LOCK_FILE_NAME).open("w", encoding="utf-8") as held:
+        watcher_module.fcntl.flock(held, watcher_module.fcntl.LOCK_EX)
+        code = machine.run("--poll-once-write-baseline")
+    check("--poll-once-write-baseline that finds the lock held says no baseline was written, "
+          "and exits 1",
+          code == 1 and "no baseline was written" in machine.errors
+          and not (machine.directory
+                   / watcher_module.WATCH_OPEN_PULL_REQUESTS_POLL_STATE_BETWEEN_CRON_RUNS_FILE_NAME).exists(),
+          machine.errors)
+
+    machine = machine_for("bad-token")
+    machine.token_file = scratch_root / "no-such-token"
+    code = machine.run()
+    check("an unusable token exits 1 and opens a task",
+          code == 1 and "token" in machine.tasks_read()[0]["subject"], machine.tasks_read())
+
+    machine = machine_for("review-assigned")
+    machine.assignments.write_text("1 merge-lane-1\n", encoding="utf-8")
+    machine.poll = [poll_once_pull_request(1)]
+    machine.run("--poll-once-write-baseline")
+    machine.poll = [poll_once_pull_request(1), poll_once_pull_request(2)]
+    code = machine.run()
+    check("a run assigns a new pull request to the merge-lane agent-seat with fewer waiting, writes "
+          "it to the assignment file, and puts its REVIEW-ASSIGNED line in the event file",
+          code == 0 and machine.assignments.read_text(encoding="utf-8")
+          == "1 merge-lane-1\n2 merge-lane-3\n"
+          and len(machine.event_lines()) == 2 and "PR #2 OPENED" in machine.event_lines()[0]
+          and "PR #2 REVIEW-ASSIGNED merge-lane-3" in machine.event_lines()[1],
+          f"{code} {machine.event_lines()} {machine.errors}")
+    machine.now += 60
+    machine.poll = "GitHub is down"
+    machine.run()
+    check("a failed poll assigns nothing",
+          machine.assignments.read_text(encoding="utf-8") == "1 merge-lane-1\n2 merge-lane-3\n"
+          and len(machine.event_lines()) == 2, machine.event_lines())
+
+    machine = machine_for("another-repository")
+    machine.assignments.write_text("1 merge-lane-1\n", encoding="utf-8")
+    other_repository = ["--repo", "someone/elsewhere"]
+    machine.poll = [poll_once_pull_request(1)]
+    machine.run("--poll-once-write-baseline", other_repository)
+    machine.poll = [poll_once_pull_request(1), poll_once_pull_request(2)]
+    saved_default = watcher_module.MERGE_LANE_PULL_REQUEST_REVIEW_ASSIGNMENTS_DEFAULT_FILE
+    watcher_module.MERGE_LANE_PULL_REQUEST_REVIEW_ASSIGNMENTS_DEFAULT_FILE = machine.assignments
+    try:
+        code = machine.run("--poll-once", other_repository)
+    finally:
+        watcher_module.MERGE_LANE_PULL_REQUEST_REVIEW_ASSIGNMENTS_DEFAULT_FILE = saved_default
+    check("a run with another --repo and no assignment file named reports the opening, assigns "
+          "no review and leaves the default file alone",
+          code == 0 and machine.assignments.read_text(encoding="utf-8") == "1 merge-lane-1\n"
+          and len(machine.event_lines()) == 1 and "PR #2 OPENED" in machine.event_lines()[0],
+          f"{code} {machine.event_lines()} {machine.errors}")
+
+    machine = machine_for("assignment-file-missing")
+    machine.assignments.unlink()
+    machine.poll = [poll_once_pull_request(1)]
+    machine.run("--poll-once-write-baseline")
+    first_code = machine.run()
+    machine.now += 60
+    second_code = machine.run()
+    stopped = [line for line in machine.event_lines() if "WATCH: review assignment stopped" in line]
+    check("a missing assignment file puts one WATCH line with the seed step in the event file, "
+          "not one per run, and opens a task naming it",
+          (first_code, second_code) == (0, 0) and len(stopped) == 1
+          and any("--merge-lane-pr-review-assignments-file-write-from-seed-and-reviewed-prs-then-exit"
+                  in line for line in machine.event_lines())
+          and len(machine.tasks_read()) == 1 and not machine.assignments.exists(),
+          f"{machine.event_lines()} {machine.tasks_read()} {machine.errors}")
+    machine.assignments.write_text("", encoding="utf-8")
+    machine.now += 60
+    machine.run()
+    check("once the file exists, the next run assigns the pull request",
+          machine.assignments.read_text(encoding="utf-8") == "1 merge-lane-1\n"
+          and "REVIEW-ASSIGNED merge-lane-1" in machine.event_lines()[-1], machine.event_lines())
+
+    machine = machine_for("directory-unusable")
+    machine.directory.write_text("a file", encoding="utf-8")
+    code = machine.run()
+    check("a state directory that cannot be used exits 1 and opens a task",
+          code == 1 and "directory" in machine.tasks_read()[0]["subject"], machine.tasks_read())
+
+
 if __name__ == "__main__":
     run_unit_cases()
     run_merge_lane_pull_request_review_assignment_unit_cases()
     run_merge_lane_pull_request_review_assignment_watcher_cases()
     run_needs_a_look_unit_cases()
     run_batch_events_cases()
+    with tempfile.TemporaryDirectory() as poll_once_scratch:
+        poll_once_token_file = Path(poll_once_scratch) / "token"
+        poll_once_token_file.write_text(FIXTURE_TOKEN, encoding="utf-8")
+        run_poll_once_cases(Path(poll_once_scratch), poll_once_token_file)
     run_subprocess_cases()
     print()
     if failures:

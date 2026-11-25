@@ -25,7 +25,9 @@ Each invocation, under a lock that keeps two from overlapping:
    agent-session while a headless usage-limit pause holds, as "How it fails" below says: rule 1 wakes it once its limit has ended;
    rule 2 has unbacked promises and announced actions judged and named to it; rule 3 sends the
    handoff text; rule 4 ends a wait no rule 2 message was sent on; rule 5 has the judge
-   decide whether to message it, and write the message. The judge is not told of a background
+   decide whether to message it, and write the message, except that an open
+   pull-request events task on merge-lane-2's task list wakes it by code, with no judge, at most
+   once in 15 minutes for one task. The judge is not told of a background
    command whose verdict gives a `timeout_ends_at` not yet reached, since such work ends by itself, nor of a background command, subagent or workflow a rule 5 message
    has already named, since the sweep asks once about each; when something runs and all of it is
    such work, the judge is not asked. Code ends a rule 5 message with a list of the open tasks
@@ -156,6 +158,10 @@ RUN_FAILURES_ALERTED_FILE_NAME = "run-failures-alerted.txt"
 # The agent-seat that owns this program: each failure of the program goes to its task list, and
 # the user hears of one only through that agent-seat, or when the task cannot be written.
 OWNING_AGENT_SEAT = "reboot-test"
+PULL_REQUEST_EVENTS_AGENT_SEAT = "merge-lane-2"
+PULL_REQUEST_EVENTS_WAKE_TEXT = ("Task {task_id} on your task list holds new pull-request events. "
+                                 "Read the event-file lines it names, act on them, and mark the "
+                                 "task completed.")
 PROGRAM_PATH_IN_REPOSITORY = f"scripts/{Path(__file__).name}"
 SENT_TEXT_DIFFERS_TASK_SUBJECT = "Idle sweep: a headless sender sent a text other than the one code wrote"
 OWNING_AGENT_SEAT_TASK_LAST_LINES = (
@@ -168,6 +174,7 @@ HEADLESS_USAGE_LIMIT_PAUSE = "headless_usage_limit_pause"
 
 WAIT_STEP_SECONDS = 15 * 60
 JUDGE_ASK_AGAIN_SECONDS = 15 * 60
+PULL_REQUEST_EVENTS_TASK_ID = "pull_request_events_task_id"
 LIMIT_WAKE_GRACE_SECONDS = 5 * 60
 DELIVERY_CHECK_AFTER_SECONDS = 60
 # Claude Code stamps a record when it writes it, which may be a moment before the send returns.
@@ -917,6 +924,25 @@ def text_sent_to(outcome, refs, seat, text):
     return sent[-1] if sent else text
 
 
+def open_pull_request_events_task(seat, tasks_root):
+    """The open task asking merge-lane-2 to read pull-request events, or None. Reads the list itself
+    because a verdict names open tasks only when nothing runs, and merge-lane-2 often has a
+    subagent running while events wait. Raises OSError."""
+    list_directory = tasks_root / f"nedsnodes-{seat}-tasks"
+    if seat != PULL_REQUEST_EVENTS_AGENT_SEAT or not list_directory.is_dir():
+        return None
+    for path in list_directory.glob("*.json"):
+        try:
+            task = json.loads(path.read_text(encoding="utf-8"))
+        except (FileNotFoundError, ValueError):
+            # Claude Code may be replacing the file or have deleted it since the listing.
+            continue
+        if (isinstance(task, dict) and task.get("status") != "completed"
+                and task.get("subject") == agent_seat_task_list.AGENT_SEAT_TASK_LIST_MERGE_LANE_2_READ_PULL_REQUEST_EVENTS_TASK_SUBJECT_LINE):
+            return {"id": path.stem}
+    return None
+
+
 def owning_agent_seat_task_opened_unless_open(tasks_root, subject, description):
     """Open a task on OWNING_AGENT_SEAT's task list unless one with the subject that is not marked
     completed is there; return the new task's id, or None. Raises OSError."""
@@ -1529,7 +1555,29 @@ class Sweep:
             self.start_wait(seat, verdict, stretch, text, 3)
             self.reminder_sent(seat, verdict, self.send(seat, verdict, text, NUDGE), [subject])
         elif rule == 5:
-            self.judge_idle_seat(seat, verdict, stretch)
+            events_task = open_pull_request_events_task(seat, self.paths.tasks_root)
+            if events_task:
+                self.wake_for_pull_request_events_task(seat, verdict, stretch, events_task)
+            else:
+                self.judge_idle_seat(seat, verdict, stretch)
+
+    def wake_for_pull_request_events_task(self, seat, verdict, stretch, task):
+        """Wake merge-lane-2 for its events task in code, since the user was told this wake happens."""
+        answer = self.log.last_judge_answer(seat)
+        if (answer and answer.get(PULL_REQUEST_EVENTS_TASK_ID) == task["id"]
+                and answer["session_id"] == verdict[fields.SESSION_ID]
+                and seconds_between(agent_seat_idle_sweep_invocation_started_at(answer), self.now)
+                < JUDGE_ASK_AGAIN_SECONDS):
+            return
+        text = PULL_REQUEST_EVENTS_WAKE_TEXT.format(task_id=task["id"])
+        self.start_wait(seat, verdict, stretch, text, 5)
+        sent = self.send(seat, verdict, text, NUDGE)
+        self.record({"event": "judge_answer", "agent_seat": seat, "rule": 5,
+                     "session_id": verdict[fields.SESSION_ID], "last_activity": stretch,
+                     "send": bool(sent), "reason": "an open pull-request events task, decided by code",
+                     "failed": False, RUNNING_WORK_ASKED_ABOUT: [],
+                     PULL_REQUEST_EVENTS_TASK_ID: task["id"],
+                     **({"message_id": sent["message_id"]} if sent else {})})
 
     def reminded_subjects(self, seat, verdict):
         last_held_at = {}
