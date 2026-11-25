@@ -144,8 +144,10 @@ WHAT IS PINNED HERE.
 Run: python3 nn-systems/cold-read/tests/cold-read-cell-common-test.py
 """
 
+import contextlib
 import hashlib
 import importlib.util
+import io
 import json
 import os
 import re
@@ -849,6 +851,33 @@ with tempfile.TemporaryDirectory() as scratch:
     check("git that does not start makes the write detector unavailable, saying why",
           unavailable_detail is not None and "could not start git" in unavailable_detail,
           repr(unavailable_detail))
+
+    # The grid lifts only the cell-log line holding the phrase, so a path or git error of
+    # several lines must reach the log as one line, or the rest of it is dropped.
+    real_stray_writes_since = common_module.stray_writes_since
+
+    def stray_write_check_printed(stray_writes_since_stand_in):
+        common_module.stray_writes_since = stray_writes_since_stand_in
+        captured = io.StringIO()
+        try:
+            with contextlib.redirect_stderr(captured):
+                common_module.report_stray_writes("cell", set())
+        finally:
+            common_module.stray_writes_since = real_stray_writes_since
+        return captured.getvalue().splitlines()
+
+    stray_lines = stray_write_check_printed(lambda baseline, own: ["stray\nwrite.md", "plain.md"])
+    check("a stray-write path holding a newline stays on the STRAY WRITE line",
+          len(stray_lines) == 1 and "$'stray\\x0awrite.md', plain.md" in stray_lines[0], repr(stray_lines))
+
+    def git_status_failing_with_several_lines(baseline, own):
+        raise common_module.WriteDetectorUnavailable(
+            "fatal: detected dubious ownership in repository at '/x/two  spaces'\nTo add an exception, run:")
+
+    skipped_lines = stray_write_check_printed(git_status_failing_with_several_lines)
+    check("a git error of several lines stays on the check-skipped line, with its doubled space",
+          len(skipped_lines) == 1 and "'/x/two  spaces' To add an exception, run:" in skipped_lines[0],
+          repr(skipped_lines))
 
     # A stamp whose reviewed file cannot be read says so instead of failing the report.
     with tempfile.TemporaryDirectory() as stamp_scratch:

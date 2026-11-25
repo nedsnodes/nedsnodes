@@ -992,28 +992,6 @@ def working_tree_snapshot_or_failure_reason() -> tuple:
         return None, WORKING_TREE_SNAPSHOT_NOT_TAKEN_REASON.format(error=error)
 
 
-def holds_a_control_character(text: str) -> bool:
-    return any(ord(character) < 32 or ord(character) == 127 for character in text)
-
-
-def shell_quoted_on_one_line(text: str) -> str:
-    """`text` as one shell argument on one line: git's `-z` output keeps a newline in a
-    path, and shlex.quote would carry it into the command, splitting the printed line."""
-    if not holds_a_control_character(text):
-        return shlex.quote(text)
-    escaped = "".join(
-        "\\\\" if character == "\\" else "\\'" if character == "'"
-        else f"\\x{ord(character):02x}" if holds_a_control_character(character)
-        else character for character in text)
-    return f"$'{escaped}'"
-
-
-def path_shown_on_one_line(path: str) -> str:
-    """`path` as written, or, when it holds a control character such as a newline, its
-    one-line shell-quoted form, so the line it is printed in stays one line."""
-    return shell_quoted_on_one_line(path) if holds_a_control_character(path) else path
-
-
 def stopped_cells_write_check_lines(stopped_report_paths: list, baseline,
                                     baseline_failure_reason, already_reported: set) -> list:
     """Return a line per path changed since the baseline and not yet reported, each with
@@ -1038,7 +1016,7 @@ def stopped_cells_write_check_lines(stopped_report_paths: list, baseline,
     if reason is not None:
         return [f"WRITE CHECK DID NOT RUN: {path.name} — "
                 + STOPPED_CELL_WRITE_CHECK_LINE.format(cell=cell_name_of(path),
-                                                      reason=" ".join(reason.split()))
+                                                      reason=cell_common.join_error_text_lines_with_one_space(reason))
                 for path in stopped_report_paths]
     status_codes_by_path = {}
     for entry in entries:
@@ -1051,7 +1029,7 @@ def stopped_cells_write_check_lines(stopped_report_paths: list, baseline,
     touched = sorted({name for name, _ in baseline - current})
     cells = ", ".join(cell_name_of(path) for path in stopped_report_paths)
     # Without --literal-pathspecs, a restore of `chapter[1].md` also discards edits to `chapter1.md`.
-    repository = f"{shell_quoted_on_one_line(str(cell_common.REPO_ROOT))} --literal-pathspecs"
+    repository = f"{cell_common.shell_quoted_on_one_line(str(cell_common.REPO_ROOT))} --literal-pathspecs"
     lines = []
     for name in changed:
         if name in already_reported:
@@ -1064,17 +1042,17 @@ def stopped_cells_write_check_lines(stopped_report_paths: list, baseline,
                 else STRAY_WRITE_UNDO_UNTRACKED if name in untracked
                 else STRAY_WRITE_UNDO_TRACKED)
         codes = status_codes_by_path.get(name, set())
-        absolute_path = shell_quoted_on_one_line(str(cell_common.REPO_ROOT / name))
+        absolute_path = cell_common.shell_quoted_on_one_line(str(cell_common.REPO_ROOT / name))
         what_to_read = (STRAY_WRITE_ALREADY_CHANGED_UNMERGED_READ if codes & GIT_STATUS_UNMERGED_CODES
                         else STRAY_WRITE_ALREADY_CHANGED_UNTRACKED_READ if name in untracked
                         else STRAY_WRITE_ALREADY_CHANGED_STAGED_DELETION_READ if "??" in codes
                         else STRAY_WRITE_ALREADY_CHANGED_TRACKED_READ).format(
-            path=shell_quoted_on_one_line(name), repository=repository, absolute_path=absolute_path)
+            path=cell_common.shell_quoted_on_one_line(name), repository=repository, absolute_path=absolute_path)
         lines.append(STOPPED_CELLS_STRAY_WRITE_LINE.format(
-            path=path_shown_on_one_line(name), cells=cells, undo=undo.format(
-                path=shell_quoted_on_one_line(name), repository=repository, what_to_read=what_to_read,
+            path=cell_common.path_shown_on_one_line(name), cells=cells, undo=undo.format(
+                path=cell_common.shell_quoted_on_one_line(name), repository=repository, what_to_read=what_to_read,
                 absolute_path=absolute_path,
-                touched=", ".join(shell_quoted_on_one_line(name) for name in touched))))
+                touched=", ".join(cell_common.shell_quoted_on_one_line(name) for name in touched))))
     return lines
 
 
