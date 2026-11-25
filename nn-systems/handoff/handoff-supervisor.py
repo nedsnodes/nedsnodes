@@ -1460,7 +1460,8 @@ class IgnitionPlanWithoutConversationTail:
             prompt += " " + line
         for line in memory_review_due:
             prompt += " " + line
-        transcript_directory = (self.unextracted_transcript_path.parent
+        # A session's subagent transcripts sit in a folder named after the session, beside its .jsonl.
+        transcript_directory = (self.unextracted_transcript_path.with_suffix("")
                                 if self.unextracted_transcript_path is not None else None)
         for line in session_handoff_field_lines_for_successor(self.handoff_fields, transcript_directory):
             prompt += " " + line

@@ -15,7 +15,6 @@ Run: python3 nn-systems/handoff/tests/handoff-supervisor-successor-prompt-test.p
 Prints one line per case and exits non-zero if any case fails.
 """
 
-import types
 import contextlib
 import dataclasses
 import functools
@@ -2833,12 +2832,19 @@ def run_session_handoff_writer_warning_cases(recent: str):
         supervisor.COLD_READ_FULL_RUN_COMMAND_REFUSED_DURING_HANDOFF_DEFERRAL_FIELD_PREFIX + "1": "cold-read run x",
     })
     _, plan = supervisor.successor_session_id_and_ignition_plan_without_conversation_tail(
-        types.SimpleNamespace(working_directory=Path("/tmp")), None, recovery_fields, "supervisor boot")
+        SimpleNamespace(working_directory=Path("/tmp")), None, recovery_fields, "supervisor boot")
     recovered = plan.compose("")
     check("the recovery launch shows each writer warning, in writer order, before the next step",
           expected in recovered and recovered.index(expected) < recovered.index("merge the queue"), recovered)
     check("the recovery launch shows the past-wait-limit tasks and the refused cold-read commands",
           "task-a: the long build" in recovered and "cold-read run x" in recovered, recovered)
+    found = supervisor.IgnitionPlanWithoutConversationTail(
+        next_step="go", unextracted_session_id="abc",
+        unextracted_transcript_path=Path("/tmp/project-dir/abc.jsonl"),
+        handoff_fields={supervisor.SPAWNED_SUBAGENT_FIELD_PREFIX + "1": "agent-x: builds the thing"},
+    ).compose("")
+    check("a recovery launch with the transcript found points the roster at that session's subagents folder",
+          "/tmp/project-dir/abc/subagents/agent-<id>.jsonl" in found, found)
 
 
 def run_spawned_subagent_roster_cases(workspace: Path, recent: str):
