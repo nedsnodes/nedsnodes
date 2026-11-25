@@ -3139,7 +3139,7 @@ def github_answer(*numbers):
         "nodes": [{"number": number, "title": "t", "isDraft": False, "headRefOid": "a" * 40,
                    "author": {"login": "nedlern"}, "createdAt": "2026-11-02T00:00:00Z",
                    "baseRefName": "main", "headRefName": f"branch-{number}",
-                   "reviews": {"nodes": []}} for number in numbers],
+                   "reviews": {"nodes": []}, "macClaudeReviews": {"nodes": []}} for number in numbers],
         "pageInfo": {"hasNextPage": False, "endCursor": None}}}}})
 
 
