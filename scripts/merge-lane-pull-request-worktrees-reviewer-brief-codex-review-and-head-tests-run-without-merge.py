@@ -21,7 +21,8 @@ Codex does not review main's changes as the pull request's.
 The brief specifications file holds merge-lane-2's judgments in exactly one
 entry, for this pull request: tag, number, title, author, tests, hazards and
 claude_reviewer, true when the pull request's review tier calls for a Claude
-reviewer and false when it does not, and optionally overlaps. A fix-round entry also has reviewed_before,
+reviewer and false when it does not, and optionally overlaps and
+hand_written_follow_up_request_blocks. A fix-round entry also has reviewed_before,
 previous_reviews, new_commits and answer; an entry is a fix-round exactly
 when --head-commit-reviewed-before is given, and its reviewed_before names
 that same commit. The entry need not name head or main; when it does, each

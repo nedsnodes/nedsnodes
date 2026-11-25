@@ -304,8 +304,35 @@ def main():
                    + " refused to print it from merge-lane-2's reviews, saying:\n\n"
                    "> REFUSED: ned-review-merge's review 2 of pull request 31 holds 2 fix-next finding(s) on "
                    "scripts/a.py worded as 1 earlier finding(s) but with new Codex finding ids.\n"
-                   "> Write the block by hand.\n") in brief,
+                   "> Write the block by hand.\n\n"
+                   "The brief specifications give no block merge-lane-2 wrote by hand for it.\n") in brief,
               f"exit {completed.returncode}\n{completed.stdout}{completed.stderr}\n--- brief ---\n{brief}")
+
+        hand_written_31 = "#follow_up_request pull request 31\n1. fix-next: `scripts/a.py:3`: It drops a line.\n" \
+                          "2. fix-next: `scripts/a.py:9`: It drops a second line.\n"
+        completed = run_program(scratch, helpers, [{**first_round, "tag": "14h", "hand_written_follow_up_request_blocks":
+                                                    {"31": hand_written_31}}],
+                                gh_routes=follow_up_gh_routes,
+                                follow_up_routes={"4": {"stdout": ""}, "31": {"exit": 1, "stderr": refusal}})
+        brief_file = helpers / "briefs" / "brief-14h-mac-claude.md"
+        brief = brief_file.read_text() if brief_file.exists() else ""
+        check("a refused block is quoted with the block merge-lane-2 wrote by hand, which the entry gives",
+              completed.returncode == 0
+              and ("> Write the block by hand.\n\n"
+                   "The block merge-lane-2 wrote by hand and sent the author instead:\n\n"
+                   "> #follow_up_request pull request 31\n> 1. fix-next: `scripts/a.py:3`: It drops a line.\n"
+                   "> 2. fix-next: `scripts/a.py:9`: It drops a second line.\n") in brief,
+              f"exit {completed.returncode}\n{completed.stdout}{completed.stderr}\n--- brief ---\n{brief}")
+
+        completed = run_program(scratch, helpers, [{**first_round, "tag": "14m", "hand_written_follow_up_request_blocks":
+                                                    {"#31": hand_written_31}}],
+                                gh_routes=follow_up_gh_routes,
+                                follow_up_routes={"4": {"stdout": ""}, "31": {"exit": 1, "stderr": refusal}})
+        check("hand_written_follow_up_request_blocks keyed by anything but a pull request number exits 1, naming "
+              "the field, and writes no brief",
+              completed.returncode == 1 and "hand_written_follow_up_request_blocks must map" in completed.stderr
+              and not (helpers / "briefs" / "brief-14m-mac-claude.md").exists(),
+              f"exit {completed.returncode}\n{completed.stdout}{completed.stderr}")
 
         completed = run_program(scratch, helpers, [first_round, {**first_round, "tag": "7b"}],
                                 gh_routes=FOLLOW_UP_GH_ROUTES)

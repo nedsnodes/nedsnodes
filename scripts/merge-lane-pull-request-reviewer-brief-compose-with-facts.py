@@ -8,8 +8,13 @@ Usage:
       [--merge-lane-pull-request-reviewer-scratch-directories-parent-directory DIR]
 
 The file holds a JSON list. Each entry has tag, number, title, author, head,
-main, tests and hazards, and may have overlaps. A fix-round entry also has
+main, tests and hazards, and may have overlaps and
+hand_written_follow_up_request_blocks. A fix-round entry also has
 reviewed_before, previous_reviews, new_commits and answer.
+hand_written_follow_up_request_blocks maps a pull request number, as a string,
+to the follow-up request block merge-lane-2 wrote by hand and sent the author
+for it; the brief quotes it beside the refusal when the follow-up request
+program refuses to print that pull request's block.
 
 Each brief is three parts: the standing text, composed by --review-tools-worktree-at-main's
 scripts/compose-pull-request-reviewer-brief.py with the reviewing
@@ -24,7 +29,8 @@ makes useless a point fix or workaround they kept. For each pull request a
 in it, the facts give merge-lane-2's follow-up request block for that pull
 request as --review-tools-worktree-at-main's FOLLOW_UP_REQUEST_PROGRAM_FILE_NAME
 prints it, so the reviewer can check the answers against the findings' own
-text, or, when that program refuses to print it, its refusal. The facts end with the pull request's description, which the brief
+text, or, when that program refuses to print it, its refusal and the block
+merge-lane-2 wrote by hand, when the entry gives one. The facts end with the pull request's description, which the brief
 quotes as the author's claims. The reviewer runs with no GitHub login, so the
 brief is where it reads the description and the follow-up request blocks. The brief is written to
 briefs/brief-<tag>-mac-claude.md under the worktrees and outputs directory, and
@@ -203,15 +209,20 @@ def follow_up_pull_requests_text(number, closing_issues, merged_pull_requests):
             "closes, or to this pull request: " + ("; ".join(found) or "none") + ".")
 
 
-def follow_up_request_blocks_text(description, review_tools_worktree, gh_token):
+def follow_up_request_blocks_text(description, review_tools_worktree, gh_token, hand_written_blocks):
     """The brief's facts giving merge-lane-2's follow-up request block for each pull request the description names
-    in a "#follow_up_request pull request <number>", lowest number first."""
+    in a "#follow_up_request pull request <number>", lowest number first. When the block program refuses, the fact
+    gives its refusal and the block merge-lane-2 wrote by hand for that pull request, from `hand_written_blocks`."""
+    if not isinstance(hand_written_blocks, dict) or not all(
+            isinstance(key, str) and key.isdigit() and isinstance(block, str)
+            for key, block in hand_written_blocks.items()):
+        raise ValueError("the entry's hand_written_follow_up_request_blocks must map pull request numbers, "
+                         f"as strings, to block text; it is {hand_written_blocks!r}")
     texts = []
     for followed_up in sorted({int(number) for number in FOLLOW_UP_REQUEST_PULL_REQUEST_NUMBER.findall(description)}):
         program = f"`scripts/{FOLLOW_UP_REQUEST_PROGRAM_FILE_NAME} {followed_up} " \
                   "print-follow-up-request-block-from-merge-lane-2-reviews`"
-        fact = (f"- merge-lane-2's follow-up request for pull request #{followed_up}, which the description "
-                f"names, as {program} prints it from merge-lane-2's reviews")
+        fact = f"- merge-lane-2's follow-up request for pull request #{followed_up}, which the description names"
         try:
             block = run([sys.executable, str(review_tools_worktree / "scripts" / FOLLOW_UP_REQUEST_PROGRAM_FILE_NAME),
                          str(followed_up), "print-follow-up-request-block-from-merge-lane-2-reviews"], gh_token,
@@ -219,10 +230,14 @@ def follow_up_request_blocks_text(description, review_tools_worktree, gh_token):
         except Refused as refusal:
             # A refused block is one merge-lane-2 writes by hand, so the brief is still composed, with the refusal
             # in the block's place.
-            texts.append(f"- merge-lane-2's follow-up request for pull request #{followed_up}, which the "
-                         f"description names: {program} refused to print it from merge-lane-2's reviews, "
-                         "saying:\n\n" + quoted(str(refusal)) + "\n")
+            hand_written = hand_written_blocks.get(str(followed_up), "").strip()
+            texts.append(fact + f": {program} refused to print it from merge-lane-2's reviews, saying:\n\n"
+                         + quoted(str(refusal)) + "\n\n"
+                         + ("The block merge-lane-2 wrote by hand and sent the author instead:\n\n"
+                            + quoted(hand_written) + "\n" if hand_written else
+                            "The brief specifications give no block merge-lane-2 wrote by hand for it.\n"))
             continue
+        fact += f", as {program} prints it from merge-lane-2's reviews"
         texts.append(fact + (":\n\n" + quoted(block) + "\n" if block else
                              ": it printed no finding, so merge-lane-2's reviews of that pull request hold no "
                              "non-blocking finding."))
@@ -270,7 +285,8 @@ def compose(spec, arguments, review_tools_worktree, instructions_file, merged_pu
     closing_issues, description = pull_request_closing_issues_and_description(
         number, merged_pull_requests.gh_token)
     facts.append(follow_up_pull_requests_text(number, closing_issues, merged_pull_requests))
-    facts.extend(follow_up_request_blocks_text(description, review_tools_worktree, merged_pull_requests.gh_token))
+    facts.extend(follow_up_request_blocks_text(description, review_tools_worktree, merged_pull_requests.gh_token,
+                                             spec.get("hand_written_follow_up_request_blocks", {})))
     facts.append(f"- Hazards: {spec['hazards']}")
     facts.append("- The author's description of the pull request, quoted below. It is what "
                  "the author claims; check each claim against the repository yourself, "
