@@ -75,6 +75,10 @@ the last poll's.
 --merge-lane-pr-review-assignments-file-write-from-seed-and-reviewed-prs-then-exit
 makes the file once, and --merge-lane-pr-review-assignments-list-for lists
 one agent-seat's pull requests.
+The default assignment file numbers the pull requests of DEFAULT_REPO only.
+With another --repo and no --merge-lane-pr-review-assignments-file, the
+watch assigns no review and prints no line saying so, and the seed and the
+listing exit 2.
 
 With --batch-events-for-seconds N, every OPENED, NEW-HEAD, READY, REVIEW-ASSIGNED and NEEDS A
 LOOK line is held in the process instead of printed. The watcher prints them
@@ -94,6 +98,7 @@ import argparse
 import getpass
 import json
 import os
+import shlex
 import stat
 import subprocess
 import tempfile
@@ -425,8 +430,10 @@ class MergeLanePullRequestReviewAssignmentsFileUnusable(Exception):
         self.case = case
 
 
-def merge_lane_pull_request_review_assignments_file_repair_steps(path, case):
-    """The instruction lines that repair the assignment file at path, for the case its read failed in."""
+def merge_lane_pull_request_review_assignments_file_repair_steps(path, case, options_in_use=()):
+    """The instruction lines that repair the assignment file at path, for the case its read failed in.
+    options_in_use are the --repo and --token-file options the watcher runs with, which the seed
+    command it prints repeats."""
     if case == "unreadable":
         return f"  Make the file readable by the user {getpass.getuser()}, who runs the watcher.\n"
     if case == "line":
@@ -434,7 +441,7 @@ def merge_lane_pull_request_review_assignments_file_repair_steps(path, case):
                 f"line as it is.\n")
     seed_files = sorted(path.parent.glob(f"{path.stem}-seed-*{path.suffix}"))
     if len(seed_files) == 1:
-        seed_file_text = f"{seed_files[0]}"
+        seed_file_text = shlex.quote(str(seed_files[0]))
         found = ""
     else:
         seed_file_text = "<seed file>"
@@ -443,10 +450,10 @@ def merge_lane_pull_request_review_assignments_file_repair_steps(path, case):
                  f"; <seed file> holds those assignments as '{ASSIGNMENT_LINE_FORMAT}' lines")
     return (f"  If you know the file was never made, make it once, on ned-box, from the file of "
             f"assignments made by hand before this watcher assigned any{found}: "
-            f"python3 scripts/watch-open-pull-requests-hack.py "
-            f"--merge-lane-pr-review-assignments-file {path} "
-            f"--merge-lane-pr-review-assignments-file-write-from-seed-and-reviewed-prs-then-exit "
-            f"{seed_file_text}\n"
+            + shlex.join(["python3", "scripts/watch-open-pull-requests-hack.py", *options_in_use,
+                          "--merge-lane-pr-review-assignments-file", str(path),
+                          "--merge-lane-pr-review-assignments-file-write-from-seed-and-reviewed-prs-then-exit"])
+            + f" {seed_file_text}\n"
             f"  If the file existed before, or you cannot tell, do not make it from a seed file, "
             f"because that would "
             f"give each reviewed pull request the merge-lane agent-seat of "
@@ -604,7 +611,7 @@ def merge_lane_pull_request_review_assignments_for_unassigned_pull_requests(pull
     return dealt
 
 
-def merge_lane_pull_request_review_assignment_lines(path, pull_requests, state):
+def merge_lane_pull_request_review_assignment_lines(path, pull_requests, state, options_in_use=()):
     """Deal the pull requests with no assignment, write them to the assignment file, and return
     a REVIEW-ASSIGNED event line for each one the file holds afterwards. A failure prints a WATCH
     line each time its case differs from the last poll's, as state records."""
@@ -620,7 +627,7 @@ def merge_lane_pull_request_review_assignment_lines(path, pull_requests, state):
         stop(error.case,
              f"WATCH: review assignment stopped: {error}, so no open pull request is given "
              f"a merge-lane agent-seat to review it; the watch goes on otherwise.\n"
-             f"{merge_lane_pull_request_review_assignments_file_repair_steps(path, error.case)}"
+             f"{merge_lane_pull_request_review_assignments_file_repair_steps(path, error.case, options_in_use)}"
              f"  The watcher assigns again at the first poll that reads the whole file.")
         return []
     dealt = merge_lane_pull_request_review_assignments_for_unassigned_pull_requests(
@@ -649,7 +656,7 @@ def merge_lane_pull_request_review_assignment_lines(path, pull_requests, state):
     return [event_line(pull_request, f"REVIEW-ASSIGNED {lane}") for pull_request, lane in dealt]
 
 
-def merge_lane_pull_request_review_assignments_seed(path, seed_path, repo, token):
+def merge_lane_pull_request_review_assignments_seed(path, seed_path, repo, token, options_in_use=()):
     """Write the assignment file once: the seed file's lines, then each other open pull request
     with a review by ned-review-merge whose number's remainder MERGE_LANE_BY_PULL_REQUEST_NUMBER_REMAINDER
     gives an agent-seat; the watcher deals the rest. Return the exit status."""
@@ -662,7 +669,8 @@ def merge_lane_pull_request_review_assignments_seed(path, seed_path, repo, token
                  f"file does not name the merge-lane agent-seat of "
                  f"{MERGE_LANE_BY_PULL_REQUEST_NUMBER_REMAINDER_TEXT}, in place of the one it was "
                  f"assigned. The file is damaged: {error}.\n"
-                 + merge_lane_pull_request_review_assignments_file_repair_steps(path, error.case)
+                 + merge_lane_pull_request_review_assignments_file_repair_steps(
+                     path, error.case, options_in_use)
                  .rstrip("\n"))
             return 1
         emit(f"WATCH: nothing was seeded, because the assignment file {path} exists and every "
@@ -718,7 +726,7 @@ def merge_lane_pull_request_review_assignments_seed(path, seed_path, repo, token
     return 0
 
 
-def merge_lane_pull_request_review_assignments_list(path, lane, repo, token):
+def merge_lane_pull_request_review_assignments_list(path, lane, repo, token, options_in_use=()):
     """Print the lane's open pull requests that are not drafts, and whether each waits for its
     verdict. Return the exit status."""
     try:
@@ -728,7 +736,7 @@ def merge_lane_pull_request_review_assignments_list(path, lane, repo, token):
              f"{error}. merge-lane-2's open-pull-request watcher meets the same failure, and "
              f"assigns no review until the file is repaired.\n"
              f"  If you are merge-lane-2, repair the file by the step for your case:\n"
-             + merge_lane_pull_request_review_assignments_file_repair_steps(path, error.case)
+             + merge_lane_pull_request_review_assignments_file_repair_steps(path, error.case, options_in_use)
              .replace("\n  ", "\n    ").replace("  ", "    ", 1)
              + "  Otherwise, review the pull requests merge-lane-2 has forwarded to you as "
              "REVIEW-ASSIGNED lines, and run this command again before you start the next one.\n"
@@ -815,10 +823,11 @@ def parse_arguments(argv):
                         help="the GHI-MD edit job's notices directory to list each "
                              "poll (default: %(default)s)")
     parser.add_argument("--merge-lane-pr-review-assignments-file", type=Path,
-                        default=MERGE_LANE_PULL_REQUEST_REVIEW_ASSIGNMENTS_DEFAULT_FILE,
                         help="the file of '<pull request number> <merge-lane agent-seat>' "
-                             "lines this watcher reads and rewrites at each poll "
-                             "(default: %(default)s)")
+                             "lines this watcher reads and rewrites at each poll (default: "
+                             f"{MERGE_LANE_PULL_REQUEST_REVIEW_ASSIGNMENTS_DEFAULT_FILE} with the "
+                             "default --repo; with another --repo, none, and no review is "
+                             "assigned)")
     instead_of_watching = parser.add_mutually_exclusive_group()
     instead_of_watching.add_argument(
         "--merge-lane-pr-review-assignments-file-write-from-seed-and-reviewed-prs-then-exit",
@@ -863,14 +872,27 @@ def main(argv=None):
         sys.stdout.reconfigure(errors="replace")
 
     assignments_file = arguments.merge_lane_pr_review_assignments_file
+    # The default file holds the default repository's pull request numbers only.
+    if assignments_file is None and arguments.repo == DEFAULT_REPO:
+        assignments_file = MERGE_LANE_PULL_REQUEST_REVIEW_ASSIGNMENTS_DEFAULT_FILE
+    options_in_use = [*(["--repo", arguments.repo] if arguments.repo != DEFAULT_REPO else []),
+                      *(["--token-file", arguments.token_file]
+                        if arguments.token_file != DEFAULT_TOKEN_FILE else [])]
     seed_file = arguments.merge_lane_pr_review_assignments_file_write_from_seed_and_reviewed_prs_then_exit
+    instead_of_watching = (seed_file is not None
+                           or arguments.merge_lane_pr_review_assignments_list_for is not None)
+    if instead_of_watching and assignments_file is None:
+        warn(f"watch-open-pull-requests-hack: --repo {arguments.repo} is not the default "
+             f"repository, whose pull requests the default assignment file numbers, so name the "
+             f"file for {arguments.repo} with --merge-lane-pr-review-assignments-file.")
+        return 2
     if seed_file is not None:
         return merge_lane_pull_request_review_assignments_seed(
-            assignments_file, seed_file, arguments.repo, token)
+            assignments_file, seed_file, arguments.repo, token, options_in_use)
     if arguments.merge_lane_pr_review_assignments_list_for is not None:
         return merge_lane_pull_request_review_assignments_list(
             assignments_file, arguments.merge_lane_pr_review_assignments_list_for,
-            arguments.repo, token)
+            arguments.repo, token, options_in_use)
     assignment_state = {}
 
     known_pull_requests = None
@@ -943,8 +965,9 @@ def main(argv=None):
                                    else pull_requests_by_number(pull_requests))
 
         event_lines = events_for_poll(known_pull_requests, pull_requests)
-        event_lines += merge_lane_pull_request_review_assignment_lines(
-            assignments_file, pull_requests, assignment_state)
+        if assignments_file is not None:
+            event_lines += merge_lane_pull_request_review_assignment_lines(
+                assignments_file, pull_requests, assignment_state, options_in_use)
         report(event_lines)
         if poll_ends_the_watch(notice_lines + event_lines):
             return 0
