@@ -31,10 +31,14 @@ Then main is tested where the merge changed it: the program fetches the merge
 commit alone from origin into --review-tools-worktree-at-main, which updates no
 remote-tracking branch, makes a detached worktree pr<n>-merge-commit-on-main-worktree
 at the merge commit GitHub reports, and runs that worktree's own
-scripts/run-all-test-suites.py --only-suites-whose-recorded-inputs-changed-since
-<since>, so only the suites whose recorded inputs changed since a tested tree
-run. <since> is the newest main commit whose own after-merge test run left no
-test failing, which the program reads from
+scripts/run-all-test-suites.py with --only-suites-whose-recorded-inputs-changed-since
+once for each commit it compares with, so only the suites whose recorded inputs
+changed since a tested tree run: a suite runs only when the comparison with every
+such commit selects it, except that the runner judges a suite the head test run
+leaves out by the first commit given alone, so the program gives the newest main
+commit below first. Two commits are compared with when both are known. One is
+the newest main commit whose own after-merge test run left no test failing,
+which the program reads from
 ~/.local/state/nedsnodes/newest-main-commit-whose-after-merge-test-run-left-no-test-failing.txt
 and uses when git says it is an ancestor of the merge commit. A test run left no
 test failing when the runner exited 0 with a SUMMARY line, every suite ran to
@@ -48,16 +52,20 @@ commit, so the one that finishes last is kept even when its commit is the older,
 and the next run compares with that older commit until a later merge records
 its own; that run's selection is not always a superset of the newer commit's,
 because an input a merge changed and a later merge set back is the same at both
-ends of the older comparison. When the file is missing, unreadable, malformed, or names
-a commit that is not an ancestor, which the program prints, <since> is instead
-the pr<n>-merged commit the head test run passed on: of the
+ends of the older comparison. The file is not used when it is missing,
+unreadable, malformed, or names a commit that is not an ancestor, which the
+program prints. The other is the pr<n>-merged commit the head test run passed on: of the
 records pull-request-head-test-run.py filed under hr/pr<n>/log-store in the
 worktrees and outputs directory, one test log per pr<n>-merged commit, named
 by its hash, the program takes each test log whose last record says it tested
 that commit and exited 0, and uses the one started last. When there is no
-such record, or a test log cannot be read, which the program prints, <since>
-is the nn-head-commit, which predates main's newer merges and so selects more
-suites, never fewer; the program prints that it fell back. The run's suite logs and test-run-report.txt go in
+such record, or a test log cannot be read, which the program prints, no head
+test run gives a commit. When only one of the two is known, the program compares
+with that one alone; when neither is, it compares with
+the nn-head-commit alone, which predates main's newer merges and so selects more
+suites, never fewer; the program prints that it fell back. The page
+docs/nedsnodes-wiki/nedsnodes-how-the-test-runner-selects-which-nn-test-suites-a-test-run-runs.md
+says why both comparisons are made. The run's suite logs and test-run-report.txt go in
 <merge-lane-worktrees-and-outputs-directory>/pr<n>-after-merge-test-run-logs-<the
 merge commit's first 12 characters>. The program prints the run's SUMMARY line,
 each failed suite's line, and that directory, then removes the worktree.
@@ -1189,16 +1197,21 @@ def after_merge_test_run(arguments, merge_commit, base_branch):
 
     no_test_failing_on_main, why_not_no_test_failing_on_main = (
         newest_main_commit_whose_after_merge_test_run_left_no_test_failing_read(git, merge_commit))
-    if no_test_failing_on_main is not None:
-        since = no_test_failing_on_main
-    # From here on the baseline is chosen, so the recovery names it instead of the conditional
-    # built from an earlier read of the record, which an overlapping merge may have replaced.
-    by_hand = (f"python3 scripts/run-all-test-suites.py "
-               f"--only-suites-whose-recorded-inputs-changed-since {since}")
-    if no_test_failing_on_main is not None:
+    compared_with = [since]
+    if no_test_failing_on_main is not None and why_no_head_test_run is None:
+        # The head commit, the fallback, is no commit a test run passed on, so only a head
+        # test run's commit is a second comparison.
+        compared_with = [no_test_failing_on_main, since]
+        print(f"selecting the nn-test-suites whose recorded inputs changed both since "
+              f"{no_test_failing_on_main[:12]}, the newest main commit whose after-merge test "
+              f"run left no test failing, and since {since[:12]}, the commit the head test run "
+              f"passed on, so a suite runs only when both comparisons select it")
+    elif no_test_failing_on_main is not None:
+        compared_with = [no_test_failing_on_main]
         print(f"selecting the nn-test-suites whose recorded inputs changed since "
-              f"{since[:12]}, the newest main commit whose after-merge test run left no test "
-              f"failing")
+              f"{no_test_failing_on_main[:12]}, the newest main commit whose after-merge test "
+              f"run left no test failing; not also since a commit a head test run passed on, "
+              f"because {why_no_head_test_run}")
     else:
         print(f"no main commit whose after-merge test run left no test failing is used: "
               f"{why_not_no_test_failing_on_main}.")
@@ -1213,6 +1226,8 @@ def after_merge_test_run(arguments, merge_commit, base_branch):
                   f"{since[:12]}, the commit the head test run passed on: "
                   f"pull request {arguments.pull_request}'s head merged with main as main was "
                   f"when that run started")
+    by_hand = "python3 scripts/run-all-test-suites.py " + " ".join(
+        f"--only-suites-whose-recorded-inputs-changed-since {commit}" for commit in compared_with)
 
     runner = common.run_all_test_suites
     store = common.merge_lane_head_test_run_recorded_inputs_store_directory(arguments)
@@ -1249,10 +1264,12 @@ def after_merge_test_run(arguments, merge_commit, base_branch):
         f"run suites again that a head test run passed on the same files.") and done_before_the_run
     print(f"testing {'main' if base_branch == 'main' else repr(base_branch)} at the merge commit "
           f"{merge_commit[:12]}: the suites whose recorded "
-          f"inputs changed since {since[:12]}", flush=True)
+          f"inputs changed since {' and since '.join(commit[:12] for commit in compared_with)}",
+          flush=True)
     run_all = subprocess.run(
         [sys.executable, str(worktree / "scripts" / "run-all-test-suites.py"),
-         "--only-suites-whose-recorded-inputs-changed-since", since,
+         *[argument for commit in compared_with
+           for argument in ("--only-suites-whose-recorded-inputs-changed-since", commit)],
          "--log-dir", str(log_dir)],
         cwd=worktree, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True,
         env=environment, stdin=subprocess.DEVNULL)
