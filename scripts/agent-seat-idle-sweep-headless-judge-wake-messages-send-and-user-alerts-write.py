@@ -45,7 +45,8 @@ Each invocation, under a lock that keeps two from overlapping:
    already open: 15 minutes later, if the agent-seat is idle, code sends the escalation, which
    quotes the message that opened the wait and each rule 2 message whose send on the open wait
    failed, and names the sentences on the wait that no message was sent for and those of a rule 2
-   message sent on the wait that the re-check did not find backed; 15 minutes after that, if the
+   message sent on the wait that the re-check did not find backed, and says so when the
+   pull-request events task the quoted message named is no longer open; 15 minutes after that, if the
    agent-seat is still idle, code logs the step that follows the escalation, which sends nothing
    and writes no user-alert, and sends it nothing more on the wait. A rule 2
    message due on a wait whose escalation is due goes on the wait first, so that the re-check
@@ -222,9 +223,13 @@ FAILED_PROMISE_ESCALATION_TEXT = ("\n\nAt {time} the idle sweep tried to send yo
                                   "send failed:\n\n{quoted_text}")
 UNSENT_SENTENCES_ESCALATION_TEXT = ("\n\nThe idle sweep found these sentences of yours unbacked "
                                     "too, and sent you no message naming them:\n\n{quoted_text}")
-SENT_PROMISE_MESSAGES_ESCALATION_TEXT = ("\n\nThe idle sweep also sent you a message naming these "
-                                         "sentences of yours, and has not found them backed:"
-                                         "\n\n{quoted_text}")
+SENT_PROMISE_MESSAGES_ESCALATION_TEXT = ("\n\nThe idle sweep also sent you one or more messages "
+                                         "naming these sentences of yours, and has not found a task "
+                                         "backing them:\n\n{quoted_text}")
+EVENTS_TASK_CLOSED_ESCALATION_TEXT = ("\n\nTask {task_id}, the pull-request events task the "
+                                      "message above named, is no longer open on your task list, "
+                                      "so that message asks nothing more of you; what follows "
+                                      "still does.")
 LIMIT_WAKE_TEXT = ("The usage limit that stopped you has ended: {why}. Carry on with the work the "
                    "limit stopped.")
 LIMIT_ENDED_BY_RESET = "its reset time has passed"
@@ -1312,11 +1317,15 @@ class Sweep:
             self.end_wait(seat, "its pull-request events task is no longer open")
             wait = None
         if (wait and TELL_USER in wait and events_task
-                and not self.woken_for_pull_request_events_task(seat, events_task)):
-            # The user already has that wait's alert; a new events task must not wait behind it,
-            # whichever rule this verdict picks, such as rule 3 for a deferred handoff.
+                and not self.woken_for_pull_request_events_task(seat, events_task)
+                and not self.headless_usage_limit_pause_holds()):
+            # The user already has that wait's alert; a new events task must not wait behind it.
+            # Its wake is sent here, not through this verdict's rule: under rule 3, a handoff nudge
+            # whose send failed was never logged as reminded, so the rule would send the handoff
+            # text again in place of the wake.
             self.end_wait(seat, "a new pull-request events task opened after the user was told")
-            wait = None
+            self.wake_for_pull_request_events_task(seat, verdict, stretch, events_task)
+            return
         promise_text, promise_on_wait = None, False
         judged_sentences = rule == 2
         sentences_checked = []
@@ -1444,7 +1453,7 @@ class Sweep:
         """Have the judge re-check every sentence of messages, the groups the wait answers for,
         against what the agent-seat did since the earliest of them, and end the wait when it finds
         each backed. Returns None when the wait ended, else the set of sentences not found backed,
-        every sentence of messages when the judge or the read failed. A judge that fails leaves
+        every (message time, sentence) pair of messages when the judge or the read failed. A judge that fails leaves
         the wait open for the escalation, which a usage-limit pause the judge started holds until
         the reset, when the re-check is asked again."""
         raised = [(message["at"], sentence) for message in messages
@@ -1459,7 +1468,7 @@ class Sweep:
         except verdicts_print.ReadFailure as error:
             # As a failed judge: the escalation goes ahead, and later agent-seats are still swept.
             self.read_failure(seat, str(error))
-            return {sentence for _, sentence in raised}
+            return set(raised)
         facts = dict(
             self.facts(seat, verdict, judged_text), step=ESCALATE, nudge_at=wait[NUDGE], since=iso(since),
             sentences=[{"index": index, "raised_at": raised_at,
@@ -1485,11 +1494,11 @@ class Sweep:
             self.headless_failed(seat, "re-check whether the sentences its promise messages named "
                                  "are backed", problem, outcome.error_kind or JUDGE_ANSWER_UNUSABLE,
                                  outcome)
-            return {sentence for _, sentence in raised}
+            return set(raised)
         answers = sorted(outcome.answer["sentences"], key=lambda answer: answer["index"])
         self.record({"event": "judge_answer", "agent_seat": seat, "rule": 2, "step": ESCALATE,
                      "answers": answers})
-        unbacked = {raised[answer["index"]][1] for answer in answers if not answer["backed"]}
+        unbacked = {raised[answer["index"]] for answer in answers if not answer["backed"]}
         if unbacked:
             return unbacked
         self.end_wait(seat, "the judge found every sentence its promise messages named backed",
@@ -1529,12 +1538,18 @@ class Sweep:
             # owed after the nudge's own reason has gone, such as a completed events task.
             owed = [sentence for message in wait[PROMISE_MESSAGES] or []
                     if not message["quoted_by_nudge"]
-                    for sentence in message["sentences"] if sentence in unbacked]
+                    for sentence in message["sentences"] if (message["at"], sentence) in unbacked]
             if self.headless_usage_limit_pause_holds():
                 return None
+            open_events_task = (open_pull_request_events_task(seat, self.paths.tasks_root)
+                                if wait[PULL_REQUEST_EVENTS_TASK_ID] else None)
+            events_task_closed = bool(wait[PULL_REQUEST_EVENTS_TASK_ID]) and (
+                not open_events_task or open_events_task["id"] != wait[PULL_REQUEST_EVENTS_TASK_ID])
             text = ESCALATION_TEXT.format(
                 minutes=minutes, nudge_time=parse_time(wait[NUDGE]).strftime("%Y-%m-%d %H:%MZ"),
-                quoted_nudge=quoted(wait["nudge_text"])) + "".join(
+                quoted_nudge=quoted(wait["nudge_text"])) + (
+                    EVENTS_TASK_CLOSED_ESCALATION_TEXT.format(
+                        task_id=wait[PULL_REQUEST_EVENTS_TASK_ID]) if events_task_closed else "") + "".join(
                     FAILED_PROMISE_ESCALATION_TEXT.format(
                         time=parse_time(message["at"]).strftime("%Y-%m-%d %H:%MZ"),
                         quoted_text=quoted(message["text"]))

@@ -3658,8 +3658,83 @@ escalation = machine.events("message_sent")[-1]
 check("an events task completed after a promise message on its wake's wait: the escalation quotes "
       "the wake and names the promise still owed",
       escalation["step"] == "escalate" and PROMISE in escalation["text"]
-      and "has not found them backed" in escalation["text"],
+      and "has not found a task backing them" in escalation["text"],
       machine.events("message_sent"))
+check("an events task completed after a promise message on its wake's wait: the escalation keeps "
+      "its first sentence and says, in a paragraph of its own, that the quoted task is no longer "
+      "open",
+      escalation["text"].startswith("You've given this ")
+      and "which you have not acted on:" in escalation["text"]
+      and "\n\nTask 1, the pull-request events task the message above named, is no longer open on "
+      "your task list" in escalation["text"]
+      and escalation["text"].index("is no longer open") < escalation["text"].index(
+          "has not found a task backing them"),
+      escalation["text"])
+
+machine = Machine()
+machine.seat(EVENTS_SEAT, DONE_TURN)
+events_task(machine)
+machine.script(sent_ok(EVENTS_SEAT))
+machine.run(0)
+machine.append(EVENTS_SEAT, cross_session(machine.events("message_sent")[-1]["text"], at(0.5)),
+               assistant(PROMISE, at(1)), turn_end(at(1)))
+machine.script(sent_ok(EVENTS_SEAT))
+machine.run(7)
+machine.script(rechecked(False), sent_ok(EVENTS_SEAT))
+machine.run(16)
+check("an events task still open at the escalation: the escalation does not say it is no longer "
+      "open",
+      machine.events("message_sent")[-1]["step"] == "escalate"
+      and "is no longer open on your task list" not in machine.events("message_sent")[-1]["text"],
+      machine.events("message_sent"))
+
+machine = Machine()
+machine.seat(EVENTS_SEAT, DONE_TURN)
+events_task(machine)
+machine.script(sent_ok(EVENTS_SEAT))
+machine.run(0)
+machine.append(EVENTS_SEAT, cross_session(machine.events("message_sent")[-1]["text"], at(0.5)),
+               assistant(PROMISE, at(1)), turn_end(at(1)))
+machine.script(sent_ok(EVENTS_SEAT))
+machine.run(7)
+machine.append(EVENTS_SEAT, cross_session(machine.events("message_sent")[-1]["text"], at(7.5)),
+               assistant(PROMISE, at(8)), turn_end(at(8)))
+machine.script(sent_ok(EVENTS_SEAT))
+machine.run(14)
+sent_twice = len(machine.events("promise_message")) == 2
+machine.script(rechecked(True, False), sent_ok(EVENTS_SEAT))
+machine.run(16)
+escalation = machine.events("message_sent")[-1]["text"]
+owed_paragraph = escalation.split("has not found a task backing them:", 1)[-1]
+check("two promise messages on one wait with the same sentence, the first copy found backed: the "
+      "escalation names the sentence once, for the copy not found backed",
+      sent_twice and machine.events("message_sent")[-1]["step"] == "escalate"
+      and "has not found a task backing them:" in escalation
+      and owed_paragraph.count(PROMISE) == 1,
+      (escalation, machine.events("promise_message")))
+
+machine = Machine()
+machine.seat(EVENTS_SEAT, DONE_TURN)
+machine.handoff_put_off()
+machine.script({"sends": [send_to(EVENTS_SEAT, is_error=True)],
+                "answer": {"sent": False, "reason": "r"}})
+machine.run(0)
+machine.append(EVENTS_SEAT, assistant("Still waiting.", when=at(1)), turn_end(at(1)))
+machine.script(sent_ok(EVENTS_SEAT))
+machine.run(16)
+machine.script()
+machine.run(32)
+told = [event["step"] for event in machine.events("wait_step")] == ["nudge", "escalate", "tell_user"]
+events_task(machine)
+machine.script(sent_ok(EVENTS_SEAT))
+machine.run(34)
+check("an events task opened after the step that follows the escalation of a deferred-handoff "
+      "wait whose nudge failed to send: the wait ends and the events task's wake is sent, not the "
+      "handoff text again",
+      told and [event["why"] for event in machine.events("wait_ended")][-1:]
+      == ["a new pull-request events task opened after the user was told"]
+      and machine.events("message_sent")[-1]["text"].startswith("Task 1 on your task list"),
+      (machine.events("wait_step"), machine.events("wait_ended"), machine.events("message_sent")))
 
 
 # --- no reminder of a wait on the user, and no repeat until the user types ----------------------
