@@ -1871,14 +1871,18 @@ def test_a_bold_new_text_label_is_read_as_the_label_by_both_hooks():
         "walk_check_program_for_mark_test",
         HOOK_SCRIPT.parent / "walk-me-through-answer-added-texts-cold-read-fast-read-check-and-close.py")
     for line in ("#newé Show every row.", "#NEW Show every row.", "#New: Show every row.",
-                 "- #new Show every row.", "#new_if_d Show every row.", "#newer Show every row."):
+                 "- #new Show every row.", "#new_if_d Show every row.", "#NEW_IF_D Show every row.",
+                 "#newer Show every row."):
         hook_reads_a_mark = hook.new_text_as_shown(line) is not None
-        check_reads_a_mark = check_program.NEW_LINE.match(line) is not None
+        check_reads_a_mark = check_program.load_walk_finder().APPROVAL_WALK_ITEM_NEW_TEXT_MARK_LINE_PATTERN.match(line) is not None
         check(f"the hook and the walk check program agree whether {line!r} is a mark",
               hook_reads_a_mark == check_reads_a_mark, f"hook {hook_reads_a_mark}, check {check_reads_a_mark}")
-    check("`#newé`, `#NEW` and `#New:` are no mark to the hook",
+    check("`#newé`, `#NEW`, `#New:` and `#NEW_IF_D` are no mark to the hook",
           all(hook.new_text_as_shown(line) is None
-              for line in ("#newé Show every row.", "#NEW Show every row.", "#New: Show every row.")))
+              for line in ("#newé Show every row.", "#NEW Show every row.", "#New: Show every row.",
+                           "#NEW_IF_D Show every row.")))
+    check("the walk check program reuses the walk finder module it loaded",
+          check_program.load_walk_finder() is check_program.load_walk_finder())
     item = DECISION_ITEM.replace("#new_if_d Show every row.", "#new_if_d **The new text:** Show every row.")
     case = Case(next_to_present="item 4 of 9", document="# A walk\n\n" + item + "\n")
     shown = item.replace("#new_if_d **The new text:** Show", "If you disapprove, the new text: Show")

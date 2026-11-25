@@ -554,6 +554,7 @@ import contextlib
 import datetime
 import difflib
 import fnmatch
+import functools
 import hashlib
 import importlib.util
 import json
@@ -592,13 +593,13 @@ def load_module(name, path):
     return module
 
 
+@functools.cache
 def load_walk_finder():
     return load_module("walk_me_through_approval_walk_minutes_and_walk_document_item_finder_common",
                        WALK_FINDER_FILE)
 
 
 NEW_MARK, NEW_IF_D_MARK = "#new", "#new_if_d"
-NEW_LINE = load_walk_finder().APPROVAL_WALK_ITEM_NEW_TEXT_MARK_LINE_PATTERN
 QUOTE_PAIRS = (('"', '"'), ("“", "”"), ("'", "'"))
 FENCE_DELIMITER = re.compile(r"^\s*(?:>\s?)*\s*(?:`{3,}|~{3,})")
 QUOTATION_LINE = re.compile(r"^\s*>")
@@ -1177,8 +1178,8 @@ WALK_FIRST_ENTERED_LINE = re.compile(LINE_OPENING_MARKERS + re.escape(WALK_FIRST
                                      + r"[*_`]*[:\s]*(.*?)[*_`\s]*$")
 # A marked text ends above the first of these lines, because this program reads each on its own; a line opening
 # with any other hashtag, such as a prose `#root_cause`, is part of the text.
-MARKER_LINES_READ_ON_THEIR_OWN = (NEW_LINE, CASE_AGAINST_LINE, EVIDENCE_LINE, WALK_CATEGORY_LINE, WALK_WAITS_ON_LINE,
-                                  WALK_FIRST_ENTERED_LINE)
+MARKER_LINES_READ_ON_THEIR_OWN = (load_walk_finder().APPROVAL_WALK_ITEM_NEW_TEXT_MARK_LINE_PATTERN, CASE_AGAINST_LINE,
+                                  EVIDENCE_LINE, WALK_CATEGORY_LINE, WALK_WAITS_ON_LINE, WALK_FIRST_ENTERED_LINE)
 WALK_ORDER_REFUSED = (
     "nothing written: {problem}\n"
     "Every item of the walk-document not yet shown to the user, headed `## <the point>` with no number, needs "
@@ -2112,7 +2113,7 @@ def new_marks(text, tokens, ranges, shown):
     marks = []
     for first, end in ranges:
         for number in range(first, end):
-            match = NEW_LINE.match(lines[number] if number in code else shown[number])
+            match = load_walk_finder().APPROVAL_WALK_ITEM_NEW_TEXT_MARK_LINE_PATTERN.match(lines[number] if number in code else shown[number])
             if not match:
                 continue
             if number in code:
