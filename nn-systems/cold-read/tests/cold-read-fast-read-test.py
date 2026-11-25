@@ -199,7 +199,8 @@ EMBEDDED_PROMPT_COPY_AND_SOURCE_PAIRS = (
      ".claude/skills/cold-read/prompts/fast-clarify-prompt.md"),
 )
 
-# The stub `agy`: the model from --model, the prompt from --print's value,
+# The stub `agy`: the model from --model, the prompt from the one stream-json
+# line the agy cell writes to its stdin,
 # the plan from the environment, and a counter file that counts launches so
 # "fail_first_attempts": N fails the first N and succeeds after; "hang"
 # sleeps past any deadline a case sets; "wait_for_file" fails unless that file
@@ -208,7 +209,7 @@ STUB_AGY = """#!/usr/bin/env python3
 import json, os, pathlib, re, sys
 argv = sys.argv
 model = argv[argv.index("--model") + 1] if "--model" in argv else "*"
-prompt = argv[argv.index("--print") + 1] if "--print" in argv else ""
+prompt = json.loads(sys.stdin.readline())["message"]["content"]
 plan = json.loads(os.environ["COLD_READ_AGY_CELL_TEST_STUB_PLAN"])
 step = plan.get(model, plan.get("*", {}))
 counter_path = pathlib.Path(os.environ["COLD_READ_AGY_CELL_TEST_STUB_COUNTER_PATH"])
