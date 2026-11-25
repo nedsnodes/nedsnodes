@@ -565,7 +565,8 @@ def merge_lane_pull_request_review_assignments_file_write(path, text, only_when_
     link in place. The new file keeps the old one's mode, or takes the mode a new file gets. The
     caller holds merge_lane_pull_request_review_assignments_file_lock. Raises OSError, and
     FileExistsError when only_when_absent is set and a file is at path, which is then left as
-    it is.
+    it is. Returns None, or, when the file was written but its temporary file could not be
+    removed, the sentence that names that temporary file and the error.
     Not handled: a symbolic link at path repointed between the caller's read and this write,
     which sends the text read from the old file to the new one; and a directory with a default
     ACL, whose mode for a new file 0o666 & ~umask overrides."""
@@ -587,8 +588,15 @@ def merge_lane_pull_request_review_assignments_file_write(path, text, only_when_
             os.link(partial, target)
         else:
             os.replace(partial, target)
-    finally:
+    except BaseException:
         partial.unlink(missing_ok=True)
+        raise
+    # After os.link the temporary name remains, so a failed removal must not read as a failed write.
+    try:
+        partial.unlink(missing_ok=True)
+    except OSError as error:
+        return f"its temporary file {partial} was left behind, because removing it failed: {error}"
+    return None
 
 
 def pull_request_waits_for_merge_lane_verdict(pull_request):
@@ -818,7 +826,7 @@ def merge_lane_pull_request_review_assignments_seed(path, seed_path, repo, token
         # The lock binds only the programs, so a file put back by hand while GitHub was read is
         # found by the write, which never replaces one.
         try:
-            merge_lane_pull_request_review_assignments_file_write(
+            leftover = merge_lane_pull_request_review_assignments_file_write(
                 path, "".join(f"{number} {lane}\n" for number, lane in assignments.items()),
                 only_when_absent=True)
         except FileExistsError:
@@ -833,6 +841,10 @@ def merge_lane_pull_request_review_assignments_seed(path, seed_path, repo, token
              f"and {len(assignments) - from_seed} open pull request(s) with a review by "
              f"the GitHub account {fix_round.MERGE_LANE_2_REVIEWER_LOGIN}, each given the merge-lane agent-seat of "
              f"{MERGE_LANE_BY_PULL_REQUEST_NUMBER_REMAINDER_TEXT}")
+        if leftover:
+            warn(f"merge-lane-open-prs-watch-and-reviewer-assign: the assignment file {path} was made, "
+                 f"but {leftover}.\n"
+                 f"  The watcher does not read that file; delete it by hand.")
         return 0
 
 
