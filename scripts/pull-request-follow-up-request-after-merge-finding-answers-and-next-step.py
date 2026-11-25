@@ -1038,15 +1038,24 @@ def print_follow_up_request_block_from_merge_lane_2_reviews(number):
         finding = (category, comment["path"], " ".join(text.split()))
         review = (comment["pull_request"], comment["review"])
         compared = (category, comment["path"], " ".join(posting.CODEX_FINDING_ID_MARK_IN_REVIEW_COMMENT_PATTERN.sub("", text).split()))
-        # Within one review, two comments alike but for their Codex finding marks are two findings.
-        restated = any(found[:3] == finding or (found[4] == compared and found[5] != review) for found in findings)
-        if category != posting.BLOCKING_CATEGORY and not restated:
-            findings.append((*finding, comment["line"], compared, review))
+        codex_finding_ids = frozenset(posting.CODEX_FINDING_ID_MARK_IN_REVIEW_COMMENT_PATTERN.findall(text))
+        # A later review restates an earlier finding with a new Codex finding id when its line range moved,
+        # but restates each earlier finding at most once: within one review, two comments alike but for
+        # their Codex finding ids are two findings.
+        restated = next((found for found in findings if found["finding"] == finding or (
+            found["compared"] == compared and (found["codex_finding_ids"] == codex_finding_ids or (
+                found["review"] != review and review not in found["restated_in_reviews"])))), None)
+        if restated is not None:
+            restated["restated_in_reviews"].add(review)
+        elif category != posting.BLOCKING_CATEGORY:
+            findings.append({"finding": finding, "line": comment["line"], "compared": compared,
+                             "codex_finding_ids": codex_finding_ids, "review": review,
+                             "restated_in_reviews": set()})
     if not findings:
         return
     lines = [f"{FOLLOW_UP_REQUEST_LINE_START} pull request {number}"] + [
-        f"{index}. {category}: `{path}:{line}`: {text}"
-        for index, (category, path, text, line, _compared, _review) in enumerate(findings, 1)]
+        f"{index}. {found['finding'][0]}: `{found['finding'][1]}:{found['line']}`: {found['finding'][2]}"
+        for index, found in enumerate(findings, 1)]
     block = "\n".join(lines) + "\n"
     try:
         read_back = [request.lines for request in parse_follow_up_request_blocks_from_message_text(block)]
