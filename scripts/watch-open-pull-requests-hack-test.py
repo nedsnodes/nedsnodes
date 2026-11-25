@@ -380,6 +380,13 @@ def run_unit_cases():
           and from_node({**pull_request_node(3, "c" * 12),
                          "author": None})[0]["author"] == "(unknown)",
           str(from_node({**pull_request_node(3, "c" * 12), "author": None})))
+    authored = {**pull_request_node(3, "c" * 12),
+                "commits": {"nodes": [{"commit": {"author": {"name": "merge-lane-1"}}}]}}
+    check("pull_request_from_node reads the first commit's author name, and None when GitHub "
+          "gives no commits",
+          from_node(authored)[0]["first_commit_author_name"] == "merge-lane-1"
+          and from_node(pull_request_node(3, "c" * 12))[0]["first_commit_author_name"] is None,
+          str(from_node(authored)))
     for field in ("createdAt", "baseRefName", "headRefName"):
         check(f"pull_request_from_node reports a missing {field} as a reason",
               from_node({**pull_request_node(3, "c" * 12), field: None})
@@ -560,10 +567,12 @@ def review(state, head_sha, body=""):
 
 
 def assignable(number, created_at="2026-11-24T00:00:00Z", head_sha="a", reviews=(), draft=False,
-               author="nedlern", base_branch="main", head_branch=None, mac_claude_reviews=()):
+               author="nedlern", base_branch="main", head_branch=None, first_commit_author_name=None,
+               mac_claude_reviews=()):
     """A pull request as fetch_open_pull_requests returns it."""
     return {"number": number, "head_sha": head_sha * 40, "title": f"title {number}",
-            "is_draft": draft, "author": author, "created_at": created_at,
+            "is_draft": draft, "author": author, "first_commit_author_name": first_commit_author_name,
+            "created_at": created_at,
             "base_branch": base_branch, "head_branch": head_branch or f"branch-{number}",
             "reviews": list(reviews), "mac_claude_reviews": list(mac_claude_reviews)}
 
@@ -640,6 +649,19 @@ def run_merge_lane_pull_request_review_assignment_unit_cases():
     check("merge-lane-2 is never assigned a review, however few it has waiting",
           dealt_numbers([waiting_1, waiting_3, assignable(10)],
                         {1: "merge-lane-1", 3: "merge-lane-3"})[0][1] != "merge-lane-2", "")
+    check("a pull request whose first commit merge-lane-1 wrote goes to merge-lane-3, though "
+          "merge-lane-1 has fewer waiting",
+          dealt_numbers([waiting_3, assignable(10, first_commit_author_name="merge-lane-1")],
+                        {3: "merge-lane-3"}) == [(10, "merge-lane-3")], "")
+    check("a pull request whose first commit merge-lane-3 wrote goes to merge-lane-1, though "
+          "merge-lane-3 has fewer waiting",
+          dealt_numbers([waiting_1, assignable(10, first_commit_author_name="merge-lane-3")],
+                        {1: "merge-lane-1"}) == [(10, "merge-lane-1")], "")
+    check("the bottom of a stack whose first commit merge-lane-1 wrote, and the stack with it, "
+          "go to merge-lane-3",
+          dealt_numbers([assignable(30, head_branch="bottom", first_commit_author_name="merge-lane-1"),
+                         assignable(31, base_branch="bottom", head_branch="middle")], {})
+          == [(30, "merge-lane-3"), (31, "merge-lane-3")], "")
     check("a draft is not assigned",
           dealt_numbers([assignable(10, draft=True)], {}) == [], "")
     fix_round_head = assignable(8, head_sha="b", reviews=[review("CHANGES_REQUESTED", "a")])
