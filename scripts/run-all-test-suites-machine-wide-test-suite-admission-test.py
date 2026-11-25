@@ -1769,9 +1769,17 @@ with tempfile.TemporaryDirectory() as scratch_name:
             slice_weights_set.append((cgroup_slice, cpu_weight))
             return None
 
+        real_suites_run_at_once = runner.suites_run_at_once
+        admission_decides_given = []
+
+        def suites_run_at_once_noting_admission_decides(*arguments, admission_decides=False):
+            admission_decides_given.append(admission_decides)
+            return real_suites_run_at_once(*arguments, admission_decides=admission_decides)
+
         code, printed, _ = main_given(
             "merge-lane-after-merge-cpu-busy", run_repository, "--merge-lane-after-merge-test-run-suites-skip-admission-cpu-threshold-and-run-at-higher-cpu-weight",
             run_one_suite=suite_passes_noting_its_slice,
+            suites_run_at_once=suites_run_at_once_noting_admission_decides,
             why_test_suites_cannot_run_in_cgroup_scopes_on_this_machine_or_none=cgroup_scopes_available,
             **{**as_if_bwrap, "TEST_SUITE_ADMISSION_CPU_PERCENT_BELOW": 0,
                "TEST_SUITE_ADMISSION_WAIT_CEILING_SECONDS": 1})
@@ -1783,6 +1791,11 @@ with tempfile.TemporaryDirectory() as scratch_name:
               and slice_weights_set == [(merge_lane_slice, 100)]
               and "whatever the machine's CPU use, as a merge-lane after-merge test run" in printed
               and f"in {merge_lane_slice} at CPU weight 100" in printed, (code, slices_given, printed[-800:]))
+        check("with --merge-lane-after-merge-test-run-suites-skip-admission-cpu-threshold-and-run-at-higher-cpu-weight, "
+              "a run without -j starts at most one suite per core, not admission's ceiling of "
+              "suites, since no CPU rule holds the rest back",
+              admission_decides_given == [False]
+              and real_suites_run_at_once(None, 144, 16) == 16, admission_decides_given)
 
         slices_given.clear()
         slice_weights_set.clear()

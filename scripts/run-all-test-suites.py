@@ -132,7 +132,8 @@ Usage:
                 ADMISSION decides, the run's suites start without waiting
                 for the machine's CPU use to fall under its threshold, and
                 run in TEST_SUITE_CGROUP_SLICE_OF_MERGE_LANE_AFTER_MERGE_TEST_RUNS
-                at CPU weight 100; every other ADMISSION rule still holds
+                at CPU weight 100; every other ADMISSION rule still holds.
+                Without -j, it runs at most one suite per core at once
 
 WHY THIS EXISTS (user-ruled 2026-09-21, walk "redesigning how pull requests
 are processed", items 3 and 6). Until this program, every full run of the
@@ -5260,8 +5261,13 @@ def main(argv=None, platform=None):
             files_only_strace_saw_by_suite=files_only_strace_saw_by_suite)
         chosen = suites_longest_recorded_first(
             [suite for suite, selected, _ in selection if selected], recordings)
-        jobs = suites_run_at_once(arguments.jobs, len(chosen), os.cpu_count(),
-                                  admission_decides=in_test_sandboxes)
+        # With the CPU rule skipped, nothing else keeps a flagged run from 64 suites on 16
+        # cores, which slows each about fourfold, as far as the time limit of 4 times its
+        # recorded seconds; so a flagged run starts one suite per core.
+        jobs = suites_run_at_once(
+            arguments.jobs, len(chosen), os.cpu_count(),
+            admission_decides=in_test_sandboxes and not
+            arguments.merge_lane_after_merge_test_run_suites_skip_admission_cpu_threshold_and_run_at_higher_cpu_weight)
         if arguments.leave_records_unchanged:
             strace = recorder = None
         else:
