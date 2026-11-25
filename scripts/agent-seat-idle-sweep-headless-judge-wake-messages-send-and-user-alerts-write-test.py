@@ -3385,6 +3385,7 @@ check("the watcher's events task wakes idle merge-lane-2: one sender and no judg
       and machine.events("message_sent")[-1]["text"].startswith(f"Task {task_id} on your task list holds new "
                                                                "pull-request events.")
       and machine.events("wait_step")[-1]["step"] == "nudge", (calls, machine.events()))
+machine.append(EVENTS_SEAT, cross_session(machine.events("message_sent")[-1]["text"], at(1.5)))
 machine.script()
 machine.run(2)
 check("the open wait sends no second wake", not machine.claude_calls(), machine.claude_calls())
@@ -3406,13 +3407,16 @@ check("the task still open 15 minutes after the wake sends no second code-writte
 machine.seat(EVENTS_SEAT, [user("go", at(18)), assistant("Started.", at(18)), turn_end(at(18))],
              session="s-2")
 machine.script(judged(False, reason="a new agent-session"))
-machine.run(19)
-check("a new agent-session of merge-lane-2 is not woken in code again for the same task",
-      len(machine.events("message_sent")) == 1, machine.events("message_sent"))
+machine.run(24)
+calls = machine.claude_calls()
+check("a new agent-session of merge-lane-2, once idle, is not woken in code again for the same "
+      "task: the one headless agent-session is the judge",
+      len(calls) == 1 and calls[0]["argv"][calls[0]["argv"].index("--tools") + 1] == ""
+      and len(machine.events("message_sent")) == 1, (calls, machine.events("message_sent")))
 watcher.complete_tasks()
-machine.append(EVENTS_SEAT, assistant("Handled.", at(20)), turn_end(at(20)))
+machine.append(EVENTS_SEAT, assistant("Handled.", at(25)), turn_end(at(25)))
 machine.script()
-machine.run(26)
+machine.run(31)
 check("with the events task completed, the sweep wakes no one",
       not machine.claude_calls() and len(machine.events("message_sent")) == 1
       and machine.events("checked")[-1]["rule"] == 4, machine.claude_calls())
@@ -3516,8 +3520,6 @@ machine.script(sent_ok(EVENTS_SEAT))
 machine.run(0)
 with machine.log.open("a") as log:
     # A rule 2 sentence the sweep put on the wake's wait and logged as checked.
-    log.write(json.dumps({"event": "wait_step", "agent_seat": EVENTS_SEAT, "at": at(5),
-                          "step": "promise"}) + "\n")
     log.write(json.dumps({"event": "rule_2_sentences_on_wait", "agent_seat": EVENTS_SEAT,
                           "at": at(5), "kinds": ["promise"], "sentences": ["I will push it."],
                           "records": [["r1", "I will push it."]],
@@ -3525,12 +3527,11 @@ with machine.log.open("a") as log:
     log.write(json.dumps({"event": "sentence_checked", "agent_seat": EVENTS_SEAT, "at": at(5),
                           "record_uuid": "r1", "sentence": "I will push it."}) + "\n")
 events_task(machine, status="completed")
-machine.script(judged(False, reason="nothing left"), sent_ok(EVENTS_SEAT))
+machine.script(rechecked(False), sent_ok(EVENTS_SEAT))
 machine.run(16)
-check("an events task completed while rule 2 sentences are on the wake's wait ends only the events "
-      "task's part: the wait stays open and its escalation names the sentence",
-      not machine.events("wait_ended")
-      and machine.events("pull_request_events_task_left_wait")
+check("an events task completed while rule 2 sentences are on the wake's wait: the wait stays open, "
+      "the re-check's answer is used, and the escalation names the sentence",
+      not machine.events("wait_ended") and not machine.events("headless_failed")
       and any(event["step"] == "escalate" for event in machine.events("wait_step"))
       and "I will push it." in machine.events("message_sent")[-1]["text"],
       (machine.events("wait_step"), machine.events("wait_ended"), machine.events("message_sent")))
@@ -3546,6 +3547,32 @@ calls = machine.claude_calls()
 check("an events task another open task blocks is held work: no code-written wake, the judge is asked",
       len(calls) == 1 and calls[0]["argv"][calls[0]["argv"].index("--tools") + 1] == ""
       and not machine.events("message_sent"), (calls, machine.events("message_sent")))
+
+machine = Machine()
+machine.seat(EVENTS_SEAT, DONE_TURN)
+events_task(machine, blockedBy=["9"])
+machine.script(sent_ok(EVENTS_SEAT))
+machine.run(0)
+check("an events task whose only blocker was deleted is not held, as the due-task hook rules: "
+      "merge-lane-2 is woken in code",
+      [event["text"].startswith("Task 1 on your task list")
+       for event in machine.events("message_sent")] == [True], machine.events("message_sent"))
+
+machine = Machine()
+machine.seat(EVENTS_SEAT, DONE_TURN)
+events_task(machine)
+machine.script({"sends": [send_to(EVENTS_SEAT, is_error=True)],
+                "answer": {"sent": False, "reason": "r"}})
+machine.run(0)
+machine.seat(EVENTS_SEAT, [user("go", at(1)), assistant("Started.", at(1)), turn_end(at(1))],
+             session="s-2")
+machine.script(sent_ok(EVENTS_SEAT))
+machine.run(7)
+check("a code-written wake whose send failed does not count as the task's one wake: the next "
+      "agent-session is woken in code",
+      [event["step"] for event in machine.events("message_sent")] == ["nudge"]
+      and machine.events("message_sent")[-1]["text"].startswith("Task 1 on your task list"),
+      (machine.events("judge_answer"), machine.events("message_sent")))
 
 machine = Machine()
 machine.seat(EVENTS_SEAT, DONE_TURN)
