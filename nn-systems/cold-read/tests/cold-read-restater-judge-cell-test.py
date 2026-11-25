@@ -116,8 +116,9 @@ Write your report to {REPORT_PATH}.
 
 # A stand-in for the `claude` CLI. It reads the model from --model and the
 # prompt from stdin, then does what the plan says for that model: "report" is
-# text to write to the report path (absent means write nothing), "dump_argv"
-# and "dump_prompt" are paths to record what the stub was launched with, and
+# text to write to the report path (absent means write nothing), "dump_argv",
+# "dump_prompt" and "dump_environment" are paths to record what the stub was
+# launched with, and
 # "exit" is the code to exit with. The report path arrives by environment, as
 # in the other cell tests, so a reworded template cannot unhook the stub.
 STUB_CLAUDE = """#!/usr/bin/env python3
@@ -133,6 +134,8 @@ if "dump_argv" in step:
     pathlib.Path(step["dump_argv"]).write_text(json.dumps(argv), encoding="utf-8")
 if "dump_prompt" in step:
     pathlib.Path(step["dump_prompt"]).write_text(prompt, encoding="utf-8")
+if "dump_environment" in step:
+    pathlib.Path(step["dump_environment"]).write_text(json.dumps(dict(os.environ)), encoding="utf-8")
 if "report" in step:
     report_path.parent.mkdir(parents=True, exist_ok=True)
     report_path.write_text(step["report"], encoding="utf-8")
@@ -211,6 +214,7 @@ def run_judge_cell(repository, stub_directory, plan, report_path, *arguments,
     environment["PATH"] = f"{stub_directory}{os.pathsep}{environment.get('PATH', '')}"
     environment["COLD_READ_RESTATER_JUDGE_CELL_TEST_STUB_PLAN"] = json.dumps(plan)
     environment["COLD_READ_RESTATER_JUDGE_CELL_TEST_STUB_REPORT_PATH"] = str(report_path)
+    environment["CLAUDE_CODE_TASK_LIST_ID"] = "launching-agent-seat-task-list"
     if prompt_file is None:
         prompt_file = write_stub_prompt_file(repository)
     command = [
@@ -242,10 +246,11 @@ with tempfile.TemporaryDirectory() as scratch:
     report = report_path_for(repository, "pin")
     argv_dump = scratch / "pin-argv.json"
     prompt_dump = scratch / "pin-prompt.txt"
+    environment_dump = scratch / "pin-environment.json"
     result = run_judge_cell(
         repository, stubs,
         {"*": {"report": STUB_JUDGE_REPORT, "dump_argv": str(argv_dump),
-               "dump_prompt": str(prompt_dump)}},
+               "dump_prompt": str(prompt_dump), "dump_environment": str(environment_dump)}},
         report,
     )
     check("a judge cell whose Fable writes the report exits 0",
@@ -274,6 +279,17 @@ with tempfile.TemporaryDirectory() as scratch:
           and argv[argv.index("--output-format") + 1] == "text"
           and argv[argv.index("--allowedTools") + 1] == "Read,Grep,Glob,Write,WebFetch",
           repr(argv))
+    check("the judge, like every Claude cold-read-cell, launches with only the user and project setting "
+          "sources, no slash commands and only its five tools",
+          "--setting-sources" in argv and argv[argv.index("--setting-sources") + 1] == "user,project"
+          and "--disable-slash-commands" in argv
+          and "--tools" in argv and argv[argv.index("--tools") + 1] == "Read,Grep,Glob,Write,WebFetch",
+          repr(argv))
+    judge_environment = (json.loads(environment_dump.read_text(encoding="utf-8"))
+                         if environment_dump.is_file() else {"CLAUDE_CODE_TASK_LIST_ID": "no dump"})
+    check("the judge starts without the launching agent-seat's task list",
+          "CLAUDE_CODE_TASK_LIST_ID" not in judge_environment,
+          judge_environment.get("CLAUDE_CODE_TASK_LIST_ID"))
     prompt = prompt_dump.read_text(encoding="utf-8") if prompt_dump.is_file() else ""
     check("the prompt names the restater class and the report path",
           RESTATER_CLASS in prompt and str(report) in prompt, repr(prompt[:200]))

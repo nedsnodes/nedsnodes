@@ -105,6 +105,7 @@ from __future__ import annotations
 
 import argparse
 import importlib.util
+import os
 import pathlib
 import re
 import sys
@@ -325,6 +326,7 @@ def main() -> int:
         cell_started_at=cell_started_at,
         prompt_file_argument=args.prompt_file,
         model_to_effort=model_to_effort,
+        child_environment=claude_cell.claude_cell_environment_copy_without_claude_code_task_list_id(os.environ),
     )
 
 

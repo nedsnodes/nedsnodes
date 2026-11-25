@@ -39,6 +39,7 @@ it up with no change here.
 """
 
 import importlib.util
+import os
 import pathlib
 import re
 import sys
@@ -78,6 +79,18 @@ ALLOWED_TOOLS = "Read,Grep,Glob,Write,WebFetch"
 # --allowedTools adds to the user's own allow rules, which may allow some Bash commands; explicitly
 # deny both Bash and Monitor to remove shell access, including access to keychain credentials.
 DISALLOWED_TOOLS = "Bash,Monitor"
+
+# A cell reads as a reader new to the project: CLAUDE.md, the glossaries and the text, and nothing of the
+# agent-seat that launched it. The local setting source carries the agent-seat's CLAUDE.local.md; user,project
+# still loads CLAUDE.md. --tools leaves out the definitions of every tool the cell may not call.
+CONTEXT_LIMITING_FLAGS = ("--setting-sources", "user,project", "--disable-slash-commands", "--tools", ALLOWED_TOOLS)
+
+
+def claude_cell_environment_copy_without_claude_code_task_list_id(environment) -> dict:
+    """Return a copy of environment without CLAUDE_CODE_TASK_LIST_ID, whose task list would reach the cell
+    as a reminder."""
+    return {name: value for name, value in environment.items() if name != "CLAUDE_CODE_TASK_LIST_ID"}
+
 
 # Disable hooks without disabling CLAUDE.md: hooks can block reports or rebase the reviewed checkout.
 # Read deny patterns need // for absolute paths; authentication happens outside model tools.
@@ -121,6 +134,7 @@ def invocation_builder(effort: str, parsed_arguments=None):
             "--output-format", "text",
             "--allowedTools", ALLOWED_TOOLS,
             "--disallowedTools", DISALLOWED_TOOLS,
+            *CONTEXT_LIMITING_FLAGS,
         ]
         return command, prompt
     return build_invocation
@@ -155,6 +169,7 @@ def main() -> int:
         invocation_builder=invocation_builder,
         recognised_failure_texts_for_model=recognised_failure_texts_for_model,
         cold_read_cell_launcher_own_command_line_options_adder=cold_read_cell_launcher_own_command_line_options_adder,
+        child_environment=claude_cell_environment_copy_without_claude_code_task_list_id(os.environ),
     )
 
 
