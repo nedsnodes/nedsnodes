@@ -206,7 +206,7 @@ The test the user approved in item 8 compared one prompt listing every step with
 | 8 | 1.29× | 2.69× | 2.1× |
 | 16 | 1.54× | 3.36× | 2.5× |
 
-Ratios are of medians. Both ways did every step correctly in all 18 test runs, so these easy steps showed no difference in reliability. The test did not measure what code adds, such as validating each step's result, retrying one step or resuming after a crash. So a machine splits a prompt into separate nodes only where one of those is needed, or where a step branches, counts or fetches.
+Ratios are of medians. Both ways did every step correctly in all 18 test runs, so these easy steps showed no difference in reliability. The test did not measure what code adds, such as validating each step's result, retrying one step or resuming after a crash. Plain steps that one agent does in order, and that neither branch, count nor fetch, stay in one agent prompt. A state machine ends that prompt, and starts a new cpc-node or a new turn, only after a step whose output code must check, or that code must be able to retry or resume after; the plain steps that follow go in the next prompt (user-ruling of 2026-11-25).
 
 Every program that starts `claude -p` passes `--strict-mcp-config` through the shared command-line prefix, `nn-systems/general-tools/claude-code-headless-run-command-line-prefix-with-no-connectors-and-explicit-permission-mode-common.py`. With the account's connectors on, one 8-step test run cost $3.86, against $0.10 to $0.13 with them off.
 
