@@ -42,6 +42,8 @@ The user's overview of NedsNodes describes "many modular building blocks that fi
 
 Every Python script is treated as a tool in the Unix tradition, with typed input and output. Most stay plain tools. A tool is a node only in a machine's file: the tool reads its input, does its one job, reports its output state and exits. It does not name a next node, read a machine file or know that a machine called it, so the same tool also runs by hand or in a pipe.
 
+The tool contract itself, typed arguments and JSON output checked against a schema, is the subject of [GHI 3065, Wiki page on designing in-house tools so agents can give them input and read their output, and on wrapping third-party tools](https://github.com/nedsnodes/nedsnodes/issues/3065), whose work the agent-seat unixify-tools carries out. This design sits on top of that contract and does not replace it.
+
 A node is a typed Python program, checked by `mypy --strict` in a test suite (item 1). Rust comes in only for a node where a measurement shows Python too slow. A shared module has a snake_case file name so that Python can import it and mypy can follow it (item 2; [PR 4134, Shared Python modules get snake_case file names keeping their common ending](https://github.com/nedsnodes/nedsnodes/pull/4134) carries the rename).
 
 Each node follows one contract (item 3), built by one shared contract module from the node's dataclasses:
