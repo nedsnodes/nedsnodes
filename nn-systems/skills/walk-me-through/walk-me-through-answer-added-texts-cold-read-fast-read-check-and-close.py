@@ -953,6 +953,7 @@ ALREADY_DECIDED_ANSWERS_PROBLEM = (
 ALREADY_DECIDED_PARTS_MISSING = (
     "nothing written: --already-decided names {parts}, but {item} in {document} has {item_parts}, as the "
     "walk-me-through UserPromptSubmit hook reads `Part N.` paragraphs.\n"
+    "If a part number was mistyped, run check again with the item's part numbers.\n"
     "If the ruling decides the whole item, run check again with A or D after USER_RULING in place of the parts.\n"
     "If the item's parts are not written as `Part N.` paragraphs, rewrite them so, then run check again.")
 
@@ -1483,11 +1484,12 @@ CLOSE_NOT_SHOWN_LINES = (
 )
 CLOSE_ALREADY_DECIDED_CHANGE = "Its change may now be made."
 CLOSE_ALREADY_DECIDED_AGAINST_CHANGE = ("It is recorded as disapproved: the change its alternative describes may now "
-                                        "be made, and its recommendation's may not.")
+                                        "be made, and the change its recommendation describes may not.")
 CLOSE_SOME_PARTS_ALREADY_DECIDED_LINES = (
     "The minutes record {item}'s {parts} as already decided, and {item} stays waiting for the user's answer to "
     "{rest}.",
-    "Show the user only {rest}, then run check with one --part-answer for each part he answers.",
+    "Show the user only {rest}, then run check with one --part-answer for each part he answers, as in "
+    "`--part-answer 2=A`.",
 )
 # Both line formats are agreed with merge-lane-2, whose hold command writes the first into its review and whose
 # pull request intake reads the second; change neither without changing those programs.

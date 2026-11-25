@@ -5028,7 +5028,7 @@ def test_an_item_an_earlier_ruling_decides_against_its_recommendation_is_recorde
           and lines[:3] == ["item 3 of 9 is recorded in the minutes as settled without being shown to the user.",
                             "List it, with its number, in one line of your next message to the user.",
                             "It is recorded as disapproved: the change its alternative describes may now be made, "
-                            "and its recommendation's may not."]
+                            "and the change its recommendation describes may not."]
           and marker(case) == f"#next_to_present item 4 of {WALK_DOCUMENT_COUNTED_M}",
           described(closed) + case.minutes.read_text())
 
@@ -5056,7 +5056,8 @@ def test_a_ruling_that_decides_some_parts_records_them_and_the_item_waits_for_th
           and closed.stdout.split("\n")[:2] == [
               "The minutes record item 3 of 9's part 1 as already decided, and item 3 of 9 stays waiting for the "
               "user's answer to part 2, part 3.",
-              "Show the user only part 2, part 3, then run check with one --part-answer for each part he answers."]
+              "Show the user only part 2, part 3, then run check with one --part-answer for each part he answers, as in "
+              "`--part-answer 2=A`."]
           and case.gh_calls.read_text() == "", described(closed) + case.minutes.read_text())
     case.run("check", "--already-decided", "walk y, item 8", "2=D")
     closed = case.run("close")
