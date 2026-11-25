@@ -2536,19 +2536,23 @@ def handoff_supervisor_claude_ai_rename_save_as_remote_control_name_and_add_inst
         successor_notice = f"{successor_notice} {failure}" if successor_notice else failure
     if stored_name is None:
         return successor_notice
-    if rename is not None:
-        # A rename back to the launched name undoes one the Stop hook stored and the others were told.
-        old_name = (rename.old_name
-                    if not launched_remote_control_name or rename.new_name == launched_remote_control_name
-                    else launched_remote_control_name)
-    else:
-        # The Stop hook stored a rename the agent-session may have handed off before announcing.
-        # A state file written before the launched name was recorded has no rename to announce here.
-        old_name = launched_remote_control_name or stored_name
-    if stored_name == old_name:
+    try:
+        recorded_names = remote_control_name_common.handoff_agent_seat_remote_control_names_it_was_announced_under_since_its_launch_read(settings.agent)
+    except OSError as error:
+        # Announcing from the launched name alone still reaches the agent-seats that never heard a rename.
+        print(f"handoff-supervisor: the names agent-seat {settings.agent} was announced under since its "
+              f"launch could not be read, so only its launched name is announced as old: {error}", file=sys.stderr)
+        recorded_names = []
+    # Any name the others may know the agent-seat by, other than the current one, gets a line:
+    # the Stop hook may have stored a name the agent-session handed off before announcing.
+    heard_names = ([launched_remote_control_name] if launched_remote_control_name else []) + recorded_names + (
+        [rename.old_name] if rename is not None else [])
+    old_names = [name for index, name in enumerate(heard_names)
+                 if name != stored_name and name not in heard_names[:index]]
+    if not old_names:
         return successor_notice
-    instruction = remote_control_name_common.handoff_remote_control_rename_message_other_agent_seats_instruction_build(
-        remote_control_name_common.RemoteControlRename(old_name, stored_name))
+    instruction = remote_control_name_common.handoff_agent_seat_remote_control_rename_from_each_old_name_agent_told_to_message_other_agent_seats_instruction_build(
+        old_names, stored_name)
     return f"{successor_notice} {instruction}" if successor_notice else instruction
 
 
@@ -2792,6 +2796,13 @@ def supervise_sessions(settings: SupervisorSettings) -> int:
         state.update({LAUNCHED_SESSION_ID_STATE_KEY: session_id,
                       LAUNCHED_REMOTE_CONTROL_NAME_STATE_KEY: remote_control_name,
                       "generation": generation})
+        try:
+            remote_control_name_common.handoff_agent_seat_remote_control_names_it_was_announced_under_since_its_launch_reset_to_launched_name(
+                settings.agent, remote_control_name)
+        except OSError as error:
+            print(f"handoff-supervisor: the record of the names agent-seat {settings.agent} is announced "
+                  f"under could not be started, so its next handoff may announce a rename from a name "
+                  f"the others no longer use: {error}", file=sys.stderr)
         clear_agent_exit_record_from_supervisor_state(state)
         write_supervisor_state(settings.state_path, state)
 

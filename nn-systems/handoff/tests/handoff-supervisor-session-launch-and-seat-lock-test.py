@@ -20,6 +20,7 @@ import importlib.util
 import io
 import json
 import os
+import shutil
 import subprocess
 import sys
 import types
@@ -1462,6 +1463,51 @@ with tempfile.TemporaryDirectory() as rename_directory:
               and "several project directories" in errors.getvalue()
               and "The agent-seat seat-a is now --renamed in Remote Control" in kept,
               kept + " | " + errors.getvalue())
+        shutil.rmtree(second_project)
+        common = supervisor.remote_control_name_common
+        stop_hook_transcript = Path(rename_directory) / "stop-hook-transcript.jsonl"
+
+        def stop_hook_stores(title):
+            stop_hook_transcript.write_text(
+                json.dumps({"type": "custom-title", "customTitle": title}) + "\n", encoding="utf-8")
+            return common.handoff_remote_control_name_save_when_transcript_custom_title_changed_and_return_rename(
+                "seat-a", stop_hook_transcript)
+
+        name_file.write_text("seat-a\n", encoding="utf-8")
+        common.handoff_agent_seat_remote_control_names_it_was_announced_under_since_its_launch_reset_to_launched_name("seat-a", "seat-a")
+        stop_hook_stores("--renamed")
+        stop_hook_stores("seat-a")
+        (other_project / "retiring.jsonl").write_text(
+            '{"type":"custom-title","customTitle":"seat-a"}\n', encoding="utf-8")
+        notice = carry("", "seat-a")
+        check("a rename announced by the Stop hook, then undone by a rename back to the launched name "
+              "the Stop hook stored before the handoff, tells the others the announced name is gone",
+              "The agent-seat --renamed is now seat-a in Remote Control; send it messages under that name." in notice,
+              notice)
+        common.handoff_agent_seat_remote_control_names_it_was_announced_under_since_its_launch_reset_to_launched_name("seat-a", "seat-a")
+        stop_hook_stores("--renamed")
+        (other_project / "retiring.jsonl").write_text(
+            '{"type":"custom-title","customTitle":"--third"}\n', encoding="utf-8")
+        notice = carry("", "seat-a")
+        check("a rename found at the handoff after a rename the Stop hook announced sends a line from "
+              "each name the others may know the agent-seat by",
+              "The agent-seat seat-a is now --third in Remote Control; send it messages under that name." in notice
+              and "The agent-seat --renamed is now --third in Remote Control; send it messages under that name." in notice
+              and "send these lines, word for word" in notice, notice)
+        common.handoff_agent_seat_remote_control_names_it_was_announced_under_since_its_launch_file_path_build("seat-a").unlink()
+        common.handoff_agent_seat_remote_control_names_it_was_announced_under_since_its_launch_file_path_build("seat-a").mkdir()
+        name_file.write_text("--fourth\n", encoding="utf-8")
+        (other_project / "retiring.jsonl").write_text(
+            '{"type":"custom-title","customTitle":"--fourth"}\n', encoding="utf-8")
+        errors = io.StringIO()
+        with contextlib.redirect_stderr(errors):
+            notice = carry("", "seat-a")
+        check("an unreadable record of announced names is reported, and the launched name is still "
+              "announced as old",
+              "could not be read" in errors.getvalue()
+              and "The agent-seat seat-a is now --fourth in Remote Control" in notice,
+              notice + " | " + errors.getvalue())
+        common.handoff_agent_seat_remote_control_names_it_was_announced_under_since_its_launch_file_path_build("seat-a").rmdir()
     finally:
         os.environ["HOME"] = real_home
         supervisor.PROJECTS_ROOT = real_projects_root
