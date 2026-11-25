@@ -3784,12 +3784,14 @@ def promise_named_only_by_escalation(escalation_sender, recheck_sleep=0):
 machine = promise_named_only_by_escalation(
     {"sends": [send_to("alpha", "You have been idle; please check your work.")],
      "answer": {"sent": True, "reason": "r"}})
-steps = [event["step"] for event in machine.events("message_sent")]
-check("an escalation sender that drops the promise from the text it sends: the promise gets a "
-      "message of its own",
-      steps[-2:] == ["escalate", "nudge"] and PROMISE in machine.events("message_sent")[-1]["text"]
-      and not machine.events("message_sent")[-2].get("escalation_named_records"),
-      (steps, machine.events("message_sent")))
+escalation = next(event for event in machine.events("message_sent") if event["step"] == "escalate")
+check("an escalation sender that drops the promise from the text it sends: the escalation is logged "
+      "as naming the promise code's text names, and the different text is reported as this "
+      "program's defect",
+      [record[1] for record in escalation.get("escalation_named_records", [])] == [PROMISE]
+      and [event["step"] for event in machine.events("sent_text_differs_from_code_text")]
+      == ["escalate"],
+      (machine.events("message_sent"), machine.events("sent_text_differs_from_code_text")))
 
 machine = promise_named_only_by_escalation(sent_ok(), recheck_sleep=2)
 named = [event for event in machine.events("message_sent") if event.get("escalation_named_records")]
@@ -3867,19 +3869,13 @@ machine = rule_five_wait_with_promises(assistant(PROMISE, at(1)), turn_end(at(1)
 machine.script({"sends": [send_to("alpha", f'You promised "{PROMISE}". Record it as a task.')],
                 "answer": {"sent": True, "reason": "r"}})
 machine.run(7)
-check("a promise message on an open wait whose sender drops one sentence: only the sentence it "
-      "sent comes off the wait, and the dropped one stays owed",
-      on_wait_sentences(machine) == [OTHER_PROMISE]
-      and [event["sentences"] for event in machine.events("promise_message")][-1:] == [[PROMISE]],
+check("a promise message on an open wait whose sender drops one sentence: the message is logged "
+      "with the sentences code's text names, and the different text is reported as this program's "
+      "defect",
+      on_wait_sentences(machine) == []
+      and sorted(machine.events("promise_message")[-1]["sentences"]) == sorted([PROMISE, OTHER_PROMISE])
+      and machine.events("sent_text_differs_from_code_text"),
       (machine.events("promise_message"), on_wait_sentences(machine)))
-
-LONGER_PROMISE = f"If the logs become available, {PROMISE}"
-check("a sentence found only inside a longer one the sent text quotes does not count as named",
-      idle_sweep_program.records_named_in(
-          f"You said:\n> {LONGER_PROMISE}",
-          [{"record": ("r1", PROMISE), "sentences": [PROMISE]},
-           {"record": ("r2", LONGER_PROMISE), "sentences": [LONGER_PROMISE]}])
-      == [["r2", LONGER_PROMISE]])
 
 machine = promise_named_only_by_escalation(sent_ok())
 machine.log.write_text("".join(
@@ -3920,15 +3916,8 @@ machine.script(rechecked(False, False),
                {"sends": [send_to("alpha", f"You have been idle. You said: {PROMISE}")],
                 "answer": {"sent": True, "reason": "r"}}, sent_ok())
 machine.run(16)
-check("an escalation that names the fresh promise but drops an older owed sentence: the fresh "
-      "promise gets no second message",
-      [event["step"] for event in machine.events("message_sent")][-1] == "escalate",
-      machine.events("message_sent"))
-
-machine = promise_named_only_by_escalation(
-    {"sends": [send_to("alpha", "You have been idle. You said: " + PROMISE.replace(" ", "\n", 1))],
-     "answer": {"sent": True, "reason": "r"}})
-check("an escalation sender that wraps a promise over two lines still names it: no second message",
+check("an escalation sender that drops an older owed sentence: the fresh promise gets no second "
+      "message",
       [event["step"] for event in machine.events("message_sent")][-1] == "escalate",
       machine.events("message_sent"))
 
