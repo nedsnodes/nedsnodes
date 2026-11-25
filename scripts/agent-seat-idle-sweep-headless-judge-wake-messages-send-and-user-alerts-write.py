@@ -44,7 +44,7 @@ Each invocation, under a lock that keeps two from overlapping:
    quotes the message that opened the wait and each rule 2 message whose send on the open wait
    failed, and names the sentences on the wait that no message was sent for, and 15 minutes after
    that writes the user a user-alert, once, which names the sentences of the failed messages and
-   of the groups no message was sent for too. A rule 2
+   the sentences no message was sent for too. A rule 2
    message due on a wait whose escalation is due goes on the wait first, so that the re-check
    judges its sentences and the escalation names them instead of the message. Before the escalation of a wait a rule 2 message was sent on, the
    rule 2 judge re-checks every sentence the wait must answer for, those of a message whose send
@@ -252,27 +252,32 @@ PROMISE_MESSAGE = "promise_message"
 # holding one of its sentences, or None when that was not logged.
 PROMISE_MESSAGES = "promise_messages"
 # An event logged when a rule 2 message's send on an open wait failed, carrying its text, since no
-# message_sent event holds it, and its group_ids; the groups hold its sentences.
+# message_sent event holds it, and the records, [record_uuid, sentence], of the sentences it named.
 PROMISE_MESSAGE_SEND_FAILED = "promise_message_send_failed"
-# On an open wait: the rule 2 messages whose send on it failed, [{"at", "group_ids", "text"}].
+# On an open wait: the rule 2 messages whose send on it failed, [{"at", "text"}].
 FAILED_PROMISE_MESSAGES = "failed_promise_messages"
 # An event logged before sentences are logged as checked on an open wait: the wait answers for them
 # whether their message is then sent, its send fails, their judge failed so that no message follows,
-# or the invocation is stopped. A promise_message event naming its group replaces it; a failed send
-# leaves it, so the re-check and the user-alert read a failed message's sentences through it, while
-# the escalation quotes the failed message's own text.
+# or the invocation is stopped. A promise_message event naming a sentence's record takes that
+# sentence off it; a failed send leaves it, so the re-check and the user-alert read a failed
+# message's sentences from it, while the escalation quotes the failed message's own text.
 RULE_2_SENTENCES_ON_WAIT = "rule_2_sentences_on_wait"
-# An event logged after an escalation's send succeeded: the group_ids of the groups whose every
-# sentence the text sent names, and the send's send_started_at.
+# Read only from logs written before the escalation's message_sent event carried
+# ESCALATION_NAMED_RECORDS: the group_ids of the groups whose every sentence the text sent named.
 ESCALATION_NAMED_SENTENCE_GROUPS = "escalation_named_sentence_groups"
+# On an escalation's message_sent event: the records of the sentences on the wait that the text
+# sent names, written in the same event as the send so that no stop between two writes loses them.
+ESCALATION_NAMED_RECORDS = "escalation_named_records"
 # What Sweep.due_step did, when it did either.
 WAIT_ENDED_BY_RECHECK = "wait ended by the re-check"
 ESCALATED = "escalated"
-# On an open wait: the groups of those sentences no message event has replaced, [{"group_id", "at",
-# "kinds", "sentences", "records", "earliest_sentence_at"}, and "named_by_escalation" once an
-# escalation has named the group]. A failed send moves its group's "at" to the failure's, and an
-# escalation that names it to the escalation's send, since a task call before then cannot answer a
-# message the agent-seat had not got.
+# On an open wait: the sentences no message event has taken off it, one entry per sentence,
+# [{"group_id", "record", "at", "kinds", "sentences", "earliest_sentence_at"}, and "failed" once a
+# send naming it failed, "named_by_escalation" once an escalation named it]. "record" is
+# [record_uuid, sentence], or None for a group logged before groups carried records, whose entry
+# holds all of its sentences. A failed send moves its sentences' "at" to the failure's, and an
+# escalation that names them to the escalation's send, since a task call before then cannot answer
+# a message the agent-seat had not got.
 SENTENCES_WITH_NO_MESSAGE_EVENT = "sentences_with_no_message_event"
 
 SEND_ANSWER_SCHEMA = {"type": "object", "required": ["sent", "reason"],
@@ -491,7 +496,7 @@ class SweepLog:
         owed, owed_by = False, None
         for event in self.of_seat(seat, "wait_step", "wait_ended", PROMISE_MESSAGE,
                                   PROMISE_MESSAGE_SEND_FAILED, RULE_2_SENTENCES_ON_WAIT,
-                                  ESCALATION_NAMED_SENTENCE_GROUPS):
+                                  ESCALATION_NAMED_SENTENCE_GROUPS, "message_sent"):
             invocation = event.get("agent_seat_idle_sweep_invocation_started_at")
             if event["event"] == "wait_ended":
                 wait, owed = None, False
@@ -499,29 +504,29 @@ class SweepLog:
                 if wait is not None:
                     if owed and owed_by != invocation:
                         wait[PROMISE_MESSAGES] = None
-                    wait[SENTENCES_WITH_NO_MESSAGE_EVENT].append({
-                        "group_id": event["group_id"], "at": event["at"],
-                        "kinds": set(event["kinds"]), "sentences": event["sentences"],
-                        "records": [tuple(record) for record in event.get("records", [])],
-                        "earliest_sentence_at": event.get("earliest_sentence_at")})
+                    wait[SENTENCES_WITH_NO_MESSAGE_EVENT].extend(sentences_on_wait_entries(event))
                 owed = False
             elif event["event"] == PROMISE_MESSAGE_SEND_FAILED:
                 if wait is not None:
-                    wait[FAILED_PROMISE_MESSAGES].append({
-                        "at": event["at"], "group_ids": event_group_ids(event),
-                        "text": event["text"]})
-                    for group in wait[SENTENCES_WITH_NO_MESSAGE_EVENT]:
-                        if group["group_id"] in event_group_ids(event):
-                            group["at"] = event["at"]
+                    wait[FAILED_PROMISE_MESSAGES].append({"at": event["at"], "text": event["text"]})
+                    for entry in wait[SENTENCES_WITH_NO_MESSAGE_EVENT]:
+                        if entry_named_by(entry, event):
+                            entry["at"], entry["failed"] = event["at"], True
                 owed = False
-            elif event["event"] == ESCALATION_NAMED_SENTENCE_GROUPS:
-                # The escalation is the first message that names these groups, so a task call before
-                # its send cannot answer it.
+            elif event["event"] in (ESCALATION_NAMED_SENTENCE_GROUPS, "message_sent"):
+                if event["event"] == "message_sent":
+                    if ESCALATION_NAMED_RECORDS not in event:
+                        continue
+                    named = {"records": event[ESCALATION_NAMED_RECORDS]}
+                else:
+                    named = event
+                # The escalation is the first message that names these sentences, so a task call
+                # before its send cannot answer it.
                 if wait is not None:
-                    for group in wait[SENTENCES_WITH_NO_MESSAGE_EVENT]:
-                        if group["group_id"] in event_group_ids(event):
-                            group["at"] = event["send_started_at"]
-                            group["named_by_escalation"] = True
+                    for entry in wait[SENTENCES_WITH_NO_MESSAGE_EVENT]:
+                        if entry_named_by(entry, named):
+                            entry["at"] = event["send_started_at"]
+                            entry["named_by_escalation"] = True
             elif event["event"] == PROMISE_MESSAGE:
                 if wait is None:
                     continue
@@ -675,11 +680,44 @@ def event_group_ids(event):
     return {event["group_id"]} if event.get("group_id") else set()
 
 
+def sentences_on_wait_entries(event):
+    """One entry of SENTENCES_WITH_NO_MESSAGE_EVENT per sentence a rule_2_sentences_on_wait event
+    logged, so that a message, a failed send or an escalation that names some of its sentences
+    leaves the others owed."""
+    common = {"group_id": event["group_id"], "at": event["at"], "kinds": set(event["kinds"]),
+              "earliest_sentence_at": event.get("earliest_sentence_at")}
+    records = [tuple(record) for record in event.get("records", [])]
+    if not records:
+        return [dict(common, record=None, sentences=event["sentences"])]
+    return [dict(common, record=record, sentences=[record[1]]) for record in records]
+
+
+def entry_named_by(entry, event):
+    """Whether a message event names the sentence of a SENTENCES_WITH_NO_MESSAGE_EVENT entry: by
+    its record when the event carries records, else, for an event logged before events did, by
+    the entry's group."""
+    if "records" in event:
+        return entry["record"] is not None and entry["record"] in {
+            tuple(record) for record in event["records"]}
+    return entry["group_id"] in event_group_ids(event)
+
+
 def without_message_event_replaced(wait, message_event):
-    replaced = event_group_ids(message_event)
     wait[SENTENCES_WITH_NO_MESSAGE_EVENT] = [
-        group for group in wait[SENTENCES_WITH_NO_MESSAGE_EVENT]
-        if group["group_id"] not in replaced]
+        entry for entry in wait[SENTENCES_WITH_NO_MESSAGE_EVENT]
+        if not entry_named_by(entry, message_event)]
+
+
+def whitespace_squeezed(text):
+    """A sender may wrap a quoted sentence over two lines without changing a word."""
+    return " ".join(text.split())
+
+
+def records_named_in(text, entries):
+    """The records of the entries whose every sentence text names."""
+    sent = whitespace_squeezed(text)
+    return [list(entry["record"]) for entry in entries if entry["record"] is not None
+            and all(whitespace_squeezed(sentence) in sent for sentence in entry["sentences"])]
 
 
 def sentence_groups_wait_answers_for(wait):
@@ -1047,9 +1085,10 @@ class Sweep:
                                self.timeout_seconds)
         return text, outcome, started_at
 
-    def send(self, seat, verdict, text, step):
-        """Send code's text to one agent-seat; log the send for the delivery check. Returns the
-        message_sent event, or False when the send failed."""
+    def send(self, seat, verdict, text, step, sentences_on_wait=None):
+        """Send code's text to one agent-seat; log the send for the delivery check, and, given the
+        SENTENCES_WITH_NO_MESSAGE_EVENT entries an escalation names, the records of those the text
+        sent names. Returns the message_sent event, or False when the send failed."""
         ref = list_agents_tool_entry_ref_of_running_agent_session_id(verdict.get(fields.SESSION_ID))
         if ref is None:
             self.entry_not_found(seat, f"send its {step} message", verdict.get(fields.SESSION_ID))
@@ -1065,16 +1104,20 @@ class Sweep:
         if problems:
             self.headless_failed(seat, f"send its {step} message", "; ".join(problems), SENDS_WRONG)
             return False
-        return self.message_sent(seat, verdict, text_sent_to(outcome, refs, seat, text), step,
-                                 started_at)
+        sent_text = text_sent_to(outcome, refs, seat, text)
+        # A sender may send a text other than code's: only a sentence the text sent names counts as
+        # named, so that a dropped sentence still gets its message.
+        named = ({} if sentences_on_wait is None
+                 else {ESCALATION_NAMED_RECORDS: records_named_in(sent_text, sentences_on_wait)})
+        return self.message_sent(seat, verdict, sent_text, step, started_at, **named)
 
-    def message_sent(self, seat, verdict, text, step, started_at):
+    def message_sent(self, seat, verdict, text, step, started_at, **details):
         # The delivery check compares transcript times with the send's start: a sender may run on
         # for minutes after its SendMessage, and the record is written when it ends.
         return self.record({"event": "message_sent", "agent_seat": seat, "step": step, "text": text,
                             "send_started_at": iso(started_at), "message_id": uuid.uuid4().hex,
                             "session_id": verdict.get(fields.SESSION_ID),
-                            "transcript_path": verdict.get(fields.TRANSCRIPT_PATH)})
+                            "transcript_path": verdict.get(fields.TRANSCRIPT_PATH), **details})
 
     # --- The account ---
 
@@ -1239,7 +1282,7 @@ class Sweep:
         if wait and TELL_USER in wait and stretch and parse_time(stretch) > parse_time(wait[TELL_USER]):
             self.end_wait(seat, "it spent tokens after the user was told")
             wait = None
-        promise_text, group_ids = None, []
+        promise_text, promise_on_wait = None, False
         judged_sentences = rule == 2
         sentences_checked = []
         if judged_sentences and self.headless_usage_limit_pause_holds():
@@ -1256,8 +1299,9 @@ class Sweep:
             if wait and promise_text:
                 # Before the due step, so that the re-check judges these sentences too and the
                 # escalation names them: a message on an open wait does not restart its 15 minutes.
-                group_ids = self.sentences_on_open_wait(seat, wait, promise_records)
-            if (outcome == "failed" or group_ids) and wait:
+                self.sentences_on_open_wait(seat, wait, promise_records)
+                promise_on_wait = True
+            if (outcome == "failed" or promise_on_wait) and wait:
                 wait = self.log.open_wait(seat)
             fallback = verdict.get(fields.IF_EVERY_SENTENCE_BACKED)
             if outcome == "all backed" and fallback is not None:
@@ -1274,15 +1318,22 @@ class Sweep:
         step = self.due_step(seat, verdict, wait) if wait else None
         if step == WAIT_ENDED_BY_RECHECK:
             wait = None
-        if step and group_ids:
-            # The re-check found these sentences backed, or the escalation just sent names them.
-            promise_text = None
-        if wait and group_ids and set(group_ids) <= {
-                group["group_id"] for group in wait[SENTENCES_WITH_NO_MESSAGE_EVENT]
-                if group.get("named_by_escalation")}:
-            # An invocation stopped after the escalation named these sentences, before they were
-            # logged as checked: the escalation was their message.
-            promise_text = None
+            if promise_on_wait:
+                # The re-check judged these sentences too, and found them backed.
+                promise_text = None
+        if wait and promise_on_wait:
+            # An escalation, this invocation's or one an invocation stopped after before logging
+            # these sentences as checked, was the message of each sentence it named: the promise
+            # message names only the others.
+            wait = self.log.open_wait(seat)
+            named = {entry["record"] for entry in wait[SENTENCES_WITH_NO_MESSAGE_EVENT]
+                     if entry.get("named_by_escalation")}
+            promise_records = [item for item in promise_records
+                               if (item["record_uuid"], item["sentence"]) not in named]
+            if promise_records:
+                promise_text, promise_kinds, promise_records = self.promise_message(promise_records)
+            else:
+                promise_text = None
         paused = self.headless_usage_limit_pause_holds()
         # An escalation stopped at a usage limit can start the pause after the sentences were
         # judged. When it holds back their promise message, the unbacked sentences and the check
@@ -1314,16 +1365,17 @@ class Sweep:
             else:
                 # The sentences are already logged as checked, so only the wait's escalation and
                 # user-alert can still report the promise: the escalation quotes a failed message's
-                # own text, and the user-alert reads its sentences from its groups.
+                # own text, and the re-check and the user-alert read its sentences from the wait.
+                records = [[item["record_uuid"], item["sentence"]] for item in promise_records]
                 sent = self.send(seat, verdict, promise_text, NUDGE)
                 if sent:
-                    self.record({"event": PROMISE_MESSAGE, "agent_seat": seat, "group_ids": group_ids,
+                    self.record({"event": PROMISE_MESSAGE, "agent_seat": seat, "records": records,
                                  "kinds": promise_kinds, "sentences": promise_sentences,
                                  "send_started_at": sent["send_started_at"],
                                  "earliest_sentence_at": earliest_sentence_at})
                 else:
                     self.record({"event": PROMISE_MESSAGE_SEND_FAILED, "agent_seat": seat,
-                                 "group_ids": group_ids, "text": promise_text})
+                                 "records": records, "text": promise_text})
         elif not wait:
             self.nudge(seat, verdict, rule, text, stretch)
 
@@ -1337,31 +1389,19 @@ class Sweep:
 
     def sentences_on_open_wait(self, seat, wait, items):
         """Log that the open wait answers for these sentences, before they are logged as checked,
-        so that no failure after that can lose them. Returns the ids of the groups that hold them
-        and nothing else: a group already on the wait that an invocation stopped before logging
-        its sentences as checked left, and a new group of the sentences on no group, so that
-        judging a sentence again adds it to no second group."""
-        # Matched as pairs, not as one sorted list: a record with no uuid cannot be ordered against
-        # one with a uuid, and a batch can hold an earlier group's sentence and a new one.
-        pairs = {(item["record_uuid"], item["sentence"]) for item in items}
-        group_ids, on_a_group = [], set()
-        for group in wait[SENTENCES_WITH_NO_MESSAGE_EVENT]:
-            records = set(group["records"])
-            on_a_group |= records & pairs
-            if records and records <= pairs:
-                group_ids.append(group["group_id"])
-        new = [item for item in items if (item["record_uuid"], item["sentence"]) not in on_a_group]
+        so that no failure after that can lose them. A sentence already on the wait, which an
+        invocation stopped before logging it as checked left, is not logged again."""
+        on_wait = {entry["record"] for entry in wait[SENTENCES_WITH_NO_MESSAGE_EVENT]}
+        new = [item for item in items if (item["record_uuid"], item["sentence"]) not in on_wait]
         if not new:
-            return group_ids
+            return
         if PROMISE not in wait:
             self.record({"event": "wait_step", "agent_seat": seat, "step": PROMISE})
-        group_id = uuid.uuid4().hex
-        self.record({"event": RULE_2_SENTENCES_ON_WAIT, "agent_seat": seat, "group_id": group_id,
-                     "kinds": sorted({item["kind"] for item in new}),
+        self.record({"event": RULE_2_SENTENCES_ON_WAIT, "agent_seat": seat,
+                     "group_id": uuid.uuid4().hex, "kinds": sorted({item["kind"] for item in new}),
                      "sentences": [item["sentence"] for item in new],
                      "records": [[item["record_uuid"], item["sentence"]] for item in new],
                      "earliest_sentence_at": earliest_sentence_time(new)})
-        return group_ids + [group_id]
 
     def raised_sentences_backed_at_recheck(self, seat, verdict, wait, messages):
         """Have the judge re-check every sentence of messages, the groups the wait answers for,
@@ -1424,16 +1464,14 @@ class Sweep:
         that, none. The escalation is a send, so a headless usage-limit pause holds it. Returns
         WAIT_ENDED_BY_RECHECK, ESCALATED when the escalation's send succeeded, or None.
 
-        The escalation quotes each message whose send failed and names the sentences of every
-        other group no message event holds, and the user-alert names the sentences of all of
-        them, so that a sentence still owed is named whether or not a message for it was tried."""
+        The escalation quotes each message whose send failed and names every other sentence no
+        message event holds, and the user-alert names all of those sentences, so that a sentence
+        still owed is named whether or not a message for it was tried."""
         if TELL_USER in wait:
             return None
         minutes = int(seconds_between(wait["first_idle_at"] or wait[NUDGE], self.now) // 60)
         failed = wait[FAILED_PROMISE_MESSAGES]
-        failed_group_ids = {group_id for message in failed for group_id in message["group_ids"]}
-        unsent = [group for group in wait[SENTENCES_WITH_NO_MESSAGE_EVENT]
-                  if group["group_id"] not in failed_group_ids]
+        unsent = [entry for entry in wait[SENTENCES_WITH_NO_MESSAGE_EVENT] if not entry.get("failed")]
         if ESCALATE in wait:
             if seconds_between(wait[ESCALATE], self.now) >= WAIT_STEP_SECONDS:
                 self.record({"event": "wait_step", "agent_seat": seat, "step": TELL_USER})
@@ -1443,14 +1481,14 @@ class Sweep:
                            f"at {wait[NUDGE]} and escalated at {wait[ESCALATE]}, and it is idle "
                            f"again. Its transcript is {verdict[fields.TRANSCRIPT_PATH]}. The idle "
                            "sweep sends it nothing more until it spends tokens and goes idle again."
-                           + "".join(f" At {group['at']} the idle sweep "
+                           + "".join(f" At {entry['at']} the idle sweep "
                                      + ("failed to send it a message naming"
-                                        if group["group_id"] in failed_group_ids
+                                        if entry.get("failed")
                                         else "sent it no message of their own about")
                                      + " these sentences of its own, which only the escalation "
                                      "named: "
-                                     + " ".join(f'"{sentence}"' for sentence in group["sentences"])
-                                     for group in wait[SENTENCES_WITH_NO_MESSAGE_EVENT]),
+                                     + " ".join(f'"{sentence}"' for sentence in entry["sentences"])
+                                     for entry in wait[SENTENCES_WITH_NO_MESSAGE_EVENT]),
                            f"An agent on ned-box can read {seat}'s transcript and its tmux session "
                            f"{seat} to see why it stopped, and message it with SendMessage; the "
                            "user may want to look at it himself.", failure=False)
@@ -1471,23 +1509,13 @@ class Sweep:
                         time=parse_time(message["at"]).strftime("%Y-%m-%d %H:%MZ"),
                         quoted_text=quoted(message["text"]))
                     for message in failed) + (UNSENT_SENTENCES_ESCALATION_TEXT.format(
-                        quoted_text=quoted("\n".join(sentence for group in unsent
-                                                      for sentence in group["sentences"])))
+                        quoted_text=quoted("\n".join(sentence for entry in unsent
+                                                      for sentence in entry["sentences"])))
                         if unsent else "")
             self.record({"event": "wait_step", "agent_seat": seat, "step": ESCALATE, "text": text})
             # A failed send leaves a rule 2 message due in this step to be sent: a send stopped at
             # a usage limit holds it back until the reset.
-            sent = self.send(seat, verdict, text, ESCALATE)
-            if not sent:
-                return None
-            # A sender may send a text other than code's: only a group whose every sentence the
-            # text sent names counts as named, so that a dropped sentence still gets its message.
-            named = [group["group_id"] for group in unsent
-                     if all(sentence in sent["text"] for sentence in group["sentences"])]
-            if named:
-                self.record({"event": ESCALATION_NAMED_SENTENCE_GROUPS, "agent_seat": seat,
-                             "group_ids": named, "send_started_at": sent["send_started_at"]})
-            return ESCALATED if len(named) == len(unsent) else None
+            return ESCALATED if self.send(seat, verdict, text, ESCALATE, unsent) else None
         return None
 
     def nudge(self, seat, verdict, rule, text, stretch):
@@ -1684,10 +1712,15 @@ class Sweep:
         unbacked += [item for index, item in enumerate(judged) if not backed[index]]
         if not unbacked:
             return "all backed", None, new
-        return "unbacked", ("\n".join(UNBACKED_SENTENCE_LINES[item["kind"]].format(
+        return "unbacked", self.promise_message(unbacked), new
+
+    def promise_message(self, items):
+        """One rule 2 message naming every one of items: (its text, the sorted kinds of the
+        sentences it names, items)."""
+        return ("\n".join(UNBACKED_SENTENCE_LINES[item["kind"]].format(
             sentence=item["sentence"],
             minutes=int(seconds_between(item["time"], self.now) // 60) if item["time"] else "some")
-            for item in unbacked), sorted({item["kind"] for item in unbacked}), unbacked), new
+            for item in items), sorted({item["kind"] for item in items}), items)
 
     def sentences_checked(self, seat, items):
         for item in items:
