@@ -1029,6 +1029,42 @@ def test_the_waiting_item_read_step_searches_a_revised_linked_title_as_the_closi
           result.returncode == 0 and "\n  user   " in result.stdout and "  d\n" in result.stdout, described(result))
 
 
+def test_the_waiting_item_read_step_searches_an_indented_heading_by_its_title():
+    case = Case(document=marks_document("The tests are still running.\n").replace(
+        "## Item 3 of 9: the opening sentence", "  ## Item 3 of 9: the opening *sentence*"))
+    # Its emphasis keeps the closing-line form, `the opening \*sentence`, from finding the dialog in the title's place.
+    session_dialog_with_its_transcript_write(case.log_store, "s7", [
+        "Item 3 of 9: the opening *sentence*", "Keep the opening sentence."])
+    result = case.run(WAITING_ITEM_READ_STEP_NAME)
+    check("a heading indented by up to three spaces is searched by its title, not by its `##` line",
+          result.returncode == 0 and "Keep the opening sentence." in result.stdout, described(result))
+
+
+def test_the_waiting_item_read_step_searches_a_linked_title_with_only_its_links_dropped_too():
+    case = Case(document=marks_document("The tests are still running.\n").replace(
+        "## Item 3 of 9: the opening sentence",
+        "## Item 3 of 9: Keep [the opening](https://example.com/o) sentence *short*"))
+    session_dialog_with_its_transcript_write(case.log_store, "s8", [
+        "Keep the opening sentence *short*", "Shorter still."])
+    result = case.run(WAITING_ITEM_READ_STEP_NAME)
+    check("a linked title ending in emphasis is also searched with only its links dropped, its emphasis kept",
+          result.returncode == 0 and "Shorter still." in result.stdout, described(result))
+
+
+def test_the_waiting_item_read_step_searches_an_item_under_a_shared_heading_by_its_own_opening_title_too():
+    document = ("# A walk\n\n## Items 3 and 4 of 9: two openings\n\n**Item 3 of 9: the first**\n\n"
+                "The tests are still running.\n#case_against weak: the page grows.\n\nRecommendation: change it.\n\n"
+                "**Item 4 of 9: the second**\n\nThe page ends.\n#case_against weak: it is short.\n\n"
+                "Recommendation: keep it.\n")
+    case = Case(document=document)
+    session_dialog_with_its_transcript_write(case.log_store, "s9", ["Item 3 of 9: the first", "First answer."])
+    session_dialog_with_its_transcript_write(case.log_store, "s10", ["Item 4 of 9: the second", "Not item 3."])
+    result = case.run(WAITING_ITEM_READ_STEP_NAME)
+    check("an item under a heading several items share is searched by its own opening's title and number too",
+          result.returncode == 0 and "First answer." in result.stdout and "Not item 3." not in result.stdout,
+          described(result))
+
+
 def test_the_waiting_item_read_step_searches_a_title_that_opens_with_a_dash():
     case = Case(document=marks_document("The tests are still running.\n").replace(
         "## Item 3 of 9: the opening sentence", "## Item 3 of 9: --feature"))

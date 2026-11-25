@@ -3535,25 +3535,42 @@ def approval_walk_item_title_search_groups(walk_finder, document, value, numbers
     titles also hold the title of each earlier read text of it, as earlier_read_texts_of_item returns them; a
     Withdrawn version heading carries no title, so those read texts are its only earlier titles the program can
     know."""
-    lines = document.read_text(encoding="utf-8").split("\n")
+    text = document.read_text(encoding="utf-8")
+    lines = text.split("\n")
     _, units = walk_finder.waiting_item_units(document, value, numbers, total, parser)
     hook = load_module("walk_me_through_user_short_answer_hook", SHORT_ANSWER_HOOK_FILE)
+    openings = walk_finder.item_opening_lines(text, parser)
+
+    def search_forms(line):
+        # An indented heading is still a heading, and item_title strips `#` only from the line's start.
+        line = line.strip()
+        title = item_title(walk_finder, line)
+        if not title:
+            return []
+        # The closing line's point, as the hook reads it, so that `## Item 4 of 9 (revised): a [filter](url)` is
+        # also searched as `a filter`; and the title with only its links dropped, which keeps its emphasis.
+        unlinked = hook.without_links(title, parser)
+        return [title, hook.approval_walk_item_heading_point_without_links(line, parser) or unlinked, unlinked]
+
     groups = []
     for unit in units:
         headings = [lines[unit[3]]] + ([copied for _, _, copied in earlier] if len(units) == 1 else [])
         titles = []
         for heading in headings:
-            first = heading.split("\n", 1)[0]
-            title = item_title(walk_finder, first)
-            # The closing line's point is read as the hook's heading_points reads it, so that a heading such as
-            # `## Item 4 of 9 (revised): a [filter](url)` is searched as `a filter`, the words the closing line shows.
-            point = hook.HEADING_POINT.match(walk_finder.approval_walk_item_heading_with_deferred_note_removed(first))
-            closing = hook.without_links(point[1] if point and point[1] else title, parser)
-            for form in ([title, closing] if title else []):
+            for form in search_forms(heading.split("\n", 1)[0]):
                 if form not in titles:
                     titles.append(form)
+        waiting = [number for number in numbers if number in unit[0]]
         if titles:
-            groups.append((titles, [number for number in numbers if number in unit[0]]))
+            groups.append((titles, waiting))
+        # Under a heading several items share, an item's own opening, such as `**Item 3 of 9: the first**`, names it
+        # by its own title, which earlier messages may use instead of the heading's.
+        for number in waiting:
+            start, _ = walk_finder.approval_walk_item_line_range_within_heading_shared_by_several_items(
+                openings, unit[3], unit[4], number, unit[0], unit[1])
+            own = [form for form in search_forms(lines[start]) if form not in titles] if start != unit[3] else []
+            if own:
+                groups.append((list(dict.fromkeys(own)), [number]))
     return groups
 
 
