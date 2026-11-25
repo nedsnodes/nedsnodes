@@ -1175,7 +1175,8 @@ def topic_worktree_cases(root, repository, base, frozen_head):
     check("topic-worktree: the printed unstage and clean commands, on a branch whose .gitignore does not name the "
           "answers file and where it is not staged, succeed, keep the answers file and remove a temporary file a "
           "killed brief run left",
-          codes == [0, 0] and (unignored / ANSWERS_NAME).read_text() == GOOD_ANSWERS and not leftover.exists(),
+          codes == [0, 0] and (unignored / ANSWERS_NAME).exists()
+          and (unignored / ANSWERS_NAME).read_text() == GOOD_ANSWERS and not leftover.exists(),
           unstage_line + "\n" + clean_line)
     restore_line = next((line for line in err.splitlines() if " restore --staged --worktree" in line), "")
     staged = root / "branch-whose-answers-file-git-add-staged"
@@ -1204,7 +1205,8 @@ def topic_worktree_cases(root, repository, base, frozen_head):
     codes = printed_commands_exit_codes((restore_line, unstage_line, clean_line), made, edited)
     check("topic-worktree: the three printed commands, run where git add -A staged the answers file and it was "
           "edited after, succeed and leave it unstaged with its edits",
-          codes == [0, 0, 0] and (edited / ANSWERS_NAME).read_text() == GOOD_ANSWERS and git(edited, "diff", "--cached", "--name-only") == "",
+          codes == [0, 0, 0] and (edited / ANSWERS_NAME).exists() and (edited / ANSWERS_NAME).read_text() == GOOD_ANSWERS
+          and git(edited, "diff", "--cached", "--name-only") == "",
           unstage_line)
     tracked = root / "branch-whose-head-tracks-the-answers-file"
     git(root, "init", "-q", str(tracked))
@@ -1216,7 +1218,8 @@ def topic_worktree_cases(root, repository, base, frozen_head):
     codes = printed_commands_exit_codes((unstage_line,), made, tracked)
     check("topic-worktree: the printed unstage command, where HEAD tracks the answers file, unstages it without "
           "staging its deletion and keeps its edits",
-          codes == [0] and (tracked / ANSWERS_NAME).read_text() == GOOD_ANSWERS and git(tracked, "diff", "--cached", "--name-only") == "",
+          codes == [0] and (tracked / ANSWERS_NAME).exists() and (tracked / ANSWERS_NAME).read_text() == GOOD_ANSWERS
+          and git(tracked, "diff", "--cached", "--name-only") == "",
           unstage_line)
     (made / "stray.txt").unlink()
     (made / "hook.py").write_text("changed\n")
@@ -1276,6 +1279,100 @@ def topic_worktree_cases(root, repository, base, frozen_head):
           f"prints the fix-round brief:\npython3 {PROGRAM.resolve()} {NUMBER}" in err, err)
     git(repository, "worktree", "remove", "--force", str(agent_home))
     git(repository, "checkout", "-q", BRANCH)
+
+
+def answers_file_tracked_by_frozen_head_case(root, repository, _base, _frozen_head):
+    """A frozen-head that tracks the answers file, as one cut before .gitignore named it can, once a fix commit
+    carried it in."""
+    (repository / ANSWERS_NAME).write_text("1. Fixed in an earlier round.\n")
+    git(repository, "add", "--force", ANSWERS_NAME)
+    git(repository, "commit", "-q", "-m", "a frozen-head that tracks the answers file")
+    tracking_head = git(repository, "rev-parse", "HEAD")
+    routes = routes_for(tracking_head, [review(commit_id=tracking_head)])
+    code, out, err = run(root, repository, routes)
+    modified = git(repository, "diff", "--name-only")
+    staged = git(repository, "diff", "--cached", "--name-only")
+    check("tracked answers file: the brief rewrites an answers file the frozen-head tracks, leaving it modified "
+          "and unstaged", code == 0 and modified == ANSWERS_NAME and staged == "", err + out + modified + staged)
+    code, out, err = run(root, repository, routes)
+    check("tracked answers file: a second brief run takes that modified, unstaged answers file as no change",
+          code == 0 and "uncommitted changes or untracked files" not in err, err + out)
+    git(repository, "add", ANSWERS_NAME)
+    code, out, err = run(root, repository, routes)
+    check("tracked answers file: once staged, it refuses the brief with exit 1, naming it",
+          code == 1 and ANSWERS_NAME in err and "uncommitted changes or untracked files" in err, err + out)
+
+
+def dismissed_review_named_in_round_record_cases(root, repository, _base, frozen_head):
+    """Round 1's first changes-requested review is dismissed and replaced on the same frozen-head, and the round
+    ends with no commit; round 2 on that frozen-head must not take the dismissed review's copies for an earlier
+    brief's."""
+    dismissed = review(state="DISMISSED", review_id=30, commit_id=frozen_head)
+    replacing = review(review_id=31, commit_id=frozen_head)
+    round_one = routes_for(frozen_head, [dismissed, replacing], review_id=31)
+    code, out, err = run(root, repository, round_one, "--check", "--answers", answers_file(root, GOOD_ANSWERS))
+    posts = [call for call in gh_calls(root) if "-f" in call]
+    check("dismissed review: a round with no commit records the dismissed review of its frozen-head too",
+          code == 0 and len(posts) == 1
+          and posts[0][3].startswith(f"body=Fix-round answered without a commit: frozen-head {frozen_head}, "
+                                     "reviews 30 31.\n"), err + out + json.dumps(posts))
+    kept_root = (Path(git(repository, "rev-parse", "--path-format=absolute", "--git-common-dir"))
+                 / "fix-round-answers-kept-copies")
+    dismissed_directory = kept_root / f"pr-{NUMBER}-review-30"
+    dismissed_directory.mkdir(parents=True)
+    dismissed_copy = dismissed_directory / f"{Path(ANSWERS_NAME).stem}-kept-under-the-dismissed-review.md"
+    dismissed_copy.write_text("1. Round one's answer.\n")
+    round_two = routes_for(frozen_head, [dismissed, replacing, review(review_id=32, commit_id=frozen_head)],
+                           review_id=32)
+    round_two[ISSUE_COMMENTS] = {"stdout": lines([round_record(frozen_head, [30, 31])])}
+    code, out, err = run(root, repository, round_two)
+    check("dismissed review: a second round on that frozen-head does not name the copies kept under the dismissed "
+          "round-1 review", code == 0 and str(dismissed_copy) not in out, err + out)
+
+
+def other_review_copies_unreadable_after_rewrite_case(_root, repository, _base, frozen_head):
+    """Another review's copies directory lists before the answers file is rewritten and fails after it."""
+    program = load_program()
+    answers = repository / ANSWERS_NAME
+    answers.write_text("1. Fixed the lookup.\n2. \n")
+    program.round_facts = lambda number, reviewer_login: (
+        URL, frozen_head, BRANCH, f"{URL}#pullrequestreview-11", frozen_head, ["first", "second"], [], 1, None,
+        None, 11, [11, 12], "merge-lane-2")
+    program.conflict_check_report = lambda number: None
+    program.topic_worktree_at_frozen_head = lambda *arguments: repository
+    listings = []
+    list_copies = program.answers_kept_copies_oldest_first
+
+    def failing_on_second_listing_of_review_12(directory):
+        if directory.name == f"pr-{NUMBER}-review-12":
+            listings.append(directory)
+            if len(listings) == 2:
+                raise program.StepFailed(f"could not list the kept copies of the answers file in {directory}: "
+                                         "Permission denied")
+        return list_copies(directory)
+    program.answers_kept_copies_oldest_first = failing_on_second_listing_of_review_12
+    try:
+        program.print_brief(NUMBER, program.MERGE_LANE_2_REVIEWER_LOGIN)
+        raised = None
+    except program.StepFailed as error:
+        raised = error
+    kept = sorted((Path(git(repository, "rev-parse", "--path-format=absolute", "--git-common-dir"))
+                   / "fix-round-answers-kept-copies" / f"pr-{NUMBER}-review-11").iterdir())
+    check("answers kept: another review's copies directory that fails only after the rewrite fails the brief naming "
+          "the copy of the answers file's earlier text",
+          raised is not None and len(kept) == 1 and str(kept[0]) in str(raised)
+          and "could not list the kept copies" in str(raised)
+          and answers.read_text() == "1. \n2. \n", repr(raised))
+    shutil.rmtree(kept[0].parent)
+    listings.clear()
+    try:
+        program.print_brief(NUMBER, program.MERGE_LANE_2_REVIEWER_LOGIN)
+        raised = None
+    except program.StepFailed as error:
+        raised = error
+    check("answers kept: the same failure with no copy of the round kept fails the brief with the listing's own "
+          "message alone",
+          raised is not None and str(raised).endswith(": Permission denied"), repr(raised))
 
 
 def check_cases(root, repository, base, frozen_head):
@@ -3336,6 +3433,9 @@ case("history git cannot walk", history_git_cannot_walk_case)
 case("commissioned reviewer", commissioned_reviewer_cases)
 case("split review", split_review_cases)
 case("rounds on one head", rounds_on_one_head_cases)
+case("answers file tracked by frozen-head", answers_file_tracked_by_frozen_head_case)
+case("dismissed review named in round record", dismissed_review_named_in_round_record_cases)
+case("other review copies unreadable after rewrite", other_review_copies_unreadable_after_rewrite_case)
 case("stated count position", stated_count_position_cases)
 case("moved into body", moved_into_body_cases)
 case("replaces", replaces_cases)
