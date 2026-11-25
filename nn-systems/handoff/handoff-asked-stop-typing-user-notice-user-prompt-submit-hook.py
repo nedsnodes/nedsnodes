@@ -37,7 +37,8 @@ PROGRAM = "handoff-asked-stop-typing-user-notice-user-prompt-submit-hook"
 
 THRESHOLD_HOOK_PATH = (pathlib.Path(__file__).resolve().parents[2]
                        / "scripts" / "handoff-context-threshold-hook.py")
-HANDOFF_SUPERVISOR_PATH = pathlib.Path(__file__).resolve().with_name("handoff-supervisor.py")
+LAUNCHED_AGENT_SESSION_ENVIRONMENT_PATH = pathlib.Path(__file__).resolve().with_name(
+    "handoff-supervisor-launched-agent-session-environment-variable-names-common.py")
 REMOTE_CONTROL_NAME_COMMON_PATH = pathlib.Path(__file__).resolve().with_name(
     "handoff-agent-seat-remote-control-name-stored-after-claude-ai-session-rename-common.py")
 
@@ -71,8 +72,9 @@ def hook_payload_from_stdin() -> dict:
 
 
 def launched_agent_seat_name() -> str:
-    supervisor = module_from_path("handoff_supervisor", HANDOFF_SUPERVISOR_PATH)
-    return os.environ.get(supervisor.HANDOFF_SUPERVISOR_AGENT_NAME_ENVIRONMENT_VARIABLE, "").strip()
+    launched = module_from_path("handoff_supervisor_launched_agent_session_environment_variable_names_common",
+                                LAUNCHED_AGENT_SESSION_ENVIRONMENT_PATH)
+    return os.environ.get(launched.HANDOFF_SUPERVISOR_AGENT_NAME_ENVIRONMENT_VARIABLE, "").strip()
 
 
 def new_session_name(transcript_path_text) -> str:

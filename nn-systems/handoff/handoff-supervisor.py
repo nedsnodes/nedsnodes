@@ -357,11 +357,17 @@ DEFAULT_APPENDED_SYSTEM_PROMPT_PATH = (
 )
 
 # The writer needs the launch directory after a cd; the session ID prevents a child session from handing off its parent.
-HANDOFF_SUPERVISOR_AGENT_NAME_ENVIRONMENT_VARIABLE = "NEDSNODES_HANDOFF_SUPERVISOR_AGENT_NAME"
+_launched_agent_session_environment_spec = importlib.util.spec_from_file_location(
+    "handoff_supervisor_launched_agent_session_environment_variable_names_common",
+    Path(__file__).with_name("handoff-supervisor-launched-agent-session-environment-variable-names-common.py"))
+launched_agent_session_environment = importlib.util.module_from_spec(_launched_agent_session_environment_spec)
+_launched_agent_session_environment_spec.loader.exec_module(launched_agent_session_environment)
+HANDOFF_SUPERVISOR_AGENT_NAME_ENVIRONMENT_VARIABLE = (
+    launched_agent_session_environment.HANDOFF_SUPERVISOR_AGENT_NAME_ENVIRONMENT_VARIABLE)
 HANDOFF_SUPERVISOR_WORKING_DIRECTORY_ENVIRONMENT_VARIABLE = (
-    "NEDSNODES_HANDOFF_SUPERVISOR_WORKING_DIRECTORY"
-)
-HANDOFF_SUPERVISOR_SESSION_ID_ENVIRONMENT_VARIABLE = "NEDSNODES_HANDOFF_SUPERVISOR_SESSION_ID"
+    launched_agent_session_environment.HANDOFF_SUPERVISOR_WORKING_DIRECTORY_ENVIRONMENT_VARIABLE)
+HANDOFF_SUPERVISOR_SESSION_ID_ENVIRONMENT_VARIABLE = (
+    launched_agent_session_environment.HANDOFF_SUPERVISOR_SESSION_ID_ENVIRONMENT_VARIABLE)
 
 # Claude Code (2.1.296) sets these for every command an agent-session runs, and they name that
 # agent-session. An agent that launches or recovers another agent-seat from its own shell would
