@@ -5,8 +5,8 @@ means and the approval-walk item it answers.
 
 Each case runs the hook as a subprocess, its real stdin-to-stdout path, in a
 scratch checkout this suite made. The exit code is asserted on every case. The
-model call is never real: a fake `claude` first on PATH records each call and
-answers as the case's model mode sets it.
+hook must call no model: a fake `claude` first on PATH records each call and
+fails, so any call to it fails the case.
 """
 
 import importlib.util
@@ -1829,54 +1829,6 @@ def test_an_answer_counts_when_the_last_message_showing_the_item_holds_its_text_
           no_blank_line_after_heading != SHOWN_ITEM_TEXT and counted(lines), f"lines {lines!r}")
 
 
-# Item 47.2 of merge-lane-2's approval-walk, as its walk-document held it when the user answered "Ao".
-ITEM_47_2 = """### Item 47.2 of 68: The change
-
-Each message a hook prints for a rule, a refusal, warning or reminder, starts with that rule's ID, such as `[rule bash-guard-git-push-force]`; a test fails when a hook prints a message without one, or when two rules share one. A scheduled program, added as a job to [GHI 1058, "Regular maintenance"](https://github.com/nedsnodes/nedsnodes/issues/1058), counts each ID once a week in the transcripts of both machines, the Mac's through its mirror on ned-box. Its one weekly report lists the rules not seen since their IDs were added, each beside the agent-seat that wrote it, found from the pull request that added the rule, as candidates to question, not verdicts: a guard against a rare, permanent harm may rightly never fire. A rule written only in prose, such as in `CLAUDE.md`, is not covered.
-
-[advisor] The advisor was called on this item; it changed the recommendation from a new shared log file to rule IDs counted in the transcripts.
-
-#case_against medium: every hook's messages change in one sweep, counts start only at the merge, and a rule that only ever lets actions through is never seen.
-
-The alternative: every hook also writes a log line with the rule ID, agent-seat and time into one file in the log-store, and a weekly report reads that file.
-
-Recommendation: ask the agent-seat reboot-test, which owns the Bash guards, to add rule IDs to every hook's messages, other agent-seats' hooks included, and to build the weekly count as a GHI 1058 job, in one pull request."""
-ITEM_47_2_DOCUMENT = f"""# A walk
-
-## Item 47 of 68: Rule IDs
-
-### Item 47.1 of 68: What you asked for
-
-The user asked for rule IDs.
-
-[No decision here; type N or next to continue.](https://claude.ai/artifact/x)
-
-{ITEM_47_2}
-
-## Item 48 of 68: The next item
-
-Recommendation: do the next thing.
-"""
-# The message merge-lane-2 showed item 47.2 in. Against ITEM_47_2 it changes "`; a test"
-# to "`. A test", and "the rule, as candidates" to "the rule. These are candidates": "as" dropped, "These are" added.
-ITEM_47_2_REAL_SHOWING = """Session handed off after you moved on from 47.1 (no decision there); resuming at 47.2.
-
-### Item 47.2 of 68: The change
-
-Each message a hook prints for a rule, a refusal, warning or reminder, starts with that rule's ID, such as `[rule bash-guard-git-push-force]`. A test fails when a hook prints a message without one, or when two rules share one. A scheduled program, added as a job to [GHI 1058, "Regular maintenance"](https://github.com/nedsnodes/nedsnodes/issues/1058), counts each ID once a week in the transcripts of both machines, the Mac's through its mirror on ned-box. Its one weekly report lists the rules not seen since their IDs were added, each beside the agent-seat that wrote it, found from the pull request that added the rule. These are candidates to question, not verdicts: a guard against a rare, permanent harm may rightly never fire. A rule written only in prose, such as in `CLAUDE.md`, is not covered.
-
-[advisor] The advisor was called on this item; it changed the recommendation from a new shared log file to rule IDs counted in the transcripts.
-
-#case_against medium: every hook's messages change in one sweep, counts start only at the merge, and a rule that only ever lets actions through is never seen.
-
-The alternative: every hook also writes a log line with the rule ID, agent-seat and time into one file in the log-store, and a weekly report reads that file.
-
-Recommendation: ask the agent-seat reboot-test, which owns the Bash guards, to add rule IDs to every hook's messages, other agent-seats' hooks included, and to build the weekly count as a GHI 1058 job, in one pull request.
-
-[Item 47.2 of 68, The change](https://claude.ai/artifact/SXzwJaGtf7sXGpYVsH1eDr) · A approve · D disapprove · M more responses"""
-ITEM_47_2_CLOSING_LINE = """[Item 47.2 of 68, The change](https://claude.ai/artifact/SXzwJaGtf7sXGpYVsH1eDr) · A approve · D disapprove · M more responses"""
-
-
 DECISION_ITEM = """## Item 4 of 9: a filter
 
 A filter would hide old rows. For example, a row from 2024 would vanish.
@@ -1898,23 +1850,16 @@ Recommendation: do the next thing.
 """
 
 
-QUOTED_PROPOSAL_ITEM = """## Item 4 of 9: a filter
-
-A filter would hide old rows.
-
-#new
-> Hide rows older than a year.
-> Keep the rest.
-
-**Recommendation: leave the filter out.**"""
-
-
 def test_a_bold_new_text_label_is_read_as_the_label_by_both_hooks():
     hook = load_short_answer_hook_for_test()
     check("a source `#new **The new text:** X` line is shown as \"If you approve, the new text: X\"",
           hook.new_text_as_shown("#new **The new text:** Show every row.")
           == "If you approve, the new text: Show every row.",
           hook.new_text_as_shown("#new **The new text:** Show every row."))
+    check("a source `#new_if_d **The new text:** X` line is shown as \"If you disapprove, the new text: X\"",
+          hook.new_text_as_shown("#new_if_d **The new text:** Show every row.")
+          == "If you disapprove, the new text: Show every row.",
+          hook.new_text_as_shown("#new_if_d **The new text:** Show every row."))
     item = DECISION_ITEM.replace("#new_if_d Show every row.", "#new_if_d **The new text:** Show every row.")
     case = Case(next_to_present="item 4 of 9", document="# A walk\n\n" + item + "\n")
     shown = item.replace("#new_if_d **The new text:** Show", "If you disapprove, the new text: Show")
@@ -2128,8 +2073,9 @@ Recommendation: do the next thing.
 
 
 def test_a_list_line_that_reads_as_a_reference_definition_only_alone_defines_nothing_for_the_message():
-    item = DECISION_ITEM.replace("#new Hide rows older than a year.",
-                                 "[Proposed edits][edits 4]:\n\n#new Hide rows older than a year.")
+    # The reference is in the heading, the only line the hook compares: read with the list line's definition, it
+    # would become a link and no longer match the walk-document's heading, where `[edits 4]` is undefined.
+    item = DECISION_ITEM.replace("## Item 4 of 9: a filter", "## Item 4 of 9: a filter, [Proposed edits][edits 4]")
     document = DECISION_DOCUMENT.replace(DECISION_ITEM, item)
     case = Case(next_to_present="item 4 of 9", document=document)
     # The list line above the item names the item's number, so the search for the item's heading reads it alone.
