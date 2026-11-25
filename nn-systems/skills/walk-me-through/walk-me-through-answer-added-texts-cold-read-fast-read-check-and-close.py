@@ -462,7 +462,7 @@ it answers, and each walk-minutes line naming one, each with its file and line.
 When the search fails, the step refuses, before any read, printing what the
 search said, and exits 1; any exit of the search but its found and nothing-found
 exits is a failure. The step saves what the search prints, a search with no
-hits too, as it prints it, in
+hits too, once it has written it out, in
 `docs/walk/title-search-cache/<walk name>-item-<N>-<agent-session id>.md`, the
 titles searched for as a JSON list on its first line, the agent-session id
 being $CLAUDE_CODE_SESSION_ID. A later run for the item in the same
@@ -3458,39 +3458,46 @@ def approval_walk_item_system_status_claims_not_rechecked_refused(text, item, do
 
 def approval_walk_item_title_user_messages_in_earlier_agent_sessions_lines(walk_finder, minutes, text, earlier,
                                                                          numbers, item, command):
-    """Return a function that saves and returns the lines TITLE_SEARCH_PROGRAM prints for the item's title and the
-    title of each earlier read text of it, as earlier_read_texts_of_item returns them; raise Failure when the search
-    failed. A Withdrawn version heading carries no title, so those read texts are the item's only earlier titles the
-    program can know.
+    """Return (the lines TITLE_SEARCH_PROGRAM prints for the item's title and the title of each earlier read text
+    of it, as earlier_read_texts_of_item returns them, a function that saves them and returns the lines to print
+    after them); raise Failure when the search failed. A Withdrawn version heading carries no title, so those read
+    texts are the item's only earlier titles the program can know.
 
-    Call the function only in the statement that prints its lines: the lines are saved in the title search cache
-    file for the item and this agent-session, and a later run for the same titles in the same agent-session prints
-    only a line naming that file, since fix rounds rerun the step, so lines saved but never printed are never read."""
+    Print them with lines_printed_with_title_search_saved_after, which saves them only once they are printed: the
+    lines are saved in the title search cache file for the item and this agent-session, and a later run for the
+    same titles in the same agent-session prints only a line naming that file, since fix rounds rerun the step, so
+    lines saved but never printed are never read."""
     titles = []
     for heading in [text] + [copied for _, _, copied in earlier]:
         title = item_title(walk_finder, heading.split("\n", 1)[0])
         if title and title not in titles:
             titles.append(title)
     if not titles:
-        return lambda: []
+        return [], lambda: []
     variable = load_module("cold_read_record_names", RECORD_NAMES_FILE).AGENT_SESSION_ID_ENVIRONMENT_VARIABLE
     session_id = os.environ.get(variable)
     cache = (minutes.parent / TITLE_SEARCH_CACHE_DIRECTORY_NAME
              / TITLE_SEARCH_CACHE_FILE_NAME.format(walk=minutes.name[:-len(walk_finder.MINUTES_SUFFIX)],
                                                    numbers="-and-".join(numbers), session=session_id))
     if session_id and title_search_cache_titles(cache) == titles:
-        return lambda: [TITLE_SEARCH_CACHE_PRINTED_BEFORE.format(item=item, path=cache)]
+        return [TITLE_SEARCH_CACHE_PRINTED_BEFORE.format(item=item, path=cache)], lambda: []
     words = [word for title in titles for word in ("--title", title)]
     words += [word for number in numbers for word in ("--item-number", number)]
     result = subprocess.run([sys.executable, str(TITLE_SEARCH_PROGRAM), *words], capture_output=True, text=True,
                             stdin=subprocess.DEVNULL)
-    exits = load_module("title_search", TITLE_SEARCH_PROGRAM)
+    try:
+        exits = load_module("title_search", TITLE_SEARCH_PROGRAM)
+    # Whatever a search that cannot load raises, it is a failed search, reported as the others are.
+    except Exception as error:
+        raise Failure(APPROVAL_WALK_ITEM_TITLE_SEARCH_FAILED.format(
+            item=item, exit=result.returncode, command=command,
+            said="\n".join(filter(None, [result.stderr.strip(), f"Loading it here raised {error!r}."]))))
     if result.returncode not in (exits.EXIT_FOUND, exits.EXIT_NOTHING_FOUND):
         raise Failure(APPROVAL_WALK_ITEM_TITLE_SEARCH_FAILED.format(
             item=item, exit=result.returncode, said=result.stderr.strip() or "nothing", command=command))
     lines = result.stdout.rstrip("\n").split("\n") if result.stdout.strip() else []
     if not session_id:
-        return lambda: lines + [TITLE_SEARCH_CACHE_NOT_SAVED.format(
+        return lines, lambda: [TITLE_SEARCH_CACHE_NOT_SAVED.format(
             path=minutes.parent / TITLE_SEARCH_CACHE_DIRECTORY_NAME,
             why=TITLE_SEARCH_CACHE_NO_AGENT_SESSION.format(variable=variable))]
 
@@ -3501,9 +3508,21 @@ def approval_walk_item_title_user_messages_in_earlier_agent_sessions_lines(walk_
             temporary.write_text("\n".join([json.dumps(titles)] + lines) + "\n", encoding="utf-8")
             os.replace(temporary, cache)
         except OSError as error:
-            return lines + [TITLE_SEARCH_CACHE_NOT_SAVED.format(path=cache, why=error)]
-        return lines
-    return saved_lines
+            return [TITLE_SEARCH_CACHE_NOT_SAVED.format(path=cache, why=error)]
+        return []
+    return lines, saved_lines
+
+
+def lines_printed_with_title_search_saved_after(first, past_words, rest):
+    """Print first, then the title search's lines of past_words, as
+    approval_walk_item_title_user_messages_in_earlier_agent_sessions_lines returns it, then rest; save the search
+    only once its lines are written out, so a write that fails leaves no cache saying they were printed."""
+    lines, save = past_words
+    print("\n".join([first] + lines))
+    sys.stdout.flush()
+    after = save() + rest
+    if after:
+        print("\n".join(after))
 
 
 def title_search_cache_titles(cache):
@@ -3586,7 +3605,7 @@ def waiting_item_read(arguments, sub_step_of=None):
             approval_walk_item_text_over_word_limit_refused(*above[:6], above[7], command)
     # Before anything is written, so a refused item leaves the walk-minutes and the walk-document as they were; an
     # item settled without being shown is not refused, since no status in it reaches the user.
-    recheck_line, past_words = None, lambda: []
+    recheck_line, past_words = None, ([], lambda: [])
     if rated_none_item_not_to_be_shown(walk_finder, top, minutes, value, numbers, total, parser, named) is None:
         recheck_line = approval_walk_item_system_status_claims_not_rechecked_refused(
             text, item, document, rerun, rechecked)
@@ -3661,8 +3680,8 @@ def waiting_item_read(arguments, sub_step_of=None):
                 rest = no_answer_rows + (withheld or [ITEM_READ_NOT_RUN_NEXT.format(
                     item=item, now_over_later_command=check_command_with_cwd(top, NOW_OVER_LATER_FLAG))]
                     + waiting_on_item_prerequisite_lines(walk_finder, minutes, numbers, total, parser))
-                print("\n".join([ITEM_READ_NOT_RUN.format(item=item, report=latest[1]["report"])] + past_words()
-                                 + rest))
+                lines_printed_with_title_search_saved_after(
+                    ITEM_READ_NOT_RUN.format(item=item, report=latest[1]["report"]), past_words, rest)
                 return 1 if withheld else 0
             why = ITEM_READ_RUN_FACTS.format(report=latest[1]["report"], facts=", ".join(facts[:FACTS_LISTED]))
         walk_name = minutes.name[:-len(walk_finder.MINUTES_SUFFIX)]
@@ -3689,8 +3708,8 @@ def waiting_item_read(arguments, sub_step_of=None):
                            now_over_later_command=check_command_with_cwd(top, NOW_OVER_LATER_FLAG))
                for line in (ITEM_READ_LINES[:1] if withheld else ITEM_READ_LINES)]
             + (withheld or waiting_on_item_prerequisite_lines(walk_finder, minutes, numbers, total, parser)))
-    print("\n".join([ITEM_READ_USED.format(item=item, how=how, report=outcome["report"], notes=notes)] + past_words()
-                     + rest))
+    lines_printed_with_title_search_saved_after(
+        ITEM_READ_USED.format(item=item, how=how, report=outcome["report"], notes=notes), past_words, rest)
     return 1 if withheld else 0
 
 
