@@ -11,7 +11,8 @@ in, as merge-lane-2, always with a merge commit. A worktree already at either
 path is removed first, with any changes in it, unless git records it as locked; a
 worktree there whose .git is gone is removed the same way once its .git is written
 back from git's record of it, and a directory there that git records no worktree
-at is left as it is, and the run stops. --merged-worktree-only makes
+at, or a symbolic link, is left as it is, and the run stops before it removes
+either worktree. --merged-worktree-only makes
 pr<n>-merged alone and leaves pr<n>-head as it is, because reviewers may be
 reading it.
 
@@ -20,8 +21,8 @@ objects, so the fetched nn-head-commit is visible to the new worktrees.
 
 Exit codes: 0 both worktrees made, or pr<n>-merged alone with
 --merged-worktree-only; 1 a git step failed, the head conflicts
-with main, or a directory at a worktree's path is not a recorded worktree, named on
-stdout.
+with main, or a worktree's path is a symbolic link or a directory that is not a
+recorded worktree, named on stdout.
 """
 
 import argparse
@@ -55,6 +56,10 @@ class HeadConflictsWithMain(Exception):
 
 
 class WorktreeNotRecorded(Exception):
+    pass
+
+
+class WorktreePathIsSymbolicLink(Exception):
     pass
 
 
@@ -113,9 +118,15 @@ def main(argv=None):
                 f"pull/{number}/head")
         rebuilt =((merged_worktree,) if arguments.merged_worktree_only
                    else (head_worktree, merged_worktree))
+        # Every path is checked before any is removed, so a refusal deletes nothing.
+        for worktree in rebuilt:
+            # git worktree remove follows a link to whatever worktree it points at.
+            if worktree.is_symlink():
+                raise WorktreePathIsSymbolicLink(worktree)
         for worktree in rebuilt:
             if worktree.exists() and not (worktree / ".git").exists():
                 git_file_of_recorded_worktree_restore(checkout, worktree)
+        for worktree in rebuilt:
             if (worktree / ".git").exists():
                 git(checkout, "worktree", "remove", "--force", str(worktree))
         if not arguments.merged_worktree_only:
@@ -156,6 +167,14 @@ def main(argv=None):
               f"Look at what the directory holds. When nothing in it is needed, delete it and "
               f"run this again.\n"
               f"When something in it is needed, or you cannot tell, tell the user this message.")
+        return 1
+    except WorktreePathIsSymbolicLink as link:
+        print(f"PR {number}: worktrees not rebuilt: {link.args[0]} is a symbolic link to "
+              f"{link.args[0].readlink()}, and removing it as a worktree would remove what it "
+              f"points at. Nothing was deleted.\n"
+              f"When nothing needs the link, delete the link alone, with rm and no -r, and run "
+              f"this again.\n"
+              f"When something needs it, or you cannot tell, tell the user this message.")
         return 1
     except GitStepFailed as failure:
         print(f"PR {number}: worktrees not rebuilt: {failure}\n"

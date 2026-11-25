@@ -200,6 +200,39 @@ def main():
                   f"exit {completed.returncode}\n{completed.stdout}{completed.stderr}")
             shutil.rmtree(head_worktree)
 
+            git(checkout, "worktree", "add", "-q", "--detach", str(head_worktree), head_commit)
+            (head_worktree / "left-behind.txt").write_text("a change in the recorded pr<n>-head\n")
+            git(checkout, "worktree", "remove", "--force", str(merged_worktree))
+            merged_worktree.mkdir()
+            (merged_worktree / "not-a-worktree.txt").write_text("an ordinary directory\n")
+            completed = run_program(helpers, checkout, "7", head_commit, main_commit)
+            check("a recorded pr<n>-head is kept, with its changes, when pr<n>-merged is a "
+                  "directory git records no worktree at, exit 1 saying nothing was deleted",
+                  completed.returncode == 1
+                  and (head_worktree / "left-behind.txt").exists()
+                  and (merged_worktree / "not-a-worktree.txt").exists()
+                  and "Nothing was deleted" in completed.stdout,
+                  f"exit {completed.returncode}\n{completed.stdout}{completed.stderr}")
+            shutil.rmtree(merged_worktree)
+
+            other_worktree = scratch / "other-worktree"
+            git(checkout, "worktree", "add", "-q", "--detach", str(other_worktree), main_commit)
+            (other_worktree / ".git").unlink()
+            (other_worktree / "kept.txt").write_text("another worktree's file\n")
+            git(checkout, "worktree", "remove", "--force", str(head_worktree))
+            head_worktree.symlink_to(other_worktree)
+            completed = run_program(helpers, checkout, "7", head_commit, main_commit)
+            check("a pr<n>-head that is a symbolic link to another worktree that lost its .git "
+                  "leaves that worktree and its record, exit 1 naming the link",
+                  completed.returncode == 1
+                  and (other_worktree / "kept.txt").exists()
+                  and not (other_worktree / ".git").exists()
+                  and str(other_worktree) in git(checkout, "worktree", "list", "--porcelain")
+                  and "symbolic link" in completed.stdout
+                  and "Nothing was deleted" in completed.stdout,
+                  f"exit {completed.returncode}\n{completed.stdout}{completed.stderr}")
+            head_worktree.unlink()
+
         relative_helpers = scratch / "relative-helpers"
         completed = run_program(Path("relative-helpers"), Path("checkout"), "7", head_commit,
                                 main_commit, cwd=scratch)
