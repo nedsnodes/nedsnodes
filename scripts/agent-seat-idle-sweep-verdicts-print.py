@@ -7,10 +7,9 @@ due-time-passes.md, § The idle sweep). It decides only what code decides, and i
 it sends no message, starts no headless agent-session, writes no alert and keeps no log, so a
 verdict here changes nothing on the machine. The second build-slice,
 scripts/agent-seat-idle-sweep-headless-judge-wake-messages-send-and-user-alerts-write.py, calls
-verdict_for_seat itself, judges the cases marked "judge", sends, and runs on a schedule; before it
-escalates a wait a rule 2 message was sent on, it calls
-transcript_tool_calls_and_assistant_texts_since for what the agent-seat did since the sentences
-that wait's messages named.
+verdict_for_seat itself, judges the cases marked "judge", sends, and runs on a schedule; on a wait
+a rule 2 message was sent on, it calls transcript_tool_calls_and_assistant_texts_since for the text
+messages the agent-seat wrote since that wait's messages, whose reply lines can end the wait.
 
 What it reads, for each agent-seat that has a handoff-supervisor state file
 (`<handoff directory>/<seat>-supervisor-state.json`):
