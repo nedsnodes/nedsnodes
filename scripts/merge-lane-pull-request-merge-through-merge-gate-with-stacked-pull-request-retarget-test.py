@@ -34,6 +34,9 @@ origin's commit and, before the program runs, write recordings under the outputs
 directory or under the runner's default recorded-inputs directory, which each case
 points into its scratch home, or put a plain file or a read-only directory where
 hr/store goes so no recording can be saved. The program's
+A case may add commits on origin's main after its first, the last of them then
+being the merge commit, and write the after-merge test run passed main commits
+file. The program's
 SURVIVING_MUTANT_TEST_PRS_GO_AHEAD_PROGRAM is a fake that logs the GH_TOKEN it
 saw and answers from the output and exit code the case gives, so no case reads
 GitHub or the log-store through the real one.
@@ -244,8 +247,9 @@ def origin_with_one_commit(scratch, extra_files=None):
     (seed / "scripts").mkdir()
     (seed / "scripts" / "run-all-test-suites.py").write_text(FAKE_RUNNER)
     for relative, body in (extra_files or {}).items():
+        (seed / relative).parent.mkdir(parents=True, exist_ok=True)
         (seed / relative).write_text(body)
-    git("add", "README", "scripts", cwd=seed)
+    git("add", "README", "scripts", *(extra_files or {}), cwd=seed)
     git("commit", "-q", "-m", "seed", cwd=seed)
     git("clone", "-q", "--bare", str(seed), str(origin))
     return origin
@@ -295,7 +299,7 @@ def run_case(scratch, name, gate_answers, routes, token=TOKEN, review_tools_stat
              origin_files=None, before_the_program_runs=None,
              merge_commit_new_to_the_clone=False,
              another_fetch_races_the_after_merge_fetch=False,
-             go_ahead_answer=GO_AHEAD_COUNT_ONLY):
+             go_ahead_answer=GO_AHEAD_COUNT_ONLY, main_commits_after_the_first=()):
     """Run main() once; return (exit code, output, gh calls, gate calls, waits).
 
     Each "MERGE_COMMIT" in routes becomes origin's commit, and each "ORIGIN"
@@ -322,6 +326,9 @@ def run_case(scratch, name, gate_answers, routes, token=TOKEN, review_tools_stat
     another_fetch_races_the_after_merge_fetch: as merge_commit_new_to_the_clone, and the
     clone's upload-pack is COMPETING_FETCH_UPLOAD_PACK.
     go_ahead_answer: (output, exit code) of the fake go-ahead program.
+    main_commits_after_the_first: path -> body dicts, each committed in turn on origin's main
+    after its first commit, before the review tools clone is made; the last is the merge
+    commit.
 
     review_tools_state: "at-main", "behind-main" (origin/main moved on after the
     clone, by a commit that adds new-on-main.txt), "no-origin" (the clone's
@@ -362,6 +369,14 @@ def run_case(scratch, name, gate_answers, routes, token=TOKEN, review_tools_stat
             f'exec {shutil.which("git")} "$@"\n')
         (bin_directory / "git").chmod(0o755)
     origin = origin_with_one_commit(directory, origin_files)
+    for files in main_commits_after_the_first:
+        seed = directory / "origin-seed"
+        for relative, body in files.items():
+            (seed / relative).parent.mkdir(parents=True, exist_ok=True)
+            (seed / relative).write_text(body)
+        git("add", *files, cwd=seed)
+        git("commit", "-q", "-m", f"main changes {', '.join(files)}", cwd=seed)
+        git("push", "-q", str(origin), "main", cwd=seed)
     review_tools = directory / "review-tools"
     git("clone", "-q", str(origin), str(review_tools))
     git("checkout", "-q", "--detach", "origin/main", cwd=review_tools)
@@ -623,6 +638,210 @@ def author_seat_made(directory):
     task_list.mkdir(parents=True)
     (directory / "home" / "agents" / "author-seat").mkdir(parents=True)
     return task_list
+
+
+MARKDOWN_PAGE = "docs/guide.md"
+MARKDOWN_READING_SUITE = "scripts/guide-reading-test.py"
+
+
+def passing_recording(suite, reads):
+    """A passing recording of suite, in the runner's format, that read only reads."""
+    runner = program.common.run_all_test_suites
+    return {"format": runner.RECORDED_INPUTS_FORMAT_VERSION, "suite": suite, "exit": 0,
+            "seconds": 1.0, "skipped_cases": 0, "skipped_cases_this_machine_cannot_run": 0,
+            "reads": reads, "looked_for": {}, "lists": {}, "git_commands_on_the_checkout": [],
+            "git_calls_run_from_the_checkout": [], "files_fingerprint": "unused without git calls"}
+
+
+def suites_the_real_runner_selects(directory, since, recordings):
+    """{suite: (selected, why)} that run-all-test-suites.py's own selection gives at origin's
+    main, the merge commit, for --only-suites-whose-recorded-inputs-changed-since since."""
+    runner = program.common.run_all_test_suites
+    top = directory / "origin-seed"
+    differ = runner.files_that_differ_since(top, since)
+    return {suite: (selected, why) for suite, selected, why in runner.suites_selected_since(
+        top, sorted(recordings), recordings, since, differ, {}, {}, None)}
+
+
+def passed_main_commits_file(directory):
+    return directory / "outputs" / program.AFTER_MERGE_TEST_RUN_PASSED_MAIN_COMMITS_FILE_NAME
+
+
+def main_commits(directory):
+    """origin's main, oldest first: the first commit, then each one a case added."""
+    return subprocess.run(["git", "-C", str(directory / "origin-seed"), "rev-list", "--reverse",
+                           "HEAD"], capture_output=True, text=True, env=GIT_ENVIRONMENT,
+                          check=True).stdout.split()
+
+
+def main_last_tested_commit_cases(scratch):
+    """A merge with no passing head test run selects since main's last tested commit."""
+    # Main's first commit is where the merged branch started; main then changes the runner,
+    # which is under EVERY_SUITE_RUNS_WHEN_THESE_CHANGE, and the merge changes only Markdown.
+    files = {RECORDED_SUITE: "print('ok')\n", MARKDOWN_READING_SUITE: "print('ok')\n",
+             MARKDOWN_PAGE: "guide\n"}
+    history = [{"scripts/run-all-test-suites.py": FAKE_RUNNER + "# main changed the runner\n"},
+               {MARKDOWN_PAGE: "guide, revised\n"}]
+
+    def record_names(*indexes):
+        def write(directory):
+            commits = main_commits(directory)
+            record = passed_main_commits_file(directory)
+            record.parent.mkdir(parents=True, exist_ok=True)
+            record.write_text("".join(f"{commits[index]}\n" for index in indexes))
+        return write
+
+    def recordings_at_first_commit(directory):
+        first = main_commits(directory)[0]
+        blob = lambda path: git_output(directory / "origin-seed", "rev-parse", f"{first}:{path}")
+        return {RECORDED_SUITE: passing_recording(RECORDED_SUITE,
+                                                  {RECORDED_SUITE: blob(RECORDED_SUITE)}),
+                MARKDOWN_READING_SUITE: passing_recording(
+                    MARKDOWN_READING_SUITE, {MARKDOWN_READING_SUITE: blob(MARKDOWN_READING_SUITE),
+                                             MARKDOWN_PAGE: blob(MARKDOWN_PAGE)})}
+
+    name = "markdown-merge-since-main-last-tested"
+    exit_code, output, _, _, _ = run_case(
+        scratch, name, [(GATE_PASSED, 0)], default_routes(STACKED_AND_NOT), origin_files=files,
+        main_commits_after_the_first=history, before_the_program_runs=record_names(1))
+    directory = scratch / name
+    first, runner_changed, merge_commit = main_commits(directory)
+    calls = runner_calls(scratch, name)
+    since = calls[0]["argv"][1] if calls else None
+    recordings = recordings_at_first_commit(directory)
+    selected = (suites_the_real_runner_selects(directory, since, recordings)
+                if since in main_commits(directory) else {})
+    from_the_branch_start = suites_the_real_runner_selects(directory, first, recordings)
+    check("a Markdown-only merge with no head test run, on a branch that started before main "
+          "changed the runner, selects since main's last tested commit, after the runner "
+          "change, so the real runner selects only the suite that reads the Markdown page; "
+          "selecting since the branch's start would run every suite",
+          exit_code == 0 and since == runner_changed
+          and selected == {RECORDED_SUITE: (False, selected.get(RECORDED_SUITE, (None,))[1]),
+                           MARKDOWN_READING_SUITE: (True, selected.get(
+                               MARKDOWN_READING_SUITE, (None,))[1])}
+          and all(chosen and "every suite runs under it" in why
+                  for chosen, why in from_the_branch_start.values())
+          and f"changed since {runner_changed[:12]}, main's last tested commit, the newest on "
+              f"main's first-parent line whose after-merge test run passed: no readable head "
+              f"test run record under" in output,
+          f"exit {exit_code}\n{output}\n{json.dumps(calls)}\n{selected}\n"
+          f"{from_the_branch_start}")
+    check("the passing after-merge test run appends the merge commit to the passed main "
+          "commits file",
+          passed_main_commits_file(directory).read_text() == f"{runner_changed}\n{merge_commit}\n"
+          and f"appended {merge_commit[:12]} to {passed_main_commits_file(directory)}, as main's "
+              f"last tested commit" in output, output)
+
+    name = "markdown-merge-main-last-tested-before-the-runner-change"
+    exit_code, output, _, _, _ = run_case(
+        scratch, name, [(GATE_PASSED, 0)], default_routes(STACKED_AND_NOT), origin_files=files,
+        main_commits_after_the_first=history, before_the_program_runs=record_names(0))
+    directory = scratch / name
+    first, runner_changed, merge_commit = main_commits(directory)
+    calls = runner_calls(scratch, name)
+    since = calls[0]["argv"][1] if calls else None
+    selected = (suites_the_real_runner_selects(directory, since,
+                                               recordings_at_first_commit(directory))
+                if since in main_commits(directory) else {})
+    check("when main's last tested commit is older than the runner change, the merge selects "
+          "since that commit, so the real runner still runs every suite; the passing run's "
+          "diff reached back to it, so the merge commit is appended",
+          exit_code == 0 and since == first and selected
+          and all(chosen and "scripts/run-all-test-suites.py differs" in why
+                  for chosen, why in selected.values())
+          and passed_main_commits_file(directory).read_text() == f"{first}\n{merge_commit}\n",
+          f"exit {exit_code}\n{output}\n{json.dumps(calls)}\n{selected}")
+
+    name = "passed-main-commits-file-left-alone-when-a-merge-between-is-untested"
+    exit_code, output, _, _, _ = run_case(
+        scratch, name, [(GATE_PASSED, 0)], default_routes(STACKED_AND_NOT), origin_files=files,
+        main_commits_after_the_first=history, before_the_program_runs=record_names(0),
+        head_test_run_test_logs=[("MERGED.txt", head_test_run_record("MERGED", 0))])
+    directory = scratch / name
+    first, _, merge_commit = main_commits(directory)
+    calls = runner_calls(scratch, name)
+    record = passed_main_commits_file(directory)
+    check("a passing run that selected since the head test run's commit, while the merge "
+          "commit's first parent is not main's last tested commit, leaves the passed main "
+          "commits file alone, since the merge between them may be untested",
+          exit_code == 0 and calls and calls[0]["argv"][1] == merged_commit(scratch, name)
+          and record.read_text() == f"{first}\n"
+          and f"{record} is left alone: this test run of main at {merge_commit[:12]} selected "
+              f"since {merged_commit(scratch, name)[:12]}, and main's last tested commit is "
+              f"{first[:12]}, so a merge between them may not have been tested." in output,
+          f"exit {exit_code}\n{output}\n{json.dumps(calls)}")
+
+    def record_names_a_commit_off_main(directory):
+        record = passed_main_commits_file(directory)
+        record.parent.mkdir(parents=True, exist_ok=True)
+        record.write_text("f" * 40 + "\n")
+
+    name = "since-head-when-passed-main-commits-are-off-main"
+    exit_code, output, _, _, _ = run_case(
+        scratch, name, [(GATE_PASSED, 0)], default_routes(STACKED_AND_NOT),
+        before_the_program_runs=record_names_a_commit_off_main)
+    calls = runner_calls(scratch, name)
+    record = passed_main_commits_file(scratch / name)
+    check("a passed main commits file naming no commit on main's first-parent line selects "
+          "since the head commit, saying why, and is left alone",
+          exit_code == 0 and calls and calls[0]["argv"][1] == HEAD
+          and f"{record} names no commit on main's first-parent line at" in output
+          and f"changed since the head commit {HEAD[:12]}" in output
+          and record.read_text() == "f" * 40 + "\n" and f"{record} is left alone" in output,
+          f"exit {exit_code}\n{output}\n{json.dumps(calls)}")
+
+    name = "since-head-when-passed-main-commits-file-unreadable"
+    exit_code, output, _, _, _ = run_case(
+        scratch, name, [(GATE_PASSED, 0)], default_routes(STACKED_AND_NOT),
+        before_the_program_runs=lambda directory: passed_main_commits_file(directory).mkdir(
+            parents=True))
+    calls = runner_calls(scratch, name)
+    record = passed_main_commits_file(scratch / name)
+    check("a passed main commits file that cannot be read selects since the head commit, "
+          "naming the error, and nothing is appended",
+          exit_code == 0 and calls and calls[0]["argv"][1] == HEAD
+          and f"{record} could not be read:" in output and f"{record} is left alone" in output,
+          f"exit {exit_code}\n{output}\n{json.dumps(calls)}")
+
+    name = "since-head-when-first-parent-line-unlisted"
+    exit_code, output, _, _, _ = run_case(
+        scratch, name, [(GATE_PASSED, 0)], default_routes(STACKED_AND_NOT),
+        before_the_program_runs=record_names(0), git_fails_after_merge_on=("rev-list --first-parent", "exit 1"))
+    calls = runner_calls(scratch, name)
+    record = passed_main_commits_file(scratch / name)
+    first = main_commits(scratch / name)[0]
+    check("when git cannot list main's first-parent line, the merge selects since the head "
+          "commit, quoting git's error, and the passed main commits file is left alone",
+          exit_code == 0 and calls and calls[0]["argv"][1] == HEAD
+          and "git rev-list --first-parent" in output and "fake git failed" in output
+          and record.read_text() == f"{first}\n" and f"{record} is left alone" in output,
+          f"exit {exit_code}\n{output}\n{json.dumps(calls)}")
+
+    def record_read_only(directory):
+        record_names(0)(directory)
+        passed_main_commits_file(directory).chmod(0o444)
+
+    name = "passed-main-commits-file-not-appended"
+    exit_code, output, _, _, _ = run_case(
+        scratch, name, [(GATE_PASSED, 0)], default_routes(STACKED_AND_NOT),
+        before_the_program_runs=record_read_only)
+    record = passed_main_commits_file(scratch / name)
+    merge_commit = origin_commit(scratch, name)
+    check("a passed main commits file the merge commit cannot be appended to exits 3, naming "
+          "it and the error",
+          exit_code == 3
+          and f"STOP: merged, but {merge_commit} was not appended to {record}:" in output
+          and f"Otherwise, {TELL_THE_USER_WITH_THE_ERROR}" in output,
+          f"exit {exit_code}\n{output}")
+
+    name = "passed-main-commits-file-not-written-after-a-failing-run"
+    exit_code, output, _, _, _ = run_case(
+        scratch, name, [(GATE_PASSED, 0)], default_routes(STACKED_AND_NOT),
+        runner_answer=(RUNNER_FAILED, 1))
+    check("a failing after-merge test run writes no passed main commits file",
+          exit_code == 3 and not passed_main_commits_file(scratch / name).exists(),
+          f"exit {exit_code}\n{output}")
 
 
 def failed_suites_kept_in_view_cases(scratch):
@@ -1964,6 +2183,7 @@ def main():
               and not merge_commit_worktree.exists(), f"exit {exit_code}\n{output}")
 
         failed_suites_kept_in_view_cases(scratch)
+        main_last_tested_commit_cases(scratch)
 
         exit_code, output, _, _, _ = run_case(
             scratch, "after-merge-could-not-run", [(GATE_PASSED, 0)],
