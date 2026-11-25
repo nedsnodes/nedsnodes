@@ -6,7 +6,7 @@ means and the approval-walk item it answers.
 Each case runs the hook as a subprocess, its real stdin-to-stdout path, in a
 scratch checkout this suite made. The exit code is asserted on every case. The
 hook must call no model: a fake `claude` first on PATH records each call and
-fails, so any call to it fails the case.
+exits 1, and the cases that assert no model call read its log.
 """
 
 import importlib.util
@@ -1860,6 +1860,9 @@ def test_a_bold_new_text_label_is_read_as_the_label_by_both_hooks():
           hook.new_text_as_shown("#new_if_d **The new text:** Show every row.")
           == "If you disapprove, the new text: Show every row.",
           hook.new_text_as_shown("#new_if_d **The new text:** Show every row."))
+    for spelled in ("#new_\u0131f_d Show every row.", "#NEW_\u0130F_D Show every row."):
+        check(f"a mark spelled with a dotless or dotted i, {spelled!r}, is no mark: shown as None, not a KeyError",
+              hook.new_text_as_shown(spelled) is None, hook.new_text_as_shown(spelled))
     item = DECISION_ITEM.replace("#new_if_d Show every row.", "#new_if_d **The new text:** Show every row.")
     case = Case(next_to_present="item 4 of 9", document="# A walk\n\n" + item + "\n")
     shown = item.replace("#new_if_d **The new text:** Show", "If you disapprove, the new text: Show")
