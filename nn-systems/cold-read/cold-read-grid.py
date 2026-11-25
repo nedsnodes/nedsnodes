@@ -1053,18 +1053,36 @@ def stopped_cells_write_check_lines(stopped_report_paths: list, baseline,
     return lines
 
 
+LIFTED_STRAY_WRITE_INSTRUCTION = (
+    "Inspect each file this line names and revert only what the reviewer wrote: you may have "
+    "been editing in the same checkout, and this is cleanup, not something to escalate.")
+LIFTED_WRITE_CHECK_DID_NOT_RUN_INSTRUCTION = (
+    "Look before you triage, because the check for writes outside the report did not run: read "
+    "what `git status` lists against the edits you know are your own, revert only what a "
+    "reviewer evidently wrote, and ask the user about any other change you did not make.")
+LIFTED_FELL_BACK_INSTRUCTION = (
+    "If this report drives a change, name the model that wrote it in cold-read-triage.md.")
+LIFTED_RECOVERED_INSTRUCTION = (
+    "The report is intact and now in place, so triage it as usual; nothing else needs doing.")
+
+
 def lift_cell_status_lines(report_path: pathlib.Path, log_lines: list) -> None:
-    """Print cell status lines before successful-attempt logs are deleted."""
+    """Print cell status lines before successful-attempt logs are deleted,
+    each followed by the line that says what to do about it."""
     for line in log_lines:
         if cell_status_line(line, cell_common.STRAY_WRITE_PHRASE):
             print(f"STRAY WRITE: {line.strip()}", flush=True)
+            print(LIFTED_STRAY_WRITE_INSTRUCTION, flush=True)
         if cell_status_line(line, cell_common.STRAY_WRITE_CHECK_SKIPPED_PHRASE):
             print(f"WRITE CHECK DID NOT RUN: {report_path.name} — "
                   f"{line.strip()}", flush=True)
+            print(LIFTED_WRITE_CHECK_DID_NOT_RUN_INSTRUCTION, flush=True)
         if cell_status_line(line, cell_common.FELL_BACK_PHRASE):
             print(f"FELL BACK: {report_path.name} — {line.strip()}", flush=True)
+            print(LIFTED_FELL_BACK_INSTRUCTION, flush=True)
         if cell_status_line(line, cell_common.NEAR_MISS_RECOVERY_PHRASE):
             print(f"RECOVERED: {report_path.name} — {line.strip()}", flush=True)
+            print(LIFTED_RECOVERED_INSTRUCTION, flush=True)
 
 
 def cause_of_failed_attempt(attempt: CellAttempt, exit_code, log_lines: list) -> tuple:
