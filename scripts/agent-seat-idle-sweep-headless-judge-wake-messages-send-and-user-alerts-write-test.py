@@ -972,11 +972,12 @@ def promise_sent_on_rule_five_wait(promise_sender):
 
 
 def failed_send_sentences(machine):
-    """The sentences of each failed promise message, read through the group its event names, as
+    """The sentences of each failed promise message, read through the groups its event names, as
     the program reads them."""
     groups = {event["group_id"]: event["sentences"]
               for event in machine.events("rule_2_sentences_on_wait")}
-    return [groups.get(event.get("group_id")) for event in machine.events("promise_message_send_failed")]
+    return [[sentence for group_id in event.get("group_ids", []) for sentence in groups[group_id]]
+            for event in machine.events("promise_message_send_failed")]
 
 
 PROMISE_SEND_FAILS = {"sends": [send_to("alpha", is_error=True)],
@@ -986,7 +987,7 @@ check("rule 2: a promise message on an open wait whose send failed logs the prom
       "failed message's sentences, but no promise_message event",
       [event["step"] for event in machine.events("wait_step")] == ["nudge", "promise"]
       and failed_send_sentences(machine) == [[PROMISE]]
-      and set(machine.events("promise_message_send_failed")[0]) >= {"group_id", "text"}
+      and set(machine.events("promise_message_send_failed")[0]) >= {"group_ids", "text"}
       and "sentences" not in machine.events("promise_message_send_failed")[0]
       and not machine.events("promise_message") and len(machine.events("headless_failed")) == 1,
       machine.events())
@@ -2594,8 +2595,8 @@ groups = machine.events("rule_2_sentences_on_wait")
 check("after the reset, the promise judged again goes on the group logged before the pause, and "
       "its message replaces that group",
       [group["sentences"] for group in groups] == [[SECOND_PROMISE]]
-      and [event.get("group_id") for event in machine.events("promise_message")][-1:]
-      == [groups[0]["group_id"]], (groups, machine.events("promise_message")))
+      and [event.get("group_ids") for event in machine.events("promise_message")][-1:]
+      == [[groups[0]["group_id"]]], (groups, machine.events("promise_message")))
 
 machine = Machine()
 machine.seat("alpha", [user("go"), assistant(PROMISE), turn_end()])
@@ -3540,6 +3541,105 @@ check("before the delivery check, typing before the send was logged has not answ
       reminded([REMINDER], typed=at(0.05)) == {"open task: 1"})
 check("before the delivery check, typing after the send was logged answers the reminder",
       reminded([REMINDER], typed=at(0.2)) == set())
+
+
+# --- sentence groups on an open wait are matched by sentence, and the escalation sent names them ------
+def rule_five_wait_with_promises(*records):
+    """A machine whose agent-seat answered a rule 5 message, sent at minute 0, with records."""
+    machine = Machine()
+    machine.seat("alpha", DONE_TURN)
+    machine.task("alpha", "1")
+    machine.script(judged(True, "What's going on?", "nothing runs"), sent_ok())
+    machine.run(0)
+    (machine.tasks / "nedsnodes-alpha-tasks" / "1.json").unlink()
+    machine.append("alpha", cross_session(machine.events("message_sent")[-1]["text"], at(0.5)),
+                   *records)
+    return machine
+
+
+without_uuid = assistant(OTHER_PROMISE, at(1.1))
+del without_uuid["uuid"]
+machine = rule_five_wait_with_promises(assistant(PROMISE, at(1)), turn_end(at(1)), user("go on", at(1.05)),
+                                       without_uuid, turn_end(at(1.1)))
+machine.script(sent_ok())
+code, output = machine.run(7)
+check("a batch holding a sentence whose record has no uuid beside one that has a uuid: one group "
+      "of both, and no traceback",
+      "Traceback" not in output
+      and [sorted(event["sentences"]) for event in machine.events("rule_2_sentences_on_wait")]
+      == [sorted([PROMISE, OTHER_PROMISE])], (code, output, machine.events()))
+
+# An invocation stopped after logging promise A's group, and promise B made before the next one.
+machine = rule_five_wait_with_promises(assistant(PROMISE, at(1)), turn_end(at(1)))
+machine.script(sent_ok())
+machine.run(7)
+log_lines = machine.log.read_text().splitlines(keepends=True)
+group_line = next(number for number, line in enumerate(log_lines)
+                  if json.loads(line)["event"] == "rule_2_sentences_on_wait")
+machine.log.write_text("".join(log_lines[:group_line + 1]))
+machine.append("alpha", user("go on", at(7.5)), assistant(OTHER_PROMISE, at(7.6)),
+               turn_end(at(7.6)))
+machine.script(sent_ok())
+machine.run(14)
+groups = machine.events("rule_2_sentences_on_wait")
+check("a batch judged again with one sentence already on a group and one new: the new one goes on a "
+      "group of its own, and the message names both groups",
+      [group["sentences"] for group in groups] == [[PROMISE], [OTHER_PROMISE]]
+      and [sorted(event.get("group_ids", [])) for event in machine.events("promise_message")][-1:]
+      == [sorted(group["group_id"] for group in groups)],
+      (groups, machine.events("promise_message")))
+
+# A promise found in the run the escalation falls due in, which only the escalation names.
+def promise_named_only_by_escalation(escalation_sender, recheck_sleep=0):
+    machine = rule_five_wait_with_promises(user("go on", at(8)), assistant(PROMISE, at(8.1)),
+                                           turn_end(at(8.1)))
+    machine.script(dict(rechecked(False), sleep=recheck_sleep), escalation_sender, sent_ok())
+    machine.run(16)
+    return machine
+
+
+machine = promise_named_only_by_escalation(
+    {"sends": [send_to("alpha", "You have been idle; please check your work.")],
+     "answer": {"sent": True, "reason": "r"}})
+steps = [event["step"] for event in machine.events("message_sent")]
+check("an escalation sender that drops the promise from the text it sends: the promise gets a "
+      "message of its own",
+      steps[-2:] == ["escalate", "nudge"] and PROMISE in machine.events("message_sent")[-1]["text"]
+      and not machine.events("escalation_named_sentence_groups"),
+      (steps, machine.events("message_sent")))
+
+machine = promise_named_only_by_escalation(sent_ok(), recheck_sleep=2)
+named = machine.events("escalation_named_sentence_groups")
+check("an escalation that names a promise no message named: the group's time moves to the "
+      "escalation's send",
+      len(named) == 1 and named[0]["send_started_at"] > machine.events("rule_2_sentences_on_wait")[0]["at"]
+      and [event["step"] for event in machine.events("message_sent")][-1] == "escalate",
+      (named, machine.events("rule_2_sentences_on_wait")))
+machine.append("alpha", user("go on", "2026-11-02T12:16:01Z"),
+               assistant(tool=("TaskCreate", {"subject": "report on PR 927", "metadata": {
+                   "prerequisites": [{"pr_merged": 927}]}}), when="2026-11-02T12:16:01Z",
+                   tool_id="t-during-recheck"),
+               task_result("t-during-recheck", "Task #1 created successfully: report on PR 927",
+                           "2026-11-02T12:16:01Z"),
+               assistant("Recorded.", at(16.5)), turn_end(at(16.5)))
+machine.script()
+machine.run(23)
+check("a task call made while the re-check ran, before the escalation named the promise, does not "
+      "end the wait", not machine.events("wait_ended"), machine.events("wait_ended"))
+
+# An invocation stopped after the escalation named the promise and before its sentence was logged
+# as checked.
+machine = promise_named_only_by_escalation(sent_ok())
+machine.log.write_text("".join(
+    line for line in machine.log.read_text().splitlines(keepends=True)
+    if not (json.loads(line).get("agent_seat_idle_sweep_invocation_started_at") == at(16)
+            and json.loads(line)["event"] in ("sentence_checked", "checked"))))
+machine.script(sent_ok())
+machine.run(17)
+check("the promise judged again after the escalation named it gets no message of its own",
+      [event["step"] for event in machine.events("message_sent")][-1] == "escalate"
+      and len(machine.events("rule_2_sentences_on_wait")) == 1,
+      (machine.events("message_sent"), machine.events("rule_2_sentences_on_wait")))
 
 if failures:
     print(f"{len(failures)} case(s) failed")
