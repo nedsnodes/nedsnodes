@@ -5205,7 +5205,7 @@ def test_an_item_an_earlier_ruling_decides_is_fast_read_recorded_and_not_shown()
               "it. <accepted>\n" in case.minutes.read_text()
           and lines[:2] == ["item 3 of 9 is recorded in the minutes as settled without being shown to the user.",
                             "Its change may now be made."]
-          and not any("fast read" in line for line in lines)
+          and not any("fast read" in line for line in lines) and "List it" not in closed.stdout
           and marker(case) == f"#next_to_present item 4 of {WALK_DOCUMENT_COUNTED_M}",
           described(closed) + case.minutes.read_text())
 
@@ -5373,23 +5373,6 @@ def test_an_item_the_walk_moves_on_from_after_it_was_shown_is_recorded_as_shown(
           and closed.stdout.split("\n")[0]
               == "item 1.2 of 2 is recorded in the minutes as settled without being shown to the user.",
           described(checked) + described(closed) + case.minutes.read_text())
-
-
-def test_nothing_the_program_prints_tells_the_agent_to_tell_the_user_of_an_item_settled_without_him():
-    usage = subprocess.run([sys.executable, str(PROGRAM), "--help"], capture_output=True, text=True)
-    closed = {}
-    for flags in (("--moved-on", "the question went to walk y"), ("--already-decided", "walk x, item 1")):
-        case = summary_case(next_to_present="item 1 of 5")
-        checked = case.run("check", *flags)
-        closed[flags[0]] = (checked, case.run("close"))
-    check("neither --help nor close on an item settled without being shown tells the agent to tell the user of it in "
-          "its next message",
-          usage.returncode == 0 and "say in your next message that you settled" not in usage.stdout
-          and "have it reversed" not in usage.stdout
-          and all(checked.returncode == 0 and result.returncode == 0
-                  and "settled without being shown" in result.stdout and "List it" not in result.stdout
-                  for checked, result in closed.values()),
-          described(usage) + "".join(described(checked) + described(result) for checked, result in closed.values()))
 
 
 def test_an_item_not_shown_needs_no_case_against_line():
@@ -5730,6 +5713,8 @@ def test_help_prints_every_row_of_the_no_answer_table():
                   "proposed-check-dropped-search-found-no-case"):
         check(f"--help lists the no-answer table's row --not-asked {value}",
               f"\n  --not-asked {value}: " in usage, usage[-3000:])
+    check("--help does not tell the agent to tell the user of an item settled without him",
+          "say in your next message that you settled" not in usage and "have it reversed" not in usage, usage[-3000:])
     check("--help lists the handoff row with its citation",
           '\n  --already-decided "the user-ruling on the handoff\'s internals in '
           'nn-systems/handoff/handoff.system.design.md": ' in usage, usage[-3000:])
