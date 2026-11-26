@@ -1349,7 +1349,7 @@ def refuse_merge_other_than_clean_merge_of_origin_main(number, reviewer_login, f
         raise Refused(f"The merge {merge[:12]} differs from the merge git makes of the frozen-head "
                       f"{frozen_head[:12]} and origin/main's {main_side[:12]}, so it holds changes of its own, "
                       f"which a review of the round's fix commit would not show. {ROUND_SHAPE_RULE}\n"
-                      f"If it is not pushed, save every change of the round with git diff {clean_tree} HEAD > "
+                      f"If it is not pushed, save every change of the round with git diff --binary {clean_tree} HEAD > "
                       f"<a file outside this worktree>, run git reset --hard {frozen_head} and git merge "
                       f"--no-edit {main_side}, apply the saved changes with git apply <that file>, and commit "
                       "them as the one commit after the merge.\n"
@@ -1680,10 +1680,17 @@ def check_round(number, reviewer_login, answers_path, commit_name,
         print("\n".join(lines))
         return
     if merge:
+        if len(commits) == 1:
+            after_merge = ", and no other commit."
+        elif len(commits) == 2 and commit_changes_only_architecture_overviews(commits[1][0]):
+            # fix_commit_range takes a last commit that changes only overview pages as the overview commit.
+            after_merge = f", then one nn-architecture-overview commit {commit} and no fix commit."
+        elif len(commits) == 2:
+            after_merge = f", then one fix commit {commit}."
+        else:
+            after_merge = f", then one fix commit and one nn-architecture-overview commit, ending in {commit}."
         pushed = (f"New head {commit}: on top of the frozen-head {frozen_head}, a merge {merge[0]} of origin/main's "
-                  f"{merge[1][1]} that git makes without a conflict, as --check confirmed"
-                  + {1: ", and no other commit.", 2: f", then one fix commit {commit}."}.get(
-                      len(commits), f", then one fix commit and one nn-architecture-overview commit, ending in {commit}."))
+                  f"{merge[1][1]} that git makes without a conflict, as --check confirmed" + after_merge)
     elif commit != frozen_head:
         pushed = (f"New head {commit}, the round's {len(commits)} commit{'' if len(commits) == 1 else 's'} "
                   f"on top of the frozen-head {frozen_head}.")

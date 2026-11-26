@@ -17,6 +17,7 @@ import importlib.util
 import json
 import os
 import resource
+import re
 import shlex
 import shutil
 import subprocess
@@ -1598,6 +1599,27 @@ def merge_of_origin_main_cases(root, repository, base, frozen_head):
           code == 1 and "differs from the merge git makes" in err
           and f"git reset --hard {frozen_head} and git merge --no-edit {main_tip}" in err, err)
 
+    # Without --binary, git diff saves a binary file's change as a "Binary files differ" line that git apply cannot
+    # restore after the hard reset, so the printed steps would lose that change.
+    saved = re.search(r"git diff (--binary [0-9a-f]+ HEAD) >", err)
+    check("merge check: the printed command that saves the round's changes keeps binary changes",
+          saved is not None, err)
+    if saved:
+        git(repository, "reset", "-q", "--hard", frozen_head)
+        git(repository, "merge", "-q", "--no-ff", "--no-commit", "origin/main")
+        (repository / "image.bin").write_bytes(bytes(range(256)))
+        git(repository, "add", "image.bin")
+        git(repository, "commit", "-q", "--no-edit")
+        code, out, err = run(root, repository, routes_for(frozen_head, reviews), "--check", "--answers", answers)
+        saved = re.search(r"git diff (--binary [0-9a-f]+ HEAD) >", err)
+        patch = subprocess.run(["git", "diff", *saved.group(1).split()], cwd=repository, capture_output=True,
+                               check=True).stdout
+        git(repository, "reset", "-q", "--hard", frozen_head)
+        git(repository, "merge", "-q", "--no-edit", main_tip)
+        subprocess.run(["git", "apply"], cwd=repository, input=patch, capture_output=True, check=True)
+        check("merge check: following the printed steps restores a binary file the merge held",
+              (repository / "image.bin").read_bytes() == bytes(range(256)), err)
+
     git(repository, "reset", "-q", "--hard", frozen_head)
     git(repository, "checkout", "-q", "-b", "elsewhere", base)
     stray = commit_file(repository, "stray.txt", "s\n", "not on main")
@@ -2963,6 +2985,16 @@ def architecture_overview_cases(root, repository, _base, _frozen_head):
           code == 0 and f"a merge {merge} of origin/main's {main_tip} that git makes without a conflict, as --check "
           f"confirmed, then one fix commit and one nn-architecture-overview commit, ending in {merge_overview}." in out,
           out + err)
+
+    # A merge followed only by an overview-only commit: the message must not call the overview commit a fix commit,
+    # since merge-lane-2's reviewer reads it to decide what to review.
+    git(repository, "reset", "-q", "--hard", merge)
+    merge_only_overview = commit_file(repository, DEMO_OVERVIEW, demo_overview_text(merge), "overview checked against the merge")
+    write_claim_check_report(report_directory, repository, merge_only_overview)
+    code, out, err = check_round_at(merge_only_overview)
+    check("overview: after the push, a merge and one overview-only commit are named as such, with no fix commit",
+          code == 0 and f"as --check confirmed, then one nn-architecture-overview commit {merge_only_overview} and "
+          "no fix commit." in out and "then one fix commit" not in out, out + err)
 
 
 def architecture_overview_check_cannot_read_case(_root, repository, _base, frozen_head):
