@@ -57,6 +57,8 @@ USER_ONLY_NOTICE = "a systemMessage Claude Code shows the user and not the agent
 
 # (hook path, constant name): why the constant opens no message for a rule.
 CONSTANTS_THAT_OPEN_NO_RULE_MESSAGE = {
+    (".claude/guard-hooks/bash-guard-hooks-dispatcher.py", "GUARD_FAILED_AGENT_NOTICE"): HOOK_FAILED,
+    (".claude/guard-hooks/bash-guard-hooks-dispatcher.py", "GUARD_FAILED_USER_NOTICE"): HOOK_FAILED,
     # fork A
     (".claude/guard-hooks/claude-code-tmux-kill-server-and-kill-session-missing-server-selection-refusal-hook.py", "PARSER_UNAVAILABLE_NEXT_STEP_LINES"): HOOK_FAILED,
     (".claude/guard-hooks/force-push-with-open-pull-request-guard-hook.py", "PARSER_UNAVAILABLE_NEXT_STEP_LINES"): HOOK_FAILED,
@@ -276,6 +278,7 @@ CONSTANTS_THAT_OPEN_NO_RULE_MESSAGE = {
 
 # Hook path: why the hook prints no message for a rule.
 HOOKS_THAT_PRINT_NO_RULE_MESSAGE = {
+    ".claude/guard-hooks/bash-guard-hooks-dispatcher.py": "it passes on the messages of the guards it runs, which carry their own rule IDs, and otherwise says only that a guard failed",
     "nn-systems/general-tools/agent-seat-worktree-create-with-owner-file-claude-code-worktree-create-hook.py": "prints only the worktree path Claude Code reads, or its own failure",
     "nn-systems/handoff/handoff-successor-conversation-tail-last-lines-first-message-display-hook.py": "it only puts the conversation-tail's last lines, written by the handoff-supervisor, above the successor's first message on the user's screen, which the agent does not see",
     "nn-systems/handoff/handoff-asked-stop-typing-user-notice-user-prompt-submit-hook.py": "it shows the user a systemMessage, which the agent does not see, and otherwise reports only its own failure",

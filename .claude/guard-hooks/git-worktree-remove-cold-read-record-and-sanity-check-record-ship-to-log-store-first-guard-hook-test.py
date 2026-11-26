@@ -639,9 +639,15 @@ check("without a syntax tree in this process, no removal counts as the whole com
 
 # A slow shipment must be refused by the hook, not cut off by Claude Code, which lets the command through.
 settings = json.loads((hook.REPOSITORY_ROOT / ".claude" / "settings.json").read_text())
-hook_timeouts = [entry.get("timeout") for group in settings["hooks"]["PreToolUse"] for entry in group["hooks"]
-                 if HOOK_SCRIPT.name in entry.get("command", "")]
-check("the hook's timeout in .claude/settings.json exceeds its shipping limit plus its worktree listing",
+_dispatcher_spec = importlib.util.spec_from_file_location(
+    "bash_guard_hooks_dispatcher", hook.REPOSITORY_ROOT / ".claude" / "guard-hooks" / "bash-guard-hooks-dispatcher.py")
+_dispatcher = importlib.util.module_from_spec(_dispatcher_spec)
+_dispatcher_spec.loader.exec_module(_dispatcher)
+hook_timeouts = [timeout for path, timeout in
+                 _dispatcher.bash_pre_tool_use_hook_path_and_timeout_pairs_read_from_settings_with_each_dispatcher_guard_listed_in_its_place(
+                     settings, hook.REPOSITORY_ROOT) if Path(path).name == HOOK_SCRIPT.name]
+check("the hook's timeout in .claude/settings.json, or in the Bash guard hooks dispatcher's guard list, exceeds "
+      "its shipping limit plus its worktree listing",
       len(hook_timeouts) == 1 and isinstance(hook_timeouts[0], (int, float))
       and hook_timeouts[0] > hook.SHIPPING_BUDGET_SECONDS + hook.GIT_TIMEOUT_SECONDS, hook_timeouts)
 

@@ -948,6 +948,10 @@ check("a force push later in a chain is still found",
 # ---------------------------------------------------------------------------
 
 SETTINGS_PATH = HOOK_SCRIPT.resolve().parents[2] / ".claude" / "settings.json"
+_dispatcher_spec = importlib.util.spec_from_file_location(
+    "bash_guard_hooks_dispatcher", HOOK_SCRIPT.resolve().with_name("bash-guard-hooks-dispatcher.py"))
+DISPATCHER = importlib.util.module_from_spec(_dispatcher_spec)
+_dispatcher_spec.loader.exec_module(DISPATCHER)
 
 
 def guard_not_wired_once_failure_detail(entries):
@@ -985,12 +989,12 @@ def guard_wiring_cases(settings, probe_budget_seconds):
     """Both wiring cases, as (case name, passed, detail) triples, given the
     parsed settings and the guard's budget, so planted settings print the
     messages the real ones would."""
+    # The Bash guard hooks dispatcher stands for each guard in its guard list, with that guard's timeout.
     guard_entries = [
-        hook
-        for matcher_block in settings.get("hooks", {}).get("PreToolUse", [])
-        if matcher_block.get("matcher") == "Bash"
-        for hook in matcher_block.get("hooks", [])
-        if HOOK_SCRIPT.name in hook.get("command", "")
+        {"path": path, "timeout": timeout}
+        for path, timeout in DISPATCHER.bash_pre_tool_use_hook_path_and_timeout_pairs_read_from_settings_with_each_dispatcher_guard_listed_in_its_place(
+            settings, SETTINGS_PATH.parents[1])
+        if Path(path).name == HOOK_SCRIPT.name
     ]
     registered_timeout = guard_entries[0].get("timeout") if guard_entries else None
     return [
@@ -1027,7 +1031,8 @@ check("an unregistered guard's failure says where it must be registered and why,
 short_timeout_passed, short_timeout_detail = wiring_case_outcome(
     guard_wiring_cases(
         {"hooks": {"PreToolUse": [{"matcher": "Bash", "hooks": [
-            {"type": "command", "command": f"python3 {HOOK_SCRIPT.name}", "timeout": 30}]}]}},
+            {"type": "command", "command": f'python3 "$CLAUDE_PROJECT_DIR"/.claude/guard-hooks/{HOOK_SCRIPT.name}',
+             "timeout": 30}]}]}},
         40.0),
     TIMEOUT_ABOVE_BUDGET_CASE)
 check("a timeout not above the budget fails with why, one fix per cause, the guarded-file line "
