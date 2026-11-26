@@ -822,6 +822,44 @@ with tempfile.TemporaryDirectory() as workspace:
     check("an absorbed removal does not claim the user record of a later equal message's dequeue",
           never_read(path) == ["human reply"], never_read(path))
 
+    path = write_transcript(workspace, "dequeue-then-agent-record-then-equal-prompt.jsonl", [
+        *ordinary_records(), enqueue_record("A"), enqueue_record("A"), dequeue_record(),
+        assistant_record("an agent turn after the dequeue"), user_record("A"),
+    ])
+    check("a dequeue does not claim an equal user record after the next agent record",
+          never_read(path) == [], never_read(path))
+
+    longer_tag_reply = "<agent-message-id> should be required"
+    path = write_transcript(workspace, "reply-opens-with-longer-tag-name.jsonl", [
+        *ordinary_records(), enqueue_record(longer_tag_reply),
+        enqueue_record("<task-notification-id> too"), enqueue_record("<cross-session-message-id> too"),
+        enqueue_record('<agent-message from="a1">done</agent-message>'), enqueue_record("<task-notification>\ndone"),
+        enqueue_record('<cross-session-message\nfrom="a1">done</cross-session-message>'),
+    ])
+    check("only a sender tag whose name ends is left out, so a reply opening with a longer tag name is kept",
+          never_read(path) == [longer_tag_reply, "<task-notification-id> too", "<cross-session-message-id> too"],
+          never_read(path))
+
+    path = write_transcript(workspace, "reply-typed-before-the-first-shown-turn.jsonl", [
+        user_record("the question the early reply answers"), assistant_record("Approve the early change?"),
+        enqueue_record("early reply"),
+        user_record("a later prompt " * 400), assistant_record("a later answer " * 400),
+    ])
+    output = Path(workspace) / "seat-dialog-0007.md"
+    extractor.main(["--transcript-path", str(path), "--output", str(output)])
+    tail = output.read_text(encoding="utf-8")
+    before_tail_introduction = extractor.CONVERSATION_TAIL_UNREAD_QUEUED_USER_MESSAGE_TYPED_BEFORE_FIRST_SHOWN_TURN_INTRODUCTION_LINE_TEXT
+    check("a reply typed before the first shown turn says that what it answers is outside the tail",
+          "Approve the early change?" not in tail and f"{before_tail_introduction}\n\nearly reply" in tail
+          and INTRODUCTION not in tail, tail)
+
+    path = write_transcript(workspace, "delivered-to-agent-removal-then-equal-attachment.jsonl", [
+        *ordinary_records(), enqueue_record("A"), remove_record("A", "delivered_to_agent"),
+        enqueue_record("A"), absorbed_attachment_record("A"),
+    ])
+    check("a delivered_to_agent removal claims no attachment, so the attachment shows the later equal message read",
+          never_read(path) == [], never_read(path))
+
     hop_chain_peer = '<cross-session-message from="s" hop-chain="abc" from-name="x" from-mode="prompting">\nbody\n</cross-session-message>'
     delivered_peer = ('Another Claude session sent a message:\n<cross-session-message from="s" from-name="x" from-mode="prompting">'
                       '\nbody\n</cross-session-message>\n\nThis came from another Claude session.')
@@ -837,6 +875,13 @@ with tempfile.TemporaryDirectory() as workspace:
     ])
     check("a dequeue delivering a peer message when only the user's reply is queued takes nothing",
           never_read(path) == ["human reply"], never_read(path))
+
+    path = write_transcript(workspace, "reply-opening-with-longer-tag-name-before-peer-delivered-in-another-form.jsonl", [
+        *ordinary_records(), enqueue_record(longer_tag_reply), enqueue_record(hop_chain_peer), dequeue_record(),
+        user_record(delivered_peer), assistant_record("handled"),
+    ])
+    check("a dequeue's fallback does not take a reply opening with a longer tag name for the peer message it delivers",
+          never_read(path) == [longer_tag_reply], never_read(path))
 
     path = write_transcript(workspace, "two-dequeues-before-their-deliveries.jsonl", [
         *ordinary_records(), enqueue_record("<task-notification>\n<task-id>stale</task-id>\n</task-notification>"),

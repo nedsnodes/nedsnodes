@@ -300,14 +300,23 @@ class Case:
 
     def run(self, step, *flags, mode="", counts_log=None, fast_read_program=None, environment=None,
             ignored_signal=None, reply="a", wait_for_reads_ahead=True, agent_session_id=CASE_AGENT_SESSION_ID,
-            stdout_closed=False):
+            stdout_closed=False, keep_printed_overrides=False):
         """Run the program; a check gets `--user-reply-as-typed reply` unless reply is None or the flags
         hold --not-asked or a reply of their own. Unless told not to, wait for the reads ahead it started.
         The program runs as agent-session agent_session_id, or with none set when it is None. With stdout_closed,
-        its stdout is a pipe whose reading end is closed, and the result's stdout is empty."""
+        its stdout is a pipe whose reading end is closed, and the result's stdout is empty.
+        The test doubles' path overrides, which every printed command repeats, are taken out of its output unless
+        keep_printed_overrides is true, so that a check of a printed command names only the words it is about."""
         result = self.run_only(step, *flags, mode=mode, counts_log=counts_log, fast_read_program=fast_read_program,
                                environment=environment, ignored_signal=ignored_signal, reply=reply,
                                agent_session_id=agent_session_id, stdout_closed=stdout_closed)
+        if not keep_printed_overrides:
+            overrides = " " + shlex.join([
+                "--cold-read-records", os.path.abspath(self.records),
+                "--fast-read-program", os.path.abspath(fast_read_program or self.stand_in),
+                "--counts-log", os.path.abspath(self.checkout / (counts_log or self.counts_log))])
+            result.stdout, result.stderr = (result.stdout.replace(overrides, ""),
+                                            result.stderr.replace(overrides, ""))
         if wait_for_reads_ahead:
             self.wait_for_reads_ahead()
         return result
@@ -6105,6 +6114,31 @@ def test_read_step_offers_a_removal_that_lacks_only_its_touches_line_while_the_r
           and check_command_for(case, "--not-asked", "3") in kind_3[0], described(result))
 
 
+def test_read_step_offers_a_rename_that_lacks_only_its_touches_line_while_the_old_name_is_still_in_files():
+    case = rated_none_case(touches="#not_asked_rename poem-list poem-index\n\n", rating=WEAK_COST_ONLY)
+    (case.checkout / "docs" / "about.md").parent.mkdir(parents=True, exist_ok=True)
+    (case.checkout / "docs" / "about.md").write_text("See the poem-list.\n")
+    (case.checkout / "docs" / "poems-glossary.md").write_text("- **poem-index** — the page that lists every poem.\n")
+    result = case.run(WAITING_ITEM_READ)
+    kind_4 = [row for row in no_answer_rows_printed(result) if row.startswith("- kind 4:")]
+    check("a rename with a rename line and no touches line is offered kind 4 as lacking only the touches line",
+          len(kind_4) == 1 and "Only evidence is missing" in kind_4[0] and "#not_asked_touches" in kind_4[0]
+          and check_command_for(case, "--not-asked", "4") in kind_4[0], described(result))
+
+
+def test_read_step_row_not_offered_for_a_failed_glossary_listing_gives_git_failure_without_a_rerun_step():
+    case = rated_none_case(touches="#not_asked_touches docs/poems-glossary.md\n\n", rating=WEAK_COST_ONLY,
+                           files=("docs/poems-glossary.md",))
+    result = case.run(WAITING_ITEM_READ, environment=stubbed_git_failing_on(case, "ls-files"))
+    kind_7 = [line for line in result.stdout.splitlines() if line.startswith("- kind 7:")]
+    check("a `git ls-files` that fails while checking kind 7 is reported on that row, which is not offered",
+          result.returncode == 0 and len(kind_7) == 1 and "its evidence could not be checked" in kind_7[0]
+          and "fatal: stub ls-files failure" in kind_7[0], described(result))
+    check("the row that is not offered gives git's failure alone, with no step to run anything again",
+          "run this suite again" not in result.stdout
+          and f"{check_command_for(case, '--not-asked', '7')}` again once" not in result.stdout, described(result))
+
+
 def test_read_step_offers_the_handoff_row_only_for_an_item_naming_the_handoff():
     document = RATED_NONE_DOCUMENT.replace("print the poem count after the list",
                                            "shorten the session-handoff file's opening").replace(
@@ -8289,6 +8323,54 @@ def test_a_forked_run_stopped_while_waiting_kills_and_reaps_its_child():
     finally:
         signal.setitimer(signal.ITIMER_REAL, 0)
         signal.signal(signal.SIGALRM, previous)
+
+
+def test_a_read_ahead_worker_stopped_with_an_unremovable_scratch_directory_says_the_read_step_reads_again():
+    case = Case()
+    reads = case.root / "reads"
+    reads.mkdir()
+    text_file = reads / "key.md"
+    text_file.write_text("the text\n")
+    result = case.run("approval-walk-item-cold-read-fast-read-review-background-worker", "--text-file", str(text_file),
+                      "--item", "item 3 of 9", "--name", "read-ahead", mode="stopped-unremovable SIGTERM")
+    check("a read-ahead worker a SIGTERM stops, whose scratch directory cannot be removed, ends its log saying the "
+          "read step runs the read itself",
+          result.returncode == -signal.SIGTERM and result.stderr.rstrip("\n").split("\n")[-1] == (
+              "The read step finds this read ended without an outcome, and runs the cold-read-fast-read itself."),
+          described(result))
+    for directory in case.temporary_directory.iterdir():
+        if (directory / "locked").exists():
+            (directory / "locked").chmod(0o700)  # Else the suite's own removal leaves it behind.
+
+
+def test_a_printed_recovery_command_keeps_the_explicit_path_overrides_as_absolute_paths():
+    case = Case()
+    result = case.run("check", mode="failed", counts_log=Path("relative-counts.log"), keep_printed_overrides=True)
+    words = shlex.split(printed_command_with(result, " check "))
+    expected = ["--cold-read-records", str(case.records), "--fast-read-program", str(case.stand_in),
+                "--counts-log", str(case.checkout / "relative-counts.log")]
+    check("the check a failed fast read prints keeps the records, reader and counts-log it was given, a relative "
+          "path resolved against the directory the check ran in",
+          result.returncode == 1 and words[-len(expected):] == expected, described(result))
+
+    read_case = item_read_case()
+    answered_and_closed(read_case)
+    read = read_case.run(WAITING_ITEM_READ, mode="failed", keep_printed_overrides=True)
+    read_words = shlex.split(printed_command_with(read, WAITING_ITEM_READ))
+    check("the read step's retry after a failed read keeps the reader it was given",
+          read.returncode == 1 and read_words[read_words.index("--fast-read-program") + 1] == str(read_case.stand_in),
+          described(read))
+
+
+def test_a_printed_command_gives_an_option_like_value_in_flag_equals_value_form():
+    case = Case()
+    failed = case.run("check", "--user-reply-as-typed=--no-cache", mode="failed", reply=None)
+    retry = printed_command_with(failed, " check ")
+    check("the printed check keeps an option-like reply in --flag=value form",
+          "--user-reply-as-typed=--no-cache" in shlex.split(retry), described(failed))
+    rerun = run_printed_command(case, retry)
+    check("the printed check with an option-like reply runs and records the reply",
+          rerun.returncode == 0 and "--no-cache" in case.minutes.read_text(), described(rerun))
 
 
 def stopped_by_sigterm(*_):

@@ -91,7 +91,10 @@ class Case:
         die by a signal, which a real run cannot be made to; every other subprocess.run, such as git's, runs."""
         payload = {"hook_event_name": "UserPromptSubmit", "prompt": prompt, "cwd": str(self.checkout),
                    "session_id": SESSION_ID, "transcript_path": str(self.transcript)}
-        run_hook_as_platform = ("import runpy, subprocess, sys; sys.platform = sys.argv[1]; "
+        # sysconfig names its data module after sys.platform when first read, which Python 3.14 on the Mac does
+        # after the fake is set, so it is read first, under the real platform.
+        run_hook_as_platform = ("import runpy, subprocess, sys, sysconfig; sysconfig.get_config_vars(); "
+                                "sys.platform = sys.argv[1]; "
                                 + ("subprocess.run = (lambda real: lambda *a, **k: "
                                    f"({insert_run}) if 'user-alert-insert' in str(a[0]) else real(*a, **k))"
                                    "(subprocess.run); " if insert_run else "")
