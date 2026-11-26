@@ -2742,11 +2742,11 @@ def test_suite_ran_to_the_end(result):
     """Whether the suite ended on its own, after running every case it would run.
 
     It did only when its output's last line is the END line every nn-test-suite prints when it
-    ends on its own, and that line's failed count agrees with its exit code: none failed with
-    exit 0, some failed with any other exit. A suite killed by a signal or its time limit, one
-    that crashed, as an uncaught exception or an exit before its first case does, or one NOT RUN
-    or stopped by the run, which has no verdict of its own and whose JUnit XML says
-    judged="false", stopped partway."""
+    ends on its own, with the pass or fail verdict, and that verdict's exit code is the suite's.
+    A suite killed by a signal or its time limit, one that crashed, as an uncaught exception
+    does, one whose END line says it could not run, so tested nothing, or one NOT RUN or stopped
+    by the run, which has no verdict of its own and whose JUnit XML says judged="false", stopped
+    partway."""
     if (result["exit"] < 0 or result.get("timeout") is not None or suite_not_run(result)
             or result.get("stopped by")):
         return False
@@ -2755,8 +2755,9 @@ def test_suite_ran_to_the_end(result):
     except OSError:
         return False
     lines = [line for line in text.splitlines() if line.strip()]
-    end = start_and_end_lines.NN_TEST_SUITE_END_LINE_WITH_PASSED_AND_FAILED_COUNTS_REGEX.match(lines[-1]) if lines else None
-    return end is not None and (int(end["failed"]) == 0) == (result["exit"] == 0)
+    end = start_and_end_lines.NN_TEST_SUITE_END_LINE_REGEX.match(lines[-1]) if lines else None
+    return (end is not None and end["verdict"] != start_and_end_lines.NN_TEST_SUITE_COULD_NOT_RUN_HASHTAG
+            and start_and_end_lines.NN_TEST_SUITE_EXIT_CODE_OF_VERDICT_HASHTAG[end["verdict"]] == result["exit"])
 
 
 def write_case_times_suite_resources_and_junit_xml_of_run(log_dir, results):

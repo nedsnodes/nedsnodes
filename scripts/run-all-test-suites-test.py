@@ -5051,31 +5051,37 @@ def suite_log(name, text):
 
 
 START_LINE = "START 2026-11-24T18:57:41Z\n"
-passed_log = suite_log("passed", START_LINE + "PASS  case a\nEND 2026-11-24T18:58:03Z passed=1 failed=0\n")
-failed_log = suite_log("failed", START_LINE + "FAIL  case a: x\nEND 2026-11-24T18:58:03Z passed=0 failed=1\n\n")
+passed_log = suite_log("passed", START_LINE + "PASS  case a\nEND 2026-11-24T18:58:03Z passed=1 failed=0 #nc_test_suite_pass\n")
+failed_log = suite_log("failed", START_LINE + "FAIL  case a: x\nEND 2026-11-24T18:58:03Z passed=0 failed=1 #nc_test_suite_fail\n\n")
 crashed_log = suite_log("crashed", START_LINE + "FAIL  case a: x\nTraceback (most recent call last):\n  boom\n")
 crashed_before_first_case_log = suite_log(
     "crashed-before-first-case", START_LINE + "Traceback (most recent call last):\nImportError: x\n")
-exited_early_log = suite_log("exited-early", START_LINE + "cannot run: no tmux\n"
-                             "END 2026-11-24T18:58:03Z passed=0 failed=0\n")
+could_not_run_log = suite_log("could-not-run", START_LINE + "END 2026-11-24T18:58:03Z passed=0 failed=0 "
+                              "#nc_test_suite_could_not_run\n")
+end_without_verdict_log = suite_log("end-without-verdict", START_LINE + "PASS  case a\n"
+                                    "END 2026-11-24T18:58:03Z passed=1 failed=0\n")
 output_after_end_log = suite_log("output-after-end", START_LINE + "PASS  case a\n"
-                                 "END 2026-11-24T18:58:03Z passed=1 failed=0\nlate child output\n")
+                                 "END 2026-11-24T18:58:03Z passed=1 failed=0 #nc_test_suite_pass\nlate child output\n")
 no_end_log = suite_log("no-end", "PASS  case a\nall cases passed\n")
 failing_case = [case_line("FAIL", "case a: x")]
 passing_case = [case_line("PASS", "case a")]
 for how, result, expected in (
-        ("passed and printed its END line last", {"exit": 0, "cases": passing_case, "log": passed_log},
+        ("passed and printed its pass END line last", {"exit": 0, "cases": passing_case, "log": passed_log},
          True),
-        ("failed a case, printed END with that failure, and exited 1",
+        ("failed a case, printed its fail END line, and exited 1",
          {"exit": 1, "cases": failing_case, "log": failed_log}, True),
         ("crashed before its first case line, printing no END",
          {"exit": 1, "cases": [], "log": crashed_before_first_case_log}, False),
         ("crashed after a case line, printing no END", {"exit": 1, "cases": failing_case, "log": crashed_log},
          False),
-        ("exited 1 with an END line counting no failure", {"exit": 1, "cases": [], "log": exited_early_log},
+        ("printed the could-not-run END line and exited 2", {"exit": 2, "cases": [], "log": could_not_run_log},
          False),
-        ("exited 0 with an END line counting a failure", {"exit": 0, "cases": failing_case, "log": failed_log},
-         False),
+        ("exited 0 with a fail END line", {"exit": 0, "cases": failing_case, "log": failed_log}, False),
+        ("exited 1 with a pass END line", {"exit": 1, "cases": passing_case, "log": passed_log}, False),
+        ("exited 2 with a fail END line", {"exit": 2, "cases": failing_case, "log": failed_log}, False),
+        ("exited 1 with the could-not-run END line", {"exit": 1, "cases": [], "log": could_not_run_log}, False),
+        ("printed an END line with no verdict", {"exit": 0, "cases": passing_case,
+                                                 "log": end_without_verdict_log}, False),
         ("exited 0 with no END line", {"exit": 0, "cases": passing_case, "log": no_end_log}, False),
         ("printed more output after its END line", {"exit": 0, "cases": passing_case,
                                                      "log": output_after_end_log}, False),

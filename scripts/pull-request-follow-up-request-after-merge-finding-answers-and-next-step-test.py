@@ -1740,7 +1740,8 @@ def test_print_block():
     blocks = {subprocess.run([sys.executable, "-c", f"__file__ = {str(Path(__file__).resolve())!r}\n"
                               + helpers_only + "\n" + two_wordings_under_one_new_id],
                              capture_output=True, text=True, cwd=Path(__file__).resolve().parent.parent,
-                             env={**os.environ, "PYTHONHASHSEED": seed}).stdout
+                             env={**os.environ, "PYTHONHASHSEED": seed,
+                                  _start_and_end_lines.CHILD_RUN_ENVIRONMENT_VARIABLE: "1"}).stdout
               for seed in ("1", "2", "3", "4")}
     check(f"{PRINT_BLOCK} pairs a later review's two comments under one new Codex finding id each with the earlier "
           "finding worded as it, and prints the same two findings whatever PYTHONHASHSEED is",
