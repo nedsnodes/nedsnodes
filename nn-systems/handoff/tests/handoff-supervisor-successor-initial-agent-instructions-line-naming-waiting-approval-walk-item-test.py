@@ -55,10 +55,10 @@ def walk_in(root, minutes, document=WALK_DOCUMENT, name=WALK):
 def approved_line(walk, count_and_point, link, count):
     """The line the user approved for a waiting item with a page link, filled in."""
     return (f"Approval-walk {walk}: item {count_and_point} is waiting for the user; its last page link is "
-            f"{link}. Before your first message, open that page with the Artifact tool. If it is gone, publish "
-            f"the item again from docs/walk/{walk}.md and append the line \"#item_page item {count} <new link>\" "
-            f"to docs/walk/{walk}-minutes.md. Show the item in full, and end your first message with its closing "
-            f"line, holding the link that opens.")
+            f"{link}. Before your first message, check that the link still works with the Artifact tool's read "
+            f"action. If the read fails, publish the item again from docs/walk/{walk}.md and append the line "
+            f"\"#item_page item {count} <new link>\" to docs/walk/{walk}-minutes.md. Show the item in full, and "
+            f"end your first message with its closing line, holding the link that opens.")
 
 
 def without_link_line(walk, count_and_point, count):
