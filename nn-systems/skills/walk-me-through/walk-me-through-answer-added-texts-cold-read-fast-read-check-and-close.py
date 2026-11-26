@@ -3694,7 +3694,7 @@ def approval_walk_item_title_user_messages_in_earlier_agent_sessions_lines(walk_
                 item=item, exit=result.returncode, command=command, said=title_search_failure_said(
                     stderr, f"FAILED: the title search exited {result.returncode} without a FAILED line of "
                             f"its own, so it crashed or was stopped.")))
-        format_line = exits.OUTPUT_FORMAT_LINE.format(format=exits.OUTPUT_FORMAT)
+        format_line = exits.APPROVAL_WALK_ITEM_TITLE_SEARCH_OUTPUT_FORMAT_VERSION_STDERR_LINE_TEMPLATE.format(version=exits.APPROVAL_WALK_ITEM_TITLE_SEARCH_OUTPUT_FORMAT_VERSION)
         if format_line not in stderr.split("\n"):
             other_format = format_line
         lines += stdout.rstrip("\n").split("\n") if stdout.strip() else []
