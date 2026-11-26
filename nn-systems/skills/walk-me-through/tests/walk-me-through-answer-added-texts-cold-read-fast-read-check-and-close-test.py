@@ -5198,12 +5198,11 @@ def test_an_item_an_earlier_ruling_decides_is_fast_read_recorded_and_not_shown()
                         case.minutes.read_text()) is not None, described(checked))
     closed = case.run("close")
     lines = closed.stdout.rstrip("\n").split("\n")
-    check("close records the item as already decided and accepted, tells the agent to list it, and moves on",
+    check("close records the item as already decided and accepted, and moves on",
           closed.returncode == 0
           and "\nitem 3 of 9: already decided by `walk x's minutes, item 3 (2026-10-20)`; the walk does not come back to "
               "it. <accepted>\n" in case.minutes.read_text()
-          and lines[:3] == ["item 3 of 9 is recorded in the minutes as settled without being shown to the user.",
-                            "List it, with its number, in one line of your next message to the user.",
+          and lines[:2] == ["item 3 of 9 is recorded in the minutes as settled without being shown to the user.",
                             "Its change may now be made."]
           and not any("fast read" in line for line in lines)
           and marker(case) == f"#next_to_present item 4 of {WALK_DOCUMENT_COUNTED_M}",
@@ -5239,8 +5238,7 @@ def test_an_item_whose_only_choice_is_now_or_later_settles_citing_the_users_ruli
           and f"\nitem 3 of 9: settled without asking the user, already decided by {spanned} #case_against_weak ("
               in case.minutes.read_text(), described(checked) + case.minutes.read_text())
     closed = case.run("close")
-    check("close records the item as already decided by the user's ruling and accepted, and tells the agent to "
-          "list it",
+    check("close records the item as already decided by the user's ruling and accepted",
           closed.returncode == 0
           and f"\nitem 3 of 9: already decided by {spanned}; the walk does not come back to it. <accepted>\n"
               in case.minutes.read_text()
@@ -5332,13 +5330,12 @@ def test_an_item_the_walk_moves_on_from_is_recorded_without_a_fast_read_and_not_
                         r"to walk y` #case_against_none \(\d{4}-\d\d-\d\d \d\d:\d\dZ\), which makes no change\.\n$",
                         case.minutes.read_text()) is not None, described(checked))
     closed = case.run("close")
-    check("close records the move on, tells the agent to list it, and names the next item",
+    check("close records the move on and names the next item",
           closed.returncode == 0
           and "\nitem 1 of 5: moved on, no decision: `the question went to walk y`; the walk does not come back to it. "
               "<moved on, no decision>\n" in case.minutes.read_text()
           and closed.stdout.rstrip("\n").split("\n") == [
               "item 1 of 5 is recorded in the minutes as settled without being shown to the user.",
-              "List it, with its number, in one line of your next message to the user.",
               read_next_item_line(case, "item 2 of 5"), prerequisite_line(case, "item 2 of 5", "## Item 2 of 5: two")]
           and marker(case) == "#next_to_present item 2 of 5", described(closed) + case.minutes.read_text())
 
@@ -5368,14 +5365,30 @@ def test_an_item_the_walk_moves_on_from_after_it_was_shown_is_recorded_as_shown(
     checked = case.run("check", "--moved-on", "the item was withdrawn")
     closed = case.run("close")
     check("check --moved-on on an item with no `#item_page` line of its own, another item having one, records it as "
-          "settled without asking the user, and close tells the agent to list it",
+          "settled without asking the user, and close says it was settled without being shown",
           checked.returncode == 0 and closed.returncode == 0
           and "\nitem 1.2 of 2: settled without asking the user, moved on, no decision: `the item was withdrawn`"
               in case.minutes.read_text()
-          and closed.stdout.split("\n")[:2] == [
-              "item 1.2 of 2 is recorded in the minutes as settled without being shown to the user.",
-              "List it, with its number, in one line of your next message to the user."],
+          and closed.stdout.split("\n")[0]
+              == "item 1.2 of 2 is recorded in the minutes as settled without being shown to the user.",
           described(checked) + described(closed) + case.minutes.read_text())
+
+
+def test_nothing_the_program_prints_tells_the_agent_to_tell_the_user_of_an_item_settled_without_him():
+    usage = subprocess.run([sys.executable, str(PROGRAM), "--help"], capture_output=True, text=True)
+    closed = {}
+    for flags in (("--moved-on", "the question went to walk y"), ("--already-decided", "walk x, item 1")):
+        case = summary_case(next_to_present="item 1 of 5")
+        checked = case.run("check", *flags)
+        closed[flags[0]] = (checked, case.run("close"))
+    check("neither --help nor close on an item settled without being shown tells the agent to tell the user of it in "
+          "its next message",
+          usage.returncode == 0 and "say in your next message that you settled" not in usage.stdout
+          and "have it reversed" not in usage.stdout
+          and all(checked.returncode == 0 and result.returncode == 0
+                  and "settled without being shown" in result.stdout and "List it" not in result.stdout
+                  for checked, result in closed.values()),
+          described(usage) + "".join(described(checked) + described(result) for checked, result in closed.values()))
 
 
 def test_an_item_not_shown_needs_no_case_against_line():
