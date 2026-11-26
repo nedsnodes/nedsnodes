@@ -23,6 +23,12 @@ PROGRAM = Path(__file__).resolve().with_name(
 _spec = importlib.util.spec_from_file_location("merge_queue", PROGRAM)
 program = importlib.util.module_from_spec(_spec)
 _spec.loader.exec_module(program)
+_git_environment_fixture_spec = importlib.util.spec_from_file_location(
+    "git_redirecting_environment_removal_test_fixture",
+    Path(__file__).resolve().with_name("git-redirecting-environment-removal-test-fixture.py"))
+_git_environment_fixture = importlib.util.module_from_spec(_git_environment_fixture_spec)
+_git_environment_fixture_spec.loader.exec_module(_git_environment_fixture)
+_git_environment_fixture.remove_git_redirecting_environment_variables_from_this_process()
 
 STOP_FILE_NAME = program.merge_program.MERGE_QUEUE_STOP_FILE_NAME
 A = "a" * 40
