@@ -859,14 +859,15 @@ with tempfile.TemporaryDirectory() as workspace:
         dequeue_record(), dequeue_record(),
         user_record("<command-message>explain</command-message>\n<command-name>/explain</command-name>\n"
                     "<command-args>item 3</command-args>", origin={"kind": "human"}),
-        user_record([{"type": "text", "text": "Base directory for this skill: /home/nedlern/.claude/skills/explain"}]),
+        user_record([{"type": "text", "text": "Base directory for this skill: /home/nedlern/.claude/skills/explain"}],
+                    isMeta=True),
         user_record(delivered_peer), assistant_record("handled"),
     ])
     check("a dequeue's fallback takes its sender from the delivery, not from a skill's context record",
           never_read(path) == ["unread reply"], never_read(path))
 
-    context_record_openings = ("Base directory for this skill:", "<local-command-caveat>", "<local-command-stdout>",
-                               "<local-command-stderr>", "<bash-stdout>", "<bash-stderr>", "<system-reminder>")
+    context_record_openings = ("<local-command-stdout>", "<local-command-stderr>", "<bash-stdout>", "<bash-stderr>",
+                               "<system-reminder>")
     check("the dialog reader leaves out every record the dequeue fallback treats as context",
           all(opening in extractor.INJECTED_TEXT_PREFIXES for opening in extractor.CONTEXT_RECORD_TEXT_OPENINGS)
           and set(extractor.CONTEXT_RECORD_TEXT_OPENINGS) == set(context_record_openings),
@@ -878,6 +879,36 @@ with tempfile.TemporaryDirectory() as workspace:
         ])
         check(f"a dequeue's fallback does not claim a record opening {opening!r}",
               never_read(path) == ["unread reply"], never_read(path))
+    for number, opening in enumerate(("Base directory for this skill:", "<local-command-caveat>")):
+        path = write_transcript(workspace, f"fallback-skips-meta-record-{number}.jsonl", [
+            *ordinary_records(), enqueue_record("unread reply"), enqueue_record(hop_chain_peer), dequeue_record(),
+            user_record(f"{opening} context", isMeta=True), user_record(delivered_peer), assistant_record("handled"),
+        ])
+        check(f"a dequeue's fallback does not claim an isMeta record opening {opening!r}",
+              never_read(path) == ["unread reply"], never_read(path))
+        path = write_transcript(workspace, f"dialog-keeps-pasted-prompt-opening-{number}.jsonl", [
+            *ordinary_records(), user_record(f"{opening} pasted by the user"), assistant_record("Read it."),
+        ])
+        check(f"the dialog reader keeps a prompt the user pastes that opens with {opening!r}",
+              f"{opening} pasted by the user" in [turn["text"] for turn in extractor.read_dialog_turns(path)[0]],
+              extractor.read_dialog_turns(path)[0])
+
+    path = write_transcript(workspace, "unread-reply-before-argumentless-command.jsonl", [
+        *ordinary_records(), enqueue_record("unread reply"), enqueue_record("/explain"), dequeue_record(),
+        user_record("<command-message>explain</command-message>\n<command-name>/explain</command-name>",
+                    origin={"kind": "human"}),
+        assistant_record("handled"),
+    ])
+    check("a dequeue delivering a command typed without arguments takes that command, not an older reply",
+          never_read(path) == ["unread reply"], never_read(path))
+
+    path = write_transcript(workspace, "identical-peer-message-enqueued-later.jsonl", [
+        *ordinary_records(), enqueue_record("unread reply"), enqueue_record(hop_chain_peer), dequeue_record(),
+        enqueue_record(delivered_peer.split("\n", 1)[1]), user_record(delivered_peer),
+        user_record("a fresh prompt"), assistant_record("handled"),
+    ])
+    check("a delivery matching a later enqueue that no later dequeue follows is this dequeue's delivery",
+          never_read(path) == ["unread reply"], never_read(path))
 
     # Excerpts of three ned-box transcripts that lost or misreported a queued message, under
     # nedlern@ned-box:/home/nedlern/nedsnodes-logs/agent-session-files-by-machine/ned-box/projects/, each record cut to
