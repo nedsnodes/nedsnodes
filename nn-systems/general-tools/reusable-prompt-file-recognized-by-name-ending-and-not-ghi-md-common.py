@@ -6,8 +6,8 @@ A reusable-prompt's name ends .prompt.md or .instructions.md.
 has_reusable_prompt_file_name_and_is_not_ghi_md also leaves out every path
 that scripts/ghi-issue-write.py's edit operation accepts as a GHI-MD named for
 its issue, by asking that program's own rule: such a name can be written by
-hand, as docs/issues/7-x.prompt.md, though the slug create builds from an
-issue's title holds no dot.
+hand to end .prompt.md, though the slug create builds from an issue's title
+holds no dot.
 
 It has no side effects on load, so a guard hook can load it.
 has_reusable_prompt_file_name_and_is_not_ghi_md loads
