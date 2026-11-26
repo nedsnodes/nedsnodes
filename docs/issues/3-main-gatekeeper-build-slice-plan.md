@@ -1,6 +1,5 @@
 ---
 issue: "[main-gatekeeper — the single check-in gate (design: nn-systems/main-gatekeeper/main-gatekeeper.system.design.md)](https://github.com/nedsnodes/nedsnodes/issues/3)"
-kind: design
 ---
 
 # main-gatekeeper build — slice plan
