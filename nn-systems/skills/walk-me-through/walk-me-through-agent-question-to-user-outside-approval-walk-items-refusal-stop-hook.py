@@ -311,6 +311,8 @@ REFUSAL_INSTRUCTIONS = (
     "question only when the item in the walk-document holds every flagged line that way, and refuses again until "
     "it does; it ignores a `>` quote mark or a list mark such as `-` or `1.` at the start of a line, bold, italic "
     "and code marks, and letter case, so you may add or drop those. "
+    "Just before the alternative, state the strongest case against the recommendation on one line that opens with "
+    "`#case_against` and a rating, none, weak, medium, strong or very strong. "
     "Give the item one recommendation and one alternative, and end it with the recommendation stated as an "
     "action, as in `Recommendation: <what you recommend doing>.` State the alternative before it, as in "
     "`The alternative: <what D does instead>.`",
