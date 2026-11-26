@@ -3359,21 +3359,23 @@ with tempfile.TemporaryDirectory() as scratch:
     def idle_git_directory(worktree):
         return Path(git(worktree, "rev-parse", "--absolute-git-dir").strip())
 
-    def age(worktree, reflog_entries_too=True):
+    def age(worktree, reflog_entries_too=True, when=None):
         """Set the mtime of every file and directory in the worktree and its own git directory to
-        three days ago, and, with reflog_entries_too, the time of every entry of its reflogs."""
+        when, three days ago unless given, and, with reflog_entries_too, the time of every entry of
+        its reflogs."""
+        when = three_days_ago if when is None else when
         if reflog_entries_too:
             for reflog in (idle_git_directory(worktree) / "logs").rglob("*"):
                 if reflog.is_file():
                     reflog.write_bytes(re.sub(rb"> \d+ ([-+]\d{4})",
-                                              rb"> %d \1" % int(three_days_ago),
+                                              rb"> %d \1" % int(when),
                                               reflog.read_bytes()))
         for root in (worktree, idle_git_directory(worktree)):
             for directory, directory_names, file_names in os.walk(root, topdown=False):
                 for name in directory_names + file_names:
-                    os.utime(os.path.join(directory, name), (three_days_ago, three_days_ago),
+                    os.utime(os.path.join(directory, name), (when, when),
                              follow_symlinks=False)
-            os.utime(root, (three_days_ago, three_days_ago))
+            os.utime(root, (when, when))
         return worktree
 
     def idle_candidate(name, where=None, pushed=True, detach=False):
@@ -3531,12 +3533,16 @@ with tempfile.TemporaryDirectory() as scratch:
                            "its detached HEAD is an open pull request's head commit"),
                           (merging_worktree, "a merge is in progress in it"),
                           (unreadable_worktree, "a directory in it cannot be read"),
-                          (marked_home, "it is an agent-home by its marker file"),
-                          (located_home, "it is an agent-home by its place in ~/agents")):
+                          (marked_home, "it is an agent-home by its marker file")):
         check(f"a worktree with no owner file is not idle, and is kept, when {why}",
               worktree.exists()
               and idle_line(removal.stdout, worktree.name) == f"{worktree.name}: {no_owner_kept}",
               idle_line(removal.stdout, worktree.name) or removal.stdout)
+    check("an idle worktree in ~/agents whose git directory holds no agent-home-marker is not an "
+          "agent-home, and is removed",
+          not located_home.exists()
+          and idle_line(removal.stdout, located_home.name).startswith(f"{located_home.name}: removed"),
+          idle_line(removal.stdout, located_home.name) or removal.stdout)
     check("a locked idle worktree is kept for its lock",
           locked_idle_worktree.exists()
           and idle_line(removal.stdout, "locked-idle-wt").startswith(
@@ -3552,6 +3558,73 @@ with tempfile.TemporaryDirectory() as scratch:
           gh_failed_worktree.exists()
           and idle_line(gh_failed.stdout, "gh-failed-wt") == f"gh-failed-wt: {no_owner_kept}",
           gh_failed.stdout + gh_failed.stderr)
+
+    # A worktree idle but for commits GitHub lacks waits 14 days, then --remove pushes its branch
+    # first; a refused push, or no branch to push, keeps it and says why.
+    fifteen_days_ago = float(int(time.time()) - 15 * 86400)
+    thirteen_days_ago = float(int(time.time()) - 13 * 86400)
+
+    def with_unpushed_commit(worktree):
+        # The worktree's name in the file keeps the commits apart: made in the same second from the
+        # same parent, identical ones would be one commit, and one push would put them all on origin.
+        (worktree / "unpushed.txt").write_text(f"unpushed from {worktree.name}\n", encoding="utf-8")
+        git(worktree, "add", "-A")
+        git(worktree, "commit", "-q", "-m", "a commit GitHub lacks")
+        return worktree
+
+    old_unpushed = with_unpushed_commit(idle_candidate("old-unpushed-wt", pushed=False))
+    old_unpushed_commit = git(old_unpushed, "rev-parse", "HEAD").strip()
+    age(old_unpushed, when=fifteen_days_ago)
+    recent_unpushed = age(with_unpushed_commit(idle_candidate("recent-unpushed-wt", pushed=False)),
+                          when=thirteen_days_ago)
+    push_refused = age(with_unpushed_commit(idle_candidate("push-refused-wt", pushed=False)),
+                       when=fifteen_days_ago)
+    old_detached_unpushed = age(with_unpushed_commit(
+        idle_candidate("old-detached-unpushed-wt", detach=True)), when=fifteen_days_ago)
+    refusing_hook = origin / "hooks" / "pre-receive"
+    refusing_hook.write_text("#!/bin/sh\nwhile read old new ref; do\n"
+                             "  [ \"$ref\" = refs/heads/push-refused-wt ] && "
+                             "{ echo 'refused by the test' >&2; exit 1; }\n"
+                             "done\nexit 0\n", encoding="utf-8")
+    refusing_hook.chmod(0o755)
+    try:
+        unpushed_report = run_idle_cleanup()
+        unpushed_removal = run_idle_cleanup("--remove")
+    finally:
+        refusing_hook.unlink()
+    check("the report calls a worktree idle 15 days but for an unpushed commit done, saying "
+          "--remove pushes its branch first",
+          idle_line(unpushed_report.stdout, "old-unpushed-wt").startswith(
+              "old-unpushed-wt: done — nothing in it, its git directory included, has changed for "
+              "14 days")
+          and "which --remove first pushes on its branch old-unpushed-wt"
+              in idle_line(unpushed_report.stdout, "old-unpushed-wt"), unpushed_report.stdout)
+    check("--remove pushes the branch of a worktree idle 15 days but for an unpushed commit, "
+          "then removes it",
+          not old_unpushed.exists()
+          and git(origin, "rev-parse", "refs/heads/old-unpushed-wt").strip() == old_unpushed_commit
+          and "branch old-unpushed-wt: pushed to origin" in unpushed_removal.stdout,
+          unpushed_removal.stdout + unpushed_removal.stderr)
+    check("a worktree with an unpushed commit unchanged for only 13 days is kept",
+          recent_unpushed.exists()
+          and idle_line(unpushed_removal.stdout, "recent-unpushed-wt")
+              == f"recent-unpushed-wt: {no_owner_kept}",
+          unpushed_removal.stdout)
+    check("--remove keeps a worktree whose branch origin refuses, says why, and exits 1",
+          push_refused.exists() and unpushed_removal.returncode == 1
+          and idle_line(unpushed_removal.stdout, "push-refused-wt").startswith(
+              "push-refused-wt: push of its branch push-refused-wt FAILED, worktree kept — "
+              "origin lacks its last commit")
+          and "refused by the test" in idle_line(unpushed_removal.stdout, "push-refused-wt"),
+          unpushed_removal.stdout + unpushed_removal.stderr)
+    check("a worktree idle 15 days but for unpushed commits on no branch is kept, saying it has "
+          "no branch to push",
+          old_detached_unpushed.exists()
+          and "is on no branch, so the cleaner has no branch to push them on"
+              in idle_line(unpushed_removal.stdout, "old-detached-unpushed-wt"),
+          unpushed_removal.stdout)
+    for leftover in (recent_unpushed, push_refused, old_detached_unpushed):
+        git(checkout, "worktree", "remove", "--force", str(leftover))
 
     # A file written after the idle rule judged a worktree, here by a stub lsof during the vacancy
     # check, must keep it: the removal would delete the file unsaved. Each run holds one idle
