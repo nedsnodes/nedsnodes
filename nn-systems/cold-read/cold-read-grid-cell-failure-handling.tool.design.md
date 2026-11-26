@@ -76,6 +76,7 @@ The classes, tested in this order; the first that matches names the cause. The f
 |---|---|---|---|---|
 | `logged-out` | `claude`, `codex` and `agy`: the line each agent-binary prints when it has no credentials, captured before this class is built (below); the `codex` line after its leading tracing-logger timestamp; for `agy`, a line starting "Authentication required." (`AGY_MISSING_GOOGLE_LOGIN_STDERR_LINE_PREFIX` in `nn-systems/cold-read/cold-read-agy-cell.py`) | the matched line; for `agy`, a fixed sentence saying how to log agy in (`AGY_LOGGED_OUT_CAUSE_DETAIL`) | the user logs in | yes |
 | `agent-binary-missing` | the program's `OSError` handler ran when it started the agent-binary (`run_model_chain` in `nn-systems/cold-read/cold-read-cell-common.py`) | the error text, which says whether the binary was not found or would not run | the user installs or repairs the agent-binary | yes |
+| `invalid-answer` | a cold-read-cell that answers in JSON, the terminology cold-read-cell: the agent-binary exited 0, but returned no answer, or an answer that breaks its schema, or one in which more than half the flags break a rule of `nn-systems/cold-read/cold-read-terminology-answer-rules-the-runner-validates-beyond-the-schema.md`; a flag below that share keeps its place in the report, marked with the rule it broke (`run_model_chain` in `nn-systems/cold-read/cold-read-cell-common.py`) | what the run returned instead of an answer, or each rule the answer breaks, cut to 120 characters | nothing the user does; the retry is the remedy | no |
 | `no-report` | the agent-binary exited 0 but no report verified (the program's existing exit-0 branch) | "no report written", followed by "; the reviewer's last line: " and the last non-empty line of the agent-binary's standard output, cut to 120 characters, when it printed one | nothing the user does; the retry is the remedy | no |
 | `program-unstartable` | the cold-read-grid's own `OSError` handler ran when it started the cold-read-cell program | the error text | the user repairs the checkout | no |
 | `exit-N` | anything else; N is the agent-binary's exit status, as in `exit-2` | the last non-empty line of the agent-binary's standard error, or of its standard output when standard error is empty, cut to 120 characters | unknown; the kept log says | no |
@@ -156,7 +157,18 @@ The stub agent-binary the tests use (`STUB_MODEL_RUNTIME` in `nn-systems/cold-re
 - The cold-read-target changes during a run that has an absent report. Expect the target-changed variant, then the absent report, both markers with the target-changed marker first, and exit 3.
 - **A Codex attempt's output holds the `claude` logged-out line, "Not logged in · Please run /login", at the start of a line, and the attempt fails with exit 1.** Expect the class `exit-1`, since no Codex text matches that line (the one Codex text recognised is its own logged-out line). Also expect a run otherwise the same as that failure without the line: the same retry, closing text and exit code.
 
+<<<<<<< HEAD
 The classifier gets its own cases in `nn-systems/cold-read/tests/cold-read-cell-common-test.py`. The `logged-out` input is the capture of section 4. `agent-binary-missing`, `no-report` and `exit-N` come from the program's own branches and need no captured text.
+=======
+The classifier gets its own cases in `nn-systems/cold-read/tests/cold-read-cell-common-test.py`. The inputs for the two limit classes are the real lines from the log-store. Each fixture records the log file and line, the command that produced it, which is the cold-read-grid's launch of `nn-systems/cold-read/cold-read-claude-cell.py`, and the machine the run was on:
+
+- the weekly limit: line 1 of `nedlern@ned-box:/home/nedlern/nedsnodes-logs/cold-read-records/2384-each-round-of-a-pull-request-runs-its-2026-11-02-2/claude-hunt-deep.md.attempt-1.stderr.log`, run on ned-box;
+- the Fable limit: line 2 of `nedlern@ned-box:/home/nedlern/nedsnodes-logs/cold-read-records/2026-09-11-SKILL-2/2026-09-11-SKILL-2--claude-hunt-floor.md.stderr.log`, run on the Mac.
+
+The `logged-out` input is the capture of section 4. `agent-binary-missing`, `invalid-answer`, `no-report` and `exit-N` come from the program's own branches and need no captured text.
+
+`invalid-answer` gets its own cases in `nn-systems/cold-read/tests/cold-read-cell-common-test.py`. A terminology cold-read-cell run on a stub agent-binary that returns no answer, an answer that breaks the schema, or an answer in which more than half the flags break a rule, each on the Claude or the Codex cold-read-cell, exits 1 with no report and a cause line naming `invalid-answer`. An invalid answer from the first model of a chain leaves the next model to write the report.
+>>>>>>> origin/cold-read-terminology-cell-json-answer-runner-schema-and-rules-check-and-glossary-lookups-topic-branch
 
 ## 9. The skill text that changes with it
 

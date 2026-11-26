@@ -39,6 +39,7 @@ it up with no change here.
 """
 
 import importlib.util
+import json
 import pathlib
 import sys
 
@@ -103,12 +104,16 @@ def cold_read_cell_launcher_own_command_line_options_adder(parser):
     )
 
 
-def invocation_builder(effort: str, parsed_arguments=None):
-    """Return a callback yielding model argv and prompt input for the shared runner."""
-    settings = (
+def claude_code_session_settings(parsed_arguments) -> dict:
+    return (
         {**SETTINGS, **PROMPT_CACHE_FIVE_MINUTE_TTL_SETTINGS}
         if parsed_arguments is not None and parsed_arguments.prompt_cache_five_minute_ttl
         else SETTINGS)
+
+
+def invocation_builder(effort: str, parsed_arguments=None):
+    """Return a callback yielding model argv and prompt input for the shared runner."""
+    settings = claude_code_session_settings(parsed_arguments)
     # Pass the prompt on stdin: variadic --allowedTools can swallow a trailing positional argument.
     def build_invocation(model: str, prompt: str):
         # dontAsk: a tool call ALLOWED_TOOLS does not allow is refused, with no one to ask.
@@ -125,9 +130,74 @@ def invocation_builder(effort: str, parsed_arguments=None):
     return build_invocation
 
 
+<<<<<<< HEAD
 RECOGNISED_FAILURE_TEXTS = (
     common.RecognisedFailureText("logged-out", "Not logged in", common.DETAIL_IS_WHOLE_LINE),
 )
+=======
+# A JSON-answer cell's reviewer writes no file: its answer is the structured output.
+STRUCTURED_ANSWER_ALLOWED_TOOLS = "Read,Grep,Glob,WebFetch"
+
+
+def structured_answer_invocation_builder(effort: str, schema_path: pathlib.Path,
+                                         answer_file: pathlib.Path, parsed_arguments=None):
+    """Return a callback yielding argv and prompt input that ask claude for an answer to schema_path."""
+    del answer_file  # claude prints its answer on stdout
+    schema_text = schema_path.read_text(encoding="utf-8")
+    settings = claude_code_session_settings(parsed_arguments)
+
+    def build_invocation(model: str, prompt: str):
+        command = [
+            *command_line_prefix.claude_code_headless_run_command_line_prefix_build(
+                "dontAsk", caller_claude_code_session_settings=settings),
+            "--model", model,
+            "--effort", effort,
+            "--output-format", "json",
+            "--json-schema", schema_text,
+            "--allowedTools", STRUCTURED_ANSWER_ALLOWED_TOOLS,
+            "--disallowedTools", DISALLOWED_TOOLS,
+        ]
+        return command, prompt
+    return build_invocation
+
+
+def structured_answer_from_run(completed, answer_file: pathlib.Path):
+    """Return claude's structured_output; raise StructuredAnswerRejected when the run has none."""
+    del answer_file
+    try:
+        output = json.loads(completed.stdout or "")
+    except ValueError:
+        output = None
+    if not isinstance(output, dict):
+        raise common.StructuredAnswerRejected(
+            "claude printed no JSON result object on stdout")
+    # claude leaves structured_output out after a refusal or a max_tokens stop.
+    if output.get("is_error") is not False or output.get("structured_output") is None:
+        raise common.StructuredAnswerRejected(
+            f"claude's result has no answer (is_error {output.get('is_error')!r}, "
+            f"subtype {output.get('subtype')!r}, stop_reason {output.get('stop_reason')!r})")
+    return output["structured_output"]
+
+
+def model_family_name(model: str) -> str:
+    """Return the family name used by Claude's model-limit messages."""
+    parts = model.split("-")
+    return (parts[1] if len(parts) > 1 and parts[1] else model).capitalize()
+
+
+# Match the CLI's failure messages at line starts; model-limit prefixes use the current model family.
+def recognised_failure_texts_for_model(model: str) -> list:
+    family = model_family_name(model)
+    return [
+        common.RecognisedFailureText(
+            "account-limit", "You've hit your ", common.DETAIL_IS_REST_OF_LINE,
+            re.compile(r"(?:\S+ ){0,3}limit\b")),
+        common.RecognisedFailureText(
+            "model-limit", f"You've reached your {family} limit", family),
+        common.RecognisedFailureText(
+            "logged-out", "Not logged in", common.DETAIL_IS_WHOLE_LINE),
+    ]
+>>>>>>> origin/cold-read-terminology-cell-json-answer-runner-schema-and-rules-check-and-glossary-lookups-topic-branch
 
 
 def main() -> int:
@@ -137,7 +207,13 @@ def main() -> int:
         tier_to_model_chain=TIER_TO_CLAUDE_MODEL_CHAIN,
         tier_to_effort=TIER_TO_REASONING_EFFORT,
         invocation_builder=invocation_builder,
+<<<<<<< HEAD
         recognised_failure_texts=RECOGNISED_FAILURE_TEXTS,
+=======
+        recognised_failure_texts_for_model=recognised_failure_texts_for_model,
+        structured_answer_support=common.StructuredAnswerSupport(
+            structured_answer_invocation_builder, structured_answer_from_run),
+>>>>>>> origin/cold-read-terminology-cell-json-answer-runner-schema-and-rules-check-and-glossary-lookups-topic-branch
         cold_read_cell_launcher_own_command_line_options_adder=cold_read_cell_launcher_own_command_line_options_adder,
     )
 
