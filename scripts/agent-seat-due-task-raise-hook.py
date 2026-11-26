@@ -111,14 +111,18 @@ silence on any fault would mute the hook for good after one torn file. Two
 sessions sharing one list id that stop at the same instant could each raise
 the same task once; that is not locked against.
 
-GITHUB, and only for prerequisites. A condition is checked with `gh pr view` or
-`gh issue view` (read-only), GH_TOKEN removed from the environment so gh
+GITHUB, and only for prerequisites. The conditions the due-task pass will ask about
+are first asked together in one read-only `gh api graphql` query; a condition that
+query leaves unanswered, because it failed or GitHub resolved nothing for that
+number, is checked alone with `gh pr view` or `gh issue view` (read-only), whose
+error is the one reported. Every gh call has GH_TOKEN removed from the environment so gh
 uses its keyring login, stdin closed, each call bounded by
 GH_CALL_TIMEOUT_SECONDS and all of a run's calls together, the due-task
 pass's and the next-action prompt's, by GH_CALLS_TOTAL_BUDGET_SECONDS, which
 leaves the rest of the run room inside the hook's 30-second timeout in
-.claude/settings.json. A condition checked within
-CONDITION_RECHECK_INTERVAL_SECONDS is answered from the state file. A check
+.claude/settings.json. A condition found met is answered from the state file for
+good, and any other condition checked within CONDITION_RECHECK_INTERVAL_SECONDS
+is answered from it too. A check
 gh could not answer, because gh is missing, failed, timed out or printed no
 JSON object, is not an answer: no task waiting on it is raised, it is
 recorded as a failure with its time so it too waits the interval, and the
@@ -127,8 +131,8 @@ task already raised for its current prerequisites; of a task held by
 blockedBy, only its `pr_merged` pull requests not yet raised as closed without
 merging are checked. Tasks no blockedBy holds are checked first, so a held
 task's checks spend only the budget they leave. A condition not checked
-because the budget is spent is answered not met and not cached, so the next
-stop asks gh, and this stop names each open task that waits on it, as OUTPUT
+because less than GH_CALL_SHORTEST_ANSWER_SECONDS of the budget is left is answered not met and not cached, so the next
+stop asks gh, and this stop counts the open tasks that wait on it, as OUTPUT
 says. An agent-seat whose tasks have no prerequisites makes no
 network call. The same call
 fetches the title and URL the raise line cites; a condition gh never
@@ -181,8 +185,8 @@ cannot be acted on yet, then one line per task whose pull request closed
 without merging and, when there is any, the instructions for re-planning it,
 then two lines per prerequisites list the hook cannot use, then the
 next-action prompt's lines, then one line per condition gh could not answer
-at this stop, then one line per open task that waits on a condition the
-budget left unchecked and, when there is any, the instructions for it. Nothing to raise or name and no next-action prompt:
+at this stop, then, when the budget left a condition unchecked, one line
+counting those conditions and the open tasks that wait on them. Nothing to raise or name and no next-action prompt:
 nothing printed, exit 0. A fault, such as a payload
 that is not a JSON object, a state file that cannot be written, a condition
 gh could not answer or the budget left unchecked at a stop with nothing else
@@ -259,6 +263,9 @@ GITHUB_REPOSITORY = "nedsnodes/nedsnodes"
 CONDITION_RECHECK_INTERVAL_SECONDS = 300
 GH_CALL_TIMEOUT_SECONDS = 8
 GH_CALLS_TOTAL_BUDGET_SECONDS = 20
+# One `gh pr view` took 0.59 seconds on ned-box on 2026-11-26; with less time left than this, a
+# call can only time out, which would be reported as a GitHub failure.
+GH_CALL_SHORTEST_ANSWER_SECONDS = 2
 
 # condition kind -> (gh subcommand, the gh state that means met, the ID-type
 # written in the raise line, the word for met in the raise line)
@@ -310,18 +317,10 @@ CLOSED_WITHOUT_MERGING_INSTRUCTIONS = (
 PREREQUISITES_PROBLEM_LINE_TEMPLATE = (
     '[rule due-task-prerequisites-unusable-correct-them] Task {task_id} "{subject}" is never raised as its metadata.prerequisites stand, because '
     "{problem}.")
-BUDGET_SKIPPED_TASK_LINE_TEMPLATE = (
-    "At this stop this hook ran out of its {budget}-second budget for GitHub calls before it asked "
-    'about {conditions}, so task {task_id} "{subject}", which waits on {pronoun}, was treated as '
-    "still waiting and not raised.")
-BUDGET_SKIPPED_INSTRUCTIONS = (
-    "If you have other work, nothing is needed for a task named above as not checked: the next "
-    "stop asks GitHub again and raises the task when what it waits on is done.",
-    "If you are about to end your turn with no other work, check each such pull request or GHI "
-    "yourself with `gh pr view <number> --repo nedsnodes/nedsnodes --json state` or `gh issue "
-    "view <number> --repo nedsnodes/nedsnodes --json state`, and act on the task now if every "
-    "prerequisite is done.",
-)
+BUDGET_SKIPPED_LINE_TEMPLATE = (
+    "This hook's {budget}-second budget for GitHub calls ran out before it asked about "
+    "{condition_count} pull request(s) or GHI(s) that {task_count} open task(s) wait on; nothing "
+    "is needed, since the next stop asks again and raises each task whose prerequisites are met.")
 PREREQUISITES_CORRECTION_INSTRUCTION = (
     'Correct the task with TaskUpdate, giving its metadata a "prerequisites" list whose entries '
     "are each one of " + PREREQUISITE_FORMS + '; if the task waits on no pull request, GHI or '
@@ -592,28 +591,99 @@ class GitHubConditionChecker:
             self.gh_failures.append((kind, number, answer["gh_failure"]))
         return answer
 
-    def cached_or_fresh_answer(self, kind: str, number: int) -> dict:
-        key = condition_key(kind, number)
-        cached = self.checks.get(key)
-        if (isinstance(cached, dict)
-                and isinstance(cached.get("checked_at_epoch"), (int, float))
+    def usable_cached_answer(self, kind: str, number: int) -> "dict | None":
+        """The cached answer, when it is met or younger than the recheck interval; else None.
+        A merged pull request or a closed GHI is kept met for good: a merge never changes back,
+        and a GHI reopened after its task was raised already counts as met."""
+        cached = self.checks.get(condition_key(kind, number))
+        if not isinstance(cached, dict):
+            return None
+        if cached.get("met") is True:
+            return cached
+        if (isinstance(cached.get("checked_at_epoch"), (int, float))
                 and 0 <= self.now_epoch - cached["checked_at_epoch"]
                 < CONDITION_RECHECK_INTERVAL_SECONDS):
             return cached
-        remaining = GH_CALLS_TOTAL_BUDGET_SECONDS - (self.clock() - self.started)
-        if remaining <= 0:
-            # Not cached, so the next stop asks gh about it.
-            self.conditions_skipped_for_budget.append((kind, number))
-            return {"met": False}
-        fresh = self.ask_gh(kind, number, min(GH_CALL_TIMEOUT_SECONDS, remaining))
+        return None
+
+    def budget_left_seconds(self) -> float:
+        return GH_CALLS_TOTAL_BUDGET_SECONDS - (self.clock() - self.started)
+
+    def store_fresh_answer(self, kind: str, number: int, fresh: dict) -> dict:
+        key = condition_key(kind, number)
         fresh["checked_at_epoch"] = self.now_epoch
-        previous = cached if isinstance(cached, dict) else {}
+        previous = self.checks.get(key) if isinstance(self.checks.get(key), dict) else {}
         for citation_field in ("title", "url"):
             if citation_field not in fresh and isinstance(previous.get(citation_field), str):
                 fresh[citation_field] = previous[citation_field]
         self.checks[key] = fresh
         self.changed = True
         return fresh
+
+    def answer_all_in_one_query(self, conditions) -> None:
+        """Ask GitHub, in one GraphQL call, about every (kind, number) the cache cannot answer,
+        and cache each answer it gives. A condition the call leaves unanswered, because the call
+        failed or GitHub gave nothing for it, is asked alone later by `answer`, whose gh call
+        reports gh's own error."""
+        unanswered = [(kind, number) for kind, number in dict.fromkeys(conditions)
+                      if kind in CONDITION_KINDS and self.usable_cached_answer(kind, number) is None]
+        remaining = self.budget_left_seconds()
+        if not unanswered or remaining < GH_CALL_SHORTEST_ANSWER_SECONDS:
+            return
+        answers = self.ask_gh_in_one_query(unanswered, min(GH_CALL_TIMEOUT_SECONDS, remaining))
+        for (kind, number), fresh in answers.items():
+            self.store_fresh_answer(kind, number, fresh)
+
+    def cached_or_fresh_answer(self, kind: str, number: int) -> dict:
+        cached = self.usable_cached_answer(kind, number)
+        if cached is not None:
+            return cached
+        remaining = self.budget_left_seconds()
+        if remaining < GH_CALL_SHORTEST_ANSWER_SECONDS:
+            # Not cached, so the next stop asks gh about it.
+            self.conditions_skipped_for_budget.append((kind, number))
+            return {"met": False}
+        fresh = self.ask_gh(kind, number, min(GH_CALL_TIMEOUT_SECONDS, remaining))
+        return self.store_fresh_answer(kind, number, fresh)
+
+    @staticmethod
+    def ask_gh_in_one_query(conditions, timeout_seconds: float) -> dict:
+        """{(kind, number): {"met": ..., "title": ..., "url": ...}} for each condition GitHub
+        answered in one `gh api graphql` call; empty when the call failed."""
+        owner, name = GITHUB_REPOSITORY.split("/")
+        fields = []
+        for index, (kind, number) in enumerate(conditions):
+            node = "pullRequest" if kind == PULL_REQUEST_KIND else "issue"
+            fields.append(f"c{index}: {node}(number: {int(number)}) {{ state title url }}")
+        query = (f'query {{ repository(owner: "{owner}", name: "{name}") {{ '
+                 + " ".join(fields) + " } }")
+        environment = dict(os.environ)
+        environment.pop("GH_TOKEN", None)
+        try:
+            completed = subprocess.run(
+                ["gh", "api", "graphql", "-f", f"query={query}"], stdin=subprocess.DEVNULL,
+                capture_output=True, text=True, timeout=timeout_seconds, env=environment,
+                check=False)
+            body = json.loads(completed.stdout)
+        except (OSError, subprocess.SubprocessError, ValueError):
+            return {}
+        # gh exits nonzero when GitHub cannot resolve one of the numbers, yet prints its answers
+        # for the others, so the body is read whatever the exit code.
+        data = body.get("data") if isinstance(body, dict) else None
+        repository = (data.get("repository") if isinstance(data, dict) else None) or {}
+        answers = {}
+        for index, (kind, number) in enumerate(conditions):
+            node = repository.get(f"c{index}")
+            if not isinstance(node, dict) or not isinstance(node.get("state"), str):
+                continue
+            answer = {"met": node["state"] == CONDITION_KINDS[kind][1]}
+            if kind == PULL_REQUEST_KIND:
+                answer[CLOSED_WITHOUT_MERGING_ANSWER_KEY] = node["state"] == "CLOSED"
+            for citation_field in ("title", "url"):
+                if isinstance(node.get(citation_field), str):
+                    answer[citation_field] = node[citation_field]
+            answers[(kind, number)] = answer
+        return answers
 
     @staticmethod
     def ask_gh(kind: str, number: int, timeout_seconds: float) -> dict:
@@ -705,17 +775,19 @@ def prerequisites_raised_as_met(record: dict, prerequisites_value) -> bool:
 
 
 def budget_skipped_task_lines(tasks: dict, skipped_conditions, raised: dict) -> list:
-    """One line per open task the skip left unraised, that is, one that names a condition the
-    checker skipped for lack of budget and that `raised`, the state file's record as this run
-    leaves it, neither shows raised as met nor shows told to re-plan for a pull request closed
-    without merging; then the instructions, or nothing when there is no such task.
+    """One line counting the open tasks the skip left unraised, and the skipped conditions
+    they name; nothing when there is none. A task counts when it names a condition the checker
+    skipped for lack of budget and `raised`, the state file's record as this run leaves it,
+    neither shows it raised as met nor shows it told to re-plan for a pull request closed
+    without merging.
 
     Not handled: a pull request with an old closed-without-merging record that was reopened and
     merged since. Its task gets no line here even when the budget skipped the pull request; a
     later run that asks GitHub sees the merge, and raises the task once its other prerequisites
     and blockers allow."""
     skipped = set(skipped_conditions)
-    lines = []
+    task_count = 0
+    skipped_named = set()
     for task_id in sorted(tasks, key=lambda text: (len(text), text)):
         task = tasks[task_id]
         metadata = task.get("metadata")
@@ -731,17 +803,42 @@ def budget_skipped_task_lines(tasks: dict, skipped_conditions, raised: dict) -> 
                 or any(kind == PULL_REQUEST_KIND and number in closed_without_merging
                        for kind, number in conditions)):
             continue
-        names = list(dict.fromkeys(f"{CONDITION_KINDS[kind][2]} {number}"
-                                   for kind, number in conditions
-                                   if kind in CONDITION_KINDS and (kind, number) in skipped))
-        if names:
-            lines.append(BUDGET_SKIPPED_TASK_LINE_TEMPLATE.format(
-                budget=GH_CALLS_TOTAL_BUDGET_SECONDS, conditions=", ".join(names),
-                task_id=task["id"], subject=single_line(task.get("subject", "")),
-                pronoun="it" if len(names) == 1 else "them"))
-    if lines:
-        lines += BUDGET_SKIPPED_INSTRUCTIONS
-    return lines
+        named = {(kind, number) for kind, number in conditions
+                 if kind in CONDITION_KINDS and (kind, number) in skipped}
+        if named:
+            task_count += 1
+            skipped_named |= named
+    if not task_count:
+        return []
+    return [BUDGET_SKIPPED_LINE_TEMPLATE.format(
+        budget=GH_CALLS_TOTAL_BUDGET_SECONDS, condition_count=len(skipped_named),
+        task_count=task_count)]
+
+
+def github_conditions_the_due_task_pass_asks(tasks: dict, directory: Path, raised: dict) -> list:
+    """The pull requests and GHIs `due_task_lines` asks GitHub about, so that one query can
+    answer them first: of each open task not raised for its current prerequisites, its
+    `pr_merged` pull requests not yet raised as closed without merging, and, when no blockedBy
+    holds it, every pull request and GHI it names."""
+    found = []
+    for task_id, task in tasks.items():
+        metadata = task.get("metadata")
+        if task.get("status") not in OPEN_TASK_STATUSES or not isinstance(metadata, dict):
+            continue
+        prerequisites_value = metadata.get(PREREQUISITES_KEY)
+        if prerequisites_value is None:
+            continue
+        try:
+            conditions = parse_prerequisites(prerequisites_value)
+        except UnreadablePrerequisites:
+            continue
+        record = raised.get(task_id) if isinstance(raised.get(task_id), dict) else {}
+        if prerequisites_raised_as_met(record, prerequisites_value):
+            continue
+        found += pull_request_conditions_not_raised_as_closed(conditions, record)
+        if not is_held_by_blockers(task, tasks, directory):
+            found += [(kind, number) for kind, number in conditions if kind in CONDITION_KINDS]
+    return list(dict.fromkeys(found))
 
 
 def raise_line(task: dict, met_citations, done_blockers=None) -> str:
@@ -1116,6 +1213,8 @@ def run(stdin_text: str, environment, home: Path, now: datetime) -> "str | None"
     state = read_state(state_path)
     # One checker for the whole run, so its GitHub budget bounds every gh call the run makes.
     checker = GitHubConditionChecker(state["checks"], now.timestamp())
+    checker.answer_all_in_one_query(
+        github_conditions_the_due_task_pass_asks(tasks, directory, state["raised"]))
     lines, closed_lines, problem_lines, state_changed = due_task_lines(
         tasks, directory, state, checker)
     next_action_lines = []

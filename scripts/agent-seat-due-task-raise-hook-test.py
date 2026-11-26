@@ -76,6 +76,23 @@ try:
         responses = json.load(handle)
 except FileNotFoundError:
     responses = {{}}
+if sys.argv[1:3] == ["api", "graphql"]:
+    # Answers each aliased pullRequest or issue from the same responses; one with no state is
+    # null with an error, and gh then exits 1 though it prints the others, as real gh does.
+    import re
+    nodes = {{}}
+    errors = []
+    for alias, node, number in re.findall(r"(c\\d+): (pullRequest|issue)\\(number: (\\d+)\\)",
+                                          sys.argv[4]):
+        answer = responses.get(("pr" if node == "pullRequest" else "issue") + ":" + number)
+        nodes[alias] = answer if isinstance(answer, dict) and "state" in answer else None
+        if nodes[alias] is None:
+            errors.append({{"message": "Could not resolve to a node with number " + number}})
+    body = {{"data": {{"repository": nodes}}}}
+    if errors:
+        body["errors"] = errors
+    print(json.dumps(body))
+    sys.exit(1 if errors else 0)
 key = sys.argv[1] + ":" + sys.argv[3]
 answer = responses.get(key, "fail")
 if answer == "fail":
@@ -150,6 +167,10 @@ class Seat:
         """Add to, or replace, the answers the gh stand-in gives; pr:900 is merged."""
         self.responses.update(responses)
         self.gh_responses.write_text(json.dumps(self.responses))
+
+    def gh_view_calls(self):
+        """The `gh pr view` and `gh issue view` calls, each asking about one condition."""
+        return [call for call in self.gh_calls() if call["argv"][1:2] == ["view"]]
 
     def gh_calls(self):
         if not self.gh_log.exists():
@@ -360,10 +381,13 @@ expected_text = (
 check("prerequisites met: raised with each prerequisite cited by title and link",
       context_of(result) == expected_text, repr(context_of(result)))
 calls = seat.gh_calls()
-check("prerequisites met: gh asked read-only view calls on the project repository",
-      sorted(call["argv"] for call in calls) == [
-          ["issue", "view", "202", "--repo", "nedsnodes/nedsnodes", "--json", "state,title,url"],
-          ["pr", "view", "101", "--repo", "nedsnodes/nedsnodes", "--json", "state,title,url"]],
+check("prerequisites met: gh asked about both in one read-only GraphQL query on the project "
+      "repository",
+      [call["argv"] for call in calls] == [[
+          "api", "graphql", "-f",
+          'query=query { repository(owner: "nedsnodes", name: "nedsnodes") { '
+          "c0: pullRequest(number: 101) { state title url } "
+          "c1: issue(number: 202) { state title url } } }"]],
       calls)
 check("prerequisites met: GH_TOKEN removed before gh runs",
       calls and not any(call["gh_token_present"] for call in calls), calls)
@@ -386,11 +410,12 @@ GH_FAILURE_103 = ("This hook could not ask GitHub whether PR 103 is merged, so n
                   "after the failed call.")
 check("gh failing: reported on stderr with gh's command and error, exit 1, nothing raised",
       reported(result, GH_FAILURE_103), result)
-check("gh failing: it was asked", len(seat.gh_calls()) == 1, seat.gh_calls())
+check("gh failing: the one query gave no answer for it, so it was asked alone",
+      len(seat.gh_view_calls()) == 1 and len(seat.gh_calls()) == 2, seat.gh_calls())
 result = seat.run()
 check("gh failing: the next stop within five minutes reports the same failure from the cache "
       "and does not ask gh again",
-      reported(result, GH_FAILURE_103) and len(seat.gh_calls()) == 1, (result, seat.gh_calls()))
+      reported(result, GH_FAILURE_103) and len(seat.gh_calls()) == 2, (result, seat.gh_calls()))
 
 # At the real 300 seconds, // 59 also gives 5, so only a longer interval tells the two apart.
 saved_interval = hook.CONDITION_RECHECK_INTERVAL_SECONDS
@@ -410,7 +435,7 @@ seat.respond({"pr:103": "fail"})
 result = seat.run()
 check("gh failing for a condition two tasks name: one gh call, the failure reported once",
       reported(result, GH_FAILURE_103) and result.stderr.count(GH_COMMAND_103) == 1
-      and len(seat.gh_calls()) == 1, (result, seat.gh_calls()))
+      and len(seat.gh_view_calls()) == 1, (result, seat.gh_calls()))
 
 seat = Seat()
 seat.task("40", metadata=MET, subject="Met anyway")
@@ -557,7 +582,7 @@ seat.task("51", metadata={"prerequisites": [{"pr_merged": 111}]})
 seat.respond({"pr:111": "fail"})
 seat.run()
 seat.run()
-check("cache: a failed check also waits five minutes", len(seat.gh_calls()) == 1,
+check("cache: a failed check also waits five minutes", len(seat.gh_calls()) == 2,
       seat.gh_calls())
 
 seat = Seat()
@@ -628,6 +653,37 @@ def age_cached_answers(seat):
     for answer in state["checks"].values():
         answer["checked_at_epoch"] -= hook.CONDITION_RECHECK_INTERVAL_SECONDS
     seat.state_path.write_text(json.dumps(state))
+
+
+# merge-lane-2 had 88 conditions on 2026-11-26; asked one by one at 0.59 seconds each they spent
+# the 20-second budget, and every one went back to gh every five minutes, merged ones included.
+seat = Seat()
+for number in range(601, 641):
+    seat.task(str(number), metadata={"prerequisites": [{"pr_merged": number}]})
+    seat.respond({f"pr:{number}": {"state": "MERGED", "title": f"T{number}",
+                                   "url": f"https://x/{number}"}})
+text = context_of(seat.run()) or ""
+check("forty conditions: one GraphQL call answers them all, no call per condition, and every "
+      "task is raised",
+      len(seat.gh_calls()) == 1 and seat.gh_view_calls() == []
+      and all(f"Act on task {number} " in text for number in range(601, 641)),
+      (len(seat.gh_calls()), text[:300]))
+
+seat = Seat()
+seat.task("54", metadata={"prerequisites": [{"pr_merged": 114}, {"pr_merged": 115}]})
+seat.respond({"pr:114": {"state": "MERGED", "title": "T", "url": "https://x/114"},
+              "pr:115": {"state": "OPEN", "title": "U", "url": "https://x/115"}})
+check("a merged answer is kept: first stop, one prerequisite still open, silent",
+      silent(seat.run()) and len(seat.gh_calls()) == 1, seat.gh_calls())
+age_cached_answers(seat)
+seat.respond({"pr:115": {"state": "MERGED", "title": "U", "url": "https://x/115"}})
+text = context_of(seat.run()) or ""
+calls = seat.gh_calls()
+check("a merged answer is kept for good: after the recheck interval only the open pull request "
+      "is asked about again, and the task is raised",
+      "Act on task 54 " in text and len(calls) == 2
+      and "pullRequest(number: 115)" in calls[1]["argv"][3]
+      and "pullRequest(number: 114)" not in calls[1]["argv"][3], (text, calls))
 
 
 seat = Seat()
@@ -1029,6 +1085,8 @@ fake_clock_seconds = [0.0]
 def slow_timing_out_gh(command, *arguments, **keywords):
     if command[0] != "gh":
         return real_subprocess_run(command, *arguments, **keywords)
+    if command[1:3] == ["api", "graphql"]:
+        raise subprocess.TimeoutExpired(command, keywords.get("timeout"))
     gh_calls_made.append(command[3])
     time.sleep(0.35)
     fake_clock_seconds[0] += 0.2
@@ -1036,11 +1094,13 @@ def slow_timing_out_gh(command, *arguments, **keywords):
 
 
 real_budget = hook.GH_CALLS_TOTAL_BUDGET_SECONDS
+real_shortest_answer = hook.GH_CALL_SHORTEST_ANSWER_SECONDS
 real_clock = hook.GitHubConditionChecker.clock
 real_home = os.environ.get("HOME")
 hook.subprocess.run = slow_timing_out_gh
 hook.GitHubConditionChecker.clock = staticmethod(lambda: fake_clock_seconds[0])
 hook.GH_CALLS_TOTAL_BUDGET_SECONDS = 0.3
+hook.GH_CALL_SHORTEST_ANSWER_SECONDS = 0.05
 os.environ["HOME"] = str(seat.home)  # the handoff module finds its markers under Path.home()
 try:
     output = hook.run(json.dumps({
@@ -1052,6 +1112,7 @@ finally:
     hook.subprocess.run = real_subprocess_run
     hook.GitHubConditionChecker.clock = real_clock
     hook.GH_CALLS_TOTAL_BUDGET_SECONDS = real_budget
+    hook.GH_CALL_SHORTEST_ANSWER_SECONDS = real_shortest_answer
     if real_home is None:
         os.environ.pop("HOME", None)
     else:
@@ -1067,7 +1128,8 @@ check("one GitHub budget for the whole run: each condition gh could not answer i
       and text.count("could not ask GitHub whether PR 301 is merged") == 1
       and text.count("could not ask GitHub whether PR 302 is merged") == 1
       and "could not ask GitHub whether PR 303 is merged" not in text
-      and text.count("before it asked about PR 303, so task 3 ") == 1
+      and text.count("ran out before it asked about 1 pull request(s) or GHI(s) that 1 open "
+                     "task(s) wait on") == 1
       and "3 more open task(s) are not listed" in text, text)
 
 
@@ -1086,13 +1148,17 @@ def run_with_fake_gh(seconds_per_call, merged, action, closed_without_merging=()
                 "title": f"T{number}", "url": f"https://x/{number}"}
 
     real_ask_gh = hook.GitHubConditionChecker.__dict__["ask_gh"]
+    real_ask_gh_in_one_query = hook.GitHubConditionChecker.__dict__["ask_gh_in_one_query"]
     real_checker_clock = hook.GitHubConditionChecker.__dict__["clock"]
     hook.GitHubConditionChecker.ask_gh = staticmethod(fake_ask_gh)
+    # The one query answers nothing here, so each condition is asked alone and spends budget.
+    hook.GitHubConditionChecker.ask_gh_in_one_query = staticmethod(lambda conditions, timeout: {})
     hook.GitHubConditionChecker.clock = staticmethod(lambda: clock_seconds[0])
     try:
         return action(), asked
     finally:
         hook.GitHubConditionChecker.ask_gh = real_ask_gh
+        hook.GitHubConditionChecker.ask_gh_in_one_query = real_ask_gh_in_one_query
         hook.GitHubConditionChecker.clock = real_checker_clock
 
 
@@ -1124,13 +1190,11 @@ def hook_run_in_process(seat):
                     seat.home, hook.datetime.now(hook.timezone.utc))
 
 
-BUDGET_SKIP_INSTRUCTIONS = (
-    "If you have other work, nothing is needed for a task named above as not checked: the next "
-    "stop asks GitHub again and raises the task when what it waits on is done.\n"
-    "If you are about to end your turn with no other work, check each such pull request or GHI "
-    "yourself with `gh pr view <number> --repo nedsnodes/nedsnodes --json state` or `gh issue "
-    "view <number> --repo nedsnodes/nedsnodes --json state`, and act on the task now if every "
-    "prerequisite is done.")
+def budget_skipped_line(condition_count, task_count):
+    return (f"This hook's 20-second budget for GitHub calls ran out before it asked about "
+            f"{condition_count} pull request(s) or GHI(s) that {task_count} open task(s) wait on; "
+            f"nothing is needed, since the next stop asks again and raises each task whose "
+            f"prerequisites are met.")
 
 # The first call uses the whole budget, so the remaining budget is exactly 0 for the second.
 seat = Seat()
@@ -1140,13 +1204,10 @@ seat.task("5", metadata={"prerequisites": [{"pr_merged": 402}, {"issue_closed": 
 output, asked = run_with_fake_gh(hook.GH_CALLS_TOTAL_BUDGET_SECONDS, {401, 402, 403},
                                  lambda: hook_run_in_process(seat))
 text = json.loads(output)["hookSpecificOutput"]["additionalContext"] if output else ""
-check("budget spent, with a task raised: each task skipped is named after the raise, with "
-      "what was not asked and the instructions",
+check("budget spent, with a task raised: after the raise, one line counts what was not asked "
+      "and the tasks waiting on it, and asks for nothing",
       asked == [401] and text.startswith("[rule due-task-raise-when-prerequisites-met] Act on task 4 ")
-      and text.endswith(
-          "\nAt this stop this hook ran out of its 20-second budget for GitHub calls before it "
-          'asked about PR 402, GHI 403, so task 5 "second", which waits on them, was treated as '
-          "still waiting and not raised.\n" + BUDGET_SKIP_INSTRUCTIONS), (asked, text))
+      and text.endswith("\n" + budget_skipped_line(2, 1)), (asked, text))
 
 seat = Seat()
 seat.task("6", metadata={"prerequisites": [{"pr_merged": 601}]})
@@ -1161,11 +1222,7 @@ except hook.HookFault as error:
     output, fault = None, str(error)
 check("budget spent, with nothing else to say: the skip is a fault, so it does not keep the "
       "agent from stopping",
-      fault is not None and fault.startswith(
-          "At this stop this hook ran out of its 20-second budget for GitHub calls before it "
-          'asked about PR 602, so task 7 "skipped", which waits on it, was treated as still '
-          "waiting and not raised.") and "task 6" not in fault and "task 8" not in fault
-      and "task 9" not in fault, (output, fault))
+      fault == budget_skipped_line(1, 1), (output, fault))
 
 seat = Seat()
 seat.task("4", metadata={"prerequisites": [{"pr_merged": 401}]})
@@ -1182,8 +1239,7 @@ except hook.HookFault as error:
     output, fault = None, str(error)
 check("budget spent before a condition that an unraised task and an already-raised task share: "
       "only the unraised task is named as not raised",
-      fault is not None and 'so task 5 "skipped"' in fault and "task 6" not in fault,
-      (output, fault))
+      fault == budget_skipped_line(1, 1), (output, fault))
 
 seat = Seat()
 seat.task("7", metadata={"prerequisites": [{"pr_merged": 701}, {"pr_merged": 702}]},
@@ -1227,11 +1283,22 @@ check("budget spent by a held task in the due-task pass: the next-action prompt 
 CountingChecker.clock = staticmethod(lambda: 0.0)
 checker = CountingChecker({}, 0)
 CountingChecker.asked = []
-checker.started = 0.001 - hook.GH_CALLS_TOTAL_BUDGET_SECONDS
+checker.started = hook.GH_CALL_SHORTEST_ANSWER_SECONDS - hook.GH_CALLS_TOTAL_BUDGET_SECONDS
 checker.answer("pr_merged", 2)
-check("budget boundary: a call is made while any budget is left, and no skip is recorded",
+check("budget boundary: a call is made while a real call's time is left, and no skip is recorded",
       CountingChecker.asked == [("pr_merged", 2)]
       and checker.conditions_skipped_for_budget == [], CountingChecker.asked)
+# Before this, the last call got the 0.09 seconds left, timed out, and was reported as gh
+# failing, with the advice to run `gh auth login`.
+checker = CountingChecker({}, 0)
+CountingChecker.asked = []
+checker.started = hook.GH_CALL_SHORTEST_ANSWER_SECONDS - 0.0887 - hook.GH_CALLS_TOTAL_BUDGET_SECONDS
+answer = checker.answer("pr_merged", 3)
+check("budget boundary: with less than a real call's time left, gh is not asked, and the "
+      "condition is skipped for the budget, not reported as a gh failure",
+      CountingChecker.asked == [] and answer == {"met": False}
+      and checker.conditions_skipped_for_budget == [("pr_merged", 3)]
+      and checker.gh_failures == [], (CountingChecker.asked, answer, checker.gh_failures))
 
 
 seat = IdleSeat()
