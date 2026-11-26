@@ -238,6 +238,10 @@ def test_block_parsing():
           request.number == NUMBER and request.text == BLOCK and request.finding_count == 2, request.text)
     check("text without the request line holds no block",
           program.parse_follow_up_request_blocks_from_message_text("1. a\n2. b\n") == [])
+    closed_block = BLOCK.replace("#follow_up_request pull request", "#follow_up_request# pull request", 1)
+    [closed] = program.parse_follow_up_request_blocks_from_message_text(closed_block)
+    check("a request line in the closed form, `#follow_up_request# pull request <number>`, opens a block",
+          closed.number == NUMBER and closed.finding_count == 2, closed.text)
     [ended] = program.parse_follow_up_request_blocks_from_message_text(BLOCK + "thanks\n3. a numbered line after\n")
     check("a numbered line after the block's end is not a finding", ended.text == BLOCK, ended.text)
     for label, text in (("no findings", f"#follow_up_request pull request {NUMBER}\nthanks\n"),
@@ -587,6 +591,9 @@ def test_build_pull_request_description_ending_with_follow_up_request_line():
     holding = "Answers it.\n\n#follow_up_request pull request 1964 \n#no_defect_fixed\n"
     check("a description already holding the follow-up request line on a line of its own is kept as written",
           program.build_pull_request_description_ending_with_follow_up_request_line(holding, 1964) == holding)
+    closed = "Answers it.\n\n#follow_up_request# pull request 1964\n#no_defect_fixed#\n"
+    check("a description already holding the follow-up request line with the hashtag's closing # is kept as written",
+          program.build_pull_request_description_ending_with_follow_up_request_line(closed, 1964) == closed)
     naming_inline = "From merge-lane-2's `#follow_up_request pull request 1964`.\n\n#no_defect_fixed"
     check("a description naming the request only inside a sentence gets the line at its end",
           program.build_pull_request_description_ending_with_follow_up_request_line(naming_inline, 1964)

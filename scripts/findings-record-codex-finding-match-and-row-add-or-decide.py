@@ -98,7 +98,7 @@ FINDING_FACT_LINE_FIELDS = {"Main has it": "main_has_it",
                             "Shown by": "shown_by"}
 FINDING_FACT_LINE = re.compile(
     r"^[ \t]*(?:(?:[-*+]|\d+[.)])[ \t]+)?[`*_]*(?:("
-    + "|".join(map(re.escape, FINDING_FACT_LINE_HASHTAG_FIELDS)) + r")(?!\w)|("
+    + "|".join(map(re.escape, FINDING_FACT_LINE_HASHTAG_FIELDS)) + r")#?(?!\w)|("
     + "|".join(map(re.escape, FINDING_FACT_LINE_FIELDS)) + r")[`*_]*:)[ \t]*(.*)$", re.MULTILINE)
 POSSIBLE_MISS_LOG_UNDER_LOG_STORE = Path("findings-record") / "findings-record-possible-misses.jsonl"
 DOES_NOT_HOLD_GRADE = "does-not-hold"

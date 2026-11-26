@@ -168,7 +168,7 @@ FOLLOW_UP_REQUEST_LINE_START = "#follow_up_request"
 FOLLOW_UP_REQUEST_BLOCK_SAVE_HOOK_PATH = ("nn-systems/general-tools/pull-request-follow-up-request-from-merge-lane-2-message-save-and-"
                   "forked-subagent-brief-hand-over-user-prompt-submit-hook.py")
 MERGE_LANE_2_MERGED_MESSAGE_TO_AUTHOR = "the SendMessage message in which merge-lane-2 tells the pull request's author that the pull request merged"
-FOLLOW_UP_REQUEST_LINE_PATTERN = re.compile(r"^#follow_up_request pull request (\d+)[ \t]*$")
+FOLLOW_UP_REQUEST_LINE_PATTERN = re.compile(r"^#follow_up_request#? pull request (\d+)[ \t]*$")
 FINDING_LINE_PATTERN = re.compile(r"^(\d+)\.\s+(\S.*)$")
 ASCII_LINE_END_PATTERN = re.compile(r"\r\n|\r|\n")
 PULL_REQUEST_LINK_PATTERN = re.compile(r"https://github\.com/[^/\s]+/[^/\s]+/pull/\d+")
@@ -552,9 +552,10 @@ def read_title_and_description(path):
 
 def build_pull_request_description_ending_with_follow_up_request_line(description, number):
     """The description, with the line "#follow_up_request pull request <number>" added at its end unless a line of it
-    already is that line."""
+    already is that line, with or without the hashtag's closing `#`."""
     request_line = f"{FOLLOW_UP_REQUEST_LINE_START} pull request {number}"
-    if any(line.rstrip() == request_line for line in description.splitlines()):
+    if any((request := FOLLOW_UP_REQUEST_LINE_PATTERN.match(line)) and int(request.group(1)) == number
+           for line in description.splitlines()):
         return description
     return description.rstrip("\n") + f"\n\n{request_line}\n"
 
