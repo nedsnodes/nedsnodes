@@ -130,7 +130,8 @@ def copy_read_back_differs(repository):
     spec = importlib.util.spec_from_file_location("branch_reverts_check", CHECK)
     module = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(module)
-    saved_copies = str(repository.directory / ".git" / module.SAVED_COPIES_DIRECTORY_NAME)
+    saved_copies = str(repository.directory / ".git"
+                       / module.BRANCH_REVERTS_CHECK_SAVED_UNCOMMITTED_COPIES_DIRECTORY_NAME)
 
     def open_with_reads_of_saved_copies_changed(path, mode="r", *arguments, **options):
         if mode == "rb" and str(path).startswith(saved_copies):
@@ -225,7 +226,7 @@ def run_cases(scratch):
     repository = Repository(scratch / "save-fails")
     squashed_branch(repository)
     (repository.directory / "shared file.txt").write_text("uncommitted work\n")
-    (repository.directory / ".git" / "branch-reverts-check-saved-copies").write_text("")
+    (repository.directory / ".git" / "branch-reverts-check-saved-uncommitted-copies").write_text("")
     done = repository.run_check("--base", "main")
     check("when the check cannot save a copy, it still gives its verdict and tells the "
           "agent to copy the file itself before the git checkout",

@@ -40,11 +40,11 @@ per file naming the base's commit it undoes, then what to do. Before it says to
 run `git checkout <base> -- <path>`, which overwrites a file in the index and the
 working tree, it copies each reported file's working copy and its staged version,
 where either differs from HEAD's, into a new directory under the repository's
-git directory (SAVED_COPIES_DIRECTORY_NAME), and prints where each copy is. It
-copies the whole file, not a diff, because no `git diff` holds the text of a
-working copy that is not in the index, such as after `git rm --cached`. Exit 2 when git
-fails, so no verdict can be given, printing nothing on stdout and, on stderr,
-the failed git command and its error."""
+git directory (BRANCH_REVERTS_CHECK_SAVED_UNCOMMITTED_COPIES_DIRECTORY_NAME), and
+prints where each copy is. It copies the whole file, not a diff, because no
+`git diff` holds the text of a working copy that is not in the index, such as
+after `git rm --cached`. Exit 2 when git fails, so no verdict can be given,
+printing nothing on stdout and, on stderr, the failed git command and its error."""
 
 import argparse
 import os
@@ -66,7 +66,7 @@ EXIT_NO_ANSWER = 2
 
 # Under the git directory, so the checkout the advice names cannot touch it and
 # the operating system's temporary-file cleanup does not remove it.
-SAVED_COPIES_DIRECTORY_NAME = "branch-reverts-check-saved-copies"
+BRANCH_REVERTS_CHECK_SAVED_UNCOMMITTED_COPIES_DIRECTORY_NAME = "branch-reverts-check-saved-uncommitted-copies"
 
 REVERTS_VERDICT_PREFIX = "VERDICT: BRANCH-REVERTS-A-FILE-TO-AN-OLDER-MAIN-VERSION"
 HEX_WORD = re.compile(r"\b[0-9a-f]{%d,40}\b" % SHORT_COMMIT_LENGTH)
@@ -217,7 +217,8 @@ def save_uncommitted_copies(reverted):
                 copies.append(("working copy", working_bytes))
         if copies:
             wanted[path] = copies
-    directory = os.path.join(git_directory, SAVED_COPIES_DIRECTORY_NAME,
+    directory = os.path.join(git_directory,
+                             BRANCH_REVERTS_CHECK_SAVED_UNCOMMITTED_COPIES_DIRECTORY_NAME,
                              time.strftime("%Y-%m-%dT%H-%M-%S") + "-%d" % os.getpid())
     saved, errors = {}, {}
     for number, (path, copies) in enumerate(sorted(wanted.items()), start=1):
