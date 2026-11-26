@@ -1030,12 +1030,15 @@ def run_cell(
     report_wait_after_result_line_seconds: float = 0.0,
     cold_read_cell_launcher_own_command_line_options_adder=None,
     pass_cold_read_tier_to_invocation_builder: bool = False,
+    per_model_run_timeout_seconds_from_parsed_arguments_getter=None,
 ) -> int:
     """cold_read_cell_launcher_own_command_line_options_adder, when given, adds
     one launcher's own options to the parser, and invocation_builder then also
     gets the parsed arguments as parsed_arguments=. With
     pass_cold_read_tier_to_invocation_builder, invocation_builder also gets the
-    cold-read-tier as tier=."""
+    cold-read-tier as tier=. per_model_run_timeout_seconds_from_parsed_arguments_getter,
+    when given, takes the parsed arguments and returns the value used in place
+    of per_model_run_timeout_seconds."""
     # Include failed attempts in the cell's total cost.
     cell_started_at = time.time()
     parser = build_argument_parser(
@@ -1043,6 +1046,8 @@ def run_cell(
         cold_read_cell_launcher_own_command_line_options_adder=cold_read_cell_launcher_own_command_line_options_adder,
         tier_to_effort=tier_to_effort)
     args = parser.parse_args()
+    if per_model_run_timeout_seconds_from_parsed_arguments_getter is not None:
+        per_model_run_timeout_seconds = per_model_run_timeout_seconds_from_parsed_arguments_getter(args)
 
     # Snapshot before execution so pre-existing edits are not reported as changes from this run.
     try:

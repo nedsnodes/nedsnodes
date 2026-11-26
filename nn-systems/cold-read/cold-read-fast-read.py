@@ -438,9 +438,9 @@ WHAT_SHOULD_BE_CODE_QUESTION_ANSWER_REPORT_SCRATCH_DIRECTORY_NAME = "what-should
 FAST_CLARIFY_CELL_REPORT_SCRATCH_DIRECTORY_NAME = "fast-clarify-cell-report"
 WHAT_SHOULD_BE_CODE_QUESTION_LAUNCHER_OUTPUT_SCRATCH_FILE_NAME = (
     "cold-read-fast-read-what-should-be-code-launcher-output.txt")
-# Opus 5.5 defect-hunt cells at xhigh, a larger task than one question at
-# high, took a median of 14 minutes and at most 44 in the log-store's records.
-COLD_READ_FAST_READ_WHAT_SHOULD_BE_CODE_QUESTION_MODEL_RUN_TIMEOUT_SECONDS = 30 * 60
+# A Question 4 cell takes under 3 minutes at p99, so one still running at 10
+# has hung.
+COLD_READ_FAST_READ_WHAT_SHOULD_BE_CODE_QUESTION_MODEL_RUN_TIMEOUT_SECONDS = 10 * 60
 
 PROGRAM = "cold-read-fast-read"
 CHANGED_SENTENCE_IDS_PLACEHOLDER = "{CHANGED_SENTENCE_IDS}"
@@ -524,9 +524,10 @@ _cell_common_spec = importlib.util.spec_from_file_location(
     "cold_read_cell_common", pathlib.Path(__file__).with_name("cold-read-cell-common.py"))
 cell_common = importlib.util.module_from_spec(_cell_common_spec)
 _cell_common_spec.loader.exec_module(cell_common)
-# The claude launcher sets no time limit of its own; the Sonnet backup is
-# allowed as long as one Gemini attempt.
-COLD_READ_FAST_READ_SONNET_BACKUP_RUN_ALLOWANCE_SECONDS = 30 * 60
+# The claude launcher sets no time limit of its own, so this is only the
+# Sonnet backup's share of the ssh time limit below; it takes under 3 minutes
+# at p99.
+COLD_READ_FAST_READ_SONNET_BACKUP_RUN_ALLOWANCE_SECONDS = 10 * 60
 # Each Gemini attempt of the read on ned-box is bounded by the time after
 # which the agy cell kills each model of the cold-read-tier's chain; the five
 # minutes more cover git, the shipper and the connect.

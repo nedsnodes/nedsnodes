@@ -155,8 +155,9 @@ TIER_TO_REASONING_EFFORT = {
     "fast": "low",
 }
 
-COLD_READ_AGY_CELL_PER_MODEL_RUN_TIMEOUT_SECONDS = 30 * 60
-AGY_PRINT_TIMEOUT = f"{COLD_READ_AGY_CELL_PER_MODEL_RUN_TIMEOUT_SECONDS // 60}m"
+# The fast read's limit; the cold-read-grid passes its own with
+# --per-model-run-timeout-seconds, since both run the fast cold-read-tier.
+COLD_READ_AGY_CELL_PER_MODEL_RUN_TIMEOUT_SECONDS = 15 * 60
 # agy does not always honour --print-timeout, so the cell kills agy's process
 # group this long after agy's own deadline. The fast read on the Mac sizes its
 # ssh time limit from the sum.
@@ -268,8 +269,30 @@ def credential_sandbox_prefix(platform: str = sys.platform, *,
     return prefix
 
 
-def invocation_builder(effort: str):
+def cold_read_cell_launcher_own_command_line_options_adder(parser):
+    parser.add_argument(
+        "--per-model-run-timeout-seconds", type=int, metavar="SECONDS",
+        default=COLD_READ_AGY_CELL_PER_MODEL_RUN_TIMEOUT_SECONDS,
+        help="agy's --print-timeout for each model of the chain, in seconds, "
+             "rounded down to whole minutes for agy; the cell kills agy "
+             f"{COLD_READ_AGY_CELL_KILL_MARGIN_PAST_AGY_PRINT_TIMEOUT_SECONDS} seconds "
+             "later. Default: "
+             f"{COLD_READ_AGY_CELL_PER_MODEL_RUN_TIMEOUT_SECONDS}",
+    )
+
+
+def agy_print_timeout(per_model_run_timeout_seconds: int) -> str:
+    return f"{per_model_run_timeout_seconds // 60}m"
+
+
+def per_model_run_kill_after_seconds(parsed_arguments) -> int:
+    return (parsed_arguments.per_model_run_timeout_seconds
+            + COLD_READ_AGY_CELL_KILL_MARGIN_PAST_AGY_PRINT_TIMEOUT_SECONDS)
+
+
+def invocation_builder(effort: str, parsed_arguments):
     """Return a callback producing (agy argv, None) for the shared runner."""
+    print_timeout = agy_print_timeout(parsed_arguments.per_model_run_timeout_seconds)
     # agy takes the prompt through --print; None makes the runner close stdin.
     def build_invocation(model: str, prompt: str):
         command = [
@@ -279,7 +302,7 @@ def invocation_builder(effort: str):
             "--dangerously-skip-permissions",
             "--model", model,
             "--effort", effort,
-            "--print-timeout", AGY_PRINT_TIMEOUT,
+            "--print-timeout", print_timeout,
             "--output-format", "stream-json",
             "--print", prompt,
         ]
@@ -308,7 +331,8 @@ def main() -> int:
         recover_report_from_stdout=stdout_is_a_review,
         recognised_failure_texts_for_model=logged_out_failure_texts,
         child_environment=agy_environment_copy_without_gemini_api_key_or_github_token(os.environ),
-        per_model_run_timeout_seconds=COLD_READ_AGY_CELL_PER_MODEL_RUN_KILL_AFTER_SECONDS,
+        per_model_run_timeout_seconds_from_parsed_arguments_getter=per_model_run_kill_after_seconds,
+        cold_read_cell_launcher_own_command_line_options_adder=cold_read_cell_launcher_own_command_line_options_adder,
         parse_agent_binary_final_result_from_stdout_line=agy_stream_json_stdout_line_final_result_event_parse_to_exit_code_and_response_or_none,
         report_wait_after_result_line_seconds=COLD_READ_AGY_CELL_WAIT_FOR_REPORT_FILE_AFTER_AGY_STDOUT_RESULT_LINE_BEFORE_PROCESS_GROUP_KILL_SECONDS,
     )
