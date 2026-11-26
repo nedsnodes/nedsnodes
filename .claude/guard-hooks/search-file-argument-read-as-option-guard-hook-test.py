@@ -251,11 +251,13 @@ try:
           refusal == (
               "[rule bash-guard-search-file-name-read-as-option] Refused: -?, the value of -f, "
               "expands to two or more names, among them -a, -n. The shell passes only the "
-              "first of the names, in its sort order, as -f's value, and grep reads each of "
-              "the others as one more word, and any of them that begins with - as an option. "
+              "first name of its own sorted expansion of -?, which need not be the first name "
+              "listed above, as -f's value, and grep reads each of the others as one more "
+              "word, and any of them that begins with - as an option. "
               "-- cannot fix this.\n"
               "If you meant one of the names, write that name in place of -?.\n"
-              "If you meant every name -? matches, give -f once before each name.\n"
+              "If you meant every name -? matches, give -f once before each of them; the "
+              "list above stops at 10, so list them all with `printf '%s\\n' -?`.\n"
               "If you meant a file named -? itself, quote -?.\n"
               "Then run the command again."),
           repr(refusal))

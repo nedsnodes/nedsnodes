@@ -83,11 +83,13 @@ REFUSAL_WITH_COMMAND_TEMPLATE = (
 REFUSAL_OF_OPTION_VALUE_TEMPLATE = (
     "[rule bash-guard-search-file-name-read-as-option] Refused: {glob_word}, the value of "
     "{option}, expands to two or more names, among them {names}. The shell passes only the "
-    "first of the names, in its sort order, as {option}'s value, and {program} reads each of "
-    "the others as one more word, and any of them that begins with - as an option. "
+    "first name of its own sorted expansion of {glob_word}, which need not be the first name "
+    "listed above, as {option}'s value, and {program} reads each of the others as one more "
+    "word, and any of them that begins with - as an option. "
     "-- cannot fix this.\n"
     "If you meant one of the names, write that name in place of {glob_word}.\n"
-    "If you meant every name {glob_word} matches, give {option} once before each name.\n"
+    "If you meant every name {glob_word} matches, give {option} once before each of them; the "
+    "list above stops at 10, so list them all with `printf '%s\\n' {glob_word}`.\n"
     "If you meant a file named {glob_word} itself, quote {glob_word}.\n"
     "Then run the command again."
 )
