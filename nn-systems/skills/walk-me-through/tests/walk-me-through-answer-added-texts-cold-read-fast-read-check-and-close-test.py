@@ -894,7 +894,7 @@ def title_search_lines_printed(result):
     return lines[1:end + 1]
 
 
-TITLE_SEARCH_SAVED_TITLES_LINE = json.dumps([[["the opening sentence"], ["3"]]])
+TITLE_SEARCH_SAVED_TITLES_LINE = json.dumps([2, [[["the opening sentence"], ["3"]]]])
 
 
 def test_the_waiting_item_read_step_prints_the_user_messages_of_an_agent_session_that_named_the_item_title():
@@ -945,6 +945,12 @@ def test_the_waiting_item_read_step_searches_again_when_the_saved_titles_differ_
     other = title_search_cache_file(case, "another-agent-session")
     check("another agent-session searches afresh and saves its own file",
           title_search_lines_printed(result) == full and other.is_file(), described(result))
+    cache.write_text(cache.read_text().replace(
+        TITLE_SEARCH_SAVED_TITLES_LINE, json.dumps([[["the opening sentence"], ["3"]]]), 1))
+    result = case.run(WAITING_ITEM_READ_STEP_NAME)
+    check("a file an older search saved, with the same titles but no cache format, searches, prints and saves again",
+          title_search_lines_printed(result) == full
+          and cache.read_text().split("\n")[0] == TITLE_SEARCH_SAVED_TITLES_LINE, described(result))
     cache.unlink()
     result = case.run(WAITING_ITEM_READ_STEP_NAME)
     check("a missing file searches, prints and saves again",
@@ -1026,7 +1032,24 @@ def test_the_waiting_item_read_step_refuses_when_the_search_for_the_user_earlier
           result.returncode == 1
           and "the search for what the user said in earlier agent-sessions that named its title failed (exit 1)"
           in result.stderr and "KeyError" in result.stderr
+          and "\nFAILED: the title search exited 1 without a FAILED line of its own, so it crashed or was stopped."
+          in result.stderr
           and case.calls.read_text() == "" and case.minutes.read_text() == minutes_before
+          and not title_search_cache_file(case).exists(), described(result))
+
+
+def test_the_waiting_item_read_step_refuses_with_a_failed_line_when_the_search_is_killed_without_a_word():
+    case, _ = case_with_a_session_dialog_naming_the_item_title()
+    killing_rg = case.root / "killing-rg"
+    # Killing the search that runs it leaves the search with an empty stderr and a negative exit.
+    killing_rg.write_text("#!/bin/sh\nkill -9 $PPID\n")
+    killing_rg.chmod(0o755)
+    result = case.run(WAITING_ITEM_READ_STEP_NAME, environment=dict(
+        os.environ, LOG_STORE_PAST_DISCUSSIONS_SEARCH_RIPGREP_PROGRAM_OVERRIDE=str(killing_rg)))
+    check("a search killed before it printed anything is refused with a FAILED line naming its exit",
+          result.returncode == 1
+          and "The search said:\nFAILED: the title search exited -9 without a FAILED line of its own, so it crashed "
+              "or was stopped.\n" in result.stderr
           and not title_search_cache_file(case).exists(), described(result))
 
 
