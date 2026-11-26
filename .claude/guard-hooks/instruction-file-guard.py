@@ -135,7 +135,7 @@ def guarded_write_deny_message(guarded_kind: str, draft_lines: str = "") -> str:
 
 
 REUSABLE_PROMPT_DENY_MESSAGE = guarded_write_deny_message(
-    "a reusable prompt, a file named .prompt.md or .instructions.md in a checkout,",
+    "a reusable prompt, a file in a checkout whose name ends .prompt.md or .instructions.md,",
     "\nIf the prompt is a one-off, write it outside the checkout, in your scratchpad.\n"
     "If it is a draft for the user's approval-walk, write it in a queue directory or "
     "docs/drafts/.")
