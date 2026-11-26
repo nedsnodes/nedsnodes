@@ -5012,6 +5012,32 @@ def test_underscore_emphasis_around_a_marker_is_read():
           result.returncode == 1 and "has no `#case_against` line" in result.stderr, described(result))
 
 
+EXAMPLE_LINES_ABOVE_THE_CASE_AGAINST_LINE = (
+    ("a list line that is one code span", "Examples:\n\n1. `#case_against none: the code to write and test, once.`\n\n"),
+    ("a line in fenced code", "Examples:\n\n```\n#case_against none: the code to write and test, once.\n```\n\n"))
+
+
+def test_an_example_case_against_line_above_the_items_own_is_not_read_as_its_rating():
+    for where, example in EXAMPLE_LINES_ABOVE_THE_CASE_AGAINST_LINE:
+        case = not_asked_case_with_line("item 2 of 7", "#case_against weak:", example + "#case_against weak:")
+        result = case.run("check", "--not-asked", "2")
+        check(f"check --not-asked 2 reads the item's own weak line, not {where} above it rated none",
+              result.returncode == 0 and "kind 2 #case_against_weak (" in case.minutes.read_text(), described(result))
+        case = close_the_issue_case()
+        document = case.checkout / "docs" / "walk" / f"{WALK_NAME}.md"
+        document.write_text(document.read_text().replace(
+            "#case_against none: the provisional-addition is already met on main.",
+            example + "#case_against weak: the issue may hold a gap no one has named."))
+        result = case.run(WAITING_ITEM_READ)
+        check(f"the read step shows an item rated weak with {where} rated none above its line",
+              "is not to be shown to the user" not in result.stdout and "--not-asked none" not in result.stdout,
+              described(result))
+    case = not_asked_case_with_line("item 2 of 7", "#case_against weak:", "- `#case_against` weak:")
+    result = case.run("check", "--not-asked", "2")
+    check("`- `#case_against` weak:`, a code span holding the tag alone, is read as the marker",
+          result.returncode == 0 and "kind 2 #case_against_weak (" in case.minutes.read_text(), described(result))
+
+
 def test_a_rename_to_a_name_with_spaces_or_to_a_glossary_term_with_an_alias_settles():
     case = not_asked_case_with_line("item 4 of 7", "#not_asked_rename poem-list poem-index",
                                     "#not_asked_rename `poem-list` `poem index page`",

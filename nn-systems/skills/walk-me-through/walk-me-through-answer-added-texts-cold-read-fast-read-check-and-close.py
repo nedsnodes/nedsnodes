@@ -105,6 +105,7 @@ Every answer but O2, O3, --moved-on-no-decision, --already-decided and
 --moved-on needs the item's
 `#case_against` line, the first line of the item, outside fenced code, whose
 first word after any list, quotation or emphasis marker is `#case_against`,
+and which is not one code span quoting such a line as an example,
 followed by a rating: none, weak, medium, strong or very strong. When the item
 has that line, CHECK writes its rating into the answer line, whatever the
 answer, as a hashtag right after the answer, as in
@@ -652,7 +653,12 @@ MARKER_END = r"(?=[*_`]*(?:[:\s]|$))"
 # the walk finder's, which the `#new` mark pattern is built from too, so every marker line takes the same list and
 # quotation marks; only that rule is shared, and each marker keeps its own emphasis rule.
 LINE_OPENING_MARKERS = rf"^\s*{load_walk_finder().MARKDOWN_LINE_OPENING_LIST_OR_QUOTATION_MARK_PATTERN_TEXT}*[*_`]*"
-CASE_AGAINST_LINE = re.compile(rf"{LINE_OPENING_MARKERS}#case_against{MARKER_END}[*_`]*[:\s]*(.*)$")
+# A line whose text, after its list, quotation and emphasis marks, is one code span quotes a `#case_against` line as
+# an example, as in a list of examples headed by ``1. `#case_against none: the code to write and test, once.` ``;
+# a code span holding the tag alone, or the tag and its rating, with the reason after it, is the marker.
+LINE_ONE_CODE_SPAN = (rf"^\s*{load_walk_finder().MARKDOWN_LINE_OPENING_LIST_OR_QUOTATION_MARK_PATTERN_TEXT}*[*_]*"
+                      r"(?:`[^`]+`|``(?:(?!``).)+``)[*_.\s]*$")
+CASE_AGAINST_LINE = re.compile(rf"(?!{LINE_ONE_CODE_SPAN}){LINE_OPENING_MARKERS}#case_against{MARKER_END}[*_`]*[:\s]*(.*)$")
 CASE_AGAINST_RATING = re.compile(r"(very strong|none|weak|medium|strong)\b", re.I)
 CASE_AGAINST_HASHTAG = " #case_against_{rating}"
 NOT_ASKED_RATINGS = ("none", "weak")
