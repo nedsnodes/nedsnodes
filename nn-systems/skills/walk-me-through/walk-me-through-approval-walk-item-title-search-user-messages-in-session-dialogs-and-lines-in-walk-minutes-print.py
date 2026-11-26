@@ -32,7 +32,9 @@ FROM THE MAC. When the log-store is not on this machine and this machine is not 
 program runs over ssh, as scripts/log-store-past-discussions-regex-search-newest-first.py does.
 
 Exit 2 when anything could not be searched, even when something was found, each failure named on stderr by a line
-opening FAILED; otherwise 0 when something was found and 3 when nothing was.
+opening FAILED; otherwise 0 when something was found and 3 when nothing was, after the line
+APPROVAL_WALK_ITEM_TITLE_SEARCH_OUTPUT_FORMAT_VERSION_STDERR_LINE_TEMPLATE on stderr, which names the version of
+what this copy prints, so that a caller can tell an older copy's search apart.
 
 Environment, for the tests:
   LOG_STORE_PAST_DISCUSSIONS_SEARCH_LOG_STORE_ROOT_OVERRIDE  the log-store's root
@@ -65,6 +67,9 @@ EXIT_FOUND = 0
 # Not 1, which Python exits with on an uncaught exception, so that a crash is never read as nothing found.
 EXIT_NOTHING_FOUND = 3
 EXIT_FAILED = 2
+# Raise it whenever a change to this program changes what a search finds or prints.
+APPROVAL_WALK_ITEM_TITLE_SEARCH_OUTPUT_FORMAT_VERSION = 1
+APPROVAL_WALK_ITEM_TITLE_SEARCH_OUTPUT_FORMAT_VERSION_STDERR_LINE_TEMPLATE = "title search output format {version}"
 FAILURES_CLOSING_LINE = (
     "The user's messages printed on stdout are real, but those in the records the FAILED lines name are missing, and "
     "may decide the approval-walk item whose title was searched for.\n"
@@ -336,6 +341,7 @@ def main(argv=None):
     if failures:
         print(FAILURES_CLOSING_LINE, file=sys.stderr)
         return EXIT_FAILED
+    print(APPROVAL_WALK_ITEM_TITLE_SEARCH_OUTPUT_FORMAT_VERSION_STDERR_LINE_TEMPLATE.format(version=APPROVAL_WALK_ITEM_TITLE_SEARCH_OUTPUT_FORMAT_VERSION), file=sys.stderr)
     return EXIT_FOUND if found else EXIT_NOTHING_FOUND
 
 
