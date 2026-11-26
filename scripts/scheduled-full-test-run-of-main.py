@@ -229,6 +229,8 @@ SCHEDULED_FULL_TEST_RUN_MAIN_FETCH_DESTINATION_GIT_REF_NAME_PREFIX = "refs/sched
 # Read at runtime so tests can shorten it.
 SCHEDULED_FULL_TEST_RUN_LOCK_WAIT_BOUND_SECONDS = 3600
 
+PRINTED_GIT_COMMAND_IGNORING_THE_READERS_GIT_DIR = "env -u GIT_DIR -u GIT_WORK_TREE git"  # git takes a GIT_DIR in the reader's shell over -C
+
 SCHEDULED_FULL_TEST_RUN_RECORD_WRITE_TIMEOUT_SECONDS = 30  # pragma: no mutate, a limit a second longer or shorter on writing one small record file changes nothing a test can see without a write that runs for thirty seconds
 
 RUNNER_SKIPPED_CASE_LINE = re.compile(r"^(?:\S+: )?SKIP\s")
@@ -506,76 +508,83 @@ def scheduled_full_test_run_under_lock(arguments, now, monotonic, on_ned_box, ma
     fetch_destination = scheduled_full_test_run_main_fetch_destination_git_ref_name_for_temporary_directory(directory)
     fetched = git(clone, "fetch", "--no-write-fetch-head", "--no-tags", "--refmap=", "origin",
                   f"+refs/heads/main:{fetch_destination}")
+    added = None
     if fetched.returncode != 0:
         steps_failed.append((
             f"not run — git fetch origin failed in {clone}: "
             f"{git_output.git_stderr_first_error_message_else_last_line(fetched.stderr)}",
             "Fix what git reports, then run this again."))
     else:
-        resolved = git(clone, "rev-parse", "--verify", "--quiet",
-                       f"{fetch_destination}^{{commit}}")
-        if resolved.returncode != 0 or not resolved.stdout.strip():
-            steps_failed.append((
-                f"not run — git cannot resolve {fetch_destination}, "
-                f"fetched from origin's main, in {clone}",
-                "Fix the clone's origin remote, then run this again."))
-        else:
-            commit = resolved.stdout.strip()
-        deleted = git(clone, "update-ref", "-d", fetch_destination)
-        if deleted.returncode != 0:
-            steps_failed.append((
-                f"git update-ref -d {fetch_destination} failed in {clone}: "
-                f"{git_output.git_stderr_first_error_message_else_last_line(deleted.stderr)}",
-                f"Fix what git reports, then delete the ref with: "
-                f"git -C {shlex.quote(str(clone))} update-ref -d {fetch_destination}"))
-    if commit is not None:
-        remove_worktree_of_main(clone, worktree)
-        added = git(clone, "worktree", "add", "--detach", str(worktree), commit)
-        if added.returncode != 0:
-            steps_failed.append((
-                f"not run — git worktree add --detach {worktree} {commit} failed in "
-                f"{clone}: {git_output.git_stderr_first_error_message_else_last_line(added.stderr)}",
-                "Fix what git reports, then run this again."))
-        else:
-            try:
-                shutil.rmtree(logs, ignore_errors=True)
-                command = [
-                    sys.executable,
-                    arguments.test_suite_runner_program
-                    or str(worktree / SCHEDULED_FULL_TEST_RUN_RUNNER_PATH_IN_WORKTREE),
-                    "--log-dir", str(logs), "--record-inputs-with-strace"]
-                if arguments.recorded_inputs_directory:
-                    command += ["--recorded-inputs-directory",
-                                arguments.recorded_inputs_directory,
-                                "--suite-files-only-strace-saw-lists-directory",
-                                arguments.recorded_inputs_directory]
-                completed, seconds_waiting_for_lock, lock_never_released = (
-                    run_test_suite_runner_waiting_for_the_machine_lock(
-                        command, worktree, monotonic))
-                if lock_never_released:
-                    steps_failed.append(
-                        lock_never_taken_step_failed(completed, seconds_waiting_for_lock))
-                elif completed.returncode < 0:
+        # The ref is deleted only once the worktree's detached HEAD holds the commit, so a
+        # gc between the two cannot prune it; the finally also deletes it on an interrupt.
+        try:
+            resolved = git(clone, "rev-parse", "--verify", "--quiet",
+                           f"{fetch_destination}^{{commit}}")
+            if resolved.returncode != 0 or not resolved.stdout.strip():
+                steps_failed.append((
+                    f"not run — git cannot resolve {fetch_destination}, "
+                    f"fetched from origin's main, in {clone}",
+                    "Fix the clone's origin remote, then run this again."))
+            else:
+                commit = resolved.stdout.strip()
+                remove_worktree_of_main(clone, worktree)
+                added = git(clone, "worktree", "add", "--detach", str(worktree), commit)
+                if added.returncode != 0:
                     steps_failed.append((
-                        f"{run_all_test_suites.PROGRAM} was "
-                        f"{run_all_test_suites.describe_exit(completed.returncode)}",
-                        "Run this again."))
-                elif (completed.returncode in (run_all_test_suites.EXIT_ALL_PASSED,
-                                               run_all_test_suites.EXIT_SOME_FAILED)
-                      and runner_summary_line(completed) is None):
-                    steps_failed.append((
-                        f"{run_all_test_suites.PROGRAM} exited {completed.returncode} "
-                        f"and printed no {run_all_test_suites.SUMMARY_LINE_PREFIX} line, "
-                        f"which is no verdict",
-                        "Read the runner's stderr in the record, then run this again."))
-            finally:
-                not_removed = remove_worktree_of_main(clone, worktree)
-                if not_removed is not None:
-                    steps_failed.append((
-                        f"the worktree {worktree} was not removed: {not_removed}",
-                        f"Remove it with: chmod -R u+rwx {shlex.quote(str(worktree))} && "
-                        f"rm -rf {shlex.quote(str(worktree))} && "
-                        f"git -C {shlex.quote(str(clone))} worktree prune"))
+                        f"not run — git worktree add --detach {worktree} {commit} failed in "
+                        f"{clone}: "
+                        f"{git_output.git_stderr_first_error_message_else_last_line(added.stderr)}",
+                        "Fix what git reports, then run this again."))
+        finally:
+            deleted = git(clone, "update-ref", "-d", fetch_destination)
+            if deleted.returncode != 0:
+                steps_failed.append((
+                    f"git update-ref -d {fetch_destination} failed in {clone}: "
+                    f"{git_output.git_stderr_first_error_message_else_last_line(deleted.stderr)}",
+                    f"Fix what git reports, then delete the ref with: "
+                    f"{PRINTED_GIT_COMMAND_IGNORING_THE_READERS_GIT_DIR} "
+                    f"-C {shlex.quote(str(clone))} update-ref -d {fetch_destination}"))
+    if added is not None and added.returncode == 0:
+        try:
+            shutil.rmtree(logs, ignore_errors=True)
+            command = [
+                sys.executable,
+                arguments.test_suite_runner_program
+                or str(worktree / SCHEDULED_FULL_TEST_RUN_RUNNER_PATH_IN_WORKTREE),
+                "--log-dir", str(logs), "--record-inputs-with-strace"]
+            if arguments.recorded_inputs_directory:
+                command += ["--recorded-inputs-directory",
+                            arguments.recorded_inputs_directory,
+                            "--suite-files-only-strace-saw-lists-directory",
+                            arguments.recorded_inputs_directory]
+            completed, seconds_waiting_for_lock, lock_never_released = (
+                run_test_suite_runner_waiting_for_the_machine_lock(
+                    command, worktree, monotonic))
+            if lock_never_released:
+                steps_failed.append(
+                    lock_never_taken_step_failed(completed, seconds_waiting_for_lock))
+            elif completed.returncode < 0:
+                steps_failed.append((
+                    f"{run_all_test_suites.PROGRAM} was "
+                    f"{run_all_test_suites.describe_exit(completed.returncode)}",
+                    "Run this again."))
+            elif (completed.returncode in (run_all_test_suites.EXIT_ALL_PASSED,
+                                           run_all_test_suites.EXIT_SOME_FAILED)
+                  and runner_summary_line(completed) is None):
+                steps_failed.append((
+                    f"{run_all_test_suites.PROGRAM} exited {completed.returncode} "
+                    f"and printed no {run_all_test_suites.SUMMARY_LINE_PREFIX} line, "
+                    f"which is no verdict",
+                    "Read the runner's stderr in the record, then run this again."))
+        finally:
+            not_removed = remove_worktree_of_main(clone, worktree)
+            if not_removed is not None:
+                steps_failed.append((
+                    f"the worktree {worktree} was not removed: {not_removed}",
+                    f"Remove it with: chmod -R u+rwx {shlex.quote(str(worktree))} && "
+                    f"rm -rf {shlex.quote(str(worktree))} && "
+                    f"{PRINTED_GIT_COMMAND_IGNORING_THE_READERS_GIT_DIR} "
+                    f"-C {shlex.quote(str(clone))} worktree prune"))
 
     record_lines = [
         f"{PROGRAM}: {machine}, {pacific_date} in {mark.PACIFIC_TIME_ZONE_NAME}, started "
