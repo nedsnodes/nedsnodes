@@ -27,6 +27,7 @@ Stop-hook payloads lack context usage; headless sessions lack a status line.
 The transcript supplies usage for both interactive and headless sessions."""
 
 import argparse
+import ast
 import importlib.util
 import json
 import os
@@ -248,11 +249,29 @@ _WATCHER = (r"(?:bash[ \t]+|python3(?:[ \t]+-u)?[ \t]+)?(?:" + _WORD + r"/)?"
             + r"""(?:[ \t]*\|[ \t]*(?:grep[ \t]+-v[ \t]+(?:'[^']*'|"[^"`$\\]*")|tail[ \t]+-n?[ \t]*\d+))*""")
 _LOOP_CONDITION_CHECK = r"(?:![ \t]+)?(?:grep|pgrep|kill[ \t]+-0|test|\[|true|:)" + _ARGUMENTS + _REDIRECTIONS
 _DEADLINE = r"\$\(date[ \t]+\+%s\)"
+COLD_READ_GRID_PATH = Path(__file__).resolve().parents[1] / "nn-systems" / "cold-read" / "cold-read-grid.py"
+
+
+def cold_read_grid_cell_attempt_time_limit_seconds() -> int:
+    """The grid's own per-attempt limit, read from its source: importing the grid loads its whole
+    toolchain, too slow for a hook that runs on every prompt."""
+    for node in ast.parse(COLD_READ_GRID_PATH.read_text(encoding="utf-8")).body:
+        if (isinstance(node, ast.Assign) and len(node.targets) == 1
+                and getattr(node.targets[0], "id", None) == "CELL_ATTEMPT_TIMEOUT_DEFAULT_SECONDS"):
+            return int(eval(compile(ast.Expression(node.value), str(COLD_READ_GRID_PATH), "eval"),
+                            {"__builtins__": {}}))
+    raise RuntimeError(f"CELL_ATTEMPT_TIMEOUT_DEFAULT_SECONDS is not assigned in {COLD_READ_GRID_PATH}")
+
+
+# The grid retries a failed cell once, so a run can last two attempts; 15 minutes covers its
+# start, triage and shipping.
+COLD_READ_FULL_RUN_WAIT_LIMIT_MINUTES = 2 * cold_read_grid_cell_attempt_time_limit_seconds() / 60 + 15.0
 WAIT_LIMIT_TABLE_WAITING_TASK_KIND_NAME = "waiting-task"
 BACKGROUND_TASK_WAIT_LIMIT_MINUTES_BY_KIND = (
     ("nn-mutation-testing", (r".*(?:mutation|mutmut|mutant).*",), 105.0),
     ("test-suite", (r".*(?:run-all-test-suites\.py|pytest|-test\.py\b|_test\.py\b|unittest"
                     r"|head-tests-with-retry|head-test-run|test-suite|run-suites).*",), 90.0),
+    ("cold-read-full-run", (r".*cold-read-grid\.py.*",), COLD_READ_FULL_RUN_WAIT_LIMIT_MINUTES),
     (WAIT_LIMIT_TABLE_WAITING_TASK_KIND_NAME, tuple(_COMMAND_PREFIX + shape + _TO_THE_END for shape in (
         r"sleep[ \t]+" + _WORD,
         r"gh[ \t]+pr[ \t]+checks(?=[^\n;&|]*--watch)" + _ARGUMENTS,
@@ -265,7 +284,6 @@ BACKGROUND_TASK_WAIT_LIMIT_MINUTES_BY_KIND = (
         + r"while[ \t]+\[[ \t]+" + _DEADLINE + r"[ \t]+-lt[ \t]+\$end[ \t]+\]" + _COMMAND_END
         + r"do\s+" + _WATCHER + _COMMAND_END + r"done")), 0.0),
 )
-# Allows a slow cold-read-full-run with one cell relaunch.
 BACKGROUND_TASK_WAIT_LIMIT_MINUTES_WHEN_NO_KIND_MATCHES = 75.0
 BACKGROUND_TASK_KIND_WHEN_NO_KIND_MATCHES = "no kind in the table matched"
 _COMPILED_WAIT_LIMIT_KINDS = [

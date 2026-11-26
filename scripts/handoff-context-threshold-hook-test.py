@@ -921,9 +921,11 @@ with tempfile.TemporaryDirectory() as workspace:
             ("while kill -0 4242; do sleep 30; done", 0),
             ("sleep 120; echo finished", 75),
             ("sleep 120 >/dev/null 2>&1", 0),
-            ("sleep 600 && python3 nn-systems/cold-read/cold-read-grid.py", 75),
+            ("sleep 600 && python3 nn-systems/cold-read/cold-read-grid.py", 255),
+            ("python3 nn-systems/cold-read/cold-read-grid.py --target CLAUDE.md", 255),
+            ("python3 nn-systems/cold-read/tests/cold-read-grid-test.py", 90),
             ("until grep -q done out.txt; do sleep 5; done; python3 scripts/run-all-test-suites.py", 90),
-            ("until [ -f /tmp/r ]; do sleep 5; done; python3 nn-systems/cold-read/cold-read-grid.py --target CLAUDE.md", 75),
+            ("until [ -f /tmp/r ]; do sleep 5; done; python3 nn-systems/cold-read/cold-read-grid.py --target CLAUDE.md", 255),
             ("while pgrep -f x >/dev/null; do sleep 20; done; python3 scripts/merge-lane-pull-request-merge-through-merge-gate-with-stacked-pull-request-retarget.py 1 2 3", 75),
             ("until [ -s first.out ]; do sleep 10; done && python3 nn-systems/cold-read/cold-read-fast-read.py --target a.md", 75),
             ("until grep -q done out.txt; do sleep 5; done; cat out.txt | tail -5", 75),
@@ -933,11 +935,35 @@ with tempfile.TemporaryDirectory() as workspace:
             ("while kill -0 4242; do sleep 30; done && echo finished; gh pr view 12", 75),
             ("for f in scripts/*-test.py; do python3 $f; done", 90),
             ("while read -r line; do echo \"$line\" >> out.txt; done < in.txt", 75),
-            ("python3 nn-systems/cold-read/cold-read-grid.py --target docs/x.md", 75),
+            ("python3 nn-systems/cold-read/cold-read-fast-read.py --target docs/x.md", 75),
             (None, 75)):
         seconds = hook.background_task_kind_and_wait_limit_minutes_from_command(command)[1] * 60
         check(f"the wait-limit of {command!r} is {expected_minutes} minutes",
               seconds == expected_minutes * 60, seconds)
+
+    # The cold-read-full-run's wait-limit follows the grid's own per-attempt limit, read from its source.
+    grid_stand_in = Path(workspace) / "cold-read-grid-stand-in.py"
+    grid_stand_in.write_text("import os\nCELL_ATTEMPT_TIMEOUT_DEFAULT_SECONDS = 3 * 60 * 60\n", encoding="utf-8")
+    real_grid_path = hook.COLD_READ_GRID_PATH
+    hook.COLD_READ_GRID_PATH = grid_stand_in
+    try:
+        check("the cold-read-full-run's wait-limit is read from the grid's CELL_ATTEMPT_TIMEOUT_DEFAULT_SECONDS",
+              hook.cold_read_grid_cell_attempt_time_limit_seconds() == 3 * 60 * 60,
+              hook.cold_read_grid_cell_attempt_time_limit_seconds())
+        grid_stand_in.write_text("CELL_ATTEMPT_TIMEOUT = 60\n", encoding="utf-8")
+        try:
+            hook.cold_read_grid_cell_attempt_time_limit_seconds()
+            raised = None
+        except RuntimeError as error:
+            raised = str(error)
+        check("a grid that no longer assigns CELL_ATTEMPT_TIMEOUT_DEFAULT_SECONDS is reported, not guessed",
+              raised is not None and "CELL_ATTEMPT_TIMEOUT_DEFAULT_SECONDS" in raised, raised)
+    finally:
+        hook.COLD_READ_GRID_PATH = real_grid_path
+    check("the cold-read-full-run's wait-limit is two of the real grid's attempts plus 15 minutes",
+          hook.COLD_READ_FULL_RUN_WAIT_LIMIT_MINUTES
+          == 2 * hook.cold_read_grid_cell_attempt_time_limit_seconds() / 60 + 15,
+          hook.COLD_READ_FULL_RUN_WAIT_LIMIT_MINUTES)
 
     # Each waiting-task shape, as recorded background launches wrote it, gets 0 alone; with work
     # beside it, before it, after it or inside its loop, the command gets the no-match limit.
@@ -1016,7 +1042,8 @@ with tempfile.TemporaryDirectory() as workspace:
 
     eighty_minutes_after_launch = datetime(2026, 9, 15, 0, 1, 47, 899000, tzinfo=timezone.utc)
     for command, in_flight in (("python3 scripts/run-all-test-suites.py", True),
-                               ("python3 nn-systems/cold-read/cold-read-grid.py", False),
+                               ("python3 nn-systems/cold-read/cold-read-grid.py", True),
+                               ("python3 nn-systems/cold-read/cold-read-fast-read.py", False),
                                (None, False)):
         records = [usage_record(100_000, cache_read=450_000)]
         if command is not None:
@@ -2214,7 +2241,8 @@ with tempfile.TemporaryDirectory() as workspace:
                 ("nn-mutation-testing",
                  "python3 scripts/mutation-testing-changed-lines-quick-or-full-pass-survivors.py", 105),
                 ("test-suite", "cd /tmp/x && python3 scripts/run-all-test-suites.py", 90),
-                ("a command no kind matches", "python3 nn-systems/cold-read/cold-read-grid.py", 75)):
+                ("cold-read-full-run", "python3 nn-systems/cold-read/cold-read-grid.py", 255),
+                ("a command no kind matches", "python3 nn-systems/cold-read/cold-read-fast-read.py", 75)):
             for age, holds in ((timedelta(minutes=limit_minutes), False),
                                (timedelta(minutes=limit_minutes) - timedelta(milliseconds=1), True)):
                 boundary_session = transcript_of(
