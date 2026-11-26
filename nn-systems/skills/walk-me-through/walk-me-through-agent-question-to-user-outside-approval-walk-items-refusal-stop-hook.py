@@ -43,8 +43,9 @@ THE TEXT CHECKED is the reply, line by line, without:
   be told from the other items'. So is a reply line matching
   the answer line's first sentence, the walk-me-through skill's
   answer line without what the item adds after it, such as ` D: <the
-  alternative>`; and one showing a line of the item that opens with the
-  mark `#new` or `#new_if_d` as the agent shows it, the mark replaced by
+  alternative>`; and one showing a line of the item that opens, after any
+  list or quotation mark and a part's opening `Part N.`, with the mark
+  `#new` or `#new_if_d` as the agent shows it, the mark replaced by
   `If you approve, the new text:` or `If you disapprove, the new text:` and
   a `The new text:` just after the mark dropped; lines match when they are
   equal once markdown emphasis, heading and list marks, a hashtag marker
@@ -310,6 +311,8 @@ REFUSAL_INSTRUCTIONS = (
     "question only when the item in the walk-document holds every flagged line that way, and refuses again until "
     "it does; it ignores a `>` quote mark or a list mark such as `-` or `1.` at the start of a line, bold, italic "
     "and code marks, and letter case, so you may add or drop those. "
+    "Just before the alternative, state the strongest case against the recommendation on one line that opens with "
+    "`#case_against` and a rating, none, weak, medium, strong or very strong. "
     "Give the item one recommendation and one alternative, and end it with the recommendation stated as an "
     "action, as in `Recommendation: <what you recommend doing>.` State the alternative before it, as in "
     "`The alternative: <what D does instead>.`",
@@ -555,36 +558,38 @@ def is_question_like(line):
     return "?" in line or ASK_PHRASE.search(line) is not None
 
 
-def model_judgement(message_lines, question_like_lines, waiting_items_text, turn_started_by, turn_start_text,
+def model_judgement(message_lines, question_like_indexes, waiting_items_text, turn_started_by, turn_start_text,
                     timeout_seconds=MODEL_TIMEOUT_SECONDS):
-    """Return (the first question-like line the model calls an ask or whose call fails, or None; None, or why that
-    line's call failed), judging each line in a call of its own, the calls running at the same time."""
-    with concurrent.futures.ThreadPoolExecutor(max_workers=len(question_like_lines)) as pool:
+    """Return (the index in message_lines of the first question-like line the model calls an ask or whose call
+    fails, or None; None, or why that line's call failed), judging each line in a call of its own, the calls running
+    at the same time."""
+    with concurrent.futures.ThreadPoolExecutor(max_workers=len(question_like_indexes)) as pool:
         verdicts = list(pool.map(
             lambda numbered: line_is_ask(*numbered, message_lines, waiting_items_text, turn_started_by,
                                          turn_start_text, timeout_seconds),
-            enumerate(question_like_lines, 1)))
-    for line, (ask, failure) in zip(question_like_lines, verdicts):
+            enumerate(question_like_indexes, 1)))
+    for index, (ask, failure) in zip(question_like_indexes, verdicts):
         if failure is not None or ask:
-            return line, failure
+            return index, failure
     return None, None
 
 
-def message_window(message_lines, line):
-    """The message cut around line, as the benchmark the user approved cut it."""
+def message_window(message_lines, index):
+    """The message cut around its index-th line, as the benchmark the user approved cut it."""
     message = "\n".join(message_lines)
-    at = max(message.find(line[:60]), 0)
+    line = message_lines[index]
+    at = sum(len(earlier) + 1 for earlier in message_lines[:index])
     start = max(at - AGENT_MESSAGE_CHARACTERS_KEPT_BEFORE_THE_LINE, 0)
     end = min(at + len(line) + AGENT_MESSAGE_CHARACTERS_KEPT_AFTER_THE_LINE, len(message))
     return ("[...] " if start else "") + message[start:end] + (" [...]" if end < len(message) else "")
 
 
-def line_is_ask(number, line, message_lines, waiting_items_text, turn_started_by, turn_start_text, timeout_seconds):
-    """Return (whether the model calls line, the number-th question-like line, an ask, None), or (None, why the call
-    failed)."""
-    entry = {"id": f"L{number}", "line": line, "turn_started_by": turn_started_by,
+def line_is_ask(number, index, message_lines, waiting_items_text, turn_started_by, turn_start_text, timeout_seconds):
+    """Return (whether the model calls message_lines[index], the number-th question-like line, an ask, None), or
+    (None, why the call failed)."""
+    entry = {"id": f"L{number}", "line": message_lines[index], "turn_started_by": turn_started_by,
              "message_that_started_the_turn": turn_start_text,
-             "agent_message_holding_the_line": message_window(message_lines, line),
+             "agent_message_holding_the_line": message_window(message_lines, index),
              "waiting_walk_item_text": waiting_items_text}
     prompt = QUESTION_LIKE_LINE_ASK_LABELLING_MODEL_PROMPT + json.dumps([entry], ensure_ascii=False, indent=1) + "\n"
     command = [*command_line_prefix.claude_code_headless_run_command_line_prefix_build(
@@ -746,22 +751,22 @@ def output_for(payload, environment, model=model_judgement):
     pages = walk_finder.newest_item_page_link_per_item_from_walk_minutes(minutes.read_text(encoding="utf-8"), parser)
     checked = checked_lines(reply, document_text, units, parser, numbers, pages)
     lines = [line for line, _ in checked]
-    question_like = [line for line in lines if is_question_like(line)]
+    question_like = [index for index, line in enumerate(lines) if is_question_like(line)]
     if not question_like:
         return None
     document_lines = document_text.split("\n")
     waiting_items_text = "\n\n".join("\n".join(document_lines[first:end]).strip()
                                      for _, _, _, first, end in waiting_units)
     turn_started_by, turn_start_text = turn_opening(records)
-    sentence, failure = model(lines, question_like, waiting_items_text, turn_started_by, turn_start_text)
+    flagged, failure = model(lines, question_like, waiting_items_text, turn_started_by, turn_start_text)
     if failure is not None:
         decided, decided_by = MODEL_CHECK_FAILED_NOTICE.format(failure=failure), "model-check-failed"
-    elif sentence is None:
+    elif flagged is None:
         return None
     else:
         decided, decided_by = DECIDED_BY_MODEL_NOTICE, "model"
     # The agent copies the flagged text into the item, so it is named as written, not as checked.
-    sentence = "\n".join(next(written for line, written in checked if line == sentence))
+    sentence = "\n".join(checked[flagged][1])
     waiting = numbers[-1]
     waiting_label = " and ".join(numbers)
     new_total = str(int(total) + 1)

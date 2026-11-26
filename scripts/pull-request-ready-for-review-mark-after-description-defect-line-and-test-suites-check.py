@@ -3,7 +3,9 @@
 
 Usage: python3 scripts/pull-request-ready-for-review-mark-after-description-defect-line-and-test-suites-check.py <pull request number>
 
-Run it from the pull request's own checkout, with its nn-head-commit checked out. In order, it:
+Run it from the pull request's own checkout, with its nn-head-commit checked out, as a background
+command: step 4 can wait up to an hour for the machine's test lock, and an agent's tool stops a
+foreground command at its time limit. In order, it:
 1. reads the pull request with gh, and stops when it is not open, or is already ready for review;
 2. refuses when the checkout's HEAD is not the pull request's pushed nn-head-commit, naming the
    one case that applies (another branch is checked out, the pushed commit has not been fetched,

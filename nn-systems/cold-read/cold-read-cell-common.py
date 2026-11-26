@@ -1165,6 +1165,7 @@ def path_shown_on_one_line(path: str) -> str:
     return shell_quoted_on_one_line(path) if holds_a_line_breaking_character(path) else path
 
 
+# When git's safe.directory remedy comes out wrong in a new way, fix it by building the remedy from the repository path, not by patching this copying again.
 def join_error_text_lines_with_one_space(text) -> str:
     """`text`'s lines joined by one space, each line's own spaces kept: a path in a git
     message may hold two spaces in a row. Only a newline or carriage return ends a line
@@ -1192,8 +1193,7 @@ def git_command_requoted_on_one_line(line: str) -> str:
         arguments = shlex.split(line)
     except ValueError:
         return escaped_where_it_splits_a_line(line)
-    return " ".join(shell_quoted_on_one_line(argument) if holds_a_line_breaking_character(argument)
-                    else shlex.quote(argument) for argument in arguments)
+    return " ".join(map(shell_quoted_on_one_line, arguments))
 
 
 def report_stray_writes(program: str, baseline, own_report_path=None) -> None:

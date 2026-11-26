@@ -2264,6 +2264,17 @@ try:
           and all((quoted_repository / neighbor).read_text(encoding="utf-8") == "The agent's own edit.\n"
                   for neighbor in ("dont", "wont.md", "cant", "shant.md")),
           repr(fallback_commands))
+    # The restore command resets the whole file, so a file that also holds edits that are not a
+    # reviewer's is edited by hand; the Monitor tool shows only the line after the finding.
+    fallback_next_step = grid_module.STOPPED_CELL_WRITE_CHECK_LINE.split("\n")
+    check("the fallback message gives a whole-file undo command only for a path whose every change is "
+          "a reviewer's, says to edit out only the reviewer's writing otherwise, all on the one line "
+          "after the finding",
+          len(fallback_next_step) == 2
+          and "whose every uncommitted change shows a reviewer wrote it" in fallback_next_step[1]
+          and "delete only the reviewer's writing, by editing the file" in fallback_next_step[1]
+          and "throws away every uncommitted change to the file" in fallback_next_step[1],
+          grid_module.STOPPED_CELL_WRITE_CHECK_LINE)
 
     # A conflict with a missing side: both diffs can print only `* Unmerged path`.
     for missing_side_code, written in (("DD", "A reviewer's write.\n"), ("DU", "Incoming.\n")):
