@@ -170,7 +170,7 @@ with tempfile.TemporaryDirectory() as scratch:
         check(f"422: {name} names the value and stores nothing", status == 422
               and f"holds a value it cannot store: {named}." in answer["error"]
               and "fields.<name> is the field <name> inside" in answer["error"]
-              and "Only machine-booted takes a null seat_id" in answer["error"]
+              and "alone take a null seat_id: findings-record-row-added, findings-record-row-decided, findings-record-row-sighted, machine-booted;" in answer["error"]
               and body["event_id"] in answer["error"]
               and events_stored() == before,
               (status, answer))
@@ -363,8 +363,102 @@ with tempfile.TemporaryDirectory() as scratch:
     check("sequence numbers rise by one per stored event, in the order stored",
           sequences == list(range(1, len(sequences) + 1)), sequences)
 
+    # The findings record
+    def added_fields(finding_id, text, path="scripts/thing.py", line_text="    delete(path)"):
+        return {"finding_id": finding_id, "pull_request": 4034, "head_commit": "c1", "path": path,
+                "line": 83, "line_text": line_text, "outside_program": None,
+                "statement": text.splitlines()[0], "finding_text": text, "main_has_it": "yes",
+                "this_pull_request_makes_it_happen": "no", "reports_success_on_failure": "no",
+                "shown_by": "judged from the code only", "grade": "fix-next", "decision": None,
+                "filed_where": None, "owning_agent_seat": None}
+
+    def search(finding_id, text, path=None, line_text=None):
+        return request("/findings-record-rows/search", {"finding_id": finding_id, "finding_text": text,
+                                                   "path": path, "line_text": line_text})
+
+    capture_text = ("Filter terminal captures before choosing which files to delete: the cleanup "
+                    "sorts every regular file and can unlink the newest capture.")
+    status, added = request("/events", event("findings-record-row-added",
+                                             added_fields("f-capture", capture_text), seat_id=None))
+    capture_row = added.get("sequence")
+    request("/events", event("findings-record-row-added", added_fields(
+        "f-other", "Quote the branch name in the merge command line.", path="scripts/other.py",
+        line_text="run(branch)"), seat_id=None))
+    row = db.execute("SELECT state, line_commit, added_from_finding_id FROM findings_record_row "
+                     "WHERE record_id = ?", (capture_row,)).fetchone()
+    check("findings-record-row-added makes a row in state new whose record_id is its sequence number",
+          status == 200 and row == ("new", "c1", "f-capture"), (status, added, row))
+    status, answer = search("f-new", "Restrict deletion to terminal capture files: NOT every "
+                                     "file sorted -- \"quoted\" (here)", "scripts/thing.py",
+                            "    delete(path)")
+    check("a search ranks the row sharing the most words first, whatever FTS5 syntax the text "
+          "holds, and names each row on the same path and line text",
+          status == 200 and answer["held"] is None
+          and [c["record_id"] for c in answer["candidates"]][:1] == [capture_row]
+          and answer["same_line_record_ids"] == [capture_row], (status, answer))
+    status, answer = search("f-capture", "no word in common")
+    check("a search for a finding id already sighted gives its row as held",
+          status == 200 and answer["held"]["record_id"] == capture_row, (status, answer))
+    status, answer = search("f-new", "!!! ---")
+    check("a search whose text has no word gives no candidate",
+          status == 200 and answer["candidates"] == [], (status, answer))
+    status, answer = search("f-new", "capture", "scripts/thing.py", "   ")
+    check("a blank line text matches no row by line", answer["same_line_record_ids"] == [],
+          answer)
+    status, answer = request("/findings-record-rows/search", {"finding_text": "capture"})
+    check("422: a search body without its keys", status == 422 and "finding_id" in answer["error"],
+          (status, answer))
+    status, answer = request("/findings-record-rows/search", raw=b"{not json")
+    check("400: a search body that is not JSON", status == 400, (status, answer))
+    sighting = {"record_id": capture_row, "finding_id": "f-again", "pull_request": 4076,
+                "head_commit": "c2"}
+    for _ in range(2):
+        request("/events", event("findings-record-row-sighted", sighting, seat_id=None))
+    request("/events", event("findings-record-row-sighted", sighting, seat_id=None))
+    check("a finding is recorded once as a sighting per head commit, however often it is sent",
+          db.execute("SELECT count(*) FROM findings_record_row_sighting WHERE finding_id = 'f-again'")
+          .fetchone()[0] == 1)
+    status, answer = request("/events", event("findings-record-row-sighted",
+                                              {**sighting, "record_id": 999999}, seat_id=None))
+    check("422: a sighting of a row that does not exist",
+          status == 422 and "record_id" in answer["error"], (status, answer))
+    decided = {"record_id": capture_row, "state": "decided-fix", "decision": "GHI 4100",
+               "filed_where": "GHI 4100", "owning_agent_seat": None}
+    request("/events", event("findings-record-row-decided", {**decided, "owning_agent_seat": "md-skills"},
+                             seat_id=None))
+    request("/events", event("findings-record-row-decided", decided, seat_id=None))
+    row = db.execute("SELECT state, decision, filed_where, owning_agent_seat FROM findings_record_row "
+                     "WHERE record_id = ?", (capture_row,)).fetchone()
+    check("findings-record-row-decided sets the state and decision, and keeps an owner a null leaves",
+          row == ("decided-fix", "GHI 4100", "GHI 4100", "md-skills"), row)
+    status, answer = request("/events", event("findings-record-row-decided",
+                                              {**decided, "state": "wontfix"}, seat_id=None))
+    check("422: a decision with a state that is not one of the findings record's states",
+          status == 422 and "decided-not-worth-fixing" in answer["error"], (status, answer))
+    status, answer = request("/events", event("findings-record-row-added",
+                                              {**added_fields("f-x", "x"), "path": None},
+                                              seat_id=None))
+    check("422: a row with neither a path nor an outside program",
+          status == 422 and "outside_program" in answer["error"], (status, answer))
+    old_schema = scratch / "old-schema.sqlite3"
+    connection = sqlite3.connect(str(old_schema))
+    connection.execute("CREATE TABLE event (sequence INTEGER PRIMARY KEY AUTOINCREMENT, "
+                       "event_id TEXT NOT NULL UNIQUE, machine TEXT NOT NULL, operation TEXT "
+                       "NOT NULL, occurred_at TEXT, received_at TEXT NOT NULL, body TEXT NOT NULL)")
+    connection.execute("INSERT INTO event VALUES (1, 'kept', 'mac', 'machine-booted', NULL, 'x', '{}')")
+    connection.commit()
+    connection.close()
+    service.create_nn_shared_database_if_absent(old_schema)
+    connection = sqlite3.connect(str(old_schema))
+    tables = {name for (name,) in connection.execute("SELECT name FROM sqlite_master")}
+    kept = connection.execute("SELECT event_id FROM event").fetchall()
+    connection.close()
+    check("a database made before the findings record gains its tables and keeps its events",
+          {"findings_record_row", "findings_record_row_sighting", "findings_record_row_text", "agent_seat"} <= tables
+          and kept == [("kept",)], (tables, kept))
+
     # 500: an error no check foresaw is answered, and its transaction rolled back
-    def fail_to_apply(connection, applied):
+    def fail_to_apply(connection, applied, sequence):
         raise RuntimeError("the state tables could not be updated")
 
     applying, service.apply_event = service.apply_event, fail_to_apply

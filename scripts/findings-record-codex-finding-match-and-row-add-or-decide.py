@@ -1,0 +1,310 @@
+#!/usr/bin/env python3
+"""Match each Codex finding on main's code against the findings record, and add the new ones to it.
+
+The findings record is the nn-shared-database's findings_record_row table, one row per
+defect a reviewer found on main, reached through the nn-shared-database service.
+
+Usage:
+  scripts/findings-record-codex-finding-match-and-row-add-or-decide.py match
+      --pull-request N --head-commit SHA [--repository DIR] [--possible-miss-log PATH]
+      [--claude-program PATH] [--service-url URL]
+      < findings.json
+  scripts/findings-record-codex-finding-match-and-row-add-or-decide.py decide
+      RECORD_ID --state STATE --decision TEXT [--filed-where TEXT]
+      [--owning-agent-seat NAME] [--service-url URL]
+
+match reads a JSON list of findings, each {"finding_id", "priority", "heading", "text"},
+with "grade", and for does-not-hold "reason", once merge-lane-2 has graded it: the
+heading is the Codex heading's text, "<title> — <path>:<line>[-<line>]", and the text
+the whole finding from its heading line on. For each finding, code:
+  - asks the service for the row a sighting of finding_id is on, the three rows FTS5
+    ranks best for the text, and the rows citing the same path and line text, the line's
+    text read from the head commit with git in --repository;
+  - when the held row was added from this finding at this head commit, answers NEW with
+    that row, so a second run adds nothing; when another held row exists, answers SAME
+    with it, with no judgment;
+  - otherwise, when the search gives candidates, has one judgment step, a headless
+    `claude -p` with no tools, answer exactly `SAME <record id>` of a candidate, or `NEW`;
+  - on SAME, records the finding as a sighting of the row;
+  - on NEW, when the finding has a grade, adds a row in state new holding the finding, its
+    four labelled lines and its grade, a does-not-hold reason as its decision; and when a
+    row already cites the same path and line text, appends one JSON line to the
+    possible-miss log, by default findings-record/findings-record-possible-misses.jsonl in
+    the log-store.
+It prints one JSON object, by finding id: {"answer": "SAME", "record": <the row>,
+"possible_regression": <whether the row is fixed>} or {"answer": "NEW", "record_id": <the
+row added, or null when the finding has no grade yet>, "possible_miss_of": [<record ids>]}.
+
+decide records a decision on a row: its state, one of the service's
+FINDINGS_RECORD_ROW_STATES, and its decision, a link or a reason.
+
+Exit codes: 0 done; 1 a step failed, with what failed on standard error: the service
+could not be reached or refused, git could not read the line, the judgment step failed
+or answered other than one of its output states, or the possible-miss log could not be
+written; 2 a bad invocation or input. Rows and sightings already recorded stay: running
+the same command again records nothing twice.
+"""
+
+import argparse
+import importlib.util
+import json
+import re
+import subprocess
+import sys
+import tempfile
+from datetime import datetime, timezone
+from pathlib import Path
+
+REPOSITORY_ROOT = Path(__file__).resolve().parents[1]
+
+
+def load_program(path, module_name):
+    spec = importlib.util.spec_from_file_location(module_name, path)
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return module
+
+
+service_call = load_program(
+    REPOSITORY_ROOT / "nn-systems" / "nn-shared-database" / "nn-shared-database-service-call-common.py",
+    "nn_shared_database_service_call_common")
+command_line_prefix = load_program(
+    REPOSITORY_ROOT / "nn-systems" / "general-tools"
+    / "claude-code-headless-run-command-line-prefix-with-no-connectors-and-explicit-permission-mode-common.py",
+    "claude_code_headless_run_command_line_prefix_with_no_connectors_and_explicit_permission_mode_common")
+path_constants = load_program(
+    REPOSITORY_ROOT / "nn-systems" / "general-tools"
+    / "ned-box-home-directory-and-its-mac-mount-point-path-constants-common.py",
+    "ned_box_home_directory_and_its_mac_mount_point_path_constants_common")
+
+FINDINGS_RECORD_ROW_STATES = ("new", "filed", "decided-fix", "decided-not-worth-fixing", "needs-user", "fixed")
+MATCH_JUDGMENT_MODEL = "claude-sonnet-5-5"
+MATCH_JUDGMENT_TIMEOUT_SECONDS = 300
+MATCH_JUDGMENT_ANSWER = re.compile(r"\A(?:SAME (\d+)|NEW)\Z")
+CODEX_HEADING_PATH_AND_LINE = re.compile(r" — (\S+?):(\d+)(?:-\d+)?\s*\Z")
+FINDING_FACT_LINE_FIELDS = {"Main has it": "main_has_it",
+                            "This pull request makes it happen": "this_pull_request_makes_it_happen",
+                            "Reports success on failure": "reports_success_on_failure",
+                            "Shown by": "shown_by"}
+FINDING_FACT_LINE = re.compile(
+    r"^[ \t]*(?:(?:[-*+]|\d+[.)])[ \t]+)?[`*_]*(" + "|".join(map(re.escape, FINDING_FACT_LINE_FIELDS))
+    + r")[`*_]*:[ \t]*(.*)$", re.MULTILINE)
+POSSIBLE_MISS_LOG_UNDER_LOG_STORE = Path("findings-record") / "findings-record-possible-misses.jsonl"
+DOES_NOT_HOLD_GRADE = "does-not-hold"
+
+MATCH_JUDGMENT_SYSTEM_PROMPT = (
+    "You decide whether a new code review finding reports the same defect as one of the earlier findings "
+    "listed with it. The same defect means the same wrong behaviour in the same code, even when the "
+    "wording, the title or the line numbers differ, because the code may have moved. A different defect "
+    "in the same file or function is not the same. Answer with exactly one line and nothing else: "
+    "`SAME <record id>`, with the record id of the earlier finding that reports the same defect, or `NEW` "
+    "when none does.")
+
+# Messages follow docs/nedsnodes-wiki/nedsnodes-how-to-write-a-tool-message-to-agent-such-as-a-hook-refusal-or-script-error.md.
+FAILED_MESSAGE = (
+    "FAILED: the findings record match stopped at finding {finding_id} of pull request {number}: {reason}\n"
+    "Rows and sightings recorded before this finding stay, and running the same command again records "
+    "nothing twice.\n"
+    "If the reason above gives a step, such as a command to run, do it, then run the same command again.\n"
+    "If the same command fails the same way again, tell the user: \"The findings record match for pull "
+    "request {number} fails: {reason}\", and leave the step that needs it until he answers.\n"
+    "If you are a subagent, send those words to the agent that dispatched you instead.")
+JUDGMENT_ANSWER_UNLISTED_REASON = (
+    "the judgment step answered {answer!r}, which is neither NEW nor SAME with one of the record ids it was "
+    "given, {record_ids}, so the program did not guess which it meant")
+LINE_UNREADABLE_REASON = (
+    "git could not read {path} at commit {head} in {repository}: {error}. The row records the line's text "
+    "at the head commit. If the commit is missing there, run `git -C {repository} fetch origin "
+    "pull/{number}/head`")
+
+
+class MatchStepFailed(Exception):
+    pass
+
+
+def utc_now():
+    return datetime.now(timezone.utc).isoformat(timespec="seconds")
+
+
+def fact_line_answers(text):
+    answers = dict.fromkeys(FINDING_FACT_LINE_FIELDS.values())
+    for label, answer in FINDING_FACT_LINE.findall(text):
+        answers[FINDING_FACT_LINE_FIELDS[label]] = answers[FINDING_FACT_LINE_FIELDS[label]] or answer.strip()
+    return answers
+
+
+def line_text_at_head(repository, head, path, line, number):
+    completed = subprocess.run(["git", "-C", str(repository), "show", f"{head}:{path}"],
+                               capture_output=True, text=True, stdin=subprocess.DEVNULL)
+    if completed.returncode != 0:
+        raise MatchStepFailed(LINE_UNREADABLE_REASON.format(
+            path=path, head=head, repository=repository, error=completed.stderr.strip(), number=number))
+    lines = completed.stdout.splitlines()
+    return lines[line - 1] if 0 < line <= len(lines) else ""
+
+
+def match_judgment(finding, candidates, claude_program):
+    """Return the record id the judgment step answers SAME with, or None for NEW."""
+    listed = [{key: row[key] for key in ("record_id", "path", "line", "line_text", "finding_text")}
+              for row in candidates]
+    prompt = ("New finding:\n" + finding["text"] + "\n\nEarlier findings:\n"
+              + json.dumps(listed, ensure_ascii=False, indent=1) + "\n")
+    command = [*command_line_prefix.claude_code_headless_run_command_line_prefix_build(
+                   "dontAsk", program=claude_program, caller_claude_code_session_settings={"disableAllHooks": True}),
+               "--model", MATCH_JUDGMENT_MODEL, "--output-format", "json", "--system-prompt",
+               MATCH_JUDGMENT_SYSTEM_PROMPT, "--tools", "", "--no-session-persistence"]
+    try:
+        completed = subprocess.run(command, input=prompt, capture_output=True, text=True,
+                                   timeout=MATCH_JUDGMENT_TIMEOUT_SECONDS, cwd=tempfile.gettempdir())
+    except subprocess.TimeoutExpired:
+        raise MatchStepFailed(f"the judgment step, {claude_program} -p, gave no answer within "
+                              f"{MATCH_JUDGMENT_TIMEOUT_SECONDS} seconds")
+    except OSError as error:
+        raise MatchStepFailed(f"the judgment step, {claude_program} -p, could not be run: {error}")
+    try:
+        result = json.loads(completed.stdout)
+        answer = result["result"]
+    except (ValueError, TypeError, KeyError) as error:
+        detail = (completed.stderr or completed.stdout or "no output").strip()[:300]
+        raise MatchStepFailed(f"the judgment step, {claude_program} -p, exited {completed.returncode} with no "
+                              f"answer ({error!r}): {detail}")
+    if completed.returncode != 0 or result.get("is_error"):
+        raise MatchStepFailed(f"the judgment step, {claude_program} -p, exited {completed.returncode} "
+                              f"reporting an error: {str(answer)[:300]}")
+    record_ids = [row["record_id"] for row in candidates]
+    parsed = MATCH_JUDGMENT_ANSWER.match(str(answer).strip())
+    if not parsed or (parsed[1] is not None and int(parsed[1]) not in record_ids):
+        raise MatchStepFailed(JUDGMENT_ANSWER_UNLISTED_REASON.format(answer=answer, record_ids=record_ids))
+    return int(parsed[1]) if parsed[1] is not None else None
+
+
+def default_possible_miss_log():
+    for home in (path_constants.NED_BOX_HOME, path_constants.MAC_MOUNT_OF_NED_BOX_HOME):
+        log_store = Path(home) / "nedsnodes-logs"
+        if log_store.is_dir():
+            return log_store / POSSIBLE_MISS_LOG_UNDER_LOG_STORE
+    raise MatchStepFailed(f"the log-store, which holds the possible-miss log, is at neither "
+                          f"{path_constants.NED_BOX_HOME}/nedsnodes-logs nor "
+                          f"{path_constants.MAC_MOUNT_OF_NED_BOX_HOME}/nedsnodes-logs")
+
+
+def possible_miss_log_append(log_path, entry):
+    try:
+        log_path = log_path or default_possible_miss_log()
+        log_path.parent.mkdir(parents=True, exist_ok=True)
+        with open(log_path, "a", encoding="utf-8") as log:
+            log.write(json.dumps(entry, ensure_ascii=False) + "\n")
+    except OSError as error:
+        raise MatchStepFailed(f"the possible-miss log {log_path} could not be written: {error}")
+
+
+def match_one(finding, arguments, call):
+    number, head = arguments.pull_request, arguments.head_commit
+    cited = CODEX_HEADING_PATH_AND_LINE.search(finding["heading"])
+    if not cited:
+        raise MatchStepFailed(f"its heading {finding['heading']!r} cites no `<path>:<line>` after ` — `, "
+                              f"so the row would have no place in the code")
+    path, line = cited[1], int(cited[2])
+    line_text = line_text_at_head(arguments.repository, head, path, line, number)
+    found = call("/findings-record-rows/search", {"finding_id": finding["finding_id"], "finding_text": finding["text"],
+                                             "path": path, "line_text": line_text})
+    held, candidates = found["held"], found["candidates"]
+    if held is not None and held["added_from_finding_id"] == finding["finding_id"] and held["line_commit"] == head:
+        return {"answer": "NEW", "record_id": held["record_id"], "possible_miss_of": []}
+    if held is not None:
+        same = held
+    else:
+        same_id = match_judgment(finding, candidates, arguments.claude_program) if candidates else None
+        same = next((row for row in candidates if row["record_id"] == same_id), None)
+    if same is not None:
+        call("/events", service_call.nn_shared_database_event_body(
+            "findings-record-row-sighted", None,
+            {"record_id": same["record_id"], "finding_id": finding["finding_id"], "pull_request": number,
+             "head_commit": head},
+            event_id=f"findings-record-row-sighted-{finding['finding_id']}-{head}"))
+        return {"answer": "SAME", "record": same, "possible_regression": same["state"] == "fixed"}
+    if "grade" not in finding:
+        return {"answer": "NEW", "record_id": None, "possible_miss_of": []}
+    answers = fact_line_answers(finding["text"])
+    added = call("/events", service_call.nn_shared_database_event_body(
+        "findings-record-row-added", None,
+        {"finding_id": finding["finding_id"], "pull_request": number, "head_commit": head, "path": path,
+         "line": line, "line_text": line_text, "outside_program": None,
+         "statement": finding["heading"], "finding_text": finding["text"], **answers,
+         "grade": finding["grade"],
+         "decision": finding.get("reason") if finding["grade"] == DOES_NOT_HOLD_GRADE else None,
+         "filed_where": None, "owning_agent_seat": None},
+        event_id=f"findings-record-row-added-{finding['finding_id']}"))
+    misses = found["same_line_record_ids"]
+    if misses:
+        possible_miss_log_append(arguments.possible_miss_log, {
+            "at": utc_now(), "record_id": added["sequence"], "same_path_and_line_text_as": misses,
+            "pull_request": number, "head_commit": head, "finding_id": finding["finding_id"], "path": path,
+            "line_text": line_text})
+    return {"answer": "NEW", "record_id": added["sequence"], "possible_miss_of": misses}
+
+
+def findings_read(text):
+    findings = json.loads(text)
+    keys = {"finding_id", "priority", "heading", "text"}
+    if not isinstance(findings, list) or not all(
+            isinstance(finding, dict) and keys <= set(finding) <= keys | {"grade", "reason"}
+            and all(isinstance(value, str) for value in finding.values()) for finding in findings):
+        raise ValueError("not a list of objects with text finding_id, priority, heading and text, and an "
+                         "optional text grade and reason")
+    return findings
+
+
+def main(argv=None):
+    parser = argparse.ArgumentParser(description=__doc__.split("\n\n")[0])
+    parser.add_argument("--service-url", default=service_call.NN_SHARED_DATABASE_SERVICE_URL)
+    commands = parser.add_subparsers(dest="command", required=True)
+    match = commands.add_parser("match")
+    match.add_argument("--pull-request", type=int, required=True)
+    match.add_argument("--head-commit", required=True)
+    match.add_argument("--repository", type=Path, default=REPOSITORY_ROOT)
+    match.add_argument("--possible-miss-log", type=Path)
+    match.add_argument("--claude-program", default=command_line_prefix.CLAUDE_CODE_PROGRAM)
+    decide = commands.add_parser("decide")
+    decide.add_argument("record_id", type=int)
+    decide.add_argument("--state", choices=FINDINGS_RECORD_ROW_STATES, required=True)
+    decide.add_argument("--decision", required=True)
+    decide.add_argument("--filed-where")
+    decide.add_argument("--owning-agent-seat")
+    arguments = parser.parse_args(argv)
+
+    def call(path, body):
+        return service_call.nn_shared_database_service_http_request_single_attempt(
+            path, body, service_url=arguments.service_url)
+
+    if arguments.command == "decide":
+        try:
+            call("/events", service_call.nn_shared_database_event_body(
+                "findings-record-row-decided", None,
+                {"record_id": arguments.record_id, "state": arguments.state, "decision": arguments.decision,
+                 "filed_where": arguments.filed_where, "owning_agent_seat": arguments.owning_agent_seat}))
+        except service_call.NnSharedDatabaseServiceCallFailed as failure:
+            print(failure, file=sys.stderr)
+            return 1
+        print(f"findings record row {arguments.record_id} is now {arguments.state}: {arguments.decision}")
+        return 0
+    try:
+        findings = findings_read(sys.stdin.read())
+    except ValueError as error:
+        print(f"FAILED: the findings on standard input are {error}; give the JSON list this program's "
+              f"docstring describes.", file=sys.stderr)
+        return 2
+    answers = {}
+    for finding in findings:
+        try:
+            answers[finding["finding_id"]] = match_one(finding, arguments, call)
+        except (MatchStepFailed, service_call.NnSharedDatabaseServiceCallFailed) as error:
+            print(FAILED_MESSAGE.format(finding_id=finding["finding_id"], number=arguments.pull_request,
+                                        reason=error), file=sys.stderr)
+            return 1
+    print(json.dumps(answers, ensure_ascii=False))
+    return 0
+
+
+if __name__ == "__main__":
+    sys.exit(main())

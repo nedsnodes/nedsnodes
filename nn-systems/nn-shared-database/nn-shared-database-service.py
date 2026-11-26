@@ -1,12 +1,14 @@
 #!/usr/bin/env python3
-"""Keep one record of every agent-seat on both machines, behind a narrow JSON API over HTTP.
+"""Keep the nn-shared-database: a record of every agent-seat on both machines, and the findings
+record of reviewer findings on main, behind a narrow JSON API over HTTP.
 
 Usage:
   nn-systems/nn-shared-database/nn-shared-database-service.py
       [--database PATH] [--accepted-tokens-file PATH] [--host HOST] [--port N]
 
   --database              default ~/.local/state/nedsnodes/nn-shared-database.sqlite3,
-                          made with its schema when absent
+                          made when absent, and given each table of its schema
+                          it lacks at every start
   --accepted-tokens-file  default ~/.config/nedsnodes/nn-shared-database-service-accepted-tokens,
                           one token per line, read at every request
   --host, --port          default every address, port 8765
@@ -26,6 +28,15 @@ of the accepted-tokens file is answered 401.
                            lists one machine's
   GET /agent-seats/<id>    one agent-seat, with its handoff-supervisor runs,
                            agent-sessions, session-handoffs and restart attempts
+  POST /findings-record-rows/search
+                           read only: the body is a JSON object with exactly
+                           finding_id and finding_text, text, and path and
+                           line_text, text or null; answers {"held": the row a
+                           sighting of finding_id is on, or null, "candidates":
+                           the FINDINGS_RECORD_ROW_SEARCH_CANDIDATES rows whose
+                           finding_text FTS5 ranks best by bm25() for any word of
+                           finding_text, best first, "same_line_record_ids": the
+                           rows with this path and line_text}; 422 for another body
 
 POST /events answers:
   200  {"sequence": N, ...}: stored now, or, for an event ID already held, the
@@ -45,6 +56,14 @@ POST /events answers:
   500  any other error, as {"error": "<its type>: <its message>"}; nothing is
        stored
 
+The findings record holds one findings_record_row row per defect, never deleted, since no
+operation deletes one. A findings-record-row-added event makes a row in state new, with the
+event's sequence number as its record_id, and a sighting of its finding_id; a
+findings-record-row-sighted event records one more finding as a sighting of a row, once per
+finding_id and head_commit; a findings-record-row-decided event sets a row's state, one of
+FINDINGS_RECORD_ROW_STATES, and its decision, and its filed_where and owning_agent_seat
+unless null. None of the three names an agent-seat.
+
 An agent-seat's state is its events applied in sequence-number order, as each
 is stored. An agent-seat stops being parked at its next handoff-supervisor-began,
 agent-seat-paused or agent-seat-retired event, and stops being paused at its next
@@ -58,6 +77,7 @@ import argparse
 import json
 import math
 import os
+import re
 import sqlite3
 import sys
 from datetime import datetime, timezone
@@ -91,12 +111,24 @@ OPERATION_FIELDS = {
     "session-handoff-consumed": {"written_event_id", "run_id"},
     "restart-attempted": {"attempt_id", "boot_id", "why_picked", "action", "began_at",
                           "ended_at", "result"},
+    "findings-record-row-added": {"finding_id", "pull_request", "head_commit", "path", "line",
+                             "line_text", "outside_program", "statement", "finding_text",
+                             "main_has_it", "this_pull_request_makes_it_happen",
+                             "reports_success_on_failure", "shown_by", "grade", "decision",
+                             "filed_where", "owning_agent_seat"},
+    "findings-record-row-sighted": {"record_id", "finding_id", "pull_request", "head_commit"},
+    "findings-record-row-decided": {"record_id", "state", "decision", "filed_where",
+                               "owning_agent_seat"},
 }
-OPERATIONS_THAT_NAME_NO_AGENT_SEAT = {"machine-booted"}
+FINDINGS_RECORD_ROW_STATES = ("new", "filed", "decided-fix", "decided-not-worth-fixing", "needs-user",
+                         "fixed")
+FINDINGS_RECORD_ROW_SEARCH_CANDIDATES = 3
+OPERATIONS_THAT_NAME_NO_AGENT_SEAT = {"machine-booted", "findings-record-row-added",
+                                      "findings-record-row-sighted", "findings-record-row-decided"}
 OPERATIONS_THAT_MAY_NAME_A_NEW_AGENT_SEAT = {"agent-seat-created", "agent-seat-seen"}
 
 SCHEMA = """
-CREATE TABLE event (
+CREATE TABLE IF NOT EXISTS event (
     sequence INTEGER PRIMARY KEY AUTOINCREMENT,
     event_id TEXT NOT NULL UNIQUE,
     machine TEXT NOT NULL,
@@ -104,7 +136,7 @@ CREATE TABLE event (
     occurred_at TEXT,
     received_at TEXT NOT NULL,
     body TEXT NOT NULL);
-CREATE TABLE agent_seat (
+CREATE TABLE IF NOT EXISTS agent_seat (
     seat_id TEXT PRIMARY KEY,
     machine TEXT NOT NULL,
     seat_name TEXT NOT NULL,
@@ -114,9 +146,9 @@ CREATE TABLE agent_seat (
     paused_at TEXT,
     parked_at TEXT,
     retired_at TEXT);
-CREATE UNIQUE INDEX agent_seat_name_among_not_retired ON agent_seat (seat_name)
+CREATE UNIQUE INDEX IF NOT EXISTS agent_seat_name_among_not_retired ON agent_seat (seat_name)
     WHERE retired_at IS NULL;
-CREATE TABLE supervisor_run (
+CREATE TABLE IF NOT EXISTS supervisor_run (
     run_id TEXT PRIMARY KEY,
     seat_id TEXT NOT NULL,
     boot_id TEXT,
@@ -126,7 +158,7 @@ CREATE TABLE supervisor_run (
     began_at TEXT,
     ended_at TEXT,
     restart_attempt_id TEXT);
-CREATE TABLE agent_session (
+CREATE TABLE IF NOT EXISTS agent_session (
     machine TEXT NOT NULL,
     session_id TEXT NOT NULL,
     run_id TEXT NOT NULL,
@@ -137,7 +169,7 @@ CREATE TABLE agent_session (
     ended_at TEXT,
     exit_code INTEGER,
     PRIMARY KEY (machine, session_id, run_id));
-CREATE TABLE handoff_event (
+CREATE TABLE IF NOT EXISTS handoff_event (
     event_id TEXT PRIMARY KEY,
     seat_id TEXT NOT NULL,
     restart_counter INTEGER,
@@ -147,7 +179,7 @@ CREATE TABLE handoff_event (
     dont_restart_reason TEXT,
     consumed_by_run TEXT,
     consumed_at TEXT);
-CREATE TABLE machine_boot (
+CREATE TABLE IF NOT EXISTS machine_boot (
     machine TEXT NOT NULL,
     boot_id TEXT NOT NULL,
     booted_at TEXT,
@@ -155,7 +187,7 @@ CREATE TABLE machine_boot (
     stop_estimated_at TEXT,
     stop_estimate_method TEXT,
     PRIMARY KEY (machine, boot_id));
-CREATE TABLE restart_attempt (
+CREATE TABLE IF NOT EXISTS restart_attempt (
     attempt_id TEXT PRIMARY KEY,
     machine TEXT NOT NULL,
     boot_id TEXT,
@@ -165,6 +197,35 @@ CREATE TABLE restart_attempt (
     began_at TEXT,
     ended_at TEXT,
     result TEXT);
+CREATE TABLE IF NOT EXISTS findings_record_row (
+    record_id INTEGER PRIMARY KEY,
+    added_from_finding_id TEXT NOT NULL,
+    path TEXT,
+    line INTEGER,
+    line_text TEXT,
+    line_commit TEXT,
+    outside_program TEXT,
+    statement TEXT NOT NULL,
+    finding_text TEXT NOT NULL,
+    main_has_it TEXT,
+    this_pull_request_makes_it_happen TEXT,
+    reports_success_on_failure TEXT,
+    shown_by TEXT,
+    grade TEXT,
+    filed_where TEXT,
+    owning_agent_seat TEXT,
+    state TEXT NOT NULL,
+    decision TEXT,
+    added_at TEXT,
+    decided_at TEXT);
+CREATE TABLE IF NOT EXISTS findings_record_row_sighting (
+    finding_id TEXT NOT NULL,
+    head_commit TEXT NOT NULL,
+    record_id INTEGER NOT NULL,
+    pull_request INTEGER,
+    seen_at TEXT,
+    PRIMARY KEY (finding_id, head_commit));
+CREATE VIRTUAL TABLE IF NOT EXISTS findings_record_row_text USING fts5(finding_text);
 """
 
 
@@ -183,9 +244,9 @@ def connect(database_path):
 
 
 def create_nn_shared_database_if_absent(database_path):
+    """Create the database file, and each table of SCHEMA it lacks, such as a table added
+    after the file was made."""
     database_path = Path(database_path)
-    if database_path.exists():
-        return
     database_path.parent.mkdir(parents=True, exist_ok=True)
     connection = connect(database_path)
     try:
@@ -271,9 +332,9 @@ def check_event_fits_its_operation(connection, event):
                                     f"with a decimal point, true, false or null, never NaN, "
                                     f"Infinity, a list or an object; no string holds a lone "
                                     f"surrogate, such as \\udc80, which does not encode to "
-                                    f"UTF-8. Only "
-                                    f"{', '.join(sorted(OPERATIONS_THAT_NAME_NO_AGENT_SEAT))} "
-                                    f"takes a null seat_id; every other operation takes a string. "
+                                    f"UTF-8. These operations alone take a null seat_id: "
+                                    f"{', '.join(sorted(OPERATIONS_THAT_NAME_NO_AGENT_SEAT))}; "
+                                    f"every other operation takes a string. "
                                     f"Correct the program that sent it."})
     names_no_seat = operation in OPERATIONS_THAT_NAME_NO_AGENT_SEAT
     if names_no_seat != (event["seat_id"] is None):
@@ -283,14 +344,57 @@ def check_event_fits_its_operation(connection, event):
             and connection.execute("SELECT 1 FROM agent_seat WHERE seat_id = ?",
                                    (event["seat_id"],)).fetchone() is None:
         raise Answer(422, {"error": f"no agent-seat has seat_id {event['seat_id']!r}"})
+    if operation == "findings-record-row-decided" and fields["state"] not in FINDINGS_RECORD_ROW_STATES:
+        raise Answer(422, {"error": f"the state {fields['state']!r} is not one of "
+                                    f"{', '.join(FINDINGS_RECORD_ROW_STATES)}"})
+    if operation in ("findings-record-row-sighted", "findings-record-row-decided") \
+            and connection.execute("SELECT 1 FROM findings_record_row WHERE record_id = ?",
+                                   (fields["record_id"],)).fetchone() is None:
+        raise Answer(422, {"error": f"no findings record row has record_id "
+                                    f"{fields['record_id']!r}"})
+    if operation == "findings-record-row-added" and not (
+            isinstance(fields["finding_id"], str) and isinstance(fields["head_commit"], str)
+            and isinstance(fields["statement"], str) and isinstance(fields["finding_text"], str)
+            and (isinstance(fields["path"], str) or isinstance(fields["outside_program"], str))):
+        raise Answer(422, {"error": "findings-record-row-added takes a text finding_id, head_commit, "
+                                    "statement and finding_text, and a text path or "
+                                    "outside_program"})
 
 
-def apply_event(connection, event):
-    """Bring the state tables up to date with one event, in the caller's transaction."""
+def apply_event(connection, event, sequence):
+    """Bring the state tables up to date with one event, in the caller's transaction; a
+    findings-record-row-added event's sequence number becomes its row's record_id."""
     operation, seat_id, fields = event["operation"], event["seat_id"], event["fields"]
     at, machine = event["occurred_at"], event["machine"]
     execute = connection.execute
-    if operation in ("agent-seat-created", "agent-seat-seen"):
+    if operation == "findings-record-row-added":
+        execute("INSERT INTO findings_record_row (record_id, added_from_finding_id, path, line, "
+                "line_text, line_commit, outside_program, statement, finding_text, main_has_it, "
+                "this_pull_request_makes_it_happen, reports_success_on_failure, shown_by, grade, "
+                "filed_where, owning_agent_seat, state, decision, added_at) "
+                "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'new', ?, ?)",
+                (sequence, fields["finding_id"], fields["path"], fields["line"],
+                 fields["line_text"], fields["head_commit"], fields["outside_program"],
+                 fields["statement"], fields["finding_text"], fields["main_has_it"],
+                 fields["this_pull_request_makes_it_happen"],
+                 fields["reports_success_on_failure"], fields["shown_by"], fields["grade"],
+                 fields["filed_where"], fields["owning_agent_seat"], fields["decision"], at))
+        execute("INSERT INTO findings_record_row_text (rowid, finding_text) VALUES (?, ?)",
+                (sequence, fields["finding_text"]))
+        execute("INSERT OR IGNORE INTO findings_record_row_sighting VALUES (?, ?, ?, ?, ?)",
+                (fields["finding_id"], fields["head_commit"], sequence, fields["pull_request"], at))
+    elif operation == "findings-record-row-sighted":
+        execute("INSERT OR IGNORE INTO findings_record_row_sighting VALUES (?, ?, ?, ?, ?)",
+                (fields["finding_id"], fields["head_commit"], fields["record_id"],
+                 fields["pull_request"], at))
+    elif operation == "findings-record-row-decided":
+        execute("UPDATE findings_record_row SET state = ?, decision = ?, "
+                "filed_where = coalesce(?, filed_where), "
+                "owning_agent_seat = coalesce(?, owning_agent_seat), decided_at = ? "
+                "WHERE record_id = ?",
+                (fields["state"], fields["decision"], fields["filed_where"],
+                 fields["owning_agent_seat"], at, fields["record_id"]))
+    elif operation in ("agent-seat-created", "agent-seat-seen"):
         execute("INSERT INTO agent_seat (seat_id, machine, seat_name, seat_directory, "
                 "task_list_name, created_at) VALUES (?, ?, ?, ?, ?, ?) "
                 "ON CONFLICT (seat_id) DO UPDATE SET machine = excluded.machine, "
@@ -382,7 +486,7 @@ def store_event(connection, raw_body):
         (event["event_id"], event["machine"], event["operation"], event["occurred_at"],
          utc_now(), json.dumps(event, sort_keys=True))).lastrowid
     try:
-        apply_event(connection, event)
+        apply_event(connection, event, sequence)
     except sqlite3.IntegrityError:
         raise Answer(422, {"error": "another agent-seat not retired holds the name "
                                     f"{event['fields'].get('seat_name')!r}"})
@@ -420,6 +524,41 @@ def get_agent_seat(connection, seat_id):
                                              "ORDER BY began_at", (seat_id,))}
 
 
+def findings_record_rows_search(connection, raw_body):
+    """The findings record rows a new finding may repeat; see the module docstring."""
+    try:
+        request = json.loads(raw_body)
+    except ValueError:
+        raise Answer(400, {"error": "the body is not JSON"})
+    if not (isinstance(request, dict)
+            and set(request) == {"finding_id", "finding_text", "path", "line_text"}
+            and isinstance(request["finding_id"], str) and isinstance(request["finding_text"], str)
+            and all(request[key] is None or isinstance(request[key], str)
+                    for key in ("path", "line_text"))
+            and all(sqlite_can_store(value) for value in request.values())):
+        raise Answer(422, {"error": "the search takes a JSON object with exactly a text "
+                                    "finding_id and finding_text, and a text or null path and "
+                                    "line_text"})
+    held = rows(connection, "SELECT findings_record_row.* FROM findings_record_row_sighting JOIN "
+                            "findings_record_row USING (record_id) WHERE finding_id = ? "
+                            "ORDER BY seen_at LIMIT 1", (request["finding_id"],))
+    # Each word is quoted, since FTS5 reads a bare word such as NOT, or a colon, as its syntax,
+    # and the words are joined by OR, since FTS5 otherwise asks for every one of them.
+    words = sorted(set(re.findall(r"\w+", request["finding_text"].lower())))
+    candidates = rows(connection, "SELECT findings_record_row.* FROM findings_record_row_text JOIN "
+                                  "findings_record_row ON findings_record_row.record_id = "
+                                  "findings_record_row_text.rowid WHERE findings_record_row_text MATCH ? "
+                                  "ORDER BY bm25(findings_record_row_text) LIMIT ?",
+                      (" OR ".join(f'"{word}"' for word in words),
+                       FINDINGS_RECORD_ROW_SEARCH_CANDIDATES)) if words else []
+    same_line = [row["record_id"] for row in rows(
+        connection, "SELECT record_id FROM findings_record_row WHERE path = ? AND line_text = ? "
+                    "ORDER BY record_id", (request["path"], request["line_text"]))] \
+        if request["path"] and request["line_text"] and request["line_text"].strip() else []
+    return {"held": held[0] if held else None, "candidates": candidates,
+            "same_line_record_ids": same_line}
+
+
 def make_request_handler(database_path, accepted_tokens_path):
     class RequestHandler(BaseHTTPRequestHandler):
         def do_GET(self):
@@ -455,6 +594,8 @@ def make_request_handler(database_path, accepted_tokens_path):
             path = urlsplit(self.path)
             if raw_body is not None and path.path == "/events":
                 return store_event(connection, raw_body)
+            if raw_body is not None and path.path == "/findings-record-rows/search":
+                return findings_record_rows_search(connection, raw_body)
             if raw_body is None and path.path == "/agent-seats":
                 return list_agent_seats(connection, path.query)
             if raw_body is None and path.path.startswith("/agent-seats/"):
