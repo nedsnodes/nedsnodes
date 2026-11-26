@@ -93,17 +93,23 @@ MAXIMUM_RECORD_BYTES = 4 * 1024 * 1024
 MINIMUM_DIALOG_WORDS = 1000
 
 
-# Do not include <bash-input>: those commands are user-typed.
-# Typed slash commands with arguments must be recovered before checking these injected prefixes.
-INJECTED_TEXT_PREFIXES = (
-    "<task-notification>",
-    "<command-message>",
-    "<command-name>",
+# Openings of records Claude Code writes as context around a delivery rather than as one. Not <bash-input>, a
+# command the user typed, nor a slash command's or task notification's record, each of which delivers a queued text.
+CONTEXT_RECORD_TEXT_OPENINGS = (
+    "Base directory for this skill:",
+    "<local-command-caveat>",
     "<local-command-stdout>",
     "<local-command-stderr>",
     "<bash-stdout>",
     "<bash-stderr>",
     "<system-reminder>",
+)
+
+# Typed slash commands with arguments must be recovered before checking these injected prefixes.
+INJECTED_TEXT_PREFIXES = CONTEXT_RECORD_TEXT_OPENINGS + (
+    "<task-notification>",
+    "<command-message>",
+    "<command-name>",
 )
 
 # The two notices Claude Code writes when the user presses Escape. Only a message that is wholly one is a
@@ -476,16 +482,6 @@ def claim_delivery_record(events: list, operation_index: int, claimed: set, queu
                 claimed.add(index)
                 return position
     return None
-
-
-# Openings of records Claude Code writes as context around a delivery rather than as one.
-CONTEXT_RECORD_TEXT_OPENINGS = (
-    "Base directory for this skill:",
-    "<local-command-caveat>",
-    "<local-command-stdout>",
-    "<local-command-stderr>",
-    "<system-reminder>",
-)
 
 
 def queued_text_sender_kind(text: str) -> str:
