@@ -594,7 +594,7 @@ with tempfile.TemporaryDirectory() as scratch:
     check("the model, effort, print timeout and stream-json output are on the command line",
           argv[argv.index("--model") + 1] == "gemini-4-neon-low"
           and argv[argv.index("--effort") + 1] == "low"
-          and argv[argv.index("--print-timeout") + 1] == "15m"
+          and argv[argv.index("--print-timeout") + 1] == "900s"
           and argv[argv.index("--output-format") + 1] == "stream-json",
           repr(argv))
     received_prompt = prompt_dump.read_text(encoding="utf-8") if prompt_dump.is_file() else ""
@@ -627,23 +627,24 @@ with tempfile.TemporaryDirectory() as scratch:
     argv = json.loads(argv_dump.read_text(encoding="utf-8")) if argv_dump.is_file() else []
     check("agy's --print-timeout follows the cell's per-model time limit",
           result.returncode == 0 and "--print-timeout" in argv
-          and argv[argv.index("--print-timeout") + 1] == "45m",
+          and argv[argv.index("--print-timeout") + 1] == "2700s",
           f"exit {result.returncode}; argv={argv!r}; stderr={result.stderr!r}")
 
     # The cold-read-grid gives its Gemini defect-hunt cell a longer limit than
-    # the fast read's, through --per-model-run-timeout-seconds.
+    # the fast read's, through --per-model-run-timeout-seconds; agy gets the
+    # seconds whole, as the cell's own kill uses them, not rounded to minutes.
     repository = build_scratch_repository(scratch)
     report = report_path_for(repository, "print-timeout-follows-option")
     argv_dump = scratch / "print-timeout-follows-option-argv.json"
     result = run_agy_cell(
         repository, stubs,
         {"*": {"report": "STUB AGY REVIEW\n", "dump_argv": str(argv_dump)}}, report,
-        "--per-model-run-timeout-seconds", "2400",
+        "--per-model-run-timeout-seconds", "119",
     )
     argv = json.loads(argv_dump.read_text(encoding="utf-8")) if argv_dump.is_file() else []
     check("agy's --print-timeout follows --per-model-run-timeout-seconds",
           result.returncode == 0 and "--print-timeout" in argv
-          and argv[argv.index("--print-timeout") + 1] == "40m",
+          and argv[argv.index("--print-timeout") + 1] == "119s",
           f"exit {result.returncode}; argv={argv!r}; stderr={result.stderr!r}")
 
     # --- The other tiers are refused before agy runs ----------------------

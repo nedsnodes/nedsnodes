@@ -272,8 +272,8 @@ def cold_read_cell_launcher_own_command_line_options_adder(parser):
     parser.add_argument(
         "--per-model-run-timeout-seconds", type=int, metavar="SECONDS",
         default=COLD_READ_AGY_CELL_PER_MODEL_RUN_TIMEOUT_SECONDS,
-        help="agy's --print-timeout for each model of the chain, in seconds, "
-             "rounded down to whole minutes for agy; the cell kills agy "
+        help="agy's --print-timeout for each model of the chain, in seconds; "
+             "the cell kills agy "
              f"{COLD_READ_AGY_CELL_KILL_MARGIN_PAST_AGY_PRINT_TIMEOUT_SECONDS} seconds "
              "later. Default: "
              f"{COLD_READ_AGY_CELL_PER_MODEL_RUN_TIMEOUT_SECONDS}",
@@ -281,7 +281,7 @@ def cold_read_cell_launcher_own_command_line_options_adder(parser):
 
 
 def agy_print_timeout(per_model_run_timeout_seconds: int) -> str:
-    return f"{per_model_run_timeout_seconds // 60}m"
+    return f"{per_model_run_timeout_seconds}s"
 
 
 def per_model_run_kill_after_seconds(parsed_arguments) -> int:
