@@ -62,6 +62,13 @@ def approved_line(walk, count_and_point, link, count):
             f"the new link when you published again.")
 
 
+def kept_link_line(walk, count_and_point, link, count):
+    return (f"Approval-walk {walk}: item {count_and_point} is waiting for the user; its last page link is "
+            f"{link}, which is not a claude.ai page, so the Artifact tool cannot read it. Do not read it or "
+            f"publish the item again. Show the item in full from docs/walk/{walk}.md, and end your first message "
+            f"with the item's closing line, with {link} as its link.")
+
+
 def without_link_line(walk, count_and_point, count):
     return (f"Approval-walk {walk}: item {count_and_point} is waiting for the user; the walk-minutes record no "
             f"page link for it. Before your first message, publish the item from docs/walk/{walk}.md and append "
@@ -124,9 +131,19 @@ def run_walk_minutes_cases(workspace):
     file_link = "file:///Volumes/nedhome/agents/fixture/docs/walk/item-2.html"
     walk_in(root, OPEN_MINUTES + f"#item_page item 2 of 3 {file_link}\n")
     check("a newest `#item_page` line holding a `file:` link: the line keeps it and asks for no Artifact read",
-          lines_for(root) == (supervisor.WAITING_APPROVAL_WALK_ITEM_WITH_FILE_URL_PAGE_LINK_KEPT_WITHOUT_ARTIFACT_READ_INSTRUCTION_TEMPLATE.format(
-              walk=WALK, count_and_point=f"2 of 3, {POINT},", count="2 of 3", link=file_link),)
+          lines_for(root) == (kept_link_line(WALK, f"2 of 3, {POINT},", file_link, "2 of 3"),)
+          and file_link in lines_for(root)[0]
           and "Artifact tool's read action" not in lines_for(root)[0], repr(lines_for(root)))
+
+    for name, other_link in (("upper-case-file-item-page", "FILE:///Volumes/nedhome/agents/fixture/item-2.html"),
+                             ("http-item-page", "http://claude.ai/artifact/FixtureItemTwoPage")):
+        root = workspace / name
+        walk_in(root, OPEN_MINUTES + f"#item_page item 2 of 3 {other_link}\n")
+        check(f"a newest `#item_page` link that is not an https://claude.ai page ({other_link}): the line keeps it "
+              "and asks for no Artifact read",
+              lines_for(root) == (kept_link_line(WALK, f"2 of 3, {POINT},", other_link, "2 of 3"),)
+              and other_link in lines_for(root)[0]
+              and "Artifact tool's read action" not in lines_for(root)[0], repr(lines_for(root)))
 
     root = workspace / "publish-failed"
     walk_in(root, OPEN_MINUTES + "#item_page item 2 of 3 publish failed: the Artifact tool timed out\n")
@@ -163,7 +180,7 @@ def run_walk_minutes_cases(workspace):
         "walk_finder_for_the_sort_case", supervisor.WALK_FINDER_PATH).ITEM_PAGE_PUBLISH_FAILED
     check("a link that sorts after the failed-publish value: the line with that link",
           link_after > publish_failed
-          and lines_for(root) == (approved_line(WALK, f"2 of 3, {POINT},", link_after, "2 of 3"),),
+          and lines_for(root) == (kept_link_line(WALK, f"2 of 3, {POINT},", link_after, "2 of 3"),),
           repr(lines_for(root)))
 
     root = workspace / "no-point"
