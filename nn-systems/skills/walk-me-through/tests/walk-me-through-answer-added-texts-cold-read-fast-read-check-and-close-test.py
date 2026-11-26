@@ -1161,9 +1161,9 @@ def test_every_walk_hashtag_is_read_in_its_closed_form_as_in_its_open_form():
     check("an answer line with closed hashtags gives the answer word alone",
           answer is not None and answer.group("answered") == "approved", repr(answer and answer.groupdict()))
     check("a held-on-ruling line in the closed form is read as the open form the program looks for",
-          program.held_on_ruling_line_without_closing_hash("#held_on_ruling# w item 3") == "#held_on_ruling w item 3"
-          and program.held_on_ruling_line_without_closing_hash("#held_on_ruling w item 3") == "#held_on_ruling w item 3",
-          program.held_on_ruling_line_without_closing_hash("#held_on_ruling# w item 3"))
+          program.line_with_leading_hashtag_closing_hash_removed("#held_on_ruling# w item 3") == "#held_on_ruling w item 3"
+          and program.line_with_leading_hashtag_closing_hash_removed("#held_on_ruling w item 3") == "#held_on_ruling w item 3",
+          program.line_with_leading_hashtag_closing_hash_removed("#held_on_ruling# w item 3"))
 
 
 def test_an_items_title_is_the_same_from_every_form_of_its_heading_or_opening():
