@@ -24,6 +24,8 @@ RULING = ("I had a discussion on this topic - check the session dialogs. I thoug
           "those that could and should be backgrounded and others that should not")
 EXTRACTOR_PATH = Path(__file__).resolve().parents[4] / "scripts" / "handoff-extract-conversation.py"
 PROJECT_KEY = "-home-nedlern-agents-MD-skills"
+# A search with no failure says on stderr only the line naming its output format.
+OUTPUT_FORMAT_STDERR = "title search output format 1\n"
 PROGRAM_PROJECT_KEY = "-home-nedlern--local-state-nedsnodes-agent-seat-idle-sweep"
 
 failures = []
@@ -267,7 +269,7 @@ def test_nothing_found_exits_3(root):
     result = store.run("--title", ITEM_6_TITLE, "--item-number", "6")
     check("nothing found exits 3, not 1, which an uncaught exception exits with, and says so",
           result.returncode == 3 and "was named before: 0 agent-session(s)" in result.stdout
-          and "Walk-minutes lines naming the title: 0." in result.stdout and result.stderr == "",
+          and "Walk-minutes lines naming the title: 0." in result.stdout and result.stderr == OUTPUT_FORMAT_STDERR,
           result.stdout + result.stderr)
 
 
@@ -300,7 +302,7 @@ def test_a_dialog_whose_transcript_is_gone_is_named_for_the_agent_to_read(root):
     result = store.run("--title", ITEM_6_TITLE, "--item-number", "6")
     check("a dialog naming the title whose transcript is not in the log-store is named for the agent to read, "
           "and is no failure",
-          result.returncode == 0 and result.stderr == ""
+          result.returncode == 0 and result.stderr == OUTPUT_FORMAT_STDERR
           and "its transcript " in result.stdout and f'read its "## User" turns in {dialog} yourself.' in result.stdout,
           result.stdout + result.stderr)
 

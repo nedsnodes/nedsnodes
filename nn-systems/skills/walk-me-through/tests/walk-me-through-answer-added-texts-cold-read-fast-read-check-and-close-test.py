@@ -1234,6 +1234,74 @@ def test_the_waiting_item_read_step_refuses_when_the_search_program_cannot_be_lo
           and case.calls.read_text() == "", described(result))
 
 
+def title_search_planted_with(case, in_the_search, in_the_step="pass"):
+    """Return an environment whose planted base64 module runs in_the_search inside the title search's process and
+    in_the_step inside the step's, each Python run after the real base64 is imported; only the search imports
+    base64, so nothing else is touched."""
+    planted = case.root / "planted-modules"
+    planted.mkdir()
+    (planted / "base64.py").write_text(
+        "import sys\n"
+        f"sys.path = [entry for entry in sys.path if entry != {str(planted)!r}]\n"
+        "del sys.modules['base64']\n"
+        "import base64 as real\n"
+        "sys.modules['base64'] = real\n"
+        "globals().update(vars(real))\n"
+        "if 'title-search' in sys.argv[0]:\n"
+        + "".join(f"    {line}\n" for line in in_the_search.split("\n"))
+        + "else:\n"
+        + "".join(f"    {line}\n" for line in in_the_step.split("\n")))
+    return dict(os.environ, PYTHONPATH=str(planted))
+
+
+def test_the_waiting_item_read_step_prints_but_does_not_save_a_search_that_does_not_say_its_output_format():
+    case, dialog = case_with_a_session_dialog_naming_the_item_title()
+    # An older copy of the search, such as ned-box's run over ssh from the Mac, prints no output format line.
+    environment = title_search_planted_with(case, (
+        "class Older:\n"
+        "    def write(self, text):\n"
+        "        return sys.__stderr__.write(text.replace('title search output format 1', 'an older search'))\n"
+        "    def flush(self):\n"
+        "        sys.__stderr__.flush()\n"
+        "sys.stderr = Older()"))
+    result = case.run(WAITING_ITEM_READ_STEP_NAME, environment=environment)
+    printed = title_search_lines_printed(result)
+    lines = result.stdout.split("\n")
+    check("a search that does not say this program's output format is printed in full and not saved, saying why",
+          result.returncode == 0
+          and f"  user   {dialog}:{dialog_line_of(dialog, KEPT_POEM_RULING)}  {KEPT_POEM_RULING}" in printed
+          and lines[len(printed) + 1].startswith(
+              f"The search for the user's words above was not saved in {title_search_cache_file(case)}, so the next "
+              f"run of this step prints it in full again: the search that ran, such as ned-box's copy run over ssh "
+              f"from the Mac, did not say \"title search output format 1\"")
+          and not title_search_cache_file(case).exists(), described(result))
+    result = case.run(WAITING_ITEM_READ_STEP_NAME)
+    check("the same search from a copy that says its output format is saved",
+          result.returncode == 0 and title_search_cache_file(case).is_file(), described(result))
+
+
+def test_the_waiting_item_read_step_keeps_the_load_error_beside_the_search_own_failed_line():
+    case = Case(document=marks_document("The tests are still running.\n"))
+    environment = title_search_planted_with(
+        case, "print('FAILED: the planted search failed.', file=sys.stderr)\nsys.exit(2)",
+        "raise ImportError('planted base64')")
+    result = case.run(WAITING_ITEM_READ_STEP_NAME, environment=environment)
+    check("when the search fails with its own FAILED line and loading it here raises too, both FAILED lines are said",
+          result.returncode == 1 and "FAILED: the planted search failed." in result.stderr
+          and "\nFAILED: loading the title search here raised ImportError('planted base64')." in result.stderr,
+          described(result))
+
+
+def test_the_waiting_item_read_step_refuses_with_the_search_failed_line_when_its_stderr_is_not_utf_8():
+    case = Case(document=marks_document("The tests are still running.\n"))
+    environment = title_search_planted_with(
+        case, "sys.stderr.buffer.write(b'FAILED: no dialog at /home/caf\\xe9.\\n')\nsys.stderr.flush()\nsys.exit(2)")
+    result = case.run(WAITING_ITEM_READ_STEP_NAME, environment=environment)
+    check("a failed search whose stderr is not UTF-8 is refused with its FAILED line, not a decoding traceback",
+          result.returncode == 1 and "FAILED: no dialog at /home/caf\ufffd." in result.stderr
+          and "UnicodeDecodeError" not in result.stderr, described(result))
+
+
 def test_the_waiting_item_read_step_does_not_refuse_a_status_claim_in_an_item_settled_without_being_shown():
     case = Case(document=marks_document("cold-read-research is offline.\n#not_asked_touches\n")
                 .replace("#case_against weak: the page grows.", "#case_against none."))

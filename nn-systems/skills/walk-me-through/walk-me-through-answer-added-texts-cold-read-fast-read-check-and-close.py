@@ -478,9 +478,12 @@ hits too, once it has written it out, in
 `docs/walk/title-search-cache/<walk name>-item-<N>-<agent-session id>.md`, the
 cache format's number and the titles and numbers searched for as a JSON list on its first line, the agent-session id
 being $CLAUDE_CODE_SESSION_ID. A later run for the item in the same
-agent-session prints only a line naming that file, unless the file is missing
-or the item's titles differ from the saved ones; then it searches, prints and
-saves again. When the file cannot be written, or the agent-session id is not
+agent-session prints only a line naming that file, unless the file is missing,
+its first line names another cache format or none, or the item's titles differ
+from the saved ones; then it searches, prints and saves again. A search that
+does not print the title search's output format line on stderr, such as an
+older copy on ned-box run over ssh from the Mac, is printed but not saved.
+When the file cannot be written, or the agent-session id is not
 set, the step prints the search in full with a line saying why it was not
 saved. walk-files-ship.py does not ship this directory.
 
@@ -1724,6 +1727,9 @@ TITLE_SEARCH_CACHE_NOT_SAVED = (
     "The search for the user's words above was not saved in {path}, so the next run of this step prints it in full "
     "again: {why}")
 TITLE_SEARCH_CACHE_NO_AGENT_SESSION = "{variable} is not set, so the agent-session that ran the step is not known."
+TITLE_SEARCH_CACHE_OTHER_OUTPUT_FORMAT = (
+    "the search that ran, such as ned-box's copy run over ssh from the Mac, did not say \"{line}\", so it may be an "
+    "older copy whose search finds less, and a saved copy would keep its result after that copy is updated.")
 ITEM_READ_FAILED_LINES = (
     "{item} has had no cold-read-fast-read of its text as it stands, so do not present it yet: the user is shown an "
     "item only after its cold-read-fast-read.",
@@ -3665,25 +3671,36 @@ def approval_walk_item_title_user_messages_in_earlier_agent_sessions_lines(walk_
     if session_id and title_search_cache_titles(cache) == titles:
         return [TITLE_SEARCH_CACHE_PRINTED_BEFORE.format(item=item, path=cache)], lambda: []
     lines = []
+    other_format = None
     for group_titles, group_numbers in groups:
         # In the `=` form, so that a title opening with `-` is not read as an option.
         words = ([f"--title={title}" for title in group_titles]
                  + [f"--item-number={number}" for number in group_numbers])
-        result = subprocess.run([sys.executable, str(TITLE_SEARCH_PROGRAM), *words], capture_output=True, text=True,
+        # As bytes, decoded with replacement, so output this process cannot decode still reaches the agent.
+        result = subprocess.run([sys.executable, str(TITLE_SEARCH_PROGRAM), *words], capture_output=True,
                                 stdin=subprocess.DEVNULL)
+        stdout = result.stdout.decode("utf-8", "replace")
+        stderr = result.stderr.decode("utf-8", "replace")
         try:
             exits = load_module("title_search", TITLE_SEARCH_PROGRAM)
-        # Whatever a search that cannot load raises, it is a failed search, reported as the others are.
+        # Whatever a search that cannot load raises, it is a failed search, reported as the others are; the load
+        # error is always added, since it stays after whatever the search's own FAILED line names is fixed.
         except Exception as error:
             raise Failure(APPROVAL_WALK_ITEM_TITLE_SEARCH_FAILED.format(
-                item=item, exit=result.returncode, command=command, said=title_search_failure_said(
-                    result.stderr, f"FAILED: loading the title search here raised {error!r}.")))
+                item=item, exit=result.returncode, command=command, said="\n".join(filter(None, [
+                    stderr.strip(), f"FAILED: loading the title search here raised {error!r}."]))))
         if result.returncode not in (exits.EXIT_FOUND, exits.EXIT_NOTHING_FOUND):
             raise Failure(APPROVAL_WALK_ITEM_TITLE_SEARCH_FAILED.format(
                 item=item, exit=result.returncode, command=command, said=title_search_failure_said(
-                    result.stderr, f"FAILED: the title search exited {result.returncode} without a FAILED line of "
-                                   f"its own, so it crashed or was stopped.")))
-        lines += result.stdout.rstrip("\n").split("\n") if result.stdout.strip() else []
+                    stderr, f"FAILED: the title search exited {result.returncode} without a FAILED line of "
+                            f"its own, so it crashed or was stopped.")))
+        format_line = exits.OUTPUT_FORMAT_LINE.format(format=exits.OUTPUT_FORMAT)
+        if format_line not in stderr.split("\n"):
+            other_format = format_line
+        lines += stdout.rstrip("\n").split("\n") if stdout.strip() else []
+    if other_format:
+        return lines, lambda: [TITLE_SEARCH_CACHE_NOT_SAVED.format(
+            path=cache, why=TITLE_SEARCH_CACHE_OTHER_OUTPUT_FORMAT.format(line=other_format))]
     if not session_id:
         return lines, lambda: [TITLE_SEARCH_CACHE_NOT_SAVED.format(
             path=minutes.parent / TITLE_SEARCH_CACHE_DIRECTORY_NAME,
