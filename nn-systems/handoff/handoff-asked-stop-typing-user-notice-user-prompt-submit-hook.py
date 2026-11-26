@@ -7,12 +7,13 @@ file for this agent-session exists, the hook prints {"systemMessage": <line>},
 which Claude Code shows the user, in the terminal and on the claude.ai page, and
 not the agent. The message itself always goes through unchanged.
 
-The line names the new agent-session by the agent-seat the handoff-supervisor
-launched this agent-session under, because the handoff-supervisor starts the
-successor under that name even after the user renames this agent-session in
-claude.ai. With no such name, as when no handoff-supervisor launched it, the line
-names it by its current title, the customTitle of the last custom-title record in
-its transcript, and failing that, says "this agent-seat's new session".
+The line names the new agent-session by this agent-session's current title, the
+customTitle of the last custom-title record in its transcript, which is the name
+claude.ai shows and changes when the user renames the agent-session there. With
+no such record, or a transcript that cannot be read, the line names the agent-seat
+the handoff-supervisor launched the agent-session under, when this is that launched
+agent-session and not a child started from its shell, and failing that, says
+"this agent-seat's new session".
 
 The line is shown once per marker file, because a refused handoff leaves the
 marker file in place and a wrong notice must not repeat on every message. Before
@@ -37,11 +38,12 @@ PROGRAM = "handoff-asked-stop-typing-user-notice-user-prompt-submit-hook"
 
 THRESHOLD_HOOK_PATH = (pathlib.Path(__file__).resolve().parents[2]
                        / "scripts" / "handoff-context-threshold-hook.py")
-HANDOFF_SUPERVISOR_PATH = pathlib.Path(__file__).resolve().with_name("handoff-supervisor.py")
+LAUNCHED_AGENT_SESSION_ENVIRONMENT_PATH = pathlib.Path(__file__).resolve().with_name(
+    "handoff-supervisor-launched-agent-session-environment-variable-names-common.py")
+REMOTE_CONTROL_NAME_COMMON_PATH = pathlib.Path(__file__).resolve().with_name(
+    "handoff-agent-seat-remote-control-name-stored-after-claude-ai-session-rename-common.py")
 
 SHOWN_RECORD_SUFFIX = "-user-notice-shown"
-
-CUSTOM_TITLE_RECORD_TYPE = "custom-title"
 
 # {name} is the Remote Control name the successor keeps; claude.ai lists the successor under it.
 HANDOFF_ASKED_STOP_TYPING_WITH_NEW_SESSION_NAME_USER_NOTICE_TEMPLATE = (
@@ -70,39 +72,32 @@ def hook_payload_from_stdin() -> dict:
     return payload
 
 
-def session_title_from_transcript(transcript_path_text: str) -> str:
-    """Return the customTitle of the transcript's last custom-title record, or ""."""
-    title = ""
-    with open(transcript_path_text, encoding="utf-8", errors="replace") as transcript:
-        for line in transcript:
-            if CUSTOM_TITLE_RECORD_TYPE not in line:
-                continue
-            try:
-                record = json.loads(line)
-            except json.JSONDecodeError:
-                continue
-            if not isinstance(record, dict) or record.get("type") != CUSTOM_TITLE_RECORD_TYPE:
-                continue
-            custom_title = record.get("customTitle")
-            if isinstance(custom_title, str) and custom_title.strip():
-                title = custom_title.strip()
-    return title
+def launched_agent_seat_name(session_id) -> str:
+    launched = module_from_path("handoff_supervisor_launched_agent_session_environment_variable_names_common",
+                                LAUNCHED_AGENT_SESSION_ENVIRONMENT_PATH)
+    return launched.handoff_supervisor_launched_agent_session_agent_seat_name_or_empty_for_another_session(
+        os.environ, session_id)
 
 
-def launched_agent_seat_name() -> str:
-    supervisor = module_from_path("handoff_supervisor", HANDOFF_SUPERVISOR_PATH)
-    return os.environ.get(supervisor.HANDOFF_SUPERVISOR_AGENT_NAME_ENVIRONMENT_VARIABLE, "").strip()
-
-
-def new_session_name(transcript_path_text) -> str:
+def new_session_name(transcript_path_text, session_id) -> str:
     """Return the name the line gives the new agent-session, or "" when none is found."""
-    agent_seat_name = launched_agent_seat_name()
-    if agent_seat_name or not (isinstance(transcript_path_text, str) and transcript_path_text):
-        return agent_seat_name
-    try:
-        return session_title_from_transcript(transcript_path_text)
-    except OSError:
+    remote_control_name_common = module_from_path("handoff_remote_control_name_common",
+                                                  REMOTE_CONTROL_NAME_COMMON_PATH)
+    if isinstance(transcript_path_text, str) and transcript_path_text:
+        try:
+            title = remote_control_name_common.session_title_from_transcript(transcript_path_text)
+        except OSError:
+            title = ""
+        if title:
+            return title
+    agent_seat = launched_agent_seat_name(session_id)
+    if not agent_seat:
         return ""
+    # The handoff-supervisor launches the successor under the stored name, as it does here when the file is unreadable.
+    try:
+        return remote_control_name_common.handoff_remote_control_name_read_stored_or_default_to_agent_seat_name(agent_seat)
+    except OSError:
+        return agent_seat
 
 
 def user_notice(name: str) -> str:
@@ -129,7 +124,7 @@ def main() -> int:
                 return 0
         except FileNotFoundError:
             pass
-        notice = user_notice(new_session_name(payload.get("transcript_path")))
+        notice = user_notice(new_session_name(payload.get("transcript_path"), session_id))
         shown_record.write_text(marker_modified + "\n", encoding="utf-8")
         print(json.dumps({"systemMessage": notice}))
     except Exception as error:

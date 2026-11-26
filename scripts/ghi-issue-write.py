@@ -454,7 +454,13 @@ GH_TIMEOUT_SECONDS = 120
 # Beyond the pre-push conflict check's own limit: the hook's other checks and
 # git sending the branch.
 PUSH_TIME_MARGIN_SECONDS = 120
-ADJUDICATION_TIMEOUT_SECONDS = 420
+# What a ghi-guide-agent cold start adds to an ask's budget: it reads
+# issues-open.md and about 220 linked files, and past ghi-guide-agent sessions
+# took a 90th percentile of 8.2 s from one Read to the next. Kept here, not
+# in scripts/ghi-guide-agent-ask.py, because that script imports this one.
+GHI_GUIDE_AGENT_COLD_START_EXTRA_SECONDS = 1800
+# The ask's 300 s budget and 120 s of ssh slack, plus a cold start's extra.
+ADJUDICATION_TIMEOUT_SECONDS = 420 + GHI_GUIDE_AGENT_COLD_START_EXTRA_SECONDS
 # scripts/ghi-guide-agent-ask.py's GHI_GUIDE_AGENT_ANSWER_NOT_USABLE_MESSAGE_OPENING.
 # Copied rather than imported, because this program runs that one as a
 # subprocess and loads nothing from it; ghi-issue-write-test.py checks the two
@@ -1107,14 +1113,15 @@ def adjudicate(repo: str, title: str, text: str, repository_root: Path,
     reaches GitHub; otherwise None. A ruling question
     does not stop the write.
 
-    Not handled: a too-similar verdict naming the edited issue, while it is
-    open, and a number that is not a GHI, such as a pull request's. The ask's
-    closed-GHI check passes a number its mirror does not hold, the edited
-    issue is dropped here, and the refusal sends the author to that number;
-    the author's reconsider path in RECONSIDER_LINE passes the write. When
-    the edited issue is closed in the mirror, the ask rechecks the verdict
-    before it reaches here, and a failed or repeated recheck skips the
-    adjudication instead."""
+    Not handled: a too-similar verdict naming a number the ask's mirror does
+    not hold as a closed GHI, such as the edited issue while the mirror shows
+    it open, even after GitHub has closed it, or a pull request's number that
+    a recheck kept. The ask's closed-GHI check passes such a number, the
+    edited issue is dropped here, and the refusal sends the author to that
+    number; the author's reconsider path in RECONSIDER_LINE passes the write.
+    A number the mirror holds as a closed GHI makes the ask recheck the
+    verdict before it reaches here, and a failed or repeated recheck skips
+    the adjudication instead."""
     marker = repository_root / RECONSIDERED_MARKER_NAME
     if marker.is_file():
         marker.unlink()
@@ -1223,7 +1230,7 @@ def ghi_guide_agent_log_store():
     directory on this machine; the store's directory)."""
     override = os.environ.get(GHI_GUIDE_AGENT_LOG_STORE_DIRECTORY_VARIABLE)
     if override:
-        return None, override
+        return None, os.path.abspath(override)
     if socket.gethostname().split(".")[0] == GHI_GUIDE_AGENT_LOG_STORE_HOSTNAME:
         return None, GHI_GUIDE_AGENT_LOG_STORE_DIRECTORY
     return GHI_GUIDE_AGENT_LOG_STORE_HOST, GHI_GUIDE_AGENT_LOG_STORE_DIRECTORY
@@ -1234,7 +1241,7 @@ def ghi_guide_agent_log_store_citation(name: str) -> str:
     as the local path when a test points the store at a directory."""
     override = os.environ.get(GHI_GUIDE_AGENT_LOG_STORE_DIRECTORY_VARIABLE)
     if override:
-        return str(Path(override) / name)
+        return os.path.join(os.path.abspath(override), name)
     return f"{GHI_GUIDE_AGENT_LOG_STORE_HOST}:{GHI_GUIDE_AGENT_LOG_STORE_DIRECTORY}/{name}"
 
 

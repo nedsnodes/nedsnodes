@@ -280,10 +280,11 @@ def this_machine():
     return os.environ.get(THIS_MACHINE_OVERRIDE) or socket.gethostname().split(".")[0]
 
 
-def run_on_ned_box_over_ssh(arguments):
-    """Run ned-box's copy of this program with the same arguments; return its exit code."""
+def run_on_ned_box_over_ssh(arguments, program_path=NED_BOX_PROGRAM_PATH):
+    """Run ned-box's copy of the program at program_path, this one by default, with these arguments; return its
+    exit code."""
     ssh = os.environ.get(SSH_OVERRIDE) or "ssh"
-    remote = "python3 " + shlex.join([NED_BOX_PROGRAM_PATH] + arguments)
+    remote = "python3 " + shlex.join([program_path] + arguments)
     try:
         completed = subprocess.run([ssh, *SSH_OPTIONS, NED_BOX_SSH_TARGET, remote],
                                    stdin=subprocess.DEVNULL, stderr=subprocess.PIPE)
@@ -394,9 +395,9 @@ def excerpt(text, start):
 
 def ripgrep_command(arguments_before_pattern, pattern, paths):
     ripgrep = os.environ.get(RIPGREP_OVERRIDE) or "rg"
-    # A shipment's staging directory, in walk/ or cold-read-records/, copies files the store already
-    # holds, and its shipment may remove it while ripgrep walks it. The trailing slash keeps a file
-    # of the same name in the search.
+    # A shipment's staging directory, in walk/ or cold-read-records/, is not the published record,
+    # and its shipment may remove it while ripgrep walks it. The trailing slash keeps a file of the
+    # same name in the search.
     skip_staging = f"!{record_shipper.STAGING_DIRECTORY_PREFIX}*/"
     return [ripgrep, "--no-ignore", "--hidden", "--ignore-case", "--glob", skip_staging,
             *arguments_before_pattern,

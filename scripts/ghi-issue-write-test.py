@@ -454,6 +454,22 @@ def run_remote_ghi_guide_agent_log_store_cases(scratch: Path):
           and on_the_mac == ("nedlern@ned-box",
                              tool.GHI_GUIDE_AGENT_LOG_STORE_DIRECTORY),
           (on_ned_box, on_the_mac))
+    saved_override = os.environ.get(tool.GHI_GUIDE_AGENT_LOG_STORE_DIRECTORY_VARIABLE)
+    os.environ[tool.GHI_GUIDE_AGENT_LOG_STORE_DIRECTORY_VARIABLE] = "relative/store"
+    try:
+        relative_store = tool.ghi_guide_agent_log_store()
+        relative_citation = tool.ghi_guide_agent_log_store_citation("a-file.md")
+    finally:
+        if saved_override is None:
+            del os.environ[tool.GHI_GUIDE_AGENT_LOG_STORE_DIRECTORY_VARIABLE]
+        else:
+            os.environ[tool.GHI_GUIDE_AGENT_LOG_STORE_DIRECTORY_VARIABLE] = saved_override
+    absolute_store = os.path.join(os.getcwd(), "relative/store")
+    check("a relative store override resolves to an absolute path, so a process "
+          "in another directory, such as ghi-guide-agent, reads the same store",
+          relative_store == (None, absolute_store)
+          and relative_citation == os.path.join(absolute_store, "a-file.md"),
+          (relative_store, relative_citation))
 
 
 def run_cases(scratch: Path):
@@ -2983,16 +2999,14 @@ def run_edit_cases(scratch: Path):
     original_rule = tool.issue_number_in_file_name
     tool.issue_number_in_file_name = lambda path: 572
     try:
-        followed = tool.validate_edit(
-            filed_ghi_md(scratch, name="v2-follows-the-shared-rule.md"),
-            scratch)[2] == 572
-    except tool.Refused:
-        followed = False
+        check("validate_edit takes a file's issue number from "
+              "issue_number_in_file_name, the rule the reusable-prompt rule "
+              "asks",
+              lambda: tool.validate_edit(
+                  filed_ghi_md(scratch, name="v2-follows-the-shared-rule.md"),
+                  scratch)[2] == 572)
     finally:
         tool.issue_number_in_file_name = original_rule
-    check("validate_edit takes a file's issue number from "
-          "issue_number_in_file_name, the rule the reusable-prompt rule asks",
-          followed)
 
     for case_name, target in [
             ("a file not named for an issue is refused",

@@ -57,7 +57,7 @@ WHAT IS PINNED HERE.
     report, and the launcher's recovery line is on the read's stderr.
 
   - The fast tier pin shows in the stamp of what the read produces:
-    runtime=agy, gemini-3.8-flash-medium, effort medium, tier fast.
+    runtime=agy, gemini-4-neon-low, effort low, tier fast.
 
   - The reviewer's instructions the model receives are the template embedded
     in the script -- not the skill's prompt file -- with both paths and
@@ -609,10 +609,16 @@ with tempfile.TemporaryDirectory() as scratch:
     check("an earlier suggestions file is replaced, not appended to",
           "LEFT BY AN EARLIER READ" not in suggestions_text
           and "of the walk item" in suggestions_text, repr(suggestions_text[:200]))
-    check("the fast tier pin shows in the stamp: runtime agy, gemini-3.8-flash-medium, medium, fast",
+    check("the fast tier pin shows in the stamp: runtime agy, gemini-4-neon-low, low, fast",
           provenance_stamp_of(suggestions).startswith(
-              "<!-- provenance: runtime=agy model=gemini-3.8-flash-medium "
-              "effort=medium cell=fast-clarify tier=fast "),
+              "<!-- provenance: runtime=agy model=gemini-4-neon-low "
+              "effort=low cell=fast-clarify tier=fast "),
+          repr(provenance_stamp_of(suggestions)))
+    check("a read given no --text-intended-reader-category stamps the default, "
+          "human-and-agent-readable, before target_sha256= so target= stays last",
+          " text_intended_reader_category=human-and-agent-readable target_sha256="
+          in provenance_stamp_of(suggestions)
+          and provenance_stamp_of(suggestions).count("text_intended_reader_category=") == 1,
           repr(provenance_stamp_of(suggestions)))
     check("the stamp names the embedded prompt file",
           "prompt_file=" in provenance_stamp_of(suggestions)
@@ -1633,8 +1639,10 @@ with tempfile.TemporaryDirectory() as scratch:
                        .replace("{TARGET_PATH}", "{TARGET_PATH}")
                        .replace("{REPORT_PATH}", str(cell_report_path))
                        .replace("{CHANGED_SENTENCE_IDS}", "none")
-                       .replace("{REMOVED_TEXT}", "none"))
-    check("the model receives the template embedded in the script",
+                       .replace("{REMOVED_TEXT}", "none")
+                       .replace("{TEXT_INTENDED_READER_CATEGORY}", "human-and-agent-readable"))
+    check("the model receives the template embedded in the script, naming the default "
+          "category, human-and-agent-readable, when no category is given",
           result.returncode == 0
           and received_prompt.strip().replace(
               target_line.split(" in full", 1)[0][len("Read "):], "{TARGET_PATH}")
@@ -1649,8 +1657,62 @@ with tempfile.TemporaryDirectory() as scratch:
           and "{TARGET_PATH}" not in received_prompt
           and "{REPORT_PATH}" not in received_prompt
           and "{CHANGED_SENTENCE_IDS}" not in received_prompt
-          and "{REMOVED_TEXT}" not in received_prompt,
+          and "{REMOVED_TEXT}" not in received_prompt
+          and "{TEXT_INTENDED_READER_CATEGORY}" not in received_prompt,
           repr(received_prompt[:300]))
+    check("the template names the reader the text is written for, not a fresh-reader",
+          "{TEXT_INTENDED_READER_CATEGORY}" in script_under_test_module().FAST_CLARIFY_PROMPT_TEMPLATE
+          and "fresh-reader" not in script_under_test_module().FAST_CLARIFY_PROMPT_TEMPLATE,
+          "")
+    check("the Question 4 prompt, which reuses the fast-clarify reading rules, holds no "
+          "text-intended-reader-category placeholder to leave unfilled",
+          "{TEXT_INTENDED_READER_CATEGORY}" not in
+          script_under_test_module().COLD_READ_FAST_READ_WHAT_SHOULD_BE_CODE_QUESTION_PROMPT_TEMPLATE,
+          "")
+
+    # --- --text-intended-reader-category names the reader ----------------
+    for category in ("agent-readable", "human-readable", "human-and-agent-readable"):
+        repository = build_scratch_repository(scratch)
+        suggestions = repository / "docs" / "walk" / "a-walk-item-cold-read-fast-read.md"
+        prompt_dump.unlink(missing_ok=True)
+        result = run_fast_read(
+            repository, stubs,
+            {"*": {"report": "STUB FAST READ\n", "dump_prompt": str(prompt_dump)}},
+            suggestions, walk_draft_relative, counter,
+            options=("--text-intended-reader-category", category, "--without-question-4"),
+        )
+        received_prompt = prompt_dump.read_text(encoding="utf-8") if prompt_dump.is_file() else ""
+        check(f"with --text-intended-reader-category {category}, the prompt names {category} "
+              "as the text's category and no other category",
+              result.returncode == 0
+              and "The text-intended-reader-category of " in received_prompt
+              and f" is {category}: judge the text for the reader that the project glossary's "
+                  f"entry for {category} names" in received_prompt
+              and all(f" is {other}:" not in received_prompt
+                      for other in ("agent-readable", "human-readable", "human-and-agent-readable")
+                      if other != category),
+              f"exit {result.returncode}; stderr={result.stderr[-300:]!r}")
+        check(f"with --text-intended-reader-category {category}, the provenance stamp records "
+              f"{category}, with target= still last",
+              f" text_intended_reader_category={category} target_sha256=" in provenance_stamp_of(suggestions)
+              and provenance_stamp_of(suggestions).rsplit(" target=", 1)[-1].endswith(" -->"),
+              repr(provenance_stamp_of(suggestions)))
+
+    repository = build_scratch_repository(scratch)
+    suggestions = repository / "docs" / "walk" / "a-walk-item-cold-read-fast-read.md"
+    result = run_fast_read(
+        repository, stubs, {"*": {"report": "STUB FAST READ\n"}},
+        suggestions, walk_draft_relative, counter,
+        options=("--text-intended-reader-category", "self-readable"),
+    )
+    check("a category the fast read does not read for is refused by the option's parser, "
+          "exit 2, naming the three it takes, and no cell is launched",
+          result.returncode == 2 and launches_counted(counter) == 0
+          and "--text-intended-reader-category" in result.stderr
+          and "invalid choice: 'self-readable'" in result.stderr
+          and all(category in result.stderr.rpartition("choose from")[2]
+                  for category in ("human-readable", "human-and-agent-readable", "agent-readable")),
+          f"exit {result.returncode}; stderr={result.stderr!r}")
     # The scratch checkout has no .claude/skills/cold-read/prompts/ tree at
     # all, so the case above also proves the read did not need the skill's
     # prompt file to run.
@@ -2836,6 +2898,16 @@ with tempfile.TemporaryDirectory() as over_ssh_scratch:
               and remote.get("argv") == ["--target", str(ned_box_draft), "--without-question-4"],
               repr(remote))
 
+        exit_code, stdout, stderr = read_from_mac(
+            mac_draft, options=("--text-intended-reader-category", "agent-readable"))
+        remote = (json.loads(remote_record.read_text(encoding="utf-8"))
+                  if remote_record.exists() else {})
+        check("from the Mac, --text-intended-reader-category is passed on to the read on ned-box",
+              exit_code == 0
+              and remote.get("argv") == ["--target", str(ned_box_draft),
+                                         "--text-intended-reader-category", "agent-readable"],
+              repr(remote))
+
         exit_code, stdout, stderr = read_from_mac(mac_draft)
         remote = (json.loads(remote_record.read_text(encoding="utf-8"))
                   if remote_record.exists() else {})
@@ -3259,11 +3331,27 @@ for worded_document, worded_sentence in (("---\ndescription: |\n  Warning:\n---\
           "makes one unit",
           worded_found[1] == {"s1": worded_sentence}, repr(worded_found))
 
+stamped_with_category = _fast_read.with_text_intended_reader_category_in_provenance_stamp(
+    "<!-- provenance: runtime=agy cell=fast-clarify target_sha256=ab target=/a b.md -->\n\nbody\n",
+    "agent-readable")
+check("the category goes into an existing stamp before target_sha256=, the rest of the report unchanged",
+      stamped_with_category == "<!-- provenance: runtime=agy cell=fast-clarify "
+      "text_intended_reader_category=agent-readable target_sha256=ab target=/a b.md -->\n\nbody\n",
+      repr(stamped_with_category))
+try:
+    unstamped_with_category = _fast_read.with_text_intended_reader_category_in_provenance_stamp(
+        "body\n", "human-readable")
+except _fast_read.ColdReadCellReportHasNoProvenanceStamp as no_stamp:
+    unstamped_with_category = no_stamp
+check("a report with no provenance stamp is refused, not given a stamp with no model or target hash",
+      isinstance(unstamped_with_category, _fast_read.ColdReadCellReportHasNoProvenanceStamp),
+      repr(unstamped_with_category))
+
 with tempfile.TemporaryDirectory() as placeholder_scratch:
     placeholder_template = Path(placeholder_scratch) / "prompt.md"
     placeholder_template.write_text(
-        _fast_read.fast_clarify_prompt_with_edit_placeholders_filled(
-            [], ["Read {TARGET_PATH} and write {REPORT_PATH}."]), encoding="utf-8")
+        _fast_read.fast_clarify_prompt_template_changed_sentence_ids_removed_text_and_text_intended_reader_category_placeholders_fill(
+            [], ["Read {TARGET_PATH} and write {REPORT_PATH}."], "agent-readable"), encoding="utf-8")
     placeholder_prompt = cell_common.compose_prompt(
         placeholder_template, Path("/the/target.md"), Path("/the/report.md"))
     check("removed text that holds {TARGET_PATH} or {REPORT_PATH} reaches the reviewer as "

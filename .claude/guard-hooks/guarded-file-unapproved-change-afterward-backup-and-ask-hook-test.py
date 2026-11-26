@@ -1400,6 +1400,145 @@ def cases(scratch):
           "seat-brief", all(world.store_file(path, "approved") for path in stocked),
           [world.store_file(path, "approved") for path in stocked])
 
+    # -- another agent-seat's seat-brief and settings.local.json, changed from any directory
+    world = World(Path(scratch) / "other-seat")
+    other = world.agents / "other"
+    (other / ".claude").mkdir(parents=True)
+    other_brief = other / "CLAUDE.local.md"
+    other_settings = other / ".claude" / "settings.local.json"
+    other_brief.write_text("other brief v1\n")
+    other_settings.write_text('{"permissions": {"allow": []}}\n')
+    elsewhere = Path(scratch) / "other-seat" / "elsewhere"
+    elsewhere.mkdir()
+    world.run(cwd=elsewhere)
+    other_brief.write_text("other brief v2\n")
+    other_settings.write_text('{"permissions": {"allow": ["Bash(rm:*)"]}}\n')
+    message = world.run(cwd=world.repo)
+    check("a change to another agent-seat's seat-brief, made from a different checkout, is asked "
+          "about", str(other_brief) in message and "has not approved" in message, message)
+    check("a change to another agent-seat's .claude/settings.local.json, made from a different "
+          "checkout, is asked about", str(other_settings) in message, message)
+    check("and both versions are kept",
+          world.key(other_brief) in world.versions(other_brief)
+          and world.key(other_settings) in world.versions(other_settings),
+          (world.versions(other_brief), world.versions(other_settings)))
+    other_brief.write_text("other brief v1\n")
+    other_settings.write_text('{"permissions": {"allow": []}}\n')
+    approved_brief, approved_settings = world.key(other_brief), world.key(other_settings)
+    other_brief.write_text("other brief v2\n")
+    other_settings.write_text('{"permissions": {"allow": ["Bash(rm:*)"]}}\n')
+    result = world.command("--restore", other_brief, world.key(other_brief),
+                           other_settings, world.key(other_settings))
+    check("--restore puts back another agent-seat's seat-brief and settings.local.json",
+          result.returncode == 0 and world.key(other_brief) == approved_brief
+          and world.key(other_settings) == approved_settings,
+          (result.returncode, result.stdout, result.stderr))
+    check("and a run after the restore asks nothing", world.run(cwd=elsewhere) == "", "")
+
+    world = World(Path(scratch) / "own-seat-brief-once")
+    brief = world.repo / "CLAUDE.local.md"
+    brief.write_text("seat v1\n")
+    world.run()
+    brief.write_text("seat v2\n")
+    message = world.run()
+    check("a change to the seat-brief of the checkout the agent runs in is named once",
+          message.count(f"{brief}, version") == 1, message)
+
+    world = World(Path(scratch) / "agent-seat-files-first-checked")
+    world.run()
+    outside_state = next((world.scratch / "cache").glob("*.json"))
+    state = json.loads(outside_state.read_text())
+    state.pop("agent_seat_files_stocked")
+    outside_state.write_text(json.dumps(state))
+    settings_local = world.repo / ".claude" / "settings.local.json"
+    settings_local.parent.mkdir()
+    settings_local.write_text('{"a": 1}\n')
+    message = world.run(cwd=Path(scratch))
+    check("on a machine that already checked the account-wide files, the agent-seat files present "
+          "when they are first checked are approved without asking",
+          message == "" and world.key(settings_local) in world.store_file(settings_local, "approved"),
+          message)
+    settings_local.write_text('{"a": 2}\n')
+    check("and a later change to one is asked about",
+          str(settings_local) in world.run(cwd=Path(scratch)), "")
+
+    def forget_agent_seat_files_stocked(world, *forgotten):
+        """The outside state as a run of an older hook leaves it: no record that the agent-seat
+        files were stocked, and no entry for each forgotten path."""
+        outside_state = next((world.scratch / "cache").glob("*.json"))
+        state = json.loads(outside_state.read_text())
+        state.pop("agent_seat_files_stocked", None)
+        for path in forgotten:
+            state["files"].pop(str(path), None)
+        outside_state.write_text(json.dumps(state))
+
+    world = World(Path(scratch) / "agent-seat-file-asked-before-stocking")
+    world.run()
+    settings_local = world.repo / ".claude" / "settings.local.json"
+    settings_local.parent.mkdir()
+    settings_local.write_text('{"a": 1}\n')
+    first = world.run(cwd=Path(scratch))
+    forget_agent_seat_files_stocked(world, settings_local)
+    message = world.run(cwd=Path(scratch), session="session-a")
+    check("an agent-seat file asked about and never approved is not approved when the agent-seat "
+          "files are first stocked",
+          str(settings_local) in first and str(settings_local) in message
+          and world.key(settings_local) not in world.store_file(settings_local, "approved"),
+          (first, message, world.store_file(settings_local, "approved")))
+
+    world = World(Path(scratch) / "agent-seat-file-edited-on-unapproved-version")
+    other = world.agents / "other"
+    other.mkdir()
+    other_brief = other / "CLAUDE.local.md"
+    other_brief.write_text("other brief v1\n")
+    world.run(cwd=Path(scratch))
+    other_brief.write_text("other brief v2, by a shell command\n")
+    asked = world.run(cwd=Path(scratch))
+    forget_agent_seat_files_stocked(world, other_brief)
+    other_brief.write_text("other brief v3, by an Edit\n")
+    message = world.run(cwd=Path(scratch), tool="Edit", file_path=other_brief)
+    check("an Edit made on an unapproved version is asked about though the outside state lost "
+          "the file's entry",
+          str(other_brief) in asked and str(other_brief) in message
+          and world.key(other_brief) not in world.store_file(other_brief, "approved"),
+          (asked, message, world.store_file(other_brief, "approved")))
+
+    world = World(Path(scratch) / "agent-seat-file-written-during-stocking")
+    world.run()
+    settings_local = world.repo / ".claude" / "settings.local.json"
+    settings_local.parent.mkdir()
+    settings_local.write_text('{"a": 1}\n')
+    scanned = world.key(settings_local)
+    forget_agent_seat_files_stocked(world)
+    hook = load_hook_in_this_process()
+    original_with_store = hook.with_store
+
+    def write_between_scan_and_store(machine, work):
+        settings_local.write_text('{"a": 2}\n')
+        return original_with_store(machine, work)
+
+    hook.with_store = write_between_scan_and_store
+    run_hook_in_this_process(world, hook, "session-a", "owner-a", directory=Path(scratch))
+    approved = world.store_file(settings_local, "approved")
+    check("the agent-seat files' first stocking approves the version its scan read, not one "
+          "written after the scan",
+          scanned in approved and world.key(settings_local) not in approved, approved)
+
+    world = World(Path(scratch) / "agent-seat-file-with-git-line-ending-filter")
+    world.git("config", "core.autocrlf", "true")
+    brief = world.repo / "CLAUDE.local.md"
+    brief.write_bytes(b"seat v1\r\n")
+    world.run()
+    brief.write_bytes(b"seat v2\r\n")
+    message = world.run()
+    printed = [command.split()[-1] for command in approve_commands(message)
+               if f" {brief} " in command]
+    result = world.command("--restore", brief, printed[0]) if printed else None
+    check("--restore takes the version the hook printed for an agent-seat file git's line-ending "
+          "filter changes",
+          result is not None and result.returncode == 0 and brief.read_bytes() == b"seat v1\r\n",
+          (message[:400], result and (result.returncode, result.stdout, result.stderr)))
+
     # -- the store cannot be written
     world = fresh(scratch, "unwritable")
     claude = world.repo / "CLAUDE.md"
@@ -2013,8 +2152,29 @@ def cases(scratch):
               "a") as module:
         module.write("\n")
     hook.checkout_files(world.repo, decisions)
+    check("within the run that loaded the guard, a change to its draft-place module keeps the "
+          "decisions that run made, under the key of the module it loaded",
+          "made-up-cached-path" in decisions, decisions)
+    # The next run loads the guard afresh.
+    hook._loaded.clear()
+    hook.checkout_files(world.repo, decisions)
     check("a change to the guard's draft-place module drops the cached guard decisions",
           "made-up-cached-path" not in decisions, decisions)
+
+    # -- the decisions a run saves are keyed to the guard files as they were when it loaded the
+    # guard, so a fast-forward that changes one during the run makes the next run decide again
+    hook._loaded.clear()
+    decisions = {}
+    hook.guard()
+    with open(copied_guard_hooks / "draft-document-place-directories-definition-and-membership-common.py",
+              "a") as module:
+        module.write("\n")
+    hook.checkout_files(world.repo, decisions)
+    decisions["made-up-cached-path"] = True
+    hook._loaded.clear()
+    hook.checkout_files(world.repo, decisions)
+    check("decisions made while the draft-place module changed under a run are decided again by "
+          "the next run", "made-up-cached-path" not in decisions, decisions)
 
     # -- git's own work after a first run made while a merge was stopped, in a checkout with no
     # guarded file yet, is not asked about

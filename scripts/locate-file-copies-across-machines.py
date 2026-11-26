@@ -1070,7 +1070,8 @@ def run_backup_search_after_nothing_found(query, git_search_complete):
         return ["The backup search found it: open the copies its \"copied to\" "
                 "lines name, and check that one holds the file's content before "
                 "you say it can be recovered. Restore a copy to the file's own "
-                "path only when asked to."] + unsearched
+                "path only when asked to, by running the backup search again "
+                "with --restore <copy>."] + unsearched
     if code == BACKUP_SEARCH_FOUND_BUT_NOT_COPIED_EXIT:
         return ["The backup search found it but copied no version: tell the "
                 "user what its FOUND lines say, such as a \"could NOT copy\" line "

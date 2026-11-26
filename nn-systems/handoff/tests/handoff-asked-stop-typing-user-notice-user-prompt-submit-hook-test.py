@@ -8,8 +8,10 @@ handoff-asked marker files and files recording a shown notice are ones this suit
 real ~/.claude/handoffs. The threshold hook computes HANDOFF_DIRECTORY from
 Path.home() at import, so HOME decides the directory.
 
-The agent-seat name variable is set or removed explicitly in every case, because
-an agent-seat running this suite has its own value in the environment.
+The agent-seat name and launched session id variables are set or removed explicitly
+in every case, because an agent-seat running this suite has its own values in the
+environment. A case that sets an agent-seat name runs as the launched agent-session,
+whose session id the launched session id variable holds, unless it names another.
 
 The exit code is asserted on every case: exit 2 from a UserPromptSubmit hook
 would block the user's message.
@@ -38,6 +40,7 @@ _supervisor_specification = importlib.util.spec_from_file_location(
 supervisor = importlib.util.module_from_spec(_supervisor_specification)
 _supervisor_specification.loader.exec_module(supervisor)
 AGENT_NAME_VARIABLE = supervisor.HANDOFF_SUPERVISOR_AGENT_NAME_ENVIRONMENT_VARIABLE
+LAUNCHED_SESSION_ID_VARIABLE = supervisor.HANDOFF_SUPERVISOR_SESSION_ID_ENVIRONMENT_VARIABLE
 
 failures = []
 
@@ -50,13 +53,19 @@ def check(case_name, condition, detail=""):
         failures.append(case_name)
 
 
-def run_hook(payload, home, agent_seat_name=None, raw_input_text=None, stdout_encoding=None):
+def run_hook(payload, home, agent_seat_name=None, raw_input_text=None, launched_session_id=None,
+             stdout_encoding=None):
     environment = {**os.environ, "HOME": str(home)}
     if stdout_encoding is not None:
         environment["PYTHONIOENCODING"] = stdout_encoding
     environment.pop(AGENT_NAME_VARIABLE, None)
+    environment.pop(LAUNCHED_SESSION_ID_VARIABLE, None)
     if agent_seat_name is not None:
         environment[AGENT_NAME_VARIABLE] = agent_seat_name
+        if launched_session_id is None and isinstance(payload, dict):
+            launched_session_id = payload.get("session_id")
+        if launched_session_id:
+            environment[LAUNCHED_SESSION_ID_VARIABLE] = launched_session_id
     text = raw_input_text if raw_input_text is not None else json.dumps(payload)
     return subprocess.run([sys.executable, str(HOOK_SCRIPT)], input=text, capture_output=True,
                           text=True, check=False, env=environment)
@@ -128,36 +137,53 @@ with tempfile.TemporaryDirectory() as workspace:
     marker("s-once").write_text("40.0\n", encoding="utf-8")
     os.utime(marker("s-once"), ns=(1_000_000_000_000, 1_000_000_000_000))
     payload = {"session_id": "s-once", "transcript_path": str(titled)}
-    result = run_hook(payload, home)
-    check("marker file present, no launched agent-seat: the line names the last custom-title, exit 0",
+    result = run_hook(payload, home, agent_seat_name="seat-a")
+    check("marker file present: the line names the last custom-title, exit 0",
           result.returncode == 0 and shown_notice(result) == expected_named("efficiency-renamed"),
           f"code {result.returncode}, stdout {result.stdout!r}, stderr {result.stderr!r}")
     check("marker file present: the file recording the shown notice holds the marker file's modification time",
           (handoffs / "s-once-handoff-asked-user-notice-shown").read_text(encoding="utf-8").strip()
           == "1000000000000")
 
-    result = run_hook(payload, home)
+    result = run_hook(payload, home, agent_seat_name="seat-a")
     check("second message, same marker file: no output, exit 0", silent(result),
           f"code {result.returncode}, stdout {result.stdout!r}, stderr {result.stderr!r}")
 
     os.utime(marker("s-once"), ns=(2_000_000_000_000, 2_000_000_000_000))
-    result = run_hook(payload, home)
+    result = run_hook(payload, home, agent_seat_name="seat-a")
     check("a newer marker file: the line again",
           result.returncode == 0 and shown_notice(result) == expected_named("efficiency-renamed"),
           f"code {result.returncode}, stdout {result.stdout!r}")
-    result = run_hook(payload, home)
+    result = run_hook(payload, home, agent_seat_name="seat-a")
     check("a newer marker file, second message: no output", silent(result),
           f"stdout {result.stdout!r}")
 
-    # ---- which name the line gives -----------------------------------------
+    # ---- fallbacks for the name --------------------------------------------
 
-    marker("s-renamed").write_text("40.0\n", encoding="utf-8")
-    result = run_hook({"session_id": "s-renamed", "transcript_path": str(titled)}, home,
+    marker("s-untitled").write_text("40.0\n", encoding="utf-8")
+    result = run_hook({"session_id": "s-untitled", "transcript_path": str(untitled)}, home,
                       agent_seat_name="seat-a")
-    check("a launched agent-seat and a renamed agent-session: the line names the launched"
-          " agent-seat, under which the successor starts",
+    check("no title record: the line names the launched agent-seat",
           result.returncode == 0 and shown_notice(result) == expected_named("seat-a"),
           f"code {result.returncode}, stdout {result.stdout!r}, stderr {result.stderr!r}")
+
+    (handoffs / "seat-a-remote-control-name").write_text("seat-a-renamed\n", encoding="utf-8")
+    marker("s-stored").write_text("40.0\n", encoding="utf-8")
+    result = run_hook({"session_id": "s-stored", "transcript_path": str(untitled)}, home,
+                      agent_seat_name="seat-a")
+    check("no title record and a stored Remote Control name: the line names the stored name",
+          result.returncode == 0 and shown_notice(result) == expected_named("seat-a-renamed"),
+          f"code {result.returncode}, stdout {result.stdout!r}, stderr {result.stderr!r}")
+    (handoffs / "seat-a-remote-control-name").unlink()
+    (handoffs / "seat-a-remote-control-name").mkdir()
+    marker("s-stored-unreadable").write_text("40.0\n", encoding="utf-8")
+    result = run_hook({"session_id": "s-stored-unreadable", "transcript_path": str(untitled)}, home,
+                      agent_seat_name="seat-a")
+    check("no title record and an unreadable stored name: the line names the agent-seat, "
+          "as the handoff-supervisor launches under it then",
+          result.returncode == 0 and shown_notice(result) == expected_named("seat-a"),
+          f"code {result.returncode}, stdout {result.stdout!r}, stderr {result.stderr!r}")
+    (handoffs / "seat-a-remote-control-name").rmdir()
 
     accented = workspace / "accented.jsonl"
     accented.write_text(custom_title_record("café") + "\n", encoding="utf-8")
@@ -166,13 +192,6 @@ with tempfile.TemporaryDirectory() as workspace:
                       stdout_encoding="ascii")
     check("a title with é and an ASCII stdout: the line, exit 0",
           result.returncode == 0 and shown_notice(result) == expected_named("café"),
-          f"code {result.returncode}, stdout {result.stdout!r}, stderr {result.stderr!r}")
-
-    marker("s-untitled").write_text("40.0\n", encoding="utf-8")
-    result = run_hook({"session_id": "s-untitled", "transcript_path": str(untitled)}, home,
-                      agent_seat_name="seat-a")
-    check("no title record: the line names the launched agent-seat",
-          result.returncode == 0 and shown_notice(result) == expected_named("seat-a"),
           f"code {result.returncode}, stdout {result.stdout!r}, stderr {result.stderr!r}")
 
     marker("s-unnamed").write_text("40.0\n", encoding="utf-8")
@@ -200,6 +219,13 @@ with tempfile.TemporaryDirectory() as workspace:
     check("no transcript_path: the line names the launched agent-seat",
           result.returncode == 0 and shown_notice(result) == expected_named("seat-c"),
           f"code {result.returncode}, stdout {result.stdout!r}")
+
+    marker("s-child").write_text("40.0\n", encoding="utf-8")
+    result = run_hook({"session_id": "s-child", "transcript_path": str(untitled)}, home,
+                      agent_seat_name="seat-a", launched_session_id="s-parent")
+    check("a child agent-session started from the launched one's shell: the line names no agent-seat",
+          result.returncode == 0 and shown_notice(result) == EXPECTED_UNNAMED,
+          f"code {result.returncode}, stdout {result.stdout!r}, stderr {result.stderr!r}")
 
     # ---- faults --------------------------------------------------------------
 
