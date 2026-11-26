@@ -367,9 +367,17 @@ class Case:
         Case.forked_runs += 1
         output_paths = [self.root / f"forked-run-{Case.forked_runs}-{stream}" for stream in ("stdout", "stderr")]
         # Opened here, not in the child, so that a failure to make them reaches the suite.
-        output_descriptors = [os.open(path, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600) for path in output_paths]
+        output_descriptors = []
+        try:
+            for path in output_paths:
+                output_descriptors.append(os.open(path, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600))
+        except BaseException:
+            for opened in output_descriptors:
+                os.close(opened)
+            raise
         sys.stdout.flush()
         sys.stderr.flush()
+        child = None
         try:
             child = os.fork()
             if child == 0:
@@ -404,21 +412,24 @@ class Case:
                         traceback.print_exc()
                         exit_code = 1
                         # An interpreter flushes stdout on its way out; os._exit below would drop it.
-                        with contextlib.suppress(Exception):
+                        try:
                             sys.stdout.flush()
+                        except Exception:
+                            traceback.print_exc()
                     sys.stderr.flush()
                 finally:
                     # Never return: the child would run the rest of the suite and remove its scratch directory.
                     os._exit(exit_code & 0xFF if isinstance(exit_code, int) else 1)
-        finally:
-            for opened in output_descriptors:
-                os.close(opened)
-        try:
+            while output_descriptors:
+                os.close(output_descriptors.pop())
             _, status = os.waitpid(child, 0)
         except BaseException:
+            while output_descriptors:
+                os.close(output_descriptors.pop())
             # Such as the suite's SIGTERM handler: the child must not go on in the scratch directory the suite removes.
-            os.kill(child, signal.SIGKILL)
-            os.waitpid(child, 0)
+            if child:
+                os.kill(child, signal.SIGKILL)
+                os.waitpid(child, 0)
             raise
         stdout, stderr = (path.read_text(encoding="utf-8") for path in output_paths)
         for path in output_paths:
@@ -7652,14 +7663,23 @@ def test_a_forked_run_runs_the_program_its_command_names_as_a_launch_would():
           (first.stdout.strip(), second.stdout.strip())
           == (str(case.root / "names-itself-first.py"), str(case.root / "names-itself-second.py")),
           described(second))
+    # A zone unlike the suite's own, so that a child keeping the suite's zone fails the check.
+    case_zone, offset = (("Etc/GMT+12", "-1200") if time.strftime("%z") == "+1400"
+                         else ("Pacific/Kiritimati", "+1400"))
     zone = forked_run_of(case, "prints-its-zone", "import time\ndef main():\n    print(time.strftime('%z'))\n",
-                         {**os.environ, "TZ": "Pacific/Kiritimati"})
-    check("a forked run takes the case's TZ, as a launched interpreter does", zone.stdout.strip() == "+1400",
+                         {**os.environ, "TZ": case_zone})
+    check("a forked run takes the case's TZ, as a launched interpreter does", zone.stdout.strip() == offset,
           described(zone))
     raised = forked_run_of(case, "prints-then-raises", "def main():\n    print('printed first')\n    raise ValueError\n")
     check("a forked run that raises keeps what it printed on stdout",
           raised.returncode == 1 and raised.stdout == "printed first\n" and "ValueError" in raised.stderr,
           described(raised))
+    unflushed = forked_run_of(case, "stdout-cannot-flush",
+                              "import sys\nclass Unflushable:\n    def write(self, text):\n        return len(text)\n"
+                              "    def flush(self):\n        raise OSError('stdout could not be flushed')\n"
+                              "def main():\n    sys.stdout = Unflushable()\n    raise ValueError\n")
+    check("a forked run that raises and then cannot flush stdout reports the failed flush",
+          unflushed.returncode == 1 and "stdout could not be flushed" in unflushed.stderr, described(unflushed))
 
 
 def test_a_forked_run_that_cannot_make_its_output_files_raises_the_error_that_stopped_it():
@@ -7685,6 +7705,73 @@ def test_a_forked_run_that_cannot_make_its_output_files_raises_the_error_that_st
         os.open = real_open
 
 
+def test_a_forked_run_whose_second_output_file_cannot_be_made_closes_the_first():
+    case = Case()
+    program = case.root / "never-runs.py"
+    program.write_text("def main():\n    pass\n")
+    real_open = os.open
+    opened = []
+
+    def second_disk_full(path, *arguments):
+        if "forked-run-" in str(path):
+            if opened:
+                raise OSError(errno.ENOSPC, "No space left on device", str(path))
+            opened.append(real_open(path, *arguments))
+            return opened[-1]
+        return real_open(path, *arguments)
+
+    os.open = second_disk_full
+    try:
+        case.run_forked([sys.executable, str(program)], dict(os.environ), lambda: None)
+    except OSError:
+        pass
+    finally:
+        os.open = real_open
+    try:
+        os.fstat(opened[0])
+        closed = False
+        os.close(opened[0])
+    except OSError:
+        closed = True
+    check("a forked run whose second output file cannot be made closes the first before the error goes on", closed)
+
+
+def test_a_forked_run_stopped_while_closing_its_copies_of_the_output_files_kills_and_reaps_its_child():
+    case = Case()
+    program = case.root / "sleeps-at-once.py"
+    program.write_text("import time\ndef main():\n    time.sleep(60)\n")
+    real_fork, real_close = os.fork, os.close
+    children = []
+
+    def recorded_fork():
+        child = real_fork()
+        if child:
+            children.append(child)
+        return child
+
+    def stopped_on_first_close(descriptor):
+        if children and not getattr(stopped_on_first_close, "done", False):
+            stopped_on_first_close.done = True
+            real_close(descriptor)
+            raise SystemExit(1)
+        return real_close(descriptor)
+
+    os.fork, os.close = recorded_fork, stopped_on_first_close
+    try:
+        case.run_forked([sys.executable, str(program)], dict(os.environ), lambda: None)
+    except SystemExit:
+        try:
+            os.kill(children[0], 0)
+            gone = False
+        except ProcessLookupError:
+            gone = True
+        check("a forked run stopped while closing its output files kills and reaps its child", gone)
+    else:
+        check("a forked run stopped while closing its output files lets the stop go on", False)
+    finally:
+        os.fork, os.close = real_fork, real_close
+
+
 def test_a_forked_run_stopped_while_waiting_kills_and_reaps_its_child():
     case = Case()
     pid_file = case.root / "forked-child-pid"
@@ -7692,10 +7779,14 @@ def test_a_forked_run_stopped_while_waiting_kills_and_reaps_its_child():
               "    time.sleep(60)\n")
 
     def stopped(*_):
+        # Stop only once the child is running, however slow the machine is to start it.
+        if not pid_file.exists() or not pid_file.read_text():
+            signal.setitimer(signal.ITIMER_REAL, 0.2)
+            return
         raise SystemExit(1)
 
     previous = signal.signal(signal.SIGALRM, stopped)
-    signal.setitimer(signal.ITIMER_REAL, 1.0)
+    signal.setitimer(signal.ITIMER_REAL, 0.2)
     try:
         forked_run_of(case, "sleeps", source)
     except SystemExit:
