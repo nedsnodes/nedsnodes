@@ -107,25 +107,6 @@ def squashed_branch(repository, changed_days_before_now=1, path="shared file.txt
     return replaced
 
 
-def advice_saves_a_staged_change_the_working_tree_undoes(directory):
-    """A staged change whose working tree is edited back to HEAD shows in no
-    `git diff HEAD`, so advice keyed on it saved nothing before the checkout."""
-    repository = Repository(directory)
-    repository.commit({"a.txt": "committed\n"}, "Base", 1)
-    (directory / "a.txt").write_text("staged\n")
-    repository.git("add", "a.txt")
-    (directory / "a.txt").write_text("committed\n")
-    status = repository.git("status", "--porcelain", "--", "a.txt")
-    staged = repository.git("diff", "--cached", "HEAD", "--", "a.txt")
-    unstaged = repository.git("diff", "--", "a.txt")
-    check("for a staged change the working tree undoes, the advice's test fires "
-          "though `git diff HEAD` prints nothing",
-          status.strip() != "" and repository.git("diff", "HEAD", "--", "a.txt") == "",
-          status)
-    check("and its two saved diffs together hold the staged change",
-          "+staged" in staged and "-staged" in unstaged, staged + unstaged)
-
-
 def main():
     scratch = Path(tempfile.mkdtemp(prefix="revert-check-test-")).resolve()
     try:
@@ -156,16 +137,59 @@ def run_cases(scratch):
           "`git checkout main -- <path>`" in done.stdout
           and "name the commit, by at least its first 12 characters" in done.stdout,
           done.stdout)
-    checkout_at = done.stdout.find("`git checkout main -- <path>`")
-    save_points = [done.stdout.find(text) for text in (
-        "if `git status --porcelain -- <path>` prints anything",
-        "`git diff --cached HEAD -- <path> > <a file outside this checkout>`",
-        "`git diff -- <path> > <another file outside this checkout>`")]
-    check("it says to save the file's staged and unstaged changes before the git "
-          "checkout that overwrites them",
-          all(0 <= at < checkout_at for at in save_points), done.stdout)
-    advice_saves_a_staged_change_the_working_tree_undoes(scratch / "staged")
+    check("it says the file has nothing uncommitted to save, before the git checkout",
+          0 <= done.stdout.find("  Nothing to save, shared file.txt: it has no uncommitted "
+                                "changes")
+          < done.stdout.find("`git checkout main -- <path>`"), done.stdout)
 
+    for case_name, prepare, saved_what, saved_text in (
+            ("a working copy removed from the index with `git rm --cached`",
+             lambda repository, path: (
+                 (repository.directory / path).write_text("uncommitted work\n"),
+                 repository.git("rm", "--quiet", "--cached", path)),
+             "working copy", "uncommitted work\n"),
+            ("a staged change the working tree has undone",
+             lambda repository, path: (
+                 (repository.directory / path).write_text("staged work\n"),
+                 repository.git("add", path),
+                 (repository.directory / path).write_text("old\n")),
+             "staged version", "staged work\n")):
+        repository = Repository(scratch / ("saved-" + saved_what.replace(" ", "-")))
+        squashed_branch(repository)
+        prepare(repository, "shared file.txt")
+        done = repository.run_check("--base", "main")
+        saved = [line.split(", whole, at ", 1)[1] for line in done.stdout.splitlines()
+                 if line.startswith("  Saved, shared file.txt: its uncommitted %s, whole, "
+                                    "at " % saved_what)]
+        checkout = [command for command in done.stdout.split("`")
+                    if command.startswith("git checkout main -- ")]
+        if saved and checkout:
+            repository.git(*["shared file.txt" if word == "<path>" else word
+                             for word in checkout[0].split(" ")[1:]])
+        check("for %s, the check saves the %s whole before the git checkout it prints, and "
+              "after that checkout the saved copy still holds the work" % (case_name, saved_what),
+              done.returncode == 1 and len(saved) == 1 and len(checkout) == 1
+              and (repository.directory / "shared file.txt").read_text() == "new\n"
+              and Path(saved[0]).read_text() == saved_text
+              and Path(saved[0]).is_relative_to(repository.directory / ".git"),
+              done.stdout + done.stderr)
+
+    repository = Repository(scratch / "save-fails")
+    squashed_branch(repository)
+    (repository.directory / "shared file.txt").write_text("uncommitted work\n")
+    (repository.directory / ".git" / "branch-reverts-check-saved-copies").write_text("")
+    done = repository.run_check("--base", "main")
+    check("when the check cannot save a copy, it still gives its verdict and tells the "
+          "agent to copy the file itself before the git checkout",
+          done.returncode == 1
+          and 0 <= done.stdout.find("  Not saved, shared file.txt: this check could not save "
+                                    "its working copy to ")
+          < done.stdout.find("`git checkout main -- <path>`")
+          and "Copy the file outside this checkout yourself" in done.stdout,
+          done.stdout + done.stderr)
+
+    repository = Repository(scratch / "squashed-named")
+    replaced = squashed_branch(repository)
     repository.git("commit", "--quiet", "--allow-empty", "-m",
                    "Undo %s on purpose" % replaced[:12])
     done = repository.run_check("--base", "main")

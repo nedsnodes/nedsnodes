@@ -36,14 +36,22 @@ an old copy of them in another.
 Exit 0 when no file is set back, printing a `VERDICT: CLEAN` line on stdout.
 Exit 1 when one is, printing on stdout a
 `VERDICT: BRANCH-REVERTS-A-FILE-TO-AN-OLDER-MAIN-VERSION` line, then one line
-per file naming the base's commit it undoes, then what to do. Exit 2 when git
+per file naming the base's commit it undoes, then what to do. Before it says to
+run `git checkout <base> -- <path>`, which overwrites a file in the index and the
+working tree, it copies each reported file's working copy and its staged version,
+where either differs from HEAD's, into a new directory under the repository's
+git directory (SAVED_COPIES_DIRECTORY_NAME), and prints where each copy is. It
+copies the whole file, not a diff, because no `git diff` holds the text of a
+working copy that is not in the index, such as after `git rm --cached`. Exit 2 when git
 fails, so no verdict can be given, printing nothing on stdout and, on stderr,
 the failed git command and its error."""
 
 import argparse
+import os
 import re
 import subprocess
 import sys
+import time
 
 DEFAULT_BASE = "origin/main"
 # Long enough for a commit held unpushed for weeks; an undo older than this is
@@ -55,6 +63,10 @@ SHORT_COMMIT_LENGTH = 12
 EXIT_NOTHING_REVERTED = 0
 EXIT_REVERTED = 1
 EXIT_NO_ANSWER = 2
+
+# Under the git directory, so the checkout the advice names cannot touch it and
+# the operating system's temporary-file cleanup does not remove it.
+SAVED_COPIES_DIRECTORY_NAME = "branch-reverts-check-saved-copies"
 
 REVERTS_VERDICT_PREFIX = "VERDICT: BRANCH-REVERTS-A-FILE-TO-AN-OLDER-MAIN-VERSION"
 HEX_WORD = re.compile(r"\b[0-9a-f]{%d,40}\b" % SHORT_COMMIT_LENGTH)
@@ -75,6 +87,20 @@ def run_git(arguments, input_text=None):
     if done.returncode != 0:
         raise GitFailed("`%s` exited %d: %s" % (" ".join(command), done.returncode,
                                                 done.stderr.strip()))
+    return done.stdout
+
+
+def run_git_bytes(arguments):
+    """Return git's stdout as bytes, or raise GitFailed naming the command and its error."""
+    command = ["git"] + arguments
+    try:
+        done = subprocess.run(command, capture_output=True)
+    except (OSError, ValueError) as error:
+        raise GitFailed("`%s` could not be started: %s" % (" ".join(command), error))
+    if done.returncode != 0:
+        raise GitFailed("`%s` exited %d: %s" % (
+            " ".join(command), done.returncode,
+            done.stderr.decode("utf-8", "replace").strip()))
     return done.stdout
 
 
@@ -156,7 +182,67 @@ def commit_subject(commit):
     return run_git(["log", "-1", "--format=%s", commit]).strip()
 
 
-def report_lines(head_hash, base, reverted):
+def blob_listed(listing, field):
+    """Return field `field` of the first `git ls-tree -z` or `git ls-files -s -z` entry, or None.
+
+    ls-tree prints `mode type blob`, so the blob is field 2; ls-files -s prints
+    `mode blob stage`, so it is field 1."""
+    entry = listing.split(b"\0")[0]
+    if not entry:
+        return None
+    return entry.split(b"\t")[0].split()[field].decode()
+
+
+def save_uncommitted_copies(reverted):
+    """Copy each reported file's working copy and staged version that differ from HEAD's.
+
+    Returns (directory, {path: [(what, saved path)]}, {path: error}); directory is
+    None when nothing needed saving."""
+    top = run_git(["rev-parse", "--show-toplevel"]).strip()
+    git_directory = run_git(["rev-parse", "--path-format=absolute",
+                             "--git-common-dir"]).strip()
+    wanted = {}
+    for path, _ in reverted:
+        head_blob = blob_listed(run_git_bytes(["ls-tree", "-z", "HEAD", "--", path]), 2)
+        head_bytes = (run_git_bytes(["cat-file", "blob", head_blob])
+                      if head_blob else None)
+        index_blob = blob_listed(run_git_bytes(["ls-files", "-s", "-z", "--", path]), 1)
+        copies = []
+        if index_blob and index_blob != head_blob:
+            copies.append(("staged version",
+                           run_git_bytes(["cat-file", "blob", index_blob])))
+        working = os.path.join(top, path)
+        if os.path.isfile(working):
+            with open(working, "rb") as handle:
+                working_bytes = handle.read()
+            if working_bytes != head_bytes:
+                copies.append(("working copy", working_bytes))
+        if copies:
+            wanted[path] = copies
+    if not wanted:
+        return None, {}, {}
+    directory = os.path.join(git_directory, SAVED_COPIES_DIRECTORY_NAME,
+                             time.strftime("%Y-%m-%dT%H-%M-%S") + "-%d" % os.getpid())
+    saved, errors = {}, {}
+    for number, (path, copies) in enumerate(sorted(wanted.items()), start=1):
+        for what, content in copies:
+            target = os.path.join(directory, "%d-%s-%s" % (
+                number, what.replace(" ", "-"), os.path.basename(path)))
+            try:
+                os.makedirs(directory, exist_ok=True)
+                with open(target, "wb") as handle:
+                    handle.write(content)
+                with open(target, "rb") as handle:
+                    if handle.read() != content:
+                        raise OSError("the copy read back differs from the file")
+            except OSError as error:
+                errors[path] = "could not save its %s to %s: %s" % (what, target, error)
+                break
+            saved.setdefault(path, []).append((what, target))
+    return directory, saved, errors
+
+
+def report_lines(head_hash, base, reverted, saved=None, save_errors=None):
     head_label = head_hash[:SHORT_COMMIT_LENGTH]
     if not reverted:
         return ["VERDICT: CLEAN -- %s sets no file back to a version that %s replaced "
@@ -171,13 +257,26 @@ def report_lines(head_hash, base, reverted):
     lines += [
         "This usually means the branch was squashed or rebuilt from an index older "
         "than its new base, such as with `git reset --soft %s`." % base,
-        "If you did not mean to undo that commit, then for each file above: if "
-        "`git status --porcelain -- <path>` prints anything, save the file's staged "
-        "changes with `git diff --cached HEAD -- <path> > <a file outside this "
-        "checkout>` and its unstaged changes with `git diff -- <path> > <another file "
-        "outside this checkout>`, because the next command overwrites both, in the index "
-        "and in the working tree; run `git checkout %s -- <path>`; put this branch's own "
-        "changes to the file, and any you saved, back on top; and commit." % base,
+    ]
+    saved = saved or {}
+    save_errors = save_errors or {}
+    for path, _ in reverted:
+        if path in save_errors:
+            lines.append("  Not saved, %s: this check %s. Copy the file outside this "
+                         "checkout yourself, and its staged version with `git show "
+                         ":<path>` if it has one, before the git checkout below."
+                         % (path, save_errors[path]))
+        elif path in saved:
+            for what, target in saved[path]:
+                lines.append("  Saved, %s: its uncommitted %s, whole, at %s"
+                             % (path, what, target))
+        else:
+            lines.append("  Nothing to save, %s: it has no uncommitted changes" % path)
+    lines += [
+        "If you did not mean to undo that commit, then for each file above run `git "
+        "checkout %s -- <path>`, which overwrites the file in the index and the working "
+        "tree; put this branch's own changes to the file, and those in its saved copies, "
+        "back on top; and commit." % base,
         "If you mean to undo it: name the commit, by at least its first %d "
         "characters, in a commit message on this branch, as `git revert` does."
         % SHORT_COMMIT_LENGTH,
@@ -193,7 +292,10 @@ def main(argv=None):
     args = parser.parse_args(argv)
     try:
         head_hash, reverted = find_reverted_files(args.head, args.base)
-        lines = report_lines(head_hash, args.base, reverted)
+        saved, save_errors = {}, {}
+        if reverted:
+            _, saved, save_errors = save_uncommitted_copies(reverted)
+        lines = report_lines(head_hash, args.base, reverted, saved, save_errors)
     except GitFailed as error:
         print("branch-reverts-a-file-to-an-older-main-version-check: could not tell "
               "whether this branch sets a file back to a version %s has replaced, because "
