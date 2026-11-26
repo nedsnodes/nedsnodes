@@ -131,7 +131,7 @@ task already raised for its current prerequisites; of a task held by
 blockedBy, only its `pr_merged` pull requests not yet raised as closed without
 merging are checked. Tasks no blockedBy holds are checked first, so a held
 task's checks spend only the budget they leave. A condition not checked
-because less than GH_CALL_SHORTEST_ANSWER_SECONDS of the budget is left is answered not met and not cached, so the next
+because less than GH_CALLS_BUDGET_LEFT_MINIMUM_TO_MAKE_A_CALL_SECONDS of the budget is left is answered not met and not cached, so the next
 stop asks gh, and this stop counts the open tasks that wait on it, as OUTPUT
 says. An agent-seat whose tasks have no prerequisites makes no
 network call. The same call
@@ -186,11 +186,10 @@ without merging and, when there is any, the instructions for re-planning it,
 then two lines per prerequisites list the hook cannot use, then the
 next-action prompt's lines, then one line per condition gh could not answer
 at this stop, then, when the budget left a condition unchecked, one line
-counting those conditions and the open tasks that wait on them. Nothing to raise or name and no next-action prompt:
-nothing printed, exit 0. A fault, such as a payload
+counting those conditions and the open tasks that wait on them. Nothing to raise or name and no next-action prompt, a budget skip
+included, since it asks nothing: nothing printed, exit 0. A fault, such as a payload
 that is not a JSON object, a state file that cannot be written, a condition
-gh could not answer or the budget left unchecked at a stop with nothing else
-to print, or any exception:
+gh could not answer at a stop with nothing else to print, or any exception:
 one line on stderr naming the hook and the fault, nothing on stdout, exit 1.
 The line for a failed state write says how many due tasks went unraised, or
 that none was due, and that the first stop after the state file can be
@@ -265,7 +264,7 @@ GH_CALL_TIMEOUT_SECONDS = 8
 GH_CALLS_TOTAL_BUDGET_SECONDS = 20
 # One `gh pr view` took 0.59 seconds on ned-box on 2026-11-26; with less time left than this, a
 # call can only time out, which would be reported as a GitHub failure.
-GH_CALL_SHORTEST_ANSWER_SECONDS = 2
+GH_CALLS_BUDGET_LEFT_MINIMUM_TO_MAKE_A_CALL_SECONDS = 2
 
 # condition kind -> (gh subcommand, the gh state that means met, the ID-type
 # written in the raise line, the word for met in the raise line)
@@ -628,7 +627,7 @@ class GitHubConditionChecker:
         unanswered = [(kind, number) for kind, number in dict.fromkeys(conditions)
                       if kind in CONDITION_KINDS and self.usable_cached_answer(kind, number) is None]
         remaining = self.budget_left_seconds()
-        if not unanswered or remaining < GH_CALL_SHORTEST_ANSWER_SECONDS:
+        if not unanswered or remaining < GH_CALLS_BUDGET_LEFT_MINIMUM_TO_MAKE_A_CALL_SECONDS:
             return
         answers = self.ask_gh_in_one_query(unanswered, min(GH_CALL_TIMEOUT_SECONDS, remaining))
         for (kind, number), fresh in answers.items():
@@ -639,7 +638,7 @@ class GitHubConditionChecker:
         if cached is not None:
             return cached
         remaining = self.budget_left_seconds()
-        if remaining < GH_CALL_SHORTEST_ANSWER_SECONDS:
+        if remaining < GH_CALLS_BUDGET_LEFT_MINIMUM_TO_MAKE_A_CALL_SECONDS:
             # Not cached, so the next stop asks gh about it.
             self.conditions_skipped_for_budget.append((kind, number))
             return {"met": False}
@@ -1237,8 +1236,8 @@ def run(stdin_text: str, environment, home: Path, now: datetime) -> "str | None"
     state_changed = state_changed or checker.changed
     gh_failure_lines = [gh_failure_line(kind, number, cause)
                         for kind, number, cause in dict.fromkeys(checker.gh_failures)]
-    gh_failure_lines += budget_skipped_task_lines(tasks, checker.conditions_skipped_for_budget,
-                                                  state["raised"])
+    budget_skipped_lines = budget_skipped_task_lines(
+        tasks, checker.conditions_skipped_for_budget, state["raised"])
     if state_changed:
         try:
             write_state_atomically(state_path, state)
@@ -1253,8 +1252,8 @@ def run(stdin_text: str, environment, home: Path, now: datetime) -> "str | None"
                             f"{error}") from error
     if not lines and not closed_lines and not problem_lines and not next_action_lines:
         if gh_failure_lines:
-            raise HookFault(" ".join(gh_failure_lines))
-        return None
+            raise HookFault(" ".join(gh_failure_lines + budget_skipped_lines))
+        return None  # a budget skip alone asks nothing, so it is no fault
     defer_lines = [DEFER_INSTRUCTION] if lines else []
     if closed_lines:
         closed_lines += CLOSED_WITHOUT_MERGING_INSTRUCTIONS
@@ -1262,7 +1261,8 @@ def run(stdin_text: str, environment, home: Path, now: datetime) -> "str | None"
         "hookSpecificOutput": {
             "hookEventName": "Stop",
             "additionalContext": "\n".join(lines + defer_lines + closed_lines + problem_lines
-                                           + next_action_lines + gh_failure_lines),
+                                           + next_action_lines + gh_failure_lines
+                                           + budget_skipped_lines),
         }
     }, ensure_ascii=False)
 

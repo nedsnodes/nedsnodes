@@ -1094,13 +1094,13 @@ def slow_timing_out_gh(command, *arguments, **keywords):
 
 
 real_budget = hook.GH_CALLS_TOTAL_BUDGET_SECONDS
-real_shortest_answer = hook.GH_CALL_SHORTEST_ANSWER_SECONDS
+real_shortest_answer = hook.GH_CALLS_BUDGET_LEFT_MINIMUM_TO_MAKE_A_CALL_SECONDS
 real_clock = hook.GitHubConditionChecker.clock
 real_home = os.environ.get("HOME")
 hook.subprocess.run = slow_timing_out_gh
 hook.GitHubConditionChecker.clock = staticmethod(lambda: fake_clock_seconds[0])
 hook.GH_CALLS_TOTAL_BUDGET_SECONDS = 0.3
-hook.GH_CALL_SHORTEST_ANSWER_SECONDS = 0.05
+hook.GH_CALLS_BUDGET_LEFT_MINIMUM_TO_MAKE_A_CALL_SECONDS = 0.05
 os.environ["HOME"] = str(seat.home)  # the handoff module finds its markers under Path.home()
 try:
     output = hook.run(json.dumps({
@@ -1112,7 +1112,7 @@ finally:
     hook.subprocess.run = real_subprocess_run
     hook.GitHubConditionChecker.clock = real_clock
     hook.GH_CALLS_TOTAL_BUDGET_SECONDS = real_budget
-    hook.GH_CALL_SHORTEST_ANSWER_SECONDS = real_shortest_answer
+    hook.GH_CALLS_BUDGET_LEFT_MINIMUM_TO_MAKE_A_CALL_SECONDS = real_shortest_answer
     if real_home is None:
         os.environ.pop("HOME", None)
     else:
@@ -1135,7 +1135,7 @@ check("one GitHub budget for the whole run: each condition gh could not answer i
 
 # --- the GitHub budget goes to tasks no blockedBy holds, and a skip is reported ---------------
 # Each fake gh call moves the budget's clock by `seconds_per_call`; the budget is the real one.
-def run_with_fake_gh(seconds_per_call, merged, action, closed_without_merging=()):
+def run_with_fake_gh(seconds_per_call, merged, action, closed_without_merging=(), failing=False):
     """Run `action()` with gh answered in-process; returns (its result, the numbers gh was asked about)."""
     clock_seconds = [0.0]
     asked = []
@@ -1143,6 +1143,8 @@ def run_with_fake_gh(seconds_per_call, merged, action, closed_without_merging=()
     def fake_ask_gh(kind, number, timeout_seconds):
         asked.append(number)
         clock_seconds[0] += seconds_per_call
+        if failing:
+            return {"gh_failure": "gh failed"}
         return {"met": number in merged,
                 hook.CLOSED_WITHOUT_MERGING_ANSWER_KEY: number in closed_without_merging,
                 "title": f"T{number}", "url": f"https://x/{number}"}
@@ -1220,9 +1222,9 @@ try:
     fault = None
 except hook.HookFault as error:
     output, fault = None, str(error)
-check("budget spent, with nothing else to say: the skip is a fault, so it does not keep the "
-      "agent from stopping",
-      fault == budget_skipped_line(1, 1), (output, fault))
+# The user saw "Stop hook failed" for a budget skip alone on 2026-11-26, though it asks nothing.
+check("budget spent, with nothing else to say: silent, exit 0, no fault",
+      output is None and fault is None, (output, fault))
 
 seat = Seat()
 seat.task("4", metadata={"prerequisites": [{"pr_merged": 401}]})
@@ -1231,15 +1233,27 @@ seat.task("6", metadata={"prerequisites": [{"pr_merged": 501}]}, subject="raised
 seat.state_path.parent.mkdir(parents=True)
 seat.state_path.write_text(json.dumps({"raised": {"6": {"prerequisites": hook.canonical_prerequisites(
     [{"pr_merged": 501}])}}, "checks": {}}))
+output, asked = run_with_fake_gh(hook.GH_CALLS_TOTAL_BUDGET_SECONDS, {401},
+                                 lambda: hook_run_in_process(seat))
+text = json.loads(output)["hookSpecificOutput"]["additionalContext"] if output else ""
+check("budget spent before a condition that an unraised task and an already-raised task share: "
+      "only the unraised task is counted",
+      "Act on task 4 " in text and text.endswith("\n" + budget_skipped_line(1, 1)), text)
+
+# A gh failure is still a fault, and the budget line goes with it.
+seat = Seat()
+seat.task("8", metadata={"prerequisites": [{"pr_merged": 801}]})
+seat.task("9", metadata={"prerequisites": [{"pr_merged": 802}]})
 try:
     output, asked = run_with_fake_gh(hook.GH_CALLS_TOTAL_BUDGET_SECONDS, set(),
-                                     lambda: hook_run_in_process(seat))
+                                     lambda: hook_run_in_process(seat), failing=True)
     fault = None
 except hook.HookFault as error:
     output, fault = None, str(error)
-check("budget spent before a condition that an unraised task and an already-raised task share: "
-      "only the unraised task is named as not raised",
-      fault == budget_skipped_line(1, 1), (output, fault))
+check("gh failing and the budget spent, nothing else to say: a fault naming the failure, then "
+      "the budget line",
+      fault is not None and fault.startswith("This hook could not ask GitHub whether PR 801")
+      and fault.endswith(budget_skipped_line(1, 1)), (output, fault))
 
 seat = Seat()
 seat.task("7", metadata={"prerequisites": [{"pr_merged": 701}, {"pr_merged": 702}]},
@@ -1283,7 +1297,7 @@ check("budget spent by a held task in the due-task pass: the next-action prompt 
 CountingChecker.clock = staticmethod(lambda: 0.0)
 checker = CountingChecker({}, 0)
 CountingChecker.asked = []
-checker.started = hook.GH_CALL_SHORTEST_ANSWER_SECONDS - hook.GH_CALLS_TOTAL_BUDGET_SECONDS
+checker.started = hook.GH_CALLS_BUDGET_LEFT_MINIMUM_TO_MAKE_A_CALL_SECONDS - hook.GH_CALLS_TOTAL_BUDGET_SECONDS
 checker.answer("pr_merged", 2)
 check("budget boundary: a call is made while a real call's time is left, and no skip is recorded",
       CountingChecker.asked == [("pr_merged", 2)]
@@ -1292,7 +1306,7 @@ check("budget boundary: a call is made while a real call's time is left, and no 
 # failing, with the advice to run `gh auth login`.
 checker = CountingChecker({}, 0)
 CountingChecker.asked = []
-checker.started = hook.GH_CALL_SHORTEST_ANSWER_SECONDS - 0.0887 - hook.GH_CALLS_TOTAL_BUDGET_SECONDS
+checker.started = hook.GH_CALLS_BUDGET_LEFT_MINIMUM_TO_MAKE_A_CALL_SECONDS - 0.0887 - hook.GH_CALLS_TOTAL_BUDGET_SECONDS
 answer = checker.answer("pr_merged", 3)
 check("budget boundary: with less than a real call's time left, gh is not asked, and the "
       "condition is skipped for the budget, not reported as a gh failure",
