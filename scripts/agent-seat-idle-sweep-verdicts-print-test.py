@@ -463,6 +463,21 @@ try:
               [(s["kind"], s["code_reading"]) for s in verdicts["alpha"]["sentences"]]
               == [("announced_action", "judge")] and verdicts["alpha"].get("rule") == 2,
               verdicts["alpha"])
+    for sentence in ("I'm starting nothing else until the load drops.",
+                     "I'll open no more pull requests today or tomorrow."):
+        machine = Machine()
+        machine.seat("alpha", [user("go"), assistant(sentence), turn_end()])
+        _, verdicts, _ = machine.run()
+        check(f"a sentence that declines until an event goes to the judge, with no task: {sentence!r}",
+              [(s["kind"], s["code_reading"]) for s in verdicts["alpha"]["sentences"]]
+              == [("promise_after_event", "judge")] and verdicts["alpha"].get("rule") == 2,
+              verdicts["alpha"])
+    machine = Machine()
+    machine.seat("alpha", [user("go"), assistant("I'll report when PR 927 merges."), turn_end()])
+    _, verdicts, _ = machine.run()
+    check("a promise phrase with no task that could back it is unbacked without the judge",
+          [(s["kind"], s["code_reading"]) for s in verdicts["alpha"]["sentences"]]
+          == [("promise_after_event", "unbacked")], verdicts["alpha"])
     machine = Machine()
     machine.seat("alpha", [user("go"),
                            assistant("Here is the diff.\n```\n-old\n+new\n```\nI'll push it now."),

@@ -258,11 +258,16 @@ def _announces(sentence):
     return bool(match and _gerund_announces(sentence, match))
 
 
+def promise_phrase_kind(sentence):
+    """Return the kind of the first promise phrase the sentence matches, or None."""
+    return next((kind for kind, pattern in PROMISE_PHRASES if pattern.search(sentence)), None)
+
+
 def sentence_kind(sentence):
     """Return the kind of a sentence the phrase lists match, or None for a sentence they miss."""
     if sentence.endswith("?"):
         return None
-    kind = next((kind for kind, pattern in PROMISE_PHRASES if pattern.search(sentence)), None)
+    kind = promise_phrase_kind(sentence)
     if kind is None and not _announces(sentence):
         return None
     # The user has the next move whatever else the sentence promises.
@@ -763,11 +768,14 @@ def sets_prerequisites_or_blocked_by(task_tool_input):
                 or task_tool_input.get("addBlockedBy"))
 
 
-def code_reading_of_sentence(kind, turn_started_at, task_tool_calls, open_waiting_tasks):
+def code_reading_of_sentence(sentence, kind, turn_started_at, task_tool_calls, open_waiting_tasks):
     """What code settles about one matched sentence: not_raised, unbacked, or judge.
 
     A task created or updated in the sentence's turn or after it may back the sentence, and so may
-    any open task that waits on something, however old."""
+    any open task that waits on something, however old. Code settles a sentence unbacked only when
+    a promise phrase matched it: one that the announced-action phrases matched beside a word such as
+    "tomorrow" may only decline an action, as "I'll open no more pull requests today or tomorrow."
+    does, and whether it declines is the judge's to decide."""
     if kind == CONDITIONAL_ON_USER:
         return fields.NOT_RAISED
     if kind in (PROMISE_AFTER_EVENT, HOLD):
@@ -776,7 +784,9 @@ def code_reading_of_sentence(kind, turn_started_at, task_tool_calls, open_waitin
         backing_candidates = [call for call in task_tool_calls
                               if call[0] and turn_started_at and call[0] >= turn_started_at
                               and sets_prerequisites_or_blocked_by(call[2])]
-        return fields.JUDGE if backing_candidates else fields.UNBACKED
+        if backing_candidates or promise_phrase_kind(sentence) is None:
+            return fields.JUDGE
+        return fields.UNBACKED
     return fields.JUDGE
 
 
@@ -795,7 +805,7 @@ def matched_sentences(facts, since, open_waiting_tasks):
             found.append({"record_uuid": record.get("uuid"), "time": iso(moment),
                           "sentence": sentence, "kind": kind,
                           "code_reading": code_reading_of_sentence(
-                              kind, turn_started_at or moment, facts.task_tool_calls,
+                              sentence, kind, turn_started_at or moment, facts.task_tool_calls,
                               open_waiting_tasks)})
     return found
 
