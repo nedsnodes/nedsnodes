@@ -952,16 +952,17 @@ _dispatcher_spec = importlib.util.spec_from_file_location(
     "bash_guard_hooks_dispatcher", HOOK_SCRIPT.resolve().with_name("bash-guard-hooks-dispatcher.py"))
 DISPATCHER = importlib.util.module_from_spec(_dispatcher_spec)
 _dispatcher_spec.loader.exec_module(DISPATCHER)
+GUARD_LIST_PATH = DISPATCHER.BASH_GUARD_HOOKS_DISPATCHER_GUARD_LIST_REPOSITORY_PATH
 
 
 def guard_not_wired_once_failure_detail(entries):
     return "\n".join([
-        f"found {entries}; .claude/settings.json must register "
-        f".claude/guard-hooks/force-push-with-open-pull-request-guard-hook.py exactly once, in the PreToolUse "
-        f"block whose matcher is Bash, so that the guard runs once before each Bash command.",
-        "If your change removed, duplicated or moved that entry, put back exactly one entry in "
-        "that block.",
-        RULE_FAILURE_LINES.guarded_file_fix_failure_message_line_pointing_to_approval_page_and_guard_refusal(".claude/settings.json"),
+        f"found {entries}; .claude/guard-hooks/force-push-with-open-pull-request-guard-hook.py must be "
+        f"registered exactly once, counting its entries in {GUARD_LIST_PATH} and its entries in a "
+        f"PreToolUse block of .claude/settings.json whose matcher is Bash, so that the guard runs once "
+        f"before each Bash command.",
+        f"If your change removed, duplicated or moved that entry, leave exactly one entry, in {GUARD_LIST_PATH}.",
+        RULE_FAILURE_LINES.guarded_file_fix_failure_message_line_pointing_to_approval_page_and_guard_refusal(GUARD_LIST_PATH),
         RULE_FAILURE_LINES.FAILURE_MAY_COME_FROM_MAIN_NOT_YOUR_CHANGE_REPORT_IT_CLOSING_LINE])
 
 
@@ -1020,12 +1021,14 @@ unregistered_passed, unregistered_detail = wiring_case_outcome(
 check("an unregistered guard's failure says where it must be registered and why, the fix, the "
       "guarded-file line and the line for a rule main broke",
       not unregistered_passed and unregistered_detail.split("\n") == [
-          "found []; .claude/settings.json must register "
-          ".claude/guard-hooks/force-push-with-open-pull-request-guard-hook.py exactly once, in the PreToolUse "
-          "block whose matcher is Bash, so that the guard runs once before each Bash command.",
-          "If your change removed, duplicated or moved that entry, put back exactly one entry in "
-          "that block.",
-          RULE_FAILURE_LINES.guarded_file_fix_failure_message_line_pointing_to_approval_page_and_guard_refusal(".claude/settings.json"),
+          "found []; .claude/guard-hooks/force-push-with-open-pull-request-guard-hook.py must be "
+          "registered exactly once, counting its entries in .claude/guard-hooks/bash-guard-hooks-dispatcher-guard-list.json "
+          "and its entries in a PreToolUse block of .claude/settings.json whose matcher is Bash, so that the "
+          "guard runs once before each Bash command.",
+          "If your change removed, duplicated or moved that entry, leave exactly one entry, in "
+          ".claude/guard-hooks/bash-guard-hooks-dispatcher-guard-list.json.",
+          RULE_FAILURE_LINES.guarded_file_fix_failure_message_line_pointing_to_approval_page_and_guard_refusal(
+              ".claude/guard-hooks/bash-guard-hooks-dispatcher-guard-list.json"),
           RULE_FAILURE_LINES.FAILURE_MAY_COME_FROM_MAIN_NOT_YOUR_CHANGE_REPORT_IT_CLOSING_LINE],
       unregistered_detail)
 short_timeout_passed, short_timeout_detail = wiring_case_outcome(
