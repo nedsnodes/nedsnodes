@@ -1004,7 +1004,7 @@ GIT_REV_PARSE_OPTIONS_THAT_SEE_NO_FILE = frozenset((
 GIT_CONFIG_OPTIONS_THAT_READ_ONE_KEY = ("--get", "--get-all")
 # These commands do not treat the current directory as a work tree.
 GIT_COMMANDS_THAT_READ_NO_WORK_TREE = frozenset((
-    "rev-parse", "log", "show", "cat-file", "for-each-ref", "config"))
+    "rev-parse", "log", "show", "cat-file", "for-each-ref", "config", "update-ref"))
 # Calls of these commands with only these options answer the same whatever files are added or
 # deleted, apart from the work-tree paths work_tree_paths_a_git_call_not_tied_to_the_file_list_consults
 # names. A call with any other option, or of any other command, stays tied to the list of files.
