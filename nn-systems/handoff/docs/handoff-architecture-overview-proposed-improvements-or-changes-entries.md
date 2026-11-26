@@ -1257,3 +1257,27 @@ The claim check's evidence:
 > - The writer takes them from the supervisor, not from the module: handoff-write-and-check-supervisor.py:152-154.
 > - Ranked fix-later: renaming one of these fields still takes one edit, in handoff-supervisor.py, and a search finds it.
 State: open
+
+## E108 — possible problem: an assertion of the overview is contradicted
+
+Claim: Before it runs the extractor, the handoff-supervisor stores as the agent-seat's Remote Control name a new title that the outgoing agent-session's transcript holds and the rename hook did not store, and then adds to the successor's initial-agent-instructions the instruction to tell the other agent-seats the new name.
+Found by: the overview claim check of 2026-11-26 against commit a0c4ae7e7c94df549833c314475cb29bccdfb5c9; its report is /home/nedlern/nedsnodes-logs/overview-write-architecture-overview-claim-check-reports/nedsnodes-handoff-architecture-overview/4f7bb24b453c98f9b097d062ae2510e15811b6fc-2026-11-26T19-53-23-420718Z.md.
+Fixed by: regular maintenance, in the overview.
+Goes wrong when: a reader takes the assertion as exact.
+The claim check's evidence:
+> - nn-systems/handoff/handoff-supervisor.py:2620-2621: `# Any name the others may know the agent-seat by, other than the current one, gets a line:` / `# the Stop hook may have stored a name the agent-session handed off before announcing.`
+> - nn-systems/handoff/handoff-supervisor.py:2622-2625: the old names come from the launched name, the names announced since launch, and `rename.old_name`. The instruction is added whenever the stored name differs from any of them, even when the rename hook stored the name. The overview ties the instruction to a name the handoff-supervisor stored itself.
+State: open
+
+## E109 — possible problem: an assertion of the overview is contradicted
+
+Claim: `CLAUDE_CODE_TASK_LIST_ID` and `GIT_AUTHOR_NAME` are set by the launchers and by recovery on ned-box. The first is required by the handoff-supervisor and names the task list the writer prunes; the second names the agent-seat in `uncommitted-work-snapshots.py`.
+Found by: the overview claim check of 2026-11-26 against commit a0c4ae7e7c94df549833c314475cb29bccdfb5c9; its report is /home/nedlern/nedsnodes-logs/overview-write-architecture-overview-claim-check-reports/nedsnodes-handoff-architecture-overview/4f7bb24b453c98f9b097d062ae2510e15811b6fc-2026-11-26T19-53-23-420718Z.md.
+Fixed by: regular maintenance, in the overview.
+Goes wrong when: a reader takes the assertion as exact.
+The claim check's evidence:
+> - The setters are borne out (row 81).
+> - The readers are incomplete. Two components the overview lists elsewhere also read these variables:
+>   - scripts/worktree-owner-file-read-and-write.py:47-48: `--agent-session names the nearest \`claude\` process among this program's` / `parent processes, and the agent-seat GIT_AUTHOR_NAME names`
+>   - nn-systems/handoff/uncommitted-work-snapshots.py:950: `task_list = Path.home() / ".claude" / "tasks" / environment[TASK_LIST_ENVIRONMENT_VARIABLE]` (restore needs the first too, line 45)
+State: open
