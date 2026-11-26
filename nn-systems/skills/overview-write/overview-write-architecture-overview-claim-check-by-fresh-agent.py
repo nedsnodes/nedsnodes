@@ -14,14 +14,15 @@ a program so that no step depends on an agent remembering it:
 4. Stage 2: splits the overview into claims, one per sentence and one per
    line of a fenced block, headings, the **Checked against:** line and the
    pointer line of step 7 left out, each keyed by its whitespace-normalized
-   text. It reads the claim
-   records of the newest report for the overview, whatever overview blob that
-   report names, that holds claim records. A claim keeps its recorded verdict
-   and evidence when that verdict is supported, the files it rests on have the
-   same git blobs at this commit as recorded, it rests on at least one file,
-   and --writer-answers FILE does not quote it. The files a claim rests on are
-   the repository paths its text names in backticks and those its evidence
-   names, a bare file name counting when one file in the commit has it. Every
+   text. It reads the claim records of the newest report for the overview,
+   whatever overview blob that report names, that holds claim records; with
+   no such report, no claim keeps a verdict. A claim keeps its recorded
+   verdict and evidence when that verdict is supported, the files it rests on
+   have the same git blobs at this commit as recorded, it rests on at least
+   one file, and --writer-answers FILE does not quote it. The files a claim
+   rests on are the repository paths its text names in backticks and those
+   its evidence names; a bare file name counts when exactly one file in the
+   commit has it, and is otherwise passed over. Every
    other claim goes, numbered from 1, to one fresh-agent, `claude -p` with
    hooks disabled and only read and search tools, in that worktree, with the
    whole overview for context; when no claim does, no fresh-agent runs. The
@@ -228,7 +229,7 @@ Give each contradicted or unsupported assertion one of three ranks:
 """
 
 FRESH_AGENT_PROMPT_TEMPLATE = """\
-You are the fresh-agent of stage 2 of the section "Checking an overview" in {page}. Read that page, and read the nn-architecture-overview {overview} for context. Then check each assertion listed below, a sentence of that overview, against the repository in your working directory, a checkout at commit {commit}, which the overview's last line names. Stage 1 has passed. Check each assertion as stage 2 of the page says. An assertion the page says is not checked against the code, such as what the system is for or a one-clause reason, gets the verdict supported with the evidence line `not checked against the code`. Name each file in your evidence by its path from the top of the repository, as in `nn-systems/handoff/handoff-supervisor.py:2333`: a program compares those files at later commits to decide which verdicts it keeps without a new check. You have the Read, Grep and Glob tools only, and cannot change files or run commands.
+You are the fresh-agent of stage 2 of the section "Checking an overview" in {page}. Read that page, and read the nn-architecture-overview {overview} for context. Then check each assertion listed below, a sentence or a diagram line of that overview, against the repository in your working directory, a checkout at commit {commit}, which the overview's last line names. Stage 1 has passed. Check each assertion as stage 2 of the page says. An assertion the page says is not checked against the code, such as what the system is for, gets the verdict supported with the evidence line `not checked against the code`; an assertion that also gives a one-clause reason is checked on what it says about the code. Name each file in your evidence, each file an absence's searches covered included, by its path from the top of the repository, as in `nn-systems/handoff/handoff-supervisor.py:2333`: a program compares those files at later commits to decide which verdicts it keeps without a new check. You have the Read, Grep and Glob tools only, and cannot change files or run commands.
 {ranks}{writer_answers}
 The assertions to check:
 {assertions}
