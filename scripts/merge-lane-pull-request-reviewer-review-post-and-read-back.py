@@ -141,8 +141,8 @@ even when the review is posted as a comment.
 For a review with a verdict, the success line also counts the reviewer's findings
 that lack, or leave unanswered, one of the hashtag lines docs/agents/pr-reviewer-instructions.md asks
 each finding on code to end with, FINDING_FACT_LINE_HASHTAGS, and names each such finding and the hashtags it
-lacks; a line that starts with the older label a hashtag replaced, from FINDING_FACT_LINE_OLDER_LABELS, counts
-as that hashtag's line. The findings are the comments of the
+lacks; a line that starts with the older label a hashtag replaced counts as that hashtag's line, as
+scripts/findings-record-codex-finding-match-and-row-add-or-decide.py's finding_fact_lines reads it. The findings are the comments of the
 Claude reviewer's file, and for merge-lane-2's review, the Codex findings on the
 commit, each finding's text running from its heading to the next one. The posted review is then read
 back by the id GitHub returned, and its state and commit must be the ones
@@ -180,6 +180,8 @@ codex_cell = load_program("code-review-codex-cell.py", "code_review_codex_cell")
 fix_round = load_program(
     "pull-request-fix-round-author-brief-from-blocking-findings-and-one-commit-every-finding-"
     "answered-check.py", "pull_request_fix_round_author_brief")
+findings_record = load_program("findings-record-codex-finding-match-and-row-add-or-decide.py",
+                               "findings_record_codex_finding_match_and_row_add_or_decide")
 
 REPOSITORY = "nedsnodes/nedsnodes"
 MAC_CLAUDE_ACCOUNT = "mac-claude"
@@ -214,22 +216,7 @@ CODEX_GRADES_BODY_HEADING = "**Codex findings graded:**"
 FINDINGS_RECORD_BODY_HEADING = "**Codex findings the findings record already holds:**"
 FINDINGS_RECORD_CODEX_FINDING_MATCH_PROGRAM = Path(__file__).resolve().with_name(
     "findings-record-codex-finding-match-and-row-add-or-decide.py")
-# docs/agents/pr-reviewer-instructions.md asks a reviewer to end each finding on code with these hashtag lines.
-FINDING_FACT_LINE_HASHTAGS = ("#defect_already_on_main", "#pull_request_triggers_the_defect",
-                              "#false_report_of_success_on_failure", "#defect_evidence")
-# Reviewers may still write the labels the hashtags replaced, each followed by a colon.
-FINDING_FACT_LINE_OLDER_LABELS = {"Main has it": "#defect_already_on_main",
-                                  "This pull request makes it happen": "#pull_request_triggers_the_defect",
-                                  "Reports success on failure": "#false_report_of_success_on_failure",
-                                  "Shown by": "#defect_evidence"}
-# A hashtag or a label may open a list item of any kind and sit inside code or bold marks, and a label's colon
-# may sit inside or outside them.
-FINDING_FACT_LINE = re.compile(
-    r"^[ \t]*(?:(?:[-*+]|\d+[.)])[ \t]+)?[`*_]*(?:("
-    + "|".join(re.escape(hashtag) for hashtag in FINDING_FACT_LINE_HASHTAGS)
-    + r")(?!\w)|("
-    + "|".join(re.escape(label) for label in FINDING_FACT_LINE_OLDER_LABELS)
-    + r")[`*_]*:)(.*)$", re.MULTILINE)
+FINDING_FACT_LINE_HASHTAGS = tuple(findings_record.FINDING_FACT_LINE_HASHTAG_FIELDS)
 FINDING_FACT_LINE_MARKS_AND_SPACE = re.compile(r"[`*_\s]")
 OUTSIDE_THE_DIFF_HEADING = fix_round.OUTSIDE_THE_DIFF_HEADING
 OUTSIDE_THE_DIFF_LINE_FORMAT = "- `{path}:{line}`: {body}"
@@ -471,8 +458,7 @@ def codex_answers_check(answers):
 def finding_fact_lines_lacking(text):
     """The hashtags of the lines that end a finding on code which a finding's text lacks or leaves unanswered,
     in FINDING_FACT_LINE_HASHTAGS order; empty when every one is there with an answer."""
-    answered = {hashtag or FINDING_FACT_LINE_OLDER_LABELS[label]
-                for hashtag, label, answer in FINDING_FACT_LINE.findall(text)
+    answered = {hashtag for hashtag, answer in findings_record.finding_fact_lines(text)
                 if FINDING_FACT_LINE_MARKS_AND_SPACE.sub("", answer)}
     return tuple(hashtag for hashtag in FINDING_FACT_LINE_HASHTAGS if hashtag not in answered)
 
@@ -718,8 +704,8 @@ def codex_finding_fact_line_answers(texts, hashtag_wanted):
     """Every answer the entries of a Codex finding give its hashtag_wanted line, or the older label's, lowercased with
     marks and spaces removed, so that "not checked" reads as "notchecked", never as "no"."""
     return [FINDING_FACT_LINE_MARKS_AND_SPACE.sub("", answer).lower()
-            for text in texts for hashtag, label, answer in FINDING_FACT_LINE.findall(text)
-            if (hashtag or FINDING_FACT_LINE_OLDER_LABELS[label]) == hashtag_wanted]
+            for text in texts for hashtag, answer in findings_record.finding_fact_lines(text)
+            if hashtag == hashtag_wanted]
 
 
 def codex_finding_says_main_has_it(texts):
@@ -746,9 +732,12 @@ def findings_record_program_answers(program, subcommand, number, head, request, 
         [sys.executable, str(program), subcommand, "--pull-request", str(number), "--head-commit", head],
         input=json.dumps(request), capture_output=True, text=True)
     if completed.returncode != 0:
+        # Starts "review not posted:" so that the findings record program's own instructions, printed after it,
+        # are the only ones given.
         raise CodexRunRecordUnusable(
-            f"the findings record program {program} {subcommand} exited {completed.returncode}, so the review cannot "
-            f"say which Codex findings the findings record holds; it printed:\n{completed.stderr.strip()}")
+            f"review not posted: the findings record program {program} {subcommand} exited {completed.returncode}, "
+            f"so the review cannot say which Codex findings the findings record holds. Do not post the review any "
+            f"other way. It printed:\n{completed.stderr.strip()}")
     try:
         answers = json.loads(completed.stdout)
         if set(answers) != {entry["finding_id"] for entry in request} or not all(

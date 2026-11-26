@@ -92,14 +92,16 @@ FINDING_FACT_LINE_HASHTAG_FIELDS = {"#defect_already_on_main": "main_has_it",
                                     "#false_report_of_success_on_failure": "reports_success_on_failure",
                                     "#defect_evidence": "shown_by"}
 # Reviewers may still write the labels the hashtags replaced, each followed by a colon.
-FINDING_FACT_LINE_FIELDS = {"Main has it": "main_has_it",
-                            "This pull request makes it happen": "this_pull_request_makes_it_happen",
-                            "Reports success on failure": "reports_success_on_failure",
-                            "Shown by": "shown_by"}
+FINDING_FACT_LINE_OLDER_LABELS = {"Main has it": "#defect_already_on_main",
+                                  "This pull request makes it happen": "#pull_request_triggers_the_defect",
+                                  "Reports success on failure": "#false_report_of_success_on_failure",
+                                  "Shown by": "#defect_evidence"}
+# A hashtag or a label may open a list item of any kind and sit inside code or bold marks, and a label's colon
+# may sit inside or outside them.
 FINDING_FACT_LINE = re.compile(
     r"^[ \t]*(?:(?:[-*+]|\d+[.)])[ \t]+)?[`*_]*(?:("
     + "|".join(map(re.escape, FINDING_FACT_LINE_HASHTAG_FIELDS)) + r")(?!\w)|("
-    + "|".join(map(re.escape, FINDING_FACT_LINE_FIELDS)) + r")[`*_]*:)[ \t]*(.*)$", re.MULTILINE)
+    + "|".join(map(re.escape, FINDING_FACT_LINE_OLDER_LABELS)) + r")[`*_]*:)[ \t]*(.*)$", re.MULTILINE)
 POSSIBLE_MISS_LOG_UNDER_LOG_STORE = Path("findings-record") / "findings-record-possible-misses.jsonl"
 DOES_NOT_HOLD_GRADE = "does-not-hold"
 
@@ -112,19 +114,21 @@ MATCH_JUDGMENT_SYSTEM_PROMPT = (
     "when none does.")
 
 # Messages follow docs/nedsnodes-wiki/nedsnodes-how-to-write-a-tool-message-to-agent-such-as-a-hook-refusal-or-script-error.md.
-FAILED_MESSAGE = (
+FAILED_MESSAGE_FIRST_LINES = (
     "FAILED: the findings record {command}, scripts/findings-record-codex-finding-match-and-row-add-or-decide.py "
     "{command}, stopped at finding {finding_id} of pull request {number}: {reason}\n"
-    "Rows and sightings recorded before this finding stay, and running the same command line again, with the "
-    "same input, records none of them twice.\n"
-    "If the reason above is a FAILED message of the nn-shared-database service call, follow that message's own "
-    "instructions, not the two lines below.\n"
-    "Otherwise, do the step the reason gives, if it gives one, and then, whether or not it gave one, run once "
-    "more the command line that printed this message, whether the review-posting command or this program's own.\n"
-    "If that one rerun fails on the findings record again, at any finding, tell the user: \"The findings record "
-    "{command} for pull request "
-    "{number} fails: {reason}\", and post no review of pull request {number} until he answers; go on with other "
-    "work meanwhile.\n"
+    "Rows and sightings recorded before this finding stay, and running the same command again, with the same "
+    "input, records none of them twice.\n")
+SERVICE_CALL_FAILED_MESSAGE = FAILED_MESSAGE_FIRST_LINES + (
+    "Do what the nn-shared-database service's message above says; if it says to tell the user, post no review of "
+    "pull request {number} until he answers.")
+STEP_FAILED_MESSAGE = FAILED_MESSAGE_FIRST_LINES + (
+    "Do the step the reason gives, if it gives one. Then run once more the command you ran: "
+    "scripts/merge-lane-pull-request-reviewer-review-post-and-read-back.py, which runs this program, or this "
+    "program itself.\n"
+    "If that rerun prints this message again, at any finding, do not run it a third time: tell the user \"The "
+    "findings record {command} for pull request {number} fails: {reason}\", and post no review of pull request "
+    "{number} until he answers; go on with other work meanwhile.\n"
     "If you are a subagent, send those words to the agent that dispatched you instead.")
 JUDGMENT_ANSWER_UNLISTED_REASON = (
     "the judgment step answered {answer!r}, which is neither NEW nor SAME with one of the record ids it was "
@@ -143,10 +147,17 @@ def utc_now():
     return datetime.now(timezone.utc).isoformat(timespec="seconds")
 
 
+def finding_fact_lines(text):
+    """(hashtag, answer) for each fact line of a finding's text, in order, a line opened by an older label
+    given under the hashtag that replaced it; the answer is the rest of the line as written."""
+    return [(hashtag or FINDING_FACT_LINE_OLDER_LABELS[label], answer)
+            for hashtag, label, answer in FINDING_FACT_LINE.findall(text)]
+
+
 def fact_line_answers(text):
-    answers = dict.fromkeys(FINDING_FACT_LINE_FIELDS.values())
-    for hashtag, label, answer in FINDING_FACT_LINE.findall(text):
-        field = FINDING_FACT_LINE_HASHTAG_FIELDS[hashtag] if hashtag else FINDING_FACT_LINE_FIELDS[label]
+    answers = dict.fromkeys(FINDING_FACT_LINE_HASHTAG_FIELDS.values())
+    for hashtag, answer in finding_fact_lines(text):
+        field = FINDING_FACT_LINE_HASHTAG_FIELDS[hashtag]
         answers[field] = answers[field] or answer.strip().strip("`*_ \t") or None
     return answers
 
@@ -252,10 +263,10 @@ def match_one(finding, arguments, call):
     if same is None:
         return {"answer": "NEW", "record_id": None}
     call("/events", service_call.nn_shared_database_event_body(
-        "findings-record-row-sighted", None,
+        "findings-record-row-sighting-added", None,
         {"record_id": same["record_id"], "finding_id": finding["finding_id"], "pull_request": number,
          "head_commit": head},
-        event_id=f"findings-record-row-sighted-{finding['finding_id']}-{head}"))
+        event_id=f"findings-record-row-sighting-added-{finding['finding_id']}-{head}"))
     return {"answer": "SAME", "record": same, "possible_regression": same["state"] == "fixed"}
 
 
@@ -323,7 +334,7 @@ def main(argv=None):
     if arguments.command == "decide":
         try:
             call("/events", service_call.nn_shared_database_event_body(
-                "findings-record-row-decided", None,
+                "findings-record-row-decision-recorded", None,
                 {"record_id": arguments.record_id, "state": arguments.state, "decision": arguments.decision,
                  "filed_where": arguments.filed_where, "owning_agent_seat": arguments.owning_agent_seat}))
         except service_call.NnSharedDatabaseServiceCallFailed as failure:
@@ -343,9 +354,9 @@ def main(argv=None):
             answers[finding["finding_id"]] = (add_one if arguments.command == "add" else match_one)(
                 finding, arguments, call)
         except (MatchStepFailed, service_call.NnSharedDatabaseServiceCallFailed) as error:
-            print(FAILED_MESSAGE.format(command=arguments.command, finding_id=finding["finding_id"],
-                                        number=arguments.pull_request,
-                                        reason=error), file=sys.stderr)
+            message = STEP_FAILED_MESSAGE if isinstance(error, MatchStepFailed) else SERVICE_CALL_FAILED_MESSAGE
+            print(message.format(command=arguments.command, finding_id=finding["finding_id"],
+                                 number=arguments.pull_request, reason=error), file=sys.stderr)
             return 1
     print(json.dumps(answers, ensure_ascii=False))
     return 0

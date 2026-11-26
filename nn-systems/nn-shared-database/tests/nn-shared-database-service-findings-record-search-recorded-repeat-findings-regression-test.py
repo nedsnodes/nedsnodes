@@ -12,7 +12,7 @@ the first candidate. The judgment step that then answers SAME or NEW is not run 
 is what tells a different defect on the same lines, which the search can also rank
 first, from a repeat.
 
-Run: python3 scripts/findings-record-codex-finding-match-and-row-add-or-decide-repeat-findings-regression-test.py
+Run: python3 nn-systems/nn-shared-database/tests/nn-shared-database-service-findings-record-search-recorded-repeat-findings-regression-test.py
 """
 
 import importlib.util
@@ -23,9 +23,9 @@ import tempfile
 from pathlib import Path
 
 HERE = Path(__file__).resolve().parent
-FIXTURE = HERE / "findings-record-codex-finding-match-and-row-add-or-decide-repeat-findings-regression-test-fixture.json"
+FIXTURE = HERE / "nn-shared-database-service-findings-record-search-recorded-repeat-findings-regression-test-fixture.json"
 spec = importlib.util.spec_from_file_location(
-    "nn_shared_database_service", HERE.parent / "nn-systems" / "nn-shared-database" / "nn-shared-database-service.py")
+    "nn_shared_database_service", HERE.parent / "nn-shared-database-service.py")
 service = importlib.util.module_from_spec(spec)
 spec.loader.exec_module(service)
 

@@ -170,7 +170,7 @@ with tempfile.TemporaryDirectory() as scratch:
         check(f"422: {name} names the value and stores nothing", status == 422
               and f"holds a value it cannot store: {named}." in answer["error"]
               and "fields.<name> is the field <name> inside" in answer["error"]
-              and "alone take a null seat_id: findings-record-row-added, findings-record-row-decided, findings-record-row-sighted, machine-booted;" in answer["error"]
+              and "alone take a null seat_id: findings-record-row-added, findings-record-row-decision-recorded, findings-record-row-sighting-added, machine-booted;" in answer["error"]
               and body["event_id"] in answer["error"]
               and events_stored() == before,
               (status, answer))
@@ -413,25 +413,25 @@ with tempfile.TemporaryDirectory() as scratch:
     sighting = {"record_id": capture_row, "finding_id": "f-again", "pull_request": 4076,
                 "head_commit": "c2"}
     for _ in range(2):
-        request("/events", event("findings-record-row-sighted", sighting, seat_id=None))
-    request("/events", event("findings-record-row-sighted", sighting, seat_id=None))
+        request("/events", event("findings-record-row-sighting-added", sighting, seat_id=None))
+    request("/events", event("findings-record-row-sighting-added", sighting, seat_id=None))
     check("a finding is recorded once as a sighting per head commit, however often it is sent",
           db.execute("SELECT count(*) FROM findings_record_row_sighting WHERE finding_id = 'f-again'")
           .fetchone()[0] == 1)
-    status, answer = request("/events", event("findings-record-row-sighted",
+    status, answer = request("/events", event("findings-record-row-sighting-added",
                                               {**sighting, "record_id": 999999}, seat_id=None))
     check("422: a sighting of a row that does not exist",
           status == 422 and "record_id" in answer["error"], (status, answer))
     decided = {"record_id": capture_row, "state": "decided-fix", "decision": "GHI 4100",
                "filed_where": "GHI 4100", "owning_agent_seat": None}
-    request("/events", event("findings-record-row-decided", {**decided, "owning_agent_seat": "md-skills"},
+    request("/events", event("findings-record-row-decision-recorded", {**decided, "owning_agent_seat": "md-skills"},
                              seat_id=None))
-    request("/events", event("findings-record-row-decided", decided, seat_id=None))
+    request("/events", event("findings-record-row-decision-recorded", decided, seat_id=None))
     row = db.execute("SELECT state, decision, filed_where, owning_agent_seat FROM findings_record_row "
                      "WHERE record_id = ?", (capture_row,)).fetchone()
-    check("findings-record-row-decided sets the state and decision, and keeps an owner a null leaves",
+    check("findings-record-row-decision-recorded sets the state and decision, and keeps an owner a null leaves",
           row == ("decided-fix", "GHI 4100", "GHI 4100", "md-skills"), row)
-    status, answer = request("/events", event("findings-record-row-decided",
+    status, answer = request("/events", event("findings-record-row-decision-recorded",
                                               {**decided, "state": "wontfix"}, seat_id=None))
     check("422: a decision with a state that is not one of the findings record's states",
           status == 422 and "decided-not-worth-fixing" in answer["error"], (status, answer))

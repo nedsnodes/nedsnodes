@@ -454,6 +454,15 @@ def findings_record_cases(scratch):
           result.code == 2 and result.posted is None and main_id in result.stderr and "have no grade" in result.stderr,
           result.detail)
 
+    findings_record_message = "FAILED: the findings record match stopped.\nIf you are a subagent, say so."
+    result = posting(file([pull_request_grade]), match=(1, "", findings_record_message))
+    check("a findings record program that fails posts nothing and prints its message last, with no rerun "
+          "instruction of this program's own after it",
+          result.code == 2 and result.posted is None
+          and result.stderr.startswith("review not posted: the findings record program ")
+          and result.stderr.strip().endswith(findings_record_message)
+          and "run the same command again" not in result.stderr, result.detail)
+
     fixed = (0, json.dumps({main_id: {"answer": "SAME", "record": {**row, "state": "fixed", "decision": None},
                                       "possible_regression": True}}), "")
     result = posting(file([pull_request_grade]), match=fixed)
