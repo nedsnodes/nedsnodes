@@ -261,18 +261,26 @@ def wait_for_judge_runs(running: dict) -> dict:
             log_text = stderr_path.read_text(encoding="utf-8")
             for line in log_text.splitlines():
                 if judge_cell_status_line(line, cell_common.FELL_BACK_PHRASE):
-                    print(f"{PROGRAM}: run {run_number} FELL BACK: {line.strip()}",
-                          file=sys.stderr)
+                    cell_common.print_cold_read_cell_status_line_with_its_next_step_instruction(
+                        f"{PROGRAM}: run {run_number} FELL BACK: {line.strip()}",
+                        cell_common.COLD_READ_CELL_FELL_BACK_TO_ANOTHER_MODEL_STATUS_LINE_NEXT_STEP_INSTRUCTION,
+                        file=sys.stderr)
                 if judge_cell_status_line(line, cell_common.STRAY_WRITE_PHRASE):
-                    print(f"{PROGRAM}: run {run_number} STRAY WRITE: {line.strip()}",
-                          file=sys.stderr)
+                    cell_common.print_cold_read_cell_status_line_with_its_next_step_instruction(
+                        f"{PROGRAM}: run {run_number} STRAY WRITE: {line.strip()}",
+                        cell_common.COLD_READ_CELL_STRAY_WRITE_STATUS_LINE_NEXT_STEP_INSTRUCTION,
+                        file=sys.stderr)
                 if judge_cell_status_line(
                         line, cell_common.STRAY_WRITE_CHECK_SKIPPED_PHRASE):
-                    print(f"{PROGRAM}: run {run_number} WRITE CHECK DID NOT RUN: "
-                          f"{line.strip()}", file=sys.stderr)
+                    cell_common.print_cold_read_cell_status_line_with_its_next_step_instruction(
+                        f"{PROGRAM}: run {run_number} WRITE CHECK DID NOT RUN: {line.strip()}",
+                        cell_common.COLD_READ_CELL_STRAY_WRITE_CHECK_SKIPPED_STATUS_LINE_NEXT_STEP_INSTRUCTION,
+                        file=sys.stderr)
                 if judge_cell_status_line(line, cell_common.NEAR_MISS_RECOVERY_PHRASE):
-                    print(f"{PROGRAM}: run {run_number} RECOVERED: {line.strip()}",
-                          file=sys.stderr)
+                    cell_common.print_cold_read_cell_status_line_with_its_next_step_instruction(
+                        f"{PROGRAM}: run {run_number} RECOVERED: {line.strip()}",
+                        cell_common.COLD_READ_CELL_NEAR_MISS_REPORT_RECOVERED_STATUS_LINE_NEXT_STEP_INSTRUCTION,
+                        file=sys.stderr)
             print(log_text, file=sys.stderr, end="")
             print(f"{PROGRAM}: run {run_number} finished (exit {code}).",
                   file=sys.stderr)
