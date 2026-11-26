@@ -3737,6 +3737,32 @@ check("an events task opened after the step that follows the escalation of a def
       (machine.events("wait_step"), machine.events("wait_ended"), machine.events("message_sent")))
 
 
+machine = Machine()
+machine.seat(EVENTS_SEAT, DONE_TURN)
+events_task(machine)
+machine.script(sent_ok(EVENTS_SEAT))
+machine.run(0)
+machine.append(EVENTS_SEAT, cross_session(machine.events("message_sent")[-1]["text"], at(0.5)),
+               assistant("Still waiting.", when=at(1)), turn_end(at(1)))
+machine.script(sent_ok(EVENTS_SEAT))
+machine.run(16)
+machine.script()
+machine.run(32)
+told = [event["step"] for event in machine.events("wait_step")] == ["nudge", "escalate", "tell_user"]
+events_task(machine, status="completed")
+events_task(machine, task_id="2")
+machine.handoff_put_off()
+machine.script(sent_ok(EVENTS_SEAT))
+machine.run(34)
+check("an events task's wait past its user-alert, the task completed and a new events task open, "
+      "with a deferred handoff not yet reminded of: the new task's wake is sent, not the handoff "
+      "text",
+      told and [event["why"] for event in machine.events("wait_ended")][-1:]
+      == ["a new pull-request events task opened after the user was told"]
+      and machine.events("message_sent")[-1]["text"].startswith("Task 2 on your task list"),
+      (machine.events("wait_step"), machine.events("wait_ended"), machine.events("message_sent")))
+
+
 # --- no reminder of a wait on the user, and no repeat until the user types ----------------------
 def typed_by_the_user(text, when):
     return {**user(text, when), "origin": {"kind": "human"}}

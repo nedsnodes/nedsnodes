@@ -1309,6 +1309,17 @@ class Sweep:
             self.end_wait(seat, "it spent tokens after the step that follows the escalation")
             wait = None
         events_task = open_pull_request_events_task(seat, self.paths.tasks_root)
+        if (wait and TELL_USER in wait and events_task
+                and not self.woken_for_pull_request_events_task(seat, events_task)
+                and not self.headless_usage_limit_pause_holds()):
+            # The user already has that wait's alert; a new events task must not wait behind it.
+            # Its wake is sent here, not through this verdict's rule: under rule 3, a handoff nudge
+            # whose send failed was never logged as reminded, so the rule would send the handoff
+            # text again in place of the wake. This runs before the check below, which would end a
+            # wait whose events task was replaced and leave the new task's wake to the rule.
+            self.end_wait(seat, "a new pull-request events task opened after the user was told")
+            self.wake_for_pull_request_events_task(seat, verdict, stretch, events_task)
+            return
         # The task may be completed by a subagent, whose calls the main transcript lacks. Rule 2
         # sentences on the wait are logged as checked, so ending the wait would lose them: it stays
         # open, and its escalation names those still owed.
@@ -1316,16 +1327,6 @@ class Sweep:
                 not events_task or events_task["id"] != wait[PULL_REQUEST_EVENTS_TASK_ID]):
             self.end_wait(seat, "its pull-request events task is no longer open")
             wait = None
-        if (wait and TELL_USER in wait and events_task
-                and not self.woken_for_pull_request_events_task(seat, events_task)
-                and not self.headless_usage_limit_pause_holds()):
-            # The user already has that wait's alert; a new events task must not wait behind it.
-            # Its wake is sent here, not through this verdict's rule: under rule 3, a handoff nudge
-            # whose send failed was never logged as reminded, so the rule would send the handoff
-            # text again in place of the wake.
-            self.end_wait(seat, "a new pull-request events task opened after the user was told")
-            self.wake_for_pull_request_events_task(seat, verdict, stretch, events_task)
-            return
         promise_text, promise_on_wait = None, False
         judged_sentences = rule == 2
         sentences_checked = []
