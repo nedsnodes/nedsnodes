@@ -80,7 +80,7 @@ class Case:
                                      "message": {"role": "user", "content": text}}) + "\n")
 
     def run(self, prompt, stdin=None, platform="linux", insert_run="", environment_extra=None, agent_seat=DEFAULT_SEAT,
-            launched_session_id=SESSION_ID):
+            launched_session_id=SESSION_ID, hook=HOOK):
         """environment_extra is added to the hook's environment, which holds neither variable that marks an
         agent-session headless, so a case reads the same in a headless reviewer as in an attended agent-session.
         agent_seat is the agent-session's agent-seat, set whatever agent-seat runs the suite; None leaves it unset.
@@ -91,14 +91,18 @@ class Case:
         die by a signal, which a real run cannot be made to; every other subprocess.run, such as git's, runs."""
         payload = {"hook_event_name": "UserPromptSubmit", "prompt": prompt, "cwd": str(self.checkout),
                    "session_id": SESSION_ID, "transcript_path": str(self.transcript)}
-        # sysconfig names its data module after sys.platform when first read, which Python 3.14 on the Mac does
-        # after the fake is set, so it is read first, under the real platform.
-        run_hook_as_platform = ("import runpy, subprocess, sys, sysconfig; sysconfig.get_config_vars(); "
-                                "sys.platform = sys.argv[1]; "
+        # Only the hook module's sys gets the case's platform: setting sys.platform itself would also reach the
+        # interpreter, whose sysconfig names its data module after it.
+        run_hook_as_platform = ("import importlib.util, subprocess, sys; "
                                 + ("subprocess.run = (lambda real: lambda *a, **k: "
                                    f"({insert_run}) if 'user-alert-insert' in str(a[0]) else real(*a, **k))"
                                    "(subprocess.run); " if insert_run else "")
-                                + "runpy.run_path(sys.argv[2], run_name='__main__')")
+                                + "specification = importlib.util.spec_from_file_location('hook', sys.argv[2]); "
+                                "hook = importlib.util.module_from_spec(specification); "
+                                "specification.loader.exec_module(hook); "
+                                "hook.sys = type('SysWithCasePlatform', (), {'platform': sys.argv[1], "
+                                "'__getattr__': lambda self, name: getattr(sys, name)})(); "
+                                "sys.exit(hook.main())")
         environment = attendance_check.environment_without_agent_session_attendance_variables(os.environ)
         environment.pop(AGENT_SEAT_VARIABLE, None)
         environment.pop(SESSION_ID_VARIABLE, None)
@@ -108,7 +112,7 @@ class Case:
         # Python finds the user's site-packages from HOME, and on the Mac markdown-it-py is installed there.
         environment.update({"HOME": str(self.home), "PYTHONUSERBASE": site.getuserbase()},
                            **(environment_extra or {}))
-        result = subprocess.run([sys.executable, "-c", run_hook_as_platform, platform, str(HOOK)],
+        result = subprocess.run([sys.executable, "-c", run_hook_as_platform, platform, str(hook)],
                                 input=stdin or json.dumps(payload),
                                 capture_output=True, text=True, env=environment, check=False)
         self.output = json.loads(result.stdout) if result.stdout else {}
@@ -347,6 +351,22 @@ def run_mac_cases(root):
           result.stdout + result.stderr + repr(case.names("claimed")))
 
 
+def run_case_platform_reaches_only_the_hook_case(root):
+    other_platform = "linux" if sys.platform == "darwin" else "darwin"
+    probe = root / "platform-probe-hook.py"
+    probe.write_text(
+        "import json, sys, sysconfig\n"
+        "def main():\n"
+        "    sysconfig._get_sysconfigdata()\n"
+        "    print(json.dumps({'hookSpecificOutput': {'additionalContext': "
+        "sys.platform + ' ' + sys.modules['sys'].platform}}))\n"
+        "    return 0\n", encoding="utf-8")
+    case = Case(root, "platform-probe")
+    result, context = case.run("hello", platform=other_platform, hook=probe)
+    check("the case's platform reaches only the hook module, so the interpreter's own sysconfig lookups still work",
+          result.returncode == 0 and context == f"{other_platform} {sys.platform}", result.stdout + result.stderr)
+
+
 def run_release_cases(root):
     case = Case(root, "returned")
     path = case.alert("alert-old", directory="claimed")
@@ -404,6 +424,7 @@ with tempfile.TemporaryDirectory() as temporary_directory:
     run_not_typed_cases(scratch)
     run_headless_cases(scratch)
     run_mac_cases(scratch)
+    run_case_platform_reaches_only_the_hook_case(scratch)
     run_release_cases(scratch)
     run_failure_cases(scratch)
     run_timeout_case()
