@@ -5083,7 +5083,32 @@ check("the JUnit XML names each skipped case, and says whether each suite ran to
       and junit_suites["scripts/b-test.py"].get("ran_to_the_end") == "false"
       and junit_suites["scripts/b-test.py"].get("judged") == "false",
       xml.etree.ElementTree.tostring(junit_root))
+check("the JUnit XML counts each skipped case among a suite's tests",
+      junit_suites["scripts/a-test.py"].get("tests") == "2"
+      and junit_suites["scripts/a-test.py"].get("skipped") == "1",
+      xml.etree.ElementTree.tostring(junit_root))
 shutil.rmtree(ran_to_the_end_directory)
+
+skipped_sibling = module.test_cases_with_failing_case_names_resolved_against_the_suites_other_case_names(
+    [case_line("FAIL", "p: X: got 1")], ["p: Y: no Mac"])
+check("a failing case's name is read against the suite's SKIP lines too, so a skipped sibling "
+      "case leaves it the name a passing sibling would",
+      [(case["name"], case["detail"]) for case in skipped_sibling] == [("p: X", "got 1")],
+      skipped_sibling)
+
+for how, text, expected in (
+        ("reached its SUMMARY with only FAIL suites", "FAIL scripts/a-test.py exit 1\nSUMMARY: 0 passed, 1 failed\n", True),
+        ("was cut short at its run time limit before its SUMMARY",
+         "FAIL scripts/a-test.py exit 1\n"
+         f"{module.RUN_STOPPED_AT_RUN_TIME_LIMIT_NOT_COUNTING_ADMISSION_WAITS_LINE_PREFIX}\n"
+         "SUMMARY: 0 passed, 1 failed\n", False),
+        ("was cut short, in a runner's bare-name form",
+         "FAIL scripts/a-test.py exit 1\nrun-all-test-suites: not run to the end — stopped\n"
+         "SUMMARY: 0 passed, 1 failed\n", False)):
+    check(f"a run that {how} {'has' if expected else 'does not have'} failed suites as its only "
+          f"problem",
+          module.run_all_test_suites_output_parse_whether_failed_suites_were_the_runs_only_problem(
+              module.EXIT_SOME_FAILED, text) is expected, text)
 
 print()
 # The count is printed so a short run is visible on sight: a run that ends
