@@ -24,7 +24,7 @@ This page tells an agent-seat how to run Codex and Gemini, and what to expect fr
 
 **What it is.** Gemini runs through the Antigravity CLI, `agy`, the agent behind the Antigravity IDE; there is no `gemini` command. On ned-box `agy` is `~/.local/bin/agy` and its configuration is under `~/.gemini/antigravity-cli/` (version 1.4.0 on 2026-10-17). `agy update` updates it and `agy --version` reports it.
 
-**Model ids carry the effort.** `agy models` lists them: `gemini-3.8-flash-high`, `gemini-3.8-flash-medium`, `gemini-3.8-flash-low`, `gemini-4-argon-high`, `gemini-4-argon-medium` and `gemini-4-argon-low` (ned-box, 2026-10-17). The cold-read-fast-read runs on `gemini-3.8-flash-medium`, and on `claude-sonnet-5-5` at low effort when Gemini fails.
+**Model ids carry the effort.** `agy models` lists them: `gemini-3.8-flash-high`, `gemini-3.8-flash-medium`, `gemini-3.8-flash-low`, `gemini-4-argon-high`, `gemini-4-argon-medium` and `gemini-4-argon-low` (ned-box, 2026-10-17). The cold-read-fast-read runs on `gemini-4-neon-low`, and on `claude-sonnet-5-5` at low effort when Gemini fails.
 
 **What a new runner must handle.** The launcher handles all of these; they matter only to someone changing it.
 
@@ -42,7 +42,7 @@ These are the cold-read-research agent-seat's results, on the models and CLI ver
 
 - A Codex run at `max` effort on a document of 1,500 to 2,300 words took 13 to 32 minutes (`gpt-6-astra` and `gpt-5.6-sol`).
 - Codex hit no account limit in the campaign; Claude hit its limit three times in one day.
-- `gemini-3.8-flash-low` read a 700 to 1,500-word skill in 21 to 31 seconds, found as many of the known defects as `gpt-5.6-terra` at low effort in a quarter of the time, and found no defect that no other reviewer found. Measured on 2026-09-07, as `nn-systems/cold-read/cold-read-agy-cell.py` records: on one defect list, `gemini-3.8-flash-medium` found 42% and low 19%, which is why the cold-read-fast-read runs on medium.
+- `gemini-3.8-flash-low` read a 700 to 1,500-word skill in 21 to 31 seconds, found as many of the known defects as `gpt-5.6-terra` at low effort in a quarter of the time, and found no defect that no other reviewer found. Measured on 2026-09-07, as `nn-systems/cold-read/cold-read-agy-cell.py` records: on one defect list, `gemini-3.8-flash-medium` found 42% and low 19%, which is why the cold-read-fast-read ran on medium until it moved to `gemini-4-neon-low`.
 
 ## Things that went wrong once and will again
 

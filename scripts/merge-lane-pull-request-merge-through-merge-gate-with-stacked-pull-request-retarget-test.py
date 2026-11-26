@@ -47,6 +47,7 @@ import importlib.util
 import io
 import json
 import os
+import shlex
 import shutil
 import subprocess
 import sys
@@ -209,6 +210,7 @@ RUNNER_FAILED = ("PASS scripts/some-test.py (1s)\n"
                  "\n1 failed:\n"
                  "FAIL scripts/broken-test.py exit 1 — log /logs/broken-test.py.log\n"
                  "SUMMARY: 1 passed, 1 failed, 2 total; fake runner\n")
+TELL_AUTHOR_AND_USER = "Tell the pull request's author, and the user, this message as printed"
 RUNNER_COULD_NOT_RUN = "run-all-test-suites.py: git cannot resolve the COMMIT given\n"
 
 failures = []
@@ -279,7 +281,7 @@ def default_routes(open_pull_requests, edit_exit=0, merge_exit=0):
         "pr list": {"stdout": json.dumps(open_pull_requests)},
         "pr edit": {"exit": edit_exit, "stderr": "" if edit_exit == 0 else "edit refused\n"},
         "pr merge": {"exit": merge_exit},
-        "view-state": {"stdout": '{"state":"MERGED","mc":"MERGE_COMMIT"}\n'},
+        "view-state": {"stdout": '{"state":"MERGED","mc":"MERGE_COMMIT","base":"main"}\n'},
     }
 
 
@@ -618,6 +620,443 @@ def failed_suites_record_of(directory):
     return json.loads(failed_suites_record_file(directory).read_text())
 
 
+def newest_main_commit_left_no_test_failing_file(directory):
+    return (directory / "home" / ".local" / "state" / "nedsnodes"
+            / "newest-main-commit-whose-after-merge-test-run-left-no-test-failing.txt")
+
+
+def newest_main_commit_left_no_test_failing_of(directory):
+    path = newest_main_commit_left_no_test_failing_file(directory)
+    return path.read_text().strip() if path.is_file() else None
+
+
+def newest_main_commit_left_no_test_failing_written(text):
+    """A before_the_program_runs that writes text to the file, makes a directory there when
+    text is None, and writes nothing when text is "". In text, "PARENT" becomes the merge
+    commit's parent, origin's first commit, and "UNRELATED" a commit with no parent in the
+    review tools clone."""
+    def prepare(directory):
+        if text == "":
+            return
+        path = newest_main_commit_left_no_test_failing_file(directory)
+        path.parent.mkdir(parents=True, exist_ok=True)
+        if text is None:
+            path.mkdir()
+            return
+        review_tools = directory / "review-tools"
+        unrelated = subprocess.run(
+            ["git", *GIT_IDENTITY, "-C", str(review_tools), "commit-tree", "HEAD^{tree}",
+             "-m", "unrelated"], capture_output=True, text=True, env=GIT_ENVIRONMENT,
+            check=True).stdout.strip()
+        parent = git_output(directory / "origin-seed", "rev-parse", "HEAD~1")
+        path.write_text(text.replace("PARENT", parent).replace("UNRELATED", unrelated))
+    return prepare
+
+
+def newest_main_commit_left_no_test_failing_cases(scratch):
+    routes = default_routes([])
+    routes["pr merge"] = {"origin_main_to": "MERGE_COMMIT", "origin": "ORIGIN"}
+
+    def case(name, written, **options):
+        exit_code, output, _, _, _ = run_case(
+            scratch, name, [(GATE_PASSED, 0)], routes, merge_commit_new_to_the_clone=True,
+            before_the_program_runs=newest_main_commit_left_no_test_failing_written(written),
+            **options)
+        directory = scratch / name
+        return (exit_code, output, runner_calls(scratch, name),
+                git_output(directory / "origin-seed", "rev-parse", "HEAD~1"),
+                origin_commit(scratch, name), newest_main_commit_left_no_test_failing_of(directory))
+
+    exit_code, output, calls, parent, merge_commit, recorded = case(
+        "no-test-failing-at-parent", "PARENT\n")
+    path = newest_main_commit_left_no_test_failing_file(scratch / "no-test-failing-at-parent")
+    check("after-merge test run selects since the recorded newest main commit whose after-merge "
+          "test run left no test failing, and then records the merge commit in its place",
+          exit_code == 0 and len(calls) == 1
+          and calls[0]["argv"][:2] == ["--only-suites-whose-recorded-inputs-changed-since", parent]
+          and f"selecting the nn-test-suites whose recorded inputs changed since {parent[:12]}, "
+              f"the newest main commit whose after-merge test run left no test failing" in output
+          and "since the head commit" not in output
+          and recorded == merge_commit
+          and f"recorded the merge commit {merge_commit[:12]} in {path}, so the next after-merge test run selects "
+              f"the suites whose recorded inputs changed since it" in output,
+          f"exit {exit_code}\n{output}\n{calls}\n{recorded}")
+
+    exit_code, output, calls, parent, merge_commit, recorded = case(
+        "no-test-failing-at-parent-and-head-test-run-passed", "PARENT\n",
+        head_test_run_test_logs=[("MERGED.txt", head_test_run_record("MERGED", 0))])
+    merged = merged_commit(scratch, "no-test-failing-at-parent-and-head-test-run-passed")
+    check("with both a recorded newest main commit whose after-merge test run left no test "
+          "failing and a passing head test run, the after-merge test run compares with both, so "
+          "a suite runs only when both comparisons select it",
+          exit_code == 0 and len(calls) == 1
+          and calls[0]["argv"][:4] == ["--only-suites-whose-recorded-inputs-changed-since", parent,
+                                       "--only-suites-whose-recorded-inputs-changed-since", merged]
+          and f"changed both since {parent[:12]}, the newest main commit whose after-merge test "
+              f"run left no test failing, and since {merged[:12]}, the commit the head test run "
+              f"passed on, so a suite runs only when both comparisons select it" in output
+          and f"inputs changed since {parent[:12]} and since {merged[:12]}" in output
+          and recorded == merge_commit,
+          f"exit {exit_code}\n{output}\n{calls}\n{recorded}")
+
+    exit_code, output, calls, parent, merge_commit, recorded = case(
+        "no-test-failing-at-parent-and-head-test-run-failed", "PARENT\n",
+        head_test_run_test_logs=[("MERGED.txt", head_test_run_record("MERGED", 1))])
+    check("with a recorded newest main commit whose after-merge test run left no test failing "
+          "but no passing head test run, the after-merge test run compares with that commit "
+          "alone, never with the nn-head-commit, on which no test run passed, and says why",
+          exit_code == 0 and len(calls) == 1
+          and calls[0]["argv"][:2] == ["--only-suites-whose-recorded-inputs-changed-since", parent]
+          and calls[0]["argv"].count("--only-suites-whose-recorded-inputs-changed-since") == 1
+          and "not also since a commit a head test run passed on, because no readable head test "
+              "run record under " in output,
+          f"exit {exit_code}\n{output}\n{calls}")
+
+    for name, runner_answer, why in (
+            ("no-test-failing-kept-after-a-failed-run", (RUNNER_FAILED, 1), "failed"),
+            ("no-test-failing-kept-after-a-run-with-no-summary",
+             ("PASS scripts/some-test.py (1s)\n", 0), "printed no SUMMARY line"),
+            ("no-test-failing-kept-after-a-killed-run", ("PASS scripts/some-test.py (1s)\n", -9),
+             "was killed")):
+        exit_code, output, calls, parent, merge_commit, recorded = case(
+            name, "PARENT\n", runner_answer=runner_answer)
+        check(f"an after-merge test run that {why} exits 3 and leaves the recorded commit as it "
+              f"was, so the next run still compares with the commit before the break",
+              exit_code == 3 and recorded == parent
+              and calls[0]["argv"][:2] == ["--only-suites-whose-recorded-inputs-changed-since",
+                                           parent],
+              f"exit {exit_code}\n{output}\n{recorded}")
+
+    for name, written, why in (
+            ("no-test-failing-file-missing", "", "does not exist"),
+            ("no-test-failing-file-malformed", "not a commit\n",
+             "does not hold one commit hash of 40 characters. The next after-merge test run that "
+             "leaves no test failing replaces it"),
+            ("no-test-failing-file-names-an-unknown-commit", "b" * 40 + "\n",
+             f"git could not say whether {'b' * 12}, which "),
+            ("no-test-failing-file-names-a-commit-not-an-ancestor", "UNRELATED\n",
+             "is not an ancestor of ")):
+        exit_code, output, calls, parent, merge_commit, recorded = case(name, written)
+        check(f"{name.replace('-', ' ')}: the after-merge test run selects since the head commit, "
+              f"as before, prints why, and records the merge commit once it leaves no test "
+              f"failing",
+              exit_code == 0 and len(calls) == 1
+              and calls[0]["argv"][:2] == ["--only-suites-whose-recorded-inputs-changed-since",
+                                           HEAD]
+              and "no main commit whose after-merge test run left no test failing is used: " in output
+              and why in output
+              and f"changed since the head commit {HEAD[:12]}, which selects more suites" in output
+              and recorded == merge_commit,
+              f"exit {exit_code}\n{output}\n{calls}\n{recorded}")
+
+    exit_code, output, calls, parent, merge_commit, recorded = case(
+        "no-test-failing-file-a-directory", None)
+    path = newest_main_commit_left_no_test_failing_file(scratch / "no-test-failing-file-a-directory")
+    check("a record that cannot be read or written: the after-merge test run selects since the "
+          "head commit, says why, and exits 3 with a STOP saying the merge commit was not recorded",
+          exit_code == 3 and calls[0]["argv"][:2] == [
+              "--only-suites-whose-recorded-inputs-changed-since", HEAD]
+          and f"{path} could not be read: " in output
+          and f"STOP: merged, and main's test run left no test failing, but {merge_commit[:12]} "
+              f"was not recorded in {path}: " in output
+          and f"{path} could not be read back (" in output
+          and f"Otherwise, {TELL_THE_USER_WITH_THE_ERROR}" in output,
+          f"exit {exit_code}\n{output}\n{calls}")
+
+    real_write_text = Path.write_text
+
+    def write_text_failing_part_way_in_the_record_directory(self, data, *arguments, **options):
+        # Only the program's own writes fail; the case's setup writes the record first.
+        if (sys._getframe(1).f_globals is vars(program)
+                and self.parent.name == "nedsnodes" and self.name.startswith(
+                "newest-main-commit-whose-after-merge-test-run-left-no-test-failing")):
+            with open(self, "w", encoding="utf-8") as opened:
+                opened.write(data[:5])
+            raise OSError(28, "No space left on device")
+        return real_write_text(self, data, *arguments, **options)
+
+    Path.write_text = write_text_failing_part_way_in_the_record_directory
+    try:
+        for name, written in (("no-test-failing-write-fails-part-way-over-a-record", "PARENT\n"),
+                              ("no-test-failing-write-fails-part-way-with-no-record", "")):
+            exit_code, output, calls, parent, merge_commit, recorded = case(name, written)
+            directory = scratch / name
+            path = newest_main_commit_left_no_test_failing_file(directory)
+            left_over = sorted(item.name for item in path.parent.iterdir()) if path.parent.is_dir() else []
+            if written:
+                held = (f"{path} still holds {parent[:12]}, the commit it held before, so the next "
+                        f"after-merge test run compares with that older commit")
+                expected_record, expected_left_over = parent, [path.name]
+            else:
+                held = (f"{path} does not exist, so the next after-merge test run compares with its "
+                        f"pull request's head commit")
+                expected_record, expected_left_over = None, []
+            check(f"{name.replace('-', ' ')}: a write of the record that fails after opening its "
+                  f"file leaves the record as it was, and the STOP says what it holds and which "
+                  f"commit the next after-merge test run compares with",
+                  exit_code == 3 and recorded == expected_record
+                  and left_over == expected_left_over
+                  and f"STOP: merged, and main's test run left no test failing, but "
+                      f"{merge_commit[:12]} was not recorded in {path}: [Errno 28] No space left "
+                      f"on device" in output
+                  and held in output,
+                  f"exit {exit_code}\n{output}\n{recorded}\n{left_over}")
+    finally:
+        Path.write_text = real_write_text
+
+    real_replace, real_unlink = os.replace, Path.unlink
+
+    def is_the_programs_temporary_record(path):
+        name = Path(path).name
+        return (sys._getframe(2).f_globals is vars(program) and name.startswith(
+            "newest-main-commit-whose-after-merge-test-run-left-no-test-failing")
+            and name.endswith(".tmp"))
+
+    def replace_failing_for_the_record(source, destination, *arguments, **options):
+        if is_the_programs_temporary_record(source):
+            raise OSError(30, "Read-only file system")
+        return real_replace(source, destination, *arguments, **options)
+
+    def unlink_failing_for_the_record(self, *arguments, **options):
+        if is_the_programs_temporary_record(self):
+            raise OSError(16, "Device or resource busy")
+        return real_unlink(self, *arguments, **options)
+
+    # The space makes the quoted and the unquoted rm differ, so the case sees an unquoted one.
+    spaced = "no-test-failing-replace-and-cleanup-both-fail with a space"
+    os.replace, Path.unlink = replace_failing_for_the_record, unlink_failing_for_the_record
+    try:
+        exit_code, output, calls, parent, merge_commit, recorded = case(spaced, "PARENT\n")
+    finally:
+        os.replace, Path.unlink = real_replace, real_unlink
+    path = newest_main_commit_left_no_test_failing_file(scratch / spaced)
+    temporaries = sorted(item.name for item in path.parent.glob(f"{path.name}.*.tmp"))
+    # Matched whole, since a TMPDIR holding the instruction's words would put them in other lines.
+    rm_instruction = ("delete the temporary file: rm "
+                      + shlex.quote(str(path.parent / temporaries[0])) if temporaries else None)
+    rm_lines = [line for line in output.splitlines()
+                if rm_instruction and line.endswith(rm_instruction)]
+    check("a record whose rename and cleanup both fail: the STOP names the temporary file left "
+          "behind and the cleanup's error, and the record keeps its commit",
+          exit_code == 3 and recorded == parent and len(temporaries) == 1
+          and f"The temporary file {path.parent / temporaries[0]} could not be removed either: "
+              f"[Errno 16] Device or resource busy." in output
+          and f"was not recorded in {path}: [Errno 30] Read-only file system" in output
+          and len(rm_lines) == 1,
+          f"exit {exit_code}\n{output}\n{temporaries}")
+
+    into_another_branch = default_routes([])
+    into_another_branch["pr merge"] = {"origin_main_to": "MERGE_COMMIT", "origin": "ORIGIN"}
+    into_another_branch["view-state"] = {
+        "stdout": '{"state":"MERGED","mc":"MERGE_COMMIT","base":"stacked-topic-branch"}\n'}
+    write_the_newest_main_commit = newest_main_commit_left_no_test_failing_written("PARENT\n")
+
+    failed_suites_as_written = []
+
+    def both_records_written(directory):
+        write_the_newest_main_commit(directory)
+        failed_suites_record_written(directory)
+        failed_suites_as_written.append(failed_suites_record_of(directory))
+
+    exit_code, output, _, _, _ = run_case(
+        scratch, "no-test-failing-merged-into-another-branch", [(GATE_PASSED, 0)],
+        into_another_branch, merge_commit_new_to_the_clone=True,
+        before_the_program_runs=both_records_written)
+    directory = scratch / "no-test-failing-merged-into-another-branch"
+    parent = git_output(directory / "origin-seed", "rev-parse", "HEAD~1")
+    check("a pull request merged into a branch other than main leaves both records main alone "
+          "owns as they were, the newest main commit and main's failed suites, and says why",
+          exit_code == 0 and newest_main_commit_left_no_test_failing_of(directory) == parent
+          and [failed_suites_record_of(directory)] == failed_suites_as_written
+          and "merged into 'stacked-topic-branch', not main" in output
+          and f"the failed suites record, {failed_suites_record_file(directory)}, was "
+              f"left as it was: pull request " in output
+          and "testing 'stacked-topic-branch' at the merge commit " in output
+          and "testing main at the merge commit" not in output,
+          f"exit {exit_code}\n{output}\n{failed_suites_record_of(directory)}")
+
+    def recorded_failure_only(directory):
+        failed_suites_record_written(directory)
+        failed_suites_as_written.append(failed_suites_record_of(directory))
+
+    def recorded_at_commit(commit_of, tests=None):
+        def prepare(directory):
+            failed_suites_record_written(directory, tests=tests)
+            record = failed_suites_record_of(directory)
+            commit = commit_of(directory)
+            for fields in record["scripts/broken-test.py"]["failed_tests"].values():
+                fields["commit"] = commit
+            failed_suites_record_file(directory).write_text(json.dumps(record))
+            failed_suites_as_written.append(record)
+            if tests:
+                (directory / "runner.junit").write_text(junit_of_broken_suite(tests, []))
+        return prepare
+
+    left_main = {}
+
+    def commit_the_branch_does_not_hold(directory):
+        # A child of the commit the branch was cut from, so the merge commit does not descend
+        # from it, and their merge base is where the branch left main.
+        cut_from = git_output(directory / "review-tools", "rev-parse", "HEAD")
+        commit = subprocess.run(
+            ["git", *GIT_IDENTITY, "-C", str(directory / "review-tools"), "commit-tree",
+             "HEAD^{tree}", "-p", cut_from, "-m", "main begins failing after the branch was cut"],
+            capture_output=True, text=True, env=GIT_ENVIRONMENT, check=True).stdout.strip()
+        left_main[directory.name] = (cut_from, commit)
+        return commit
+
+    def commit_the_branch_holds_only_through_its_second_parent(directory):
+        # Main's first-failing commit merged the branch's cut-from commit in as its second
+        # parent, so their merge base is that commit, which main's tip never was; main's own
+        # first-parent history never meets the branch's, so no commit can be named.
+        tools = directory / "review-tools"
+        cut_from = git_output(tools, "rev-parse", "HEAD")
+
+        def commit_tree(*parents, message):
+            arguments = []
+            for parent in parents:
+                arguments += ["-p", parent]
+            return subprocess.run(
+                ["git", *GIT_IDENTITY, "-C", str(tools), "commit-tree", "HEAD^{tree}", *arguments,
+                 "-m", message],
+                capture_output=True, text=True, env=GIT_ENVIRONMENT, check=True).stdout.strip()
+
+        mains_tip = commit_tree(message="main's history, apart from the branch's")
+        return commit_tree(mains_tip, cut_from, message="main merges the branch's base in")
+
+    def one_recorded_and_one_new_case(directory):
+        failed_suites_record_written(directory, tests=["case recorded"])
+        failed_suites_as_written.append(failed_suites_record_of(directory))
+        (directory / "runner.junit").write_text(
+            junit_of_broken_suite(["case recorded", "case new"], []))
+
+    for name, runner_output, expected_exit, expected_lines, unexpected in (
+            ("failed-into-another-branch-only-what-main-fails", RUNNER_FAILED, 0,
+             ["the test run of 'stacked-topic-branch' at ",
+              "failed only tests already on the failed suites record"],
+             ["STOP", "main may be broken"]),
+            ("failed-into-another-branch-what-main-does-not-fail",
+             RUNNER_FAILED.replace("broken-test.py", "new-broken-test.py"), 3,
+             ["STOP: merged, but the test run of 'stacked-topic-branch' at ",
+              "failed tests that are not main's failures",
+              "No repair task was opened: pull request 10 merged into 'stacked-topic-branch', "
+              "not main", TELL_AUTHOR_AND_USER],
+             ["main may be broken", "Ask the user: \"Main fails"]),
+            ("failed-into-another-branch-cut-before-main-began-failing", RUNNER_FAILED, 3,
+             ["STOP: merged, but the test run of 'stacked-topic-branch' at ",
+              "failed tests that are not main's failures", TELL_AUTHOR_AND_USER,
+              "is on the failed suites record, ",
+              ", which keeps the main commit whose test run recorded it first, ",
+              ". 'stacked-topic-branch' does not hold that commit, so this program counts the "
+              "failure as 'stacked-topic-branch''s own. It may still be main's: when two of "
+              "main's after-merge test runs overlap, the later commit's run can record the "
+              "test first, though the earlier commit fails it too.\n",
+              "If that test passes there, 'stacked-topic-branch' broke it: the author fixes it on "
+              "'stacked-topic-branch'.\n",
+              "If scripts/broken-test.py is not in that commit, main gained it after "
+              "'stacked-topic-branch' left, so this check cannot say whose failure it is: say so "
+              "when you tell the author and the user."],
+             ["main may be broken", "git could not say"]),
+            ("failed-into-another-branch-main-took-the-cut-from-commit-in-by-a-merge",
+             RUNNER_FAILED, 3,
+             ["STOP: merged, but the test run of 'stacked-topic-branch' at ",
+              "failed tests that are not main's failures", TELL_AUTHOR_AND_USER],
+             ["main may be broken", "git could not say", "Before the author fixes it, run ",
+              "left main's history"]),
+            ("failed-into-another-branch-recorded-suite-new-case", RUNNER_FAILED, 3,
+             ["STOP: merged, but the test run of 'stacked-topic-branch' at ",
+              "failed tests that are not main's failures", TELL_AUTHOR_AND_USER],
+             ["main may be broken", "nothing is needed",
+              "which keeps the main commit whose test run recorded it first"]),
+            ("failed-into-another-branch-first-failing-commit-unknown", RUNNER_FAILED, 3,
+             ["STOP: pull request 10 merged into 'stacked-topic-branch', but git could not say "
+              "whether 'stacked-topic-branch' holds ffffffffffff, the main commit whose test run "
+              "first failed scripts/broken-test.py: case a, so this program counts the failure of every "
+              "test first failed there as 'stacked-topic-branch''s own, not main's; the STOP this "
+              "program prints last lists those failures among the ones that are not main's. "
+              "`git rev-list --first-parent --parents "
+              "ffffffffffffffffffffffffffffffffffffffff ^",
+              TELL_AUTHOR_AND_USER],
+             ["main may be broken", "nothing is needed"])):
+        prepare = {
+            "failed-into-another-branch-cut-before-main-began-failing":
+                recorded_at_commit(commit_the_branch_does_not_hold),
+            "failed-into-another-branch-main-took-the-cut-from-commit-in-by-a-merge":
+                recorded_at_commit(commit_the_branch_holds_only_through_its_second_parent),
+            "failed-into-another-branch-recorded-suite-new-case": one_recorded_and_one_new_case,
+            "failed-into-another-branch-first-failing-commit-unknown":
+                # Two tests first failed at one commit: one git fault, one STOP.
+                recorded_at_commit(lambda directory: "f" * 40, tests=["case a", "case b"]),
+        }.get(name, recorded_failure_only)
+        failed_suites_as_written.clear()
+        exit_code, output, _, _, _ = run_case(
+            scratch, name, [(GATE_PASSED, 0)], into_another_branch,
+            merge_commit_new_to_the_clone=True, runner_answer=(runner_output, 1),
+            before_the_program_runs=prepare)
+        directory = scratch / name
+        check(f"{name.replace('-', ' ')}: a failed after-merge test run of a merge into a branch "
+              f"other than main is judged against the failed suites record, which it "
+              f"leaves as it was, opens no repair task, and names the branch, not main",
+              exit_code == expected_exit
+              and [failed_suites_record_of(directory)] == failed_suites_as_written
+              and not (directory / "home" / ".claude" / "tasks").exists()
+              and all(line in output for line in expected_lines)
+              and not any(line in output for line in unexpected)
+              and output.count("git could not say") == (
+                  1 if name.endswith("first-failing-commit-unknown") else 0)
+              and (name not in left_main
+                   or "Before the author fixes it, run scripts/broken-test.py in a worktree at "
+                      f"{left_main[name][0]}, the commit where 'stacked-topic-branch' left "
+                      f"main's history before {left_main[name][1][:12]}.\n" in output),
+              f"exit {exit_code}\n{output}")
+
+    def record_unreadable(directory):
+        record = failed_suites_record_file(directory)
+        record.parent.mkdir(parents=True, exist_ok=True)
+        record.write_text("not json")
+
+    def no_junit(directory):
+        recorded_failure_only(directory)
+        (directory / "runner-writes-no-junit").write_text("")
+
+    def suite_cut_short(directory):
+        recorded_failure_only(directory)
+        (directory / "runner.junit").write_text(
+            junit_of_broken_suite(["scripts/broken-test.py"], [], ran_to_the_end=False))
+
+    for name, prepare, expected in (
+            ("failed-into-another-branch-record-unreadable", record_unreadable,
+             "could not be read, so every failed test of this run is taken as failing on "
+             "'stacked-topic-branch' alone"),
+            ("failed-into-another-branch-junit-missing", no_junit,
+             "STOP: merged into 'stacked-topic-branch', but this test run's failed tests could "
+             "not be named"),
+            ("failed-into-another-branch-suite-cut-short", suite_cut_short,
+             "STOP: merged into 'stacked-topic-branch', but scripts/broken-test.py did not run "
+             "to the end")):
+        failed_suites_as_written.clear()
+        exit_code, output, _, _, _ = run_case(
+            scratch, name, [(GATE_PASSED, 0)], into_another_branch,
+            merge_commit_new_to_the_clone=True, runner_answer=(RUNNER_FAILED, 1),
+            before_the_program_runs=prepare)
+        check(f"{name.replace('-', ' ')}: a merge into a branch other than main whose failed "
+              f"tests cannot be judged against the failed suites record is a STOP "
+              f"that names the branch",
+              exit_code == 3 and expected in output and "main may be broken" not in output,
+              f"exit {exit_code}\n{output}")
+
+    exit_code, output, calls, parent, merge_commit, recorded = case(
+        "no-test-failing-record-not-usable-and-run-prints-no-summary", "c" * 40 + "\n",
+        runner_answer=("PASS scripts/some-test.py (1s)\n", 0))
+    check("an after-merge test run that cannot use the record and prints no SUMMARY line prints "
+          "the recovery command with the baseline the run used, not a check of the record again",
+          exit_code == 3 and calls
+          and f"run: python3 scripts/run-all-test-suites.py "
+              f"--only-suites-whose-recorded-inputs-changed-since {calls[0]['argv'][1]}\n" in output
+          and "if git merge-base --is-ancestor" not in output,
+          f"exit {exit_code}\n{output}")
+
+
 def author_seat_made(directory):
     task_list = directory / "home" / ".claude" / "tasks" / "nedsnodes-author-seat-tasks"
     task_list.mkdir(parents=True)
@@ -657,9 +1096,11 @@ def failed_suites_kept_in_view_cases(scratch):
             scratch, "failed-suite-known", [(GATE_PASSED, 0)], default_routes([]),
             runner_answer=(RUNNER_FAILED, 1), before_the_program_runs=recorded_with_author)
         directory = scratch / "failed-suite-known"
-        check("a merge that fails only a recorded suite exits 0, with a notice and no second task",
+        check("a merge that fails only a recorded suite exits 0, with a notice and no second task, "
+              "and is not recorded as a commit whose after-merge test run left no test failing",
               exit_code == 0 and "STOP" not in output
-              and "failed only suites already on the failed suites record" in output
+              and not newest_main_commit_left_no_test_failing_file(directory).exists()
+              and "failed only tests already on the failed suites record" in output
               and failed_suites_record_of(directory)["scripts/broken-test.py"]["failed_tests"][
                   "scripts/broken-test.py"]["repair_task_id"] == 3
               and [path.name for path in tasks_of_author(directory)] == ["3.json"],
@@ -685,16 +1126,23 @@ def failed_suites_kept_in_view_cases(scratch):
               and len(calls) == 2 and "--only-suites-named" in calls[1]["argv"]
               and "scripts/broken-test.py" in calls[1]["argv"]
               and "--leave-recorded-inputs-and-failure-history-unchanged" in calls[1]["argv"]
-              and "scripts/broken-test.py left the failed suites record: it passed" in output,
+              and "scripts/broken-test.py left the failed suites record: it passed" in output
+              and newest_main_commit_left_no_test_failing_of(
+                  scratch / "failed-suite-rerun-passes")
+              == origin_commit(scratch, "failed-suite-rerun-passes"),
               f"exit {exit_code}\n{output}\n{calls}")
 
         exit_code, output, _, _, _ = run_case(
             scratch, "failed-suite-rerun-fails", [(GATE_PASSED, 0)], default_routes([]),
             origin_files=broken_on_origin, before_the_program_runs=recorded_and_rerun(
                 "FAIL scripts/broken-test.py exit 1 (1s)\nSUMMARY: 0 passed, 1 failed, 1 total\n", 1))
-        check("a recorded suite that fails its rerun stays on the record, and the merge exits 0",
+        check("a recorded suite that fails its rerun stays on the record, and the merge exits 0, "
+              "though the selective test run passed, without recording the merge commit as one "
+              "whose after-merge test run left no test failing",
               exit_code == 0 and "scripts/broken-test.py" in failed_suites_record_of(
                   scratch / "failed-suite-rerun-fails")
+              and not newest_main_commit_left_no_test_failing_file(
+                  scratch / "failed-suite-rerun-fails").exists()
               and "FAILED TEST SUITES ON MAIN" in output, f"exit {exit_code}\n{output}")
 
         exit_code, output, _, _, _ = run_case(
@@ -735,10 +1183,14 @@ def failed_suites_kept_in_view_cases(scratch):
         exit_code, output, _, _, _ = run_case(
             scratch, "failed-suite-record-unreadable", [(GATE_PASSED, 0)], default_routes([]),
             before_the_program_runs=unreadable)
-        check("an unreadable record exits 3, naming the file, and leaves it as it was",
+        check("an unreadable record exits 3, naming the file, and leaves it as it was; the "
+              "passing test run is not recorded as one that left no test failing, since the "
+              "record could not say whether main still fails a test",
               exit_code == 3 and "the failed suites record was not updated: could not read" in output
               and failed_suites_record_file(
-                  scratch / "failed-suite-record-unreadable").read_text() == "not json",
+                  scratch / "failed-suite-record-unreadable").read_text() == "not json"
+              and not newest_main_commit_left_no_test_failing_file(
+                  scratch / "failed-suite-record-unreadable").exists(),
               f"exit {exit_code}\n{output}")
 
         def lock_blocked(directory):
@@ -779,7 +1231,7 @@ def failed_suites_kept_in_view_cases(scratch):
                 before_the_program_runs=recorded_with_author)
             check(f"a recorded failure with another problem in the run ({name}) is a STOP",
                   exit_code == 3 and "STOP: merged, but the test run of main" in output
-                  and "failed only suites already" not in output
+                  and "failed only tests already" not in output
                   and "Tell the pull request's author, and the user" in output,
                   f"exit {exit_code}\n{output}")
 
@@ -838,7 +1290,7 @@ def failed_suites_kept_in_view_cases(scratch):
               and tests["case b"]["repair_task_id"] != 3 and tests["case a"]["repair_task_id"] == 3
               and "case b" in json.loads(new_tasks[0].read_text())["description"]
               and "case a" not in json.loads(new_tasks[0].read_text())["description"]
-              and "failed only suites already" not in output, f"exit {exit_code}\n{output}\n{tests}")
+              and "failed only tests already" not in output, f"exit {exit_code}\n{output}\n{tests}")
 
         exit_code, output, _, _, _ = run_case(
             scratch, "test-passes-another-stays", [(GATE_PASSED, 0)], default_routes([]),
@@ -918,7 +1370,7 @@ def failed_suites_kept_in_view_cases(scratch):
               "tests, so the second is a new failure and a STOP",
               exit_code == 3 and sorted(tests) == ["--failures-only: prints X",
                                                    "--failures-only: prints Y"]
-              and "failed only suites already" not in output, f"exit {exit_code}\n{output}\n{tests}")
+              and "failed only tests already" not in output, f"exit {exit_code}\n{output}\n{tests}")
 
         exit_code, output, _, _, _ = run_case(
             scratch, "known-failure-suite-cut-short", [(GATE_PASSED, 0)], default_routes([]),
@@ -927,7 +1379,7 @@ def failed_suites_kept_in_view_cases(scratch):
         check("a known failure in a suite that did not run to the end is a STOP, not a known "
               "failure",
               exit_code == 3 and "STOP: merged, but scripts/broken-test.py did not run to the end"
-              in output and "failed only suites already" not in output
+              in output and "failed only tests already" not in output
               and "nothing needs sending" not in output, f"exit {exit_code}\n{output}")
 
         def partial_rerun_with_a_new_failure(directory):
@@ -1138,6 +1590,22 @@ def failed_suites_kept_in_view_cases(scratch):
           worked and left == {}
           and "scripts/x-test.py: case a left the failed suites record: its suite ran to the end "
               "and reported nothing for it" in output, f"{worked} {left}\n{output}")
+    worked, left, output = kept_in_view_directly(older, newer, still_failing, test="case a")
+    check("a recorded test stays when its suite, at a later commit, failed before its first "
+          "case line, and the suite's own failure is recorded beside it",
+          worked and set(left["scripts/x-test.py"]["failed_tests"]) == {"case a", "scripts/x-test.py"}
+          and left["scripts/x-test.py"]["failed_tests"]["case a"]["pull_request"] == "9"
+          and "left the failed suites record" not in output, f"{worked} {left}\n{output}")
+    worked, left, output = kept_in_view_directly(
+        older, newer, x_suite('<testcase name="case b"><failure message="x"/></testcase>'),
+        test="case a")
+    check("a recorded test stays unchanged when its suite, at a later commit, failed another "
+          "case and stopped before this one with no traceback, as a shell suite under set -e does",
+          worked and left.get("scripts/x-test.py", {}).get("failed_tests", {}).get("case a") == {
+              "commit": older, "last_failed_commit": older, "pull_request": "9", "log": None,
+              "failed_at": "2026-11-20T17:18:00Z", "repair_task_agent_seat": None,
+              "repair_task_id": None}
+          and "left the failed suites record" not in output, f"{worked} {left}\n{output}")
     worked, left, output = kept_in_view_directly(newer, newer, other_case, test="case a")
     check("a recorded test not reported at the commit where it last failed stays",
           worked and "case a" in left["scripts/x-test.py"]["failed_tests"], f"{left}\n{output}")
@@ -1160,11 +1628,15 @@ def failed_suites_kept_in_view_cases(scratch):
     worked, left, output = kept_in_view_directly(
         older, newer, x_suite('<testcase name="case b"><failure message="x"/></testcase>'),
         test="scripts/x-test.py exit")
-    check("a recorded failure after the last case line leaves once the suite runs to the end "
-          "without one",
-          "scripts/x-test.py exit" not in left["scripts/x-test.py"]["failed_tests"]
-          and "case b" in left["scripts/x-test.py"]["failed_tests"],
+    check("a recorded failure after the last case line stays while the suite fails another case, "
+          "which it may have stopped at",
+          {"scripts/x-test.py exit", "case b"}
+          <= set(left.get("scripts/x-test.py", {}).get("failed_tests", {})),
           f"{left}\n{output}")
+    worked, left, output = kept_in_view_directly(
+        older, newer, x_suite('<testcase name="case b"/>'), test="scripts/x-test.py exit")
+    check("a recorded failure after the last case line leaves once the suite passes every case",
+          worked and left == {} and "reported nothing for it" in output, f"{left}\n{output}")
     worked, left, output = kept_in_view_directly(
         "0" * 40, newer, x_suite('<testcase name="scripts/x-test.py"><failure message="x"/>'
                                  '</testcase><testcase name="case n"><failure message="x"/>'
@@ -1174,7 +1646,7 @@ def failed_suites_kept_in_view_cases(scratch):
         stop = program.after_merge_test_run_closing_message_printed_returning_whether_stop(
             argparse.Namespace(pull_request="10"), newer, 1, ["SUMMARY: 0 passed, 1 failed"], True,
             {"complete": worked, "new_tests": {"scripts/x-test.py": {"case n": None}},
-             "seat": "author-seat", "task_id": 7, "why_none": None}, worked, "by hand")
+             "seat": "author-seat", "task_id": 7, "why_none": None}, worked, "by hand", "main")
     check("a new failure with a repair task, when git cannot judge a recorded commit, never says "
           "nothing needs sending",
           not worked and stop and "STOP: merged, but scripts/x-test.py stays" in output
@@ -1964,6 +2436,7 @@ def main():
               and not merge_commit_worktree.exists(), f"exit {exit_code}\n{output}")
 
         failed_suites_kept_in_view_cases(scratch)
+        newest_main_commit_left_no_test_failing_cases(scratch)
 
         exit_code, output, _, _, _ = run_case(
             scratch, "after-merge-could-not-run", [(GATE_PASSED, 0)],
@@ -2205,6 +2678,26 @@ def main():
         routes["pr merge"] = {"remove_directory": "ORIGIN"}
         exit_code, output, _, _, _ = run_case(
             scratch, "fetch-fails-after-merge", [(GATE_PASSED, 0)], routes)
+        recorded_commit = "c" * 40
+
+        def record_written(directory):
+            path = newest_main_commit_left_no_test_failing_file(directory)
+            path.parent.mkdir(parents=True, exist_ok=True)
+            path.write_text(recorded_commit + "\n")
+
+        exit_code_recorded, output_recorded, _, _, _ = run_case(
+            scratch, "fetch-fails-after-merge-with-a-record", [(GATE_PASSED, 0)], routes,
+            before_the_program_runs=record_written)
+        check("a fetch that fails after the merge, with a recorded commit: the recovery command "
+              "compares with the recorded commit when it is an ancestor of the merge commit, as "
+              "the after-merge test run would, and with the head commit otherwise",
+              exit_code_recorded == 3
+              and f"run: if git merge-base --is-ancestor {recorded_commit} " in output_recorded
+              and f"; then since={recorded_commit}; else since={HEAD}; fi; python3 "
+                  f"scripts/run-all-test-suites.py "
+                  f"--only-suites-whose-recorded-inputs-changed-since \"$since\"\n"
+                  in output_recorded,
+              f"exit {exit_code_recorded}\n{output_recorded}")
         check("a fetch that fails after the merge exits 3 without a test run",
               exit_code == 3 and runner_calls(scratch, "fetch-fails-after-merge") == []
               and "could not fetch origin in " in output
@@ -2311,6 +2804,18 @@ def main():
               exit_code == 1 and len(merges) == 1 and waits == [], f"exit {exit_code}\n{output}")
     finally:
         shutil.rmtree(scratch, ignore_errors=True)
+
+    printed = io.StringIO()
+    with contextlib.redirect_stdout(printed):
+        try:
+            program.failed_suites_record.main(iter(["--help"]))
+            help_exit = None
+        except SystemExit as stop:
+            help_exit = stop.code
+    check("the failed suites record program reads arguments given as a one-shot iterator: "
+          "--help prints help and exits 0",
+          help_exit == 0 and "--print-merge-gate-notice" in printed.getvalue(),
+          f"exit {help_exit}\n{printed.getvalue()}")
 
     if failures:
         print(f"\n{len(failures)} case(s) failed")

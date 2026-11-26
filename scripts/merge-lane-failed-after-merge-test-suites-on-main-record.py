@@ -19,13 +19,15 @@ when no repair task was opened.
 Exit codes: 0 the notice, if any, was printed; 1 the record could not be read, and stderr says why.
 """
 
-import argparse
 import fcntl
 import json
 import os
 import sys
-import tempfile
 from pathlib import Path
+
+# merge-gate.sh runs this with --print-merge-gate-notice on every gate run, and its test suite runs
+# the gate hundreds of times, so that path imports only what it uses: argparse alone costs Python
+# 3.14 about 30 ms to set up, and tempfile about 15 ms.
 
 NOTICE_HEADING = "FAILED TEST SUITES ON MAIN"
 TEST_FIELD_TYPES = {"commit": str, "last_failed_commit": str, "pull_request": str, "log": (str, type(None)),
@@ -72,6 +74,8 @@ def failed_after_merge_test_suites_on_main_record_change_apply_under_lock(change
     Two merges can finish their after-merge test runs at once, so each reads and writes the
     record inside one lock.
     """
+    import tempfile
+
     path = failed_suites_record_file()
     try:
         path.parent.mkdir(parents=True, exist_ok=True)
@@ -96,7 +100,7 @@ def merge_gate_notice(suites):
     lines = [f"{NOTICE_HEADING}: {count} test(s) in {len(suites)} test suite(s) failed an "
              f"after-merge test run of main and have not passed since. The gate goes on; each "
              f"later after-merge test run runs them again, and a test that passes, or that a suite "
-             f"run to the end no longer reports, leaves this notice."]
+             f"run to the end with no failure no longer reports, leaves this notice."]
     for suite, entry in sorted(suites.items()):
         for test, fields in sorted(entry["failed_tests"].items()):
             task = (f"repair task #{fields['repair_task_id']} on "
@@ -111,10 +115,14 @@ def merge_gate_notice(suites):
 
 
 def main(argv=None):
-    parser = argparse.ArgumentParser(
-        description="Print the merge-gate.sh notice of test suites that failed on main.")
-    parser.add_argument("--print-merge-gate-notice", action="store_true", required=True)
-    parser.parse_args(argv)
+    argv = sys.argv[1:] if argv is None else list(argv)
+    if argv != ["--print-merge-gate-notice"]:
+        import argparse
+
+        parser = argparse.ArgumentParser(
+            description="Print the merge-gate.sh notice of test suites that failed on main.")
+        parser.add_argument("--print-merge-gate-notice", action="store_true", required=True)
+        parser.parse_args(argv)
     try:
         notice = merge_gate_notice(failed_after_merge_test_suites_on_main_record_read())
     except FailedAfterMergeTestSuitesOnMainRecordFileUnreadableOrUnwritable as error:

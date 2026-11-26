@@ -126,10 +126,10 @@ class Machine:
                                    + raw_tail)
         return project, transcript
 
-    def task(self, seat, task_id, status="pending", metadata=None, blocked_by=()):
+    def task(self, seat, task_id, status="pending", metadata=None, blocked_by=(), subject=None):
         directory = self.tasks / f"nedsnodes-{seat}-tasks"
         directory.mkdir(exist_ok=True)
-        task = {"id": task_id, "subject": f"task {task_id}", "status": status,
+        task = {"id": task_id, "subject": subject or f"task {task_id}", "status": status,
                 "blocks": [], "blockedBy": list(blocked_by)}
         if metadata:
             task["metadata"] = metadata
@@ -219,6 +219,48 @@ try:
     check("the judge is handed the tool calls from the judged sentence's turn on, inputs cut short",
           calls is not None and [call["name"] for call in calls] == ["Bash"]
           and len(calls[0]["input"]) == fields.TOOL_CALL_INPUT_CHARACTERS_KEPT, calls)
+    failed_bash = assistant(tool=("Bash", {"command": "false"}), at="2026-11-02T11:41:10Z",
+                            tool_id="t-failed")
+    failed_result = user([{"type": "tool_result", "tool_use_id": "t-failed", "is_error": True,
+                           "content": "Exit code 1"}], at="2026-11-02T11:41:20Z")
+    told = assistant("The test failed.", at="2026-11-02T11:41:30Z")
+    records = [user("a", at="2026-11-02T11:20:00Z"), assistant("Earlier text.", at="2026-11-02T11:21:00Z"),
+               turn_end(at="2026-11-02T11:22:00Z"), user("go", at="2026-11-02T11:40:00Z"),
+               failed_bash, failed_result,
+               assistant(tool=("Bash", {"command": "true"}), at="2026-11-02T11:41:25Z", tool_id="t-ok"),
+               user([{"type": "tool_result", "tool_use_id": "t-ok", "content": ""}],
+                    at="2026-11-02T11:41:26Z"),
+               assistant(tool=("TaskUpdate", {"taskId": "99", "addBlockedBy": ["1"]}),
+                         at="2026-11-02T11:41:27Z", tool_id="t-missing"),
+               task_result("Task not found", at="2026-11-02T11:41:27.5Z", tool_id="t-missing"),
+               assistant(tool=("TaskUpdate", {"taskId": "3", "addBlockedBy": ["1"]}),
+                         at="2026-11-02T11:41:28Z", tool_id="t-updated"),
+               task_result(UPDATED, at="2026-11-02T11:41:28.5Z", tool_id="t-updated"),
+               told, assistant(ANNOUNCED, at="2026-11-02T11:42:00Z"), turn_end(at="2026-11-02T11:43:00Z")]
+    machine = Machine()
+    _, transcript = machine.seat("alpha", records)
+    _, verdicts, _ = machine.run()
+    alpha = verdicts["alpha"]
+    check("the judge is handed the assistant texts from the judged sentence's turn on, and each tool "
+          "call whose result carried is_error, or task call answered 'Task not found', marked failed",
+          [item["text"] for item in alpha.get(
+              fields.ASSISTANT_TEXT_MESSAGES_SINCE_START_OF_EARLIEST_TURN_WITH_SENTENCE_TO_JUDGE, [])]
+          == ["The test failed.", ANNOUNCED]
+          and [call.get("failed") for call in alpha.get(
+              fields.TOOL_CALLS_SINCE_START_OF_EARLIEST_TURN_WITH_SENTENCE_TO_JUDGE, [])]
+          == [True, None, True, None], alpha)
+    _program_specification = importlib.util.spec_from_file_location(
+        "agent_seat_idle_sweep_verdicts_print", PROGRAM)
+    program = importlib.util.module_from_spec(_program_specification)
+    _program_specification.loader.exec_module(program)
+    since = program.parse_time("2026-11-02T11:41:00Z")
+    done = program.transcript_tool_calls_and_assistant_texts_since(transcript, since)
+    check("the re-check is handed each tool call since the sentences, one whose result carried "
+          "is_error, or a task call answered 'Task not found', marked failed",
+          [(call["name"], call.get("failed")) for call in done["tool_calls"]]
+          == [("Bash", True), ("Bash", None), ("TaskUpdate", True), ("TaskUpdate", None)]
+          and [item["text"] for item in done["assistant_texts"]] == ["The test failed.", ANNOUNCED],
+          done)
     # {"command": "<n x>"} is n + 15 characters of JSON.
     for command_length, expected_input_length in ((1485, 1500), (1486, 1500)):
         machine = Machine()
@@ -924,6 +966,22 @@ try:
     check("the same task once the due-task hook has raised it for that pull request: rule 4",
           verdicts["alpha"]["rule"] == 4 and verdicts["alpha"]["open_tasks_nothing_holds"] == [],
           verdicts["alpha"])
+    events_machine = Machine()
+    events_machine.seat("alpha", [user("go"), assistant("Done."), turn_end()])
+    _, verdicts, _ = events_machine.run()
+    check("no pull-request events task: an idle agent-seat is not woken (rule 4)",
+          verdicts["alpha"]["rule"] == 4, verdicts["alpha"])
+    events_task_subject = "Read the new pull-request events in the watcher's event file"
+    events_machine.task("alpha", "1", subject=events_task_subject)
+    _, verdicts, _ = events_machine.run()
+    check("an open pull-request events task goes to the sweep's judge, naming the task (rule 5)",
+          verdicts["alpha"]["rule"] == 5
+          and verdicts["alpha"]["open_tasks_nothing_holds"]
+          == [{"id": "1", "subject": events_task_subject}], verdicts["alpha"])
+    events_machine.task("alpha", "1", subject=events_task_subject, status="completed")
+    _, verdicts, _ = events_machine.run()
+    check("the events task completed: the idle agent-seat is not woken (rule 4)",
+          verdicts["alpha"]["rule"] == 4, verdicts["alpha"])
     machine.gh_responses.write_text("{}")
     machine.seat("beta", [user("go"), assistant("Done."), turn_end()])
     code, verdicts, _ = machine.run()
