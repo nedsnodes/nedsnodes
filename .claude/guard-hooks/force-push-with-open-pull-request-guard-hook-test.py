@@ -943,7 +943,7 @@ check("a force push later in a chain is still found",
 
 # ---------------------------------------------------------------------------
 # The wiring. A hook that overruns its registered timeout fails open silently,
-# so the timeout in .claude/settings.json must stay above the guard's own
+# so the timeout in the Bash guard hooks dispatcher's guard list, or in .claude/settings.json, must stay above the guard's own
 # budget: the guard then always answers first, and can say what it skipped.
 # ---------------------------------------------------------------------------
 
@@ -966,24 +966,33 @@ def guard_not_wired_once_failure_detail(entries):
         RULE_FAILURE_LINES.FAILURE_MAY_COME_FROM_MAIN_NOT_YOUR_CHANGE_REPORT_IT_CLOSING_LINE])
 
 
-def registered_timeout_not_above_budget_failure_detail(timeout, budget):
+def registered_timeout_not_above_budget_failure_detail(timeout, budget, timeout_file):
     return "\n".join([
         f"timeout {timeout} vs budget {budget}; the guard must finish its probes and answer "
-        f"before the harness stops it, so the timeout .claude/settings.json registers for it must "
+        f"before the harness stops it, so the timeout {timeout_file} registers for it must "
         f"be a number above PROBE_BUDGET_SECONDS in "
         f".claude/guard-hooks/force-push-with-open-pull-request-guard-hook.py.",
         "If the case above also failed, fix that first; this case reads the timeout from the entry "
         "that case looks for.",
         "If your change raised PROBE_BUDGET_SECONDS, lower it below the timeout, or ask the user "
-        "to approve a higher timeout in .claude/settings.json.",
-        "If your change lowered, removed or rewrote the timeout in .claude/settings.json, put back "
+        f"to approve a higher timeout in {timeout_file}.",
+        f"If your change lowered, removed or rewrote the timeout in {timeout_file}, put back "
         "a number above the budget.",
-        RULE_FAILURE_LINES.guarded_file_fix_failure_message_line_pointing_to_approval_page_and_guard_refusal(".claude/settings.json"),
+        RULE_FAILURE_LINES.guarded_file_fix_failure_message_line_pointing_to_approval_page_and_guard_refusal(timeout_file),
         RULE_FAILURE_LINES.FAILURE_MAY_COME_FROM_MAIN_NOT_YOUR_CHANGE_REPORT_IT_CLOSING_LINE])
 
 
 WIRED_ONCE_CASE = "the guard is wired exactly once as a PreToolUse Bash hook"
 TIMEOUT_ABOVE_BUDGET_CASE = "the registered timeout exceeds the guard's probe budget"
+
+
+def settings_without_the_dispatcher(settings):
+    """The parsed settings with each Bash guard hooks dispatcher hook left out, so that what remains lists only
+    the hooks the settings register themselves."""
+    return {"hooks": {"PreToolUse": [
+        {**entry, "hooks": [hook for hook in entry.get("hooks", [])
+                            if DISPATCHER.BASH_GUARD_HOOKS_DISPATCHER_REPOSITORY_PATH not in hook.get("command", "")]}
+        for entry in settings.get("hooks", {}).get("PreToolUse", [])]}}
 
 
 def guard_wiring_cases(settings, probe_budget_seconds):
@@ -998,6 +1007,11 @@ def guard_wiring_cases(settings, probe_budget_seconds):
         if Path(path).name == HOOK_SCRIPT.name
     ]
     registered_timeout = guard_entries[0].get("timeout") if guard_entries else None
+    registered_in_settings_itself = any(
+        Path(path).name == HOOK_SCRIPT.name
+        for path, _ in DISPATCHER.bash_pre_tool_use_hook_path_and_timeout_pairs_read_from_settings_with_each_dispatcher_guard_listed_in_its_place(
+            settings_without_the_dispatcher(settings), SETTINGS_PATH.parents[1]))
+    timeout_file = ".claude/settings.json" if registered_in_settings_itself else GUARD_LIST_PATH
     return [
         (WIRED_ONCE_CASE, len(guard_entries) == 1,
          guard_not_wired_once_failure_detail(guard_entries)),
@@ -1005,7 +1019,7 @@ def guard_wiring_cases(settings, probe_budget_seconds):
          isinstance(registered_timeout, (int, float))
          and registered_timeout > probe_budget_seconds,
          registered_timeout_not_above_budget_failure_detail(
-             registered_timeout, probe_budget_seconds)),
+             registered_timeout, probe_budget_seconds, timeout_file)),
     ]
 
 
@@ -1054,6 +1068,23 @@ check("a timeout not above the budget fails with why, one fix per cause, the gua
           RULE_FAILURE_LINES.guarded_file_fix_failure_message_line_pointing_to_approval_page_and_guard_refusal(".claude/settings.json"),
           RULE_FAILURE_LINES.FAILURE_MAY_COME_FROM_MAIN_NOT_YOUR_CHANGE_REPORT_IT_CLOSING_LINE],
       short_timeout_detail)
+
+listed_short_timeout_passed, listed_short_timeout_detail = wiring_case_outcome(
+    guard_wiring_cases(json.loads(SETTINGS_PATH.read_text(encoding="utf-8")), 40.0), TIMEOUT_ABOVE_BUDGET_CASE)
+check("a timeout from the dispatcher's guard list not above the budget names the guard list as where to fix it",
+      not listed_short_timeout_passed
+      and listed_short_timeout_detail.split("\n")[:4] == [
+          "timeout 30 vs budget 40.0; the guard must finish its probes and answer before the "
+          "harness stops it, so the timeout .claude/guard-hooks/bash-guard-hooks-dispatcher-guard-list.json "
+          "registers for it must be a number above PROBE_BUDGET_SECONDS in "
+          ".claude/guard-hooks/force-push-with-open-pull-request-guard-hook.py.",
+          "If the case above also failed, fix that first; this case reads the timeout from the "
+          "entry that case looks for.",
+          "If your change raised PROBE_BUDGET_SECONDS, lower it below the timeout, or ask the user "
+          "to approve a higher timeout in .claude/guard-hooks/bash-guard-hooks-dispatcher-guard-list.json.",
+          "If your change lowered, removed or rewrote the timeout in "
+          ".claude/guard-hooks/bash-guard-hooks-dispatcher-guard-list.json, put back a number above the budget."],
+      listed_short_timeout_detail)
 
 # ---------------------------------------------------------------------------
 # The harness contract: what main() writes, and what it ignores.

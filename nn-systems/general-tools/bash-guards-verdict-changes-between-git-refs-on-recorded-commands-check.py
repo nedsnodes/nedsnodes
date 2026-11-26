@@ -402,7 +402,11 @@ def bash_hook_files(checkout):
 
 
 def dispatcher_guard_list_files(checkout):
-    """Return the guard files the checkout's Bash guard hooks dispatcher runs, from its guard list."""
+    """Return the guard files the checkout's Bash guard hooks dispatcher runs, from its guard list.
+
+    Only the paths are read: a list the dispatcher would refuse, such as one with an entry that has no valid
+    timeout_seconds, is refused by .claude/guard-hooks/bash-guard-hooks-dispatcher-test.py, not by this check.
+    """
     list_path = Path(checkout) / BASH_GUARD_HOOKS_DISPATCHER_GUARD_LIST
     try:
         return [entry["path"] for entry in json.loads(list_path.read_text(encoding="utf-8"))["guards"]]
