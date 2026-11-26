@@ -436,6 +436,24 @@ def findings_record_cases(scratch):
           result.code == 0 and f"- {main_id} (P1): file-for-later" in (result.posted or {}).get("body", "")
           and [call[0][0] for call in result.match_calls] == ["match"], result.detail)
 
+    unchecked_lines = main_lines.replace("`#pull_request_triggers_the_defect` `no`",
+                                         "`#pull_request_triggers_the_defect` `not checked`")
+    unchecked_report = (f"<!-- provenance -->\n\n- [Codex priority P1 (P0 highest)] {on_main}\n  Body.\n"
+                        + "\n".join("  " + line for line in unchecked_lines.splitlines()) + "\n")
+    result = run_program(scratch, file([]), arguments=MERGE_LANE_ARGUMENTS,
+                         codex_runs=((HEAD, 0, unchecked_report),), findings_record_match={"match": same})
+    check("a Codex finding the findings record already holds whose entry answers that this pull request makes it "
+          "happen `not checked` still needs a grade, so nothing is posted without one",
+          result.code == 2 and result.posted is None and main_id in result.stderr and "have no grade" in result.stderr,
+          result.detail)
+    conflicting_report = report.split("\n\n- [Codex priority P2")[0] + "\n\n" + both_report.split("\n\n", 1)[1]
+    result = run_program(scratch, file([]), arguments=MERGE_LANE_ARGUMENTS,
+                         codex_runs=((HEAD, 0, conflicting_report),), findings_record_match={"match": same})
+    check("a Codex finding the findings record already holds whose two entries answer that this pull request makes "
+          "it happen no and yes still needs a grade, so nothing is posted without one",
+          result.code == 2 and result.posted is None and main_id in result.stderr and "have no grade" in result.stderr,
+          result.detail)
+
     fixed = (0, json.dumps({main_id: {"answer": "SAME", "record": {**row, "state": "fixed", "decision": None},
                                       "possible_regression": True}}), "")
     result = posting(file([pull_request_grade]), match=fixed)

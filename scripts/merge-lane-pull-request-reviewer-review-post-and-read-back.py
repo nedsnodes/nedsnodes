@@ -714,25 +714,28 @@ def findings_record_summary(matched, added):
             + "".join(f"; {note}" for note in notes))
 
 
-def codex_finding_fact_line_answers(texts, hashtag_wanted, answer_wanted):
-    """Whether any entry of a Codex finding answers its hashtag_wanted line, or the older label's, with
-    answer_wanted."""
-    return any((hashtag or FINDING_FACT_LINE_OLDER_LABELS[label]) == hashtag_wanted
-               and FINDING_FACT_LINE_MARKS_AND_SPACE.sub("", answer).lower().startswith(answer_wanted)
-               for text in texts for hashtag, label, answer in FINDING_FACT_LINE.findall(text))
+def codex_finding_fact_line_answers(texts, hashtag_wanted):
+    """Every answer the entries of a Codex finding give its hashtag_wanted line, or the older label's, lowercased with
+    marks and spaces removed, so that "not checked" reads as "notchecked", never as "no"."""
+    return [FINDING_FACT_LINE_MARKS_AND_SPACE.sub("", answer).lower()
+            for text in texts for hashtag, label, answer in FINDING_FACT_LINE.findall(text)
+            if (hashtag or FINDING_FACT_LINE_OLDER_LABELS[label]) == hashtag_wanted]
 
 
 def codex_finding_says_main_has_it(texts):
     """Whether any entry of a Codex finding answers its `#defect_already_on_main` line yes."""
-    return codex_finding_fact_line_answers(texts, "#defect_already_on_main", "yes")
+    return "yes" in codex_finding_fact_line_answers(texts, "#defect_already_on_main")
 
 
 def findings_record_rows_needing_no_grade(matched, findings):
-    """The SAME answers, by finding id, of the matched findings that need no grade: those whose text answers
-    `#pull_request_triggers_the_defect` no. One that answers yes is still graded, since this pull request may
-    bring the defect back, and the earlier row's grade is for main."""
+    """The SAME answers, by finding id, of the matched findings that need no grade: those whose every entry answers
+    `#pull_request_triggers_the_defect` no. One that answers yes, not checked, or yes in one entry and no in another
+    is still graded, since this pull request may bring the defect back, and the earlier row's grade is for main."""
+    def every_entry_answers_no(texts):
+        answers = codex_finding_fact_line_answers(texts, "#pull_request_triggers_the_defect")
+        return bool(answers) and all(answer == "no" for answer in answers)
     return {finding: answer for finding, answer in matched.items() if answer["answer"] == "SAME"
-            and codex_finding_fact_line_answers(findings[finding][3], "#pull_request_triggers_the_defect", "no")}
+            and every_entry_answers_no(findings[finding][3])}
 
 
 def findings_record_program_answers(program, subcommand, number, head, request, answer_is_readable):
