@@ -832,11 +832,11 @@ def newest_main_commit_left_no_test_failing_cases(scratch):
             if written:
                 held = (f"{path} still holds {parent[:12]}, the commit it held before, so the next "
                         f"after-merge test run compares with that older commit")
-                expected_record, expected_left_over = parent, [path.name]
+                expected_record, expected_left_over = parent, [path.name, f"{path.name}.lock"]
             else:
                 held = (f"{path} does not exist, so the next after-merge test run compares with its "
                         f"pull request's head commit")
-                expected_record, expected_left_over = None, []
+                expected_record, expected_left_over = None, [f"{path.name}.lock"]
             check(f"{name.replace('-', ' ')}: a write of the record that fails after opening its "
                   f"file leaves the record as it was, and the STOP says what it holds and which "
                   f"commit the next after-merge test run compares with",
@@ -1947,6 +1947,65 @@ def failed_suites_kept_in_view_cases(scratch):
           worked and refreshed["last_failed_commit"] == newer and refreshed["commit"] == older
           and worked_after and "scripts/x-test.py" in left_after,
           f"{left}\n{left_after}\n{output}")
+
+    def newest_passing_written_directly(held, merge_commit, hold_the_lock_for=0.0):
+        run = next(runs)
+        home = scratch / f"newest-passing-home-{run}"
+        saved_home = os.environ.get("HOME")
+        os.environ["HOME"] = str(home)
+        try:
+            path = program.newest_main_commit_whose_after_merge_test_run_left_no_test_failing_file()
+            path.parent.mkdir(parents=True)
+            if held is not None:
+                path.write_text(held + "\n")
+
+            def git(*arguments):
+                return subprocess.run(["git", "-C", str(author_repository), *arguments],
+                                      capture_output=True, text=True, env=GIT_ENVIRONMENT,
+                                      stdin=subprocess.DEVNULL)
+
+            printed = io.StringIO()
+            waited = None
+            with contextlib.redirect_stdout(printed):
+                if hold_the_lock_for:
+                    with open(path.with_name(path.name + ".lock"), "a") as lock:
+                        fcntl.flock(lock, fcntl.LOCK_EX)
+                        writer = threading.Thread(
+                            target=program.newest_main_commit_whose_after_merge_test_run_left_no_test_failing_written,
+                            args=(merge_commit, git))
+                        writer.start()
+                        time.sleep(hold_the_lock_for)
+                        waited = path.read_text().strip() == (held or "")
+                    writer.join()
+                    written = True
+                else:
+                    written = program.newest_main_commit_whose_after_merge_test_run_left_no_test_failing_written(
+                        merge_commit, git)
+            return written, path.read_text().strip(), printed.getvalue(), waited
+        finally:
+            if saved_home is None:
+                del os.environ["HOME"]
+            else:
+                os.environ["HOME"] = saved_home
+
+    written, held, output, _ = newest_passing_written_directly(newer, older)
+    check("an older commit's after-merge test run that finishes after a newer one's leaves the "
+          "newer commit in the newest-passing record, and says so",
+          written and held == newer
+          and f"the merge commit {older[:12]} was not recorded in " in output
+          and "the record moves only to a newer commit. Nothing to do." in output,
+          f"{written} {held}\n{output}")
+    written, held, output, _ = newest_passing_written_directly(older, newer)
+    check("a newer commit's after-merge test run moves the newest-passing record forward",
+          written and held == newer and f"recorded the merge commit {newer[:12]}" in output,
+          f"{written} {held}\n{output}")
+    written, held, output, _ = newest_passing_written_directly("0" * 40, older)
+    check("a commit git cannot place in the newest-passing record is replaced, since no run "
+          "uses it", written and held == older, f"{written} {held}\n{output}")
+    _, held, output, waited = newest_passing_written_directly(older, newer, hold_the_lock_for=0.3)
+    check("the newest-passing record is read and written under its lock, so a run that finishes "
+          "while another holds it waits, then writes",
+          waited and held == newer, f"{waited} {held}\n{output}")
 
     other_case = x_suite('<testcase name="case b"/>')
     worked, left, output = kept_in_view_directly(older, newer, other_case, test="case a")

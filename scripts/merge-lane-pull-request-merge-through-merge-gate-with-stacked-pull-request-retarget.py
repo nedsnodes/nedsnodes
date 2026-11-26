@@ -46,13 +46,10 @@ the end, every step that keeps failed tests in view worked, and the failed
 suites record below is then empty; the program then writes the merge commit to
 that file, when the pull request merged into main; a merge into another branch
 leaves both that file and the failed suites record as they were. A test run that fails only tests already on that record exits 0 but
-writes nothing, because main still fails them. Two after-merge test runs that
-overlap, such as a scheduled merge and one by hand, each write their own merge
-commit, so the one that finishes last is kept even when its commit is the older,
-and the next run compares with that older commit until a later merge records
-its own; that run's selection is not always a superset of the newer commit's,
-because an input a merge changed and a later merge set back is the same at both
-ends of the older comparison. The file is not used when it is missing,
+writes nothing, because main still fails them. The file moves only forward: when
+two after-merge test runs overlap and the later commit's run finishes first,
+the earlier commit's run leaves the later commit in the file, since it already
+names a commit descending from the earlier one. The file is not used when it is missing,
 unreadable, malformed, or names a commit that is not an ancestor, which the
 program prints. The other is the pr<n>-merged commit the head test run passed on: of the
 records pull-request-head-test-run.py filed under hr/pr<n>/log-store in the
@@ -1227,17 +1224,36 @@ def newest_main_commit_whose_after_merge_test_run_left_no_test_failing_held(path
             f"there.")
 
 
-def newest_main_commit_whose_after_merge_test_run_left_no_test_failing_written(merge_commit):
+def newest_main_commit_whose_after_merge_test_run_left_no_test_failing_written(merge_commit, git):
     """Record merge_commit as the newest main commit whose after-merge test run left no test
-    failing; print what happened and return False when it could not be written."""
+    failing, unless the record already names merge_commit or a commit descending from it; print
+    what happened and return False when it could not be written."""
     path = newest_main_commit_whose_after_merge_test_run_left_no_test_failing_file()
     # Written beside the record and renamed over it, so that a write failing part way, as on a
     # full disk, leaves the record as it was instead of truncated.
     temporary = path.with_name(f"{path.name}.{os.getpid()}.tmp")
     try:
         path.parent.mkdir(parents=True, exist_ok=True)
-        temporary.write_text(merge_commit + "\n", encoding="utf-8")
-        os.replace(temporary, path)
+        # Two after-merge test runs can finish at once; the lock keeps one from reading the
+        # record before the other's write and then moving it back.
+        with open(path.with_name(path.name + ".lock"), "a", encoding="utf-8") as lock:
+            fcntl.flock(lock, fcntl.LOCK_EX)
+            try:
+                held = path.read_text(encoding="utf-8").strip()
+            except (FileNotFoundError, UnicodeDecodeError, IsADirectoryError):
+                held = ""
+            # Only "merge_commit is an ancestor of the held commit" keeps the record: an
+            # unrelated or unreadable commit is never used, and moving the record back only
+            # makes the next run select more suites.
+            if (len(held) == 40 and all(character in "0123456789abcdef" for character in held)
+                    and git("merge-base", "--is-ancestor", merge_commit, held).returncode == 0):
+                print(f"the merge commit {merge_commit[:12]} was not recorded in {path}: it "
+                      f"names {held[:12]}, which is {merge_commit[:12]} or a later commit of "
+                      f"main whose after-merge test run finished first, and the record moves "
+                      f"only to a newer commit. Nothing to do.")
+                return True
+            temporary.write_text(merge_commit + "\n", encoding="utf-8")
+            os.replace(temporary, path)
     except OSError as error:
         left_behind = ""
         try:
@@ -1479,7 +1495,7 @@ def after_merge_test_run(arguments, merge_commit, base_branch):
                   f"main, and that file names only main's commits. Nothing to do: the next "
                   f"merge into main whose test run leaves no test failing writes its own merge "
                   f"commit there.")
-        elif not newest_main_commit_whose_after_merge_test_run_left_no_test_failing_written(merge_commit):
+        elif not newest_main_commit_whose_after_merge_test_run_left_no_test_failing_written(merge_commit, git):
             every_step_complete = False
 
     if not recordings_matching_the_merge_commit_adopted(
