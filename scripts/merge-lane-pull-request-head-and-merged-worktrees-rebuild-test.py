@@ -180,13 +180,16 @@ def main():
             (head_worktree / ".git").unlink()
             (head_worktree / "kept.txt").write_text("in a locked worktree\n")
             completed = run_program(helpers, checkout, "7", head_commit, main_commit)
-            check("a locked pr<n>-head that lost its .git is left with its files, exit 1 naming "
-                  "the lock",
+            check("a locked pr<n>-head that lost its .git is left with its files and no .git "
+                  "written into it, exit 1 naming the lock and its reason",
                   completed.returncode == 1 and (head_worktree / "kept.txt").exists()
-                  and "locked" in completed.stdout,
+                  and not (head_worktree / ".git").exists()
+                  and "as locked, with the reason: a reviewer is reading it" in completed.stdout
+                  and "Nothing was deleted" in completed.stdout,
                   f"exit {completed.returncode}\n{completed.stdout}{completed.stderr}")
             git(checkout, "worktree", "unlock", str(head_worktree))
-            git(checkout, "worktree", "remove", "--force", str(head_worktree))
+            shutil.rmtree(head_worktree)
+            git(checkout, "worktree", "prune")
 
             head_worktree.mkdir()
             (head_worktree / "not-a-worktree.txt").write_text("an ordinary directory\n")
@@ -195,7 +198,7 @@ def main():
                   "saying git records no worktree there and nothing was deleted",
                   completed.returncode == 1
                   and (head_worktree / "not-a-worktree.txt").exists()
-                  and "records no worktree at that path" in completed.stdout
+                  and f"records no worktree at {head_worktree}" in completed.stdout
                   and "Nothing was deleted" in completed.stdout,
                   f"exit {completed.returncode}\n{completed.stdout}{completed.stderr}")
             shutil.rmtree(head_worktree)
@@ -232,6 +235,95 @@ def main():
                   and "Nothing was deleted" in completed.stdout,
                   f"exit {completed.returncode}\n{completed.stdout}{completed.stderr}")
             head_worktree.unlink()
+
+            def rebuilt_fresh():
+                completed = run_program(helpers, checkout, "7", head_commit, main_commit)
+                if completed.returncode != 0:
+                    raise AssertionError(f"setup rebuild failed: {completed.stdout}")
+
+            rebuilt_fresh()
+            (head_worktree / "left.txt").write_text("a change in a healthy pr<n>-head\n")
+            git(checkout, "worktree", "lock", str(merged_worktree))
+            completed = run_program(helpers, checkout, "7", head_commit, main_commit)
+            check("a healthy pr<n>-head keeps its changes when pr<n>-merged is locked, exit 1 "
+                  "naming the lock and saying nothing was deleted",
+                  completed.returncode == 1 and (head_worktree / "left.txt").exists()
+                  and f"git records {merged_worktree} as locked, with no reason given"
+                  in completed.stdout and "Nothing was deleted" in completed.stdout,
+                  f"exit {completed.returncode}\n{completed.stdout}{completed.stderr}")
+            git(checkout, "worktree", "unlock", str(merged_worktree))
+
+            git(checkout, "worktree", "remove", "--force", str(merged_worktree))
+            subprocess.run(["git", "init", "-q", str(merged_worktree)], check=True,
+                           env=GIT_ENVIRONMENT)
+            completed = run_program(helpers, checkout, "7", head_commit, main_commit)
+            check("a healthy pr<n>-head keeps its changes when pr<n>-merged is a checkout of its "
+                  "own, exit 1 saying git records no worktree there",
+                  completed.returncode == 1 and (head_worktree / "left.txt").exists()
+                  and (merged_worktree / ".git").is_dir()
+                  and f"records no worktree at {merged_worktree}" in completed.stdout,
+                  f"exit {completed.returncode}\n{completed.stdout}{completed.stderr}")
+            shutil.rmtree(merged_worktree)
+
+            rebuilt_fresh()
+            git(checkout, "worktree", "lock", str(head_worktree))
+            (merged_worktree / ".git").unlink()
+            completed = run_program(helpers, checkout, "7", head_commit, main_commit)
+            check("a locked pr<n>-head stops the run before pr<n>-merged, which lost its .git, "
+                  "has one written into it",
+                  completed.returncode == 1 and not (merged_worktree / ".git").exists()
+                  and f"git records {head_worktree} as locked" in completed.stdout,
+                  f"exit {completed.returncode}\n{completed.stdout}{completed.stderr}")
+            git(checkout, "worktree", "unlock", str(head_worktree))
+            shutil.rmtree(merged_worktree)
+            git(checkout, "worktree", "prune")
+
+            rebuilt_fresh()
+            common_directory = Path(git(checkout, "rev-parse", "--path-format=absolute",
+                                        "--git-common-dir"))
+            # A gitdir record read after its worktree's removal: a link to nothing reads as gone.
+            vanished = common_directory / "worktrees" / "0-vanished-during-the-scan"
+            vanished.mkdir()
+            (vanished / "gitdir").symlink_to(scratch / "no-such-gitdir-record")
+            (head_worktree / ".git").unlink()
+            completed = run_program(helpers, checkout, "7", head_commit, main_commit)
+            check("a gitdir record that vanishes during the scan is skipped, and pr<n>-head, "
+                  "which lost its .git, is made again, exit 0",
+                  completed.returncode == 0
+                  and git(head_worktree, "rev-parse", "HEAD") == head_commit,
+                  f"exit {completed.returncode}\n{completed.stdout}{completed.stderr}")
+            shutil.rmtree(vanished)
+
+            head_record = next(record for record in (common_directory / "worktrees").glob(
+                "*/gitdir") if Path(record.read_text().strip()).parent == head_worktree)
+            head_record.write_text(os.path.relpath(head_worktree / ".git", head_record.parent)
+                                   + "\n")
+            (head_worktree / ".git").unlink()
+            completed = run_program(helpers, checkout, "7", head_commit, main_commit)
+            check("a pr<n>-head that lost its .git, whose gitdir record is relative to the "
+                  "record's directory, is found and made again, exit 0",
+                  completed.returncode == 0
+                  and git(head_worktree, "rev-parse", "HEAD") == head_commit,
+                  f"exit {completed.returncode}\n{completed.stdout}{completed.stderr}")
+
+            unwritable = head_worktree / "unwritable"
+            unwritable.mkdir()
+            (unwritable / "stuck.txt").write_text("git cannot delete this\n")
+            unwritable.chmod(0o500)
+            try:
+                completed = run_program(helpers, checkout, "7", head_commit, main_commit)
+            finally:
+                unwritable.chmod(0o700)
+            check("a removal that fails part way says what is left of the directory and of "
+                  "git's record, exit 1",
+                  completed.returncode == 1
+                  and f"After that failure, {head_worktree} still exists, and git no longer "
+                      f"records a worktree there." in completed.stdout
+                  and "No other worktree was removed in this run." in completed.stdout,
+                  f"exit {completed.returncode}\n{completed.stdout}{completed.stderr}")
+            shutil.rmtree(head_worktree)
+            git(checkout, "worktree", "prune")
+            rebuilt_fresh()
 
         relative_helpers = scratch / "relative-helpers"
         completed = run_program(Path("relative-helpers"), Path("checkout"), "7", head_commit,
