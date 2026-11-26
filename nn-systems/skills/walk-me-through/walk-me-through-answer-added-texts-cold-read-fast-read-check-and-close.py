@@ -230,20 +230,23 @@ command that reads the text again; then what to do with the findings: apply a
 finding that changes only how a text reads to the walk-document and to the
 work the answer started, and take a finding that would change what the user
 approved back to him as the walk-me-through skill says for an answer close
-has already recorded. It writes one line per read into the walk-minutes,
-`Background cold-read-fast-read of <item>'s `<mark>` text <number>: done,
-<report>.` or `...: failed, <the FAILED line>.`, and marks the read handed
-over, so that each is handed over once. A read that fails is not run again by
+has already recorded. The step that hands a read over writes one line for it
+into the walk-minutes, `Background cold-read-fast-read of <item>'s `<mark>`
+text <number>: done, <report>.` or `...: failed, <the FAILED line>.`, the
+line for a worker that ended without an outcome giving the sentence that
+says so in place of a FAILED line, and marks the read handed over, so that
+each is handed over once. A read that fails is not run again by
 the program. A fast read that names its report and exits 1 only because its
 record did not reach the log-store, as a `record: FAILED` or `record: REFUSED`
 line on its stderr says, counts as done; such a line, and one saying the
-target changed during the read, are added to the read's line, and an unshipped
+target changed during the read, are added to the line that hands the read over, and an unshipped
 record is printed with the command that ships it, after the rest of the
 step's output in CHECK and CLOSE and before it in the read step, with exit 2
 when the step would have exited 0. CHECK prints its hand-over before its close
 line, CLOSE before the line naming the read step, and the read step before
 its own output. A CLOSE that writes `none, closed` first waits for each such
-read still running, since no later step would hand it over.
+read still running, for as long as its worker's process lives, since no later
+step would hand it over.
 
 Each run of CHECK, CLOSE and the waiting-item step first saves the open
 walk's walk-document, as it stands, to `walk-document-copies/<walk name>/` in
@@ -397,7 +400,7 @@ CLOSE names item 1 only when the walk comes round to it again, so no read ahead
 covers item 1's first showing: the walk-me-through skill's cold-read-fast-read
 of the whole walk before item 1 covers it. Item 2's read is run by the step after item 1's close,
 since no read ahead was started while item 1 was shown.
-Close and the step also start a read ahead of each unshown item, an item
+Close and the read step also start a read ahead of each unshown item, an item
 added to the walk-document while another is shown included, so that its read
 is ready when check --bump or the walk order brings it up: each item without
 a running count but the summary item, once it holds its
@@ -588,11 +591,12 @@ prints the APPROVAL-WALK-ITEM-AFTER-WAITING-ITEM-PAGE-BUILD-AHEAD command, to ru
 once the agent's message has shown the item's text and before its closing line,
 so that the next item's page publishes while the user reads this one. That step
 finds the item after the waiting item as the read ahead does, numbered as close
-will number it, builds its page with
+will number it, and builds that numbered text's page with
 walk-me-through-approval-walk-item-page-html-build-from-walk-document.py's
 build function, its Previous link the waiting item's page, writes it to
-`<key>-approval-walk-item-page-built-ahead.html` in the directory below, keyed
-by that item's text, and prints how to publish it with the Artifact tool, which
+`<key>-approval-walk-item-page-built-ahead.html` in the per-text-hash directory
+named below, `<key>` being the sha256 of that numbered text, the key its read
+step reads it under, and prints how to publish it with the Artifact tool, which
 only the agent has, and the commands that record the publish: with
 --approval-walk-item-page-built-ahead-artifact-link the link, with
 --approval-walk-item-page-built-ahead-publish-failure-message-to-record what
@@ -601,8 +605,8 @@ the Artifact tool said, each in
 record for a text no page was built for, as when the item changed after the
 build, is refused, writing nothing, with the build command to run again. The
 link is not written as an `#item_page` line then, since that line says the
-user was shown the item. The read step that hands the item over writes it,
-when the minutes hold no `#item_page` line for the item: with a page published
+user was shown the item. The read step that hands the item over writes that
+`#item_page` line, when the minutes hold none for the item: with a page published
 for the item's text as it stands, it says the item needs no page step; with
 one published for an earlier text of the item, found by the heading's title, it
 says to build the page again as version 2 and republish it to that link; either
@@ -1717,16 +1721,20 @@ ANSWER_READ_ENDED = ("Background cold-read-fast-read of {item}'s `{mark}` text {
                      "user's answer added: its worker ended without writing an outcome, so that text has had no fast "
                      "read; its output is in {log}.")
 ANSWER_READ_RUN_AGAIN = (
-    "The answer stands in the walk-minutes. Run `{command}` once, and handle its report as the last two lines of "
-    "this hand-over say; if it prints a line opening FAILED again, or ends without naming a report, tell the user "
-    "what it printed and ask whether to undo the work his answer started; a subagent asks the agent that "
-    "dispatched it.")
+    "The answer stands in the walk-minutes. Run `{command}` once, and handle the report it names as the last lines "
+    "of this hand-over say for a finding.",
+    "If that run prints a line opening FAILED again, or ends without naming a report, tell the user the line it "
+    "printed, that the text his answer approved has had no fast read, and ask whether to undo the work his answer "
+    "started, recommending that you run the read again later and keep the work; a subagent asks the agent that "
+    "dispatched it.",
+)
 ANSWER_READ_FINDINGS_LINES = (
-    "Read each report named above. A finding that does not hold: leave it. A finding that holds and changes only how "
-    "a text reads: apply it to that text in "
+    "Read each report named above.",
+    "If a finding does not hold, leave it.",
+    "If a finding holds and changes only how a text reads, apply it to that text in "
     "the walk-document {document} and wherever the work the answer started uses the text, telling the subagent or "
     "agent-seat doing that work.",
-    "A finding that would change what the user approved: do what the walk-me-through skill says for an item revised "
+    "If a finding would change what the user approved, do what the walk-me-through skill says for an item revised "
     "after the close step recorded its answer: stop the work that answer started that is still running, and add the "
     "changed recommendation as a new item, shown next, naming the item, the answer it replaces, what that work has "
     "already done, and each item answered since whose answer builds on the approved text.",
@@ -3171,9 +3179,9 @@ def answer_added_text_background_reads_handed_over(walk_finder, minutes, documen
             failed = outcome["failed"] if outcome else None
             lines.append(ANSWER_READ_FAILED.format(**named, failed=failed) if outcome
                          else ANSWER_READ_ENDED.format(**named, log=reads / f"{key}.log"))
-            lines.append(ANSWER_READ_RUN_AGAIN.format(command=shlex.join(
-                ["python3", str(fast_read_program), "--target", str(reads / f"{key}.md"),
-                 FAST_READ_WITHOUT_QUESTION_4_OPTION])))
+            again = shlex.join(["python3", str(fast_read_program), "--target", str(reads / f"{key}.md"),
+                                FAST_READ_WITHOUT_QUESTION_4_OPTION])
+            lines += [line.format(command=again) for line in ANSWER_READ_RUN_AGAIN]
             said = ANSWER_READ_MINUTES_FAILED.format(failed=walk_finder.text_wrapped_as_markdown_code_span(
                 failed or ANSWER_READ_ENDED.format(**named, log=reads / f"{key}.log")))
         recorded.append(ANSWER_READ_MINUTES.format(item=read["item"], mark=read["mark"], number=read["number"],

@@ -4003,7 +4003,7 @@ def test_each_background_read_is_handed_over_once_and_a_running_one_only_once_it
           "item over",
           read.returncode == 0
           and lines[0].startswith("Background cold-read-fast-read of item 2 of 5's `#new` text 1, ")
-          and "A finding that would change what the user approved: " in read.stdout
+          and "If a finding would change what the user approved, " in read.stdout
           and "\nitem 3 of 5: its cold-read-fast-read, of its text as it stands, " in read.stdout,
           described(read))
     again = case.run(WAITING_ITEM_READ)
@@ -4011,6 +4011,42 @@ def test_each_background_read_is_handed_over_once_and_a_running_one_only_once_it
           again.returncode == 0 and "Background cold-read-fast-read" not in again.stdout
           and case.minutes.read_text().count("Background cold-read-fast-read of item 2 of 5's") == 1,
           described(again))
+
+
+def test_check_and_the_read_step_exit_2_when_a_read_they_hand_over_did_not_ship_its_record():
+    case = item_read_case()
+    document = case.checkout / "docs" / "walk" / f"{WALK_NAME}.md"
+    document.write_text(document.read_text().replace("## Item 2 of 5: two\n", "## Item 2 of 5: two\n\n#new \"Text two.\"\n"))
+    case.run("check", mode="record-not-shipped")
+    read = case.run(WAITING_ITEM_READ)
+    check("the read step that hands over a background read whose record was not shipped prints its ship command "
+          "first and exits 2, though it hands its own item over",
+          read.returncode == 2 and read.stdout.startswith("Background cold-read-fast-read of item 2 of 5's `#new` text 1")
+          and "did not ship its record" in read.stdout and "Then present item 2 of 5" in read.stdout,
+          described(read))
+    for handed_over in case.answer_reads().glob("*-handed-over.json"):
+        handed_over.unlink()  # So the next step hands the read over again.
+    checked = case.run("check")
+    check("check that hands over a background read whose record was not shipped exits 2, and still records the "
+          "answer",
+          checked.returncode == 2 and "did not ship its record" in checked.stdout
+          and case.minutes.read_text().count("item 2 of 5: the user answered approved") == 2, described(checked))
+
+
+def test_the_lines_close_writes_for_an_answer_whose_reads_run_in_the_background_decide_the_item():
+    program = load_program()
+    walk_finder = program.load_walk_finder()
+    lines = "".join(line + "\n" for line in (
+        program.CLOSE_TOOK_EFFECT_READS_IN_BACKGROUND_MINUTES.format(item="item 2 of 5", answered="approved",
+                                                                     outcome="<accepted>"),
+        program.CLOSE_PARTS_TOOK_EFFECT_READS_IN_BACKGROUND_MINUTES.format(
+            item="item 3 of 5", parts="part 1 approved <accepted>, part 2 disapproved <rejected>")))
+    decided, _ = program.minutes_record(walk_finder, "# Minutes\n\n" + lines, walk_finder.markdown_parser())
+    words, _ = program.minutes_ruling_words(walk_finder, "# Minutes\n\n" + lines, walk_finder.markdown_parser())
+    check("the close lines for an answer, or answers to parts, whose reads run in the background decide their items, "
+          "with the ruling words approved and part_answers",
+          {"2", "3"} <= set(decided) and words.get("2") == "approved" and words.get("3") == "part_answers",
+          f"decided {decided}, words {words}")
 
 
 def test_the_close_that_ends_the_walk_waits_for_the_background_reads_and_hands_them_over():
@@ -6198,10 +6234,11 @@ def test_a_read_ahead_that_cannot_find_its_item_never_stops_close_or_the_read_st
           and lines[-3].startswith(not_started) and closed.stdout.count(not_started) == 1
           and marker(case) == "#next_to_present item 3 of 5" and times_read(case, "## Item") == 0, described(closed))
     read = case.run(WAITING_ITEM_READ)
-    check("the read step reads its own item when the read ahead of the item after it cannot find that item",
+    check("the read step reads its own item when the read ahead of the item after it cannot find that item, and says "
+          "to build no page ahead for it",
           read.returncode == 0 and read.stdout.startswith(not_started)
           and "item 3 of 5: its cold-read-fast-read, of its text as it stands, had to be run now: " in read.stdout
-          and times_read(case, "## Item 3 of 5: three") == 1, described(read))
+          and times_read(case, "## Item 3 of 5: three") == 1 and PAGE_AHEAD not in read.stdout, described(read))
 
 
 def test_a_read_that_fails_in_the_read_step_says_not_to_present_the_item():
@@ -6590,6 +6627,11 @@ def test_the_read_step_says_to_build_the_next_items_page_ahead_and_the_step_buil
           and f"Item 3's page, {THREE_PAGE}, has no Next link to item 4 of 5's page yet" in four.stdout
           and "--version 2" in printed_command_with(four, "item-page-html-build-from-walk-document.py"),
           described(four) + case.minutes.read_text())
+    again = case.run(WAITING_ITEM_READ)
+    check("a later read step of that item writes no second `#item_page` line and says nothing of the page published "
+          "ahead",
+          again.returncode == 0 and case.minutes.read_text().count("#item_page item 4 of 5") == 1
+          and "was published ahead" not in again.stdout, described(again))
 
 
 def test_a_page_built_ahead_for_an_older_text_is_recorded_and_built_again():
