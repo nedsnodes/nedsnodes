@@ -1374,10 +1374,6 @@ with tempfile.TemporaryDirectory() as temporary:
             ("a ruling issue given as text fails the ask",
              {"kind": "ask-user-about-ruling", "ruling_issue": "#3", "sentence": "s"},
              "ruling_issue is not of the schema's type integer"),
-            ("a reading list with no issue and no note, which the cold-start prompt asks for when no issue bears on the topic, fails the ask",
-             reading_list(), "names no issue and gives no note"),
-            ("a reading list with no issue and only blank notes fails the ask",
-             reading_list(notes=[" ", ""]), "names no issue and gives no note"),
             ("a too-similar verdict that names no issue fails the ask",
              {"kind": "verdict", "verdict": "too-similar", "issues": []},
              "names no issue it is too similar to", "draft-verdict")]:
@@ -1387,6 +1383,18 @@ with tempfile.TemporaryDirectory() as temporary:
             request_form=(request_form or ["reading-list"])[0])
         check(case_name, answer is None and error is not None and expected in error
               and json.dumps(structured_output)[:40] in error, (answer, error))
+
+    # A resumed agent-session may answer an empty reading list with no note.
+    for case_name, structured_output in [
+            ("a reading list with no issue and no note exits 0 saying there is no GHI to read",
+             reading_list()),
+            ("a reading list with no issue and only blank notes exits 0 saying there is no GHI to read",
+             reading_list(notes=[" ", ""]))]:
+        seat_empty = root / ("seat-" + case_name.replace(" ", "-")[:60])
+        seat_empty.mkdir()
+        exit_code, out, err = main_with_answer(seat_empty, structured_output)
+        check(case_name, exit_code == 0 and out.strip() == "no GHI to read on this topic",
+              (exit_code, out, err))
 
     # A drift recheck whose answer is not usable keeps the first answer.
     seat_bad_recheck = root / "seat-bad-recheck"

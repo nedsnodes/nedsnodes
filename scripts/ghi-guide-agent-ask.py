@@ -303,6 +303,9 @@ GHI_GUIDE_AGENT_ANSWER_OPTIONAL_FIELDS_EACH_KIND_MAY_GIVE = {
 # other. No program sends form 4, a link repair, so no request form allows
 # `repair`.
 GHI_GUIDE_AGENT_REQUEST_FORM_VALUE_ASKING_FOR_READING_LIST = "reading-list"
+# Printed for a reading list that names no GHI and gives no note, so the caller
+# still gets a line it reads as the answer.
+NO_GHI_TO_READ_LINE = "no GHI to read on this topic"
 GHI_GUIDE_AGENT_REQUEST_FORM_VALUE_ASKING_FOR_VERDICT_ON_DRAFT_ISSUE = "draft-verdict"
 _REQUEST_FORM_OPENING_SENTENCE_AND_ANSWER_KINDS = {
     GHI_GUIDE_AGENT_REQUEST_FORM_VALUE_ASKING_FOR_READING_LIST: (
@@ -508,11 +511,6 @@ def ghi_guide_agent_answer_extract_and_schema_check_from_claude_result(result: d
             field_type = int if properties[field]["type"] == "integer" else str
             if not isinstance(value, field_type) or isinstance(value, bool):
                 return None, f"the answer's {field} is not of the schema's type {properties[field]['type']}: {shown}"
-    # The schema cannot say that a list may be empty only for some answers,
-    # and an empty one would render as nothing, which a caller reads as an answer.
-    if (kind == GHI_GUIDE_AGENT_ANSWER_KIND_READING_LIST and not answer["issues"]
-            and not any(note.strip() for note in answer.get("notes", []))):
-        return None, f"the reading-list answer names no issue and gives no note: {shown}"
     if kind == GHI_GUIDE_AGENT_ANSWER_KIND_VERDICT and answer["verdict"] == "too-similar" and not answer["issues"]:
         return None, f"the too-similar verdict names no issue it is too similar to: {shown}"
     return answer, None
@@ -548,7 +546,7 @@ def ghi_guide_agent_answer_render_as_caller_stdout_stderr_and_exit_code(answer: 
                 f"#{number}" + (f" (closed {closed_on[number]})" if number in closed_on else "")
                 for number in answer["issues"]))
         lines += [note.strip() for note in answer.get("notes", []) if note.strip()]
-        return "\n".join(lines), "", 0
+        return "\n".join(lines or [NO_GHI_TO_READ_LINE]), "", 0
     numbers = ",".join(f"#{number}" for number in answer["issues"])
     return f"verdict: {answer['verdict']}" + (f" {numbers}" if numbers else ""), "", 0
 
