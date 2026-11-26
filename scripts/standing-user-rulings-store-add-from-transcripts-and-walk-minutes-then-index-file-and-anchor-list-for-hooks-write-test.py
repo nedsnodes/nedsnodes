@@ -507,6 +507,38 @@ with tempfile.TemporaryDirectory() as directory:
     check("a run while another holds the lock exits 3 and adds nothing",
           held.returncode == 3 and "No action is needed:" in held.stdout
           and not (case.store_directory / program.STORE_FILE_NAME).exists(), described(held))
+    with open(case.store_directory / program.LOCK_FILE_NAME, "w") as holder:
+        fcntl.flock(holder, fcntl.LOCK_EX)
+        held_quietly = case.run("--failures-only")
+    check("with --failures-only, a run while another holds the lock prints nothing and still exits 3",
+          held_quietly.returncode == 3 and held_quietly.stdout == "" and held_quietly.stderr == "",
+          described(held_quietly))
+
+# --failures-only, which cron runs each minute: a run that succeeds prints nothing; a failure is still printed.
+with tempfile.TemporaryDirectory() as directory:
+    case = Case(directory)
+    case.transcript("ned-box", [human("quiet words", "2026-10-22T00:00:00Z")])
+    quiet = case.run("--failures-only")
+    check("with --failures-only, a run that succeeds prints nothing and still adds and indexes his words",
+          quiet.returncode == 0 and quiet.stdout == "" and quiet.stderr == ""
+          and [entry[1] for entry in case.entries()] == ["quiet words"]
+          and case.index()[0]["standing_entry_count"] == 1, described(quiet))
+    blocked = case.transcript("mac", [human("unreadable", "2026-10-22T00:01:00Z")], name="blocked.jsonl")
+    blocked.chmod(0)
+    failed = case.run("--failures-only")
+    blocked.chmod(0o644)
+    check("with --failures-only, a transcript that cannot be read is still reported FAILED, with no summary line",
+          failed.returncode == 1 and f"FAILED: transcript {blocked}:" in failed.stderr and failed.stdout == "",
+          described(failed))
+
+# The scheduled-jobs table runs this program each minute on ned-box, quietly; the store went unfilled while it did not.
+SCHEDULED_JOBS_TABLE = PROGRAM.resolve().parents[1] / "nn-systems" / "general-tools" / "scheduled-jobs-on-each-machine.json"
+store_jobs = [job for job in json.loads(SCHEDULED_JOBS_TABLE.read_text(encoding="utf-8"))["jobs"]
+              if job["program"] == f"scripts/{PROGRAM.name}"]
+check("the scheduled-jobs table runs this program on ned-box each minute, with --failures-only, and on no other machine",
+      len(store_jobs) == 1 and store_jobs[0]["on"] == {"ned-box": {"scheduler": "cron", "schedule": "* * * * *"}}
+      and store_jobs[0]["arguments"] == ["--failures-only"] and store_jobs[0]["owner"] == "prime-intellect",
+      f"jobs naming the program: {store_jobs!r}")
 
 # A transcript that cannot be read.
 with tempfile.TemporaryDirectory() as directory:
@@ -1078,7 +1110,7 @@ with tempfile.TemporaryDirectory() as directory:
           exit_code == program.EXIT_SOURCE_OR_OUTPUT_FAILED
           and stderr.getvalue() == "FAILED: moving stored source paths to the names the project rename gave them: "
                                    "database is locked\n" + MOVE_FAILED_TEXT + "\n" + OWNER_REPORT_TEXT + "\n"
-                                   + f"FAILED: transcript {blocked}: [Errno 13] Permission denied: '{blocked}'\n"
+                                   + f"FAILED: transcript {blocked}: [Errno 13] Permission denied: {str(blocked)!r}\n"
                                    + SOURCE_FAILED_TEXT + "\n" + OWNER_REPORT_TEXT + "\n",
           f"exit {exit_code}: {stderr.getvalue()!r}")
 

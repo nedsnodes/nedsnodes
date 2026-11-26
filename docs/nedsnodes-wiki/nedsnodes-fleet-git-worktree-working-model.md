@@ -57,14 +57,7 @@ passing review.
   the credential able to push main belongs to a dedicated system user,
   reached only through the main-gatekeeper, which logs every use). Dormant
   until its credential work lands.
-- **The PR process** — until the gate activates: each pull request
-  merges one atomic nn-topic-branch, and
-  the merge-lane agent-seat reviews and merges every PR (deputization, recorded
-  at R13, is the ruled exception). Recorded in CLAUDE.md's PR-process paragraph.
-  The earlier form — commits accumulating on a seat-branch, cherry-picked
-  onto a fresh branch later — was retired 2026-08-28 after a three-commit
-  topic written on a Tuesday took until Friday to reach main, every
-  cherry-pick re-resolving conflicts against a head that had moved.
+- **The PR process** — until the gate activates: each pull request merges one atomic nn-topic-branch, and merge-lane-2 merges every PR, and it, merge-lane-1 and merge-lane-3 manage their reviews (deputization, recorded at R13, is the ruled exception). Recorded in CLAUDE.md's PR-process paragraph. The earlier form — commits accumulating on a seat-branch, cherry-picked onto a fresh branch later — was retired 2026-08-28 after a three-commit topic written on a Tuesday took until Friday to reach main, every cherry-pick re-resolving conflicts against a head that had moved.
 - **The override markers** — `.walk-approved` (instruction-file guard) and `.location-write-approved` (session-location guard), both gitignored, each by convention holding the user's quoted approval words, consumed by the one guarded call it approves (see Marker honesty); `.walk-approved` holds instead `#pre_approved_change` and the reason for a change that `docs/nedsnodes-wiki/nedsnodes-which-changes-need-the-users-approval.md` does not require his approval for.
 - **The launchers** — `scripts/launch-claude-mac` and
   `scripts/launch-claude-ubuntu`.
@@ -314,12 +307,12 @@ clean and conflict-free — an
 agent-seat that lags says so on its status line rather than silently. **Who
 hears it** (ruled 2026-08-17): exactly one state forces an agent turn — a
 conflict whose cleanup failed, leaving the tree mid-merge; routine events
-stay display-plus-stamp. **Known structural finding, candidate fix
-unruled:** the atomic-PR lane reliably produces add/add conflicts on files
+stay display-plus-stamp. **Known structural finding:** the atomic-PR lane reliably produces add/add conflicts on files
 a cherry-picked topic *created*. Manual remedy: `git status` to list,
 `git checkout --theirs <file>` to take main's canonical version, `git
 add`, commit. The candidate launch-reset of fully-merged seat-branches
-stays unruled (cherry-picks break ancestry, so the predicate needs care).
+no longer applies: an agent-home rests on a detached HEAD at `origin/main`
+and has no seat-branch to reset.
 
 **R16. Binary updates at launch, never in background — built-live
 (accreted, no single PR).** Both launchers update the binary at launch,
@@ -519,7 +512,7 @@ pull request.
    `claude update`.) See R16 for the mechanism's history.
 
 Recorded candidates, unruled — an incident or a user pick is the trigger:
-the supervisor launch-reset of fully-merged seat-branches (R15); R24's
+R24's
 logic encoded into R22's future cleanup script; R8's session detector;
 machine-suffixed agent-seat names (rider 5); other-seat-home write blocking
 (R6's recorded-unbuilt half).

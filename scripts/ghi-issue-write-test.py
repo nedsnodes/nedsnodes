@@ -226,6 +226,13 @@ class Recorder:
     def __call__(self, arguments, timeout=None, cwd=None, check=True):
         self.calls.append(with_question_read(arguments))
         self.timeouts.append(timeout)
+        if (arguments[:2] == ["git", "show"]
+                and arguments[2].startswith("origin/main:")
+                and not any("origin/main:" in key for key in self.answers)):
+            # Step 5 reads the heading of main's copy before its body edit.
+            # A case that is not about the title gets no heading, which the
+            # title read below matches, so the title is left alone.
+            return Completed()
         for prefix, answer in self.answers.items():
             if prefix in " ".join(arguments):
                 if isinstance(answer, Exception):
@@ -235,6 +242,11 @@ class Recorder:
                         f"{' '.join(arguments[:3])} failed: "
                         f"{(answer.stderr or answer.stdout).strip()}", 1)
                 return answer
+        if arguments[-2:] == ["--json", "title"]:
+            # The title read before step 5's body edit, answered as the
+            # heading an unanswered `git show` of main's copy gives, so a
+            # case that is not about the title sees it left alone.
+            return Completed(json.dumps({"title": ""}))
         return Completed()
 
     def commands(self):
@@ -454,6 +466,22 @@ def run_remote_ghi_guide_agent_log_store_cases(scratch: Path):
           and on_the_mac == ("nedlern@ned-box",
                              tool.GHI_GUIDE_AGENT_LOG_STORE_DIRECTORY),
           (on_ned_box, on_the_mac))
+    saved_override = os.environ.get(tool.GHI_GUIDE_AGENT_LOG_STORE_DIRECTORY_VARIABLE)
+    os.environ[tool.GHI_GUIDE_AGENT_LOG_STORE_DIRECTORY_VARIABLE] = "relative/store"
+    try:
+        relative_store = tool.ghi_guide_agent_log_store()
+        relative_citation = tool.ghi_guide_agent_log_store_citation("a-file.md")
+    finally:
+        if saved_override is None:
+            del os.environ[tool.GHI_GUIDE_AGENT_LOG_STORE_DIRECTORY_VARIABLE]
+        else:
+            os.environ[tool.GHI_GUIDE_AGENT_LOG_STORE_DIRECTORY_VARIABLE] = saved_override
+    absolute_store = os.path.join(os.getcwd(), "relative/store")
+    check("a relative store override resolves to an absolute path, so a process "
+          "in another directory, such as ghi-guide-agent, reads the same store",
+          relative_store == (None, absolute_store)
+          and relative_citation == os.path.join(absolute_store, "a-file.md"),
+          (relative_store, relative_citation))
 
 
 def run_cases(scratch: Path):
@@ -574,7 +602,23 @@ def run_cases(scratch: Path):
           tool.pairing_key(FILE_TEXT) == tool.pairing_key(FILE_TEXT)
           and tool.pairing_key(FILE_TEXT) != tool.pairing_key(FILE_TEXT + "x"))
     check("the placeholder body carries the key, so a rerun can find it",
-          tool.pairing_key(FILE_TEXT) in tool.placeholder_body(tool.pairing_key(FILE_TEXT)))
+          tool.pairing_key(FILE_TEXT) in tool.placeholder_body(tool.pairing_key(FILE_TEXT), REPO))
+    # The body's rerun command is read back as the shell would split it, so a
+    # filing run with --repo tells its rerun to file into the same repository.
+    for repo, expected_tail in ((REPO, []),
+                                ("someone/fork", ["--repo", "someone/fork"])):
+        body = tool.placeholder_body(tool.pairing_key(FILE_TEXT), repo)
+        command = body.split("`")[1] if body.count("`") >= 2 else body
+        check(f"the placeholder body of a filing run against {repo} tells "
+              "the rerun that --repo",
+              shlex.split(command) == ["scripts/ghi-issue-write.py", "create"]
+              + expected_tail, command)
+    forked = Recorder({"gh issue create": Completed(
+        "https://github.com/someone/fork/issues/7\n")})
+    tool.file_issue("someone/fork", "Widget", "ghipairabc", forked, quiet)
+    check("and step 3 gives the placeholder body the --repo the run used",
+          forked.ran("create --repo someone/fork` on the file"),
+          forked.calls)
     check("the body is links and nothing else, in filename order",
           tool.links_body(REPO, ["docs/issues/9-b.md", "docs/issues/9-a.md"])
           == ("- [9-a.md](https://github.com/nedsnodes/nedsnodes/blob/main/docs/issues/9-a.md)\n"
@@ -1482,6 +1526,9 @@ def run_cases(scratch: Path):
     landed = written(scratch, "570-a-statusline-that-drops-its-branch-name.md",
                      STAGED)
     moved = Recorder({
+        "gh issue view 570 --repo nedsnodes/nedsnodes --json title":
+            Completed(json.dumps({"title": TITLE})),
+        f"git show origin/main:{LANDED}": Completed(STAGED),
         "gh issue view": Completed('{"body": "in progress ' + KEY + '"}'),
         "git ls-tree": Completed(LANDED + "\0"),
     })
@@ -2836,7 +2883,7 @@ def run_saved_question_on_resume_cases(scratch: Path):
     created_saved.write_text(ghi_guide_agent_file("may the filing go ahead?"))
     numbered = Recorder({
         "gh issue view 570": Completed(json.dumps(
-            {"body": tool.placeholder_body(tool.pairing_key(FILE_TEXT))})),
+            {"title": "", "body": tool.placeholder_body(tool.pairing_key(FILE_TEXT), REPO)})),
         "git ls-tree": Completed(EDIT_RELATIVE + "\0"),
     })
     lines = []
@@ -2871,6 +2918,113 @@ def run_saved_question_on_resume_cases(scratch: Path):
               and GHI_GUIDE_AGENT_HEAD in line
               and "dispatch a forked subagent" in line for line in lines),
           lines[-2:])
+    log_store_at(scratch / "default-log-store")
+
+
+def run_resumed_create_title_follows_landed_heading_cases(scratch: Path):
+    """The landing pull request changed the heading after the issue was
+    filed under the old one, so step 5 sets the title to main's heading in
+    the same call that links the body."""
+    log_store_at(scratch / "title-store").mkdir()
+    local = FILE_TEXT.replace(f"# {EDIT_TITLE}", "# Local unmerged heading")
+    source = filed_ghi_md(scratch, text=local)
+    placeholder = tool.placeholder_body(tool.pairing_key(local), REPO)
+    title_view = f"gh issue view 570 --repo {REPO} --json title"
+    main_copy = f"git show origin/main:{EDIT_RELATIVE}"
+
+    def numbered_run(title, landed=True, extra=None):
+        answers = {title_view: Completed(json.dumps({"title": title})),
+                   "gh issue view 570": issue_json(title, placeholder),
+                   main_copy: Completed(FILE_TEXT)}
+        if landed:
+            answers["git ls-tree"] = Completed(EDIT_RELATIVE + "\0")
+        answers.update(extra or {})
+        recorder = Recorder(answers)
+        lines = []
+        try:
+            outcome = tool.create(source, REPO, scratch, recorder, lines.append)
+        except (tool.Refused, KeyError) as raised:
+            outcome = raised
+        return recorder, lines, outcome
+
+    def one_edit_with_title(recorder, title):
+        return [call for call in recorder.calls
+                if call[:3] == ["gh", "issue", "edit"]
+                and "--body" in call
+                and (("--title" in call and title in call) if title
+                     else "--title" not in call)]
+
+    for name, title, landed, renamed in (
+            ("a title the heading changed from", "Handoff dialog: older words",
+             True, True),
+            ("a title that is main's heading already", EDIT_TITLE, True, False),
+            ("a file not yet on main", "Handoff dialog: older words", False,
+             False)):
+        recorder, lines, _ = numbered_run(title, landed)
+        check(f"a create resumed on its landed file with {name} "
+              + ("sets the title to main's heading in the body's edit"
+                 if renamed else "leaves the title alone"),
+              (len(one_edit_with_title(recorder,
+                                       EDIT_TITLE if renamed else None)) == 1
+               if landed else not recorder.ran("gh issue edit"))
+              and (f"title is now: {EDIT_TITLE}" in lines) == renamed,
+              (recorder.calls, lines))
+
+    recorder, lines, _ = numbered_run("Handoff dialog: older words")
+    check("the title comes from main's copy, not from a checkout whose "
+          "heading never merged",
+          not any("Local unmerged heading" in " ".join(call)
+                  for call in recorder.calls), (recorder.calls, lines))
+
+    failing, lines, outcome = numbered_run(
+        "Handoff dialog: older words",
+        extra={"gh issue edit": Completed("", returncode=1,
+                                          stderr="title write failed")})
+    rerun, rerun_lines, rerun_outcome = numbered_run(
+        "Handoff dialog: older words")
+    check("a failed title write leaves the body's pairing key, so a rerun "
+          "sets the title and links the body",
+          isinstance(outcome, tool.Refused)
+          and failing.count("gh issue edit") == 1
+          and rerun_outcome == (570, True)
+          and len(one_edit_with_title(rerun, EDIT_TITLE)) == 1,
+          (outcome, failing.calls, rerun_outcome, rerun.calls))
+
+    empty, lines, outcome = numbered_run(
+        "unused", extra={title_view: Completed("{}")})
+    check("a title read that answers no title raises, and nothing is edited",
+          isinstance(outcome, KeyError) and not empty.ran("gh issue edit"),
+          (outcome, empty.calls))
+
+    several, lines, _ = numbered_run(
+        "Handoff dialog: older words",
+        extra={"git ls-tree": Completed(
+            EDIT_RELATIVE + "\0docs/issues/570-another-file.md\0")})
+    check("an issue with several GHI-MDs on main keeps its title",
+          len(one_edit_with_title(several, None)) == 1
+          and not several.ran(title_view), (several.calls, lines))
+
+    original = written(scratch)
+    key = tool.pairing_key(FILE_TEXT)
+    from_original = Recorder({
+        "gh issue list": Completed(json.dumps([{
+            "number": 570, "title": "Handoff dialog: older words",
+            "body": tool.placeholder_body(key, REPO)}])),
+        title_view: Completed(json.dumps(
+            {"title": "Handoff dialog: older words"})),
+        main_copy: Completed(tool.with_issue_frontmatter(
+            FILE_TEXT, REPO, 570, EDIT_TITLE)),
+        "git show": Completed(tool.with_issue_frontmatter(
+            FILE_TEXT, REPO, 570, EDIT_TITLE)),
+        "git ls-tree": Completed(EDIT_RELATIVE + "\0"),
+    })
+    lines = []
+    outcome = tool.create(original, REPO, scratch, from_original, lines.append)
+    check("a rerun on the original source whose filing merged sets the "
+          "title in the body's edit too",
+          outcome == (570, True)
+          and len(one_edit_with_title(from_original, EDIT_TITLE)) == 1,
+          (from_original.calls, lines))
     log_store_at(scratch / "default-log-store")
 
 
@@ -2961,6 +3115,21 @@ def run_edit_cases(scratch: Path):
                            directory="nn-systems/statusline"),
               scratch)[2] == 570)
 
+    # nn-systems/general-tools/reusable-prompt-file-recognized-by-name-ending-
+    # and-not-ghi-md-common.py takes a GHI-MD by issue_number_in_file_name, so
+    # validate_edit must ask the same function or the two can disagree.
+    original_rule = tool.issue_number_in_file_name
+    tool.issue_number_in_file_name = lambda path: 572
+    try:
+        check("validate_edit takes a file's issue number from "
+              "issue_number_in_file_name, the rule the reusable-prompt rule "
+              "asks",
+              lambda: tool.validate_edit(
+                  filed_ghi_md(scratch, name="v2-follows-the-shared-rule.md"),
+                  scratch)[2] == 572)
+    finally:
+        tool.issue_number_in_file_name = original_rule
+
     for case_name, target in [
             ("a file not named for an issue is refused",
              filed_ghi_md(scratch, name="notes.md")),
@@ -3008,7 +3177,7 @@ def run_edit_cases(scratch: Path):
 
     check("a link list is a body the tool wrote", tool.is_derived_body(one_link))
     check("so is the placeholder create leaves between its steps",
-          tool.is_derived_body(tool.placeholder_body(tool.pairing_key(FILE_TEXT))))
+          tool.is_derived_body(tool.placeholder_body(tool.pairing_key(FILE_TEXT), REPO)))
     check("an empty body is not prose to protect", tool.is_derived_body(""))
     check("prose is not a body the tool wrote",
           not tool.is_derived_body("This issue is about the statusline.\n"))
@@ -5403,7 +5572,9 @@ def run_pushed_filing_branch_rerun_line_real_git_cases(scratch: Path):
           refusal is not None and refusal.code == 1
           and "ghi-4101-gadget" in str(refusal)
           and f"at commit {gadget_commit}," in str(refusal)
-          and f"`scripts/ghi-issue-write.py create {source}`" in str(refusal),
+          and str(refusal).count("`") >= 2
+          and shlex.split(str(refusal).split("`")[1])
+          == ["scripts/ghi-issue-write.py", "create", str(source)],
           str(refusal))
     told = str(refusal)
     check("and tells the agent to leave the branch to the user, tell the "
@@ -5518,11 +5689,13 @@ def run_resumed_create_after_older_name_merged_real_git_cases(scratch: Path):
             if "issue list" in gh_calls[-1]:
                 return Completed(json.dumps([{
                     "number": number, "title": title,
-                    "body": tool.placeholder_body(tool.pairing_key(text))}]))
+                    "body": tool.placeholder_body(tool.pairing_key(text), REPO)}]))
             if "pr list" in gh_calls[-1]:
                 return Completed("[]")
             if "pr create" in gh_calls[-1]:
                 return Completed("https://github.com/x/y/pull/11\n")
+            if "issue view" in gh_calls[-1]:
+                return Completed(json.dumps({"title": title}))
             return Completed("")
         return tool.run(arguments, timeout=timeout or tool.GH_TIMEOUT_SECONDS,
                         cwd=cwd, check=check)
@@ -5815,6 +5988,8 @@ def main():
                     run_group(run_old_ghi_guide_agent_files_on_main_cases, Path(name))
                 with tempfile.TemporaryDirectory(prefix="ghi-issue-resume-test-") as name:
                     run_group(run_saved_question_on_resume_cases, Path(name))
+                with tempfile.TemporaryDirectory(prefix="ghi-issue-resume-title-test-") as name:
+                    run_group(run_resumed_create_title_follows_landed_heading_cases, Path(name))
                 with tempfile.TemporaryDirectory(prefix="ghi-issue-remote-read-test-") as name:
                     run_group(run_remote_read_failure_cases, Path(name))
                 # A checkout of its own: the reconsidered marker lives at the root of

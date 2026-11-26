@@ -11,14 +11,15 @@ Which captures directories a run deletes from, unless --captures-directory repla
   because the transcript mirror never deletes, so the Mac's copy there outlives the Mac's own;
 - elsewhere, which is the Mac, this machine's own, ~/.claude/agent-seat-terminal-captures.
 
-A file is deleted when its modification time is more than seven days ago, except the newest
+A capture is deleted when its modification time is more than seven days ago, except the newest
 capture of each agent-seat, by the start time in its name: that is the one the agent-seat's
 current supervisor writes, and a pane that has written nothing for seven days, as while the Mac
 sleeps, still has tmux holding it open, so deleting it would send the rest of that terminal
 capture into a file no one can read. The start time is not otherwise used: a supervisor that has
 run for more than seven days is still writing its file. Agent-seat directories are never removed,
 since a supervisor starting at that moment may have just made one and be about to open its
-capture there. Anything else in a captures directory is left alone.
+capture there. Anything else in a captures directory, including a file in an agent-seat's
+directory whose name is not that agent-seat's capture name, is left alone.
 
 OUTPUT. `deleted <file>` for each file deleted, or `would delete <file>` with --dry-run, then one
 summary line. A captures directory that does not exist is not a failure: nothing has been
@@ -82,13 +83,16 @@ def delete_old_captures(directory: Path, oldest_kept_modification_time: float, d
         return 0, 1
     for seat_directory in seat_directories:
         try:
-            files = sorted(path for path in seat_directory.iterdir() if path.is_file())
+            seat_captures = sorted(
+                path for path in seat_directory.iterdir()
+                if path.is_file() and captures.agent_seat_terminal_capture_file_name_matches_exact_format_for_agent_seat(
+                    path.name, seat_directory.name))
         except OSError as error:
             print(f"FAILED: could not list {seat_directory} ({error}). {FAILED_PATH_KEPT_UNTIL_A_RUN_CAN_DELETE_IT_LINE}")
             failed += 1
             continue
         # The name opens with the supervisor's UTC start, so the last name is the live capture.
-        for path in files[:-1]:
+        for path in seat_captures[:-1]:
             try:
                 if path.stat().st_mtime >= oldest_kept_modification_time:
                     continue

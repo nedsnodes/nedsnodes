@@ -16,7 +16,9 @@ a key is billed per call and agy's own Google login, in ~/.gemini, is not. The
 agent-seat's GitHub tokens, which can push and merge, are removed too: every
 name in AGENT_SEAT_GITHUB_TOKEN_ENVIRONMENT_VARIABLES of
 nn-systems/cold-read/cold-read-cell-common.py, GH_TOKEN and GITHUB_TOKEN among
-them. No read-only token takes their place.
+them. No read-only token takes their place. How gh behaves inside the macOS
+sandbox is said beside CREDENTIAL_DIRECTORIES in
+nn-systems/cold-read/cold-read-cell-common.py.
 
 The program's name describes the Linux sandbox; on macOS the home is not
 emptied, as the macOS paragraph below says.
@@ -102,22 +104,12 @@ def empty_home_sandbox_prefix(home: pathlib.Path, agy_path: str) -> list:
     ]
 
 
-def gemini_launcher():
-    """Load and return the Gemini cold-read launcher module."""
+def load_cold_read_skill_agy_cell_launcher_program_module():
+    """Return the Gemini cold-read-cell launcher, loaded from its file."""
     spec = importlib.util.spec_from_file_location("cold_read_agy_cell", GEMINI_LAUNCHER_PATH)
     launcher = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(launcher)
     return launcher
-
-
-def launcher_credential_sandbox_prefix() -> list:
-    """Return the Gemini launcher's macOS sandbox-exec prefix."""
-    return gemini_launcher().credential_sandbox_prefix()
-
-
-def agy_environment(environment) -> dict:
-    """Return a copy of environment without GEMINI_API_KEY or any agent-seat GitHub token."""
-    return gemini_launcher().agy_environment_copy_without_gemini_api_key_or_github_token(environment)
 
 
 def main() -> int:
@@ -135,16 +127,18 @@ def main() -> int:
             print(f"{PROGRAM}: refused: {needed} is not on PATH, so agy was not run.",
                   file=sys.stderr)
             return 1
+    launcher = load_cold_read_skill_agy_cell_launcher_program_module()
     working_directory_context = (tempfile.TemporaryDirectory(prefix="agy-working-directory-")
                                  if sys.platform == "darwin" else contextlib.nullcontext())
     with working_directory_context as working_directory:
         if sys.platform == "darwin":
-            command = [*launcher_credential_sandbox_prefix(), agy_path, *agy_arguments]
+            command = [*launcher.credential_sandbox_prefix(), agy_path, *agy_arguments]
         else:
             command = [*empty_home_sandbox_prefix(pathlib.Path.home(), agy_path),
                        AGY_PATH_INSIDE_SANDBOX, *agy_arguments]
+        environment = launcher.agy_environment_copy_without_gemini_api_key_or_github_token(os.environ)
         exit_code = subprocess.run(command, stdin=subprocess.DEVNULL, cwd=working_directory,
-                                   env=agy_environment(os.environ)).returncode
+                                   env=environment).returncode
     if exit_code != 0:
         print(f"{PROGRAM}: the sandboxed agy run failed with exit code {exit_code}; "
               f"{sandbox_program}'s or agy's own message is above.", file=sys.stderr)

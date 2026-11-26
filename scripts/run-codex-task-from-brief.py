@@ -43,7 +43,7 @@ The program an agent uses to hand Codex a task. It always:
   - with --sandbox workspace-write and -C naming the top folder of a git
     worktree, tells Codex to write its commit message in the file
     commit-message.txt there, and, when Codex ends without error or timeout,
-    commits the run's changes and runs the nc-test-suites they touch; see
+    commits the run's changes and runs the nn-test-suites they touch; see
     "Commit" below.
 
 Options that widen what Codex may do, each off by default:
@@ -77,7 +77,7 @@ Options that widen what Codex may do, each off by default:
                           ends with a list of them.
 
 --deadline-minutes bounds the --prefetch-github commands and Codex together;
-the nc-test-suites run after the commit are outside it.
+the nn-test-suites run after the commit are outside it.
 
 --resume <session-id> sends the brief as a follow-up to that Codex session.
 The id is on the `session id:` line near the top of the earlier run's run
@@ -105,7 +105,7 @@ failed, when a --prefetch-github command fails, or when Codex cannot be
 started, exits nonzero, writes no report, or when the run passes its
 deadline, or when the run's changes cannot be committed: no commit message,
 or git refused the commit; and, after a commit, when the test-suite runner
-cannot be started, names failing nc-test-suites, which the message lists, or
+cannot be started, names failing nn-test-suites, which the message lists, or
 ends without judging every suite. It exits 2 on bad arguments. It needs no terminal, so
 it can run as a background task.
 """
@@ -439,7 +439,7 @@ def codex_or_gemini_workspace_write_run_start_commit(worktree: pathlib.Path):
             f"could not read the commit HEAD is at in {worktree}: `git rev-parse --verify "
             f"HEAD` exited {result.returncode} and said: {said}\n"
             f"The model was not started: after committing a run's changes, the program runs "
-            f"the nc-test-suites whose recorded inputs changed since that commit.\n"
+            f"the nn-test-suites whose recorded inputs changed since that commit.\n"
             f"Give -C a topic-worktree whose branch has a commit.")
     return result.stdout.strip(), None
 
@@ -456,7 +456,7 @@ def codex_or_gemini_committed_run_test_suites_whose_recorded_inputs_changed_run(
     kept = f"The run's commit is kept in {worktree}, and nothing was pushed."
     push_when_passing = f"Push the commit only once `{shown}`, run in {worktree}, passes."
     failing, unfinished = [], []
-    print(f"{PROGRAM}: running the nc-test-suites the run's change touches: {shown}",
+    print(f"{PROGRAM}: running the nn-test-suites the run's change touches: {shown}",
           file=sys.stderr, flush=True)
     try:
         # Started by its own path, so a worktree without the runner fails to start it.
@@ -477,13 +477,13 @@ def codex_or_gemini_committed_run_test_suites_whose_recorded_inputs_changed_run(
                     unfinished.append(line.strip())
     except OSError as error:
         return (f"could not start `{shown}` in {worktree} after committing the run's changes: "
-                f"{error}, so no nc-test-suite was run on the commit. {kept}\n"
+                f"{error}, so no nn-test-suite was run on the commit. {kept}\n"
                 f"{push_when_passing}")
     status = runner.returncode
     if status == test_suite_runner.EXIT_ALL_PASSED:
         return None
     if status == test_suite_runner.EXIT_SOME_FAILED and failing:
-        return (f"nc-test-suites the run's change touches failed after its commit: "
+        return (f"nn-test-suites the run's change touches failed after its commit: "
                 f"{', '.join(failing)}. Each one's FAIL line above names its log. {kept}\n"
                 f"Read each failing suite's log, fix the cause, and commit the fix in "
                 f"{worktree}, yourself or with another run whose brief names the failing "

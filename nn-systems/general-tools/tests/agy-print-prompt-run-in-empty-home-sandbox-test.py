@@ -220,34 +220,55 @@ def cases_with_the_stand_in_sandbox(root, home):
           repr((result.returncode, result.stdout, result.stderr)))
 
 
-def working_directory_given_to_agy_run(platform):
+class StubGeminiLauncher:
+    """Stands in for the Gemini launcher: a fixed macOS prefix, and an environment
+    filter that removes one more variable than the real one, so a case can tell
+    that the program uses the launcher's filter."""
+
+    EXTRA_REMOVED_VARIABLE = "AGY_PRINT_PROMPT_TEST_VARIABLE_THE_SHARED_FILTER_REMOVES"
+
+    @staticmethod
+    def credential_sandbox_prefix():
+        return ["sandbox-exec"]
+
+    @staticmethod
+    def agy_environment_copy_without_gemini_api_key_or_github_token(environment):
+        return {name: value for name, value in environment.items()
+                if name != StubGeminiLauncher.EXTRA_REMOVED_VARIABLE}
+
+
+def agy_run_with_stubs(platform):
     """Run main() in this process as if sys.platform were platform, with which(),
-    the macOS sandbox prefix and subprocess.run stubbed, and return the cwd the
-    program handed subprocess.run, with whether that directory existed then."""
+    the Gemini launcher and subprocess.run stubbed, and return the exit code, the
+    cwd the program handed subprocess.run with whether that directory existed then,
+    and the environment it handed subprocess.run."""
     seen = {}
 
     def fake_run(command, **keywords):
         seen["cwd"] = keywords.get("cwd")
         seen["existed"] = seen["cwd"] is not None and os.path.isdir(seen["cwd"])
+        seen["env"] = keywords.get("env")
         return subprocess.CompletedProcess(command, 0)
 
     saved = (sys.platform, sys.argv, program.shutil.which, program.subprocess.run,
-             program.launcher_credential_sandbox_prefix)
+             program.load_cold_read_skill_agy_cell_launcher_program_module)
     sys.platform = platform
     sys.argv = [str(SCRIPT_PATH), "--model", "m", "prompt"]
     program.shutil.which = lambda name: f"/stub/{name}"
     program.subprocess.run = fake_run
-    program.launcher_credential_sandbox_prefix = lambda: ["sandbox-exec"]
+    program.load_cold_read_skill_agy_cell_launcher_program_module = lambda: StubGeminiLauncher
+    os.environ[StubGeminiLauncher.EXTRA_REMOVED_VARIABLE] = "x"
     try:
         exit_code = program.main()
     finally:
         (sys.platform, sys.argv, program.shutil.which, program.subprocess.run,
-         program.launcher_credential_sandbox_prefix) = saved
-    return exit_code, seen.get("cwd"), seen.get("existed")
+         program.load_cold_read_skill_agy_cell_launcher_program_module) = saved
+        del os.environ[StubGeminiLauncher.EXTRA_REMOVED_VARIABLE]
+    return exit_code, seen.get("cwd"), seen.get("existed"), seen.get("env")
 
 
 def working_directory_cases():
-    exit_code, cwd, existed = working_directory_given_to_agy_run("darwin")
+    exit_code, cwd, existed, environment = agy_run_with_stubs("darwin")
     check("on macOS agy runs in a fresh agy-working-directory- temporary directory",
           exit_code == 0 and cwd is not None and existed
           and pathlib.Path(cwd).name.startswith("agy-working-directory-"),
@@ -255,10 +276,16 @@ def working_directory_cases():
     # cygwin sorts before darwin and linux after it, so between them they tell
     # == from <= and >=.
     for platform in ("linux", "cygwin"):
-        exit_code, cwd, existed = working_directory_given_to_agy_run(platform)
+        exit_code, cwd, existed, environment = agy_run_with_stubs(platform)
         check(f"on {platform} agy gets no temporary working directory, since bwrap's "
               "--chdir sets it",
               exit_code == 0 and cwd is None, repr((exit_code, cwd, existed)))
+        check(f"on {platform} agy's environment comes from the Gemini launcher's filter, "
+              "so a variable added to that filter does not reach agy",
+              environment is not None
+              and StubGeminiLauncher.EXTRA_REMOVED_VARIABLE not in environment
+              and environment.get("PATH") == os.environ.get("PATH"),
+              repr(sorted(environment or {})))
 
 
 def main() -> int:

@@ -911,7 +911,12 @@ with tempfile.TemporaryDirectory() as workspace:
             ("python3 scripts/mutation-testing-changed-lines-quick-or-full-pass-survivors.py --quick", 105),
             ("gh pr checks 3101 --watch --interval 30", 0),
             ("gh run watch 12345", 0),
-            ("python3 -u scripts/watch-open-pull-requests-hack.py --exit-after-first-poll-with-events", 0),
+            ("python3 -u scripts/merge-lane-open-prs-watch-and-reviewer-assign.py --exit-after-first-poll-with-events", 0),
+            ("python3 scripts/merge-lane-open-prs-watch-and-reviewer-assign.py --poll-once-write-baseline", 75),
+            ("python3 scripts/merge-lane-open-prs-watch-and-reviewer-assign.py --poll-once", 75),
+            # --poll-once counts only as an argument of its own.
+            ("python3 scripts/merge-lane-open-prs-watch-and-reviewer-assign.py --batch-events-for-seconds 1200 --token-file /x/--poll-once-token", 0),
+            ("python3 scripts/merge-lane-open-prs-watch-and-reviewer-assign.py --repo 'a;b' --poll-once", 75),
             ("cd /home/nedlern/x && until grep -q done out.txt; do sleep 5; done", 0),
             ("while kill -0 4242; do sleep 30; done", 0),
             ("sleep 120; echo finished", 75),
@@ -945,7 +950,7 @@ with tempfile.TemporaryDirectory() as workspace:
         f"bash {waiter}",
         waiter,
         f"bash {waiter} 2>&1 | tail -30",
-        "python3 -u scripts/watch-open-pull-requests-hack.py --exit-after-first-poll-with-events",
+        "python3 -u scripts/merge-lane-open-prs-watch-and-reviewer-assign.py --exit-after-first-poll-with-events",
         "/tmp/claude-1000/x/scratchpad/wait-review-runs.sh",
         "until grep -q done out.txt; do sleep 5; done",
         "while kill -0 4242; do sleep 30; done",
@@ -1652,7 +1657,7 @@ with tempfile.TemporaryDirectory() as workspace:
               " work to your task list"
               in hook.NEW_WORK_DURING_HANDOFF_DEFERRAL_INSTRUCTION,
               hook.NEW_WORK_DURING_HANDOFF_DEFERRAL_INSTRUCTION)
-        # The removed instruction had the agent name a background Bash task by hand when it started before the deferral; the writer now lists each one whatever its launch time.
+        # Whether the agent names a background Bash task by hand depends on whether the writer can list it, not on when the task started.
         check("the instruction on new work does not tell the agent to name a background Bash task"
               " started before the deferral in the next-step file",
               "started before the deferral" not in hook.NEW_WORK_DURING_HANDOFF_DEFERRAL_INSTRUCTION

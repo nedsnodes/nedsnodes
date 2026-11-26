@@ -63,7 +63,7 @@ call. When agy has no login, its "Authentication required." message is in
 the log.
 
 Runs `agy models` inside the same sandbox before starting the task, refusing
-unknown names with the known names. The default is gemini-4-argon-high.
+unknown names with the known names. The default is gemini-4-neon-high.
 --effort is refused with a model id that ends in an effort, such as
 gemini-4-hydrogen-xhigh, and so with the default; give it only with an id
 that carries none, such as gemini-pro-orchestrator.
@@ -86,7 +86,7 @@ and 1 with a diagnostic for file errors, unavailable sandbox, agy startup
 or model-list failures, unknown models, timeout, a result whose status is
 not SUCCESS, nonzero exit without a result line, no report,
 changes that could not be committed, or, after a commit, a test-suite runner
-that cannot be started, names failing nc-test-suites, which the message
+that cannot be started, names failing nn-test-suites, which the message
 lists, or ends without judging every suite.
 Requires bwrap on Linux or sandbox-exec on macOS; never runs unsandboxed.
 """
@@ -127,7 +127,7 @@ def _parser():
                         help="required unless the log-store is on this machine, where the "
                              "default is report.md in the run's numbered folder")
     parser.add_argument("--sandbox", choices=("read-only", "workspace-write"), default="read-only")
-    parser.add_argument("-m", dest="model", default="gemini-4-argon-high")
+    parser.add_argument("-m", dest="model", default="gemini-4-neon-high")
     parser.add_argument("--effort")
     parser.add_argument("--writable-root", action="append", default=[])
     parser.add_argument("--deadline-minutes", type=float, default=60)
@@ -291,7 +291,7 @@ def main(argv=None):
                 raise RuntimeError(error)
             if done:
                 print(f"{PROGRAM}: {done}", file=sys.stderr)
-                stage = (f"running the nc-test-suites the run's change touches; the report is "
+                stage = (f"running the nn-test-suites the run's change touches; the report is "
                          f"at {report}")
                 error = (codex_task.
                          codex_or_gemini_committed_run_test_suites_whose_recorded_inputs_changed_run(

@@ -1390,10 +1390,11 @@ with tempfile.TemporaryDirectory() as scratch_name:
                     "reads": {path: "0" * 40 for path in paths}}
 
         def kept_and_left_out(recording, files_only_strace_saw=None,
-                              differ=("scripts/tested.py",)):
+                              differs=(("scripts/tested.py",),)):
             selection = [("outside-test.py", True, "it reads scripts/tested.py, which differs")]
             return runner.selective_test_run_selection_without_no_sandbox_suites(
-                selection, applies=True, differ={path: "M" for path in differ},
+                selection, applies=True,
+                differs=[{path: "M" for path in differ} for differ in differs],
                 recordings={"outside-test.py": recording},
                 files_only_strace_saw_by_suite={"outside-test.py": files_only_strace_saw})
 
@@ -1416,6 +1417,28 @@ with tempfile.TemporaryDirectory() as scratch_name:
                  format=runner.RECORDED_INPUTS_FORMAT_VERSION - 1))
         check("a no-sandbox suite whose recording is of an older format, whose reads may mean "
               "something else, is left out", kept == [] and len(left_out) == 1, (kept, left_out))
+        kept, left_out = kept_and_left_out(
+            recording_reading("scripts/tested.py", "scripts/other.py"),
+            differs=(("scripts/tested.py",), ("scripts/other.py",)))
+        check("given two comparisons, a no-sandbox suite is judged by the first, and names the "
+              "file that comparison found",
+              left_out == [] and len(kept) == 1
+              and "reads scripts/tested.py, which differs" in kept[0][2],
+              (kept, left_out))
+        kept, left_out = kept_and_left_out(
+            recording_reading("scripts/tested.py"),
+            differs=(("scripts/tested.py",), ("scripts/unread.py",)))
+        check("given two comparisons, a no-sandbox suite stays when the first finds a file it "
+              "read that differs, though the second, a head test run's commit holding the same "
+              "change, finds none",
+              left_out == [] and len(kept) == 1, (kept, left_out))
+        kept, left_out = kept_and_left_out(
+            recording_reading("scripts/tested.py"),
+            differs=(("scripts/unread.py",), ("scripts/tested.py",)))
+        check("given two comparisons, a no-sandbox suite is left out when the first finds no "
+              "file it read that differs",
+              kept == [] and [suite for suite, _ in left_out] == ["outside-test.py"],
+              (kept, left_out))
 
         code, printed = left_out_run("named", "--only-suites-whose-recorded-inputs-changed-since",
                                      "HEAD", "--only-suites-named", "outside-test.py")
@@ -1462,8 +1485,10 @@ with tempfile.TemporaryDirectory() as scratch_name:
         subprocess.run(["git", "-c", "user.name=t", "-c", "user.email=t@t", "commit", "-q", "-m",
                         "list the real-claude suite", "--", "scripts/run-all-test-suites.py"],
                        cwd=left_out_repository, check=True)
+        # .get, so that against a runner that read this list only from itself the case below
+        # is reached and fails for not leaving the suite out.
         check("this runner's own list does not name the suite the checkout lists as running the "
-              "real claude", "outside-test.py" not in runner.SUITE_SANDBOX_LISTS_OF_THIS_PROGRAM["SUITES_THAT_RUN_THE_REAL_CLAUDE_CLI"])
+              "real claude", "outside-test.py" not in runner.SUITE_SANDBOX_LISTS_OF_THIS_PROGRAM.get("SUITES_THAT_RUN_THE_REAL_CLAUDE_CLI", {}))
         selective = ("--only-suites-whose-recorded-inputs-changed-since", "HEAD")
         code, printed = left_out_run("real-claude-run", *selective,
                                      run_one_suite=note_and_fail_the_claude_suite)
@@ -1500,7 +1525,7 @@ with tempfile.TemporaryDirectory() as scratch_name:
         check("this runner lists the trial against the installed Claude Code among the suites that "
               "run the real claude",
               "nn-systems/general-tools/tests/agent-seat-worktree-create-with-owner-file-claude-code-"
-              "worktree-create-hook-real-claude-code-test.py" in runner.SUITE_SANDBOX_LISTS_OF_THIS_PROGRAM["SUITES_THAT_RUN_THE_REAL_CLAUDE_CLI"])
+              "worktree-create-hook-real-claude-code-test.py" in runner.SUITE_SANDBOX_LISTS_OF_THIS_PROGRAM.get("SUITES_THAT_RUN_THE_REAL_CLAUDE_CLI", {}))
 
         two_suites = scratch / "two-suites-repository"
         two_suites.mkdir()

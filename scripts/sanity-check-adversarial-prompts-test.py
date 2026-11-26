@@ -245,6 +245,49 @@ def main():
             return sorted(path for path in set(now) | set(baseline)
                           if now.get(path) != baseline.get(path))
 
+    # Two cells print at once: print() writes a line's text and its newline as two
+    # writes, and another cell's WARNING written between them would join that line,
+    # where a Monitor filter for lines opening WARNING: misses it.
+    with tempfile.TemporaryDirectory() as scratch:
+        stream = io.StringIO()
+        run_log = runner.RunOutputCopiedToRecordLog(stream)
+        log_path = pathlib.Path(scratch) / "run.log"
+        run_log.attach(log_path)
+        text_written, warning_written = threading.Event(), threading.Event()
+
+        def saved_line_cell():
+            run_log.write("saved: cell-a.md")
+            text_written.set()
+            warning_written.wait(5)
+            run_log.write("\n")
+            run_log.flush()
+
+        def warning_cell():
+            text_written.wait(5)
+            real_stdout = sys.stdout
+            sys.stdout = run_log
+            try:
+                runner.print_warning_with_its_next_step("cell-b warned", "Do the next step.")
+            finally:
+                sys.stdout = real_stdout
+            warning_written.set()
+
+        cells = [threading.Thread(target=saved_line_cell), threading.Thread(target=warning_cell)]
+        for cell in cells:
+            cell.start()
+        for cell in cells:
+            cell.join(10)
+        run_log.detach()
+        expected_lines = {"saved: cell-a.md", "WARNING: cell-b warned", "Do the next step."}
+        for where, printed in (("the stream", stream.getvalue()),
+                               ("the run log", log_path.read_text(encoding="utf-8"))):
+            lines = printed.splitlines()
+            check(f"two cells printing at once leave whole lines in {where}, "
+                  "the WARNING line followed by its instruction",
+                  set(lines) == expected_lines and len(lines) == 3
+                  and lines[lines.index("WARNING: cell-b warned") + 1] == "Do the next step.",
+                  repr(printed))
+
     # Case 1: a file already dirty before the run, rewritten by a cell.
     with tempfile.TemporaryDirectory() as scratch:
         repo = new_repo(pathlib.Path(scratch))
@@ -529,6 +572,14 @@ def main():
           "same as a codex cell",
           "WARNING: the review copy was modified outside the cells' scratch "
           f"directories, seen when cut-adversarial-prompt-claude finished: {stray_name}" in output,
+          f"output was {output!r}")
+    check("the overwritten-stray-write warning is followed by its instruction line",
+          f"overwrote it: {out_path}\n"
+          f"{runner_gate.SANITY_CHECK_STRAY_FILE_AT_CELL_REPORT_PATH_REPLACED_BY_REPORT_WARNING_NEXT_STEP_INSTRUCTION}\n" in output,
+          f"output was {output!r}")
+    check("the review-copy warning is followed by its instruction line",
+          f"finished: {stray_name}\n"
+          f"{runner_gate.SANITY_CHECK_REVIEW_COPY_MODIFIED_OUTSIDE_CELL_SCRATCH_WARNING_NEXT_STEP_INSTRUCTION}\n" in output,
           f"output was {output!r}")
 
     # Case 19: the per-cell scratch directory the runner makes. The prompts
@@ -942,6 +993,30 @@ def main():
     check("a quote found nowhere warns",
           "quote found in no tracked file" in buffer.getvalue(),
           f"output was {buffer.getvalue()!r}")
+    check("the unfound-quote warning is followed by its instruction line",
+          buffer.getvalue().splitlines()[1:2] == [runner_scan.SANITY_CHECK_CELL_REPORT_QUOTE_FOUND_IN_NO_TRACKED_FILE_WARNING_NEXT_STEP_INSTRUCTION],
+          f"output was {buffer.getvalue()!r}")
+
+    class WriteCallsRecorder(io.StringIO):
+        def __init__(self):
+            super().__init__()
+            self.calls = []
+
+        def write(self, text):
+            self.calls.append(text)
+            return super().write(text)
+
+    # Each write is where another cell's thread can cut in; the warning and its
+    # instruction must arrive in one, or a `saved:` line can land between them.
+    recorder = WriteCallsRecorder()
+    with contextlib.redirect_stdout(recorder):
+        runner_scan.quote_scan(corpus, 'It says "words that appear in no file at all" here.', "q3")
+    instruction = runner_scan.SANITY_CHECK_CELL_REPORT_QUOTE_FOUND_IN_NO_TRACKED_FILE_WARNING_NEXT_STEP_INSTRUCTION
+    check("a warning and its instruction line reach stdout in one write, so a parallel "
+          "cell's line cannot land between them",
+          any(call.startswith("WARNING: ") and f"\n{instruction}\n" in call
+              for call in recorder.calls),
+          f"write calls were {recorder.calls!r}")
 
     # The print modes: each surface arrives on stdout, and the requester
     # surface carries both of its sources.
@@ -1203,6 +1278,9 @@ def main():
               "Invalid API key" in said, said)
         check("and the stdout it failed with, where a CLI puts its reason instead",
               "Credit balance is too low" in said, said)
+        check("the failed-model warning is followed by its instruction line",
+              f"WARNING: {fable} failed (exit 1)\n"
+              f"{runner_chain.SANITY_CHECK_CELL_MODEL_RUN_FAILED_WARNING_NEXT_STEP_INSTRUCTION}\n" in said, said)
         check("the cell still falls back, and the review is returned, never printed",
               (code, output, model) == (0, "opus's review\n", opus)
               and "opus's review" not in said, (code, output, model, said))
@@ -2114,7 +2192,7 @@ def main():
     # launchers: the launch is replaced under them. The texts are the
     # captured ones kept beside the cold-read cells
     # (nn-systems/cold-read/cold-read-claude-cell.py and
-    # cold-read-codex-cell.py, recognised_failure_texts_for_model).
+    # cold-read-codex-cell.py, RECOGNISED_FAILURE_TEXTS).
     runner_classes = load_runner()
     real_classes_run = agent_binary_launch_a_case_replaces(runner_classes)
     codex_logged_out = ("2026-09-18T19:37:41.140816Z ERROR codex_api::endpoint::"
@@ -2151,14 +2229,10 @@ def main():
         ("claude", "logged-out",
          cli_answering(1, "Not logged in · Please run /login\n", ""),
          "Not logged in · Please run /login", 2),
-        ("claude", "account-limit",
+        ("claude", "exit-1",
          cli_answering(1, "You've hit your session limit · resets 8:50pm "
                           "(America/Los_Angeles)\n", ""),
          "resets 8:50pm (America/Los_Angeles)", 2),
-        ("claude", "model-limit",
-         cli_answering(1, "You've reached your Opus limit. Switch to another "
-                          "model, or manage usage credits, to continue.\n", ""),
-         "Opus", 2),
         ("claude", "agent-binary-missing", cli_missing, "No such file or directory", 2),
     )
     try:

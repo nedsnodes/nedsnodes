@@ -41,14 +41,15 @@ on an `#item_page` line, read through the walk finder's approval_walk_item_page_
 a page gets a "Previous" link to the page of the item before, when there is one: the whole item with the highest
 number below this item's whole number whose newest `#item_page` line with a link gives that link. It gets a "Next"
 link to the page of the item after, the lowest such number above it, when there is one. Both lead to whole items' pages only, so a sub-step's page, such as
-4.1's, links the pages of items 3 and 5, and neither a sub-step's `#item_page` line nor a failed publish's line becomes
+4.1's, links the pages of items 3 and 5 when both have such a line, and neither a sub-step's `#item_page` line nor a failed publish's line becomes
 a Previous or Next link. When there is no Previous link, such as when the walk-minutes are missing, the
 program prints why.
 
 The item after has no link yet when this item's first page is built, so that page cannot be given its Next link in the
-same invocation of the program; on a whole item's first page, built without --version, the program prints the command that builds
-the item before's page again, with --version set to that item's next version, to run once this item's page is
-published and its `#item_page` line recorded; that page then gets its Next link to this one. An item's `#item_page`
+same invocation of the program. On a whole item's first page, built without --version, when that page has a Previous
+link, the program prints the command that rebuilds the earlier item's page, the one the Previous link opens, with --version
+set to that item's next version, to run once this item's page is published and its `#item_page` line recorded; the earlier
+item's page then gets its Next link to this one. An item's `#item_page`
 lines with a link, read oldest first, count versions from 1, each one more than the line before or the version it
 states when that is higher, so the last line's version is the highest; the item's next version is one more.
 A stated version can skip ahead, because an agent may republish a page without recording a line for it, as when

@@ -1160,7 +1160,7 @@ try:
     start = fresh_worktree()
     completed, report = run_in_worktree("change,message", "--sandbox", "workspace-write",
                                         test_suite_runner_mode="fail")
-    check("when nc-test-suites fail after the commit, the run exits 1 naming each failing "
+    check("when nn-test-suites fail after the commit, the run exits 1 naming each failing "
           "suite once, keeps the commit and prints no report line",
           completed.returncode == 1 and git("rev-parse", "HEAD~1").strip() == start
           and "failed after its commit: scripts/a-test.py, scripts/c-test.py." in completed.stderr
@@ -1187,7 +1187,7 @@ try:
           "suite was run, and keeps the commit",
           completed.returncode == 1 and git("rev-parse", "HEAD~1").strip() == start
           and "could not start `scripts/run-all-test-suites.py" in completed.stderr
-          and "no nc-test-suite was run on the commit" in completed.stderr
+          and "no nn-test-suite was run on the commit" in completed.stderr
           and "report:" not in completed.stdout,
           f"exit {completed.returncode}, stderr {completed.stderr!r}")
 
@@ -1224,7 +1224,7 @@ try:
         start = fresh_worktree()
         completed, report = run_in_worktree(writes, "--sandbox", "workspace-write")
         check(f"a workspace-write run that changes nothing ({writes!r}) commits nothing, "
-              f"leaves no message file, runs no nc-test-suite and exits 0",
+              f"leaves no message file, runs no nn-test-suite and exits 0",
               completed.returncode == 0 and git("rev-parse", "HEAD").strip() == start
               and not message_file.exists() and git("status", "--porcelain") == ""
               and not test_suite_runner_calls.exists(),

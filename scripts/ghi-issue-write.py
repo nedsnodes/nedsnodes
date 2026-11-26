@@ -454,7 +454,13 @@ GH_TIMEOUT_SECONDS = 120
 # Beyond the pre-push conflict check's own limit: the hook's other checks and
 # git sending the branch.
 PUSH_TIME_MARGIN_SECONDS = 120
-ADJUDICATION_TIMEOUT_SECONDS = 420
+# What a ghi-guide-agent cold start adds to an ask's budget: it reads
+# issues-open.md and about 220 linked files, and past ghi-guide-agent sessions
+# took a 90th percentile of 8.2 s from one Read to the next. Kept here, not
+# in scripts/ghi-guide-agent-ask.py, because that script imports this one.
+GHI_GUIDE_AGENT_COLD_START_EXTRA_SECONDS = 1800
+# The ask's 300 s budget and 120 s of ssh slack, plus a cold start's extra.
+ADJUDICATION_TIMEOUT_SECONDS = 420 + GHI_GUIDE_AGENT_COLD_START_EXTRA_SECONDS
 # scripts/ghi-guide-agent-ask.py's GHI_GUIDE_AGENT_ANSWER_NOT_USABLE_MESSAGE_OPENING.
 # Copied rather than imported, because this program runs that one as a
 # subprocess and loads nothing from it; ghi-issue-write-test.py checks the two
@@ -798,10 +804,10 @@ def _slug_cut_within(joined: str, limit: int) -> str:
     return head.rsplit("-", 1)[0] if "-" in head else joined[:limit]
 
 
-def placeholder_body(key: str) -> str:
+def placeholder_body(key: str, repo: str) -> str:
     return (f"Filing in progress, pairing key {key}. This body becomes the "
             "links to this issue's files once they land on main. If it still "
-            "reads this way, rerun `scripts/ghi-issue-write.py create` on the "
+            f"reads this way, rerun `{create_rerun_command(repo)}` on the "
             "file and it will continue from where it stopped. If that file is "
             f"gone, rerun it on this issue's file under {GHI_MD_DIRECTORY}/.")
 
@@ -1105,7 +1111,17 @@ def adjudicate(repo: str, title: str, text: str, repository_root: Path,
     Returns the RulingConflict when ghi-guide-agent answered with a ruling
     question, for the caller to record in the log-store before anything
     reaches GitHub; otherwise None. A ruling question
-    does not stop the write."""
+    does not stop the write.
+
+    Not handled: a too-similar verdict naming a number the ask's mirror does
+    not hold as a closed GHI, such as the edited issue while the mirror shows
+    it open, even after GitHub has closed it, or a pull request's number that
+    a recheck kept. The ask's closed-GHI check passes such a number, the
+    edited issue is dropped here, and the refusal sends the author to that
+    number; the author's reconsider path in RECONSIDER_LINE passes the write.
+    A number the mirror holds as a closed GHI makes the ask recheck the
+    verdict before it reaches here, and a failed or repeated recheck skips
+    the adjudication instead."""
     marker = repository_root / RECONSIDERED_MARKER_NAME
     if marker.is_file():
         marker.unlink()
@@ -1169,8 +1185,9 @@ def adjudicate(repo: str, title: str, text: str, repository_root: Path,
                "proposed-improvements-or-changes-file in the log-store")
         # The saved file holds the question on one line, and
         # ruling_question_lines() reads back only that line.
-        # Only line breaks are replaced: the question may quote a command
-        # whose spaces matter, as in printf 'a  b'.
+        # Each line is trimmed at both ends and the lines are joined with one
+        # space; whitespace within a line is kept, because the question may
+        # quote a command whose spaces matter, as in printf 'a  b'.
         return RulingConflict(answer.get("ruling_issue"), " ".join(
             line.strip() for line in str(answer.get("sentence", "")).splitlines()
             if line.strip()))
@@ -1213,7 +1230,7 @@ def ghi_guide_agent_log_store():
     directory on this machine; the store's directory)."""
     override = os.environ.get(GHI_GUIDE_AGENT_LOG_STORE_DIRECTORY_VARIABLE)
     if override:
-        return None, override
+        return None, os.path.abspath(override)
     if socket.gethostname().split(".")[0] == GHI_GUIDE_AGENT_LOG_STORE_HOSTNAME:
         return None, GHI_GUIDE_AGENT_LOG_STORE_DIRECTORY
     return GHI_GUIDE_AGENT_LOG_STORE_HOST, GHI_GUIDE_AGENT_LOG_STORE_DIRECTORY
@@ -1224,7 +1241,7 @@ def ghi_guide_agent_log_store_citation(name: str) -> str:
     as the local path when a test points the store at a directory."""
     override = os.environ.get(GHI_GUIDE_AGENT_LOG_STORE_DIRECTORY_VARIABLE)
     if override:
-        return str(Path(override) / name)
+        return os.path.join(os.path.abspath(override), name)
     return f"{GHI_GUIDE_AGENT_LOG_STORE_HOST}:{GHI_GUIDE_AGENT_LOG_STORE_DIRECTORY}/{name}"
 
 
@@ -1602,7 +1619,7 @@ def file_issue(repo: str, title: str, key: str, runner, report) -> int:
     only thing a rerun has to find this issue by."""
     completed = runner(
         ["gh", "issue", "create", "--repo", repo, "--title", title,
-         "--body", placeholder_body(key)])
+         "--body", placeholder_body(key, repo)])
     report((completed.stdout or "").strip())
     match = re.search(r"/issues/(\d+)", completed.stdout or "")
     if not match:
@@ -1931,11 +1948,13 @@ def land_file(repo: str, number: int, title: str, source: Path,
     return destination
 
 
-def create_rerun_command(repo: str, source) -> str:
+def create_rerun_command(repo: str, source=None) -> str:
     """The create command a stopped filing tells the agent to rerun, quoted
     for the shell and carrying the run's --repo, so the rerun files into the
-    same repository."""
-    arguments = ["scripts/ghi-issue-write.py", "create", str(source)]
+    same repository. Without a source, the text around it names the file."""
+    arguments = ["scripts/ghi-issue-write.py", "create"]
+    if source is not None:
+        arguments.append(str(source))
     if repo != DEFAULT_REPO:
         arguments += ["--repo", repo]
     return shlex.join(arguments)
@@ -2090,6 +2109,28 @@ def ghi_md_paths_for_issue(number: int, repository_root: Path, runner,
     return selected
 
 
+def landed_heading_the_title_lacks(repo: str, number: int, paths,
+                                   repository_root: Path, runner):
+    """The heading of the issue's one GHI-MD as main holds it, when the
+    issue's title differs from it, else None. The issue is titled with the
+    heading the file had at step 3, and its landing pull request can still
+    change that heading before it merges; no edit follows to carry the
+    change, since main's copy already has the new heading. Read from main,
+    not from the checkout, which can be older than the landing pull request
+    or hold a local edit. An issue with several GHI-MDs is left alone, as
+    `title_follows_heading_in_this_edit` leaves it."""
+    if len(paths) != 1:
+        return None
+    shown = runner(["git", "show", f"origin/main:{paths[0]}"],
+                   cwd=str(repository_root))
+    heading = first_heading(shown.stdout)
+    viewed = runner(["gh", "issue", "view", str(number), "--repo", repo,
+                     "--json", "title"])
+    if json.loads(viewed.stdout)["title"] == heading:
+        return None
+    return heading
+
+
 def link_body(repo: str, number: int, repository_root: Path, runner, report,
               rerun_on: str):
     """Step 5. Nothing happens until the file is on main: until then the body
@@ -2115,9 +2156,18 @@ def link_body(repo: str, number: int, repository_root: Path, runner, report,
         report("Once the pull request from step 4 merges, pull main and "
                f"rerun: {create_rerun_command(repo, rerun_on)}")
         return False
-    runner(["gh", "issue", "edit", str(number), "--repo", repo,
-            "--body", links_body(repo, paths)])
+    # The title goes in the same call as the body: the body edit removes
+    # the pairing key, after which no rerun can come back to set it.
+    heading = landed_heading_the_title_lacks(repo, number, paths,
+                                             repository_root, runner)
+    command = ["gh", "issue", "edit", str(number), "--repo", repo,
+               "--body", links_body(repo, paths)]
+    if heading is not None:
+        command += ["--title", heading]
+    runner(command)
     report(f"body is now {len(paths)} link(s): " + ", ".join(paths))
+    if heading is not None:
+        report(f"title is now: {heading}")
     return True
 
 
@@ -2295,9 +2345,8 @@ def validate_edit(path: Path, repository_root: Path):
     text = path.read_text(encoding="utf-8")
     if not text.strip():
         raise Refused(f"{path} is empty", 64)
-    numbered = re.match(r"^(\d+)-", path.name)
-    if numbered:
-        number = int(numbered.group(1))
+    number = issue_number_in_file_name(path)
+    if number is not None:
         relative = relative_to_root(path, repository_root)
         if not writable_relative_path(relative):
             raise Refused(
