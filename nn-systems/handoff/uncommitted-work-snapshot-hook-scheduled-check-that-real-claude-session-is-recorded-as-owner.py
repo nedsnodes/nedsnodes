@@ -147,9 +147,10 @@ def note(event, arguments):
     if (event == "open" and isinstance(arguments[0], str)
             and not arguments[2] & (os.O_WRONLY | os.O_RDWR)):
         path = os.path.realpath(arguments[0])
-        if "__pycache__" in path.split(os.sep):
-            # A module whose cached bytecode is fresh is loaded without opening its source.
-            path = importlib.util.source_from_cache(path)
+        if path.endswith(".pyc"):
+            # A module whose cached bytecode is fresh is loaded without opening its source; the
+            # cache may sit under PYTHONPYCACHEPREFIX, with no __pycache__ part in its path.
+            path = os.path.realpath(importlib.util.source_from_cache(path))
         if path.startswith(prefixes):
             opened.add(os.path.relpath(path, root))
 sys.addaudithook(note)

@@ -51,7 +51,7 @@ import importlib.util, json, os, subprocess, sys, time
 from pathlib import Path
 mode = os.environ["FAKE_CLAUDE_MODE"]
 session = "11111111-2222-3333-4444-555555555555"
-if mode == "hook" and "FAKE_CLAUDE_RUNNING_AS_CLAUDE" not in os.environ:
+if mode in ("hook", "hook-without-owner-file-module-dependency") and "FAKE_CLAUDE_RUNNING_AS_CLAUDE" not in os.environ:
     os.environ["FAKE_CLAUDE_RUNNING_AS_CLAUDE"] = "1"
     named_claude = os.environ["FAKE_CLAUDE_PYTHON_NAMED_CLAUDE"]
     os.execv(named_claude, [named_claude, __file__, *sys.argv[1:]])
@@ -487,10 +487,35 @@ def test_a_deleted_file_the_hook_loads_fails_the_check_naming_it():
 
 def test_an_owner_file_module_that_does_not_load_fails_the_check():
     completed, record = run_check("hook-without-owner-file-module-dependency")
+    lines = record.splitlines()
+    failed = [line for line in lines if line.startswith("FAIL ")]
     check(completed.returncode == 1 and "VERDICT: FAILED" in record
-          and "FAIL the clone's scripts/worktree-owner-file-read-and-write.py does not load" in record,
-          "a clone whose owner-file module cannot load its own dependency fails the check "
-          "instead of passing over the hook's FileNotFoundError", record or completed.stderr)
+          and any(line.startswith("PASS the hook wrote one work-snapshot") for line in lines)
+          and len(failed) == 1
+          and failed[0].startswith("FAIL the clone's scripts/worktree-owner-file-read-and-write.py does not load"),
+          "a clone whose owner-file module cannot load its own dependency fails the check on that "
+          "line alone, while the hook, run by the fake as claude, still writes its work-snapshot",
+          record or completed.stderr)
+
+
+def test_the_probe_finds_the_modules_when_their_bytecode_is_cached_under_a_prefix():
+    # The hand-mutant run sets PYTHONPYCACHEPREFIX; a warm cache there is read without opening
+    # any source and with no __pycache__ part in the path.
+    prefix = SCRATCH / "pycache-prefix"
+    environment = dict(os.environ, PYTHONPYCACHEPREFIX=str(prefix))
+    listed = []
+    for _ in range(2):
+        completed = subprocess.run(
+            [sys.executable, "-c", owner_check.LOADED_FILES_PROBE_SOURCE,
+             str(owner_check.REPOSITORY_ROOT),
+             os.pathsep.join(owner_check.SCRATCH_CLONE_REPOSITORY_DIRECTORIES_TO_COPY),
+             str(owner_check.MODULE_RELATIVE), str(owner_check.OWNER_FILE_MODULE_RELATIVE)],
+            capture_output=True, text=True, env=environment)
+        listed.append(set(filter(None, completed.stdout.split("\0"))))
+    expected = {str(owner_check.MODULE_RELATIVE), str(owner_check.OWNER_FILE_MODULE_RELATIVE)}
+    check(any(prefix.rglob("*.pyc")) and expected <= listed[1] and listed[0] == listed[1],
+          "with PYTHONPYCACHEPREFIX set and its cache warm, the probe still lists the modules "
+          "the hook loads", listed)
 
 
 def test_a_check_that_cannot_run_fails():
@@ -550,6 +575,7 @@ def main():
                      test_a_deleted_file_the_hook_does_not_load_leaves_the_scratch_clone_whole,
                      test_a_deleted_file_the_hook_loads_fails_the_check_naming_it,
                      test_an_owner_file_module_that_does_not_load_fails_the_check,
+                     test_the_probe_finds_the_modules_when_their_bytecode_is_cached_under_a_prefix,
                      test_a_check_that_cannot_run_fails,
                      test_an_error_after_claude_started_is_not_reported_as_a_failed_start,
                      test_a_record_that_cannot_be_written_is_reported):
