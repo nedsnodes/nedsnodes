@@ -964,6 +964,7 @@ def no_answer_table_text():
 
 
 HASHTAG_MARKER = re.compile(r"#[A-Za-z0-9_-]+")
+HASHTAG_MARKER_CLOSING_HASH = re.compile(r"^(#[A-Za-z0-9_-]+)#$")
 NOT_MARKDOWN_FILES = ":(exclude)*.md"
 GLOSSARY_FILES = "*-glossary.md"
 STATUS_LINE_PREFIX = "- "
@@ -2684,7 +2685,7 @@ def glossary_term_or_marker_problems(found, touched, top, item):
     """Return why a kind 6 item, a glossary term put in or a hashtag marker added to Markdown prose, cannot settle."""
     problems = []
     terms = [name for value in found[GLOSSARY_TERM] for name in rename_names(value)]
-    markers = words(found[ADDED_HASHTAG_MARKER])
+    markers = [HASHTAG_MARKER_CLOSING_HASH.sub(r"\1", value) for value in words(found[ADDED_HASHTAG_MARKER])]
     if not terms and not markers:
         problems.append(MissingEvidenceLine(NOT_ASKED_NO_TERM_OR_MARKER_PROBLEM.format(term=GLOSSARY_TERM,
                                                                                        marker=ADDED_HASHTAG_MARKER)))

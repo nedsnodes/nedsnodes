@@ -5084,6 +5084,7 @@ def test_a_glossary_term_put_in_or_a_marker_no_program_reads_settles_as_kind_6_a
                             ("#not_asked_glossary_term `poem index page`",
                              {"docs/poems-glossary.md": "- **poem index page** — the page that lists poems.\n"}),
                             ("#not_asked_hashtag_marker #poem_date", {"docs/about.md": "Mark a dated poem #poem_date.\n"}),
+                            ("#not_asked_hashtag_marker #poem_date#", {"docs/about.md": "Mark a dated poem #poem_date#.\n"}),
                             ("#not_asked_hashtag_marker #poem_date", {"tools/poems.py": "TAG = '#poem_date_old'\n"}),
                             ("#not_asked_hashtag_marker #poem_date-note", {"tools/poems.py": "TAG = '#poem_date-old'\n"}),
                             ("#not_asked_glossary_term poem-index\n\n#not_asked_hashtag_marker #poem_date", None)):
@@ -5122,6 +5123,10 @@ def test_kind_6_is_refused_unless_markdown_prose_outside_a_glossary_gets_a_liste
         check(f"kind 6 is refused when the marker is in {reader}, which a program runs or reads",
               *refused(kind_6_case("#not_asked_hashtag_marker #poem_date", {reader: 'if "#poem_date" in line: pass\n'}), 6,
                        f"the marker `#poem_date` is in {reader}, which are not Markdown"))
+    check("kind 6 reads a marker written with the hashtag's closing # as the marker, and is refused when a program "
+          "reads it",
+          *refused(kind_6_case("#not_asked_hashtag_marker #poem_date#", {"tools/poems.py": 'TAG = "#poem_date#"\n'}), 6,
+                   "the marker `#poem_date` is in tools/poems.py, which are not Markdown"))
     for marker, code, why in (
             ("#POEM_DATE", 'if "#poem_date" in line: pass\n', "in another letter case"),
             ("#poem_date-note", 'PAUSE = re.compile(r"#poem_date\\b")\n', "through a pattern that ends at its `-`"),
