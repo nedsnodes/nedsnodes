@@ -452,7 +452,7 @@ MORE_RESPONSES_SEVERAL_ITEMS_LINE = (
 MORE_RESPONSES_CLOSING_LINE = "{item}'s closing line: {closing_line}"
 # The page builder refuses an item it cannot read, so publishing before this fix would only fail.
 PAGE_BUILDER = HERE / "walk-me-through-approval-walk-item-page-html-build-from-walk-document.py"
-UNPUBLISHED_ITEM_UNREADABLE_LINE = (
+WALK_ME_THROUGH_HOOK_INSTRUCTION_TO_AGENT_FIX_APPROVAL_WALK_ITEM_TEXT_UNREADABLE_FROM_WALK_DOCUMENT_BEFORE_PUBLISHING_ITEM_PAGE_LINE = (
     "The hook could not read the text of {item} from the walk-document {document}, so the page builder, "
     f"{PAGE_BUILDER}, would refuse to build the item's page: {{problem}}. First fix what the reason after the "
     "colon describes. Then publish the item as the lines below say: {item}, or, if the fix changed which item the "
@@ -1049,11 +1049,11 @@ def more_responses_closing_line(number, walk):
 
 
 def unpublished_item_unreadable_lines(number, walk):
-    """UNPUBLISHED_ITEM_UNREADABLE_LINE and a line break, for an item with no page whose text the hook could not
+    """WALK_ME_THROUGH_HOOK_INSTRUCTION_TO_AGENT_FIX_APPROVAL_WALK_ITEM_TEXT_UNREADABLE_FROM_WALK_DOCUMENT_BEFORE_PUBLISHING_ITEM_PAGE_LINE and a line break, for an item with no page whose text the hook could not
     read from the walk-document; "" otherwise."""
     if number in walk.shown_texts or not walk.shown_text_problem:
         return ""
-    return UNPUBLISHED_ITEM_UNREADABLE_LINE.format(item=item_name(number, walk), document=walk.document,
+    return WALK_ME_THROUGH_HOOK_INSTRUCTION_TO_AGENT_FIX_APPROVAL_WALK_ITEM_TEXT_UNREADABLE_FROM_WALK_DOCUMENT_BEFORE_PUBLISHING_ITEM_PAGE_LINE.format(item=item_name(number, walk), document=walk.document,
                                                    problem=walk.shown_text_problem.rstrip(".")) + "\n"
 
 
