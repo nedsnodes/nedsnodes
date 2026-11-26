@@ -1010,7 +1010,10 @@ def stopped_cells_write_check_lines(stopped_report_paths: list, baseline,
     A path that leaves the snapshot after the baseline gets no line of its own, such as an
     already-untracked file a stopped cell deletes, or a changed tracked file it resets to HEAD;
     it withholds every undo command instead. A gitignored file is in no snapshot, so a cell
-    that moves one to a path git does not ignore gets an undo command for that path."""
+    that moves one to a path git does not ignore gets an undo command for that path.
+    Not handled: a gone path whose merge conflict began after launch. Its unmerged code is
+    sorted by its first letter, so AA and AU are called never committed though HEAD holds
+    them, and DD, DU and UA get a `git diff HEAD` that prints nothing."""
     reason = None if baseline is not None else (
         baseline_failure_reason or "no snapshot of the working tree was taken before the cells launched")
     if baseline is not None:
