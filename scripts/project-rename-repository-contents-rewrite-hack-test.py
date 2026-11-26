@@ -45,16 +45,14 @@ def scratch_checkout(files):
     return checkout
 
 
-def run(checkout, *arguments):
-    return subprocess.run([sys.executable, str(PROGRAM), "--checkout", str(checkout), *arguments],
-                          capture_output=True, text=True)
-
-
-def run_stages(checkout, *stages):
-    """Run each stage; return the failed runs as (stage, exit code, stderr), so a case that checks files stayed
-    unchanged cannot pass on a stage that exited before writing anything."""
-    results = [(stage, run(checkout, "--stage", stage)) for stage in stages]
-    return [(stage, result.returncode, result.stderr) for stage, result in results if result.returncode != 0]
+def run(checkout, *arguments, expect=0):
+    """Run the program and fail the suite when it exits other than `expect`, so a case that checks files stayed
+    unchanged cannot pass on a run that exited before writing anything."""
+    result = subprocess.run([sys.executable, str(PROGRAM), "--checkout", str(checkout), *arguments],
+                            capture_output=True, text=True)
+    check(f"{' '.join(arguments)} exits {expect}", result.returncode == expect,
+          (result.returncode, result.stdout, result.stderr))
+    return result
 
 
 def read(checkout, path):
@@ -148,7 +146,7 @@ check("a file added under nc-systems beside nn-systems moves into nn-systems",
 
 # --- A path whose new name holds other content is refused, and the rest still moves ----------------
 checkout = scratch_checkout({"nc-queue/a.md": "old a\n", "nn-queue/a.md": "new a\n", "nc-queue/b.md": "b\n"})
-refused = run(checkout, "--stage", "3")
+refused = run(checkout, "--stage", "3", expect=1)
 check("stage 3 refuses a move onto a path that holds other content, names it, and exits 1",
       refused.returncode == 1 and "nc-queue/a.md -> nn-queue/a.md" in refused.stdout
       and (checkout / "nn-queue/b.md").exists() and read(checkout, "nn-queue/a.md") == "new a\n",
@@ -164,12 +162,13 @@ checkout = scratch_checkout({
     "scripts/binary.bin": b"\xff\xfe nedschorus/nedschorus\n",
 })
 os.chmod(checkout / "scripts/run.sh", 0o755)
-failed_stages = run_stages(checkout, "1", "2", "3")
+for stage in ("1", "2", "3"):
+    run(checkout, "--stage", stage)
 check("stage 1 leaves Markdown, captured responses, a kept program file and non-UTF-8 files alone",
-      not failed_stages and read(checkout, "README.md") == "gh pr list --repo nedschorus/nedschorus\n"
+      read(checkout, "README.md") == "gh pr list --repo nedschorus/nedschorus\n"
       and "nedschorus/nedschorus" in read(checkout, "scripts/merge-gate-test-captured-github-responses/x.json")
       and "nedschorus/nedschorus" in read(checkout, "scripts/project-rename-repository-contents-rewrite-hack.py")
-      and (checkout / "scripts/binary.bin").read_bytes() == b"\xff\xfe nedschorus/nedschorus\n", failed_stages)
+      and (checkout / "scripts/binary.bin").read_bytes() == b"\xff\xfe nedschorus/nedschorus\n", read(checkout, "README.md"))
 check("stages 2 and 3 rewrite a GHI-MD file's paths like any other file's",
       read(checkout, "docs/issues/1-a.md") == "nn-systems/x and /home/nedlern/nedsnodes-logs\n",
       read(checkout, "docs/issues/1-a.md"))
@@ -227,13 +226,13 @@ covered = run(checkout, "--residue-report")
 check("the residue report covers the four canary glossary terms as nc- glossary terms",
       covered.returncode == 0 and "4 old-name matches covered" in covered.stdout, covered.stdout)
 checkout = scratch_checkout({"a.py": "PATH = 'nc-systems/x'\n"})
-uncovered = run(checkout, "--residue-report")
+uncovered = run(checkout, "--residue-report", expect=1)
 check("the residue report exits 1 and prints each old name no reason covers",
       uncovered.returncode == 1 and "a.py:1: PATH = 'nc-systems/x'" in uncovered.stdout, uncovered.stdout)
 
 # --- A git failure is reported and exits 1 --------------------------------------------------------
 not_a_checkout = Path(tempfile.mkdtemp(prefix="project-rename-rewrite-test-not-git-"))
-failed = run(not_a_checkout, "--stage", "1")
+failed = run(not_a_checkout, "--stage", "1", expect=1)
 check("a failing git command prints FAILED and exits 1",
       failed.returncode == 1 and "FAILED: git ls-files" in failed.stderr, (failed.returncode, failed.stderr))
 
@@ -290,7 +289,7 @@ check("stage 3 renames a name after an escape in a string, and the backups' dire
 checkout = scratch_checkout({"scripts/x.py": ("NED_BOX_NC_SHARED_DATABASE_BACKUP_DIRECTORY = 1\n"
                                              "create_nc_shared_database_if_absent = old_nc_systems = 2\n"
                                              'SLICE = r"nc\\x2dtest\\x2dsuites.slice"\n')})
-before = run(checkout, "--residue-report")
+before = run(checkout, "--residue-report", expect=1)
 check("the residue report sees an old name inside a longer identifier and in systemd's escaped spelling",
       before.returncode == 1 and "scripts/x.py:1:" in before.stdout and "scripts/x.py:2:" in before.stdout
       and "scripts/x.py:3:" in before.stdout, before.stdout)
@@ -369,13 +368,13 @@ check("a rerun of stage 3 renames a citation by name alone of a page an earlier 
 # --- The residue report finds a GHI-MD citation stage 3 missed --------------------------------------
 checkout = scratch_checkout({"docs/cross-project/nedsnodes-notes.md": "notes\n",
                              "docs/issues/2636-c.md": "See `docs/cross-project/nedschorus-notes.md` and the retired `nedschorus-founding-plan.md`.\n"})
-missed = run(checkout, "--residue-report")
+missed = run(checkout, "--residue-report", expect=1)
 check("the residue report names a GHI-MD citation of a file the checkout holds under its new name, and covers a retired one",
       missed.returncode == 1 and "docs/issues/2636-c.md:1:" in missed.stdout and "1 not covered" in missed.stdout, missed.stdout)
 
 checkout = scratch_checkout({"docs/nedsnodes-wiki/nedsnodes-glossary.md": "terms\n",
                              "docs/issues/2636-c.md": "See `docs/nedschorus-wiki/` and `docs/nedschorus-wiki/nedsnodes-glossary.md`.\n"})
-missed = run(checkout, "--residue-report")
+missed = run(checkout, "--residue-report", expect=1)
 check("the residue report names a GHI-MD citation of a directory stage 3 renamed, such as the wiki's",
       missed.returncode == 1 and "docs/issues/2636-c.md:1:" in missed.stdout and "2 not covered" in missed.stdout, missed.stdout)
 
@@ -435,10 +434,10 @@ check("stage 2 renames the shared database's unit file, at the top or in a direc
 # --- Stage 3 does not rename a citation of a kept nedschorus- file ----------------------------------
 CAPTURED = "scripts/merge-gate-test-captured-github-responses/nedschorus-nedschorus-1-pr-view.json"
 checkout = scratch_checkout({CAPTURED: "{}\n", "scripts/gate-test.py": 'NAME = "nedschorus-nedschorus-1-pr-view.json"\n'})
-failed_stages = run_stages(checkout, "3")
+run(checkout, "--stage", "3")
 check("stage 3 leaves a citation of a kept file whose name starts nedschorus-, which keeps its name",
-      not failed_stages and read(checkout, "scripts/gate-test.py") == 'NAME = "nedschorus-nedschorus-1-pr-view.json"\n'
-      and read(checkout, CAPTURED) == "{}\n", (failed_stages, read(checkout, "scripts/gate-test.py")))
+      read(checkout, "scripts/gate-test.py") == 'NAME = "nedschorus-nedschorus-1-pr-view.json"\n'
+      and read(checkout, CAPTURED) == "{}\n", read(checkout, "scripts/gate-test.py"))
 
 # --- Stages 1 and 2 leave stage 3's page names and Bash-guard map alone ------------------------------
 checkout = scratch_checkout({
@@ -446,9 +445,10 @@ checkout = scratch_checkout({
     "docs/issues/1-a.md": "See `nedschorus-glossary.md`.\n",
     "nn-systems/general-tools/" + BASH_GUARD_CHECK.rsplit("/", 1)[-1]: (
         'BASH_GUARD_CURRENT_PATHS_BY_FORMER_PATH = {\n}\nGUARDS = {\n    "nn-systems/x/stop-hook.py": read_stop,\n}\n')})
-failed_stages = run_stages(checkout, "1", "2")
+for stage in ("1", "2"):
+    run(checkout, "--stage", stage)
 check("stages 1 and 2 rename no page cited by name alone and add no former path to the Bash-guard check",
-      not failed_stages and git(checkout, "status", "--porcelain") == "", (failed_stages, git(checkout, "diff")))
+      git(checkout, "status", "--porcelain") == "", git(checkout, "diff"))
 
 # --- The summary counts the files rewritten and the paths moved, a twin's removal included ------------
 checkout = scratch_checkout({"nc-systems/x/a.py": "see nc-systems/x/b.py\nb = 1\n",
@@ -476,7 +476,7 @@ check("the residue report does not read a kept file's old names again through a 
 
 # --- Stage 3 refuses a move onto other content whatever the two contents' order ----------------------
 checkout = scratch_checkout({"nc-queue/c.md": "a\n", "nn-queue/c.md": "b\n"})
-refused = run(checkout, "--stage", "3")
+refused = run(checkout, "--stage", "3", expect=1)
 check("stage 3 refuses a move onto a path whose content sorts after the old path's",
       refused.returncode == 1 and "nc-queue/c.md -> nn-queue/c.md" in refused.stdout
       and read(checkout, "nc-queue/c.md") == "a\n", (refused.returncode, refused.stdout))
@@ -505,7 +505,7 @@ check("the residue report counts each line of a kept file and prints the counts 
       and counts.stdout.index(captured_line) < counts.stdout.index(citation_line), counts.stdout)
 LONG_LINE = "PATH = 'nc-systems/x'  # " + "y" * 300
 checkout = scratch_checkout({"a.py": "# nedschorus#418nedschorus\n# nedschorus#418 x nedschorus\n" + LONG_LINE + "\n"})
-uncovered = run(checkout, "--residue-report")
+uncovered = run(checkout, "--residue-report", expect=1)
 check("the residue report does not let a covered span cover an old name that starts where or after it ends, "
       "and prints a line's first 200 characters",
       uncovered.returncode == 1 and "a.py:1: # nedschorus#418nedschorus\n" in uncovered.stdout
