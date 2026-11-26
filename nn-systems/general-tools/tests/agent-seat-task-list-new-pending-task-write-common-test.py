@@ -125,9 +125,11 @@ with tempfile.TemporaryDirectory() as scratch:
         raised = error
     finally:
         task_list.os.link = real_link
-    check("a task file that cannot be linked into place raises, and leaves no partial file and "
-          "no high-water mark", raised is not None and list(refused.iterdir()) == [],
-          sorted(path.name for path in refused.iterdir()))
+    check("a task file that cannot be linked into place raises, not as a task that stands on the "
+          "list, and leaves no partial file and no high-water mark",
+          raised is not None and not isinstance(
+              raised, task_list.AgentSeatTaskListNewPendingTaskLinkedThenWriteFailed)
+          and list(refused.iterdir()) == [], sorted(path.name for path in refused.iterdir()))
 
     # A second writer runs whole between the first writer's partial write and its rename.
     together = root / "together"
@@ -166,6 +168,22 @@ with tempfile.TemporaryDirectory() as scratch:
     check("a high-water mark that cannot be replaced raises OSError and leaves no partial file",
           raised is not None and sorted(path.name for path in unwritable_mark.iterdir())
           == [".highwatermark"], (raised, sorted(path.name for path in unwritable_mark.iterdir())))
+
+    linked_then_failed = root / "linked-then-failed"
+    linked_then_failed.mkdir()
+    (linked_then_failed / ".highwatermark").mkdir()
+    try:
+        write(linked_then_failed, "subject", "description")
+        raised = None
+    except OSError as error:
+        raised = error
+    check("a writer that fails after linking the task raises the linked-then-failed error, an "
+          "OSError carrying the task's id, with the task file in place and no partial file left",
+          isinstance(raised, task_list.AgentSeatTaskListNewPendingTaskLinkedThenWriteFailed)
+          and raised.task_id == 1 and "task #1 stands on the list" in str(raised)
+          and json.loads((linked_then_failed / "1.json").read_text())["subject"] == "subject"
+          and not list(linked_then_failed.glob("*.partial")),
+          (raised, sorted(path.name for path in linked_then_failed.iterdir())))
 
 if failures:
     print(f"\n{failures} case(s) failed")

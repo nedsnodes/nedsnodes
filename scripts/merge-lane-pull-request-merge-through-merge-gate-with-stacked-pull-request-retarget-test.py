@@ -1685,6 +1685,29 @@ def failed_suites_kept_in_view_cases(scratch):
                   "repair_task_id"] is None,
               f"exit {exit_code}\n{output}\n{record}")
 
+        def task_write_reports_a_linked_task_then_fails(*_):
+            raise program.task_write.AgentSeatTaskListNewPendingTaskLinkedThenWriteFailed(
+                7, OSError("disk full"))
+
+        program.task_write.agent_seat_task_list_new_pending_task_write = (
+            task_write_reports_a_linked_task_then_fails)
+        try:
+            exit_code, output, _, _, _ = run_case(
+                scratch, "failed-suite-writer-reports-linked-task", [(GATE_PASSED, 0)],
+                default_routes([]), runner_answer=(RUNNER_FAILED, 1),
+                before_the_program_runs=author_seat_made)
+        finally:
+            program.task_write.agent_seat_task_list_new_pending_task_write = saved_write
+        record = failed_suites_record_of(scratch / "failed-suite-writer-reports-linked-task")
+        check("the task id the writer's linked-then-failed error carries is the one the record and "
+              "the STOP name, with no task file read to find it",
+              exit_code == 3
+              and "STOP: merged, but the task writer wrote repair task #7 to" in output
+              and "the repair task could not be written" not in output
+              and record["scripts/broken-test.py"]["failed_tests"]["scripts/broken-test.py"][
+                  "repair_task_id"] == 7,
+              f"exit {exit_code}\n{output}\n{record}")
+
         def mark_unwritable_after_the_task_is_linked(directory):
             # A directory at .highwatermark makes the writer's rename onto it raise after it has
             # linked the task file, however the writer names its partial file.
