@@ -722,8 +722,10 @@ def merge_lane_pull_request_review_assignment_lines(path, pull_requests, state, 
     names as in the event file (EventLinesAppendFailed.written_lines), or every deal when the
     event file could not be read back, and loses the others, so the next poll deals those again;
     the OSError raised then names the kept pull requests, whose lines a failed append may not keep
-    through a crash. When putting the file back fails too, it names the pull requests the file
-    keeps with no REVIEW-ASSIGNED line recorded."""
+    through a crash. When the event file may lack a kept pull request's line, because it could not
+    be read back, or putting the file back fails, the error raised is
+    ReviewAssignmentsKeptWithoutRecordedLines, naming the pull requests the file keeps whose
+    REVIEW-ASSIGNED line may not be recorded."""
 
     def stop(case, message):
         if state.get("stopped") != case:
@@ -801,14 +803,16 @@ def merge_lane_pull_request_review_assignment_lines(path, pull_requests, state, 
                             path, text + separator + "".join(
                                 f"{pull_request['number']} {lane}\n" for (pull_request, lane), _ in kept))
                     except OSError as put_back_error:
-                        raise OSError(
+                        raise ReviewAssignmentsKeptWithoutRecordedLines(
                             f"{message}; and the assignment file {path} could not be put back "
                             f"({put_back_error}), so it assigns these pull requests although no "
                             f"REVIEW-ASSIGNED line for them was recorded: "
                             + "; ".join(put_back)
-                            + ". Send each to its merge-lane agent-seat yourself") from error
-                if isinstance(error, EventFileCutBackFailed):
-                    raise
+                            + ". Send each to its merge-lane agent-seat yourself",
+                            [pull_request["number"] for pull_request, _ in dealt]) from error
+                if not read_back:
+                    raise ReviewAssignmentsKeptWithoutRecordedLines(
+                        message, [pull_request["number"] for (pull_request, _), _ in kept]) from error
                 raise OSError(message) from error
         return assigned_lines
 
@@ -1031,18 +1035,32 @@ class EventFileCutBackFailed(OSError):
     """The event file ends inside a line, and the bytes after its last newline could not be cut."""
 
 
+class ReviewAssignmentsKeptWithoutRecordedLines(OSError):
+    """The assignment file keeps the deals of pull_request_numbers, whose REVIEW-ASSIGNED lines
+    the event file may not hold."""
+
+    def __init__(self, message, pull_request_numbers):
+        super().__init__(message)
+        self.pull_request_numbers = pull_request_numbers
+
+
 def event_file_cut_back_to_last_whole_line(path):
     """Cut the bytes after the event file's last newline, which an append that stopped inside a
     line leaves, so that the next line does not glue onto them. Raises EventFileCutBackFailed when
-    they cannot be cut."""
+    the file ends inside a line and they cannot be found or cut, and OSError when its last byte
+    cannot be read."""
     try:
-        with path.open("rb") as events:
-            end = events.seek(0, os.SEEK_END)
-            if end == 0:
-                return
-            events.seek(end - 1)
-            if events.read(1) == b"\n":
-                return
+        events = path.open("rb")
+    except FileNotFoundError:
+        return
+    with events:
+        end = events.seek(0, os.SEEK_END)
+        if end == 0:
+            return
+        events.seek(end - 1)
+        if events.read(1) == b"\n":
+            return
+        try:
             while end > 0:
                 start = max(0, end - 65536)
                 events.seek(start)
@@ -1052,28 +1070,22 @@ def event_file_cut_back_to_last_whole_line(path):
                     end = start + newline + 1
                     break
                 end = start
-    except FileNotFoundError:
-        return
-    try:
-        os.truncate(path, end)
-    except OSError as error:
-        raise EventFileCutBackFailed(
-            f"the event file {path} ends inside a line, which a failed append left, and the poll "
-            f"could not cut that line back ({error}), so this poll recorded nothing. Each later "
-            f"poll cuts the line back itself before it records, so polls record again once the "
-            f"cut works. Fix what the error names; do not edit the event file by hand. When a "
-            f"later poll has recorded events, mark this task completed") from error
+            os.truncate(path, end)
+        except OSError as error:
+            raise EventFileCutBackFailed(
+                f"the event file {path} ends inside a line, which a failed append left, and the "
+                f"poll could not cut that line back ({error}), so this poll recorded nothing. Each "
+                f"later poll cuts the line back itself before it records, so polls record again "
+                f"once the cut works. Fix what the error names; do not edit the event file by "
+                f"hand. When a later poll has recorded events, mark this task completed") from error
 
 
 def event_lines_append(path, lines, now):
-    """Append the lines, each after the UTC time. Raises EventLinesAppendFailed when the append
-    fails after the file is opened, and OSError when it cannot be opened or ends inside a line
-    that cannot be cut back."""
+    """Append the lines, each after the UTC time, to a file that event_file_cut_back_to_last_whole_line
+    has cut back. Raises EventLinesAppendFailed when the append fails after the file is opened,
+    and OSError when it cannot be opened."""
     if not lines:
         return
-    # The caller's lock keeps other writers out, so bytes after the last newline are a failed
-    # append's.
-    event_file_cut_back_to_last_whole_line(path)
     stamp = datetime.datetime.fromtimestamp(now, datetime.timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
     encoded = [f"{stamp} {redact_secrets(line)}\n".encode("utf-8", errors="replace") for line in lines]
     start = None
@@ -1227,6 +1239,10 @@ def poll_once(arguments, assignments_file, options_in_use):
             if arguments.poll_once_write_baseline:
                 return poll_once_write_baseline(arguments, token, state_path, events_path)
             state = poll_state_read(state_path)
+            # Before any deal is written, so a failed cut never leaves a deal to roll back. The
+            # poll lock keeps other writers out, so bytes after the last newline are a failed
+            # append's.
+            event_file_cut_back_to_last_whole_line(events_path)
             lines = needs_a_look_events(arguments.needs_a_look_directory, state["notices"],
                                         state_survives_restarts=True)
             pull_requests, reason = fetch_open_pull_requests(arguments.repo, token)
@@ -1260,6 +1276,13 @@ def poll_once(arguments, assignments_file, options_in_use):
             # Its own subject, so an open append-failure task does not swallow it.
             return failure_reported(task_list_directory, "its polls record nothing until the event "
                                     "file's last line is cut back", str(error))
+        except ReviewAssignmentsKeptWithoutRecordedLines as error:
+            # Its own subject for each set of pull requests, so an open task does not swallow the
+            # only message that names them.
+            return failure_reported(
+                task_list_directory,
+                "it kept review assignments whose REVIEW-ASSIGNED lines may not be recorded: "
+                + ", ".join(f"#{number}" for number in error.pull_request_numbers), str(error))
         except OSError as error:
             return failure_reported(task_list_directory, "it could not record or deliver events",
                                     f"{error}. The state file still holds the last run that "
