@@ -156,7 +156,7 @@ ned-box passes the option on to the read there when it was given.
 
 THE EDIT. The template's placeholders {CHANGED_SENTENCE_IDS} and
 {REMOVED_TEXT} tell the reviewer what the edit changed, so it can label each
-finding #edit or #kept_text. The edit is the cold-read-target's file as it
+finding #changed_text or #unchanged_text. The edit is the cold-read-target's file as it
 is on disk, against the file at the same path in the commit
 `git merge-base HEAD origin/main` of the checkout that holds it, compared
 unit by unit: a unit is what one sentence id covers, with its
@@ -379,7 +379,7 @@ The text-intended-reader-category of {TARGET_PATH} is {TEXT_INTENDED_READER_CATE
 
 Restate each document as follows. For each sentence, write its id — the bracketed `[s12]` that begins it, brackets and all — on a line of its own, then one bullet per point, action, fact, idea, concept or claim in that sentence, in the order they were originally presented. The ids mark where each sentence begins: restate the text under the id it carries, and never merge two ids into one restatement or split one id into two. A heading, a table row or a fenced code block counts as a sentence; a list item is split into its sentences like any paragraph. A sentence may contain many points. Do not merge or omit details. Restate each point in your own plain, succinct words, literally and precisely. If a sentence or point does not make sense to you, your restatement may also not make sense, in which case add ?nonsense? to the end of that line or bullet. If there is a clear gap in the document, note that gap with a bullet that says ?gap? followed by what is missing. In frontmatter, a data field such as a name, an identifier or a date gets no bullets; a prose field such as a description is treated like any other sentence. Your bullets, taken together, should be roughly the length of the text you restate. This question exists so the author can check whether you understood what they meant, which is why you should be literal, and not try to guess a coherent meaning if there is none. Your restatement helps the author determine whether the reader the text is written for understands it correctly.
 
-## Question 2: Where you struggled
+## Question 2: What is unclear
 
 Note where the reader the text is written for might waste effort or come to incorrect conclusions:
 
@@ -395,11 +395,11 @@ BE CONCISE: for each problem, quote the exact phrase and then a sentence naming 
 
 The text explains something or tells its reader what to do. Find the gaps within its logic, situations it covers incompletely, likely cases or states that are not covered, or are covered in conflicting ways. Take each rule, instruction, case, or definition the document states, and ask what a reader needs to know that is not explained — a boundary value falling between two cases, a state the document's own machinery could reach but never names, a step with no stopping point, a failure the text neither handles nor rules out. BE CONCISE here too: for each gap, quote the relevant text and describe its gap. Ask this only of what {TARGET_PATH} sets out to cover; a subject it never takes up is not a gap.
 
-Sentences the edit added or changed: {CHANGED_SENTENCE_IDS}. Text the edit removed or replaced, which {TARGET_PATH} no longer holds: {REMOVED_TEXT}. When either of these names something, {TARGET_PATH} is an edit of a document on main. Begin each item in Questions 2 and 3 with one label. `#edit`: the item is about a sentence the edit added or changed, a conflict between such a sentence and the rest of the document, or a gap that the removed or replaced text leaves. `#kept_text`: the item is about sentences the edit did not change, and the edit did not cause it; end the item by saying whether the document already records the problem, citing where, such as "open question 6", or with "not recorded". When both say none, {TARGET_PATH} is not an edit: give no labels.
+Sentences the edit added or changed: {CHANGED_SENTENCE_IDS}. Text the edit removed or replaced, which {TARGET_PATH} no longer holds: {REMOVED_TEXT}. When either of these names something, {TARGET_PATH} is an edit of a document on main. Begin each item in Questions 2 and 3 with one label. `#changed_text`: the item is about a sentence the edit added or changed, a conflict between such a sentence and the rest of the document, or a gap that the removed or replaced text leaves. `#unchanged_text`: the item is about sentences the edit did not change, and the edit did not cause it; end the item by saying whether the document already records the problem, citing where, such as "open question 6", or with "not recorded". When both say none, {TARGET_PATH} is not an edit: give no labels.
 
-Number the items of Questions 2 and 3 separately, ORDERED MOST IMPORTANT FIRST — the problem most likely to stop the reader the text is written for leads its section. If a question has none, say "No issues".
+Number the items of Questions 2 and 3 separately, ORDERED MOST IMPORTANT FIRST — the problem most likely to stop the reader the text is written for leads its section. If a question has none, say "No problems found".
 
-Lay out your report as follows, and do not look for an example report: first the list of the files you were told to examine, noting any you were unable to read; then `## Question 1: What it says`, with each sentence id on a line of its own and its bullets under it; then `## Question 2: Where you struggled` and `## Question 3: What it does not cover that it implies it should`, each a numbered list in which every item quotes a phrase and then says in one sentence what is wrong.
+Lay out your report as follows, and do not look for an example report: first the list of the files you were told to examine, noting any you were unable to read; then `## Question 1: What it says`, with each sentence id on a line of its own and its bullets under it; then `## Question 2: What is unclear` and `## Question 3: What it does not cover that it implies it should`, each a numbered list in which every item quotes a phrase and then says in one sentence what is wrong.
 
 Write your report to {REPORT_PATH}, once, when your analysis is complete. That file is your entire deliverable: what you say in conversation is discarded. {REPORT_PATH} is the only file to create; write nothing anywhere else.
 """
@@ -411,7 +411,7 @@ WITHOUT_QUESTION_4_OPTION = "--without-question-4"
 WITHOUT_QUESTION_4_SECTION_LINE = (
     f"Question 4 was not asked: this fast read was run with {WITHOUT_QUESTION_4_OPTION}.")
 WHAT_SHOULD_BE_CODE_QUESTION = WHAT_SHOULD_BE_CODE_QUESTION_REPORT_SECTION_HEADING + """
-What here relies on an LLM following English instructions, or on a human remembering to do something, where code could do the job? The model handles what truly needs interpretation: understanding ambiguous intent, classifying semantically complex material, drafting open-ended content, ranking alternatives no known libraries or algorithms cover. Code handles everything where variability adds nothing: validation, parsing, calculation, state transitions, sequencing, retries, deduplication, filtering, formatting contracts, invariant enforcement, tool routing when the rule is known. Go through every step the text gives to a model or a person, and ask whether code could do it, constrain it to a bounded choice, take over its state or control flow, or check its result. A step that works reliably today, costs little, and fails loudly is not an issue, and neither is one that code already does. BE CONCISE: for each step, quote the exact phrase, then a sentence naming the work and the code that could do or check it. Number each item, most useful first. If there are none, say "No issues"."""
+What here relies on an LLM following English instructions, or on a human remembering to do something, where code could do the job? The model handles what truly needs interpretation: understanding ambiguous intent, classifying semantically complex material, drafting open-ended content, ranking alternatives no known libraries or algorithms cover. Code handles everything where variability adds nothing: validation, parsing, calculation, state transitions, sequencing, retries, deduplication, filtering, formatting contracts, invariant enforcement, tool routing when the rule is known. Go through every step the text gives to a model or a person, and ask whether code could do it, constrain it to a bounded choice, take over its state or control flow, or check its result. A step that works reliably today, costs little, and fails loudly is not an issue, and neither is one that code already does. BE CONCISE: for each step, quote the exact phrase, then a sentence naming the work and the code that could do or check it. Number each item, most useful first. If there are none, say "No problems found"."""
 
 # The fast-clarify prompt's rules on what a reader reads and may not touch,
 # from its first sentence to its last: the Question 4 cell reads by the same
@@ -430,7 +430,7 @@ COLD_READ_FAST_READ_WHAT_SHOULD_BE_CODE_QUESTION_PROMPT_TEMPLATE = (
     "Write your report to {REPORT_PATH}, once, when your analysis is complete. Do "
     "not write the question's heading: the program that runs you puts your report "
     "under it. For more than one document, give each document's numbered items, or "
-    "\"No issues\", under the document's name. That file is your entire deliverable: "
+    "\"No problems found\", under the document's name. That file is your entire deliverable: "
     "what you say in conversation is discarded. {REPORT_PATH} is the only file to "
     "create; write nothing anywhere else.\n")
 WHAT_SHOULD_BE_CODE_QUESTION_COLD_READ_CELL_LABEL = "what-should-be-code"

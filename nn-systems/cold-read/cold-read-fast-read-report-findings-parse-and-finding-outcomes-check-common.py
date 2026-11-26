@@ -3,7 +3,7 @@
 ready-made command that records them.
 
 A finding is a numbered item, a line opening `1.` or `1)` at the line's start, outside fenced code, under a
-`## Question N` heading, or one headed with `#` or `###`, for a question that asks for findings: 2, Where you struggled; 3, What it does not
+`## Question N` heading, or one headed with `#` or `###`, for a question that asks for findings: 2, What is unclear; 3, What it does not
 cover; and 4, What should be code. Question 1 restates the document and holds no findings. A finding's id is
 `Q<question>.<number>`, as in `Q2.1`; the number counts the question's findings in the order the report gives
 them, so a report that numbers each document's findings from 1 under one question, as a Question 4 answer
@@ -27,7 +27,7 @@ record_names = importlib.util.module_from_spec(_record_names_spec)
 _record_names_spec.loader.exec_module(record_names)
 
 FINDING_OUTCOMES_FILE_NAME = record_names.COLD_READ_FAST_READ_FINDING_OUTCOMES_FILE_NAME
-FINDING_QUESTION_TITLES = {2: "Where you struggled", 3: "What it does not cover that it implies it should",
+FINDING_QUESTION_TITLES = {2: "What is unclear", 3: "What it does not cover that it implies it should",
                            4: "What should be code"}
 FINDING_QUESTION_NUMBERS = tuple(FINDING_QUESTION_TITLES)
 FINDING_OUTCOMES_RECORD_OPTION = "--record-finding-outcomes-in-cold-read-record"

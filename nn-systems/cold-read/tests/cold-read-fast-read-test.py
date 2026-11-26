@@ -328,7 +328,7 @@ report_path.parent.mkdir(parents=True, exist_ok=True)
 report_path.write_text(plan["report"], encoding="utf-8")
 """.replace("QUESTION_4_MODEL", script_under_test_module().WHAT_SHOULD_BE_CODE_QUESTION_REVIEWER_MODEL_ID)
 # What the stub answers to Question 4 when a case plans nothing else.
-QUESTION_4_STUB_ANSWER = "STUB OPUS QUESTION 4: No issues\n"
+QUESTION_4_STUB_ANSWER = "STUB OPUS QUESTION 4: No problems found\n"
 # The words Gemini's agy prints when the project's monthly spending cap is
 # reached, as a real failing read on ned-box printed them.
 GEMINI_SPENDING_CAP_STDERR = (
@@ -1972,7 +1972,7 @@ with tempfile.TemporaryDirectory() as scratch:
                        / f"a-design-with-findings-{record_stamp}" / "cold-read-fast-read.md")
     result = run_fast_read(
         repository, stubs,
-        {"*": {"report": "## Question 2: Where you struggled\n\n1. `One vague line.`: vague.\n"}},
+        {"*": {"report": "## Question 2: What is unclear\n\n1. `One vague line.`: vague.\n"}},
         findings_report, findings_relative, counter,
         question_4_plan={"report": "1. `One vague line.` — code could check it.\n"})
     check("a read whose report has findings lists them on stderr with the ready-made command naming its record, "

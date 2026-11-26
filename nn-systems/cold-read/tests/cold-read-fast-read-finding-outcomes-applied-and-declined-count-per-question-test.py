@@ -16,7 +16,7 @@ from pathlib import Path
 PROGRAM = (Path(__file__).resolve().parents[1]
            / "cold-read-fast-read-finding-outcomes-applied-and-declined-count-per-question.py")
 OUTCOMES_FILE_NAME = "cold-read-fast-read-finding-outcomes.json"
-FINDINGS_REPORT = "## Question 2: Where you struggled\n\n1. x\n"
+FINDINGS_REPORT = "## Question 2: What is unclear\n\n1. x\n"
 
 failures = []
 
@@ -53,7 +53,7 @@ with tempfile.TemporaryDirectory() as scratch:
     record(records, "a-2026-11-19", [(2, "applied"), (2, "declined"), (4, "applied")], report_time=2_000_000_000)
     record(records, "b-2026-11-20", [(2, "applied"), (3, "declined")], report_time=2_000_000_100)
     record(records, "c-2026-11-21", report_time=2_000_000_200)
-    record(records, "d-2026-11-21", report="## Question 2: Where you struggled\n\nNo issues\n",
+    record(records, "d-2026-11-21", report="## Question 2: What is unclear\n\nNo problems found\n",
            report_time=2_000_000_300)
     # A read that failed after freezing its target leaves a record with no report.
     (records / "e-2026-11-21" / "target").mkdir(parents=True)
@@ -64,7 +64,7 @@ with tempfile.TemporaryDirectory() as scratch:
           result.returncode == 0
           and lines[0].startswith(f"Cold-read-fast-read finding outcomes in {records}: 2 records hold them, "
                                   "the first for a report written ")
-          and "| Question 2, Where you struggled | 2 | 1 | 67% |" in lines
+          and "| Question 2, What is unclear | 2 | 1 | 67% |" in lines
           and "| Question 3, What it does not cover that it implies it should | 0 | 1 | 0% |" in lines
           and "| Question 4, What should be code | 1 | 0 | 100% |" in lines
           and "| All questions | 3 | 2 | 60% |" in lines, result.stdout + result.stderr)
@@ -76,7 +76,7 @@ with tempfile.TemporaryDirectory() as scratch:
     (records / "b-2026-11-20" / OUTCOMES_FILE_NAME).write_text("not json", encoding="utf-8")
     result = run(records)
     check("an outcomes file that is not the program's JSON is left out of the table and named on stderr, exit 1",
-          result.returncode == 1 and "| Question 2, Where you struggled | 1 | 1 | 50% |" in result.stdout
+          result.returncode == 1 and "| Question 2, What is unclear | 1 | 1 | 50% |" in result.stdout
           and f"{records / 'b-2026-11-20' / OUTCOMES_FILE_NAME}:" in result.stderr, result.stdout + result.stderr)
 
     staged = Path(scratch) / "staged"
