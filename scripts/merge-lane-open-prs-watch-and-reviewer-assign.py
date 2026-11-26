@@ -996,13 +996,13 @@ def event_lines_append(path, lines, now):
             events.flush()
             os.fsync(events.fileno())
     except OSError as error:
-        if start is not None and event_file_holds_at(path, start, payload):
+        if start is not None and event_file_holds_payload_at_offset(path, start, payload):
             raise EventLinesWrittenButNotSynced(
                 f"{error}, after the event file {path} already held every line of this append") from error
         raise
 
 
-def event_file_holds_at(path, offset, payload):
+def event_file_holds_payload_at_offset(path, offset, payload):
     try:
         with path.open("rb") as events:
             events.seek(offset)

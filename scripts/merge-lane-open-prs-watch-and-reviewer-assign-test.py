@@ -2129,7 +2129,7 @@ def run_poll_once_cases(scratch_root, token_file):
 
     check("an event file that cannot be read back counts as not holding the lines, so the deal "
           "is put back",
-          watcher_module.event_file_holds_at(machine.directory / "absent.log", 0, b"x\n") is False)
+          watcher_module.event_file_holds_payload_at_offset(machine.directory / "absent.log", 0, b"x\n") is False)
 
     machine = machine_for("append-and-put-back-fail")
     machine.assignments.write_text("", encoding="utf-8")
