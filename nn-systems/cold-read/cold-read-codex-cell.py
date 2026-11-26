@@ -178,9 +178,11 @@ TIER_TO_REASONING_EFFORT = {
 }
 
 
-# "priority" is the id `codex debug models` gives the Fast tier: twice the speed, more usage.
+# "priority" is the id `codex debug models` gives the Fast tier: 2x speed for
+# gpt-6.2-sol, 1.5x for gpt-6-luna. A tier left out runs at the default speed.
 TIER_TO_SERVICE_TIER = {
     "deep": "priority",
+    "second-strongest-model": "priority",
 }
 
 
