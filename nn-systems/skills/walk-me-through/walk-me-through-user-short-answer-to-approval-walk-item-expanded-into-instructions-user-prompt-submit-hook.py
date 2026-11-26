@@ -450,6 +450,13 @@ MORE_RESPONSES_SEVERAL_ITEMS_LINE = (
     "lines this message gives next, and wait for the user's answer; record nothing in the walk-minutes: "
     + MORE_RESPONSES_TEXT)
 MORE_RESPONSES_CLOSING_LINE = "{item}'s closing line: {closing_line}"
+# The page builder refuses an item it cannot read, so publishing before this fix would only fail.
+PAGE_BUILDER = HERE / "walk-me-through-approval-walk-item-page-html-build-from-walk-document.py"
+WALK_ME_THROUGH_HOOK_INSTRUCTION_TO_AGENT_FIX_APPROVAL_WALK_ITEM_TEXT_UNREADABLE_FROM_WALK_DOCUMENT_BEFORE_PUBLISHING_ITEM_PAGE_LINE = (
+    "The hook could not read the text of {item} from the walk-document {document}, so the page builder, "
+    f"{PAGE_BUILDER}, would refuse to build the item's page: {{problem}}. First fix what the reason after the "
+    "colon describes. Then publish the item as the lines below say: {item}, or, if the fix changed which item the "
+    "walk-minutes' last `#next_to_present` line names, that item instead.")
 MORE_RESPONSES_UNPUBLISHED_LINES = (
     "The hook found no `#item_page` line for {item} in the walk-minutes{minutes}.",
     *REPEAT_UNPUBLISHED_LINES[1:3],
@@ -1028,7 +1035,7 @@ def repeat_line(answer, number, walk):
     no page for it, to publish the item and record its page first."""
     line = closing_line(number, walk)
     if line is None:
-        return "\n".join(REPEAT_UNPUBLISHED_LINES).format(
+        return unpublished_item_unreadable_lines(number, walk) + "\n".join(REPEAT_UNPUBLISHED_LINES).format(
             answer=answer, item=item_name(number, walk), item_count=item_count(number, walk),
             minutes=f" {walk.minutes}" if walk.minutes else "",
             closing_line=closing_line(number, walk, "<page link>"))
@@ -1040,10 +1047,19 @@ def more_responses_closing_line(number, walk):
     line = closing_line(number, walk)
     if line is not None:
         return MORE_RESPONSES_CLOSING_LINE.format(item=item_name(number, walk), closing_line=line)
-    return "\n".join(MORE_RESPONSES_UNPUBLISHED_LINES).format(
+    return unpublished_item_unreadable_lines(number, walk) + "\n".join(MORE_RESPONSES_UNPUBLISHED_LINES).format(
         item=item_name(number, walk), item_count=item_count(number, walk),
         minutes=f" {walk.minutes}" if walk.minutes else "",
         closing_line=closing_line(number, walk, "<page link>"))
+
+
+def unpublished_item_unreadable_lines(number, walk):
+    """WALK_ME_THROUGH_HOOK_INSTRUCTION_TO_AGENT_FIX_APPROVAL_WALK_ITEM_TEXT_UNREADABLE_FROM_WALK_DOCUMENT_BEFORE_PUBLISHING_ITEM_PAGE_LINE and a line break, for an item with no page whose text the hook could not
+    read from the walk-document; "" otherwise."""
+    if number in walk.shown_texts or not walk.shown_text_problem:
+        return ""
+    return WALK_ME_THROUGH_HOOK_INSTRUCTION_TO_AGENT_FIX_APPROVAL_WALK_ITEM_TEXT_UNREADABLE_FROM_WALK_DOCUMENT_BEFORE_PUBLISHING_ITEM_PAGE_LINE.format(item=item_name(number, walk), document=walk.document,
+                                                   problem=walk.shown_text_problem.rstrip(".")) + "\n"
 
 
 def checked_item_numbers(answer, walk):
