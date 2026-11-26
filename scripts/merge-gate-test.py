@@ -547,7 +547,9 @@ def case_every_served_fixture_is_opened_by_the_suite_itself(gate):
         run = run_gate(gate, BASE_PR, BASE_HEAD, BASE_APPROVAL["submitted_at"], routes)
     finally:
         opened, fixtures_opened_here = fixtures_opened_here, None
-    unopened = sorted({route["stdout_file"] for route in routes.values()
+    # The routes run_gate served, its own defaults included, not the routes this case passed in.
+    served = json.loads((run.home.parent / "routes.json").read_text())
+    unopened = sorted({route["stdout_file"] for route in served.values()
                        if route["stdout_file"] not in opened})
     return run.code == 0 and not unopened, f"not opened by the suite: {unopened}; {run.summary()}"
 
