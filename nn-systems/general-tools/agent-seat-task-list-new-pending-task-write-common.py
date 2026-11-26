@@ -27,7 +27,8 @@ AGENT_SEAT_TASK_LIST_MERGE_LANE_2_READ_PULL_REQUEST_EVENTS_TASK_SUBJECT_LINE = (
 
 def agent_seat_task_list_new_pending_task_write(list_directory, subject, description, metadata=None):
     """Write a new pending task into the list, with metadata when given; return its id. Raises
-    OSError.
+    OSError, and AgentSeatTaskListNewPendingTaskLinkedThenWriteFailed, an OSError, once the task
+    file stands on the list.
 
     The id is one more than the highest of the list's task ids and its .highwatermark, as
     Claude Code numbers a new task; the file is linked into place only where no file of that
@@ -62,10 +63,23 @@ def agent_seat_task_list_new_pending_task_write(list_directory, subject, descrip
                 break
             except FileExistsError:
                 task_id += 1
-    finally:
+    except BaseException:
         partial_path.unlink(missing_ok=True)
-    agent_seat_task_list_high_water_mark_write(list_directory, task_id)
+        raise
+    try:
+        partial_path.unlink(missing_ok=True)
+        agent_seat_task_list_high_water_mark_write(list_directory, task_id)
+    except OSError as error:
+        raise AgentSeatTaskListNewPendingTaskLinkedThenWriteFailed(task_id, error) from error
     return task_id
+
+
+class AgentSeatTaskListNewPendingTaskLinkedThenWriteFailed(OSError):
+    """The writer linked task task_id into the list, then failed; the task stands on the list."""
+
+    def __init__(self, task_id, error):
+        super().__init__(f"task #{task_id} stands on the list, but the writer then failed: {error}")
+        self.task_id = task_id
 
 
 def agent_seat_task_list_high_water_mark_write(list_directory, value):
