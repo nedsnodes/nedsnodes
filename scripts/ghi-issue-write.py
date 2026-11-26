@@ -2152,6 +2152,24 @@ def issue_whose_filing_stopped_before_step_5(path: Path, repo: str, runner):
     return None
 
 
+def sync_title_to_landed_heading(repo: str, number: int, path: Path, runner,
+                                 report):
+    """A filing's issue is titled with the heading the file had at step 3,
+    but its landing pull request can still change that heading before it
+    merges. No edit follows to carry the change, since main's copy already
+    has the new heading, so the resume that links the body sets the title.
+    A reply without a title is left alone rather than read as a mismatch."""
+    heading = first_heading(path.read_text())
+    viewed = runner(["gh", "issue", "view", str(number), "--repo", repo,
+                     "--json", "title"])
+    title = (json.loads(viewed.stdout or "{}") or {}).get("title")
+    if not title or title == heading:
+        return
+    runner(["gh", "issue", "edit", str(number), "--repo", repo,
+            "--title", heading])
+    report(f"title is now: {heading}")
+
+
 def create(path: Path, repo: str, repository_root: Path, runner, report):
     """The whole sequence, and the one function the tests drive."""
     filed_number = issue_whose_filing_stopped_before_step_5(path, repo, runner)
@@ -2161,6 +2179,9 @@ def create(path: Path, repo: str, repository_root: Path, runner, report):
                "stopped before step 5")
         finished = link_body(repo, filed_number, repository_root, runner,
                              report, str(path))
+        if finished:
+            sync_title_to_landed_heading(repo, filed_number, path, runner,
+                                         report)
         report_open_ruling_questions(
             filed_number, "filed", ghi_guide_agent_prefixes(path.name, filed_number),
             runner, report)

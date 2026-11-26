@@ -2890,6 +2890,35 @@ def run_saved_question_on_resume_cases(scratch: Path):
     log_store_at(scratch / "default-log-store")
 
 
+def run_resumed_create_title_follows_landed_heading_cases(scratch: Path):
+    """The landing pull request changed the heading after the issue was
+    filed under the old one, so the resume that links the body also sets
+    the title."""
+    log_store_at(scratch / "title-store").mkdir()
+    source = filed_ghi_md(scratch)
+    placeholder = tool.placeholder_body(tool.pairing_key(FILE_TEXT), REPO)
+    for name, title, landed, renamed in (
+            ("a title the heading changed from", "Handoff dialog: older words",
+             True, True),
+            ("a title that is the heading already", EDIT_TITLE, True, False),
+            ("a file not yet on main", "Handoff dialog: older words", False,
+             False)):
+        answers = {"gh issue view 570": issue_json(title, placeholder)}
+        if landed:
+            answers["git ls-tree"] = Completed(EDIT_RELATIVE + "\0")
+        recorder = Recorder(answers)
+        lines = []
+        tool.create(source, REPO, scratch, recorder, lines.append)
+        check(f"a create resumed on its landed file with {name} "
+              + ("sets the title to the heading" if renamed
+                 else "leaves the title alone"),
+              ran_with(recorder, "gh issue edit 570", "--title", EDIT_TITLE)
+              == renamed
+              and (f"title is now: {EDIT_TITLE}" in lines) == renamed,
+              (recorder.commands(), lines))
+    log_store_at(scratch / "default-log-store")
+
+
 def run_remote_read_failure_cases(scratch: Path):
     """The read over ssh tells a store with no directory yet from one it
     could not read."""
@@ -5848,6 +5877,8 @@ def main():
                     run_group(run_old_ghi_guide_agent_files_on_main_cases, Path(name))
                 with tempfile.TemporaryDirectory(prefix="ghi-issue-resume-test-") as name:
                     run_group(run_saved_question_on_resume_cases, Path(name))
+                with tempfile.TemporaryDirectory(prefix="ghi-issue-resume-title-test-") as name:
+                    run_group(run_resumed_create_title_follows_landed_heading_cases, Path(name))
                 with tempfile.TemporaryDirectory(prefix="ghi-issue-remote-read-test-") as name:
                     run_group(run_remote_read_failure_cases, Path(name))
                 # A checkout of its own: the reconsidered marker lives at the root of
