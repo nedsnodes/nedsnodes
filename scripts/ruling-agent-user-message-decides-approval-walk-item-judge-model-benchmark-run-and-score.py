@@ -1,0 +1,485 @@
+#!/usr/bin/env python3
+"""Run one model and effort on the ruling-agent judge benchmark's cases, and score the rows such runs wrote.
+
+The benchmark picks the model that ruling-agent's prompt runs to judge whether a stored message of the user's
+decides an approval-walk item (docs/issues/2118-ruling-agent-keeps-user-rulings-checks-approval-walk.md). Its case
+set is in the log-store, because it holds the user's words: one JSON file per case under <case set>/cases/, and every
+store entry a case lists under <case set>/candidate-entries.jsonl.
+
+Usage:
+  ruling-agent-user-message-decides-approval-walk-item-judge-model-benchmark-run-and-score.py run --case-set DIR --runtime {claude,agy,codex}
+      --model MODEL --effort EFFORT --hits-from RETRIEVER:LIST --first-n N --rows FILE
+      [--repeats 3] [--case CASE_ID ...] [--instructions-checkout DIR] [--keep DIR]
+  ruling-agent-user-message-decides-approval-walk-item-judge-model-benchmark-run-and-score.py score --rows FILE [FILE ...]
+
+run: for each repeat and each case, one fresh agent gets, in one prompt, CLAUDE.md, the project glossary and the
+system glossaries it lists, the item's text, and the first N messages of the case's list --hits-from names, each
+with the agent message it answered, and answers DECIDES or NO for each. --hits-from names a retriever's ranked
+list inside a case file, such as grep:hits_newest_first, so a search by meaning that writes its own list into the
+cases is run the same way. One JSON row per case and repeat is appended to --rows; a case and repeat --rows already
+holds for the same model, effort, list and N is skipped, so a rerun goes on where a failed run stopped. A case whose
+model run passes 120 seconds drops the whole model and effort: its row says so, the run stops, and a later run of
+that model and effort runs nothing. Every case's --hits-from list is checked before the first model run. A case
+whose prompt the agy cell launcher refuses as longer than agy reads whole gets a row whose state is "prompt too large
+for agy", and the run goes on with the next case.
+
+claude runs `claude -p` with no tools in an empty directory. agy and codex run through their cold-read cell
+launchers (nn-systems/cold-read/), which sandbox them; codex in the launcher's "deep" tier, its fast mode. Those
+launchers run the model in the repository with its tools on, so only the prompt keeps it from opening files, and
+they take efforts low to max only.
+
+Messages to agents follow docs/nedsnodes-wiki/nedsnodes-how-to-write-a-tool-message-to-agent-such-as-a-hook-refusal-or-script-error.md.
+
+score reads each rows file once, even when --rows names it twice. For each model, effort, list and N in the rows, the middle of the repeats' found-out-of-cases and of their
+mean seconds per case, the score (percent of cases whose known ruling was answered DECIDES, divided by that mean
+seconds; highest wins), and the wrong-DECIDES count on the other messages. The cases are those the combination
+could take: a "prompt too large for agy" row counts in no found count, seconds or score, and the found count is
+given over the cases it could take, such as "3 of 7". A combination is out when it was dropped, when more than 1 in
+10 of its other messages across all its rows were answered DECIDES, when it has fewer rows than its cases times its
+repeats, or when its prompt was too large for agy on every case.
+
+EXIT. 0 when every run finished, or every row was scored. 1 when a combination was dropped at 120 seconds.
+2 when the run or score could not be done: bad arguments or case set, or a model run that failed; a line opening
+FAILED on stderr says which.
+"""
+
+import argparse
+import importlib.util
+import json
+import os
+import re
+import signal
+import statistics
+import subprocess
+import sys
+import tempfile
+import time
+from pathlib import Path
+
+HERE = Path(__file__).resolve().parent
+REPOSITORY = HERE.parent
+_prefix_spec = importlib.util.spec_from_file_location(
+    "claude_code_headless_run_command_line_prefix_with_no_connectors_and_explicit_permission_mode_common",
+    REPOSITORY / "nn-systems" / "general-tools"
+    / "claude-code-headless-run-command-line-prefix-with-no-connectors-and-explicit-permission-mode-common.py")
+command_line_prefix = importlib.util.module_from_spec(_prefix_spec)
+_prefix_spec.loader.exec_module(command_line_prefix)
+_cell_common_spec = importlib.util.spec_from_file_location(
+    "cold_read_cell_common", REPOSITORY / "nn-systems" / "cold-read" / "cold-read-cell-common.py")
+cold_read_cell_common = importlib.util.module_from_spec(_cell_common_spec)
+_cell_common_spec.loader.exec_module(cold_read_cell_common)
+
+EXIT_OK, EXIT_MODEL_AND_EFFORT_DROPPED_PAST_TIME_LIMIT, EXIT_COULD_NOT_RUN = 0, 1, 2
+ANSWER_WORDS = ("DECIDES", "NO")
+BENCHMARK_MODEL_RUN_SECONDS_LIMIT_THAT_DROPS_THE_MODEL_AND_EFFORT = 120
+LAUNCHER_STOP_GRACE_SECONDS = 5
+OVER_FLAG_LIMIT = 0.1
+# A cold-read cell launcher opens its report with this one line, before the model's answer.
+CELL_REPORT_PROVENANCE_STAMP = re.compile(r"\A<!-- provenance: [^\n]*-->\n")
+PROJECT_GLOSSARY_RELATIVE_PATH = "docs/nedsnodes-wiki/nedsnodes-glossary.md"
+SYSTEM_GLOSSARY_IN_PROJECT_GLOSSARY = re.compile(r"`([^`\s]+-glossary\.md)`")
+ANSWER_LINE = re.compile(r"^(m\d+):\s*(\S+)\s*$")
+BENCHMARK_ROW_STATE_MODEL_ANSWERED = "answered"
+BENCHMARK_ROW_STATE_MODEL_ANSWER_UNPARSABLE = "answer-unparsable"
+BENCHMARK_ROW_STATE_MODEL_AND_EFFORT_DROPPED_PAST_TIME_LIMIT = "dropped-past-time-limit"
+BENCHMARK_ROW_STATE_PROMPT_TOO_LONG_FOR_AGY_TO_READ_WHOLE = "prompt too large for agy"
+# The agy cell launcher refuses, with cold_read_cell_common.EXIT_BAD_INVOCATION and this token on stderr, a prompt
+# longer than agy reads whole, which agy would otherwise cut and still exit 0. The token is the launcher's own constant of this name in
+# nn-systems/cold-read/cold-read-agy-cell.py; a launcher without it never refuses, and every row stands as before.
+AGY_PROMPT_TOO_LONG_FOR_AGY_TO_READ_WHOLE_REFUSAL_MARKER = "agy-prompt-too-long-for-agy-to-read-whole-refusal"
+
+# The cold-read cell launchers already run agy and codex inside the credential sandbox the project requires, and
+# write the model's answer to the report file. Codex's fast mode is that launcher's "deep" tier, whose
+# service_tier is "priority".
+CELL_LAUNCHERS = {"agy": ("cold-read-agy-cell.py", "fast"), "codex": ("cold-read-codex-cell.py", "deep")}
+
+PROMPT_TEMPLATE = """You judge whether messages the user once typed decide an approval-walk item that an agent is about to show him. A message decides the item when it already settles the question the item asks, so that showing the item again would ask him to decide what he has decided. Every file you need is given in full below; open no file and run no tool.
+
+First come CLAUDE.md and the glossaries, which every agent of this project reads. Then the item. Then {count} messages of the user's, each with the agent message it answered, ids m1 to m{count}.
+
+Answer with exactly {count} lines and nothing else, one per message, in order, each the message's id, a colon, a space and one word: DECIDES when that message decides the item, NO otherwise. For example:
+m1: NO
+m2: DECIDES
+
+# Files given in full
+{files}
+# The approval-walk item
+
+{item}
+# The user's messages
+{messages}
+Answer now with the {count} lines only."""
+
+MESSAGE_TEMPLATE = """
+## {message_id}, said {said_at_utc}
+
+The agent message it answered:
+<<<
+{answered}
+>>>
+
+The user's message:
+<<<
+{text}
+>>>
+"""
+
+
+class CouldNotRun(Exception):
+    pass
+
+
+class AnswerUnparsable(Exception):
+    pass
+
+
+def load_case_set(case_set):
+    cases_directory = Path(case_set) / "cases"
+    entries_file = Path(case_set) / "candidate-entries.jsonl"
+    missing = [name for name, there in (("cases/ directory", cases_directory.is_dir()),
+                                        ("candidate-entries.jsonl file", entries_file.is_file())) if not there]
+    if missing:
+        raise CouldNotRun(f"{case_set} is not a case set: it has no {' and no '.join(missing)}. A case set holds both.\n"
+                          f"Run again with --case-set naming a directory that holds both.")
+    cases = {}
+    for path in sorted(cases_directory.glob("*.json")):
+        case = json.loads(path.read_text(encoding="utf-8"))
+        cases[case["case_id"]] = case
+    entries = {}
+    with entries_file.open(encoding="utf-8") as handle:
+        for line in handle:
+            entry = json.loads(line)
+            entries[entry["id"]] = entry
+    return cases, entries
+
+
+def instruction_files(checkout):
+    """[(path, text)] of CLAUDE.md, the project glossary and each system glossary the project glossary lists."""
+    checkout = Path(checkout)
+    project_glossary = (checkout / PROJECT_GLOSSARY_RELATIVE_PATH).read_text(encoding="utf-8")
+    paths = ["CLAUDE.md", PROJECT_GLOSSARY_RELATIVE_PATH]
+    for path in SYSTEM_GLOSSARY_IN_PROJECT_GLOSSARY.findall(project_glossary):
+        if path not in paths and (checkout / path).is_file():
+            paths.append(path)
+    return [(path, (checkout / path).read_text(encoding="utf-8")) for path in paths]
+
+
+def case_hits(case, hits_from):
+    retriever, _, list_name = hits_from.partition(":")
+    hits = case.get(retriever)
+    if isinstance(hits, dict) and isinstance(hits.get(list_name), list):
+        return hits[list_name]
+    held = [f"{key}:{name}" for key, value in case.items() if isinstance(value, dict)
+            for name, items in value.items() if isinstance(items, list)]
+    raise CouldNotRun(f"case {case['case_id']} holds no list {hits_from!r}; no model was run. The lists it holds are: "
+                      f"{', '.join(held) or 'none'}.\nRun again with --hits-from naming one of them.")
+
+
+def build_prompt(case, entries, hits, files):
+    """(prompt, [entry id of m1, m2, ...])."""
+    message_ids = list(hits)
+    messages = "".join(MESSAGE_TEMPLATE.format(
+        message_id=f"m{number}", said_at_utc=entries[entry_id]["said_at_utc"],
+        answered=(entries[entry_id].get("agent_message_answered") or "(none stored)").strip(),
+        text=entries[entry_id]["text"].strip()) for number, entry_id in enumerate(message_ids, 1))
+    given = "".join(f"\n===== BEGIN {path} =====\n{text}\n===== END {path} =====\n" for path, text in files)
+    prompt = PROMPT_TEMPLATE.format(count=len(message_ids), files=given, item=case["walk_item_text"], messages=messages)
+    return prompt, message_ids
+
+
+def parse_answers(answer, message_ids):
+    """{entry id: "DECIDES" or "NO"} from the model's answer; raises AnswerUnparsable unless every line but blank
+    ones is "m<k>: DECIDES" or "m<k>: NO" and each message is answered exactly once."""
+    by_label = {f"m{number}": entry_id for number, entry_id in enumerate(message_ids, 1)}
+    answers = {}
+    for line in answer.splitlines():
+        if not line.strip():
+            continue
+        match = ANSWER_LINE.match(line.strip())
+        if not match:
+            raise AnswerUnparsable(f"a line is not '<id>: DECIDES' or '<id>: NO': {line.strip()[:200]!r}")
+        label, word = match.groups()
+        if label not in by_label:
+            raise AnswerUnparsable(f"{label} is not one of the ids m1 to m{len(message_ids)}")
+        if word not in ANSWER_WORDS:
+            raise AnswerUnparsable(f"{label} was answered {word!r}, which is not DECIDES or NO")
+        if by_label[label] in answers:
+            raise AnswerUnparsable(f"{label} was answered twice")
+        answers[by_label[label]] = word
+    missing = [label for label, entry_id in by_label.items() if entry_id not in answers]
+    if missing:
+        raise AnswerUnparsable(f"{len(missing)} message(s) got no answer, the first {missing[0]}")
+    return answers
+
+
+def agent_binary_model_run_argv_stdin_working_directory_and_answer_stdout_or_report_file(
+        runtime, model, effort, prompt_file, report_file):
+    """(argv, stdin text or None, working directory or None, where the answer is: "stdout" or the report file)."""
+    if runtime == "claude":
+        argv = [*command_line_prefix.claude_code_headless_run_command_line_prefix_build(
+                    "dontAsk", caller_claude_code_session_settings={"disableAllHooks": True}),
+                "--model", model, "--effort", effort, "--output-format", "text", "--tools", "",
+                "--no-session-persistence"]
+        # An empty working directory, so Claude Code loads no project CLAUDE.md on top of the one in the prompt.
+        return argv, prompt_file.read_text(encoding="utf-8"), prompt_file.parent / "empty-working-directory", "stdout"
+    launcher, tier = CELL_LAUNCHERS[runtime]
+    argv = [sys.executable, str(REPOSITORY / "nn-systems" / "cold-read" / launcher), "--cell", "ruling-judge",
+            "--tier", tier, "--target", str(prompt_file), "--report", str(report_file), "--prompt-file", str(prompt_file),
+            "--model", model, "--effort", effort]
+    return argv, None, None, report_file
+
+
+def model_run_timed(argv, stdin_text, working_directory, limit_seconds):
+    """(exit code or None when stopped at the limit, stdout, stderr, wall-clock seconds); the program's one timer."""
+    started = time.monotonic()
+    process = subprocess.Popen(argv, stdin=subprocess.PIPE if stdin_text is not None else subprocess.DEVNULL,
+                               stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True, cwd=working_directory,
+                               start_new_session=True)
+    try:
+        stdout, stderr = process.communicate(stdin_text, timeout=limit_seconds)
+        return process.returncode, stdout, stderr, round(time.monotonic() - started, 2)
+    except subprocess.TimeoutExpired:
+        seconds = round(time.monotonic() - started, 2)
+        # SIGTERM first: a cold-read cell launcher answers it by killing the model's own process group, which
+        # SIGKILL to the launcher's group would leave running on the same login, slowing the next timed run.
+        os.killpg(process.pid, signal.SIGTERM)
+        try:
+            stdout, stderr = process.communicate(timeout=LAUNCHER_STOP_GRACE_SECONDS)
+        except subprocess.TimeoutExpired:
+            os.killpg(process.pid, signal.SIGKILL)
+            stdout, stderr = process.communicate()
+        return None, stdout, stderr, seconds
+
+
+def known_ruling_ids(case):
+    return {ruling["store_entry_id"] for ruling in case["known_rulings"] if ruling["store_entry_id"]}
+
+
+def run_one_case(case, entries, arguments, files, repeat, work):
+    hits = case_hits(case, arguments.hits_from)[:arguments.first_n]
+    prompt, message_ids = build_prompt(case, entries, hits, files)
+    prompt_file = work / f"{case['case_id']}-prompt.md"
+    prompt_file.write_text(prompt, encoding="utf-8")
+    report_file = work / f"{case['case_id']}-repeat-{repeat}-answer.md"
+    (work / "empty-working-directory").mkdir(exist_ok=True)
+    argv, stdin_text, working_directory, answer_place = agent_binary_model_run_argv_stdin_working_directory_and_answer_stdout_or_report_file(
+        arguments.runtime, arguments.model, arguments.effort, prompt_file, report_file)
+    started_at = time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())
+    exit_code, stdout, stderr, seconds = model_run_timed(
+        argv, stdin_text, working_directory, BENCHMARK_MODEL_RUN_SECONDS_LIMIT_THAT_DROPS_THE_MODEL_AND_EFFORT)
+    known = known_ruling_ids(case)
+    row = {"case_id": case["case_id"], "runtime": arguments.runtime, "model": arguments.model, "effort": arguments.effort,
+           "hits_from": arguments.hits_from, "first_n": arguments.first_n, "repeat": repeat, "started_at_utc": started_at,
+           "seconds": seconds, "prompt_bytes": len(prompt.encode("utf-8")), "messages": len(message_ids),
+           "known_rulings_in_messages": sorted(known & set(message_ids)), "exit_code": exit_code}
+    if exit_code is None:
+        return {**row, "state": BENCHMARK_ROW_STATE_MODEL_AND_EFFORT_DROPPED_PAST_TIME_LIMIT}, stdout
+    if (arguments.runtime == "agy" and exit_code == cold_read_cell_common.EXIT_BAD_INVOCATION
+            and AGY_PROMPT_TOO_LONG_FOR_AGY_TO_READ_WHOLE_REFUSAL_MARKER in stderr):
+        return {**row, "state": BENCHMARK_ROW_STATE_PROMPT_TOO_LONG_FOR_AGY_TO_READ_WHOLE}, stderr
+    answer = stdout if answer_place == "stdout" else CELL_REPORT_PROVENANCE_STAMP.sub(
+        "", report_file.read_text(encoding="utf-8") if report_file.is_file() else "")
+    if exit_code != 0:
+        raise CouldNotRun(
+            f"the {arguments.runtime} run of {arguments.model} at effort {arguments.effort} on case {case['case_id']} "
+            f"exited {exit_code}, so that case has no row and the run stopped. The last 600 characters of its "
+            f"stderr:\n{stderr.strip()[-600:]}\n"
+            f"The rows already in {arguments.rows} stand; the same command run again skips them and starts at this "
+            f"case.\n"
+            f"If that stderr shows a cause outside the benchmark, such as a logged-out agent-binary, a usage limit or "
+            f"a network failure: tell the user what it says, and run nothing more on {arguments.runtime} until he "
+            f"says it is fixed.\n"
+            f"Otherwise: run the same command once more. If it fails again, tell the user which model and effort "
+            f"failed, quoting its stderr, and go on with the next model and effort you were given, if any.\n"
+            f"If you are a subagent, do none of the above: send this whole message to the agent that dispatched "
+            f"you.")
+    if answer_place != "stdout":
+        report_file.unlink(missing_ok=True)
+    try:
+        answers = parse_answers(answer, message_ids)
+    except AnswerUnparsable as error:
+        return {**row, "state": BENCHMARK_ROW_STATE_MODEL_ANSWER_UNPARSABLE, "failure": str(error), "found": False}, answer
+    others = [entry_id for entry_id in message_ids if entry_id not in known]
+    return {**row, "state": BENCHMARK_ROW_STATE_MODEL_ANSWERED,
+            "known_rulings_decided": sorted(entry_id for entry_id in known if answers.get(entry_id) == "DECIDES"),
+            "found": any(answers.get(entry_id) == "DECIDES" for entry_id in known),
+            "other_messages": len(others), "other_messages_decided": sum(answers[e] == "DECIDES" for e in others),
+            "answers": answers}, answer
+
+
+def run(arguments):
+    if arguments.first_n < 1:
+        raise CouldNotRun(f"--first-n was {arguments.first_n}, and must be 1 or more: it is how many messages from the "
+                          f"top of each case's list the model is given.\nRun again with --first-n 1 or more.")
+    cases, entries = load_case_set(arguments.case_set)
+    if arguments.case:
+        unknown = [case_id for case_id in arguments.case if case_id not in cases]
+        if unknown:
+            raise CouldNotRun(f"no case in {arguments.case_set} has the case_id {', '.join(unknown)}. The case_ids it "
+                              f"holds are: {', '.join(cases)}.\nRun again with each --case naming one of them.")
+        cases = {case_id: cases[case_id] for case_id in arguments.case}
+    for case in cases.values():
+        case_hits(case, arguments.hits_from)
+    files = instruction_files(arguments.instructions_checkout)
+    combination = (arguments.runtime, arguments.model, arguments.effort, arguments.hits_from, arguments.first_n)
+    earlier = [row for row, _, _ in read_rows([arguments.rows], missing_ok=True) if combination_key(row) == combination]
+    dropped = [row for row in earlier if row.get("state") == BENCHMARK_ROW_STATE_MODEL_AND_EFFORT_DROPPED_PAST_TIME_LIMIT]
+    if dropped:
+        print(dropped_message(arguments, dropped[0]["case_id"], already=True), file=sys.stderr)
+        return EXIT_MODEL_AND_EFFORT_DROPPED_PAST_TIME_LIMIT
+    done = {(row["case_id"], row["repeat"]) for row in earlier}
+    with tempfile.TemporaryDirectory(prefix="ruling-agent-judge-benchmark-") as scratch:
+        work = Path(arguments.keep) if arguments.keep else Path(scratch)
+        work.mkdir(parents=True, exist_ok=True)
+        with open(arguments.rows, "a", encoding="utf-8") as rows:
+            for repeat in range(1, arguments.repeats + 1):
+                for case in cases.values():
+                    if (case["case_id"], repeat) in done:
+                        continue
+                    row, answer = run_one_case(case, entries, arguments, files, repeat, work)
+                    rows.write(json.dumps(row) + "\n")
+                    rows.flush()
+                    if arguments.keep:
+                        (work / f"{case['case_id']}-repeat-{repeat}-{arguments.model}-{arguments.effort}-answer.txt").write_text(
+                            answer, encoding="utf-8")
+                    print(json.dumps({k: v for k, v in row.items() if k != "answers"}), flush=True)
+                    if row["state"] == BENCHMARK_ROW_STATE_MODEL_AND_EFFORT_DROPPED_PAST_TIME_LIMIT:
+                        print(dropped_message(arguments, case["case_id"], already=False), file=sys.stderr)
+                        return EXIT_MODEL_AND_EFFORT_DROPPED_PAST_TIME_LIMIT
+    return EXIT_OK
+
+
+def dropped_message(arguments, case_id, already):
+    when = f"{arguments.rows} already shows that" if already else "This run stopped because"
+    return (f"DROPPED: {when} {arguments.runtime} {arguments.model} at effort {arguments.effort} took over "
+            f"{BENCHMARK_MODEL_RUN_SECONDS_LIMIT_THAT_DROPS_THE_MODEL_AND_EFFORT} seconds on case {case_id}, so this "
+            f"model and effort is dropped from the benchmark at --hits-from {arguments.hits_from} and --first-n "
+            f"{arguments.first_n}: no further case or repeat of it is run there, and score lists it as out.\nDo not "
+            f"run this model and effort at that --hits-from and --first-n again; go on with the next combination you "
+            f"were given, if any.")
+
+
+def combination_key(row):
+    return (row["runtime"], row["model"], row["effort"], row["hits_from"], row["first_n"])
+
+
+def read_rows(paths, missing_ok=False):
+    """[(row, path, line number)] from each rows file, a file whose lines are the JSON rows run appended."""
+    rows = []
+    for path in paths:
+        try:
+            lines = Path(path).read_text(encoding="utf-8").splitlines()
+        except FileNotFoundError:
+            if missing_ok:
+                continue
+            raise CouldNotRun(f"the rows file {path} does not exist.\nRun score again with --rows naming the files "
+                              f"that the run commands' --rows named.") from None
+        except OSError as error:
+            raise CouldNotRun(f"cannot open the rows file {path}: {error}.\nRun the same command again with --rows "
+                              f"naming a rows file you can open.") from error
+        for number, line in enumerate(lines, 1):
+            if line.strip():
+                try:
+                    rows.append((json.loads(line), path, number))
+                except json.JSONDecodeError as error:
+                    raise CouldNotRun(f"line {number} of the rows file {path} is not a JSON row ({error}): "
+                                      f"{line[:200]!r}. The run command writes whole JSON rows, so this line was cut "
+                                      f"short, such as by a run command killed while writing it, or edited by hand.\n"
+                                      f"Delete that line. Then run again each run command that wrote to {path}: each "
+                                      f"runs only the cases and repeats the file lacks, so the deleted row's run is "
+                                      f"made again. Then run score.") from None
+    return rows
+
+
+def score(arguments):
+    # A file named twice holds no second run, so it is read once.
+    paths = list({str(Path(path).resolve()): path for path in reversed(arguments.rows)}.values())[::-1]
+    groups, seen = {}, {}
+    for row, path, number in read_rows(paths):
+        key = (*combination_key(row), row["case_id"], row["repeat"])
+        if key in seen:
+            raise CouldNotRun(
+                f"two rows are for case {row['case_id']} repeat {row['repeat']} of {row['runtime']} {row['model']} at "
+                f"effort {row['effort']}: line {seen[key][1]} of {seen[key][0]} and line {number} of {path}. score "
+                f"would count that run twice, so it scored nothing.\n"
+                f"If the two lines are the same: delete either one, then run score again.\n"
+                f"Otherwise each is a different model run: tell the user both lines' files and line numbers, and ask "
+                f"which to keep.\n"
+                f"If you are a subagent, send this whole message to the agent that dispatched you instead of asking "
+                f"the user.")
+        seen[key] = (path, number)
+        groups.setdefault(combination_key(row), []).append(row)
+    if not groups:
+        raise CouldNotRun(f"the rows files {', '.join(paths)} hold no rows, so there is nothing to score.\n"
+                          f"Run score again with --rows naming the files that the run commands' --rows named.")
+    for key, rows in sorted(groups.items()):
+        case_ids = sorted({row["case_id"] for row in rows})
+        repeats = sorted({row["repeat"] for row in rows})
+        # A case agy could not take is no miss: it stays out of the found count, the seconds and the score.
+        taken = [row for row in rows if row["state"] != BENCHMARK_ROW_STATE_PROMPT_TOO_LONG_FOR_AGY_TO_READ_WHOLE]
+        taken_case_ids = sorted({row["case_id"] for row in taken})
+        too_large_case_ids = sorted({row["case_id"] for row in rows} - set(taken_case_ids))
+        answered = [row for row in rows if row["state"] == BENCHMARK_ROW_STATE_MODEL_ANSWERED]
+        other = sum(row["other_messages"] for row in answered)
+        other_decided = sum(row["other_messages_decided"] for row in answered)
+        per_repeat = []
+        for repeat in repeats:
+            repeat_rows = [row for row in taken if row["repeat"] == repeat]
+            per_repeat.append({"repeat": repeat, "found": sum(bool(row.get("found")) for row in repeat_rows),
+                               "mean_seconds_per_case": (statistics.mean(row["seconds"] for row in repeat_rows)
+                                                         if repeat_rows else None)})
+        found = statistics.median_low([r["found"] for r in per_repeat])
+        repeat_seconds = [r["mean_seconds_per_case"] for r in per_repeat if r["mean_seconds_per_case"] is not None]
+        seconds = statistics.median(repeat_seconds) if repeat_seconds else None
+        out = []
+        if not taken_case_ids:
+            out.append("its prompt was too large for agy on every case")
+        if any(row["state"] == BENCHMARK_ROW_STATE_MODEL_AND_EFFORT_DROPPED_PAST_TIME_LIMIT for row in rows):
+            out.append(f"took over {BENCHMARK_MODEL_RUN_SECONDS_LIMIT_THAT_DROPS_THE_MODEL_AND_EFFORT} seconds on a case")
+        if other and other_decided / other > OVER_FLAG_LIMIT:
+            out.append(f"answered DECIDES on {other_decided} of {other} other messages, more than 1 in 10")
+        if len(rows) < len(case_ids) * len(repeats):
+            out.append(f"has {len(rows)} rows, fewer than its {len(case_ids)} cases times {len(repeats)} repeats")
+        runtime, model, effort, hits_from, first_n = key
+        print(json.dumps({
+            "runtime": runtime, "model": model, "effort": effort, "hits_from": hits_from, "first_n": first_n,
+            "cases": len(case_ids), "repeats": len(repeats),
+            "cases_it_could_take": len(taken_case_ids), "cases_prompt_too_large_for_agy": too_large_case_ids,
+            "found_of_cases_it_could_take": f"{found} of {len(taken_case_ids)}",
+            "found_middle_of_repeats": found,
+            "mean_seconds_per_case_middle_of_repeats": round(seconds, 2) if seconds is not None else None,
+            "score": round(100 * found / len(taken_case_ids) / seconds, 4) if seconds and taken_case_ids else None,
+            "other_messages": other, "other_messages_decided": other_decided,
+            "answers_unparsable": sum(row["state"] == BENCHMARK_ROW_STATE_MODEL_ANSWER_UNPARSABLE for row in rows),
+            "out": out, "per_repeat": per_repeat}))
+    return EXIT_OK
+
+
+def main(argv=None):
+    parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
+    commands = parser.add_subparsers(dest="command", required=True)
+    run_parser = commands.add_parser("run", help="run one model and effort on the cases")
+    run_parser.add_argument("--case-set", required=True)
+    run_parser.add_argument("--runtime", required=True, choices=["claude", *CELL_LAUNCHERS])
+    run_parser.add_argument("--model", required=True)
+    run_parser.add_argument("--effort", required=True)
+    run_parser.add_argument("--hits-from", required=True, help="RETRIEVER:LIST, such as grep:hits_newest_first")
+    run_parser.add_argument("--first-n", required=True, type=int)
+    run_parser.add_argument("--rows", required=True, help="JSON Lines file the rows are appended to")
+    run_parser.add_argument("--repeats", type=int, default=3)
+    run_parser.add_argument("--case", action="append", default=[], help="run only this case id; repeatable")
+    run_parser.add_argument("--instructions-checkout", default=str(REPOSITORY),
+                            help="the checkout whose CLAUDE.md and glossaries go into the prompt")
+    run_parser.add_argument("--keep", help="directory to keep each prompt and answer in")
+    score_parser = commands.add_parser("score", help="score the rows of earlier runs")
+    score_parser.add_argument("--rows", required=True, nargs="+")
+    arguments = parser.parse_args(argv)
+    try:
+        return run(arguments) if arguments.command == "run" else score(arguments)
+    except CouldNotRun as error:
+        print(f"FAILED: {error}", file=sys.stderr)
+        return EXIT_COULD_NOT_RUN
+
+
+if __name__ == "__main__":
+    sys.exit(main())
