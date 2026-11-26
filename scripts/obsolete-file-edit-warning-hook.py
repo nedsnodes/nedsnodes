@@ -103,6 +103,7 @@ Code records a PostToolUse exit 1 as a non-blocking error and keeps the edit.
 
 import importlib.util
 import json
+import shlex
 import sys
 import tempfile
 from pathlib import Path
@@ -243,26 +244,53 @@ MAIN_MOVED_FILE_PUSHED_LINE = (
 )
 # git checkout -- <path> and git restore <path> would discard the file's other
 # uncommitted changes with the warned edit. Those changes block the git switch or
-# git rebase the next line names, so they are saved before the file is reset.
-# --binary: without it git diff saves a binary file's change as one
-# "Binary files ... differ" line, from which nothing can be restored.
+# git rebase the next line names, so they are copied aside whole before the file
+# is reset. A whole copy, not a git diff: no diff holds a working copy taken out of
+# the index with `git rm --cached`, an unmerged file's diff is a combined diff git
+# apply cannot use, and an external diff driver or textconv filter writes its own
+# display instead of a patch. Every command names the checkout with -C and the
+# copy by absolute path, so it works from any directory.
+OBSOLETE_FILE_EDIT_WARNING_SAVED_COPIES_DIRECTORY_NAME = "obsolete-file-edit-warning-saved-copies"
+LAST_COMMIT_COPY_SUFFIX = ".at-last-commit"
 UNDO_ONLY_THIS_EDIT_LINES = (
     "Undo only the change you just made to {path}, by editing the file back to the "
     "text it had before that change. Do not run `git checkout -- {path}` or `git "
     "restore {path}` for this: either one throws away every uncommitted change to the "
     "file, not only the one this warning is about.\n"
-    "If `git diff -- {path}` still prints changes after that, the file holds uncommitted "
-    "work from before your change, which cannot stay at {path} either, and git refuses "
-    "to switch branch or rebase while it is there: save it with `git diff --binary -- {path} > "
-    "<a file outside this checkout>`, and only then run `git checkout -- {path}`. "
-    "Carry the saved changes along with your own in the step below, and tell the user "
-    "about any you did not make."
+    "Then run `{status_command}`. If it prints nothing, go on to the step below. If it "
+    "prints a line, the file still holds uncommitted work from before your change, "
+    "staged or not, and git refuses the step below while it is there: run "
+    "`{save_and_reset_command}`, which copies the whole file aside, with its version "
+    "at this checkout's last commit beside it, and only then sets the file back to that "
+    "last commit. After the step below, `{compare_command}` prints that earlier work: "
+    "make it in the file that does that job, along with your own change, and tell the "
+    "user what it changed, since another agent-session may have made it."
 )
+
+
+def undo_only_this_edit_lines(checkout: Path, git_directory: Path, repository_path: str) -> str:
+    saved_copy = git_directory / OBSOLETE_FILE_EDIT_WARNING_SAVED_COPIES_DIRECTORY_NAME / repository_path
+    last_commit_copy = saved_copy.with_name(saved_copy.name + LAST_COMMIT_COPY_SUFFIX)
+    quoted_checkout = shlex.quote(str(checkout))
+    quoted_path = shlex.quote(repository_path)
+    return UNDO_ONLY_THIS_EDIT_LINES.format(
+        path=repository_path,
+        status_command=f"git -C {quoted_checkout} status --porcelain -- {quoted_path}",
+        save_and_reset_command=(
+            f"mkdir -p {shlex.quote(str(saved_copy.parent))} && cp "
+            f"{shlex.quote(str(checkout / repository_path))} {shlex.quote(str(saved_copy))} "
+            f"&& git -C {quoted_checkout} show HEAD:{quoted_path} > "
+            f"{shlex.quote(str(last_commit_copy))} && git -C {quoted_checkout} restore "
+            f"--source=HEAD --staged --worktree -- {quoted_path}"),
+        compare_command=(f"diff -u {shlex.quote(str(last_commit_copy))} "
+                         f"{shlex.quote(str(saved_copy))}"))
+
+
 MAIN_MOVED_AND_REWRITTEN_FILE_LINE = (
     "main moved {path} to {new_path} and then changed it so much that git no longer "
     "pairs the two paths, so neither a rebase nor a merge carries your edit there: "
     "both stop on a modify/delete conflict at {path}.\n"
-    + UNDO_ONLY_THIS_EDIT_LINES + "\n"
+    "{undo_lines}\n"
     "Then make the branch, run `git rebase origin/main`, and make the same change by "
     "hand in {new_path}."
 )
@@ -271,14 +299,14 @@ MAIN_MOVED_AND_REWRITTEN_FILE_PUSHED_LINE = (
     "pairs the two paths, so when the pull request merges, git does not carry your "
     "edit there: the merge stops on a modify/delete conflict at {path}. Do not commit "
     "the edit.\n"
-    + UNDO_ONLY_THIS_EDIT_LINES + "\n"
+    "{undo_lines}\n"
     "Then start a topic branch with `git switch -c <a-branch-name> origin/main`, and "
     "make the same change by hand in {new_path} there."
 )
 MAIN_DELETED_FILE_LINE = (
     "main deleted {path}{deleted_in}, so your edit has nowhere to go. Read why "
     "with `git log -1 --stat origin/main -- {path}`.\n"
-    + UNDO_ONLY_THIS_EDIT_LINES + "\n"
+    "{undo_lines}\n"
     "Then, if your fix is still needed, start a topic branch with `git switch -c "
     "<a-branch-name> origin/main`, and make the same fix in the file that does that "
     "job on main now. If no file on main does that job, do not make the fix."
@@ -290,7 +318,7 @@ MAIN_LOST_FILE_UNKNOWN_LINE = (
     "If a line there starts with R and names {path}, main moved the file, and your "
     "edit belongs at the second path on that line.\n"
     "Otherwise main deleted it, and your edit has nowhere to go:\n"
-    + UNDO_ONLY_THIS_EDIT_LINES + "\n"
+    "{undo_lines}\n"
     "Then, if your fix is still needed, make it in the file that does that job on "
     "main now, on a topic branch from origin/main (`git switch -c <a-branch-name> "
     "origin/main`)."
@@ -508,7 +536,7 @@ def git_operation_in_progress(freshness, git_directory: Path):
     return None
 
 
-def main_lost_file_line(freshness, checkout: Path, merge_base: str,
+def main_lost_file_line(freshness, checkout: Path, git_directory: Path, merge_base: str,
                         repository_path: str, pushed: bool):
     """(line, whether the line reports a git failure) for an edit at a path
     origin/main no longer has: the moved line naming main's new path when the
@@ -517,22 +545,26 @@ def main_lost_file_line(freshness, checkout: Path, merge_base: str,
     diff of the commit that removed the path pairs them; else the deleted line, naming that commit when git
     names one; the unknown line, with git's text, when any of those git steps
     fails."""
+    undo_lines = undo_only_this_edit_lines(checkout, git_directory, repository_path)
     renamed = freshness.run_git(
         ["diff", "-z", "--name-status", "-M", "--diff-filter=R", merge_base,
          "origin/main"], checkout, timeout=OBSOLETE_DIFF_TIMEOUT_SECONDS)
     if renamed.returncode != 0:
         text = (renamed.stderr or "").strip() or "git diff exited %d" % renamed.returncode
-        return MAIN_LOST_FILE_UNKNOWN_LINE.format(path=repository_path, text=text), True
+        return MAIN_LOST_FILE_UNKNOWN_LINE.format(path=repository_path, text=text,
+                                                  undo_lines=undo_lines), True
     for entry in freshness.git_output.name_status_entries(renamed.stdout):
         if entry.origin_path == repository_path and entry.path:
             moved = MAIN_MOVED_FILE_PUSHED_LINE if pushed else MAIN_MOVED_FILE_LINE
-            return moved.format(path=repository_path, new_path=entry.path), False
+            return moved.format(path=repository_path, new_path=entry.path,
+                                   undo_lines=undo_lines), False
     deleting = freshness.run_git(
         ["log", "-1", "--format=%h (%s)", "origin/main", "--", repository_path],
         checkout, timeout=COMMIT_COUNT_TIMEOUT_SECONDS)
     if deleting.returncode != 0:
         text = (deleting.stderr or "").strip() or "git log exited %d" % deleting.returncode
-        return MAIN_LOST_FILE_UNKNOWN_LINE.format(path=repository_path, text=text), True
+        return MAIN_LOST_FILE_UNKNOWN_LINE.format(path=repository_path, text=text,
+                                                  undo_lines=undo_lines), True
     commit = deleting.stdout.strip()
     if commit:
         # The merge-base-to-main diff misses a move when main also changed the file
@@ -543,17 +575,21 @@ def main_lost_file_line(freshness, checkout: Path, merge_base: str,
             checkout, timeout=COMMIT_COUNT_TIMEOUT_SECONDS)
         if removing.returncode != 0:
             text = (removing.stderr or "").strip() or "git show exited %d" % removing.returncode
-            return MAIN_LOST_FILE_UNKNOWN_LINE.format(path=repository_path, text=text), True
+            return MAIN_LOST_FILE_UNKNOWN_LINE.format(path=repository_path, text=text,
+                                                  undo_lines=undo_lines), True
         for entry in freshness.git_output.name_status_entries(removing.stdout):
             if entry.status[:1] == "R" and entry.origin_path == repository_path and entry.path:
                 moved = (MAIN_MOVED_AND_REWRITTEN_FILE_PUSHED_LINE if pushed
                          else MAIN_MOVED_AND_REWRITTEN_FILE_LINE)
-                return moved.format(path=repository_path, new_path=entry.path), False
+                return moved.format(path=repository_path, new_path=entry.path,
+                                   undo_lines=undo_lines), False
     return MAIN_DELETED_FILE_LINE.format(
-        path=repository_path, deleted_in=f" in commit {commit}" if commit else ""), False
+        path=repository_path, deleted_in=f" in commit {commit}" if commit else "",
+        undo_lines=undo_lines), False
 
 
-def overlap_line(freshness, checkout: Path, repository_path: str, pushed: bool = False):
+def overlap_line(freshness, checkout: Path, git_directory: Path, repository_path: str,
+                 pushed: bool = False):
     """(line, whether the line reports a git failure): whether main's changes to
     the file overlap this checkout's copy.
 
@@ -592,7 +628,7 @@ def overlap_line(freshness, checkout: Path, repository_path: str, pushed: bool =
             ["ls-tree", "origin/main", "--", repository_path], checkout,
             timeout=REV_PARSE_TIMEOUT_SECONDS)
         if main_listing.returncode == 0 and not main_listing.stdout.strip():
-            return main_lost_file_line(freshness, checkout, merge_base.stdout.strip(),
+            return main_lost_file_line(freshness, checkout, git_directory, merge_base.stdout.strip(),
                                        repository_path, pushed)
         text = ((main_copy.stderr or "").strip()
                 or "git show exited %d" % main_copy.returncode)
@@ -670,7 +706,7 @@ def head_advice(freshness, checkout: Path, git_directory: Path, repository_path:
         else:
             lines = [DETACHED_HEAD_LINE]
         verdict, verdict_reports_failure = overlap_line(
-            freshness, checkout, repository_path, pushed=holders != [])
+            freshness, checkout, git_directory, repository_path, pushed=holders != [])
         verdict_reports_failure = verdict_reports_failure or holders is None
         if verdict:
             lines.append(verdict)
