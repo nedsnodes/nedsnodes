@@ -1263,10 +1263,11 @@ HELD_RULING = "the user's answer to {new_item}, for which its answer was held"
 CASE_AGAINST_MISSING = (
     "nothing written: {item} in {document} has no `#case_against` line, and every answer records the item's "
     "case-against rating beside it in the minutes, so the ratings can later be compared with the user's answers.\n"
-    "Add one line to {item}, just before its recommendation, that opens with `#case_against` and your rating of "
-    "its strongest case against, none, weak, medium, strong or very strong, as in "
-    "`#case_against weak: the fix costs an hour of fast reads.` or `#case_against none.`; the rating is yours, so "
-    "the user need not see the item again for it.\n"
+    "Add one line to {item}, just before its `The alternative:` line, that opens with `#case_against`, then "
+    "your rating of its strongest case against, weak, medium, strong or very strong, a colon and that case, as "
+    "in `#case_against weak: the fix costs an hour of fast reads.`; when nothing argues against the "
+    "recommendation, the line is `#case_against none.`. The rating is yours, so the user need not see the item "
+    "again for it.\n"
     "Then run `{command}` again.\n"
     "From now on, write the `#case_against` line into each item before you show it.")
 CASE_AGAINST_UNRATED = (

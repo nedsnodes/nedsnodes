@@ -64,8 +64,10 @@ REPLANNED_MINUTES_LINE = ("- Re-planned {date}: added the unnumbered item {title
 ADDED_LINE = "Added the unnumbered item `## {title}` to {document}, after the whole of item {whole}."
 NEXT_STEPS_LINES = (
     "In that item, put the rest of the question on lines of its own, if the flagged lines are not all of it; on the "
-    "`#case_against` line, put in place of `<rating>` one of none, weak, medium, strong or very strong, and after "
-    "the colon the strongest case against your recommendation; then add the line `The alternative: <what D does "
+    "`#case_against` line, put in place of `<rating>` one of weak, medium, strong or very strong, and after the "
+    "colon the strongest case against your recommendation, as in `#case_against weak: the fix costs an hour of "
+    "fast reads.`, or, when nothing argues against it, make the whole line `#case_against none.`; then add the "
+    "line `The alternative: <what D does "
     "instead>.` and, last, the recommendation stated as an action, as in `Recommendation: <what you recommend "
     "doing>.`",
     "End the message you write next with the line `I added the question to the walk as a new item.` and then "

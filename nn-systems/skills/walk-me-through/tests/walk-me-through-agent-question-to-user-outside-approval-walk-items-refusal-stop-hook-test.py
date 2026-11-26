@@ -1466,6 +1466,17 @@ def test_the_closing_line_and_the_item_ending_are_the_walk_skills():
     check("SKILL.md's Style paragraph puts the strongest case against just before the alternative, where \"Each item\" "
           "puts the alternative", "Just before the alternative, state the strongest case against the recommendation"
           in skill)
+    check_spec = importlib.util.spec_from_file_location(
+        "walk_check", Path(QUESTION_INSERT_PROGRAM).parent / "walk-me-through-answer-added-texts-cold-read-fast-read-check-and-close.py")
+    walk_check = importlib.util.module_from_spec(check_spec)
+    check_spec.loader.exec_module(walk_check)
+    check("the walk check program's missing-line refusal puts the `#case_against` line where SKILL.md does",
+          "just before its `The alternative:` line" in walk_check.CASE_AGAINST_MISSING, walk_check.CASE_AGAINST_MISSING)
+    for name, text in (("the walk check program's missing-line refusal", walk_check.CASE_AGAINST_MISSING),
+                       ("the command's output", command.NEXT_STEPS_LINES[0])):
+        check(name + " gives the rated form and SKILL.md's `#case_against none.` form",
+              "`#case_against weak: the fix costs an hour of fast reads.`" in text and "`#case_against none.`" in text
+              and "`#case_against none.`" in skill, text)
 
 
 SUB_STEP_2_1_NO_DECISION_CLOSING_LINE = "[No decision here; type N or next to continue.](https://claude.ai/artifact/p21)"
