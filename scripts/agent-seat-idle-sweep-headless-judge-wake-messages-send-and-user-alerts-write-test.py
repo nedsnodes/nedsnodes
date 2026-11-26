@@ -8,8 +8,9 @@ a handoff directory, agents, projects and tasks roots, a ~/.claude.json, a log f
 directory and HOME, under which user-alerts are written. `claude` is a fake placed first on PATH:
 it answers each call with the next scripted answer, as stream-json, and records the call's
 arguments and prompt. `gh` is never reached: the one case that gives a task prerequisites runs the
-program through GITHUB_BUDGET_SPENT_RUNNER, which starts the GitHub budget spent. Each invocation
-fixes the time with --now.
+program through GITHUB_BUDGET_SPENT_RUNNER, which starts the GitHub budget spent, and the case run
+through FIRST_READ_ONLY_BUDGET_SKIP_RUNNER gives no task prerequisites but writes a skipped
+prerequisite into the first read's verdict itself. Each invocation fixes the time with --now.
 """
 
 import atexit
