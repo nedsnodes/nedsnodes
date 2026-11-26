@@ -290,8 +290,10 @@ def codex_finding_id(priority, text):
     return hashlib.sha256(f"{priority}\0{text}".encode("utf-8")).hexdigest()[:12]
 
 
-FACT_LINES = ("- `Main has it:` `no`\n- `This pull request makes it happen:` `yes`\n"
-              "- `Reports success on failure:` `no`\n- `Shown by:` `judged from the code only`")
+FACT_LINES = ("- `#defect_already_on_main` `no`\n- `#pull_request_triggers_the_defect` `yes`\n"
+              "- `#false_report_of_success_on_failure` `no`\n- `#defect_evidence` `judged from the code only`")
+OLDER_LABEL_FACT_LINES = ("- `Main has it:` `no`\n- `This pull request makes it happen:` `yes`\n"
+                          "- `Reports success on failure:` `no`\n- `Shown by:` `judged from the code only`")
 
 
 def finding_fact_line_count_cases(scratch):
@@ -303,17 +305,40 @@ def finding_fact_line_count_cases(scratch):
     check("the success line counts the Claude reviewer's comments that lack a fact line, reading labels "
           "with or without list and code marks, and names each with the labels it lacks",
           result.code == 0 and "; 1 of 2 finding(s) lack an answered fact line: "
-          "scripts/thing.py:3 lacks 'Shown by:'" in result.stdout, result.detail)
+          "scripts/thing.py:3 lacks '#defect_evidence'" in result.stdout, result.detail)
     bare = {"path": "scripts/thing.py", "line": 4,
-            "body": FACT_LINES.replace("- `Shown by:` `judged from the code only`", "- `Shown by:`")}
+            "body": OLDER_LABEL_FACT_LINES.replace("- `Shown by:` `judged from the code only`", "- `Shown by:`")}
     other_marks = {"path": "scripts/thing.py", "line": 5, "body": (
         "A finding.\n+ **Main has it**: no\n1. This pull request makes it happen: yes\n"
         "2) `Reports success on failure`: no\n+ __Shown by:__ judged from the code only")}
     result = run_program(scratch, review("APPROVE", comments=[bare, other_marks]))
-    check("a fact line whose label carries no answer counts as lacking, and a + or numbered list mark or a "
-          "colon outside the label's marks still counts as a fact line",
+    check("an older label with no answer counts as lacking, and a + or numbered list mark or a colon outside "
+          "an older label's marks still counts as a fact line",
           result.code == 0 and "; 1 of 2 finding(s) lack an answered fact line: "
-          "scripts/thing.py:4 lacks 'Shown by:'" in result.stdout, result.detail)
+          "scripts/thing.py:4 lacks '#defect_evidence'" in result.stdout, result.detail)
+    bare_hashtag = {"path": "scripts/thing.py", "line": 4, "body": FACT_LINES.replace(
+        "- `#defect_evidence` `judged from the code only`", "- `#defect_evidence`")}
+    unmarked = {"path": "scripts/thing.py", "line": 5, "body": (
+        "A finding.\n#defect_already_on_main no\n#pull_request_triggers_the_defect yes\n"
+        "#false_report_of_success_on_failure no\n#defect_evidence_shown judged from the code only")}
+    result = run_program(scratch, review("APPROVE", comments=[bare_hashtag, unmarked]))
+    check("a hashtag line with no answer counts as lacking, a hashtag needs no list or code marks, and a "
+          "longer hashtag that starts with one of the four is not that hashtag's line",
+          result.code == 0 and "; 2 of 2 finding(s) lack an answered fact line: "
+          "scripts/thing.py:4 lacks '#defect_evidence' | scripts/thing.py:5 lacks '#defect_evidence'"
+          in result.stdout, result.detail)
+    older = {"path": "scripts/thing.py", "line": 6, "body": f"A finding.\n\n{OLDER_LABEL_FACT_LINES}"}
+    older_short = {"path": "scripts/thing.py", "line": 7, "body": OLDER_LABEL_FACT_LINES.replace(
+        "- `Main has it:` `no`\n", "")}
+    mixed = {"path": "scripts/thing.py", "line": 8, "body": (
+        "A finding.\nMain has it: no\n#pull_request_triggers_the_defect yes\n"
+        "Reports success on failure: no\n#defect_evidence reproduction")}
+    result = run_program(scratch, review("APPROVE", comments=[older, older_short, mixed]))
+    check("a line starting with the older label a hashtag replaced counts as that hashtag's line, also beside "
+          "hashtag lines in one finding, and a finding missing one older label is named with that label's hashtag",
+          result.code == 0 and "; 1 of 3 finding(s) lack an answered fact line: "
+          "scripts/thing.py:7 lacks '#defect_already_on_main'" in result.stdout
+          and "scripts/thing.py:8" not in result.stdout, result.detail)
     result = run_program(scratch, review("APPROVE", comments=[whole]))
     check("a review whose findings all have their fact lines names none",
           result.code == 0 and "; 0 of 1 finding(s) lack an answered fact line" in result.stdout
@@ -334,8 +359,8 @@ def finding_fact_line_count_cases(scratch):
     check("merge-lane-2's verdict review counts the Codex findings that lack a fact line, each finding's text "
           "running to the next heading, and not merge-lane-2's own comments",
           result.code == 0 and "; 1 of 2 Codex finding(s) lack an answered fact line: "
-          f"{codex_finding_id('P3', second)} lacks 'Main has it:', 'This pull request makes it happen:', "
-          "'Reports success on failure:'" in result.stdout, result.detail)
+          f"{codex_finding_id('P3', second)} lacks '#defect_already_on_main', '#pull_request_triggers_the_defect', "
+          "'#false_report_of_success_on_failure'" in result.stdout, result.detail)
     report = (f"<!-- provenance -->\n\n- [Codex priority P2 (P0 highest)] {first}\n  Body.\n{indented}\n\n"
               f"- [Codex priority P2 (P0 highest)] {first}\n  The same heading, without lines.\n")
     result = run_program(scratch, json.dumps({"verdict": "APPROVE", "body": "The review body.", "comments": [
@@ -354,13 +379,13 @@ def finding_fact_line_count_cases(scratch):
     check("two Codex runs on one commit that report the same finding are both counted, the later run not "
           "replacing the earlier run's entry",
           result.code == 0 and "; 1 of 2 Codex finding(s) lack an answered fact line: "
-          f"{codex_finding_id('P2', first)} lacks 'Main has it:'" in result.stdout, result.detail)
+          f"{codex_finding_id('P2', first)} lacks '#defect_already_on_main'" in result.stdout, result.detail)
 
 
 def findings_record_cases(scratch):
     on_main, on_pull_request = "Delete only captures — scripts/thing.py:2-2", "New bug — scripts/thing.py:3-3"
-    main_lines = FACT_LINES.replace("`Main has it:` `no`", "`Main has it:` `yes`").replace(
-        "`This pull request makes it happen:` `yes`", "`This pull request makes it happen:` `no`")
+    main_lines = FACT_LINES.replace("`#defect_already_on_main` `no`", "`#defect_already_on_main` `yes`").replace(
+        "`#pull_request_triggers_the_defect` `yes`", "`#pull_request_triggers_the_defect` `no`")
     indent = "\n".join("  " + line for line in main_lines.splitlines())
     report = (f"<!-- provenance -->\n\n- [Codex priority P1 (P0 highest)] {on_main}\n  Body.\n{indent}\n\n"
               f"- [Codex priority P2 (P0 highest)] {on_pull_request}\n  Body.\n"
@@ -396,7 +421,7 @@ def findings_record_cases(scratch):
           "holds only captures" in (result.posted or {}).get("body", "")
           and "; findings record: 1 already held, 0 added" in result.stdout, result.detail)
 
-    both_lines = FACT_LINES.replace("`Main has it:` `no`", "`Main has it:` `yes`")
+    both_lines = FACT_LINES.replace("`#defect_already_on_main` `no`", "`#defect_already_on_main` `yes`")
     both_report = (f"<!-- provenance -->\n\n- [Codex priority P1 (P0 highest)] {on_main}\n  Body.\n"
                    + "\n".join("  " + line for line in both_lines.splitlines()) + "\n")
     result = run_program(scratch, file([]), arguments=MERGE_LANE_ARGUMENTS, codex_runs=((HEAD, 0, both_report),),

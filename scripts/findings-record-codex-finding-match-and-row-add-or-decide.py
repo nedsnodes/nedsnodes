@@ -86,13 +86,20 @@ MATCH_JUDGMENT_MODEL = "claude-sonnet-5-5"
 MATCH_JUDGMENT_TIMEOUT_SECONDS = 300
 MATCH_JUDGMENT_ANSWER = re.compile(r"\A(?:SAME (\d+)|NEW)\Z")
 CODEX_HEADING_PATH_AND_LINE = re.compile(r" — (\S+?):(\d+)(?:-\d+)?\s*\Z")
+# docs/agents/pr-reviewer-instructions.md asks a reviewer to end each finding on code with these hashtag lines.
+FINDING_FACT_LINE_HASHTAG_FIELDS = {"#defect_already_on_main": "main_has_it",
+                                    "#pull_request_triggers_the_defect": "this_pull_request_makes_it_happen",
+                                    "#false_report_of_success_on_failure": "reports_success_on_failure",
+                                    "#defect_evidence": "shown_by"}
+# Reviewers may still write the labels the hashtags replaced, each followed by a colon.
 FINDING_FACT_LINE_FIELDS = {"Main has it": "main_has_it",
                             "This pull request makes it happen": "this_pull_request_makes_it_happen",
                             "Reports success on failure": "reports_success_on_failure",
                             "Shown by": "shown_by"}
 FINDING_FACT_LINE = re.compile(
-    r"^[ \t]*(?:(?:[-*+]|\d+[.)])[ \t]+)?[`*_]*(" + "|".join(map(re.escape, FINDING_FACT_LINE_FIELDS))
-    + r")[`*_]*:[ \t]*(.*)$", re.MULTILINE)
+    r"^[ \t]*(?:(?:[-*+]|\d+[.)])[ \t]+)?[`*_]*(?:("
+    + "|".join(map(re.escape, FINDING_FACT_LINE_HASHTAG_FIELDS)) + r")(?!\w)|("
+    + "|".join(map(re.escape, FINDING_FACT_LINE_FIELDS)) + r")[`*_]*:)[ \t]*(.*)$", re.MULTILINE)
 POSSIBLE_MISS_LOG_UNDER_LOG_STORE = Path("findings-record") / "findings-record-possible-misses.jsonl"
 DOES_NOT_HOLD_GRADE = "does-not-hold"
 
@@ -138,9 +145,9 @@ def utc_now():
 
 def fact_line_answers(text):
     answers = dict.fromkeys(FINDING_FACT_LINE_FIELDS.values())
-    for label, answer in FINDING_FACT_LINE.findall(text):
-        answers[FINDING_FACT_LINE_FIELDS[label]] = (answers[FINDING_FACT_LINE_FIELDS[label]]
-                                                    or answer.strip().strip("`*_ \t") or None)
+    for hashtag, label, answer in FINDING_FACT_LINE.findall(text):
+        field = FINDING_FACT_LINE_HASHTAG_FIELDS[hashtag] if hashtag else FINDING_FACT_LINE_FIELDS[label]
+        answers[field] = answers[field] or answer.strip().strip("`*_ \t") or None
     return answers
 
 

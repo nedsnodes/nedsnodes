@@ -122,6 +122,7 @@ CONSTANTS_THAT_OPEN_NO_RULE_MESSAGE = {
     ("nn-systems/skills/walk-me-through/walk-me-through-agent-question-to-user-outside-approval-walk-items-refusal-stop-hook.py", "DECIDED_BY_MODEL_NOTICE"): LATER_PART,
     ("nn-systems/skills/walk-me-through/walk-me-through-agent-question-to-user-outside-approval-walk-items-refusal-stop-hook.py", "MODEL_CHECK_FAILED_NOTICE"): LATER_PART,
     ("nn-systems/skills/walk-me-through/walk-me-through-agent-question-to-user-outside-approval-walk-items-refusal-stop-hook.py", "NOT_LOGGED_NOTICE"): LATER_PART,
+    ("nn-systems/skills/walk-me-through/walk-me-through-agent-question-to-user-outside-approval-walk-items-refusal-stop-hook.py", "REPLY_LINE_MODEL_ASK_OR_NOT_LABELS_NOT_LOGGED_NOTICE"): LATER_PART,
     ("nn-systems/skills/walk-me-through/walk-me-through-agent-question-to-user-outside-approval-walk-items-refusal-stop-hook.py", "NO_PAGE_TEMPLATE"): LATER_PART,
     ("nn-systems/skills/walk-me-through/walk-me-through-agent-question-to-user-outside-approval-walk-items-refusal-stop-hook.py", "NO_WALK_REFUSAL_INSTRUCTIONS"): LATER_PART,
     ("nn-systems/skills/walk-me-through/walk-me-through-agent-question-to-user-outside-approval-walk-items-refusal-stop-hook.py", "REFUSAL_INSTRUCTIONS"): LATER_PART,
@@ -264,6 +265,7 @@ CONSTANTS_THAT_OPEN_NO_RULE_MESSAGE = {
     ("scripts/obsolete-file-edit-warning-hook.py", "PUSHED_NO_OVERLAP_LINE"): LATER_PART,
     ("scripts/obsolete-file-edit-warning-hook.py", "PUSHED_OVERLAP_LINE"): LATER_PART,
     ("scripts/obsolete-file-edit-warning-hook.py", "RECORD_WRITE_FAILED_LINE"): LATER_PART,
+    ("scripts/obsolete-file-edit-warning-hook.py", "UNDO_ONLY_THIS_EDIT_LINES"): LATER_PART,
     ("scripts/post-compaction-session-continues-hook.py", "FAULT_LINE"): LATER_PART,
     ("scripts/post-compaction-session-continues-hook.py", "MARKER_PATH_NOT_CLEARED_INSTRUCTION"): LATER_PART,
     ("scripts/post-compaction-session-continues-hook.py", "MARKER_PATH_UNKNOWN_INSTRUCTION"): LATER_PART,
@@ -271,7 +273,6 @@ CONSTANTS_THAT_OPEN_NO_RULE_MESSAGE = {
     ("scripts/style-guide-word-checker-markdown-edit-hook-hack.py", "HIT_LINE"): LATER_PART,
     ("scripts/style-guide-word-checker-markdown-edit-hook-hack.py", "MORE_HITS_LINE"): LATER_PART,
     ("scripts/uncommitted-work-snapshot-hook.py", "NOT_PROTECTED_MESSAGE"): HOOK_FAILED,
-    ("scripts/uncommitted-work-snapshot-hook.py", "OWNER_FILE_NOT_WRITTEN_MESSAGE"): HOOK_FAILED,
 }
 
 # Hook path: why the hook prints no message for a rule.
@@ -279,7 +280,7 @@ HOOKS_THAT_PRINT_NO_RULE_MESSAGE = {
     "nn-systems/general-tools/agent-seat-worktree-create-with-owner-file-claude-code-worktree-create-hook.py": "prints only the worktree path Claude Code reads, or its own failure",
     "nn-systems/handoff/handoff-successor-conversation-tail-last-lines-first-message-display-hook.py": "it only puts the conversation-tail's last lines, written by the handoff-supervisor, above the successor's first message on the user's screen, which the agent does not see",
     "nn-systems/handoff/handoff-asked-stop-typing-user-notice-user-prompt-submit-hook.py": "it shows the user a systemMessage, which the agent does not see, and otherwise reports only its own failure",
-    "scripts/uncommitted-work-snapshot-hook.py": "it speaks only when it could not keep a work-snapshot or write a worktree's owner file, which reports its own failure",
+    "scripts/uncommitted-work-snapshot-hook.py": "it speaks only when it could not keep a work-snapshot, which reports its own failure",
 }
 
 # (hook path, rule ID): every message constant of that hook the ID opens, when it opens

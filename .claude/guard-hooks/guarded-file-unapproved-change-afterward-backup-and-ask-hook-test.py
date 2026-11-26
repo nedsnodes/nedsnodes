@@ -1462,6 +1462,83 @@ def cases(scratch):
     check("and a later change to one is asked about",
           str(settings_local) in world.run(cwd=Path(scratch)), "")
 
+    def forget_agent_seat_files_stocked(world, *forgotten):
+        """The outside state as a run of an older hook leaves it: no record that the agent-seat
+        files were stocked, and no entry for each forgotten path."""
+        outside_state = next((world.scratch / "cache").glob("*.json"))
+        state = json.loads(outside_state.read_text())
+        state.pop("agent_seat_files_stocked", None)
+        for path in forgotten:
+            state["files"].pop(str(path), None)
+        outside_state.write_text(json.dumps(state))
+
+    world = World(Path(scratch) / "agent-seat-file-asked-before-stocking")
+    world.run()
+    settings_local = world.repo / ".claude" / "settings.local.json"
+    settings_local.parent.mkdir()
+    settings_local.write_text('{"a": 1}\n')
+    first = world.run(cwd=Path(scratch))
+    forget_agent_seat_files_stocked(world, settings_local)
+    message = world.run(cwd=Path(scratch), session="session-a")
+    check("an agent-seat file asked about and never approved is not approved when the agent-seat "
+          "files are first stocked",
+          str(settings_local) in first and str(settings_local) in message
+          and world.key(settings_local) not in world.store_file(settings_local, "approved"),
+          (first, message, world.store_file(settings_local, "approved")))
+
+    world = World(Path(scratch) / "agent-seat-file-edited-on-unapproved-version")
+    other = world.agents / "other"
+    other.mkdir()
+    other_brief = other / "CLAUDE.local.md"
+    other_brief.write_text("other brief v1\n")
+    world.run(cwd=Path(scratch))
+    other_brief.write_text("other brief v2, by a shell command\n")
+    asked = world.run(cwd=Path(scratch))
+    forget_agent_seat_files_stocked(world, other_brief)
+    other_brief.write_text("other brief v3, by an Edit\n")
+    message = world.run(cwd=Path(scratch), tool="Edit", file_path=other_brief)
+    check("an Edit made on an unapproved version is asked about though the outside state lost "
+          "the file's entry",
+          str(other_brief) in asked and str(other_brief) in message
+          and world.key(other_brief) not in world.store_file(other_brief, "approved"),
+          (asked, message, world.store_file(other_brief, "approved")))
+
+    world = World(Path(scratch) / "agent-seat-file-written-during-stocking")
+    world.run()
+    settings_local = world.repo / ".claude" / "settings.local.json"
+    settings_local.parent.mkdir()
+    settings_local.write_text('{"a": 1}\n')
+    scanned = world.key(settings_local)
+    forget_agent_seat_files_stocked(world)
+    hook = load_hook_in_this_process()
+    original_with_store = hook.with_store
+
+    def write_between_scan_and_store(machine, work):
+        settings_local.write_text('{"a": 2}\n')
+        return original_with_store(machine, work)
+
+    hook.with_store = write_between_scan_and_store
+    run_hook_in_this_process(world, hook, "session-a", "owner-a", directory=Path(scratch))
+    approved = world.store_file(settings_local, "approved")
+    check("the agent-seat files' first stocking approves the version its scan read, not one "
+          "written after the scan",
+          scanned in approved and world.key(settings_local) not in approved, approved)
+
+    world = World(Path(scratch) / "agent-seat-file-with-git-line-ending-filter")
+    world.git("config", "core.autocrlf", "true")
+    brief = world.repo / "CLAUDE.local.md"
+    brief.write_bytes(b"seat v1\r\n")
+    world.run()
+    brief.write_bytes(b"seat v2\r\n")
+    message = world.run()
+    printed = [command.split()[-1] for command in approve_commands(message)
+               if f" {brief} " in command]
+    result = world.command("--restore", brief, printed[0]) if printed else None
+    check("--restore takes the version the hook printed for an agent-seat file git's line-ending "
+          "filter changes",
+          result is not None and result.returncode == 0 and brief.read_bytes() == b"seat v1\r\n",
+          (message[:400], result and (result.returncode, result.stdout, result.stderr)))
+
     # -- the store cannot be written
     world = fresh(scratch, "unwritable")
     claude = world.repo / "CLAUDE.md"

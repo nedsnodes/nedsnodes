@@ -91,11 +91,11 @@ object is refused too; the agent then asks merge-lane-2. Then:
   after-merge follow-up program read findings only from comments. It adds the grades to
   the posted body under a heading. Two findings of one report with the same priority and
   heading text get one id, and one grade answers both;
-- before the grades are checked, each Codex finding whose text answers `Main has it:` yes
+- before the grades are checked, each Codex finding whose text answers `#defect_already_on_main` yes
   goes to
   scripts/findings-record-codex-finding-match-and-row-add-or-decide.py match, which
   answers SAME with the findings record row already holding the finding, or NEW. A SAME
-  finding whose text answers `This pull request makes it happen:` no needs no grade; one
+  finding whose text answers `#pull_request_triggers_the_defect` no needs no grade; one
   that answers yes is graded like any other. For a SAME finding with no grade, the posted body quotes its row's state, grade and decision
   under a heading, and calls it a possible regression when the row is fixed. Once every
   grade is accepted, the same program's add adds each NEW finding, with its grade, to the
@@ -139,9 +139,10 @@ The body starts with a line APPROVE or REQUEST_CHANGES, so the verdict shows
 even when the review is posted as a comment.
 
 For a review with a verdict, the success line also counts the reviewer's findings
-that lack, or leave unanswered, one of the labelled lines docs/agents/pr-reviewer-instructions.md asks
-each finding on code to end with, FINDING_FACT_LINE_LABELS, and names each such finding and the labels it
-lacks: the comments of the
+that lack, or leave unanswered, one of the hashtag lines docs/agents/pr-reviewer-instructions.md asks
+each finding on code to end with, FINDING_FACT_LINE_HASHTAGS, and names each such finding and the hashtags it
+lacks; a line that starts with the older label a hashtag replaced, from FINDING_FACT_LINE_OLDER_LABELS, counts
+as that hashtag's line. The findings are the comments of the
 Claude reviewer's file, and for merge-lane-2's review, the Codex findings on the
 commit, each finding's text running from its heading to the next one. The posted review is then read
 back by the id GitHub returned, and its state and commit must be the ones
@@ -213,14 +214,22 @@ CODEX_GRADES_BODY_HEADING = "**Codex findings graded:**"
 FINDINGS_RECORD_BODY_HEADING = "**Codex findings the findings record already holds:**"
 FINDINGS_RECORD_CODEX_FINDING_MATCH_PROGRAM = Path(__file__).resolve().with_name(
     "findings-record-codex-finding-match-and-row-add-or-decide.py")
-# docs/agents/pr-reviewer-instructions.md asks a reviewer to end each finding on code with these labelled lines.
-FINDING_FACT_LINE_LABELS = ("Main has it:", "This pull request makes it happen:", "Reports success on failure:",
-                            "Shown by:")
-# A label may open a list item of any kind, and its colon may sit inside or outside its code or bold marks.
+# docs/agents/pr-reviewer-instructions.md asks a reviewer to end each finding on code with these hashtag lines.
+FINDING_FACT_LINE_HASHTAGS = ("#defect_already_on_main", "#pull_request_triggers_the_defect",
+                              "#false_report_of_success_on_failure", "#defect_evidence")
+# Reviewers may still write the labels the hashtags replaced, each followed by a colon.
+FINDING_FACT_LINE_OLDER_LABELS = {"Main has it": "#defect_already_on_main",
+                                  "This pull request makes it happen": "#pull_request_triggers_the_defect",
+                                  "Reports success on failure": "#false_report_of_success_on_failure",
+                                  "Shown by": "#defect_evidence"}
+# A hashtag or a label may open a list item of any kind and sit inside code or bold marks, and a label's colon
+# may sit inside or outside them.
 FINDING_FACT_LINE = re.compile(
-    r"^[ \t]*(?:(?:[-*+]|\d+[.)])[ \t]+)?[`*_]*("
-    + "|".join(re.escape(label.removesuffix(":")) for label in FINDING_FACT_LINE_LABELS)
-    + r")[`*_]*:(.*)$", re.MULTILINE)
+    r"^[ \t]*(?:(?:[-*+]|\d+[.)])[ \t]+)?[`*_]*(?:("
+    + "|".join(re.escape(hashtag) for hashtag in FINDING_FACT_LINE_HASHTAGS)
+    + r")(?!\w)|("
+    + "|".join(re.escape(label) for label in FINDING_FACT_LINE_OLDER_LABELS)
+    + r")[`*_]*:)(.*)$", re.MULTILINE)
 FINDING_FACT_LINE_MARKS_AND_SPACE = re.compile(r"[`*_\s]")
 OUTSIDE_THE_DIFF_HEADING = fix_round.OUTSIDE_THE_DIFF_HEADING
 OUTSIDE_THE_DIFF_LINE_FORMAT = "- `{path}:{line}`: {body}"
@@ -460,15 +469,16 @@ def codex_answers_check(answers):
 
 
 def finding_fact_lines_lacking(text):
-    """The labels of the lines that end a finding on code which a finding's text lacks or leaves unanswered,
-    in FINDING_FACT_LINE_LABELS order; empty when every one is there with an answer."""
-    answered = {f"{label}:" for label, answer in FINDING_FACT_LINE.findall(text)
+    """The hashtags of the lines that end a finding on code which a finding's text lacks or leaves unanswered,
+    in FINDING_FACT_LINE_HASHTAGS order; empty when every one is there with an answer."""
+    answered = {hashtag or FINDING_FACT_LINE_OLDER_LABELS[label]
+                for hashtag, label, answer in FINDING_FACT_LINE.findall(text)
                 if FINDING_FACT_LINE_MARKS_AND_SPACE.sub("", answer)}
-    return tuple(label for label in FINDING_FACT_LINE_LABELS if label not in answered)
+    return tuple(hashtag for hashtag in FINDING_FACT_LINE_HASHTAGS if hashtag not in answered)
 
 
 def codex_findings_in_report(report):
-    """{finding id: (priority, heading text, [the fact-line labels each entry lacks], [each entry's text])} for
+    """{finding id: (priority, heading text, [the fact-line hashtags each entry lacks], [each entry's text])} for
     each finding heading of a Codex report; a finding's text runs from its heading line to the next heading.
     Entries with the same priority and heading share an id, so each list holds one item per entry."""
     findings, finding_id, finding_lines = {}, None, []
@@ -704,24 +714,25 @@ def findings_record_summary(matched, added):
             + "".join(f"; {note}" for note in notes))
 
 
-def codex_finding_fact_line_answers(texts, label_wanted, answer_wanted):
-    """Whether any entry of a Codex finding answers its `<label_wanted>:` line with answer_wanted."""
-    return any(label == label_wanted
+def codex_finding_fact_line_answers(texts, hashtag_wanted, answer_wanted):
+    """Whether any entry of a Codex finding answers its hashtag_wanted line, or the older label's, with
+    answer_wanted."""
+    return any((hashtag or FINDING_FACT_LINE_OLDER_LABELS[label]) == hashtag_wanted
                and FINDING_FACT_LINE_MARKS_AND_SPACE.sub("", answer).lower().startswith(answer_wanted)
-               for text in texts for label, answer in FINDING_FACT_LINE.findall(text))
+               for text in texts for hashtag, label, answer in FINDING_FACT_LINE.findall(text))
 
 
 def codex_finding_says_main_has_it(texts):
-    """Whether any entry of a Codex finding answers its `Main has it:` line yes."""
-    return codex_finding_fact_line_answers(texts, "Main has it", "yes")
+    """Whether any entry of a Codex finding answers its `#defect_already_on_main` line yes."""
+    return codex_finding_fact_line_answers(texts, "#defect_already_on_main", "yes")
 
 
 def findings_record_rows_needing_no_grade(matched, findings):
     """The SAME answers, by finding id, of the matched findings that need no grade: those whose text answers
-    `This pull request makes it happen:` no. One that answers yes is still graded, since this pull request may
+    `#pull_request_triggers_the_defect` no. One that answers yes is still graded, since this pull request may
     bring the defect back, and the earlier row's grade is for main."""
     return {finding: answer for finding, answer in matched.items() if answer["answer"] == "SAME"
-            and codex_finding_fact_line_answers(findings[finding][3], "This pull request makes it happen", "no")}
+            and codex_finding_fact_line_answers(findings[finding][3], "#pull_request_triggers_the_defect", "no")}
 
 
 def findings_record_program_answers(program, subcommand, number, head, request, answer_is_readable):
@@ -1079,8 +1090,8 @@ def main(argv=None):
                   file=sys.stderr)
             return EXIT_NOT_POSTED
         moved = f"; {moved_count} comment(s) moved into the body" if moved_count else ""
-        lacks = [f"{name} lacks {', '.join(repr(label) for label in labels)}"
-                 for name, labels in fact_line_lacks if labels]
+        lacks = [f"{name} lacks {', '.join(repr(hashtag) for hashtag in hashtags)}"
+                 for name, hashtags in fact_line_lacks if hashtags]
         lacking = (f"; {len(lacks)} of {len(fact_line_lacks)} "
                    f"{'Codex ' if account == MERGE_LANE_ACCOUNT else ''}finding(s) lack an answered fact line"
                    f"{': ' + ' | '.join(lacks) if lacks else ''}" if fact_line_lacks and verdict else "")

@@ -907,6 +907,12 @@ with tempfile.TemporaryDirectory() as scratch:
           repr(joined_apostrophe_remedy))
     check("a U+2028 outside any quoted span is written as its escape",
           common_module.join_error_text_lines_with_one_space("fatal: a\u2028b") == "fatal: a\\u2028b")
+    unparsable_command = common_module.join_error_text_lines_with_one_space(
+        "git config --global --add safe.directory '/x/a\u2028b")
+    check("a git command line shlex cannot split, holding U+2028 and an unmatched quote, stays "
+          "one line with the character escaped",
+          unparsable_command == "git config --global --add safe.directory '/x/a\\u2028b",
+          repr(unparsable_command))
 
     # A cell whose pre-run snapshot failed passes git's reason, so the line the grid lifts carries it.
     captured = io.StringIO()
