@@ -1214,6 +1214,11 @@ def merge_program_lock_and_merge_queue_stop_file_cases(scratch):
           exit_code == 2 and "it exists but could not be read: " in output and gate_calls == []
           and index_of(argvs(gh_calls), ["pr", "merge"]) is None,
           f"exit {exit_code}\n{output}")
+    check("a stop file that cannot be read tells merge-lane-2 to fix or remove it before "
+          "merge-batch-start, which would repeat the failed read",
+          f"{stop_file_name} so it can be read, or remove it if main is already handled, then run: "
+          "python3 " in output and "merge-lane-2, fix " in output,
+          output)
 
     def stop_file_present(directory):
         (directory / "outputs").mkdir(parents=True, exist_ok=True)
@@ -1229,7 +1234,7 @@ def merge_program_lock_and_merge_queue_stop_file_cases(scratch):
         "merge-lane-merge-queue-approved-lines-merge-in-order-until-none-left.py")
     check("a stop file no merge queue run wrote, so with no stopped notice, sends merge-lane-2 "
           "to merge-batch-start, whose STOPPED line covers that case, and names no notice",
-          f"run: python3 {queue_program} merge-batch-start\n" in output
+          f"merge-lane-2, run: python3 {queue_program} merge-batch-start\n" in output
           and queue_program.is_file() and "stopped notice says" not in output,
           output)
 

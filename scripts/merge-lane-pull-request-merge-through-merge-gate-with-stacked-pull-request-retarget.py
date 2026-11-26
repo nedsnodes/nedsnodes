@@ -1546,18 +1546,24 @@ def main(argv=None, wait=time.sleep):
             fcntl.flock(lock, fcntl.LOCK_EX)
         # Read only once the lock is held, since the run that held it may have just written it.
         stop_file = outputs / MERGE_QUEUE_STOP_FILE_NAME
+        unreadable = None
         try:
             stop_reason = stop_file.read_text().strip()
         except FileNotFoundError:
             stop_reason = None
         except OSError as error:
+            unreadable = error
             stop_reason = f"it exists but could not be read: {error}"
         if stop_reason is not None:
             queue_program = Path(__file__).resolve().with_name(
                 "merge-lane-merge-queue-approved-lines-merge-in-order-until-none-left.py")
+            # merge-batch-start repeats the failed read and stops with FAILED, so its STOPPED line
+            # never comes until the file can be read.
+            first = (f"fix {stop_file} so it can be read, or remove it if main is already handled, "
+                     f"then run: " if unreadable is not None else "run: ")
             print(f"STOP: not merged: the merge queue is stopped, because {stop_file} says: "
                   f"{stop_reason}\n"
-                  f"No merge may start until main is handled. If you are merge-lane-2, run: "
+                  f"No merge may start until main is handled. If you are merge-lane-2, {first}"
                   f"python3 {queue_program} merge-batch-start\n"
                   f"and do what its STOPPED line says, which covers a stop with or without a "
                   f"stopped notice. Otherwise tell merge-lane-2 this message, with Claude Code's "
