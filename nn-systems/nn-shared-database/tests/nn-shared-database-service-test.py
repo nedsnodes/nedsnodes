@@ -399,6 +399,11 @@ with tempfile.TemporaryDirectory() as scratch:
     status, answer = search("f-capture", "no word in common")
     check("a search for a finding id already sighted gives its row as held",
           status == 200 and answer["held"]["record_id"] == capture_row, (status, answer))
+    status, answer = search("f-new", "unlink_newest")
+    check("a search splits a word at its underscores, as FTS5 splits the stored text, so "
+          "unlink_newest finds a row saying unlink and newest apart",
+          status == 200 and [c["record_id"] for c in answer["candidates"]] == [capture_row],
+          (status, answer))
     status, answer = search("f-new", "!!! ---")
     check("a search whose text has no word gives no candidate",
           status == 200 and answer["candidates"] == [], (status, answer))

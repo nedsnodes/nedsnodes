@@ -552,8 +552,9 @@ def findings_record_rows_search(connection, raw_body):
                             "findings_record_row USING (record_id) WHERE finding_id = ? "
                             "ORDER BY seen_at LIMIT 1", (request["finding_id"],))
     # Each word is quoted, since FTS5 reads a bare word such as NOT, or a colon, as its syntax,
-    # and the words are joined by OR, since FTS5 otherwise asks for every one of them.
-    words = sorted(set(re.findall(r"\w+", request["finding_text"].lower())))
+    # and the words are joined by OR, since FTS5 otherwise asks for every one of them. Words are split
+    # at underscores, as FTS5's tokenizer splits the stored text, so connect_timeout also finds timeout.
+    words = sorted(set(re.findall(r"[^\W_]+", request["finding_text"].lower())))
     candidates = rows(connection, "SELECT findings_record_row.* FROM findings_record_row_text JOIN "
                                   "findings_record_row ON findings_record_row.record_id = "
                                   "findings_record_row_text.rowid WHERE findings_record_row_text MATCH ? "

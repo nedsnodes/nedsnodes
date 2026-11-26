@@ -231,6 +231,7 @@ FINDING_FACT_LINE = re.compile(
     + "|".join(re.escape(label) for label in FINDING_FACT_LINE_OLDER_LABELS)
     + r")[`*_]*:)(.*)$", re.MULTILINE)
 FINDING_FACT_LINE_MARKS_AND_SPACE = re.compile(r"[`*_\s]")
+FACT_LINE_ANSWER_FIRST_WORD = re.compile(r"[\W_]*([^\W_]+)")
 OUTSIDE_THE_DIFF_HEADING = fix_round.OUTSIDE_THE_DIFF_HEADING
 OUTSIDE_THE_DIFF_LINE_FORMAT = "- `{path}:{line}`: {body}"
 OUTSIDE_THE_DIFF_LINE_PATTERN = fix_round.OUTSIDE_THE_DIFF_LINE_PATTERN
@@ -632,13 +633,14 @@ def review_tier_of_commit(plan_program, number, head):
 
 
 def body_with_codex_answers(body, comments, answers, findings, plan, number, head, review_file, outputs_directory,
-                            recorded=None):
-    """Return the body with the Codex grades, and with the findings record rows of the findings in recorded,
-    or raise CodexRunRecordUnusable with the whole refusal when an answer is missing or does not fit the run
-    records. plan, review_tier_of_commit()'s answer, is None unless findings is None. recorded holds, by
-    finding id, the match program's SAME answer for each finding the findings record already holds, which
-    needs no grade."""
-    recorded = recorded or {}
+                            matched=None):
+    """Return the body with the Codex grades, and with the findings record row of each finding the findings record
+    already holds, or raise CodexRunRecordUnusable with the whole refusal when an answer is missing or does not fit
+    the run records. plan, review_tier_of_commit()'s answer, is None unless findings is None. matched holds the match
+    program's answer by finding id; a SAME finding that findings_record_rows_needing_no_grade() waives needs no
+    grade, and every SAME finding's row is quoted, with its possible-regression warning."""
+    recorded = {finding: answer for finding, answer in (matched or {}).items() if answer["answer"] == "SAME"}
+    waived = findings_record_rows_needing_no_grade(recorded, findings) if findings else {}
     grades = {entry["finding"]: entry for entry in answers.get(CODEX_FINDING_GRADES_KEY, [])}
     if findings is None:
         tier, base, base_reason = plan
@@ -657,13 +659,13 @@ def body_with_codex_answers(body, comments, answers, findings, plan, number, hea
         raise CodexRunRecordUnusable(
             f"review not posted: the review file {review_file} grades {', '.join(unknown)}, which no Codex "
             f"report on commit {head} holds.\nRemove or correct each, then run the same command again.")
-    missing = [finding for finding in findings if finding not in grades and finding not in recorded]
+    missing = [finding for finding in findings if finding not in grades and finding not in waived]
     if missing:
         raise CodexRunRecordUnusable(CODEX_FINDINGS_NOT_GRADED.format(
             count=len(missing), head=head, path=review_file,
             findings="\n".join(f"- {finding}: {findings[finding][0]} {findings[finding][1]}" for finding in missing),
             grades=", ".join((*FINDING_CATEGORIES, DOES_NOT_HOLD_GRADE)))
-            + findings_record_rows_already_holding_lines(recorded, "\nThese Codex findings need no grade, since "
+            + findings_record_rows_already_holding_lines(waived, "\nThese Codex findings need no grade, since "
                                                                   "the findings record already holds each:"))
     if not findings:
         return body
@@ -714,28 +716,30 @@ def findings_record_summary(matched, added):
             + "".join(f"; {note}" for note in notes))
 
 
-def codex_finding_fact_line_answers(texts, hashtag_wanted):
-    """Every answer the entries of a Codex finding give its hashtag_wanted line, or the older label's, lowercased with
-    marks and spaces removed, so that "not checked" reads as "notchecked", never as "no"."""
-    return [FINDING_FACT_LINE_MARKS_AND_SPACE.sub("", answer).lower()
-            for text in texts for hashtag, label, answer in FINDING_FACT_LINE.findall(text)
-            if (hashtag or FINDING_FACT_LINE_OLDER_LABELS[label]) == hashtag_wanted]
+def codex_finding_entry_fact_line_answer_word(text, hashtag_wanted):
+    """The first word, lowercased, of the answer that one entry of a Codex finding gives its first hashtag_wanted
+    line, or the older label's line: "yes" for "Yes." or "yes (on main)", "not" for "not checked"; "" when the line
+    has no word, and None when the entry has no such line."""
+    for hashtag, label, answer in FINDING_FACT_LINE.findall(text):
+        if (hashtag or FINDING_FACT_LINE_OLDER_LABELS[label]) == hashtag_wanted:
+            word = FACT_LINE_ANSWER_FIRST_WORD.match(answer)
+            return word.group(1).lower() if word else ""
+    return None
 
 
-def codex_finding_says_main_has_it(texts):
-    """Whether any entry of a Codex finding answers its `#defect_already_on_main` line yes."""
-    return "yes" in codex_finding_fact_line_answers(texts, "#defect_already_on_main")
+def codex_finding_entry_saying_main_has_it(texts):
+    """The text of the first entry of a Codex finding that answers its `#defect_already_on_main` line yes, or None."""
+    return next((text for text in texts
+                 if codex_finding_entry_fact_line_answer_word(text, "#defect_already_on_main") == "yes"), None)
 
 
 def findings_record_rows_needing_no_grade(matched, findings):
     """The SAME answers, by finding id, of the matched findings that need no grade: those whose every entry answers
-    `#pull_request_triggers_the_defect` no. One that answers yes, not checked, or yes in one entry and no in another
+    `#pull_request_triggers_the_defect` no. One with an entry that answers yes or not checked, or has no such line,
     is still graded, since this pull request may bring the defect back, and the earlier row's grade is for main."""
-    def every_entry_answers_no(texts):
-        answers = codex_finding_fact_line_answers(texts, "#pull_request_triggers_the_defect")
-        return bool(answers) and all(answer == "no" for answer in answers)
     return {finding: answer for finding, answer in matched.items() if answer["answer"] == "SAME"
-            and every_entry_answers_no(findings[finding][3])}
+            and all(codex_finding_entry_fact_line_answer_word(text, "#pull_request_triggers_the_defect") == "no"
+                    for text in findings[finding][3])}
 
 
 def findings_record_program_answers(program, subcommand, number, head, request, answer_is_readable):
@@ -762,8 +766,10 @@ def findings_record_program_answers(program, subcommand, number, head, request, 
 
 def findings_record_match(program, number, head, findings):
     """The findings record program's match answer for each Codex finding that says main has it, by finding id."""
-    request = [{"finding_id": finding, "priority": priority, "heading": heading, "text": texts[0]}
-               for finding, (priority, heading, _, texts) in findings.items() if codex_finding_says_main_has_it(texts)]
+    request = [{"finding_id": finding, "priority": priority, "heading": heading,
+                "text": codex_finding_entry_saying_main_has_it(texts)}
+               for finding, (priority, heading, _, texts) in findings.items()
+               if codex_finding_entry_saying_main_has_it(texts) is not None]
     if not request:
         return {}
     return findings_record_program_answers(
@@ -778,7 +784,7 @@ def findings_record_add(program, number, head, findings, matched, answers):
     add answer by finding id."""
     grades = {entry["finding"]: entry for entry in answers.get(CODEX_FINDING_GRADES_KEY, [])}
     request = [{"finding_id": finding, "priority": findings[finding][0], "heading": findings[finding][1],
-                "text": findings[finding][3][0], "grade": grades[finding]["grade"],
+                "text": codex_finding_entry_saying_main_has_it(findings[finding][3]), "grade": grades[finding]["grade"],
                 **({"reason": grades[finding]["reason"]} if "reason" in grades[finding] else {})}
                for finding, answer in matched.items() if answer["answer"] == "NEW"]
     if not request:
@@ -1007,7 +1013,7 @@ def main(argv=None):
             matched = findings_record_match(program, number, head, findings) if findings else {}
             body = body_with_codex_answers(
                 body, comments, codex_answers, findings, plan, number, head, arguments.review_file,
-                outputs_directory, findings_record_rows_needing_no_grade(matched, findings))
+                outputs_directory, matched)
             # Added only once the grades are accepted, since a row keeps the grade it was added with.
             added = findings_record_add(program, number, head, findings, matched, codex_answers)
         except CodexRunRecordUnusable as error:
