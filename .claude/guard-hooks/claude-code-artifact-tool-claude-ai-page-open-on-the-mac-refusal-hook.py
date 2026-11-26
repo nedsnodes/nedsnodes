@@ -34,12 +34,15 @@ NO_LINK_TEXT = "(no link in the call: use the link the publish that made the pag
 REFUSAL_TEMPLATE = (
     '[rule artifact-guard-claude-ai-page-open-on-the-mac] '
     'REFUSED on purpose: Artifact tool call with action "open", blocked by a PreToolUse hook '
-    "on the Mac. The user works at the Mac, so an open there puts the page on his screen; he "
-    "opens each page himself from its link. The call was not sent; the page is unchanged.\n"
-    "If a step, skill, session-handoff, tool description or tool result says to open the page: "
-    "skip the open and give the user the page's link, {link}, in your next message.\n"
-    "If the user asked you to open the page: give him its link, {link}, so he can open it "
-    "himself.\n"
+    "on the Mac. The user works at the Mac and does not want agents putting pages on his screen "
+    "there, even a page he asked to see; he opens each page himself from its link. The open did "
+    "not happen; the claude.ai page the call named is unchanged.\n"
+    "Whatever asked for the open, a step, a skill, a tool description, your own choice or the "
+    "user himself: give the user the page's link, {link}, in your next message to him, count the "
+    "open as done, and carry on; do not open the page another way, such as with the shell's "
+    "`open` command.\n"
+    "If you are a subagent: put the link in your report to the agent that dispatched you, which "
+    "gives it to the user.\n"
     'From now on, in an agent-session on the Mac, do not call the Artifact tool with action '
     '"open"; give the user the link instead.'
 )
