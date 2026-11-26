@@ -7,7 +7,8 @@ a fake `systemctl` on PATH that records its arguments and succeeds or fails on
 request: a merge that changes the service restarts the unit, one that does not
 leaves it, a failed restart prints systemctl's error and exits 1, a checkout
 that is not the reference-checkout is left alone, and git failing to list the
-merge's changes is reported. One case checks that the trigger files name the
+merge's changes, or failing to find the checkout for a reason other than being
+outside one, is reported. One case checks that the trigger files name the
 service file and exist. A last case merges through the real post-merge hook in
 a checkout that is not ned-box's reference-checkout, with nothing on stderr.
 
@@ -177,6 +178,24 @@ with tempfile.TemporaryDirectory() as scratch:
     finally:
         os.chdir(before)
     check("outside any git checkout nothing is done", code == 0, code)
+
+    stale_git_directory = scratch / "stale-git-directory"
+    if systemctl_log.exists():
+        systemctl_log.unlink()
+    os.environ["GIT_DIR"] = str(stale_git_directory)
+    errors = io.StringIO()
+    try:
+        with redirect_stderr(errors):
+            code = restarter.main(["--reference-checkout", str(repository)])
+    finally:
+        del os.environ["GIT_DIR"]
+    errors = errors.getvalue()
+    check("a stale GIT_DIR: FAILED with git's error on stderr, exit 1, nothing restarted",
+          code == 1 and not systemctl_log.exists()
+          and errors.startswith(f"{restarter.PROGRAM}: FAILED — `git rev-parse --show-toplevel` "
+                                f"exited 128")
+          and f"git said: fatal: not a git repository: '{stale_git_directory}'\n" in errors,
+          (code, errors))
 
     check("the reference-checkout by default is ned-box's",
           restarter.NED_BOX_REFERENCE_CHECKOUT == "/home/nedlern/Projects/nedsnodes")

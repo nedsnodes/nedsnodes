@@ -53,9 +53,16 @@ reference-checkout, shows the user any FAILED line there.
 
 Git ignores a post-merge hook's exit code; the merge stands either way.
 
-Exit codes: 0 not a reference-checkout, both steps succeeded, or the failed
-step was written as a task; 1 a step failed and writing it as a task failed,
-or, on the Mac, was not tried, with the FAILED message on standard error.
+When `git rev-parse --show-toplevel` fails for a reason other than the current
+directory being outside any Git checkout, such as a GIT_DIR naming a missing
+directory or a removed current directory, no installer step runs and a FAILED
+message with git's first error line goes to standard error, with or without
+--print-outcome.
+
+Exit codes: 0 outside any Git checkout, not a reference-checkout, both steps
+succeeded, or the failed step was written as a task; 1 git rev-parse failed
+otherwise, or a step failed and writing it as a task failed or, on the Mac,
+was not tried, with the FAILED message on standard error.
 
 Each *_TEST_OVERRIDE_ENVIRONMENT_VARIABLE constant names an environment
 variable whose value, when set, replaces a path, for
@@ -117,6 +124,8 @@ agent_seat_task_list = _load("agent_seat_task_list_new_pending_task_write_common
                              "agent-seat-task-list-new-pending-task-write-common.py")
 agent_seat_task_file = _load("agent_seat_task_list_task_file_rewrite_common",
                              "agent-seat-task-list-task-file-rewrite-common.py")
+git_output = _load("git_machine_readable_output_runner_and_parser_common",
+                   "git-machine-readable-output-runner-and-parser-common.py")
 
 REFERENCE_CHECKOUT_PATH_BY_MACHINE_NAME = {
     NED_BOX: f"{ned_box_paths.NED_BOX_HOME}/Projects/nedsnodes",
@@ -132,8 +141,6 @@ INSTALLER_STEPS = (INSTALL, REMOVE_NOT_IN_TABLE)
 SCHEDULED_JOBS_TABLE = "nn-systems/general-tools/scheduled-jobs-on-each-machine.json"
 BOTH_INSTALLER_STEPS = f"both installer steps, `{INSTALL}` and then `{REMOVE_NOT_IN_TABLE}`,"
 PRINT_OUTCOME_COMMAND_LINE_FLAG = "--print-outcome"
-# Git ends this "(or any of the parent directories)" or "(or any parent up to mount point /)".
-GIT_OUTSIDE_ANY_CHECKOUT_MESSAGE_START = "fatal: not a git repository (or any "
 WHAT_A_FAILED_STEP_MAY_LEAVE_ON_THE_MACHINE = {
     INSTALL: f"may not run every job that {SCHEDULED_JOBS_TABLE} gives it",
     REMOVE_NOT_IN_TABLE: f"may still run a job that {SCHEDULED_JOBS_TABLE} does not give it",
@@ -226,6 +233,18 @@ def failed_message(machine, reference_checkout, step, exit_code, output, why_no_
         f"The installer printed:\n{output}")
 
 
+def git_rev_parse_failed_message(exit_code, git_error):
+    return (
+        f"{PROGRAM}: FAILED — `git rev-parse --show-toplevel` exited {exit_code} for a reason "
+        f"other than the current directory being outside any Git checkout, so this program "
+        f"could not tell whether it runs in a reference-checkout and ran no installer step. "
+        f"git said: {git_error}\n"
+        f"Put right what git names, such as a GIT_DIR that names a missing directory, then, in "
+        f"the checkout the merge was into, run `python3 {PROGRAM} {PRINT_OUTCOME_COMMAND_LINE_FLAG}`.\n"
+        f"If you are a subagent, give this whole message to the agent that dispatched you.\n"
+        f"If you cannot put it right, tell the user, quoting this whole message.")
+
+
 def write_failure_owner_instructions(list_directory):
     return (
         f"If you are {OWNING_AGENT_SEAT}, also put right, on ned-box, what stopped the task "
@@ -284,14 +303,14 @@ def main(environment=None, argv=None):
     top = subprocess.run(["git", "rev-parse", "--show-toplevel"], capture_output=True, text=True,
                          env={**environment, "LC_ALL": "C"})
     if top.returncode != 0:
-        error = top.stderr.strip()
-        if error.startswith(GIT_OUTSIDE_ANY_CHECKOUT_MESSAGE_START):
+        if git_output.git_stderr_says_outside_a_repository(top.stderr):
             outcome(f"The current directory is not in a Git checkout, so nothing was run; "
                     f"{run_it_where}")
-        else:
-            outcome(f"git rev-parse --show-toplevel exited {top.returncode}, so nothing was run; "
-                    f"git said: {error}")
-        return EXIT_DONE
+            return EXIT_DONE
+        print(git_rev_parse_failed_message(
+            top.returncode, git_output.git_stderr_first_error_message_else_last_line(top.stderr)),
+            file=sys.stderr)
+        return EXIT_FAILED
     checkout = os.path.realpath(top.stdout.strip())
     machine = next((name for name, path in reference_checkouts.items()
                     if os.path.realpath(path) == checkout), None)

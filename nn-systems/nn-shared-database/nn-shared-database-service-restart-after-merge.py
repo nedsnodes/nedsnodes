@@ -24,9 +24,11 @@ Git ignores a post-merge hook's exit code; the merge stands either way. Git
 puts this program's output on its own stderr; checkout-freshness-catch-up.py,
 which fast-forwards the reference-checkout, shows the user any FAILED line.
 
-Exit codes: 0 nothing to restart, or the restart succeeded; 1 git could not
-list the merge's changes, or the restart failed, with git's or systemctl's
-error on standard error.
+Exit codes: 0 outside any Git checkout, not ned-box's reference-checkout,
+nothing to restart, or the restart succeeded; 1 `git rev-parse --show-toplevel`
+failed for another reason, such as a GIT_DIR naming a missing directory, git
+could not list the merge's changes, or the restart failed, with git's or
+systemctl's error on standard error.
 """
 
 import argparse
@@ -49,6 +51,13 @@ _ned_box_paths_spec = importlib.util.spec_from_file_location(
 ned_box_paths = importlib.util.module_from_spec(_ned_box_paths_spec)
 _ned_box_paths_spec.loader.exec_module(ned_box_paths)
 
+_git_output_spec = importlib.util.spec_from_file_location(
+    "git_machine_readable_output_runner_and_parser_common",
+    Path(__file__).resolve().parents[1] / "general-tools"
+    / "git-machine-readable-output-runner-and-parser-common.py")
+git_output = importlib.util.module_from_spec(_git_output_spec)
+_git_output_spec.loader.exec_module(git_output)
+
 NED_BOX_REFERENCE_CHECKOUT = f"{ned_box_paths.NED_BOX_HOME}/Projects/nedsnodes"
 
 
@@ -56,9 +65,25 @@ def main(argv=None):
     parser = argparse.ArgumentParser(description=__doc__.split("\n\n")[0])
     parser.add_argument("--reference-checkout", default=NED_BOX_REFERENCE_CHECKOUT)
     arguments = parser.parse_args(argv)
-    top = subprocess.run(["git", "rev-parse", "--show-toplevel"], capture_output=True, text=True)
-    if top.returncode != 0 or os.path.realpath(top.stdout.strip()) \
-            != os.path.realpath(arguments.reference_checkout):
+    # LC_ALL=C keeps git's message in English, so the outside-a-checkout case can be told apart.
+    top = subprocess.run(["git", "rev-parse", "--show-toplevel"], capture_output=True, text=True,
+                         env={**os.environ, "LC_ALL": "C"})
+    if top.returncode != 0:
+        if git_output.git_stderr_says_outside_a_repository(top.stderr):
+            return EXIT_DONE
+        print(f"{PROGRAM}: FAILED — `git rev-parse --show-toplevel` exited {top.returncode} for "
+              f"a reason other than the current directory being outside any Git checkout, so "
+              f"this program could not tell whether this merge was into ned-box's "
+              f"reference-checkout, and did not check whether the nn-shared-database service "
+              f"needs a restart. git said: "
+              f"{git_output.git_stderr_first_error_message_else_last_line(top.stderr)}\n"
+              f"Put right what git names, such as a GIT_DIR that names a missing directory, "
+              f"then, in the checkout the merge was into, run `python3 {PROGRAM}`.\n"
+              f"If you are a subagent, give this whole message to the agent that dispatched you.\n"
+              f"If you cannot put it right, tell the user, quoting this whole message.",
+              file=sys.stderr)
+        return EXIT_FAILED
+    if os.path.realpath(top.stdout.strip()) != os.path.realpath(arguments.reference_checkout):
         return EXIT_DONE
     # Spelled out, not $(id -u): run over ssh from the Mac, $(id -u) expands on the Mac.
     runtime_directory = f"XDG_RUNTIME_DIR=/run/user/{os.getuid()}"
