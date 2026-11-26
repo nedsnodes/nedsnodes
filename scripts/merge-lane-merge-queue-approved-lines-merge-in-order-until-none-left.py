@@ -38,9 +38,11 @@ nn-head-commit, which is the commit about to be merged, is Markdown under docs/ 
 scripts/pull-request-review-plan.py classes as prose, so no line it changes is inside a
 fenced code block; any other pull request is code, and so is one whose files could not be
 read, which the log says. The count of prose-only merges in a row is kept in
-merge-batch-prose-only-merges-in-a-row.txt, so it carries from one merge batch to the next;
-each prose-only merge this program makes adds 1 to it, past 3 when no code line waits, and
-each code merge sets it to 0.
+merge-batch-prose-only-merges-in-a-row.txt in the merge batches directory, so it carries from
+one merge batch to the next. Every merge this program makes counts, whichever rule or
+--merge-only chose it: a prose-only merge adds 1, past 3 when no code line waits, and a code
+merge sets the count to 0. A missing file counts 0; a file that holds no count stops the
+merge batch.
 
 merge-batch-run-in-queue-order takes merge-batch.lock without waiting, and exits 0 when
 another process holds it. It makes passes over the queue file until a pass neither merges
@@ -305,8 +307,8 @@ class MergeQueuePullRequestMergeBatchRunner:
             raise Stop(f"{self.prose_only_merges_in_a_row_file} holds {text[:200]!r}, not a count "
                        f"of 0 or more, so the next pull request cannot be chosen. The file holds "
                        f"the number of prose-only merges since the last code merge, as this "
-                       f"program's docstring defines them. Remove the file, which counts from 0, "
-                       f"then run this program's merge-batch-resume")
+                       f"program's docstring defines them. Remove the file, so that the count "
+                       f"starts again from 0, then run: {RESUME_COMMAND}")
         return int(text)
 
     def next_in_merge_order(self, waiting):
