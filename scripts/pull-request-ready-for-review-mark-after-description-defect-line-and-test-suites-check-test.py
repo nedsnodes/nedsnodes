@@ -5,13 +5,17 @@ Run: python3 scripts/pull-request-ready-for-review-mark-after-description-defect
 Prints one line per case and exits non-zero if any case fails.
 
 main() is called with a fake runner standing in for gh, git and the test suite runner, so each
-answer and each failure is injected and nothing reaches GitHub. One case runs the program as a
-command, to show it starts and reads its argument.
+answer and each failure is injected and nothing reaches GitHub. A fake test suite run writes its
+report and junit.xml into the --log-dir it is given, and HOME points at a scratch directory, so
+main's failed suites record is one each case writes. One case runs the program as a command, to
+show it starts and reads its argument.
 """
 
 import importlib.util
 import io
 import json
+import os
+import shutil
 import subprocess
 import sys
 import tempfile
@@ -156,11 +160,60 @@ def exits(status, stderr=""):
     return lambda command: completed(command, status, "", stderr)
 
 
+RECORDED_COMMIT = "d" * 40
+SUITE = "scripts/example-test.py"
+RECORDED_CASE = "a case main fails"
+NEW_CASE = "a case this pull request breaks"
+
+
+def record_written(home, suites):
+    """main's failed suites record under home, holding each (suite, case, first failing commit)."""
+    path = Path(home) / ".local" / "state" / "nedsnodes" / "failed-after-merge-test-suites-on-main.json"
+    path.parent.mkdir(parents=True, exist_ok=True)
+    record = {}
+    for suite, case, commit in suites:
+        record.setdefault(suite, {"failed_tests": {}})["failed_tests"][case] = {
+            "commit": commit, "last_failed_commit": commit, "pull_request": "1", "log": None,
+            "failed_at": "2026-11-26T00:00:00Z", "repair_task_agent_seat": None,
+            "repair_task_id": None}
+    path.write_text(json.dumps(record))
+    return path
+
+
+def suites_failing(cases, ran_to_the_end=True, report_extra="", write_junit=True):
+    """A test suite run that exits 1 with each (suite, case) failing, writing its report and
+    junit.xml into the --log-dir the command names."""
+    def behaviour(command):
+        log_dir = Path(command[command.index("--log-dir") + 1])
+        log_dir.mkdir(parents=True, exist_ok=True)
+        suites = sorted({suite for suite, _ in cases})
+        (log_dir / program.test_suite_runner.REPORT_FILE_NAME).write_text(
+            "".join(f"{program.test_suite_runner.FAILED_SUITE_LINE_PREFIX}{suite} exit 1 — log "
+                    f"{log_dir}/{suite}.log\n" for suite in suites)
+            + report_extra
+            + f"{program.test_suite_runner.SUMMARY_LINE_PREFIX} 0 passed, {len(suites)} failed\n")
+        if write_junit:
+            (log_dir / program.test_suite_runner.JUNIT_XML_FILE_NAME).write_text(
+                "<testsuites>" + "".join(
+                    f'<testsuite name="{suite}" judged="true" '
+                    f'ran_to_the_end="{str(ran_to_the_end).lower()}">'
+                    + "".join(f'<testcase name="{case}"><failure message="x"/></testcase>'
+                              for named, case in cases if named == suite)
+                    + '<testcase name="a passing case"/></testsuite>' for suite in suites)
+                + "</testsuites>")
+        return completed(command, 1)
+    return behaviour
+
+
 RETRY_LINE = ("Run this command again once. If it fails the same way, tell the user, in one "
               "sentence, that pull request 77 could not be marked ready for review")
 
 
 def main():
+    home = tempfile.mkdtemp(prefix="ready-command-test-home-")
+    os.environ["HOME"] = home
+    # The program keeps a refused run's log directory, so the cases make theirs under home.
+    tempfile.tempdir = home
     # Every check passes: the pull request is marked ready, after the test suites ran.
     runner = FakeRunner()
     status, output, errors = run(runner)
@@ -184,12 +237,81 @@ def main():
           and runner.commands["suites"] == [
               "python3", scratch + "/scripts/run-all-test-suites.py",
               "--only-suites-whose-recorded-inputs-changed-since", MERGE_BASE,
-              "--wait-for-lock-seconds", "3600"]
+              "--wait-for-lock-seconds", "3600", "--log-dir", runner.commands["suites"][-1]]
+          and not runner.commands["suites"][-1].startswith((CHECKOUT, scratch))
           and runner.commands["worktree-remove"] == ["git", "worktree", "remove", "--force", scratch]
           and f"running, in a scratch worktree of {HEAD[:12]}, {scratch}/scripts/run-all-test-suites.py "
               f"--only-suites-whose-recorded-inputs-changed-since {MERGE_BASE} "
-              "--wait-for-lock-seconds 3600\n" in output,
+              f"--wait-for-lock-seconds 3600 --log-dir {runner.commands['suites'][-1]}\n" in output,
           (runner.commands, output))
+
+    # A failing test case main's failed suites record holds, at a main commit the head holds.
+    record_written(home, [(SUITE, RECORDED_CASE, RECORDED_COMMIT)])
+    runner = FakeRunner(suites=suites_failing([(SUITE, RECORDED_CASE)]),
+                        ancestor=ancestors((RECORDED_COMMIT, HEAD)))
+    status, output, errors = run(runner)
+    check("a pull request whose only failing test case is on main's failed suites record, at a "
+          "main commit its head holds, is marked ready, naming that case",
+          status == program.EXIT_MARKED_READY
+          and runner.calls == ["view", "rev-parse", "status", "merge-base", "worktree-add", "suites",
+                               "worktree-remove", "ancestor", "view", "ready"]
+          and runner.commands["ancestor"] == ["git", "merge-base", "--is-ancestor",
+                                              RECORDED_COMMIT, HEAD]
+          and "every failing test case is main's" in output
+          and f"  {SUITE}: {RECORDED_CASE}\n" in output
+          and not Path(runner.commands["suites"][-1]).exists(),
+          (status, runner.calls, output, errors))
+
+    for label, runner, record, expected_lines in [
+            ("a new failing test case beside a recorded one in the same suite",
+             FakeRunner(suites=suites_failing([(SUITE, RECORDED_CASE), (SUITE, NEW_CASE)]),
+                        ancestor=ancestors((RECORDED_COMMIT, HEAD))),
+             [(SUITE, RECORDED_CASE, RECORDED_COMMIT)],
+             [f"main commit the nn-head-commit holds: {SUITE}: {NEW_CASE}."]),
+            ("a failing test case on the record at a main commit the head lacks",
+             FakeRunner(suites=suites_failing([(SUITE, RECORDED_CASE)])),
+             [(SUITE, RECORDED_CASE, RECORDED_COMMIT)],
+             [f"main commit the nn-head-commit holds: {SUITE}: {RECORDED_CASE}."]),
+            ("a recorded failing test case in a suite that did not run to the end",
+             FakeRunner(suites=suites_failing([(SUITE, RECORDED_CASE)], ran_to_the_end=False),
+                        ancestor=ancestors((RECORDED_COMMIT, HEAD))),
+             [(SUITE, RECORDED_CASE, RECORDED_COMMIT)],
+             [f"{SUITE} did not run to the end, so its later cases have no verdict."]),
+            ("a recorded failing test case in a run that also has a suite NOT RUN",
+             FakeRunner(suites=suites_failing(
+                 [(SUITE, RECORDED_CASE)],
+                 report_extra=f"{program.test_suite_runner.NOT_RUN_SUITE_LINE_PREFIX}scripts/other-test.py\n"),
+                        ancestor=ancestors((RECORDED_COMMIT, HEAD))),
+             [(SUITE, RECORDED_CASE, RECORDED_COMMIT)],
+             ["the run reported a problem besides failing suites, or did not reach its SUMMARY "
+              "line."]),
+            ("a recorded failing test case in a run that wrote no junit.xml",
+             FakeRunner(suites=suites_failing([(SUITE, RECORDED_CASE)], write_junit=False),
+                        ancestor=ancestors((RECORDED_COMMIT, HEAD))),
+             [(SUITE, RECORDED_CASE, RECORDED_COMMIT)],
+             ["its failing test cases could not be named: ", "junit.xml does not exist."]),
+            ("a failing test case when main's failed suites record is not JSON",
+             FakeRunner(suites=suites_failing([(SUITE, RECORDED_CASE)]),
+                        ancestor=ancestors((RECORDED_COMMIT, HEAD))),
+             None,
+             ["main's failed suites record could not be read: could not read "]),
+            ("a recorded failing test case whose main commit git cannot find",
+             FakeRunner(suites=suites_failing([(SUITE, RECORDED_CASE)]),
+                        ancestor=exits(128, f"fatal: Not a valid commit name {RECORDED_COMMIT}")),
+             [(SUITE, RECORDED_CASE, RECORDED_COMMIT)],
+             ["merge-base --is-ancestor exited with status 128: fatal: Not a valid commit name",
+              "If git's error says the commit is not a valid commit name: run git fetch origin "
+              "main, then run this again."])]:
+        path = record_written(home, record or [])
+        if record is None:
+            path.write_text("{not json")
+        status, output, errors = run(runner)
+        check(f"{label} is refused before gh pr ready, naming why the failure is not main's",
+              status == program.EXIT_MARK_READY_REFUSED_OR_FAILED and "ready" not in runner.calls
+              and all(line in errors for line in expected_lines)
+              and (runner.calls[-1] == "ancestor" or f"logs are in {runner.commands['suites'][-1]}" in errors),
+              (status, runner.calls, errors))
+    record_written(home, [])
 
     # Already ready: nothing to do, nothing run.
     runner = FakeRunner(view=answers(view_answer(isDraft=False)))
@@ -335,8 +457,8 @@ def main():
             ("a failing test suite", FakeRunner(suites=exits(1)),
              ["view", "rev-parse", "status", "merge-base", "worktree-add", "suites", "worktree-remove"],
              ["the test suites exited with status 1, so #77",
-              "The failing suites are named above.",
-              "Fix the cause of each suite's failure and commit the fix; then push, and run "
+              "The failing suites are named above, and their logs are in ",
+              "Fix the cause of each failure that is not main's and commit the fix; then push, and run "
               "this again: it runs the test suites on the pushed fix, keeps the pull request a "
               "draft while any fails, and marks it ready for review when they pass.",
               "If git or a pre-push hook refuses the push: do what its message says, push again, "
@@ -346,7 +468,7 @@ def main():
              FakeRunner(suites=exits(2)), ["view", "rev-parse", "status", "merge-base", "worktree-add", "suites", "worktree-remove"],
              ["scripts/run-all-test-suites.py exited with status 2, before judging every suite, "
               "so #77",
-              "Its error is above.", RETRY_LINE]),
+              "Its error is above, and its logs are in ", RETRY_LINE]),
             ("a push that moves the pull request's head while the test suites run",
              FakeRunner(view=in_turn(answers(view_answer()), answers(view_answer(headRefOid=OTHER)))),
              ["view", "rev-parse", "status", "merge-base", "worktree-add", "suites", "worktree-remove",
@@ -591,6 +713,8 @@ def main():
           command.returncode == 2 and "invalid int value" in command.stderr,
           (command.returncode, command.stderr))
 
+    tempfile.tempdir = None
+    shutil.rmtree(home)
     print()
     if failures:
         print(f"{len(failures)} case(s) failed")

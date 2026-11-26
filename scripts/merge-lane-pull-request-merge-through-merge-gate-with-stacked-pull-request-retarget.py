@@ -185,7 +185,6 @@ import shutil
 import subprocess
 import sys
 import time
-import xml.etree.ElementTree
 from pathlib import Path
 
 _common_spec = importlib.util.spec_from_file_location(
@@ -574,18 +573,6 @@ def recordings_matching_the_merge_commit_adopted(worktree, source, which_source,
     return True
 
 
-def suites_on_runner_lines(lines, prefix):
-    """Each suite on a line opening with prefix, with its log when a line names one."""
-    suites = {}
-    for line in lines:
-        if line.startswith(prefix):
-            words = line[len(prefix):].split()
-            if words:
-                log = line.partition(" — log ")[2].strip() or None
-                suites[words[0]] = log or suites.get(words[0])
-    return suites
-
-
 def merged_branch_last_commit_author_name_read(worktree, merge_commit, environment):
     """The author name of the merged branch's last commit, or None when git cannot read it."""
     author = subprocess.run(
@@ -660,43 +647,6 @@ def repair_task_no_longer_open(seat, task_id):
         return True
 
 
-def run_verdicts_by_suite(lines, junit_file):
-    """{suite: verdict} for each suite the run judged, and what went wrong reading junit_file, or
-    None.
-
-    A verdict holds "failed", {test: log}; "passed", the set of tests that passed; "skipped", the
-    text of each SKIP line; and "ran_to_the_end", whether the suite ended on its own after every
-    case it would run. The runner names each test in junit.xml, a suite that printed no case
-    line being the one test named for the suite; a suite NOT RUN or stopped by the run has no
-    verdict."""
-    logs = suites_on_runner_lines(lines, common.run_all_test_suites.FAILED_SUITE_LINE_PREFIX)
-    try:
-        root = xml.etree.ElementTree.parse(junit_file).getroot()
-    except FileNotFoundError:
-        return {}, f"{junit_file} does not exist"
-    except (OSError, xml.etree.ElementTree.ParseError) as caught:
-        return {}, f"{junit_file} could not be read: {caught}"
-    verdicts = {}
-    for element in root.iter("testsuite"):
-        if element.get("judged") == "false":
-            continue
-        suite = element.get("name")
-        verdict = verdicts.setdefault(suite, {"failed": {}, "passed": set(), "skipped": [],
-                                              "ran_to_the_end": True})
-        verdict["ran_to_the_end"] = (verdict["ran_to_the_end"]
-                                     and element.get("ran_to_the_end") == "true")
-        for case in element.iter("testcase"):
-            if case.find("skipped") is not None:
-                verdict["skipped"].append(case.get("name"))
-            elif case.find("failure") is not None:
-                verdict["failed"][case.get("name")] = logs.get(suite)
-            else:
-                verdict["passed"].add(case.get("name"))
-    for verdict in verdicts.values():
-        verdict["passed"] -= set(verdict["failed"])
-    return verdicts, None
-
-
 def test_skipped(test, verdict):
     """Whether a SKIP line of the suite names test; its text is the name, then ": " and why."""
     return any(text == test or text.startswith(test + ": ") for text in verdict["skipped"])
@@ -739,7 +689,7 @@ def failed_suites_kept_in_view(arguments, merge_commit, worktree, log_dir, envir
                                 for line in lines):
         return kept
 
-    verdicts, junit_error = run_verdicts_by_suite(lines, log_dir / runner.JUNIT_XML_FILE_NAME)
+    verdicts, junit_error = runner.run_verdicts_by_suite(lines, log_dir / runner.JUNIT_XML_FILE_NAME)
     if junit_error:
         print(f"STOP: merged, but this test run's failed tests could not be named: {junit_error}\n"
               f"{tell_the_user}")
@@ -776,7 +726,7 @@ def failed_suites_kept_in_view(arguments, merge_commit, worktree, log_dir, envir
                 rerun.returncode, rerun.stdout)
             or (rerun.returncode == 0
                 and any(line.startswith(runner.SUMMARY_LINE_PREFIX) for line in rerun_lines)))
-        rerun_verdicts, rerun_junit_error = run_verdicts_by_suite(
+        rerun_verdicts, rerun_junit_error = runner.run_verdicts_by_suite(
             rerun_lines, rerun_log_dir / runner.JUNIT_XML_FILE_NAME)
         if not rerun_gave_every_verdict:
             print(f"STOP: merged, but the recorded failed suites could not all be run again: the "
@@ -1091,7 +1041,7 @@ def failed_tests_main_does_not_fail_named(arguments, base_branch, merge_commit, 
           f"failed test needs action.")
     if not any(line.startswith(runner.FAILED_SUITE_LINE_PREFIX) for line in lines):
         return kept
-    verdicts, junit_error = run_verdicts_by_suite(lines, log_dir / runner.JUNIT_XML_FILE_NAME)
+    verdicts, junit_error = runner.run_verdicts_by_suite(lines, log_dir / runner.JUNIT_XML_FILE_NAME)
     if junit_error:
         print(f"STOP: merged into {base_branch!r}, but this test run's failed tests could not "
               f"be named: {junit_error}\n{TELL_AUTHOR_AND_USER_THE_STOP_MESSAGE}")
