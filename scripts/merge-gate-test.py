@@ -163,9 +163,11 @@ scratch = Path(tempfile.mkdtemp(prefix="merge-gate-test-"))
 # Python's time. It calls nothing through PATH, because some cases cut PATH down to the
 # stand-in's own directory. The route keys are written into its case statement, and each
 # call is logged as NUL-separated fields: the field count, then the token, then argv.
+# An exported BASH_ENV is not handled: bash sources it before the stand-in reads GH_TOKEN.
 GH_STAND_IN_TEMPLATE = f"#!{BASH}\n" + r"""log=$MERGE_GATE_TEST_GH_CALL_LOG
 if [ "${GH_TOKEN+set}" = set ]; then token="1$GH_TOKEN"; else token=0; fi
-printf '%s\0' "$(($# + 1))" "$token" "$@" >>"$log"
+printf '%s\0' "$(($# + 1))" "$token" "$@" >>"$log" ||
+  { printf 'merge-gate-test stand-in: could not log the call to %s\n' "$log" >&2; exit 96; }
 arguments=("$@")
 key=unknown
 if [ "$1" = pr ] && [ "$2" = view ]; then
@@ -207,7 +209,9 @@ def gh_stand_in(routes, case_dir):
         stdout_file = case_dir / f"route-{number}-stdout"
         stdout_file.write_bytes(route["stdout"].encode("utf-8", "surrogateescape"))
         stderr = route.get("stderr", "")
-        arms.append(f"  {shlex.quote(key)}) {cat} {shlex.quote(str(stdout_file))};"
+        sent = shlex.quote(str(stdout_file))
+        arms.append(f"  {shlex.quote(key)}) {cat} {sent}"
+                    + f" || {{ printf 'merge-gate-test stand-in: could not send %s\\n' {sent} >&2; exit 98; }};"
                     + (f" printf %s {shlex.quote(stderr)} >&2;" if stderr else "")
                     + f" exit {int(route.get('exit', 0))} ;;")
     return GH_STAND_IN_TEMPLATE.replace("@ROUTES@", "\n".join(arms))
@@ -454,6 +458,8 @@ def run_gate(gate, pr, expected, since, routes, token=TEST_TOKEN, path_override=
     routes = {key: {**route, "stdout": Path(route["stdout_file"]).read_text(
                   encoding="utf-8", errors="surrogateescape")}
               for key, route in routes.items()}
+    # The routes served, defaults included, for G4 to read beside the case's home.
+    (case_dir / "routes.json").write_text(json.dumps(routes))
     stand_in = stand_in_dir / "gh"
     stand_in.write_text(gh_stand_in(routes, case_dir))
     stand_in.chmod(0o755)
@@ -2472,10 +2478,32 @@ def run_cases(gate, label):
     return passed
 
 
+def check_stand_in_fails_when_it_cannot_send_or_log():
+    """Without these exits, a case could pass on an empty response or an unlogged call."""
+    case_dir = Path(tempfile.mkdtemp(dir=scratch))
+    stand_in = case_dir / "gh"
+    stand_in.write_text(gh_stand_in({"body": {"stdout": "{}"}}, case_dir))
+    stand_in.chmod(0o755)
+    argv = [str(stand_in), "pr", "view", "1", "--json", "body"]
+    call_log = case_dir / "gh-calls"
+    (case_dir / "route-0-stdout").unlink()
+    unsent = subprocess.run(argv, capture_output=True, text=True,
+                            env={**os.environ, "MERGE_GATE_TEST_GH_CALL_LOG": str(call_log)})
+    check("the gh stand-in fails when it cannot send a route's stdout",
+          unsent.returncode == 98 and "could not send" in unsent.stderr,
+          f"exit {unsent.returncode}, stderr {unsent.stderr.strip()!r}")
+    unlogged = subprocess.run(argv, capture_output=True, text=True,
+                              env={**os.environ, "MERGE_GATE_TEST_GH_CALL_LOG": str(case_dir)})
+    check("the gh stand-in fails when it cannot log a call",
+          unlogged.returncode == 96 and "could not log" in unlogged.stderr,
+          f"exit {unlogged.returncode}, stderr {unlogged.stderr.strip()!r}")
+
+
 def main():
     if BASH is None:
         raise SystemExit("merge-gate-test: bash is not on PATH")
     check_every_fixture_has_a_capture_record()
+    check_stand_in_fails_when_it_cannot_send_or_log()
     check("the CLEAN spelling came from a capture", CLEAN == "CLEAN", f"read {CLEAN!r}")
     open_before = open_file_descriptor_count()
     first = run_cases(GATE, "")
