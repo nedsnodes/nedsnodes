@@ -4,8 +4,8 @@
 docs/nedsnodes-wiki/nedsnodes-file-naming-and-location-standards.md defines a
 suffix as written with its leading dot. DOT_SUFFIXES lists the suffixes of
 Markdown files that take one; a tracked `.md` file whose stem ends in one of
-them written with a hyphen, such as `docs/agents/seat-first-prompt.md` for
-`docs/agents/seat-first.prompt.md`, fails this test, unless its name also
+them written with a hyphen, such as `docs/agents/a-seat-first-prompt.md` for
+`docs/agents/a-seat-first.prompt.md`, fails this test, unless its name also
 ends in a dot suffix, as `x.test-design.md` does, or it is a GHI-MD, whose
 name is its issue's title as a slug and may end in any word.
 
@@ -71,12 +71,12 @@ def check(name, condition, detail=None):
 
 
 check("a hyphen-written suffix fails, at any depth and for each suffix",
-      misnamed(["docs/agents/seat-first-prompt.md", "x/y-instructions.md", "a-design.md",
+      misnamed(["docs/agents/a-seat-first-prompt.md", "x/y-instructions.md", "a-design.md",
                 "a.tool-design.md", "b-test-design.md", "c-contract.md"])
-      == sorted(["docs/agents/seat-first-prompt.md", "x/y-instructions.md", "a-design.md",
+      == sorted(["docs/agents/a-seat-first-prompt.md", "x/y-instructions.md", "a-design.md",
                  "a.tool-design.md", "b-test-design.md", "c-contract.md"]))
 check("a dot-written suffix passes, a test-design's ending included",
-      misnamed(["docs/agents/seat-first.prompt.md", "x/y.instructions.md", "a.tool.design.md",
+      misnamed(["docs/agents/a-seat-first.prompt.md", "x/y.instructions.md", "a.tool.design.md",
                 "a.tool.test-design.md", "a.tool.contract.md"]) == [])
 check("a name with no suffix, or a file that is not Markdown, passes",
       misnamed(["docs/prompt-writing-notes.md", "scripts/x-prompt.py",
