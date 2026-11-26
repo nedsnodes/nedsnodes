@@ -15,7 +15,8 @@ prints one line opening with its outcome state, checked in this order:
   STOPPED            the stop file exists; the line quotes it; nothing was started
   ALREADY RUNNING    a merge batch holds merge-batch.lock, and will see any line added
   DIED MID-MERGE     a merge batch ended during a merge, so main is untested; the stop file
-                     and a stopped notice now say so; nothing was started
+                     and a stopped notice now say so, or a FAILED line says which could not
+                     be written (exit 1); nothing was started
   STARTED            a merge batch was started; its log is merge-batch.log
   NOT STARTED        the merge batch could not be started; the line says why (exit 1)
 With --quiet, STOPPED and ALREADY RUNNING print nothing. The DIED MID-MERGE check is made
@@ -65,8 +66,8 @@ the stop file itself is left as it is. merge-lane-2
 sends the merge notices, handles each notice, moves it into handled/, and runs
 merge-batch-resume once a stopped merge batch is handled.
 
-merge-batch-resume refuses while a merge batch holds merge-batch.lock; otherwise it removes
-the stop file and the in-progress file and starts a merge batch. With --merge-only, that
+merge-batch-resume refuses while a merge batch holds merge-batch.lock; otherwise, holding
+that lock, it removes the stop file and the in-progress file, then starts a merge batch. With --merge-only, that
 pull request, which must be waiting, merges first; the merge batch goes on only when it
 merged and its after-merge test run passed, and otherwise stops again, with the stop file
 and a stopped notice naming its outcome.
@@ -577,16 +578,6 @@ class MergeQueuePullRequestMergeBatchRunner:
 
     # Starting
 
-    def lock_held(self):
-        self.directory.mkdir(parents=True, exist_ok=True)
-        with open(self.directory / MERGE_BATCH_LOCK_FILE_NAME, "a") as lock:
-            try:
-                fcntl.flock(lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
-            except BlockingIOError:
-                return True
-            fcntl.flock(lock, fcntl.LOCK_UN)
-            return False
-
     def start(self, quiet, merge_only=None):
         # The stop file is checked before the lock, since a running batch that finds a stop
         # file written outside it ends at its next check.
@@ -615,9 +606,16 @@ class MergeQueuePullRequestMergeBatchRunner:
             if self.in_progress_file.exists():
                 print(f"DIED MID-MERGE: {self.in_progress_file} was left by a merge batch that "
                       f"ended during a merge, so that merge's outcome and main's after-merge test "
-                      f"run are unchecked; nothing was started. The stop file and a stopped "
-                      f"notice in {self.notices} now say so: handle that notice as it says.")
-                return 0 if self.died_mid_merge_stopped() else 1
+                      f"run are unchecked; nothing was started.")
+                if self.died_mid_merge_stopped():
+                    print(f"The stop file and a stopped notice in {self.notices} now say that a "
+                          f"merge batch died mid-merge: handle that notice as it says.")
+                    return 0
+                print(f"FAILED: the stop file or the stopped notice could not be written, as the "
+                      f"lines above say. Fix what they name, then run merge-batch-start again; "
+                      f"until then the in-progress file is kept, so every merge-batch-start "
+                      f"reports DIED MID-MERGE and starts nothing.")
+                return 1
         # Released before the merge batch starts, since that batch takes the lock itself.
         command = [sys.executable, str(Path(__file__).resolve()),
                    "--merge-queue-file", str(self.arguments.merge_queue_file),
@@ -643,22 +641,28 @@ class MergeQueuePullRequestMergeBatchRunner:
         return 0
 
     def resume(self, merge_only):
-        if self.lock_held():
-            print(f"REFUSED: a merge batch is running, and resume is only for a stopped one; "
-                  f"the running batch will merge what is waiting. Read its log, "
-                  f"{self.directory / MERGE_BATCH_LOG_FILE_NAME}, and run merge-batch-resume "
-                  f"only after a stopped notice appears in {self.notices}.")
-            return 2
-        if merge_only is not None:
-            numbers = [int(line["pr"]) for line in self.waiting(self.queue_lines())]
-            if merge_only not in numbers:
-                print(f"REFUSED: pull request {merge_only} is not waiting in the merge queue "
-                      f"file, so it cannot merge first; the stop file is left in place.\n"
-                      f"Name a pull request that this program's merge-batch-list-waiting "
-                      f"subcommand prints.")
+        self.directory.mkdir(parents=True, exist_ok=True)
+        # The files are removed under the lock, so a batch that takes it cannot have its live
+        # in-progress file removed.
+        with open(self.directory / MERGE_BATCH_LOCK_FILE_NAME, "a") as lock:
+            try:
+                fcntl.flock(lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
+            except BlockingIOError:
+                print(f"REFUSED: a merge batch is running, and resume is only for a stopped one; "
+                      f"the running batch will merge what is waiting. Read its log, "
+                      f"{self.directory / MERGE_BATCH_LOG_FILE_NAME}, and run merge-batch-resume "
+                      f"only after a stopped notice appears in {self.notices}.")
                 return 2
-        self.stop_file.unlink(missing_ok=True)
-        self.in_progress_file.unlink(missing_ok=True)
+            if merge_only is not None:
+                numbers = [int(line["pr"]) for line in self.waiting(self.queue_lines())]
+                if merge_only not in numbers:
+                    print(f"REFUSED: pull request {merge_only} is not waiting in the merge queue "
+                          f"file, so it cannot merge first; the stop file is left in place.\n"
+                          f"Name a pull request that this program's merge-batch-list-waiting "
+                          f"subcommand prints.")
+                    return 2
+            self.stop_file.unlink(missing_ok=True)
+            self.in_progress_file.unlink(missing_ok=True)
         return self.start(quiet=False, merge_only=merge_only)
 
     def list_waiting(self):

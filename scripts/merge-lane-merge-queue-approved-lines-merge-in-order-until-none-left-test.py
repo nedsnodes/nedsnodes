@@ -514,8 +514,10 @@ def stopping_cases(scratch):
           output.startswith("DIED MID-MERGE: ") and in_progress.exists()
           and case.run("merge-batch-start")[1].startswith("DIED MID-MERGE: ")
           and case.merge_calls() == [], f"{output}\n{in_progress.exists()}")
-    check("merge-batch-start exits 1 when the dead batch's stop file cannot be written",
-          exit_code == 1, f"exit {exit_code}\n{output}")
+    check("merge-batch-start exits 1 when the dead batch's stop file cannot be written, and "
+          "says so instead of saying the stop file now says so",
+          exit_code == 1 and "FAILED: the stop file or the stopped notice could not be written"
+          in output and "now say so" not in output, f"exit {exit_code}\n{output}")
 
     case = Case(scratch, "outside-stop-notice-unwritable", [approved(10, A)], {"10": pr(A)})
     (case.outputs / STOP_FILE_NAME).write_text("the GHI-MD edit merge job's merge exited 3\n")
@@ -690,6 +692,38 @@ def starting_cases(scratch):
           "that takes the lock and writes its in-progress file is not taken for a dead one",
           not output.startswith("DIED MID-MERGE") and case.stop_text() is None
           and case.notices() == {}, f"{output}\n{case.stop_text()}")
+
+    case = Case(scratch, "resume-while-a-healthy-batch-takes-the-lock", [approved(10, A)],
+                {"10": pr(A)})
+    (case.outputs / STOP_FILE_NAME).write_text("stopped\n")
+    real_flock = program.fcntl.flock
+    real_popen = program.subprocess.Popen
+    healthy_batch = []
+
+    def a_healthy_batch_takes_the_lock_when_resume_releases_it(lock, operation):
+        result = real_flock(lock, operation)
+        if operation == fcntl.LOCK_UN and not healthy_batch:
+            holder = open(case.batches / program.MERGE_BATCH_LOCK_FILE_NAME, "a")
+            real_flock(holder, fcntl.LOCK_EX)
+            healthy_batch.append(holder)
+            (case.batches / program.MERGE_IN_PROGRESS_FILE_NAME).write_text(
+                "pull request 10, started 2026-11-25T10:00:00Z\n")
+        return result
+    program.fcntl.flock = a_healthy_batch_takes_the_lock_when_resume_releases_it
+    program.subprocess.Popen = lambda *arguments, **keywords: None
+    try:
+        exit_code, output = case.run("merge-batch-resume")
+    finally:
+        program.fcntl.flock = real_flock
+        program.subprocess.Popen = real_popen
+        for holder in healthy_batch:
+            holder.close()
+    check("resume removes the stop file and the in-progress file while it holds merge-batch.lock, "
+          "so a healthy batch that takes the lock keeps its in-progress file",
+          not healthy_batch or (case.batches / program.MERGE_IN_PROGRESS_FILE_NAME).exists(),
+          f"{output}\n{healthy_batch}")
+    check("resume makes no check outside merge-batch.lock that a batch could take the lock in",
+          healthy_batch == [], output)
 
     case = Case(scratch, "loop-retakes-the-lock-after-another-batch-died", [approved(10, A)],
                 {"10": pr(A), "11": pr(B)})
