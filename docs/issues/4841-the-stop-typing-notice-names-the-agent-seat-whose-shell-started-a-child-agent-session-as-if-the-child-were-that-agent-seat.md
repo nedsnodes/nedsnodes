@@ -23,3 +23,7 @@ The notice sends the user to the wrong agent-session. A message he types there r
 ## What to do
 
 PR 4826, open when this was written, adds the function `handoff_supervisor_launched_agent_session_agent_seat_name_or_empty_for_another_session` to `nn-systems/handoff/handoff-supervisor-launched-agent-session-environment-variable-names-common.py`. PR 4826 uses that function in the user-alert claim hook and the claude.ai rename Stop hook, as a pattern to follow. Once PR 4826 merges, call the same function with the payload's `session_id` in the stop-typing hook. When the function returns empty, the hook gives the notice it gives an agent-session that no handoff-supervisor launched, which names no agent-seat. Add a test, beside the hook's existing tests, in which the variable is set but the payload's `session_id` belongs to another agent-session, and which checks that the notice names no agent-seat. The agent-seat ned-box-helper, which wrote that function, owns this fix.
+
+## Outcome
+
+Fixed by [PR 4851, "Stop-typing notice names an agent-seat only in the agent-session the handoff-supervisor launched"](https://github.com/nedsnodes/nedsnodes/pull/4851), merged 2026-11-25. The hook now calls `handoff_supervisor_launched_agent_session_agent_seat_name_or_empty_for_another_session` with the payload's `session_id`, and its test file has a case in which the variable is set but the `session_id` belongs to another agent-session; that case fails on the code before the fix and passes after it.
