@@ -2522,6 +2522,47 @@ def run_poll_once_cases(scratch_root, token_file):
           machine.assignments.read_text(encoding="utf-8") == "1 merge-lane-1\n"
           and "REVIEW-ASSIGNED merge-lane-1" in machine.event_lines()[-1], machine.event_lines())
 
+    machine = machine_for("append-stops-inside-a-watch-event")
+    machine.assignments.unlink()
+    machine.poll = [poll_once_pull_request(1)]
+    machine.run("--poll-once-write-baseline")
+    before = machine.events_path.read_bytes() if machine.events_path.exists() else b""
+    real_open = watcher_module.Path.open
+
+    class StopsAfterWatchHeader:
+        def __init__(self, handle):
+            self.handle = handle
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *exc):
+            self.handle.close()
+            return False
+
+        def tell(self):
+            return self.handle.tell()
+
+        def write(self, payload):
+            self.handle.write(payload[:payload.index(b"\n  ") + 1])
+            self.handle.flush()
+            raise OSError("injected: no space left after the WATCH event's first line")
+
+    def open_stops_after_header(path, mode="r", *args, **kwargs):
+        handle = real_open(path, mode, *args, **kwargs)
+        return StopsAfterWatchHeader(handle) if path == machine.events_path and mode == "ab" else handle
+
+    watcher_module.Path.open = open_stops_after_header
+    try:
+        code = machine.run()
+    finally:
+        watcher_module.Path.open = real_open
+    after = machine.events_path.read_bytes() if machine.events_path.exists() else b""
+    check("when an append stops after a WATCH event's first line, before its repair steps, the "
+          "run cuts the event file back to where that event began, so no later poll delivers the "
+          "header without its steps",
+          code == 1 and after == before, f"{code} {before[-120:]!r} {after[-120:]!r} {machine.errors}")
+
     machine = machine_for("directory-unusable")
     machine.directory.write_text("a file", encoding="utf-8")
     code = machine.run()

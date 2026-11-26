@@ -1091,8 +1091,19 @@ def event_lines_append(path, lines, now):
             raise EventLinesAppendFailed(
                 f"{error}; the event file {path} could not be read back, so it may hold any of "
                 f"this append's {len(lines)} lines", [], read_back=False) from error
+        # A WATCH event spans several physical lines, so the last newline may fall inside the
+        # event the append stopped in; cut back to that event's start instead.
+        whole_end = start + sum(len(line) for line in encoded[:held])
+        cut = ""
+        try:
+            if path.stat().st_size > whole_end:
+                os.truncate(path, whole_end)
+        except OSError as cut_error:
+            cut = (f"; the part of the next event it wrote could not be cut back ({cut_error}), so "
+                   f"the next poll cuts back to the last newline, which may keep that event's first "
+                   f"lines")
         raise EventLinesAppendFailed(
-            f"{error}; the event file {path} holds {held} of this append's {len(lines)} lines",
+            f"{error}; the event file {path} holds {held} of this append's {len(lines)} lines{cut}",
             lines[:held], read_back=True) from error
 
 
