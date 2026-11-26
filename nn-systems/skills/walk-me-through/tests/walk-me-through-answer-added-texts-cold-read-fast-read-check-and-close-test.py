@@ -7873,8 +7873,11 @@ def test_a_forked_run_whose_second_output_file_cannot_be_made_closes_the_first()
     os.open = second_disk_full
     try:
         case.run_forked([sys.executable, str(program)], dict(os.environ), lambda: None)
-    except OSError:
-        pass
+    except OSError as error:
+        check("a forked run whose second output file cannot be made raises the error that stopped it",
+              error.errno == errno.ENOSPC, repr(error))
+    else:
+        check("a forked run whose second output file cannot be made raises", False)
     finally:
         os.open = real_open
     try:
@@ -7893,6 +7896,9 @@ def test_a_forked_run_stopped_while_closing_its_copies_of_the_output_files_kills
     real_fork, real_close = os.fork, os.close
     children = []
 
+    class SimulatedStop(BaseException):
+        """Not SystemExit, so a real stop from the suite's SIGTERM handler is not taken for this one."""
+
     def recorded_fork():
         child = real_fork()
         if child:
@@ -7903,13 +7909,13 @@ def test_a_forked_run_stopped_while_closing_its_copies_of_the_output_files_kills
         if children and not getattr(stopped_on_first_close, "done", False):
             stopped_on_first_close.done = True
             real_close(descriptor)
-            raise SystemExit(1)
+            raise SimulatedStop
         return real_close(descriptor)
 
     os.fork, os.close = recorded_fork, stopped_on_first_close
     try:
         case.run_forked([sys.executable, str(program)], dict(os.environ), lambda: None)
-    except SystemExit:
+    except SimulatedStop:
         try:
             os.kill(children[0], 0)
             gone = False
