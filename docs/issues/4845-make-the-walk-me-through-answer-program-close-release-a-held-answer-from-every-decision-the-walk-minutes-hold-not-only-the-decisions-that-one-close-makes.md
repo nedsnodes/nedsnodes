@@ -1,0 +1,30 @@
+---
+issue: "[Make the walk-me-through answer program's close release a held answer from every decision the walk-minutes hold, not only the decisions that one close makes](https://github.com/nedsnodes/nedsnodes/issues/4845)"
+---
+
+# Make the walk-me-through answer program's close release a held answer from every decision the walk-minutes hold, not only the decisions that one close makes
+
+## What is wrong
+
+`nn-systems/skills/walk-me-through/walk-me-through-answer-added-texts-cold-read-fast-read-check-and-close.py`, the walk-me-through answer program, records a held answer when `close` is run with `--hold-answer-until-new-item-answered`: a walk-minutes line such as `item 32 of 97: answer held: item 33 of 99, raised by a fast-read finding, waits for the user's answer. <open>`. A later `close` is meant to release that held answer once every item it names is decided, and to record the held item as decided with the same outcome.
+
+On main at commit 7f55e0e70, the release is `held_items_decided_with` (lines 4472-4491). It starts from `answered_numbers`, the items the current `close` answers, and releases a hold only when every item the hold names is among them or among items it has just released. The items `close` decides through their sub-steps are worked out afterwards, at lines 4705-4709, so the release never sees them. Pull request [#4836](https://github.com/nedsnodes/nedsnodes/pull/4836), open as this is written, adds a release pass for an item decided through its sub-steps, but that pass too reads only what the current `close` decides. Codex's review of #4836 found two cases that neither main nor #4836 releases; its report is `nedlern@ned-box:/home/nedlern/nedsnodes-logs/seats/merge-lane-2/merge-helpers/cx/pr4836-56350b15/codex-code-review-report.md`, and merge-lane-3's review [6064729736](https://github.com/nedsnodes/nedsnodes/pull/4836#pullrequestreview-6064729736) left both to be fixed after #4836 merges, as defects #4836 does not cause.
+
+- Codex finding 411842e389a9, a hold on a parent whose last sub-step is itself held: item 1 is held for item 2, and item 2's last sub-step is held for item 3. Answering item 3 releases the sub-step, and `close` then infers that item 2 is approved and posts its ruling, but item 1's hold was checked before that inference, so item 1 stays held and `close` names item 1 as the next item to present. Codex reproduced it by calling `close()` on walk files in memory: it returned 0, queued item 2's approval and wrote `#next_to_present item 1 of 3`, on main and on #4836's head alike.
+- Codex finding 4447d9f5095a, a hold on several items, one decided at an earlier close: an answer is held for `items 2 and 3`; item 3 is approved at one close, and item 2 at a later one. At the later close `released` holds item 2 but not item 3, because item 3 was decided by an earlier close, so the hold never releases. On main this happens when item 2 is answered directly; with #4836 it also happens when item 2 is approved through its sub-steps. Codex's in-memory reproduction returned 0 and named the held item as the next item to present, on both revisions.
+
+## Whether it has happened
+
+Neither case has happened in a real walk. Searching every walk-minutes file on ned-box for `: answer held` (`grep -rn --include='*minutes*.md' ': answer held' /home/nedlern/nedsnodes-logs/walk /home/nedlern/agents/*/docs/walk`) finds 7 distinct held-answer lines (a walk-minutes file found under both directories counts once). Each holds one item for one new item, so none is a hold on several items; and in none does the new item have a sub-step that is itself held. The search did not cover walk-minutes in the Mac's clone. A walk reaches either case only when the user's answers to fast-read findings nest two deep, or a fast-read finding raises several items at once, so the defect is real but not urgent.
+
+## Why it matters
+
+A held answer that is never released leaves its item undecided after the user has decided everything it waited on: the walk presents the item again, asking the user a question he has already answered, and a pull request whose review waits on that item's ruling does not move.
+
+## Root cause
+
+The release reads the decisions one `close` makes, the items it answers plus those it releases in a chain, rather than every decision the walk-minutes hold: decisions recorded at earlier closes, and decisions inferred through sub-steps, including inferences that only become true once a hold is released.
+
+## What to do
+
+The agent-seat reboot-test, which owns the walk-me-through answer program and #4836, changes `close` so that a hold is released when every item it names is in the full decided set: every item the walk-minutes decide, at this close or an earlier one, together with every item decided through its sub-steps. Releasing a hold can decide a further item through its sub-steps, which can in turn release a further hold, so the release and the sub-step inference repeat together until neither adds an item, and only then does `close` choose the next item. Each hold released and each item inferred in that loop gets its walk-minutes line and its ruling as a release or an inference gets them today, and a released item takes the outcome today's code gives it. GHI [Make the due-task raise hook decide an approval-walk item as the walk-me-through answer program does](https://github.com/nedsnodes/nedsnodes/issues/3659) proposes that the walk-me-through answer program export one function that reads a walk-document and its walk-minutes and returns the decided set; the fix builds that function, or uses it if it exists by then, rather than adding another reading of the walk-minutes. The pull request adds a test for each case above to `nn-systems/skills/walk-me-through/tests/walk-me-through-answer-added-texts-cold-read-fast-read-check-and-close-test.py`, each failing before the fix, and its description cites this issue in its `#root_cause` line. If #4836 has not merged when this work starts, the fix builds on its branch or waits for it, because both change the same release pass.

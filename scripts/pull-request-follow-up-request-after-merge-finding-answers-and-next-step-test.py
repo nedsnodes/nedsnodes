@@ -269,6 +269,15 @@ def test_block_parsing():
             check(f"a request line {label} is refused, quoting the line and the form", False)
     check("a #follow_up_request inside a sentence is not a request line",
           program.parse_follow_up_request_blocks_from_message_text("Use the #follow_up_request line.\n") == [])
+    for name, character in (("U+0085", "\u0085"), ("U+2028", "\u2028"), ("U+2029", "\u2029")):
+        quoting = (f"#follow_up_request pull request {NUMBER}\n"
+                   f"1. fix-next: under LC_ALL=C bash prints `$'{character}'` as literal text.\n"
+                   "2. fix-in-maintenance: a second finding.\n")
+        [request] = program.parse_follow_up_request_blocks_from_message_text(quoting + "thanks\n")
+        check(f"a finding quoting {name} stays one whole finding, and every finding after it is counted",
+              request.text == quoting and request.finding_count == 2, repr(request.text))
+    [crlf] = program.parse_follow_up_request_blocks_from_message_text(BLOCK.replace("\n", "\r\n"))
+    check("a block whose lines end in CRLF is read as with LF", crlf.text == BLOCK, repr(crlf.text))
 
 
 def test_brief_text():
@@ -526,9 +535,10 @@ def test_open():
         check("open sets the branch's upstream", git(worktree, "rev-parse", "--abbrev-ref", "@{upstream}")
               == "origin/topic-one")
         calls = case.gh_calls()
-        check("open creates the pull request from the file",
+        check("open creates the pull request from the file, its description ending with the follow-up request line",
               len(calls) == 1 and calls[0] == "pr create --base main --head topic-one --title Keep code span padding "
-                              "--body Keeps the padding.\n\n#no_defect_fixed\n", str(calls))
+                              "--body Keeps the padding.\n\n#no_defect_fixed\n\n#follow_up_request pull request 1964\n",
+              str(calls))
         check("open records the link against the finding",
               case.answers() == {"started": {"1": "topic-one"}, "answers": {"1": {"link": LINK, "branch": "topic-one"}}}, str(case.answers()))
         check("open removes the title and description file once the pull request is recorded", not description.exists())
@@ -571,6 +581,20 @@ def test_open():
               and case.gh_calls()[-1].startswith("pr create --base main --head topic-two "), str(case.gh_calls()))
     finally:
         case.close()
+
+
+def test_build_pull_request_description_ending_with_follow_up_request_line():
+    holding = "Answers it.\n\n#follow_up_request pull request 1964 \n#no_defect_fixed\n"
+    check("a description already holding the follow-up request line on a line of its own is kept as written",
+          program.build_pull_request_description_ending_with_follow_up_request_line(holding, 1964) == holding)
+    naming_inline = "From merge-lane-2's `#follow_up_request pull request 1964`.\n\n#no_defect_fixed"
+    check("a description naming the request only inside a sentence gets the line at its end",
+          program.build_pull_request_description_ending_with_follow_up_request_line(naming_inline, 1964)
+          == naming_inline + "\n\n#follow_up_request pull request 1964\n")
+    other = "Answers it.\n\n#follow_up_request pull request 1963\n#no_defect_fixed\n"
+    check("a description holding another pull request's follow-up request line gets this one's at its end",
+          program.build_pull_request_description_ending_with_follow_up_request_line(other, 1964)
+          == other + "\n#follow_up_request pull request 1964\n")
 
 
 def test_new_shared_names_wait_for_the_dispatching_agent():
@@ -1546,6 +1570,208 @@ def test_print_block():
           "readable review approves",
           code == 2 and out == "" and err.startswith("FAILED: GitHub returned a review by ned-review-merge without a "
                                                      "state, so its verdict cannot be read: "), out + err)
+    code, out, err = print_block([merge_lane_review(2), merge_lane_review(1)],
+                                 [merge_lane_comment(10, 1, "**fix-next** Rename it (Codex finding 0123456789ab)."),
+                                  merge_lane_comment(11, 2, "**fix-next** Rename it (Codex finding ba9876543210).")])
+    check(f"{PRINT_BLOCK} prints a restated Codex finding once when only its Codex finding id differs",
+          code == 0 and err == "" and out == (f"#follow_up_request pull request {NUMBER}\n"
+                                               "1. fix-next: `scripts/thing.py:3`: Rename it (Codex finding "
+                                               "0123456789ab).\n"), out + err)
+    code, out, err = print_block([merge_lane_review(1)],
+                                 [merge_lane_comment(10, 1, "**fix-next** Rename it (Codex finding 0123456789ab)."),
+                                  merge_lane_comment(11, 1, "**fix-next** Rename it (Codex finding ba9876543210).", line=7)])
+    check(f"{PRINT_BLOCK} prints both of one review's comments alike but for their Codex finding ids",
+          code == 0 and err == "" and out == (f"#follow_up_request pull request {NUMBER}\n"
+                                               "1. fix-next: `scripts/thing.py:3`: Rename it (Codex finding "
+                                               "0123456789ab).\n"
+                                               "2. fix-next: `scripts/thing.py:7`: Rename it (Codex finding "
+                                               "ba9876543210).\n"), out + err)
+    code, out, err = print_block([merge_lane_review(2), merge_lane_review(1)],
+                                 [merge_lane_comment(10, 1, "**fix-next** Rename it (Codex finding 0123456789ab)."),
+                                  merge_lane_comment(11, 2, "**fix-next** Rename it (Codex finding ba9876543210)."),
+                                  merge_lane_comment(12, 2, "**fix-next** Rename it (Codex finding 5555aaaa5555).",
+                                                     line=7)])
+    check(f"{PRINT_BLOCK} refuses, printing nothing, when a later review has two comments alike but for their "
+          "Codex finding ids and one earlier finding alike, naming the lines and saying how to write the block by hand",
+          code == 1 and out == "" and "holds 2 fix-next finding(s) on scripts/thing.py worded as 1 earlier finding(s)"
+          in err and "Its comments are on lines 3, 7; the earlier findings are on lines 3." in err
+          and f"the line #follow_up_request pull request {NUMBER}, then one line" in err, out + err)
+    code, out, err = print_block([merge_lane_review(2), merge_lane_review(1)],
+                                 [merge_lane_comment(10, 1, "**fix-next** Rename it (Codex finding 0123456789ab)."),
+                                  merge_lane_comment(11, 2, "**fix-next** Rename it (Codex finding 5555aaaa5555).",
+                                                     line=9),
+                                  merge_lane_comment(12, 2, "**fix-next** Rename it (Codex finding 0123456789ab).")])
+    check(f"{PRINT_BLOCK} pairs an earlier finding with its unchanged restatement, not with a new finding alike "
+          "but for its Codex finding id that GitHub numbered first, and prints the new finding",
+          code == 0 and err == "" and out == (f"#follow_up_request pull request {NUMBER}\n"
+                                               "1. fix-next: `scripts/thing.py:3`: Rename it (Codex finding "
+                                               "0123456789ab).\n"
+                                               "2. fix-next: `scripts/thing.py:9`: Rename it (Codex finding "
+                                               "5555aaaa5555).\n"), out + err)
+    code, out, err = print_block([merge_lane_review(2), merge_lane_review(1)],
+                                 [merge_lane_comment(10, 1, "**fix-next** Rename it (Codex finding 0123456789ab)."),
+                                  merge_lane_comment(11, 2, "**fix-next** Rename it (Codex finding 5555aaaa5555).",
+                                                     line=9),
+                                  merge_lane_comment(12, 2, "**fix-next** Rename it (Codex finding ba9876543210).",
+                                                     line=5)])
+    check(f"{PRINT_BLOCK} refuses rather than guess by line which of two later comments, both alike but for new "
+          "Codex finding ids, restates the earlier finding",
+          code == 1 and out == "" and "worded as 1 earlier finding(s) but with new Codex finding ids" in err
+          and "Its comments are on lines 9, 5" in err, out + err)
+    code, out, err = print_block([merge_lane_review(2), merge_lane_review(1)],
+                                 [merge_lane_comment(10, 1, "**fix-next** Rename it (Codex finding aaaaaaaaaaaa).",
+                                                     line=10),
+                                  merge_lane_comment(11, 1, "**fix-next** Rename it (Codex finding bbbbbbbbbbbb).",
+                                                     line=15),
+                                  merge_lane_comment(12, 2, "**fix-next** Rename it (Codex finding cccccccccccc).",
+                                                     line=6),
+                                  merge_lane_comment(13, 2, "**fix-next** Rename it (Codex finding eeeeeeeeeeee).",
+                                                     line=11),
+                                  merge_lane_comment(14, 2, "**fix-next** Rename it (Codex finding dddddddddddd).",
+                                                     line=23)])
+    check(f"{PRINT_BLOCK} refuses when two earlier findings alike but for their Codex finding ids are restated "
+          "with new ids beside a new finding worded alike, rather than drop the new finding",
+          code == 1 and out == "" and "holds 3 fix-next finding(s) on scripts/thing.py worded as 2 earlier "
+          "finding(s)" in err and "Its comments are on lines 6, 11, 23; the earlier findings are on lines 10, 15." in err,
+          out + err)
+    code, out, err = print_block([merge_lane_review(3), merge_lane_review(2), merge_lane_review(1)],
+                                 [merge_lane_comment(10, 1, "**fix-next** Rename it (Codex finding aaaaaaaaaaaa).",
+                                                     line=10),
+                                  merge_lane_comment(11, 2, "**fix-next** Rename it (Codex finding bbbbbbbbbbbb).",
+                                                     line=110),
+                                  merge_lane_comment(12, 3, "**fix-next** Rename it (Codex finding cccccccccccc).",
+                                                     line=112),
+                                  merge_lane_comment(13, 3, "**fix-next** Rename it (Codex finding dddddddddddd).",
+                                                     line=12)])
+    check(f"{PRINT_BLOCK} refuses when a third review restates a moved finding with a new id beside a new finding "
+          "worded alike near the finding's first line, rather than drop the new finding",
+          code == 1 and out == "" and "Its comments are on lines 112, 12; the earlier findings are on lines 10." in err,
+          out + err)
+    code, out, err = print_block([merge_lane_review(2), merge_lane_review(1)],
+                                 [merge_lane_comment(10, 1, "**fix-next** Rename it (Codex finding aaaaaaaaaaaa).",
+                                                     line=10),
+                                  merge_lane_comment(11, 2, "**fix-next** Rename it (Codex finding bbbbbbbbbbbb).",
+                                                     line=110)])
+    check(f"{PRINT_BLOCK} pairs a later review's one comment alike but for a new Codex finding id with the one "
+          "earlier finding alike, and prints the finding once",
+          code == 0 and err == "" and out == (f"#follow_up_request pull request {NUMBER}\n"
+                                               "1. fix-next: `scripts/thing.py:10`: Rename it (Codex finding "
+                                               "aaaaaaaaaaaa).\n"), out + err)
+    code, out, err = print_block([merge_lane_review(2), merge_lane_review(1)],
+                                 [merge_lane_comment(10, 1, "**fix-next** Rename it (Codex finding 0123456789ab)."),
+                                  merge_lane_comment(11, 2, "**fix-next** Rename it (Codex finding ba9876543210).",
+                                                     line=5),
+                                  merge_lane_comment(12, 2, "**fix-next** Rename it (Codex finding ba9876543210).",
+                                                     line=5)])
+    check(f"{PRINT_BLOCK} prints an earlier finding once when a later review restates it twice under one new "
+          "Codex finding id",
+          code == 0 and err == "" and out == (f"#follow_up_request pull request {NUMBER}\n"
+                                               "1. fix-next: `scripts/thing.py:3`: Rename it (Codex finding "
+                                               "0123456789ab).\n"), out + err)
+    code, out, err = print_block([merge_lane_review(1), merge_lane_review(2)],
+                                 [merge_lane_comment(10, 1, "**fix-next** Rename it (Codex finding aaaaaaaaaaaa)."),
+                                  merge_lane_comment(20, 2, "**fix-next** Rename the helper (Codex finding "
+                                                            "aaaaaaaaaaaa)."),
+                                  merge_lane_comment(21, 2, "**fix-next** Rename it (Codex finding eeeeeeeeeeee).",
+                                                     line=9)])
+    check(f"{PRINT_BLOCK} refuses a later review's comment under an earlier finding's Codex finding id but worded "
+          "differently, rather than print it again and drop a new finding worded as the earlier one",
+          code == 1 and out == ""
+          and ("line 3, under the Codex finding id of an earlier finding, in review 1 of pull request 1964 on line 3 "
+               "of the same file, but worded differently") in err
+          and "This comment's text: Rename the helper (Codex finding aaaaaaaaaaaa)." in err
+          and "write the block by hand" in err, out + err)
+    code, out, err = print_block([merge_lane_review(1), merge_lane_review(2)],
+                                 [merge_lane_comment(10, 1, "**Blocks** Fix the leak (Codex finding aaaaaaaaaaaa)."),
+                                  merge_lane_comment(20, 2, "**Blocks** Fix the reader's leak (Codex finding "
+                                                            "aaaaaaaaaaaa).")])
+    check(f"{PRINT_BLOCK} prints no block, and refuses nothing, for two differently worded blocking findings under "
+          "one Codex finding id, which no block holds",
+          code == 0 and out == "" and err == "", out + err)
+    code, out, err = print_block([merge_lane_review(1), merge_lane_review(2)],
+                                 [merge_lane_comment(10, 1, "**fix-next** Rename the helper (Codex finding "
+                                                            "aaaaaaaaaaaa)."),
+                                  merge_lane_comment(11, 1, "**fix-next** Rename it (Codex finding bbbbbbbbbbbb).",
+                                                     line=7),
+                                  merge_lane_comment(20, 2, "**fix-next** Rename it (Codex finding aaaaaaaaaaaa)."),
+                                  merge_lane_comment(21, 2, "**fix-next** Rename it (Codex finding cccccccccccc).",
+                                                     line=7)])
+    check(f"{PRINT_BLOCK} refuses when a later review's comment takes an earlier finding's Codex finding id with "
+          "another earlier finding's wording, rather than pair a new finding under a third id and drop it",
+          code == 1 and out == "" and "worded differently" in err, out + err)
+    code, out, err = print_block([merge_lane_review(1), merge_lane_review(2)],
+                                 [merge_lane_comment(10, 1, "**fix-next** The reader leaks its file (Codex finding "
+                                                            "00c0c20c45bf)."),
+                                  merge_lane_comment(20, 2, "**fix-next** The writer leaks its file (Codex finding "
+                                                            "00c0c20c45bf).")])
+    check(f"{PRINT_BLOCK} refuses two differently worded findings of two reviews that share a Codex finding id, "
+          "which hashes only priority and heading, rather than print only the first",
+          code == 1 and out == "" and "worded differently" in err, out + err)
+    code, out, err = print_block([merge_lane_review(1)],
+                                 [merge_lane_comment(10, 1, "**fix-next** Rename it (Codex finding aaaaaaaaaaaa)."),
+                                  merge_lane_comment(11, 1, "**fix-next** Add a test for the rename (Codex finding "
+                                                            "aaaaaaaaaaaa).", line=9)])
+    check(f"{PRINT_BLOCK} prints both of one review's two differently worded comments under one Codex finding id",
+          code == 0 and err == "" and out == (f"#follow_up_request pull request {NUMBER}\n"
+                                               "1. fix-next: `scripts/thing.py:3`: Rename it (Codex finding "
+                                               "aaaaaaaaaaaa).\n"
+                                               "2. fix-next: `scripts/thing.py:9`: Add a test for the rename "
+                                               "(Codex finding aaaaaaaaaaaa).\n"), out + err)
+    # The order a set of texts iterates in changes with PYTHONHASHSEED, so the case runs under several seeds, each
+    # in an interpreter of its own that loads this file's helpers without running its cases.
+    two_wordings_under_one_new_id = (
+        "R, C = merge_lane_review, merge_lane_comment\n"
+        "print(repr(print_block([R(1), R(2)], ["
+        "C(10, 1, '**fix-next** Rename it (Codex finding aaaaaaaaaaaa).'), "
+        "C(11, 1, '**fix-next** Add a test (Codex finding bbbbbbbbbbbb).', line=7), "
+        "C(20, 2, '**fix-next** Add a test (Codex finding eeeeeeeeeeee).', line=8), "
+        "C(21, 2, '**fix-next** Rename it (Codex finding eeeeeeeeeeee).', line=4)])))\n")
+    helpers_only = Path(__file__).read_text().split("\nfor test in (")[0]
+    blocks = {subprocess.run([sys.executable, "-c", f"__file__ = {str(Path(__file__).resolve())!r}\n"
+                              + helpers_only + "\n" + two_wordings_under_one_new_id],
+                             capture_output=True, text=True, cwd=Path(__file__).resolve().parent.parent,
+                             env={**os.environ, "PYTHONHASHSEED": seed}).stdout
+              for seed in ("1", "2", "3", "4")}
+    check(f"{PRINT_BLOCK} pairs a later review's two comments under one new Codex finding id each with the earlier "
+          "finding worded as it, and prints the same two findings whatever PYTHONHASHSEED is",
+          blocks == {repr((0, f"#follow_up_request pull request {NUMBER}\n"
+                              "1. fix-next: `scripts/thing.py:3`: Rename it (Codex finding aaaaaaaaaaaa).\n"
+                              "2. fix-next: `scripts/thing.py:7`: Add a test (Codex finding bbbbbbbbbbbb).\n",
+                              "")) + "\n"},
+          repr(blocks))
+    code, out, err = print_block([merge_lane_review(1), merge_lane_review(2), merge_lane_review(3)],
+                                 [merge_lane_comment(10, 1, "**fix-next** Rename it (Codex finding aaaaaaaaaaaa)."),
+                                  merge_lane_comment(11, 1, "**fix-next** Rename it (Codex finding bbbbbbbbbbbb).",
+                                                     line=7),
+                                  merge_lane_comment(12, 1, "**fix-next** Rename it (Codex finding cccccccccccc).",
+                                                     line=11),
+                                  merge_lane_comment(20, 2, "**fix-next** Rename it (Codex finding bbbbbbbbbbbb).",
+                                                     line=7),
+                                  merge_lane_comment(21, 2, "**fix-next** Rename it (Codex finding cccccccccccc).",
+                                                     line=11),
+                                  merge_lane_comment(22, 2, "**fix-next** Rename it (Codex finding dddddddddddd).",
+                                                     line=5),
+                                  merge_lane_comment(30, 3, "**fix-next** Rename it (Codex finding aaaaaaaaaaaa).",
+                                                     line=5),
+                                  merge_lane_comment(31, 3, "**fix-next** Rename it (Codex finding dddddddddddd).",
+                                                     line=5)])
+    check(f"{PRINT_BLOCK} takes a third review's two comments under the two Codex finding ids one earlier finding "
+          "gathered as that one finding, and prints all three findings",
+          code == 0 and err == "" and out == (f"#follow_up_request pull request {NUMBER}\n"
+                                               "1. fix-next: `scripts/thing.py:3`: Rename it (Codex finding "
+                                               "aaaaaaaaaaaa).\n"
+                                               "2. fix-next: `scripts/thing.py:7`: Rename it (Codex finding "
+                                               "bbbbbbbbbbbb).\n"
+                                               "3. fix-next: `scripts/thing.py:11`: Rename it (Codex finding "
+                                               "cccccccccccc).\n"), out + err)
+    code, out, err = print_block([merge_lane_review(1)],
+                                 [merge_lane_comment(10, 1, "**fix-next** Rename it (Codex finding 0123456789ab)."),
+                                  merge_lane_comment(11, 1, "**fix-next** Rename it Codex finding 0123456789ab.",
+                                                     line=7)])
+    check(f"{PRINT_BLOCK} prints once one review's two comments naming the same Codex finding id in two forms",
+          code == 0 and err == "" and out == (f"#follow_up_request pull request {NUMBER}\n"
+                                               "1. fix-next: `scripts/thing.py:3`: Rename it (Codex finding "
+                                               "0123456789ab).\n"), out + err)
     code, out, err = print_block([merge_lane_review(1)], [merge_lane_comment(10, 1, "**fix-next** Rename it.")],
                                  read_back=lambda text: [])
     check(f"{PRINT_BLOCK} prints nothing and fails with exit 2 when its block does not read back as itself",
@@ -1586,7 +1812,8 @@ def test_print_block_with_replaced_pull_requests():
 
 
 for test in (test_help, test_block_parsing, test_print_block, test_print_block_with_replaced_pull_requests, test_brief_text, test_no_saved_block, test_start,
-             test_open_refusals, test_open, test_new_shared_names_wait_for_the_dispatching_agent,
+             test_open_refusals, test_open, test_build_pull_request_description_ending_with_follow_up_request_line,
+             test_new_shared_names_wait_for_the_dispatching_agent,
              test_open_pushes_the_checked_out_recorded_branch_not_the_last,
              test_open_failures, test_open_passes_on_what_a_push_that_succeeds_prints,
              test_open_gh_pr_create_second_try_and_gh_pr_list,

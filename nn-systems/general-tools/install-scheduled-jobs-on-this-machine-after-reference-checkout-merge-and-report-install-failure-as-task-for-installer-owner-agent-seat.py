@@ -132,6 +132,8 @@ INSTALLER_STEPS = (INSTALL, REMOVE_NOT_IN_TABLE)
 SCHEDULED_JOBS_TABLE = "nn-systems/general-tools/scheduled-jobs-on-each-machine.json"
 BOTH_INSTALLER_STEPS = f"both installer steps, `{INSTALL}` and then `{REMOVE_NOT_IN_TABLE}`,"
 PRINT_OUTCOME_COMMAND_LINE_FLAG = "--print-outcome"
+# Git ends this "(or any of the parent directories)" or "(or any parent up to mount point /)".
+GIT_OUTSIDE_ANY_CHECKOUT_MESSAGE_START = "fatal: not a git repository (or any "
 WHAT_A_FAILED_STEP_MAY_LEAVE_ON_THE_MACHINE = {
     INSTALL: f"may not run every job that {SCHEDULED_JOBS_TABLE} gives it",
     REMOVE_NOT_IN_TABLE: f"may still run a job that {SCHEDULED_JOBS_TABLE} does not give it",
@@ -278,9 +280,17 @@ def main(environment=None, argv=None):
             NED_BOX_REFERENCE_CHECKOUT_PATH_TEST_OVERRIDE_ENVIRONMENT_VARIABLE]
     run_it_where = (f"run this in {reference_checkouts[NED_BOX]} on ned-box or "
                     f"{reference_checkouts[MAC]} on the Mac.")
-    top = subprocess.run(["git", "rev-parse", "--show-toplevel"], capture_output=True, text=True)
+    # LC_ALL=C keeps git's message in English, so the outside-a-checkout case can be told apart.
+    top = subprocess.run(["git", "rev-parse", "--show-toplevel"], capture_output=True, text=True,
+                         env={**environment, "LC_ALL": "C"})
     if top.returncode != 0:
-        outcome(f"{os.getcwd()} is not in a Git checkout, so nothing was run; {run_it_where}")
+        error = top.stderr.strip()
+        if error.startswith(GIT_OUTSIDE_ANY_CHECKOUT_MESSAGE_START):
+            outcome(f"The current directory is not in a Git checkout, so nothing was run; "
+                    f"{run_it_where}")
+        else:
+            outcome(f"git rev-parse --show-toplevel exited {top.returncode}, so nothing was run; "
+                    f"git said: {error}")
         return EXIT_DONE
     checkout = os.path.realpath(top.stdout.strip())
     machine = next((name for name, path in reference_checkouts.items()

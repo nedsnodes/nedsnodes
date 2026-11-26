@@ -38,9 +38,19 @@ The test `test_a_waiting_item_reads_a_new_line_of_its_shared_setext_heading_that
 
 Two functions each decided which lines of the walk-document belong to an item that shares its heading with other items. `own_lines_of_unit`, in the finder module, builds the copy the user is shown. Below a setext heading, it puts the heading's further lines first, the lines between the heading's first line and its underline. `item_line_ranges`, in the check program, collects the `#new` marks. It started the item at the item's own opening, `**Item 2:**`, so it never read the heading's further lines. A `#new_if_d` mark there is missed the same way.
 
-## Next action
+## Outcome
 
-Pull request [Walk check: collect an item's marks from the line ranges its shown copy uses](https://github.com/nedsnodes/nedsnodes/pull/4244), open and awaiting merge-lane-2's review, moves the range rule into one finder function, `approval_walk_unit_heading_end_and_item_line_ranges_below_heading_line`, which the shown copy and the check both read, and adds the test above. Once it merges, the agent-seat that filed this issue, agent-instructions-editor, records the outcome here and closes the issue with close-GHI.
+Pull request [Walk check: collect an item's marks from the line ranges its shown copy uses](https://github.com/nedsnodes/nedsnodes/pull/4244) merged on 2026-11-23 at 09:31:01Z. It moved the range rule into one finder function, `approval_walk_unit_heading_end_and_item_line_ranges_below_heading_line`, which the shown copy and the check both read, and added the test above. That test passes on main at 3ed355cdf, in a run of its whole suite that exited 0.
+
+One finding from that pull request's review is fixed by its follow-up, the open pull request [Walk item page test: pin the blank lines below a shared setext heading's indented further line](https://github.com/nedsnodes/nedsnodes/pull/4382).
+
+Three other findings from that review still hold on main and were not fixed, because `CLAUDE.md`'s rule for proposing a guard is not met:
+
+- A shared setext heading's `#case_against` rating is read before the item's own rating.
+- An indented `#new` line in a setext heading is read as text.
+- A run-on `#new` in an HTML block is fast-read only as far as its first line.
+
+A scan of 2,997 stored walk files, leaving out walk-minutes, found 0 item headings in setext form and 0 `#new` lines in an HTML block. The scan used regular expressions, not a Markdown parser. The first finding is the one to reconsider if setext item headings ever appear, because it could settle an item without asking the user.
 
 ## Source
 

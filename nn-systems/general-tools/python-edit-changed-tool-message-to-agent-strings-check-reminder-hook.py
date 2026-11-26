@@ -75,7 +75,9 @@ _checkout_path_spec.loader.exec_module(checkout_path)
 HOOK_NAME = "python-edit-changed-tool-message-to-agent-strings-check-reminder"
 PAGE_PATH = ("docs/nedsnodes-wiki/"
              "nedsnodes-how-to-write-a-tool-message-to-agent-such-as-a-hook-refusal-or-script-error.md")
-FAST_READ_COMMAND = "python3 nn-systems/cold-read/cold-read-fast-read.py --target {target}"
+# A tool-message-to-agent is written for an agent.
+FAST_READ_COMMAND = ("python3 nn-systems/cold-read/cold-read-fast-read.py --target {target} "
+                     "--text-intended-reader-category agent-readable")
 FAST_READ_TARGET_DIRECTORY_NAME = "tool-message-to-agent-fast-read-targets"
 EDIT_TOOL_NAMES = ("Edit", "MultiEdit")
 INSPECTED_TOOL_NAMES = (*EDIT_TOOL_NAMES, "Write")
